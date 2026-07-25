@@ -29,6 +29,7 @@ const allowedServerExternalImports = new Set([
   '@maka/core/runtime-event',
   '@maka/core/session',
   '@maka/runtime',
+  '@maka/storage/agent-graph-control-store',
   '@maka/storage/execution-stores',
   '@maka/storage/runtime-policy-stores',
 ]);

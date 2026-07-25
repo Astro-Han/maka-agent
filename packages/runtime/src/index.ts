@@ -132,6 +132,16 @@ export type {
   ViewAgentGraphToolInput,
   ViewAgentGraphToolResult,
 } from './stream-graph-supervisor-tools.js';
+export {
+  AgentGraphCoordinator,
+  agentGraphIdForRootSession,
+  topologyFromProvisions,
+} from './stream-graph-coordinator.js';
+export type {
+  AgentGraphCoordinatorInput,
+  AgentGraphCoordinatorRuntime,
+  AgentGraphCoordinatorSessionStore,
+} from './stream-graph-coordinator.js';
 export type {
   AgentGraphAllSettledReadinessPolicy,
   AgentGraphMapReadinessPolicy,

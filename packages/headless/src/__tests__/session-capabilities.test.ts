@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { SessionManager, SpawnChildSessionResult, StopSessionInput } from '@maka/runtime';
+import type {
+  AgentGraphCoordinator,
+  MakaTool,
+  SessionManager,
+  SpawnChildSessionResult,
+  StopSessionInput,
+} from '@maka/runtime';
 import { createHeadlessSessionCapabilityBridge } from '../session-capabilities.js';
 
 const childResult: SpawnChildSessionResult = {
@@ -118,4 +124,23 @@ test('settle preserves the first unrecoverable stop error after one bounded retr
 
   assert.equal(settleResult, firstStopError);
   assert.equal(stopCalls, 2);
+});
+
+test('exposes graph supervisor tools only after the coordinator is bound', async () => {
+  const bridge = createHeadlessSessionCapabilityBridge();
+  await assert.rejects(
+    bridge.capabilities.getAgentGraphSupervisorTools('root-session'),
+    /coordinator is unavailable/,
+  );
+  const graphTools = [{ name: 'view_agent_graph' }] as MakaTool[];
+  bridge.bind({} as SessionManager, {
+    toolsForSession: async (sessionId: string) => {
+      assert.equal(sessionId, 'root-session');
+      return graphTools;
+    },
+  } as AgentGraphCoordinator);
+  assert.equal(
+    await bridge.capabilities.getAgentGraphSupervisorTools('root-session'),
+    graphTools,
+  );
 });

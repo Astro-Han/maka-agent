@@ -9,6 +9,7 @@ import {
   type StoredMessage,
 } from '@maka/core';
 import {
+  AgentGraphCoordinator,
   AgentRun,
   AiSdkFlow,
   BackendRegistry,
@@ -19,6 +20,7 @@ import {
   type InvocationResult,
   type SessionStore,
 } from '@maka/runtime';
+import { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
 import type { Config, ResultRecord, Task } from './contracts.js';
 import { registerFakeBackend } from './backends.js';
 import {
@@ -267,6 +269,10 @@ export async function runTaskOnceWithStorage(
   }
 
   const workspace = await prepareWorkspace(task.workspaceDir);
+  let graphCoordinator: AgentGraphCoordinator | undefined;
+  let graphControlStore:
+    | ReturnType<typeof createAgentGraphControlStore>
+    | undefined;
   try {
     const agentWorkspaceDir = deps.realBackendIsolation?.workspaceDir ?? workspace.dir;
     await appendTaskEvent(taskRunStore, taskRunId, {
@@ -345,7 +351,17 @@ export async function runTaskOnceWithStorage(
       now,
       runtimeSource: 'test',
     });
-    sessionCapabilities.bind(sessionCapabilityManager);
+    graphControlStore = createAgentGraphControlStore(deps.storageRoot);
+    graphCoordinator = new AgentGraphCoordinator({
+      sessionStore,
+      runStore: agentRunStore,
+      runtimeEventStore,
+      controlStore: graphControlStore,
+      runtime: sessionCapabilityManager,
+      newId,
+    });
+    sessionCapabilities.bind(sessionCapabilityManager, graphCoordinator);
+    await graphCoordinator.recover();
 
     const header = await sessionStore.create({
       cwd: agentWorkspaceDir,
@@ -814,6 +830,8 @@ export async function runTaskOnceWithStorage(
       settledByDeadline,
     };
   } finally {
+    await graphCoordinator?.close();
+    graphControlStore?.close();
     await workspace.cleanup();
   }
 }

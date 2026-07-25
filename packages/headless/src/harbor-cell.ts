@@ -10,6 +10,7 @@ import type {
 } from '@maka/core';
 import { isTerminalRuntimeEvent, isThinkingLevel, resolveModelVisionSupport } from '@maka/core';
 import {
+  AgentGraphCoordinator,
   AiSdkBackend,
   BackendRegistry,
   PermissionEngine,
@@ -33,6 +34,7 @@ import {
   createReadImageSnapshotter,
   persistProviderRequestCaptureArtifact,
 } from '@maka/storage';
+import { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
 import { registerFakeBackend } from './backends.js';
 import {
   buildHarborCellOutput,
@@ -350,17 +352,35 @@ export async function runHarborCellWithStorage(
       invocation = result;
     },
   });
-  sessionCapabilities.bind(manager);
-
-  const session = await manager.createSession({
-    cwd: input.cwd,
-    backend: input.config.backend,
-    llmConnectionSlug: config.llmConnectionSlug,
-    model: config.model,
-    ...(config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : {}),
-    permissionMode: 'execute',
-    name: `harbor-cell:${input.config.id}`,
+  const graphControlStore = createAgentGraphControlStore(input.storageRoot);
+  const graphCoordinator = new AgentGraphCoordinator({
+    sessionStore,
+    runStore: agentRunStore,
+    runtimeEventStore,
+    controlStore: graphControlStore,
+    runtime: manager,
+    newId,
   });
+  sessionCapabilities.bind(manager, graphCoordinator);
+
+  const session = await (async () => {
+    try {
+      await graphCoordinator.recover();
+      return await manager.createSession({
+        cwd: input.cwd,
+        backend: input.config.backend,
+        llmConnectionSlug: config.llmConnectionSlug,
+        model: config.model,
+        ...(config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : {}),
+        permissionMode: 'execute',
+        name: `harbor-cell:${input.config.id}`,
+      });
+    } catch (error) {
+      await graphCoordinator.close();
+      graphControlStore.close();
+      throw error;
+    }
+  })();
 
   let deadlineReached = false;
   let settlementError: unknown;
@@ -429,6 +449,11 @@ export async function runHarborCellWithStorage(
     sendMessageError = error;
   } finally {
     if (settlementTimer) clearTimeout(settlementTimer);
+    try {
+      await graphCoordinator.close();
+    } finally {
+      graphControlStore.close();
+    }
   }
   await settlementAttempt;
   if (settlementError) throw settlementError;

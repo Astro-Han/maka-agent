@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { BackendRegistry, FakeBackend, SessionManager } from '@maka/runtime';
+import {
+  AgentGraphCoordinator,
+  BackendRegistry,
+  FakeBackend,
+  SessionManager,
+} from '@maka/runtime';
+import { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
 import { openInteractiveExecutionStoresForWrite } from '@maka/storage/execution-stores';
 import { openInteractiveRuntimePolicyStoresForWrite } from '@maka/storage/runtime-policy-stores';
 import type { RuntimeHostComposition, RuntimeHostCompositionContext } from './host-kernel.js';
@@ -29,6 +35,17 @@ export async function createExecutionRuntimeHostComposition(
       now: Date.now,
       runBackendActivation: (operation) => runtimePolicyActivation.runBackendActivation(operation),
     });
+    const graphControlStore = createAgentGraphControlStore(
+      context.owner.capability.canonicalPath,
+    );
+    const graphCoordinator = new AgentGraphCoordinator({
+      sessionStore: stores.sessionStore,
+      runStore: stores.agentRunStore,
+      runtimeEventStore: stores.runtimeEventStore,
+      controlStore: graphControlStore,
+      runtime: manager,
+      newId: randomUUID,
+    });
     const sessionAdmission = new SessionAdmissionGate();
     const rootAdmissionOwner = new RootAdmissionOwner(stores.agentRunStore);
     const coordinator = new RootTurnCoordinator(
@@ -56,13 +73,19 @@ export async function createExecutionRuntimeHostComposition(
       recover: async () => {
         await coordinator.prepareRecovery();
         await manager.recoverInterruptedSessionsStrict(stores);
+        await graphCoordinator.recover();
         await coordinator.recover();
       },
       close: async () => {
         try {
           await coordinator.close();
         } finally {
-          await stores.sessionStore.close?.();
+          try {
+            await graphCoordinator.close();
+          } finally {
+            graphControlStore.close();
+            await stores.sessionStore.close?.();
+          }
         }
       },
     };

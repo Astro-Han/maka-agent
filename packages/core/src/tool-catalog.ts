@@ -133,6 +133,9 @@ export const MAKA_CATALOG_TOOLS: readonly CatalogToolDef[] = Object.freeze(
     { name: 'agent_swarm' },
     { name: 'agent_list' },
     { name: 'agent_output' },
+    // Host-managed agent graph supervisor surface
+    { name: 'view_agent_graph' },
+    { name: 'update_agent_graph' },
   ].map(freezeTool),
 );
 

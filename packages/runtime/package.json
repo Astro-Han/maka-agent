@@ -59,7 +59,8 @@
     "./stream-graph-admission": "./dist/stream-graph-admission.js",
     "./stream-graph-dispatch": "./dist/stream-graph-dispatch.js",
     "./stream-graph-schedule-reconcile": "./dist/stream-graph-schedule-reconcile.js",
-    "./stream-graph-supervisor-tools": "./dist/stream-graph-supervisor-tools.js"
+    "./stream-graph-supervisor-tools": "./dist/stream-graph-supervisor-tools.js",
+    "./stream-graph-coordinator": "./dist/stream-graph-coordinator.js"
   },
   "scripts": {
     "clean": "node ../../scripts/clean-paths.mjs dist tsconfig.tsbuildinfo",

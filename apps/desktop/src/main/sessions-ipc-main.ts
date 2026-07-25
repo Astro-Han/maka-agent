@@ -91,6 +91,7 @@ export interface SessionsIpcDeps {
   ) => Promise<PreparedSkillInvocationMessage>;
   invalidateSessionBindings?: (sessionId: string) => void;
   clearSkillHost?: (sessionId: string) => void;
+  stopAgentGraph?: (sessionId: string) => Promise<void>;
   ensureSessionWorkspaceAvailable: (sessionId: string) => Promise<void>;
   createSession: (input: CreateSessionInput) => ReturnType<SessionManager['createSession']>;
   getReadyConnection: (
@@ -190,6 +191,7 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
     prepareSkillInvocation,
     invalidateSessionBindings,
     clearSkillHost,
+    stopAgentGraph,
     ensureSessionWorkspaceAvailable,
     createSession,
     getReadyConnection,
@@ -312,6 +314,7 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
   ipcMain.handle('sessions:stop', async (_event, sessionId: string, input?: { source?: 'stop_button' }) => {
     computerUseOverlay.clearForSession(sessionId);
     computerUseTools.clearSession(sessionId);
+    await stopAgentGraph?.(sessionId);
     await runtime.stopSession(sessionId, normalizeStopSessionInput(input));
     await runtime.interruptActivePlanExecution(sessionId, 'user_stopped_execution').catch(() => null);
     emitSessionsChanged('status-change', sessionId);
@@ -479,6 +482,7 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
     for (const id of await resolveSessionActionIds(runtime, sessionId, options)) {
       computerUseOverlay.clearForSession(id);
       computerUseTools.clearSession(id);
+      await stopAgentGraph?.(id);
       await goalWiring.archiveSession(id, () => runtime.archive(id));
       invalidateSessionBindings?.(id);
       clearSkillHost?.(id);
