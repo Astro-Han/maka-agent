@@ -52,7 +52,7 @@ export interface ReconcileAgentGraphScheduleInput {
 export interface AgentGraphScheduleStopResult {
   targetId: string;
   reason: string;
-  status: 'stopped' | 'already_terminal' | 'cancelled_before_runtime';
+  status: 'stopped' | 'already_terminal' | 'cancelled_before_runtime' | 'ignored_unknown';
   sessionId?: string;
   activationId?: string;
 }
@@ -408,24 +408,7 @@ async function applyScheduleStops(
     const activation = claim
       ? activationTargets.get(claim.targetRunId)
       : activationTargets.get(targetId);
-    if (!activation) {
-      if (work) {
-        immediate.push({
-          targetId,
-          reason,
-          status: 'cancelled_before_runtime',
-          ...(claim ? { sessionId: claim.targetSessionId, activationId: claim.targetRunId } : {}),
-        });
-      } else {
-        failures.push({
-          phase: 'stop',
-          targetId,
-          error: new Error(`Agent graph stop target ${targetId} is unknown`),
-        });
-      }
-      continue;
-    }
-    if (isTerminalActivationStatus(activation.status)) {
+    if (activation && isTerminalActivationStatus(activation.status)) {
       immediate.push({
         targetId,
         reason,
@@ -435,13 +418,43 @@ async function applyScheduleStops(
       });
       continue;
     }
-    const sessionTargets = targetsBySession.get(activation.sessionId) ?? [];
+    if (work && claim) {
+      try {
+        const cancellation = await input.controlStore.cancelAgentGraphIntentExecution(
+          snapshot.schedule.graphId,
+          claim.intentId,
+          reason,
+        );
+        if (cancellation.previousState !== 'executing' && !activation) {
+          immediate.push({
+            targetId,
+            reason,
+            status: 'cancelled_before_runtime',
+            sessionId: claim.targetSessionId,
+            activationId: claim.targetRunId,
+          });
+          continue;
+        }
+      } catch (error) {
+        failures.push({ phase: 'stop', targetId, error });
+        continue;
+      }
+    } else if (work) {
+      immediate.push({ targetId, reason, status: 'cancelled_before_runtime' });
+      continue;
+    } else if (!activation) {
+      immediate.push({ targetId, reason, status: 'ignored_unknown' });
+      continue;
+    }
+    const sessionId = activation?.sessionId ?? claim!.targetSessionId;
+    const activationId = activation?.activationId ?? claim!.targetRunId;
+    const sessionTargets = targetsBySession.get(sessionId) ?? [];
     sessionTargets.push({
       targetId,
       reason,
-      activationId: activation.activationId,
+      activationId,
     });
-    targetsBySession.set(activation.sessionId, sessionTargets);
+    targetsBySession.set(sessionId, sessionTargets);
   }
 
   const settled = await Promise.allSettled(
@@ -505,6 +518,15 @@ async function dispatchScheduledWork(
       graphId: prepared.intent.graphId,
       intentId: prepared.intent.intentId,
       prompt: prepared.prompt,
+      async admitExecution() {
+        const transition =
+          await input.controlStore.beginAgentGraphIntentExecutionAtScheduleRevision(
+            prepared.intent.graphId,
+            prepared.intent.intentId,
+            expectedRevision,
+          );
+        return transition.state === 'cancelled' ? 'cancelled' : 'executing';
+      },
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       onReady(runtime) {
         notifySupervisor(input.supervisor?.onActivationReady, {

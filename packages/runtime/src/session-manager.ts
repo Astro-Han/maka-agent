@@ -204,6 +204,12 @@ export interface RunClaimedAgentGraphIntentInput {
   graphId: string;
   intentId: string;
   prompt: string;
+  /**
+   * Optional control-plane gate evaluated after Session serialization and
+   * immediately before a new Runtime turn is admitted. Existing durable runs
+   * bypass the gate and remain recoverable.
+   */
+  admitExecution?: () => Promise<'executing' | 'cancelled'>;
   abortSignal?: AbortSignal;
   onReady?: (input: {
     claimId: string;
@@ -1421,6 +1427,7 @@ export class SessionManager {
     const resolved: ResolvedClaimedAgentGraphIntentInput = {
       claim,
       prompt: input.prompt,
+      ...(input.admitExecution ? { admitExecution: input.admitExecution } : {}),
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       ...(input.onReady ? { onReady: input.onReady } : {}),
       ...(input.onEvent ? { onEvent: input.onEvent } : {}),
@@ -1546,6 +1553,12 @@ export class SessionManager {
     }
     if (child.isArchived || child.status === 'archived' || child.status === 'aborted') {
       throw new Error('Claimed graph execution target child session is terminated');
+    }
+    if (input.abortSignal?.aborted) {
+      throw new Error('Claimed graph execution was cancelled before runtime admission');
+    }
+    if (input.admitExecution && (await input.admitExecution()) === 'cancelled') {
+      throw new Error('Claimed graph execution was cancelled before runtime admission');
     }
     if (input.abortSignal?.aborted) {
       throw new Error('Claimed graph execution was cancelled before runtime admission');

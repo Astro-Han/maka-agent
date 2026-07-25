@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 7;
+export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 8;
 
 const MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
@@ -228,6 +228,22 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
 
     CREATE INDEX agent_graph_schedule_updates_by_graph
       ON agent_graph_schedule_updates(graph_id, committed_at, update_id);
+  `,
+  ],
+  [
+    8,
+    `
+    ALTER TABLE agent_graph_intent_claims
+      ADD COLUMN admission_status TEXT NOT NULL DEFAULT 'executing'
+      CHECK (admission_status IN ('claimed', 'executing', 'cancelled'));
+    ALTER TABLE agent_graph_intent_claims
+      ADD COLUMN admission_updated_at INTEGER NOT NULL DEFAULT 0
+      CHECK (admission_updated_at >= 0);
+    ALTER TABLE agent_graph_intent_claims
+      ADD COLUMN cancellation_reason TEXT;
+
+    UPDATE agent_graph_intent_claims
+    SET admission_updated_at = claimed_at;
   `,
   ],
 ]);

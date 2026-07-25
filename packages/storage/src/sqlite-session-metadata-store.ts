@@ -16,6 +16,8 @@ import {
   type AgentGraphScheduleUpdate,
   type AgentGraphScheduleUpdateRequest,
   type AgentGraphScheduleUpdateResult,
+  type AgentGraphIntentAdmissionState,
+  type AgentGraphIntentAdmissionTransition,
   type AgentGraphIntentClaim,
   type AgentGraphIntentClaimRequest,
   type AgentGraphIntentClaimResult,
@@ -310,6 +312,85 @@ export class SqliteSessionMetadataStore {
         throw new AgentGraphScheduleClosedError(request.graphId);
       }
       return this.claimAgentGraphIntentSync(request);
+    });
+  }
+
+  async beginAgentGraphIntentExecutionAtScheduleRevision(
+    graphId: string,
+    intentId: string,
+    expectedRevision: number,
+  ): Promise<AgentGraphIntentAdmissionTransition> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    assertGraphIntentId(intentId);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new Error('Agent graph schedule expected revision must be a non-negative safe integer');
+    }
+    return this.transaction(() => {
+      const currentRevision = this.currentAgentGraphScheduleRevision(graphId);
+      if (currentRevision !== expectedRevision) {
+        throw new AgentGraphScheduleRevisionConflictError(
+          graphId,
+          expectedRevision,
+          currentRevision,
+        );
+      }
+      const previousState = this.readAgentGraphIntentAdmissionStateSync(graphId, intentId);
+      if (previousState !== 'claimed') {
+        return { state: previousState, previousState, changed: false };
+      }
+      const changed = this.db
+        .prepare(`
+          UPDATE agent_graph_intent_claims
+          SET admission_status = 'executing',
+              admission_updated_at = ?
+          WHERE graph_id = ?
+            AND intent_id = ?
+            AND admission_status = 'claimed'
+        `)
+        .run(this.now(), graphId, intentId).changes;
+      if (changed !== 1) {
+        throw new AgentGraphIntentClaimConflictError(
+          'Agent graph intent execution admission changed concurrently',
+        );
+      }
+      return { state: 'executing', previousState, changed: true };
+    });
+  }
+
+  async cancelAgentGraphIntentExecution(
+    graphId: string,
+    intentId: string,
+    reason: string,
+  ): Promise<AgentGraphIntentAdmissionTransition> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    assertGraphIntentId(intentId);
+    if (!reason.trim() || reason.length > 4_000) {
+      throw new Error('Agent graph intent cancellation reason must be non-empty and bounded');
+    }
+    return this.transaction(() => {
+      const previousState = this.readAgentGraphIntentAdmissionStateSync(graphId, intentId);
+      if (previousState === 'cancelled') {
+        return { state: 'cancelled', previousState, changed: false };
+      }
+      const changed = this.db
+        .prepare(`
+          UPDATE agent_graph_intent_claims
+          SET admission_status = 'cancelled',
+              admission_updated_at = ?,
+              cancellation_reason = ?
+          WHERE graph_id = ?
+            AND intent_id = ?
+            AND admission_status = ?
+        `)
+        .run(this.now(), reason, graphId, intentId, previousState).changes;
+      if (changed !== 1) {
+        throw new AgentGraphIntentClaimConflictError(
+          'Agent graph intent cancellation admission changed concurrently',
+        );
+      }
+      return { state: 'cancelled', previousState, changed: true };
     });
   }
 
@@ -837,6 +918,29 @@ export class SqliteSessionMetadataStore {
     return row ? decodeAgentGraphIntentClaim(row) : undefined;
   }
 
+  private readAgentGraphIntentAdmissionStateSync(
+    graphId: string,
+    intentId: string,
+  ): AgentGraphIntentAdmissionState {
+    const row = this.db
+      .prepare(`
+        SELECT admission_status AS admissionState
+        FROM agent_graph_intent_claims
+        WHERE graph_id = ? AND intent_id = ?
+      `)
+      .get(graphId, intentId) as { admissionState?: unknown } | undefined;
+    if (
+      row?.admissionState !== 'claimed' &&
+      row?.admissionState !== 'executing' &&
+      row?.admissionState !== 'cancelled'
+    ) {
+      throw new AgentGraphIntentClaimConflictError(
+        `Agent graph intent ${graphId}/${intentId} has no durable admission`,
+      );
+    }
+    return row.admissionState;
+  }
+
   private claimAgentGraphIntentSync(
     request: AgentGraphIntentClaimRequest,
   ): AgentGraphIntentClaimResult {
@@ -854,8 +958,10 @@ export class SqliteSessionMetadataStore {
           target_session_id,
           target_turn_id,
           target_run_id,
-          claimed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          claimed_at,
+          admission_status,
+          admission_updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'claimed', ?)
       `)
       .run(
         request.claimId,
@@ -868,6 +974,7 @@ export class SqliteSessionMetadataStore {
         request.targetSessionId,
         request.targetTurnId,
         request.targetRunId,
+        claimedAt,
         claimedAt,
       );
     if (inserted.changes === 1) {

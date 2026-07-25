@@ -80,6 +80,14 @@ export interface AgentGraphScheduleStore {
   listAgentGraphScheduleUpdates(graphId: string): Promise<AgentGraphScheduleUpdate[]>;
 }
 
+export type AgentGraphIntentAdmissionState = 'claimed' | 'executing' | 'cancelled';
+
+export interface AgentGraphIntentAdmissionTransition {
+  state: AgentGraphIntentAdmissionState;
+  previousState: AgentGraphIntentAdmissionState;
+  changed: boolean;
+}
+
 /**
  * Raised when a reconciler tries to admit work from an observation that is no
  * longer the current durable schedule revision.
@@ -123,6 +131,16 @@ export interface AgentGraphScheduleControlStore
     request: AgentGraphIntentClaimRequest,
     expectedRevision: number,
   ): Promise<AgentGraphIntentClaimResult>;
+  beginAgentGraphIntentExecutionAtScheduleRevision(
+    graphId: string,
+    intentId: string,
+    expectedRevision: number,
+  ): Promise<AgentGraphIntentAdmissionTransition>;
+  cancelAgentGraphIntentExecution(
+    graphId: string,
+    intentId: string,
+    reason: string,
+  ): Promise<AgentGraphIntentAdmissionTransition>;
 }
 
 export function isAgentGraphScheduleUpdateRequest(

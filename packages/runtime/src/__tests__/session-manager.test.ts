@@ -327,6 +327,61 @@ describe('SessionManager claimed graph intent execution', () => {
     expect((await runStore.listSessionRuns(child.id)).length).toBe(2);
   });
 
+  test('evaluates execution admission only after a claimed child-session slot is available', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const firstGate = makeGate();
+    const firstReady = makeGate();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx, firstGate);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(75),
+    });
+    const parent = await manager.createSession(makeInput());
+    const child = await createGraphOperatorSession(store, parent.id);
+    const firstClaim = graphIntentClaim({ targetSessionId: child.id });
+    const queuedClaim = graphIntentClaim({
+      claimId: `graph_claim_${'7'.repeat(32)}`,
+      intentId: `graph_intent_${'8'.repeat(32)}`,
+      targetSessionId: child.id,
+      targetTurnId: 'queued-turn',
+      targetRunId: 'queued-run',
+    });
+    const first = manager.runClaimedAgentGraphIntent({
+      ...graphExecutionInput(firstClaim, 'first activation'),
+      onReady: () => firstReady.release(),
+    });
+    await firstReady.promise;
+
+    let admissionChecks = 0;
+    const queued = manager.runClaimedAgentGraphIntent({
+      ...graphExecutionInput(queuedClaim, 'cancelled queued activation'),
+      async admitExecution() {
+        admissionChecks += 1;
+        return 'cancelled';
+      },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(admissionChecks).toBe(0);
+
+    firstGate.release();
+    expect((await first).status).toBe('completed');
+    await expectRejects(queued, /cancelled before runtime admission/);
+    expect(admissionChecks).toBe(1);
+    expect(backend?.sendInputs.length).toBe(1);
+    expect((await runStore.listSessionRuns(child.id)).length).toBe(1);
+  });
+
   test('recovers an existing nonterminal claimed run without invoking the backend again', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();

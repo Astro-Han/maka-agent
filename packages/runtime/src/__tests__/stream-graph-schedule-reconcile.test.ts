@@ -179,6 +179,14 @@ describe('stream graph schedule reconciliation', () => {
         readAgentGraphIntentClaim: (graphId, intentId) =>
           store.readAgentGraphIntentClaim(graphId, intentId),
         listAgentGraphIntentClaims: (graphId) => store.listAgentGraphIntentClaims(graphId),
+        beginAgentGraphIntentExecutionAtScheduleRevision: (graphId, intentId, expectedRevision) =>
+          store.beginAgentGraphIntentExecutionAtScheduleRevision(
+            graphId,
+            intentId,
+            expectedRevision,
+          ),
+        cancelAgentGraphIntentExecution: (graphId, intentId, reason) =>
+          store.cancelAgentGraphIntentExecution(graphId, intentId, reason),
         async claimAgentGraphIntentAtScheduleRevision(request, expectedRevision) {
           if (!raced) {
             raced = true;
@@ -207,6 +215,139 @@ describe('stream graph schedule reconciliation', () => {
       assert.equal(result.stops[0]?.status, 'cancelled_before_runtime');
       assert.equal(executor.backendInvocations, 0);
       assert.deepEqual(await store.listAgentGraphIntentClaims(GRAPH_ID), []);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('durably cancels a claim when stop wins before Runtime execution admission', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', { now: nextNumber(400) });
+    const observation = new MemoryGraphObservation();
+    const executor = new MemoryScheduleExecutor(store, observation);
+    const stopController = new MemoryStopController(observation);
+    const claimed = deferred<void>();
+    const releaseClaim = deferred<void>();
+    let pauseClaim = true;
+    try {
+      const added = await commitSchedule(store, 'tool-add', {
+        add_work: [
+          {
+            operator_id: 'writer',
+            instruction: 'Do not start if the supervisor stops this claim.',
+            input_ids: [],
+          },
+        ],
+      });
+      const workId = added.addWork[0]!.workId;
+      const pausingStore: AgentGraphScheduleControlStore = {
+        commitAgentGraphScheduleUpdate: (request) => store.commitAgentGraphScheduleUpdate(request),
+        listAgentGraphScheduleUpdates: (graphId) => store.listAgentGraphScheduleUpdates(graphId),
+        claimAgentGraphIntent: (request) => store.claimAgentGraphIntent(request),
+        readAgentGraphIntentClaim: (graphId, intentId) =>
+          store.readAgentGraphIntentClaim(graphId, intentId),
+        listAgentGraphIntentClaims: (graphId) => store.listAgentGraphIntentClaims(graphId),
+        beginAgentGraphIntentExecutionAtScheduleRevision: (graphId, intentId, expectedRevision) =>
+          store.beginAgentGraphIntentExecutionAtScheduleRevision(
+            graphId,
+            intentId,
+            expectedRevision,
+          ),
+        cancelAgentGraphIntentExecution: (graphId, intentId, reason) =>
+          store.cancelAgentGraphIntentExecution(graphId, intentId, reason),
+        async claimAgentGraphIntentAtScheduleRevision(request, expectedRevision) {
+          const result = await store.claimAgentGraphIntentAtScheduleRevision(
+            request,
+            expectedRevision,
+          );
+          if (pauseClaim) {
+            pauseClaim = false;
+            claimed.resolve();
+            await releaseClaim.promise;
+          }
+          return result;
+        },
+      };
+      const firstPromise = reconcileAgentGraphSchedule({
+        topology: topology(),
+        controlStore: pausingStore,
+        executor,
+        stopController,
+        newId: nextId(),
+        maxNewActivations: 1,
+        observeGraph: () => observation.read(),
+        renderPrompt: ({ work }) => work.instruction,
+      });
+      await claimed.promise;
+
+      await commitSchedule(store, 'tool-stop', {
+        stop: [{ target_id: workId, reason: 'Stop before Runtime admission.' }],
+      });
+      const stopper = await reconcileAgentGraphSchedule({
+        topology: topology(),
+        controlStore: store,
+        executor,
+        stopController,
+        newId: nextId(),
+        maxNewActivations: 0,
+        observeGraph: () => observation.read(),
+        renderPrompt: ({ work }) => work.instruction,
+      });
+      releaseClaim.resolve();
+      const first = await firstPromise;
+
+      assert.equal(stopper.status, 'reconciled');
+      assert.equal(stopper.stops[0]?.status, 'cancelled_before_runtime');
+      assert.equal(first.status, 'reconciled');
+      assert.equal(first.dispatches.length, 0);
+      assert.equal(executor.backendInvocations, 0);
+    } finally {
+      releaseClaim.resolve();
+      store.close();
+    }
+  });
+
+  test('ignores unknown stop and replacement targets without poisoning later work', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', { now: nextNumber(500) });
+    const observation = new MemoryGraphObservation();
+    const executor = new MemoryScheduleExecutor(store, observation);
+    const stopController = new MemoryStopController(observation);
+    try {
+      await commitSchedule(store, 'tool-unknown-stop', {
+        stop: [{ target_id: 'typo-target', reason: 'This target was mistyped.' }],
+      });
+      await commitSchedule(store, 'tool-add', {
+        add_work: [
+          {
+            operator_id: 'writer',
+            instruction: 'Continue despite stale supervisor references.',
+            input_ids: [],
+            replaces: 'missing-replacement-target',
+          },
+        ],
+      });
+
+      const result = await reconcileAgentGraphSchedule({
+        topology: topology(),
+        controlStore: store,
+        executor,
+        stopController,
+        newId: nextId(),
+        maxNewActivations: 1,
+        observeGraph: () => observation.read(),
+        renderPrompt: ({ work }) => work.instruction,
+      });
+
+      assert.equal(result.status, 'reconciled');
+      assert.deepEqual(
+        result.stops.map((stop) => [stop.targetId, stop.status]),
+        [
+          ['missing-replacement-target', 'ignored_unknown'],
+          ['typo-target', 'ignored_unknown'],
+        ],
+      );
+      assert.equal(result.failures.length, 0);
+      assert.equal(result.dispatches.length, 1);
+      assert.equal(executor.backendInvocations, 1);
     } finally {
       store.close();
     }
@@ -380,6 +521,9 @@ class MemoryScheduleExecutor implements AgentGraphIntentExecutor {
   ): ReturnType<AgentGraphIntentExecutor['runClaimedAgentGraphIntent']> {
     const existing = this.results.get(input.intentId);
     if (existing) return existing;
+    if (input.admitExecution && (await input.admitExecution()) === 'cancelled') {
+      throw new Error('schedule execution cancelled before runtime admission');
+    }
     const claim = await this.claims.readAgentGraphIntentClaim(input.graphId, input.intentId);
     if (!claim) throw new Error('missing schedule claim');
     this.backendInvocations += 1;
@@ -439,4 +583,15 @@ function nextId(): () => string {
 function nextNumber(start: number): () => number {
   let value = start;
   return () => value++;
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
