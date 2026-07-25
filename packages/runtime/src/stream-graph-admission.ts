@@ -6,10 +6,23 @@ import { AGENT_GRAPH_INTENT_CLAIM_SCHEMA_VERSION } from '@maka/core/agent-graph-
 import { stableHash } from './request-shape.js';
 import type { AgentGraphRunnableIntent } from './stream-graph-readiness.js';
 
+const AGENT_GRAPH_EXECUTION_INPUT_SCHEMA_VERSION = 1 as const;
+
 export interface ClaimAgentGraphRunnableIntentInput {
   intent: AgentGraphRunnableIntent;
   store: AgentGraphIntentClaimStore;
   newId: () => string;
+  /**
+   * Stable execution input resolved before admission.
+   *
+   * A graph driver should provide this so a crash after the claim but before
+   * the Runtime message is durable cannot retry the same intent with different
+   * work. The optional form preserves the projection-only admission primitive
+   * for callers that have not resolved execution input yet.
+   */
+  executionInput?: {
+    prompt: string;
+  };
 }
 
 /**
@@ -21,7 +34,16 @@ export interface ClaimAgentGraphRunnableIntentInput {
 export function claimAgentGraphRunnableIntent(
   input: ClaimAgentGraphRunnableIntentInput,
 ): Promise<AgentGraphIntentClaimResult> {
-  const intentFingerprint = stableHash(input.intent);
+  if (input.executionInput && !input.executionInput.prompt.trim()) {
+    throw new Error('Agent graph execution prompt must not be empty');
+  }
+  const intentFingerprint = input.executionInput
+    ? stableHash({
+        schemaVersion: AGENT_GRAPH_EXECUTION_INPUT_SCHEMA_VERSION,
+        intent: input.intent,
+        executionInput: input.executionInput,
+      })
+    : stableHash(input.intent);
   const claimHash = stableHash({
     schemaVersion: AGENT_GRAPH_INTENT_CLAIM_SCHEMA_VERSION,
     graphId: input.intent.graphId,

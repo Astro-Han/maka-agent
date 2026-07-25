@@ -56,7 +56,8 @@
     "./stream-graph-projection": "./dist/stream-graph-projection.js",
     "./stream-graph-trace": "./dist/stream-graph-trace.js",
     "./stream-graph-readiness": "./dist/stream-graph-readiness.js",
-    "./stream-graph-admission": "./dist/stream-graph-admission.js"
+    "./stream-graph-admission": "./dist/stream-graph-admission.js",
+    "./stream-graph-dispatch": "./dist/stream-graph-dispatch.js"
   },
   "scripts": {
     "clean": "node ../../scripts/clean-paths.mjs dist tsconfig.tsbuildinfo",

@@ -32,6 +32,42 @@ describe('stream graph admission', () => {
     assert.match(first.claim.claimId, /^graph_claim_[a-f0-9]{32}$/);
     assert.match(first.claim.intentFingerprint, /^sha256:[a-f0-9]{64}$/);
   });
+
+  test('binds resolved execution input into the durable intent fingerprint', async () => {
+    const firstStore = new MemoryClaimStore();
+    const secondStore = new MemoryClaimStore();
+    const first = await claimAgentGraphRunnableIntent({
+      intent: runnableIntent(),
+      store: firstStore,
+      newId: nextId(),
+      executionInput: { prompt: 'summarize the committed record' },
+    });
+    const same = await claimAgentGraphRunnableIntent({
+      intent: runnableIntent(),
+      store: secondStore,
+      newId: nextId(),
+      executionInput: { prompt: 'summarize the committed record' },
+    });
+    const drifted = await claimAgentGraphRunnableIntent({
+      intent: runnableIntent(),
+      store: new MemoryClaimStore(),
+      newId: nextId(),
+      executionInput: { prompt: 'perform different work' },
+    });
+
+    assert.equal(first.claim.intentFingerprint, same.claim.intentFingerprint);
+    assert.notEqual(first.claim.intentFingerprint, drifted.claim.intentFingerprint);
+    assert.throws(
+      () =>
+        claimAgentGraphRunnableIntent({
+          intent: runnableIntent(),
+          store: new MemoryClaimStore(),
+          newId: nextId(),
+          executionInput: { prompt: '   ' },
+        }),
+      /prompt must not be empty/,
+    );
+  });
 });
 
 class MemoryClaimStore implements AgentGraphIntentClaimStore {
@@ -66,4 +102,9 @@ function runnableIntent(): AgentGraphRunnableIntent {
     triggerRouteIds: ['route-1'],
     triggerRecordIds: ['record-1'],
   };
+}
+
+function nextId(): () => string {
+  let value = 0;
+  return () => `id-${++value}`;
 }

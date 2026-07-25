@@ -84,6 +84,20 @@ export {
 } from './stream-graph-readiness.js';
 export { claimAgentGraphRunnableIntent } from './stream-graph-admission.js';
 export type { ClaimAgentGraphRunnableIntentInput } from './stream-graph-admission.js';
+export { runAgentGraphToQuiescence } from './stream-graph-dispatch.js';
+export type {
+  AgentGraphDispatchFailure,
+  AgentGraphDispatchedActivation,
+  AgentGraphIntentExecutor,
+  AgentGraphQuiescenceResult,
+  AgentGraphSupervisorActivationReady,
+  AgentGraphSupervisorObservation,
+  AgentGraphSupervisorObserver,
+  AgentGraphSupervisorRuntimeEvent,
+  RenderAgentGraphIntentPromptInput,
+  ResolveAgentGraphPoliciesInput,
+  RunAgentGraphToQuiescenceInput,
+} from './stream-graph-dispatch.js';
 export type {
   AgentGraphAllSettledReadinessPolicy,
   AgentGraphMapReadinessPolicy,
