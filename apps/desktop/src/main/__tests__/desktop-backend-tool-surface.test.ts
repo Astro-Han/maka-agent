@@ -129,6 +129,41 @@ describe('Desktop backend tool surface', () => {
     assert.equal(child.skillHost.toolNames.has('SubmitPlan'), false);
   });
 
+  it('binds graph supervisor tools only to an existing root Session', async () => {
+    let graphToolRequests = 0;
+    const graphTools = [
+      tool('view_agent_graph', 'read'),
+      tool('update_agent_graph', 'subagent'),
+    ];
+    const deps = makeDeps({
+      getAgentGraphSupervisorTools: async () => {
+        graphToolRequests += 1;
+        return graphTools;
+      },
+    });
+    const input = inputFor('claude-sonnet-4-5-20250929');
+    const root = await resolveDesktopBackendToolSurface(deps, input);
+    assert.equal(root.skillHost.toolNames.has('view_agent_graph'), true);
+    assert.equal(root.skillHost.toolNames.has('update_agent_graph'), true);
+
+    const child = await resolveDesktopBackendToolSurface(deps, {
+      ...input,
+      tools: [readTool],
+    });
+    assert.deepEqual([...child.skillHost.toolNames], ['Read']);
+
+    await resolveDesktopNewSessionSkillHost(deps, {
+      projectRoot: '/tmp/project',
+      workspaceRoot: '/tmp/workspace',
+      readyConnection: {
+        connection: connectionFor('claude-sonnet-4-5-20250929'),
+        apiKey: 'preview-key',
+        model: 'claude-sonnet-4-5-20250929',
+      },
+    });
+    assert.equal(graphToolRequests, 1);
+  });
+
   it('uses the durable child snapshot for the persisted-session Skill host', async () => {
     const header = inputFor('claude-sonnet-4-5-20250929').header;
     header.subagentParent = {} as SessionHeader['subagentParent'];

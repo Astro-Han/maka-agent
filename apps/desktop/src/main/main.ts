@@ -30,6 +30,7 @@ import { AntigravitySubscriptionService } from './oauth/antigravity-subscription
 import type { WorkspacePrivacyContext } from '@maka/core/incognito';
 import { ok } from '@maka/core/result';
 import {
+  AgentGraphCoordinator,
   BackendRegistry,
   FakeBackend,
   PermissionEngine,
@@ -71,6 +72,7 @@ import {
   createShellRunStore,
   createTelemetryRepo,
 } from '@maka/storage';
+import { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
 import { resolveStorageRoot } from '@maka/storage/root-authority';
 import { resolveWorkspaceIdentity } from '@maka/storage/workspace-identity';
 import { McpClientManager } from '@maka/mcp';
@@ -218,6 +220,7 @@ if (e2eFixture) {
 // process, so quit needs no special teardown.
 const keepSystemAwake = createKeepSystemAwakeController(powerSaveBlocker);
 const store = createSessionStore(workspaceRoot);
+const agentGraphControlStore = createAgentGraphControlStore(workspaceRoot);
 const planStore = createPlanStore(workspaceRoot);
 const runStore = createAgentRunStore(workspaceRoot);
 const runtimePersistence = await openRuntimeEventPersistence({
@@ -389,6 +392,7 @@ const automationWiring = createMainAutomationWiring({
     // do not accumulate an unbounded pile of active sessions. The session (with
     // its run/trace) is preserved under the archive, labelled automation/cron.
     try {
+      await agentGraphCoordinator.stop(session.id);
       await goalWiring.archiveSession(session.id, () => runtime.archive(session.id));
       desktopSessionSkillHosts.delete(session.id);
       emitSessionsChanged('archived', session.id);
@@ -618,6 +622,7 @@ const {
   getWorkspacePrivacyContext,
   resolveDesktopSkillHost,
 });
+let agentGraphCoordinator: AgentGraphCoordinator;
 const desktopBackendToolSurfaceDeps = {
   isComputerUseRealModelE2e,
   ensureMcpReady,
@@ -630,6 +635,8 @@ const desktopBackendToolSurfaceDeps = {
   builtinTools,
   toolAvailability,
   planStore,
+  getAgentGraphSupervisorTools: (sessionId: string) =>
+    agentGraphCoordinator.toolsForSession(sessionId),
 };
 // Cursor-overlay teardown assigns a module-scoped `let`, so it stays in main.ts.
 onMainWindowClose = () => computerUseOverlay.destroyAll();
@@ -818,6 +825,14 @@ const runtime = new SessionManager({
   newId: randomUUID,
   now: Date.now,
 });
+agentGraphCoordinator = new AgentGraphCoordinator({
+  sessionStore: store,
+  runStore,
+  runtimeEventStore,
+  controlStore: agentGraphControlStore,
+  runtime,
+  newId: randomUUID,
+});
 let settingsIpc: SettingsIpcHandle | undefined;
 let mcpToolSnapshot = JSON.stringify(mcpManager.tools());
 mcpManager.onChange(() => {
@@ -936,6 +951,10 @@ function registerIpc(): void {
     prepareSkillInvocation: prepareDesktopSkillInvocation,
     invalidateSessionBindings: (sessionId) => botIncoming.invalidateSessionBindings(sessionId),
     clearSkillHost: (sessionId) => desktopSessionSkillHosts.delete(sessionId),
+    stopAgentGraph: async (sessionId) => {
+      const header = await store.readHeader(sessionId);
+      if (!header.subagentParent) await agentGraphCoordinator.stop(sessionId);
+    },
     ensureSessionWorkspaceAvailable,
     createSession: createDesktopSession,
     getReadyConnection,
@@ -1285,6 +1304,8 @@ wireAppLifecycle({
   runtimePersistence,
   mainWindowController,
   runtime,
+  agentGraphCoordinator,
+  agentGraphControlStore,
   streamEvents,
   focusOrCreateMainWindow,
   emitConnectionListChanged,

@@ -251,6 +251,20 @@ export interface BuildAgentGraphSupervisorToolsInput {
   graphId: string;
   scheduleStore: AgentGraphScheduleStore;
   observeGraph(): Promise<AgentGraphSupervisorObservation>;
+  /** Host ownership check performed before append-only schedule admission. */
+  authorizeScheduleUpdate?(
+    request: AgentGraphScheduleUpdateRequest,
+  ): unknown | Promise<unknown>;
+  /**
+   * Host lifecycle hook invoked after the schedule update is durable.
+   *
+   * The tool does not execute graph work itself. A host-owned coordinator can
+   * use this notification to wake its single reconciliation driver.
+   */
+  onScheduleUpdateCommitted?(
+    update: AgentGraphScheduleUpdate,
+    authorization: unknown,
+  ): void | Promise<void>;
 }
 
 /**
@@ -303,10 +317,12 @@ export function buildAgentGraphSupervisorTools(
         input: toolInput,
         context,
       });
+      const authorization = await input.authorizeScheduleUpdate?.(request);
       if (request.finish) {
         assertFinishResultsCommitted(graphId, request.finish.resultIds, await input.observeGraph());
       }
-      await input.scheduleStore.commitAgentGraphScheduleUpdate(request);
+      const committed = await input.scheduleStore.commitAgentGraphScheduleUpdate(request);
+      await input.onScheduleUpdateCommitted?.(committed.update, authorization);
       const view = await readToolGraphView(
         input.scheduleStore,
         graphId,

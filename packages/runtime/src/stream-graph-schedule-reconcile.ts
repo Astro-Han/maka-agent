@@ -141,9 +141,6 @@ export async function reconcileAgentGraphSchedule(
   if (!Number.isSafeInteger(input.maxNewActivations) || input.maxNewActivations < 0) {
     throw new Error('Agent graph maxNewActivations must be a non-negative safe integer');
   }
-  if (input.topology.operators.length === 0) {
-    throw new Error('Agent graph schedule reconciliation requires at least one operator');
-  }
 
   const processedIntentIds = new Set<string>();
   const dispatches: AgentGraphDispatchedActivation[] = [];

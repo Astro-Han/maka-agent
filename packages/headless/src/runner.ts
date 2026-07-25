@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { BackendKind, OrchestrationMode, TurnOrchestration } from '@maka/core';
 import {
+  AgentGraphCoordinator,
   BackendRegistry,
   SessionManager,
   buildChildAgentTools,
   type InvocationResult,
 } from '@maka/runtime';
+import { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
 import type { Config, ResultRecord, Task } from './contracts.js';
 import { registerFakeBackend } from './backends.js';
 import {
@@ -122,6 +124,10 @@ export async function runExperimentWithStorage(
   const effectiveConfig = { ...config, systemPrompt: prompt.systemPrompt };
 
   const workspace = await prepareWorkspace(task.workspaceDir);
+  let graphCoordinator: AgentGraphCoordinator | undefined;
+  let graphControlStore:
+    | ReturnType<typeof createAgentGraphControlStore>
+    | undefined;
   try {
     const agentWorkspaceDir = deps.realBackendIsolation?.workspaceDir ?? workspace.dir;
     const verifier = normalizeVerifier(task);
@@ -165,8 +171,6 @@ export async function runExperimentWithStorage(
         invocation = result;
       },
     });
-    sessionCapabilities.bind(manager);
-
     const session = await manager.createSession({
       cwd: agentWorkspaceDir,
       backend: config.backend,
@@ -176,6 +180,17 @@ export async function runExperimentWithStorage(
       ...(deps.orchestrationMode ? { orchestrationMode: deps.orchestrationMode } : {}),
       name: `lab:${config.id}:${task.id}`,
     });
+    graphControlStore = createAgentGraphControlStore(deps.storageRoot);
+    graphCoordinator = new AgentGraphCoordinator({
+      sessionStore: storage.executionStores.sessionStore,
+      runStore,
+      runtimeEventStore: storage.executionStores.runtimeEventStore,
+      controlStore: graphControlStore,
+      runtime: manager,
+      newId,
+      rootSessionId: session.id,
+    });
+    sessionCapabilities.bind(manager, graphCoordinator);
 
     const turnId = newId();
     // Drain the turn to completion. The trajectory + status come from the
@@ -197,6 +212,7 @@ export async function runExperimentWithStorage(
         });
       }
     }
+    await sessionCapabilities.settle(session.id);
 
     const status = invocation?.status ?? 'failed';
     const runnerCompleted = status === 'completed';
@@ -287,6 +303,14 @@ export async function runExperimentWithStorage(
       await scoringWorkspace.cleanup();
     }
   } finally {
-    await workspace.cleanup();
+    try {
+      await graphCoordinator?.close();
+    } finally {
+      try {
+        graphControlStore?.close();
+      } finally {
+        await workspace.cleanup();
+      }
+    }
   }
 }

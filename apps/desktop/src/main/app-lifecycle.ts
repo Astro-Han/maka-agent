@@ -2,7 +2,12 @@ import { app, nativeImage, safeStorage } from 'electron';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildPricingLookup, setActiveProxy } from '@maka/runtime';
-import type { BotRegistry, SessionManager, ShellRunProcessManager } from '@maka/runtime';
+import type {
+  AgentGraphCoordinator,
+  BotRegistry,
+  SessionManager,
+  ShellRunProcessManager,
+} from '@maka/runtime';
 import type { McpClientManager } from '@maka/mcp';
 import type {
   createConnectionStore,
@@ -11,6 +16,7 @@ import type {
   createTelemetryRepo,
   openRuntimeEventPersistence,
 } from '@maka/storage';
+import type { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
 import { migrateLegacyCredentials } from './credential-store.js';
 import type { createFileCredentialStore } from './credential-store.js';
 import { startConfigFileWatcher, type ConfigFileWatcher } from './config-file-watcher.js';
@@ -54,6 +60,8 @@ export interface AppLifecycleDeps {
   runtimePersistence: Awaited<ReturnType<typeof openRuntimeEventPersistence>>;
   mainWindowController: ReturnType<typeof createMainWindowController>;
   runtime: SessionManager;
+  agentGraphCoordinator: AgentGraphCoordinator;
+  agentGraphControlStore: ReturnType<typeof createAgentGraphControlStore>;
   streamEvents: StreamEvents;
   /** Focus-or-create for the main window; stays in main.ts next to the
    *  controller and is registered here on `second-instance` / `activate`. */
@@ -104,6 +112,8 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
     runtimePersistence,
     mainWindowController,
     runtime,
+    agentGraphCoordinator,
+    agentGraphControlStore,
     streamEvents,
     focusOrCreateMainWindow,
     emitConnectionListChanged,
@@ -117,6 +127,7 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
   async function recoverInterruptedSessionsOnStartup(): Promise<void> {
     try {
       await runtime.recoverInterruptedSessions();
+      await agentGraphCoordinator.recover();
       if (process.env.MAKA_RUNTIME_SAFE_BOUNDARY_RESUME !== '1') return;
       for (const session of await runtime.listSessions()) {
         const plan = await runtime.planLatestAuthoritativeSafeBoundaryContinuation(session.id);
@@ -320,11 +331,13 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
       Promise.resolve(mainWindowController.disposeBrowserViews()),
       shellRuns.terminateAll(),
       mcpManager.close(),
+      agentGraphCoordinator.close(),
     ]);
     for (const result of results) {
       if (result.status === 'rejected') console.error('[shutdown] cleanup failed:', result.reason);
     }
     runtimePersistence.close();
+    agentGraphControlStore.close();
     await sessionStore.close?.();
   }
 }

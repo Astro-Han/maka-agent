@@ -236,9 +236,6 @@ function fingerprintTopology(graphId: string, topology: ValidatedTopology): stri
 
 function validateTopology(topology: AgentGraphTraceTopology): ValidatedTopology {
   if (!topology.graphId.trim()) throw new Error('Trace graph id must not be empty');
-  if (topology.operators.length === 0) {
-    throw new Error(`Trace graph ${topology.graphId} must contain at least one operator`);
-  }
 
   const operatorsById = new Map<string, AgentGraphOperatorBinding>();
   const operatorBySession = new Map<string, string>();

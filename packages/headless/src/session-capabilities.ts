@@ -1,5 +1,6 @@
 import type {
   AgentListResult,
+  AgentGraphCoordinator,
   AgentOutputInput,
   AgentOutputResult,
   PrepareChildAgentResumeResult,
@@ -11,6 +12,7 @@ import type {
   SpawnChildSessionInput,
   SpawnChildSessionResult,
   StopSessionInput,
+  MakaTool,
 } from '@maka/runtime';
 
 export interface HeadlessSessionCapabilities {
@@ -27,14 +29,16 @@ export interface HeadlessSessionCapabilities {
   retryChildAgent(sessionId: string, input: RetryChildAgentInput): Promise<SpawnChildAgentResult>;
   listChildAgents(sessionId: string): Promise<AgentListResult>;
   readChildAgentOutput(sessionId: string, input: AgentOutputInput): Promise<AgentOutputResult>;
+  getAgentGraphSupervisorTools(sessionId: string): Promise<readonly MakaTool[]>;
 }
 
 export function createHeadlessSessionCapabilityBridge(): {
   capabilities: HeadlessSessionCapabilities;
-  bind(manager: SessionManager): void;
+  bind(manager: SessionManager, graphCoordinator?: AgentGraphCoordinator): void;
   settle(sessionId: string, input?: StopSessionInput): Promise<void>;
 } {
   let manager: SessionManager | undefined;
+  let graphCoordinator: AgentGraphCoordinator | undefined;
   const activeOperations = new Set<Promise<unknown>>();
   const requireManager = (): SessionManager => {
     if (!manager) {
@@ -65,15 +69,30 @@ export function createHeadlessSessionCapabilityBridge(): {
       listChildAgents: async (sessionId) => await requireManager().listChildAgents(sessionId),
       readChildAgentOutput: async (sessionId, input) =>
         await requireManager().readChildAgentOutput(sessionId, input),
+      getAgentGraphSupervisorTools: async (sessionId) => {
+        if (!graphCoordinator) {
+          throw new Error('Headless agent graph coordinator is unavailable');
+        }
+        return graphCoordinator.toolsForSession(sessionId);
+      },
     },
-    bind(nextManager) {
+    bind(nextManager, nextGraphCoordinator) {
       if (manager) {
         throw new Error('Headless session capabilities are already bound');
       }
       manager = nextManager;
+      graphCoordinator = nextGraphCoordinator;
     },
     async settle(sessionId, input) {
       const operations = [...activeOperations];
+      let graphStopError: unknown;
+      if (graphCoordinator) {
+        try {
+          await graphCoordinator.stop(sessionId);
+        } catch (error) {
+          graphStopError = error;
+        }
+      }
       let firstStopError: unknown;
       try {
         await requireManager().stopSession(sessionId, input);
@@ -91,6 +110,7 @@ export function createHeadlessSessionCapabilityBridge(): {
       const error = results.find(
         (result): result is PromiseRejectedResult => result.status === 'rejected',
       )?.reason;
+      if (graphStopError !== undefined) throw graphStopError;
       if (error !== undefined) throw error;
     },
   };

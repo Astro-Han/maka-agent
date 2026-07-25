@@ -58,6 +58,10 @@ export interface DesktopBackendToolSurfaceDeps {
   builtinTools: readonly MakaTool[];
   toolAvailability: ToolAvailabilityConfig;
   planStore: PlanStore;
+  getAgentGraphSupervisorTools?: (
+    sessionId: string,
+    header: SessionHeader,
+  ) => Promise<readonly MakaTool[]>;
 }
 
 export interface DesktopBackendToolSurfaceInput {
@@ -70,6 +74,8 @@ export interface DesktopBackendToolSurfaceInput {
   readyConnection?: ReadyConnection;
   /** Avoid reading a durable plan ledger for a not-yet-persisted session preview. */
   planState?: PlanSessionState;
+  /** A new-session preview has no durable root Session to supervise yet. */
+  includeAgentGraphSupervisorTools?: boolean;
 }
 
 export interface DesktopBackendToolSurface {
@@ -161,6 +167,7 @@ export async function resolveDesktopNewSessionSkillHost(
       header,
       readyConnection: input.readyConnection,
       planState: emptyPlanSessionState(sessionId),
+      includeAgentGraphSupervisorTools: false,
     })
   ).skillHost;
 }
@@ -194,12 +201,19 @@ export async function resolveDesktopBackendToolSurface(
   const interruptedExecution = [...planState.executions]
     .reverse()
     .find((execution) => execution.status === 'interrupted');
+  const agentGraphSupervisorTools =
+    !input.tools &&
+    input.includeAgentGraphSupervisorTools !== false &&
+    deps.getAgentGraphSupervisorTools
+      ? await deps.getAgentGraphSupervisorTools(input.sessionId, input.header)
+      : [];
   const candidateTools = input.tools
     ? [...input.tools]
     : deps.isComputerUseRealModelE2e
       ? [...deps.computerUseTools]
       : [
           ...deps.builtinTools,
+          ...agentGraphSupervisorTools,
           ...buildMcpTools(deps.mcpManager),
           ...(isDeepResearchSession(input.header.labels) ? deps.deepResearchTools : []),
         ];
