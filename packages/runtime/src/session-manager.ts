@@ -1557,13 +1557,8 @@ export class SessionManager {
     if (input.abortSignal?.aborted) {
       throw new Error('Claimed graph execution was cancelled before runtime admission');
     }
-    if (input.admitExecution && (await input.admitExecution()) === 'cancelled') {
-      throw new Error('Claimed graph execution was cancelled before runtime admission');
-    }
-    if (input.abortSignal?.aborted) {
-      throw new Error('Claimed graph execution was cancelled before runtime admission');
-    }
 
+    const admitExecution = input.admitExecution;
     const startedAt = this.deps.now();
     const summary = new ChildAgentSummaryAccumulator();
     let aborted = false;
@@ -1579,6 +1574,12 @@ export class SessionManager {
       {
         runId: claim.targetRunId,
         durability: 'required',
+        ...(admitExecution
+          ? {
+              admitTurn: async () =>
+                (await admitExecution()) === 'executing' ? 'admitted' : 'cancelled',
+            }
+          : {}),
         onRunStarted: notifyReady,
       },
     )[Symbol.asyncIterator]();

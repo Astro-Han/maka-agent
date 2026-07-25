@@ -382,6 +382,57 @@ describe('SessionManager claimed graph intent execution', () => {
     expect((await runStore.listSessionRuns(child.id)).length).toBe(1);
   });
 
+  test('keeps a stop pending across graph admission until the turn can be cancelled', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const admissionStarted = makeGate();
+    const releaseAdmission = makeGate();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(77),
+    });
+    const parent = await manager.createSession(makeInput());
+    const child = await createGraphOperatorSession(store, parent.id);
+    const claim = graphIntentClaim({ targetSessionId: child.id });
+    const execution = manager.runClaimedAgentGraphIntent({
+      ...graphExecutionInput(claim, 'activation stopped during admission'),
+      async admitExecution() {
+        admissionStarted.release();
+        await releaseAdmission.promise;
+        return 'executing';
+      },
+    });
+    await admissionStarted.promise;
+
+    let stopSettled = false;
+    const stop = manager.stopSession(child.id, { source: 'graph_supervisor' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+    expect(backend).toBe(undefined);
+
+    releaseAdmission.release();
+    await stop;
+    const result = await execution;
+
+    expect(result.status).toBe('cancelled');
+    expect(backend?.stopCalls).toBe(1);
+    expect(backend?.sendInputs).toHaveLength(0);
+    expect((await runStore.readRun(child.id, claim.targetRunId)).status).toBe('cancelled');
+  });
+
   test('recovers an existing nonterminal claimed run without invoking the backend again', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
