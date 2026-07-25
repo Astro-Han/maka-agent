@@ -3,6 +3,7 @@ import type {
   AgentGraphIntentClaimResult,
   AgentGraphIntentClaimStore,
 } from './agent-graph-control.js';
+import type { AgentGraphTopologyStore } from './agent-graph-topology.js';
 
 export const AGENT_GRAPH_SCHEDULE_UPDATE_SCHEMA_VERSION = 1 as const;
 
@@ -126,7 +127,8 @@ export class AgentGraphScheduleClosedError extends Error {
  */
 export interface AgentGraphScheduleControlStore
   extends AgentGraphScheduleStore,
-    AgentGraphIntentClaimStore {
+    AgentGraphIntentClaimStore,
+    AgentGraphTopologyStore {
   claimAgentGraphIntentAtScheduleRevision(
     request: AgentGraphIntentClaimRequest,
     expectedRevision: number,

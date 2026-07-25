@@ -73,6 +73,10 @@ import {
 import type {
   AgentGraphIntentClaim,
   AgentGraphIntentClaimStore,
+  AgentGraphOperatorProvisionRequest,
+  AgentGraphOperatorProvisionResult,
+  AgentGraphProvisionedEdge,
+  AgentGraphScheduleUpdateSource,
   AgentRunEvent,
   AgentRunHeader,
   AgentRunStore,
@@ -81,6 +85,7 @@ import type {
   RuntimeEventStore,
   ToolBoundaryProtocol,
 } from '@maka/core';
+import { AGENT_GRAPH_OPERATOR_PROVISION_SCHEMA_VERSION } from '@maka/core';
 import { type RuntimeEventTerminalFact } from './runtime-event-read-model.js';
 import {
   RuntimeReadModel,
@@ -136,6 +141,7 @@ import {
 } from './agent-catalog.js';
 import { buildRuntimeEventModelReplayPlan } from './model-history.js';
 import { requireResolvedAgentDefinition } from './expert-catalog.js';
+import { stableHash } from './request-shape.js';
 import type { SubagentExecutionRef } from './subagent-execution.js';
 import {
   buildResumePlanFromRuntimeEvents,
@@ -197,6 +203,20 @@ export interface SpawnChildSessionResult extends SpawnChildAgentResult {
   childSessionId: string;
   runId: string;
   profile: string;
+}
+
+export interface ProvisionAgentGraphOperatorInput {
+  graphId: string;
+  workId: string;
+  agentId: string;
+  operatorId: string;
+  source: AgentGraphScheduleUpdateSource;
+  edges: AgentGraphProvisionedEdge[];
+  expectedScheduleRevision: number;
+}
+
+export interface ProvisionAgentGraphOperatorResult extends AgentGraphOperatorProvisionResult {
+  header: SessionHeader;
 }
 
 export interface RunClaimedAgentGraphIntentInput {
@@ -372,6 +392,11 @@ export interface AgentOutputResult {
 export interface SessionStore {
   create(input: CreateSessionInput): Promise<SessionHeader>;
   createSubagent(input: CreateSessionInput): Promise<{ header: SessionHeader; created: boolean }>;
+  createAgentGraphOperator?(
+    input: CreateSessionInput,
+    request: AgentGraphOperatorProvisionRequest,
+    expectedRevision: number,
+  ): Promise<ProvisionAgentGraphOperatorResult>;
   list(filter?: SessionListFilter): Promise<SessionSummary[]>;
   readHeader(sessionId: string): Promise<SessionHeader>;
   readMessages(sessionId: string): Promise<StoredMessage[]>;
@@ -1400,6 +1425,144 @@ export class SessionManager {
         this.childSessionSpawns.delete(spawnKey);
       }
     }
+  }
+
+  /**
+   * Atomically materialize one catalog agent as a durable child Session and a
+   * monotonic graph-topology operator.
+   *
+   * This is metadata admission only. The reserved first turn/run is executed
+   * later through the ordinary claimed graph-intent path.
+   */
+  async provisionAgentGraphOperator(
+    input: ProvisionAgentGraphOperatorInput,
+  ): Promise<ProvisionAgentGraphOperatorResult> {
+    const create = this.deps.store.createAgentGraphOperator;
+    if (!create || !this.deps.runStore || !this.deps.runtimeEventStore) {
+      throw new Error(
+        'Graph operator provisioning requires SQLite Session metadata, AgentRunStore, and RuntimeEventStore',
+      );
+    }
+    if (input.source.sessionId.length === 0) {
+      throw new Error('Graph operator provision requires a supervisor Session');
+    }
+    const [parentHeader, sourceRun] = await Promise.all([
+      this.deps.store.readHeader(input.source.sessionId),
+      this.deps.runStore.readRun(input.source.sessionId, input.source.runId),
+    ]);
+    if (
+      sourceRun.sessionId !== input.source.sessionId ||
+      sourceRun.runId !== input.source.runId ||
+      sourceRun.turnId !== input.source.turnId
+    ) {
+      throw new Error('Graph schedule source does not match its durable supervisor run');
+    }
+
+    const definition = requireResolvedAgentDefinition(input.agentId);
+    assertAgentDefinitionRunnable({
+      parentPermissionMode: parentHeader.permissionMode,
+      definition,
+      tools: this.deps.childTools ?? [],
+    });
+
+    const initialTurnId = this.deps.newId();
+    const initialRunId = this.deps.newId();
+    const identityHash = stableHash({
+      schemaVersion: AGENT_GRAPH_OPERATOR_PROVISION_SCHEMA_VERSION,
+      graphId: input.graphId,
+      workId: input.workId,
+    }).slice('sha256:'.length, 'sha256:'.length + 32);
+    const provisionFingerprint = stableHash({
+      schemaVersion: AGENT_GRAPH_OPERATOR_PROVISION_SCHEMA_VERSION,
+      graphId: input.graphId,
+      workId: input.workId,
+      agentId: input.agentId,
+      operatorId: input.operatorId,
+      source: input.source,
+      edges: input.edges,
+      definition: {
+        definitionVersion: definition.definitionVersion,
+        agentId: definition.id,
+        profile: definition.profile,
+        permissionMode: definition.permissionMode,
+        toolNames: [...definition.tools],
+        categoryPolicy: { ...definition.categoryPolicy },
+        systemPrompt: definition.systemPrompt,
+      },
+      parentPermissionCeiling: parentHeader.permissionMode,
+    });
+    const request: AgentGraphOperatorProvisionRequest = {
+      schemaVersion: AGENT_GRAPH_OPERATOR_PROVISION_SCHEMA_VERSION,
+      provisionId: `graph_provision_${identityHash}`,
+      provisionFingerprint,
+      graphId: input.graphId,
+      workId: input.workId,
+      agentId: input.agentId,
+      operatorId: input.operatorId,
+      initialTurnId,
+      initialRunId,
+      edges: input.edges.map((edge) => ({ ...edge })),
+    };
+    const result = await create.call(
+      this.deps.store,
+      {
+        cwd: parentHeader.cwd,
+        name: definition.name,
+        backend: parentHeader.backend,
+        llmConnectionSlug: parentHeader.llmConnectionSlug,
+        model: parentHeader.model,
+        ...(parentHeader.thinkingLevel !== undefined
+          ? { thinkingLevel: parentHeader.thinkingLevel }
+          : {}),
+        permissionMode: definition.permissionMode,
+        collaborationMode: 'agent',
+        orchestrationMode: 'default',
+        subagentParent: {
+          kind: 'subagent',
+          parentSessionId: input.source.sessionId,
+          spawnedBy: {
+            parentRunId: input.source.runId,
+            parentTurnId: input.source.turnId,
+            toolCallId: input.source.toolCallId,
+          },
+          graph: {
+            graphId: input.graphId,
+            workId: input.workId,
+            operatorId: input.operatorId,
+          },
+          lifecycle: 'foreground',
+        },
+        subagentRuntime: {
+          schemaVersion: SUBAGENT_SESSION_RUNTIME_SCHEMA_VERSION,
+          definitionVersion: definition.definitionVersion,
+          agentId: definition.id,
+          agentName: definition.name,
+          profile: definition.profile,
+          systemPrompt: definition.systemPrompt,
+          toolNames: [...definition.tools],
+          categoryPolicy: { ...definition.categoryPolicy },
+          permissionCeiling: parentHeader.permissionMode,
+        },
+        subagentSpawn: {
+          schemaVersion: SUBAGENT_SESSION_SPAWN_SCHEMA_VERSION,
+          requestFingerprint: provisionFingerprint.slice('sha256:'.length),
+          initialTurnId,
+          initialRunId,
+        },
+      },
+      request,
+      input.expectedScheduleRevision,
+    );
+    const relation = result.header.subagentParent?.graph;
+    if (
+      relation?.graphId !== input.graphId ||
+      relation.workId !== input.workId ||
+      relation.operatorId !== result.provision.operatorId ||
+      result.header.id !== result.provision.targetSessionId
+    ) {
+      throw new Error('Stored graph operator provision returned mismatched Session metadata');
+    }
+    return result;
   }
 
   /**

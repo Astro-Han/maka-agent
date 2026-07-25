@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 8;
+export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 9;
 
 const MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
@@ -244,6 +244,28 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
 
     UPDATE agent_graph_intent_claims
     SET admission_updated_at = claimed_at;
+  `,
+  ],
+  [
+    9,
+    `
+    CREATE TABLE agent_graph_operator_provisions (
+      graph_id TEXT NOT NULL,
+      work_id TEXT NOT NULL,
+      provision_id TEXT NOT NULL UNIQUE,
+      schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+      provision_fingerprint TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      operator_id TEXT NOT NULL,
+      target_session_id TEXT NOT NULL UNIQUE,
+      payload_json TEXT NOT NULL,
+      provisioned_at INTEGER NOT NULL CHECK (provisioned_at >= 0),
+      PRIMARY KEY(graph_id, work_id),
+      UNIQUE(graph_id, operator_id)
+    );
+
+    CREATE INDEX agent_graph_operator_provisions_by_graph
+      ON agent_graph_operator_provisions(graph_id, provisioned_at, operator_id);
   `,
   ],
 ]);

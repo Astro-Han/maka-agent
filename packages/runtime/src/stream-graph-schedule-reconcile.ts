@@ -5,7 +5,13 @@ import type {
 import {
   AgentGraphScheduleRevisionConflictError,
   type AgentGraphScheduleControlStore,
+  type AgentGraphScheduleUpdate,
+  type AgentGraphScheduleUpdateSource,
 } from '@maka/core/agent-graph-schedule';
+import type {
+  AgentGraphOperatorProvision,
+  AgentGraphProvisionedEdge,
+} from '@maka/core/agent-graph-topology';
 import type { SessionEvent } from '@maka/core/events';
 import { claimAgentGraphRunnableIntent } from './stream-graph-admission.js';
 import type {
@@ -14,6 +20,10 @@ import type {
   AgentGraphSupervisorObserver,
   AgentGraphSupervisorObservation,
 } from './stream-graph-dispatch.js';
+import type {
+  ProvisionAgentGraphOperatorInput,
+  ProvisionAgentGraphOperatorResult,
+} from './session-manager.js';
 import type { AgentGraphRecord } from './stream-graph-projection.js';
 import type { AgentGraphRunnableIntent } from './stream-graph-readiness.js';
 import {
@@ -43,7 +53,10 @@ export interface ReconcileAgentGraphScheduleInput {
   stopController: AgentGraphScheduleStopController;
   newId: () => string;
   maxNewActivations: number;
-  observeGraph(): Promise<AgentGraphSupervisorObservation>;
+  observeGraph(topology: AgentGraphTraceTopology): Promise<AgentGraphSupervisorObservation>;
+  provisionOperator?(
+    input: ProvisionAgentGraphOperatorInput,
+  ): Promise<ProvisionAgentGraphOperatorResult>;
   renderPrompt(input: RenderAgentGraphScheduledWorkPromptInput): string | Promise<string>;
   abortSignal?: AbortSignal;
   supervisor?: AgentGraphSupervisorObserver;
@@ -64,7 +77,7 @@ export interface AgentGraphScheduleDeferredWork {
 }
 
 export interface AgentGraphScheduleReconciliationFailure {
-  phase: 'schedule' | 'stop' | 'render' | 'dispatch';
+  phase: 'schedule' | 'topology' | 'stop' | 'render' | 'dispatch';
   error: unknown;
   work?: AgentGraphScheduleWorkView;
   intent?: AgentGraphRunnableIntent;
@@ -87,12 +100,16 @@ interface ScheduleSnapshot {
   schedule: AgentGraphScheduleProjection;
   observation: AgentGraphSupervisorObservation;
   claims: AgentGraphIntentClaim[];
+  topology: AgentGraphTraceTopology;
+  provisions: AgentGraphOperatorProvision[];
+  sourceByWorkId: Map<string, AgentGraphScheduleUpdateSource>;
 }
 
 interface PreparedWork {
   work: AgentGraphScheduleWorkView;
   intent: AgentGraphRunnableIntent;
   prompt: string;
+  provision?: AgentGraphOperatorProvision;
 }
 
 type ScheduleDispatchOutcome =
@@ -110,12 +127,13 @@ type ScheduleDispatchOutcome =
     };
 
 /**
- * Applies durable supervisor schedule intent to existing graph operators.
+ * Applies durable supervisor schedule intent to existing and newly
+ * materialized graph operators.
  *
  * Schedule revision and new intent admission are linearized by the control
  * store. Existing claims remain recoverable after finish; unclaimed work does
- * not cross terminal closure. New catalog-agent nodes deliberately remain a
- * separate dynamic-topology concern.
+ * not cross terminal closure. Catalog-agent work is materialized through an
+ * append-only topology provision before its first intent is claimed.
  */
 export async function reconcileAgentGraphSchedule(
   input: ReconcileAgentGraphScheduleInput,
@@ -167,10 +185,76 @@ export async function reconcileAgentGraphSchedule(
     }
 
     const claimsByIntent = new Map(snapshot.claims.map((claim) => [claim.intentId, claim]));
+    const provisionsByWork = new Map(
+      snapshot.provisions.map((provision) => [provision.workId, provision]),
+    );
     const committedRecords = new Map(
       snapshot.observation.projection.records.map((record) => [record.recordId, record]),
     );
     const deferredWork: AgentGraphScheduleDeferredWork[] = [];
+    let topologyChanged = false;
+    let topologyStale = false;
+
+    for (const work of orderedRequestedWork(snapshot.schedule)) {
+      if (work.target.kind !== 'agent' || provisionsByWork.has(work.workId)) continue;
+      if (snapshot.schedule.closed) {
+        deferredWork.push({ work, reason: 'graph_closed' });
+        continue;
+      }
+      const missingInputIds = work.inputIds.filter((recordId) => !committedRecords.has(recordId));
+      if (missingInputIds.length > 0) {
+        deferredWork.push({ work, reason: 'input_not_committed', missingInputIds });
+        continue;
+      }
+      if (!input.provisionOperator) {
+        deferredWork.push({ work, reason: 'agent_topology_required' });
+        continue;
+      }
+      const source = snapshot.sourceByWorkId.get(work.workId);
+      if (!source) {
+        failures.push({
+          phase: 'topology',
+          work,
+          error: new Error(`Graph work ${work.workId} has no durable schedule source`),
+        });
+        continue;
+      }
+      try {
+        await input.provisionOperator(
+          buildOperatorProvisionInput(
+            snapshot.topology,
+            snapshot.observation,
+            work,
+            source,
+            snapshot.schedule.revision,
+          ),
+        );
+        topologyChanged = true;
+      } catch (error) {
+        if (error instanceof AgentGraphScheduleRevisionConflictError) {
+          topologyStale = true;
+          break;
+        }
+        failures.push({ phase: 'topology', work, error });
+      }
+    }
+    if (topologyChanged || topologyStale) {
+      snapshot = await readScheduleSnapshot(input);
+      if (failures.length === 0) continue;
+    }
+    if (failures.length > 0) {
+      return reconciliationResult(
+        'failed',
+        newActivationCount,
+        observedExistingActivationCount,
+        dispatches,
+        stops,
+        deferredWork,
+        failures,
+        snapshot,
+      );
+    }
+
     const candidates: Array<{
       work: AgentGraphScheduleWorkView;
       intent: AgentGraphRunnableIntent;
@@ -178,16 +262,15 @@ export async function reconcileAgentGraphSchedule(
     }> = [];
 
     for (const work of orderedRequestedWork(snapshot.schedule)) {
-      if (work.target.kind === 'agent') {
-        deferredWork.push({
-          work,
-          reason: snapshot.schedule.closed ? 'graph_closed' : 'agent_topology_required',
-        });
-        continue;
-      }
+      if (work.target.kind === 'agent' && !provisionsByWork.has(work.workId)) continue;
       let intent: AgentGraphRunnableIntent;
       try {
-        intent = scheduledWorkIntent(input.topology, snapshot.observation, work);
+        intent = scheduledWorkIntent(
+          snapshot.topology,
+          snapshot.observation,
+          work,
+          provisionsByWork.get(work.workId),
+        );
       } catch (error) {
         failures.push({ phase: 'schedule', work, error });
         continue;
@@ -248,7 +331,8 @@ export async function reconcileAgentGraphSchedule(
         if (!prompt.trim()) {
           throw new Error(`Agent graph scheduled work ${work.workId} rendered an empty prompt`);
         }
-        return { work, intent, prompt };
+        const provision = provisionsByWork.get(work.workId);
+        return { work, intent, prompt, ...(provision ? { provision } : {}) };
       }),
     );
     const prepared: PreparedWork[] = [];
@@ -358,17 +442,22 @@ export async function reconcileAgentGraphSchedule(
 async function readScheduleSnapshot(
   input: ReconcileAgentGraphScheduleInput,
 ): Promise<ScheduleSnapshot> {
-  const [updates, observation, claims] = await Promise.all([
+  const [updates, provisions, claims] = await Promise.all([
     input.controlStore.listAgentGraphScheduleUpdates(input.topology.graphId),
-    input.observeGraph(),
+    input.controlStore.listAgentGraphOperatorProvisions(input.topology.graphId),
     input.controlStore.listAgentGraphIntentClaims(input.topology.graphId),
   ]);
+  const topology = composeProvisionedTopology(input.topology, provisions);
+  const observation = await input.observeGraph(topology);
   assertGraphObservation(input.topology.graphId, observation);
   notifySupervisor(input.supervisor?.onObservation, observation);
   return {
     schedule: projectAgentGraphSchedule(input.topology.graphId, updates),
     observation,
     claims,
+    topology,
+    provisions,
+    sourceByWorkId: scheduleSourceByWorkId(updates),
   };
 }
 
@@ -511,6 +600,12 @@ async function dispatchScheduledWork(
           input.controlStore.claimAgentGraphIntentAtScheduleRevision(request, expectedRevision),
       },
       newId: input.newId,
+      ...(prepared.provision
+        ? {
+            targetTurnId: prepared.provision.initialTurnId,
+            targetRunId: prepared.provision.initialRunId,
+          }
+        : {}),
       executionInput: { prompt: prepared.prompt },
     });
     const result = await input.executor.runClaimedAgentGraphIntent({
@@ -573,11 +668,21 @@ function scheduledWorkIntent(
   topology: AgentGraphTraceTopology,
   observation: AgentGraphSupervisorObservation,
   work: AgentGraphScheduleWorkView,
+  provision?: AgentGraphOperatorProvision,
 ): AgentGraphRunnableIntent {
-  if (work.target.kind !== 'operator') {
-    throw new Error(`Graph work ${work.workId} requires a new agent topology node`);
+  if (work.target.kind === 'agent') {
+    if (
+      !provision ||
+      provision.workId !== work.workId ||
+      provision.agentId !== work.target.agentId
+    ) {
+      throw new Error(`Graph work ${work.workId} has no matching topology provision`);
+    }
+  } else if (provision) {
+    throw new Error(`Existing-operator graph work ${work.workId} cannot own a provision`);
   }
-  const operatorId = work.target.operatorId;
+  const operatorId =
+    work.target.kind === 'operator' ? work.target.operatorId : provision!.operatorId;
   const topologyBinding = topology.operators.find((operator) => operator.operatorId === operatorId);
   const observedBinding = observation.projection.operators.find(
     (operator) => operator.operatorId === operatorId,
@@ -627,6 +732,133 @@ function scheduledWorkIntentId(graphId: string, workId: string): string {
     workId,
   });
   return `graph_intent_${hash.slice('sha256:'.length, 'sha256:'.length + 32)}`;
+}
+
+function buildOperatorProvisionInput(
+  topology: AgentGraphTraceTopology,
+  observation: AgentGraphSupervisorObservation,
+  work: AgentGraphScheduleWorkView,
+  source: AgentGraphScheduleUpdateSource,
+  expectedScheduleRevision: number,
+): ProvisionAgentGraphOperatorInput {
+  if (work.target.kind !== 'agent') {
+    throw new Error(`Graph work ${work.workId} does not target a catalog agent`);
+  }
+  const operatorHash = stableHash({
+    schemaVersion: SCHEDULE_INTENT_SCHEMA_VERSION,
+    kind: 'dynamic_operator',
+    graphId: topology.graphId,
+    workId: work.workId,
+  });
+  const operatorId = `graph_operator_${operatorHash.slice(
+    'sha256:'.length,
+    'sha256:'.length + 32,
+  )}`;
+  const recordsById = new Map(
+    observation.projection.records.map((record) => [record.recordId, record]),
+  );
+  const sourceOperatorIds = [
+    ...new Set(work.inputIds.map((recordId) => recordsById.get(recordId)!.operatorId)),
+  ].sort(compareIdentity);
+  const edges: AgentGraphProvisionedEdge[] = sourceOperatorIds.map((fromOperatorId) => {
+    const edgeHash = stableHash({
+      schemaVersion: SCHEDULE_INTENT_SCHEMA_VERSION,
+      kind: 'dynamic_edge',
+      graphId: topology.graphId,
+      workId: work.workId,
+      fromOperatorId,
+      toOperatorId: operatorId,
+    });
+    return {
+      edgeId: `graph_edge_${edgeHash.slice('sha256:'.length, 'sha256:'.length + 32)}`,
+      fromOperatorId,
+      toOperatorId: operatorId,
+    };
+  });
+  return {
+    graphId: topology.graphId,
+    workId: work.workId,
+    agentId: work.target.agentId,
+    operatorId,
+    source,
+    edges,
+    expectedScheduleRevision,
+  };
+}
+
+function composeProvisionedTopology(
+  baseline: AgentGraphTraceTopology,
+  provisions: readonly AgentGraphOperatorProvision[],
+): AgentGraphTraceTopology {
+  const operators = baseline.operators.map((operator) => ({ ...operator }));
+  const edges = baseline.edges.map((edge) => ({ ...edge }));
+  const operatorById = new Map(operators.map((operator) => [operator.operatorId, operator]));
+  const edgeById = new Map(edges.map((edge) => [edge.edgeId, edge]));
+
+  for (const provision of [...provisions].sort((a, b) =>
+    compareIdentity(a.provisionId, b.provisionId),
+  )) {
+    if (provision.graphId !== baseline.graphId) {
+      throw new Error(`Topology provision ${provision.provisionId} belongs to another graph`);
+    }
+    const existingOperator = operatorById.get(provision.operatorId);
+    if (existingOperator) {
+      throw new Error(`Topology provision reuses existing operator ${provision.operatorId}`);
+    }
+    const binding = {
+      operatorId: provision.operatorId,
+      sessionId: provision.targetSessionId,
+    };
+    operators.push(binding);
+    operatorById.set(binding.operatorId, binding);
+    for (const edge of provision.edges) {
+      const existingEdge = edgeById.get(edge.edgeId);
+      if (existingEdge) {
+        throw new Error(`Topology provision reuses existing edge ${edge.edgeId}`);
+      }
+      const copy = { ...edge };
+      edges.push(copy);
+      edgeById.set(copy.edgeId, copy);
+    }
+  }
+  for (const edge of edges) {
+    if (!operatorById.has(edge.fromOperatorId) || !operatorById.has(edge.toOperatorId)) {
+      throw new Error(`Graph edge ${edge.edgeId} references an unknown operator`);
+    }
+  }
+  return {
+    graphId: baseline.graphId,
+    operators,
+    edges,
+  };
+}
+
+function scheduleSourceByWorkId(
+  updates: readonly AgentGraphScheduleUpdate[],
+): Map<string, AgentGraphScheduleUpdateSource> {
+  const sources = new Map<string, AgentGraphScheduleUpdateSource>();
+  for (const update of updates) {
+    for (const work of update.addWork) {
+      const existing = sources.get(work.workId);
+      if (existing && !sameScheduleSource(existing, update.source)) {
+        throw new Error(`Graph work ${work.workId} has conflicting schedule sources`);
+      }
+      sources.set(work.workId, { ...update.source });
+    }
+  }
+  return sources;
+}
+
+function sameScheduleSource(
+  left: AgentGraphScheduleUpdateSource,
+  right: AgentGraphScheduleUpdateSource,
+): boolean {
+  return (
+    left.sessionId === right.sessionId &&
+    left.runId === right.runId &&
+    left.turnId === right.turnId &&
+    left.toolCallId === right.toolCallId
+  );
 }
 
 function orderedRequestedWork(

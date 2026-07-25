@@ -135,6 +135,7 @@ describe('SQLite agent graph intent claims', () => {
 
       const legacy = new DatabaseSync(path);
       legacy.exec(`
+        DROP TABLE agent_graph_operator_provisions;
         DROP INDEX agent_graph_intent_claims_by_graph;
         ALTER TABLE agent_graph_intent_claims RENAME TO agent_graph_intent_claims_v8;
         CREATE TABLE agent_graph_intent_claims (
@@ -178,7 +179,7 @@ describe('SQLite agent graph intent claims', () => {
 
       const migrated = createSqliteSessionMetadataStore(path);
       try {
-        assert.equal(migrated.schemaVersion(), 8);
+        assert.equal(migrated.schemaVersion(), 9);
         assert.deepEqual(
           await migrated.beginAgentGraphIntentExecutionAtScheduleRevision(
             'graph-1',

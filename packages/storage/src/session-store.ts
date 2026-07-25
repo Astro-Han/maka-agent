@@ -35,6 +35,8 @@ import {
   subagentSessionRuntimeSummary,
 } from '@maka/core';
 import type {
+  AgentGraphOperatorProvisionRequest,
+  AgentGraphOperatorProvisionResult,
   CreateSessionInput,
   SessionHeader,
   SessionListFilter,
@@ -50,6 +52,11 @@ export const SQLITE_SESSION_METADATA_DATABASE_NAME = 'sessions.sqlite';
 export interface SessionStore {
   create(input: CreateSessionInput): Promise<SessionHeader>;
   createSubagent(input: CreateSessionInput): Promise<{ header: SessionHeader; created: boolean }>;
+  createAgentGraphOperator(
+    input: CreateSessionInput,
+    request: AgentGraphOperatorProvisionRequest,
+    expectedRevision: number,
+  ): Promise<{ header: SessionHeader } & AgentGraphOperatorProvisionResult>;
   list(filter?: SessionListFilter): Promise<SessionSummary[]>;
   listForRecovery(): Promise<SessionHeader[]>;
   /** Read only the durable header without triggering connection-lock self-healing. */
@@ -126,6 +133,31 @@ class SqliteSessionStore implements SessionStore {
       const result = await this.metadata.createSubagent(staged);
       if (!result.created) await this.files.remove(staged.id);
       return { header: result.record.header, created: result.created };
+    } catch (error) {
+      await this.files.remove(staged.id).catch(() => {});
+      throw error;
+    }
+  }
+
+  async createAgentGraphOperator(
+    input: CreateSessionInput,
+    request: AgentGraphOperatorProvisionRequest,
+    expectedRevision: number,
+  ): Promise<{ header: SessionHeader } & AgentGraphOperatorProvisionResult> {
+    await this.ensureReady();
+    const staged = await this.files.createTranscript(input);
+    try {
+      const result = await this.metadata.createAgentGraphOperator(
+        staged,
+        request,
+        expectedRevision,
+      );
+      if (!result.created) await this.files.remove(staged.id);
+      return {
+        header: result.record.header,
+        provision: result.provision,
+        created: result.created,
+      };
     } catch (error) {
       await this.files.remove(staged.id).catch(() => {});
       throw error;
@@ -352,6 +384,14 @@ class FileSessionStore implements SessionStore {
     _input: CreateSessionInput,
   ): Promise<{ header: SessionHeader; created: boolean }> {
     throw new Error('Child-session idempotency requires the SQLite metadata control plane');
+  }
+
+  async createAgentGraphOperator(
+    _input: CreateSessionInput,
+    _request: AgentGraphOperatorProvisionRequest,
+    _expectedRevision: number,
+  ): Promise<{ header: SessionHeader } & AgentGraphOperatorProvisionResult> {
+    throw new Error('Graph operator provisioning requires the SQLite metadata control plane');
   }
 
   async createTranscript(input: CreateSessionInput): Promise<SessionHeader> {

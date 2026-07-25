@@ -95,6 +95,11 @@ export interface SubagentSessionParent {
     swarmId: string;
     itemId: string;
   };
+  graph?: {
+    graphId: string;
+    workId: string;
+    operatorId: string;
+  };
   lifecycle: SubagentSessionLifecycle;
 }
 
@@ -289,7 +294,7 @@ export interface LinkedSessionTreeProjectionOptions {
 
 const SUBAGENT_SESSION_PARENT_SHAPE = defineObjectShape<SubagentSessionParent>()(
   ['kind', 'parentSessionId', 'spawnedBy', 'lifecycle'],
-  ['swarm'],
+  ['swarm', 'graph'],
 );
 const SUBAGENT_SESSION_SPAWN_SHAPE = defineObjectShape<SubagentSessionParent['spawnedBy']>()(
   ['parentRunId', 'parentTurnId', 'toolCallId'],
@@ -298,6 +303,9 @@ const SUBAGENT_SESSION_SPAWN_SHAPE = defineObjectShape<SubagentSessionParent['sp
 const SUBAGENT_SESSION_SWARM_SHAPE = defineObjectShape<
   NonNullable<SubagentSessionParent['swarm']>
 >()(['swarmId', 'itemId'], []);
+const SUBAGENT_SESSION_GRAPH_SHAPE = defineObjectShape<
+  NonNullable<SubagentSessionParent['graph']>
+>()(['graphId', 'workId', 'operatorId'], []);
 const SUBAGENT_SESSION_RUNTIME_SHAPE = defineObjectShape<SubagentSessionRuntime>()(
   [
     'schemaVersion',
@@ -339,13 +347,20 @@ export function isSubagentSessionParent(value: unknown): value is SubagentSessio
   ) {
     return false;
   }
-  return (
+  const swarmValid =
     value.swarm === undefined ||
     (isRecord(value.swarm) &&
       hasExactShape(value.swarm, SUBAGENT_SESSION_SWARM_SHAPE) &&
       isSessionLineageId(value.swarm.swarmId) &&
-      isSessionLineageId(value.swarm.itemId))
-  );
+      isSessionLineageId(value.swarm.itemId));
+  const graphValid =
+    value.graph === undefined ||
+    (isRecord(value.graph) &&
+      hasExactShape(value.graph, SUBAGENT_SESSION_GRAPH_SHAPE) &&
+      isSessionLineageId(value.graph.graphId) &&
+      isSessionLineageId(value.graph.workId) &&
+      isSessionLineageId(value.graph.operatorId));
+  return swarmValid && graphValid && !(value.swarm && value.graph);
 }
 
 /** Strict decoder guard for the persisted child execution snapshot. */

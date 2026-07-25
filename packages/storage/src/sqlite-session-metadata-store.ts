@@ -7,7 +7,9 @@ import {
   assertAgentGraphScheduleUpdateRequest,
   AgentGraphScheduleClosedError,
   AgentGraphScheduleRevisionConflictError,
+  assertAgentGraphOperatorProvisionRequest,
   assertAgentGraphIntentClaimRequest,
+  decodeAgentGraphOperatorProvision,
   decodeAgentGraphScheduleUpdate,
   decodeAgentGraphIntentClaim,
   isSubagentSessionParent,
@@ -21,6 +23,9 @@ import {
   type AgentGraphIntentClaim,
   type AgentGraphIntentClaimRequest,
   type AgentGraphIntentClaimResult,
+  type AgentGraphOperatorProvision,
+  type AgentGraphOperatorProvisionRequest,
+  type AgentGraphOperatorProvisionResult,
   type SessionHeader,
   type SessionListFilter,
   type SubagentSessionParent,
@@ -60,7 +65,8 @@ export type SqliteSessionMetadataStoreFailpoint =
   | 'after_session_labels_write'
   | 'after_session_import_marker_write'
   | 'after_agent_graph_intent_claim_write'
-  | 'after_agent_graph_schedule_update_write';
+  | 'after_agent_graph_schedule_update_write'
+  | 'after_agent_graph_operator_provision_write';
 
 export interface SqliteSessionMetadataStoreOptions {
   now?: () => number;
@@ -76,6 +82,11 @@ export interface SessionMetadataRecord {
 export interface IdempotentSubagentSessionMetadataResult {
   record: SessionMetadataRecord;
   created: boolean;
+}
+
+export interface IdempotentAgentGraphOperatorMetadataResult
+  extends AgentGraphOperatorProvisionResult {
+  record: SessionMetadataRecord;
 }
 
 export interface SessionMetadataImportEntry {
@@ -184,6 +195,9 @@ export class SqliteSessionMetadataStore {
     this.assertOpen();
     const normalized = normalizeSessionHeader(header);
     assertSafeSessionId(normalized.id);
+    if (normalized.subagentParent?.graph) {
+      throw new Error('Graph operator metadata requires atomic topology provisioning');
+    }
     const identity = requireSubagentSpawnIdentity(normalized);
     return this.transaction(() => {
       if (this.hasTombstone(normalized.id)) {
@@ -217,6 +231,102 @@ export class SqliteSessionMetadataStore {
       }
       this.assertMatchingSubagentSpawnClaim(existing.header);
       return { record: existing, created: false };
+    });
+  }
+
+  async createAgentGraphOperator(
+    header: SessionHeader,
+    request: AgentGraphOperatorProvisionRequest,
+    expectedRevision: number,
+  ): Promise<IdempotentAgentGraphOperatorMetadataResult> {
+    this.assertOpen();
+    const normalized = normalizeSessionHeader(header);
+    assertSafeSessionId(normalized.id);
+    assertAgentGraphOperatorProvisionRequest(request);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new Error('Agent graph schedule expected revision must be a non-negative safe integer');
+    }
+    const identity = requireSubagentSpawnIdentity(normalized);
+    if (
+      !identity.parent.graph ||
+      identity.parent.graph.graphId !== request.graphId ||
+      identity.parent.graph.workId !== request.workId ||
+      identity.parent.graph.operatorId !== request.operatorId ||
+      normalized.subagentRuntime?.agentId !== request.agentId ||
+      identity.spawn.initialTurnId !== request.initialTurnId ||
+      identity.spawn.initialRunId !== request.initialRunId
+    ) {
+      throw new Error('Graph operator Session metadata does not match its provision request');
+    }
+    return this.transaction(() => {
+      const existing = this.readAgentGraphOperatorProvisionSync(request.graphId, request.workId);
+      if (existing) return this.matchAgentGraphOperatorProvision(existing, request);
+      const currentRevision = this.currentAgentGraphScheduleRevision(request.graphId);
+      if (currentRevision !== expectedRevision) {
+        throw new AgentGraphScheduleRevisionConflictError(
+          request.graphId,
+          expectedRevision,
+          currentRevision,
+        );
+      }
+      if (this.hasClosedAgentGraphSchedule(request.graphId)) {
+        throw new AgentGraphScheduleClosedError(request.graphId);
+      }
+      if (this.hasTombstone(normalized.id)) {
+        throw new SessionMetadataConflictError(
+          `Session metadata id is tombstoned: ${normalized.id}`,
+        );
+      }
+      if (this.readRecordSync(normalized.id)) {
+        throw new SessionMetadataConflictError(`Session metadata already exists: ${normalized.id}`);
+      }
+      const provisionedAt = this.now();
+      const claim = this.tryClaimSubagentSpawn(normalized, provisionedAt);
+      if (!claim.created) {
+        throw new SessionMetadataConflictError(
+          'Graph operator spawn identity exists without its topology provision',
+        );
+      }
+      const record = this.insertHeader(normalized, 1, provisionedAt);
+      const provision: AgentGraphOperatorProvision = {
+        ...request,
+        edges: request.edges.map((edge) => ({ ...edge })),
+        targetSessionId: normalized.id,
+        provisionedAt,
+      };
+      this.db
+        .prepare(`
+          INSERT INTO agent_graph_operator_provisions(
+            graph_id,
+            work_id,
+            provision_id,
+            schema_version,
+            provision_fingerprint,
+            agent_id,
+            operator_id,
+            target_session_id,
+            payload_json,
+            provisioned_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          provision.graphId,
+          provision.workId,
+          provision.provisionId,
+          provision.schemaVersion,
+          provision.provisionFingerprint,
+          provision.agentId,
+          provision.operatorId,
+          provision.targetSessionId,
+          JSON.stringify(provision),
+          provision.provisionedAt,
+        );
+      this.options.failpoint?.('after_agent_graph_operator_provision_write');
+      return {
+        record,
+        provision: decodeAgentGraphOperatorProvision(provision),
+        created: true,
+      };
     });
   }
 
@@ -513,6 +623,22 @@ export class SqliteSessionMetadataStore {
     return rows.map(decodeAgentGraphScheduleUpdateRow);
   }
 
+  async listAgentGraphOperatorProvisions(graphId: string): Promise<AgentGraphOperatorProvision[]> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    const rows = this.db
+      .prepare(`
+        SELECT payload_json AS payloadJson
+        FROM agent_graph_operator_provisions
+        WHERE graph_id = ?
+        ORDER BY provisioned_at ASC, operator_id ASC
+      `)
+      .all(graphId) as unknown as AgentGraphOperatorProvisionRow[];
+    return rows.map((row) =>
+      decodeAgentGraphOperatorProvision(JSON.parse(row.payloadJson) as unknown),
+    );
+  }
+
   async update(
     sessionId: string,
     patch: Partial<SessionHeader>,
@@ -610,6 +736,18 @@ export class SqliteSessionMetadataStore {
     this.assertOpen();
     assertSafeSessionId(sessionId);
     return this.transaction(() => {
+      const graphOwner = this.db
+        .prepare(`
+          SELECT graph_id AS graphId, work_id AS workId
+          FROM agent_graph_operator_provisions
+          WHERE target_session_id = ?
+        `)
+        .get(sessionId) as { graphId: string; workId: string } | undefined;
+      if (graphOwner) {
+        throw new SessionMetadataConflictError(
+          `Cannot remove graph operator Session ${sessionId}; owned by ${graphOwner.graphId}/${graphOwner.workId}`,
+        );
+      }
       const deleted =
         this.db.prepare('DELETE FROM session_metadata WHERE session_id = ?').run(sessionId)
           .changes === 1;
@@ -840,8 +978,8 @@ export class SqliteSessionMetadataStore {
         identity.parent.parentSessionId,
         identity.parent.spawnedBy.parentRunId,
         identity.parent.spawnedBy.toolCallId,
-        identity.parent.swarm?.swarmId ?? '',
-        identity.parent.swarm?.itemId ?? '',
+        subagentSpawnScope(identity.parent).scopeId,
+        subagentSpawnScope(identity.parent).itemId,
         identity.spawn.requestFingerprint,
         header.id,
         identity.spawn.initialTurnId,
@@ -888,9 +1026,57 @@ export class SqliteSessionMetadataStore {
         parent.parentSessionId,
         parent.spawnedBy.parentRunId,
         parent.spawnedBy.toolCallId,
-        parent.swarm?.swarmId ?? '',
-        parent.swarm?.itemId ?? '',
+        subagentSpawnScope(parent).scopeId,
+        subagentSpawnScope(parent).itemId,
       ) as SubagentSpawnClaim | undefined;
+  }
+
+  private readAgentGraphOperatorProvisionSync(
+    graphId: string,
+    workId: string,
+  ): AgentGraphOperatorProvision | undefined {
+    const row = this.db
+      .prepare(`
+        SELECT payload_json AS payloadJson
+        FROM agent_graph_operator_provisions
+        WHERE graph_id = ? AND work_id = ?
+      `)
+      .get(graphId, workId) as AgentGraphOperatorProvisionRow | undefined;
+    return row
+      ? decodeAgentGraphOperatorProvision(JSON.parse(row.payloadJson) as unknown)
+      : undefined;
+  }
+
+  private matchAgentGraphOperatorProvision(
+    existing: AgentGraphOperatorProvision,
+    request: AgentGraphOperatorProvisionRequest,
+  ): IdempotentAgentGraphOperatorMetadataResult {
+    if (existing.provisionFingerprint !== request.provisionFingerprint) {
+      throw new SessionMetadataConflictError(
+        'Graph operator provision identity was reused for different work',
+      );
+    }
+    const record = this.readRecordSync(existing.targetSessionId);
+    if (!record) {
+      throw new SessionMetadataConflictError(
+        `Graph operator provision belongs to deleted session: ${existing.targetSessionId}`,
+      );
+    }
+    if (
+      record.header.subagentParent?.graph?.graphId !== existing.graphId ||
+      record.header.subagentParent.graph.workId !== existing.workId ||
+      record.header.subagentParent.graph.operatorId !== existing.operatorId
+    ) {
+      throw new SessionMetadataConflictError(
+        'Graph operator provision disagrees with live session metadata',
+      );
+    }
+    this.assertMatchingSubagentSpawnClaim(record.header);
+    return {
+      record,
+      provision: decodeAgentGraphOperatorProvision(existing),
+      created: false,
+    };
   }
 
   private readAgentGraphIntentClaimSync(
@@ -1137,10 +1323,30 @@ interface AgentGraphScheduleUpdateRow {
   payloadJson: string;
 }
 
+interface AgentGraphOperatorProvisionRow {
+  payloadJson: string;
+}
+
 function decodeAgentGraphScheduleUpdateRow(
   row: AgentGraphScheduleUpdateRow,
 ): AgentGraphScheduleUpdate {
   return decodeAgentGraphScheduleUpdate(JSON.parse(row.payloadJson) as unknown);
+}
+
+function subagentSpawnScope(parent: SubagentSessionParent): {
+  scopeId: string;
+  itemId: string;
+} {
+  if (parent.graph) {
+    return {
+      scopeId: `graph:${parent.graph.graphId}`,
+      itemId: parent.graph.workId,
+    };
+  }
+  return {
+    scopeId: parent.swarm?.swarmId ?? '',
+    itemId: parent.swarm?.itemId ?? '',
+  };
 }
 
 function agentGraphScheduleUpdateRequest(
