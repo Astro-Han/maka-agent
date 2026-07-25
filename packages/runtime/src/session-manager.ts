@@ -147,7 +147,7 @@ import {
 } from './runtime-resume.js';
 
 export interface StopSessionInput {
-  source?: 'stop_button' | 'benchmark_deadline';
+  source?: 'stop_button' | 'benchmark_deadline' | 'graph_supervisor';
   mode?: BackendStopMode;
 }
 

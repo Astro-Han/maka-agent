@@ -106,6 +106,10 @@ describe('session projection helpers', () => {
     expect(normalizeStopSessionSource('benchmark_deadline')).toBe('benchmark.deadline');
   });
 
+  test('normalizeStopSessionSource preserves graph supervisor provenance', () => {
+    expect(normalizeStopSessionSource('graph_supervisor')).toBe('graph.supervisor');
+  });
+
   test('projects terminal run statuses and session terminal events', () => {
     expect(isTerminalRunStatus('completed')).toBe(true);
     expect(isTerminalRunStatus('failed')).toBe(true);

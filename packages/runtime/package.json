@@ -58,6 +58,7 @@
     "./stream-graph-readiness": "./dist/stream-graph-readiness.js",
     "./stream-graph-admission": "./dist/stream-graph-admission.js",
     "./stream-graph-dispatch": "./dist/stream-graph-dispatch.js",
+    "./stream-graph-schedule-reconcile": "./dist/stream-graph-schedule-reconcile.js",
     "./stream-graph-supervisor-tools": "./dist/stream-graph-supervisor-tools.js"
   },
   "scripts": {

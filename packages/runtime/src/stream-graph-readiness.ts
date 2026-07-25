@@ -43,6 +43,8 @@ export type AgentGraphReadinessPolicy =
   | AgentGraphMapReadinessPolicy
   | AgentGraphAllSettledReadinessPolicy;
 
+export type AgentGraphRunnableIntentPolicyKind = AgentGraphReadinessPolicy['kind'] | 'supervisor';
+
 export type AgentGraphReadinessWait =
   | {
       kind: 'input_route';
@@ -74,7 +76,7 @@ export interface AgentGraphRunnableIntent {
   readinessId: string;
   operatorId: string;
   targetSessionId: string;
-  policyKind: AgentGraphReadinessPolicy['kind'];
+  policyKind: AgentGraphRunnableIntentPolicyKind;
   triggerRouteIds: string[];
   triggerRecordIds: string[];
 }

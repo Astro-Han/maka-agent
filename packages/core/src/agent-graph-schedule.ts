@@ -1,3 +1,9 @@
+import type {
+  AgentGraphIntentClaimRequest,
+  AgentGraphIntentClaimResult,
+  AgentGraphIntentClaimStore,
+} from './agent-graph-control.js';
+
 export const AGENT_GRAPH_SCHEDULE_UPDATE_SCHEMA_VERSION = 1 as const;
 
 export const AGENT_GRAPH_SCHEDULE_MAX_ADD_WORK = 20;
@@ -72,6 +78,51 @@ export interface AgentGraphScheduleStore {
     request: AgentGraphScheduleUpdateRequest,
   ): Promise<AgentGraphScheduleUpdateResult>;
   listAgentGraphScheduleUpdates(graphId: string): Promise<AgentGraphScheduleUpdate[]>;
+}
+
+/**
+ * Raised when a reconciler tries to admit work from an observation that is no
+ * longer the current durable schedule revision.
+ */
+export class AgentGraphScheduleRevisionConflictError extends Error {
+  readonly name = 'AgentGraphScheduleRevisionConflictError';
+
+  constructor(
+    readonly graphId: string,
+    readonly expectedRevision: number,
+    readonly currentRevision: number,
+  ) {
+    super(
+      `Agent graph schedule ${graphId} revision changed from ${expectedRevision} to ${currentRevision}`,
+    );
+  }
+}
+
+/**
+ * Raised when a reconciler attempts a fresh admission after terminal closure.
+ * Existing claims remain recoverable after closure.
+ */
+export class AgentGraphScheduleClosedError extends Error {
+  readonly name = 'AgentGraphScheduleClosedError';
+
+  constructor(readonly graphId: string) {
+    super(`Agent graph schedule ${graphId} is already finished`);
+  }
+}
+
+/**
+ * SQLite-backed control-plane boundary used by the schedule reconciler.
+ *
+ * The conditional claim linearizes supervisor stop/finish updates against new
+ * Runtime admission without making the Agent runtime understand graph state.
+ */
+export interface AgentGraphScheduleControlStore
+  extends AgentGraphScheduleStore,
+    AgentGraphIntentClaimStore {
+  claimAgentGraphIntentAtScheduleRevision(
+    request: AgentGraphIntentClaimRequest,
+    expectedRevision: number,
+  ): Promise<AgentGraphIntentClaimResult>;
 }
 
 export function isAgentGraphScheduleUpdateRequest(

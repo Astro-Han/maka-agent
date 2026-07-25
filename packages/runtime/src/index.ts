@@ -98,6 +98,16 @@ export type {
   ResolveAgentGraphPoliciesInput,
   RunAgentGraphToQuiescenceInput,
 } from './stream-graph-dispatch.js';
+export { reconcileAgentGraphSchedule } from './stream-graph-schedule-reconcile.js';
+export type {
+  AgentGraphScheduleDeferredWork,
+  AgentGraphScheduleReconciliationFailure,
+  AgentGraphScheduleReconciliationResult,
+  AgentGraphScheduleStopController,
+  AgentGraphScheduleStopResult,
+  ReconcileAgentGraphScheduleInput,
+  RenderAgentGraphScheduledWorkPromptInput,
+} from './stream-graph-schedule-reconcile.js';
 export {
   AGENT_GRAPH_SUPERVISOR_TOOL_NAMES,
   UPDATE_AGENT_GRAPH_TOOL_NAME,
@@ -130,6 +140,7 @@ export type {
   AgentGraphReadinessSnapshot,
   AgentGraphReadinessWait,
   AgentGraphRunnableIntent,
+  AgentGraphRunnableIntentPolicyKind,
   AgentGraphSealedActivationInput,
   AgentGraphSupervisorReadinessObservation,
   BuildAgentGraphReadinessSnapshotInput,

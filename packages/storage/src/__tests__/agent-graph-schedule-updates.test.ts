@@ -5,8 +5,14 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import {
   AGENT_GRAPH_SCHEDULE_UPDATE_SCHEMA_VERSION,
+  AgentGraphScheduleClosedError,
+  AgentGraphScheduleRevisionConflictError,
   type AgentGraphScheduleUpdateRequest,
 } from '@maka/core/agent-graph-schedule';
+import {
+  AGENT_GRAPH_INTENT_CLAIM_SCHEMA_VERSION,
+  type AgentGraphIntentClaimRequest,
+} from '@maka/core/agent-graph-control';
 import {
   AgentGraphScheduleUpdateConflictError,
   createSqliteSessionMetadataStore,
@@ -130,6 +136,71 @@ describe('SQLite agent graph schedule updates', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test('linearizes scheduled admission against revision changes and closure', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', { now: nextNumber(90) });
+    try {
+      await store.commitAgentGraphScheduleUpdate(request());
+      const first = await store.claimAgentGraphIntentAtScheduleRevision(claimRequest(), 1);
+      assert.equal(first.created, true);
+
+      await store.commitAgentGraphScheduleUpdate(
+        request({
+          updateId: `graph_update_${'d'.repeat(32)}`,
+          updateFingerprint: `sha256:${'e'.repeat(64)}`,
+          source: {
+            sessionId: 'session-main',
+            runId: 'run-main',
+            turnId: 'turn-finish',
+            toolCallId: 'tool-finish',
+          },
+          addWork: [],
+          stop: [],
+          finish: { resultIds: ['result-1'], reason: 'accept the result' },
+        }),
+      );
+
+      await assert.rejects(
+        store.claimAgentGraphIntentAtScheduleRevision(
+          {
+            ...claimRequest(),
+            claimId: `graph_claim_${'d'.repeat(32)}`,
+            intentId: `graph_intent_${'e'.repeat(32)}`,
+            targetTurnId: 'turn-2',
+            targetRunId: 'run-2',
+          },
+          1,
+        ),
+        (error: unknown) =>
+          error instanceof AgentGraphScheduleRevisionConflictError && error.currentRevision === 2,
+      );
+      assert.equal(
+        (
+          await store.claimAgentGraphIntentAtScheduleRevision(
+            { ...claimRequest(), targetTurnId: 'discarded', targetRunId: 'discarded' },
+            2,
+          )
+        ).created,
+        false,
+      );
+      await assert.rejects(
+        store.claimAgentGraphIntentAtScheduleRevision(
+          {
+            ...claimRequest(),
+            claimId: `graph_claim_${'d'.repeat(32)}`,
+            intentId: `graph_intent_${'e'.repeat(32)}`,
+            targetTurnId: 'turn-2',
+            targetRunId: 'run-2',
+          },
+          2,
+        ),
+        AgentGraphScheduleClosedError,
+      );
+      assert.equal((await store.listAgentGraphIntentClaims('graph-1')).length, 1);
+    } finally {
+      store.close();
+    }
+  });
 });
 
 function request(
@@ -162,4 +233,19 @@ function request(
 function nextNumber(start: number): () => number {
   let value = start;
   return () => value++;
+}
+
+function claimRequest(): AgentGraphIntentClaimRequest {
+  return {
+    schemaVersion: AGENT_GRAPH_INTENT_CLAIM_SCHEMA_VERSION,
+    claimId: `graph_claim_${'a'.repeat(32)}`,
+    graphId: 'graph-1',
+    intentId: `graph_intent_${'b'.repeat(32)}`,
+    intentFingerprint: `sha256:${'c'.repeat(64)}`,
+    readinessContextFingerprint: `sha256:${'d'.repeat(64)}`,
+    targetOperatorId: 'writer',
+    targetSessionId: 'session-writer',
+    targetTurnId: 'turn-1',
+    targetRunId: 'run-1',
+  };
 }

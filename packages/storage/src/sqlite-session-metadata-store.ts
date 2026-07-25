@@ -5,6 +5,8 @@ import { isDeepStrictEqual } from 'node:util';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   assertAgentGraphScheduleUpdateRequest,
+  AgentGraphScheduleClosedError,
+  AgentGraphScheduleRevisionConflictError,
   assertAgentGraphIntentClaimRequest,
   decodeAgentGraphScheduleUpdate,
   decodeAgentGraphIntentClaim,
@@ -282,58 +284,32 @@ export class SqliteSessionMetadataStore {
   ): Promise<AgentGraphIntentClaimResult> {
     this.assertOpen();
     assertAgentGraphIntentClaimRequest(request);
+    return this.transaction(() => this.claimAgentGraphIntentSync(request));
+  }
+
+  async claimAgentGraphIntentAtScheduleRevision(
+    request: AgentGraphIntentClaimRequest,
+    expectedRevision: number,
+  ): Promise<AgentGraphIntentClaimResult> {
+    this.assertOpen();
+    assertAgentGraphIntentClaimRequest(request);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new Error('Agent graph schedule expected revision must be a non-negative safe integer');
+    }
     return this.transaction(() => {
-      const claimedAt = this.now();
-      const inserted = this.db
-        .prepare(`
-          INSERT OR IGNORE INTO agent_graph_intent_claims(
-            claim_id,
-            schema_version,
-            graph_id,
-            intent_id,
-            intent_fingerprint,
-            readiness_context_fingerprint,
-            target_operator_id,
-            target_session_id,
-            target_turn_id,
-            target_run_id,
-            claimed_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `)
-        .run(
-          request.claimId,
-          request.schemaVersion,
+      const currentRevision = this.currentAgentGraphScheduleRevision(request.graphId);
+      if (currentRevision !== expectedRevision) {
+        throw new AgentGraphScheduleRevisionConflictError(
           request.graphId,
-          request.intentId,
-          request.intentFingerprint,
-          request.readinessContextFingerprint,
-          request.targetOperatorId,
-          request.targetSessionId,
-          request.targetTurnId,
-          request.targetRunId,
-          claimedAt,
-        );
-      if (inserted.changes === 1) {
-        this.options.failpoint?.('after_agent_graph_intent_claim_write');
-      }
-      const claim = this.readAgentGraphIntentClaimSync(request.graphId, request.intentId);
-      if (!claim) {
-        throw new AgentGraphIntentClaimConflictError(
-          'Agent graph intent claim identity collides with another claim',
+          expectedRevision,
+          currentRevision,
         );
       }
-      if (
-        claim.claimId !== request.claimId ||
-        claim.intentFingerprint !== request.intentFingerprint ||
-        claim.readinessContextFingerprint !== request.readinessContextFingerprint ||
-        claim.targetOperatorId !== request.targetOperatorId ||
-        claim.targetSessionId !== request.targetSessionId
-      ) {
-        throw new AgentGraphIntentClaimConflictError(
-          'Agent graph intent identity was reused for different work',
-        );
+      const existing = this.readAgentGraphIntentClaimSync(request.graphId, request.intentId);
+      if (!existing && this.hasClosedAgentGraphSchedule(request.graphId)) {
+        throw new AgentGraphScheduleClosedError(request.graphId);
       }
-      return { claim, created: inserted.changes === 1 };
+      return this.claimAgentGraphIntentSync(request);
     });
   }
 
@@ -383,9 +359,7 @@ export class SqliteSessionMetadataStore {
       const existingBySource = this.readAgentGraphScheduleUpdateBySourceSync(request.source);
       if (existingBySource) return this.matchAgentGraphScheduleUpdate(existingBySource, request);
       if (this.hasClosedAgentGraphSchedule(request.graphId)) {
-        throw new AgentGraphScheduleUpdateConflictError(
-          'Agent graph schedule is already finished',
-        );
+        throw new AgentGraphScheduleUpdateConflictError('Agent graph schedule is already finished');
       }
       const revision = this.nextAgentGraphScheduleRevision(request.graphId);
       const update: AgentGraphScheduleUpdate = {
@@ -863,6 +837,62 @@ export class SqliteSessionMetadataStore {
     return row ? decodeAgentGraphIntentClaim(row) : undefined;
   }
 
+  private claimAgentGraphIntentSync(
+    request: AgentGraphIntentClaimRequest,
+  ): AgentGraphIntentClaimResult {
+    const claimedAt = this.now();
+    const inserted = this.db
+      .prepare(`
+        INSERT OR IGNORE INTO agent_graph_intent_claims(
+          claim_id,
+          schema_version,
+          graph_id,
+          intent_id,
+          intent_fingerprint,
+          readiness_context_fingerprint,
+          target_operator_id,
+          target_session_id,
+          target_turn_id,
+          target_run_id,
+          claimed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        request.claimId,
+        request.schemaVersion,
+        request.graphId,
+        request.intentId,
+        request.intentFingerprint,
+        request.readinessContextFingerprint,
+        request.targetOperatorId,
+        request.targetSessionId,
+        request.targetTurnId,
+        request.targetRunId,
+        claimedAt,
+      );
+    if (inserted.changes === 1) {
+      this.options.failpoint?.('after_agent_graph_intent_claim_write');
+    }
+    const claim = this.readAgentGraphIntentClaimSync(request.graphId, request.intentId);
+    if (!claim) {
+      throw new AgentGraphIntentClaimConflictError(
+        'Agent graph intent claim identity collides with another claim',
+      );
+    }
+    if (
+      claim.claimId !== request.claimId ||
+      claim.intentFingerprint !== request.intentFingerprint ||
+      claim.readinessContextFingerprint !== request.readinessContextFingerprint ||
+      claim.targetOperatorId !== request.targetOperatorId ||
+      claim.targetSessionId !== request.targetSessionId
+    ) {
+      throw new AgentGraphIntentClaimConflictError(
+        'Agent graph intent identity was reused for different work',
+      );
+    }
+    return { claim, created: inserted.changes === 1 };
+  }
+
   private readAgentGraphScheduleUpdateByIdSync(
     updateId: string,
   ): AgentGraphScheduleUpdate | undefined {
@@ -919,6 +949,10 @@ export class SqliteSessionMetadataStore {
   }
 
   private nextAgentGraphScheduleRevision(graphId: string): number {
+    return this.currentAgentGraphScheduleRevision(graphId) + 1;
+  }
+
+  private currentAgentGraphScheduleRevision(graphId: string): number {
     const row = this.db
       .prepare(`
         SELECT COALESCE(MAX(revision), 0) AS revision
@@ -930,7 +964,7 @@ export class SqliteSessionMetadataStore {
     if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
       throw new Error(`Invalid agent graph schedule revision for ${graphId}`);
     }
-    return revision + 1;
+    return revision;
   }
 
   private hasTombstone(sessionId: string): boolean {

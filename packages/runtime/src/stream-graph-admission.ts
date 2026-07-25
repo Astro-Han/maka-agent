@@ -10,7 +10,7 @@ const AGENT_GRAPH_EXECUTION_INPUT_SCHEMA_VERSION = 1 as const;
 
 export interface ClaimAgentGraphRunnableIntentInput {
   intent: AgentGraphRunnableIntent;
-  store: AgentGraphIntentClaimStore;
+  store: Pick<AgentGraphIntentClaimStore, 'claimAgentGraphIntent'>;
   newId: () => string;
   /**
    * Stable execution input resolved before admission.
