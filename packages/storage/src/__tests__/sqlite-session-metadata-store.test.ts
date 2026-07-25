@@ -747,6 +747,13 @@ describe('SQLite agent graph operator provisions', () => {
         ),
         /reused for different work/,
       );
+      await assert.rejects(
+        store.remove('graph-child'),
+        /Cannot remove graph operator Session graph-child/,
+      );
+      assert.equal(await store.has('graph-child'), true);
+      assert.equal(await store.isTombstoned('graph-child'), false);
+      assert.deepEqual(await store.listAgentGraphOperatorProvisions('graph-1'), [first.provision]);
     } finally {
       store.close();
     }

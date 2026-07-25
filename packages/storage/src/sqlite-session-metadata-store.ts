@@ -736,6 +736,18 @@ export class SqliteSessionMetadataStore {
     this.assertOpen();
     assertSafeSessionId(sessionId);
     return this.transaction(() => {
+      const graphOwner = this.db
+        .prepare(`
+          SELECT graph_id AS graphId, work_id AS workId
+          FROM agent_graph_operator_provisions
+          WHERE target_session_id = ?
+        `)
+        .get(sessionId) as { graphId: string; workId: string } | undefined;
+      if (graphOwner) {
+        throw new SessionMetadataConflictError(
+          `Cannot remove graph operator Session ${sessionId}; owned by ${graphOwner.graphId}/${graphOwner.workId}`,
+        );
+      }
       const deleted =
         this.db.prepare('DELETE FROM session_metadata WHERE session_id = ?').run(sessionId)
           .changes === 1;

@@ -266,7 +266,7 @@ describe('default SQLite session metadata store', () => {
     }
   });
 
-  test('fails closed when a transcript marker has no canonical SQLite metadata', async () => {
+  test('recovers an exact empty transcript marker left before SQLite admission', async () => {
     const root = await mkdtemp(join(tmpdir(), 'maka-default-session-orphan-marker-'));
     const sessionId = 'orphan-session';
     const sessionDir = join(root, 'sessions', sessionId);
@@ -283,7 +283,36 @@ describe('default SQLite session metadata store', () => {
 
     const store = createSessionStore(root);
     try {
+      assert.deepEqual(await store.list(), []);
+      await assert.rejects(
+        stat(sessionDir),
+        (error: NodeJS.ErrnoException) => error.code === 'ENOENT',
+      );
+    } finally {
+      await store.close?.();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when an orphan transcript marker contains any additional state', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-default-session-nonempty-orphan-marker-'));
+    const sessionId = 'nonempty-orphan-session';
+    const sessionDir = join(root, 'sessions', sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, 'session.jsonl'),
+      `${JSON.stringify({
+        type: 'session_transcript',
+        sessionId,
+        schemaVersion: 1,
+      })}\n${JSON.stringify({ type: 'user', id: 'message-1', text: 'must survive' })}\n`,
+      'utf8',
+    );
+
+    const store = createSessionStore(root);
+    try {
       await assert.rejects(() => store.list(), /has no SQLite metadata/);
+      assert.equal((await stat(join(sessionDir, 'session.jsonl'))).isFile(), true);
     } finally {
       await store.close?.();
       await rm(root, { recursive: true, force: true });

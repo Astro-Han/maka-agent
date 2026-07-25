@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
-import { open, readdir } from 'node:fs/promises';
+import { open, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeSessionHeader, isSafeSessionId } from './session-store.js';
-import { decodeSessionTranscriptMarker, isSessionTranscriptMarker } from './session-transcript.js';
+import {
+  createSessionTranscriptMarker,
+  decodeSessionTranscriptMarker,
+  isSessionTranscriptMarker,
+} from './session-transcript.js';
 import type {
   SessionMetadataImportEntry,
   SqliteSessionMetadataStore,
@@ -77,6 +81,7 @@ export async function importLegacySessionMetadataTree(input: {
       !(await input.destination.has(sessionId)) &&
       !(await input.destination.isTombstoned(sessionId))
     ) {
+      if (await removeRecoverableOrphanTranscriptMarker(sessionsRoot, sessionId)) continue;
       throw new Error(`Session transcript marker has no SQLite metadata: ${sessionId}`);
     }
   }
@@ -90,6 +95,30 @@ export async function importLegacySessionMetadataTree(input: {
     sourcesAlreadyImported: result.sourcesAlreadyImported,
     sourcesTombstoned: result.sourcesTombstoned,
   };
+}
+
+/**
+ * Recover only the exact filesystem state published before SQLite admission:
+ * one canonical marker record in an otherwise empty Session directory.
+ *
+ * Any extra transcript byte or directory entry may contain user/runtime state
+ * and therefore remains a fail-closed corruption boundary.
+ */
+async function removeRecoverableOrphanTranscriptMarker(
+  sessionsRoot: string,
+  sessionId: string,
+): Promise<boolean> {
+  const sessionDir = join(sessionsRoot, sessionId);
+  const entries = await readdir(sessionDir, { withFileTypes: true });
+  if (entries.length !== 1 || entries[0]?.name !== 'session.jsonl' || !entries[0].isFile()) {
+    return false;
+  }
+  const path = join(sessionDir, 'session.jsonl');
+  const actual = await readFile(path, 'utf8');
+  const expected = `${JSON.stringify(createSessionTranscriptMarker(sessionId))}\n`;
+  if (actual !== expected) return false;
+  await rm(sessionDir, { recursive: true });
+  return true;
 }
 
 export async function readLegacySessionMetadataEntry(
