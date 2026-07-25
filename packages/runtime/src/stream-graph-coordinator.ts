@@ -1,4 +1,5 @@
 import type {
+  AgentGraphClientProjectionStore,
   AgentGraphIntentClaim,
   AgentGraphScheduleControlStore,
   AgentGraphScheduleUpdate,
@@ -8,6 +9,7 @@ import type {
   SessionHeader,
 } from '@maka/core';
 import { decodeAgentGraphIntentClaim } from '@maka/core';
+import { AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION } from '@maka/core';
 import type { MakaTool } from './tool-runtime.js';
 import type { SessionManager } from './session-manager.js';
 import {
@@ -29,8 +31,14 @@ import {
   type RenderAgentGraphScheduledWorkPromptInput,
 } from './stream-graph-schedule-reconcile.js';
 import {
-  buildAgentGraphClientSnapshot,
-  inspectAgentGraphOperator,
+  AGENT_GRAPH_CLIENT_TERMINAL_PAGE_SIZE,
+  advanceMaterializedAgentGraphClientProjection,
+  decodeAgentGraphTerminalCursor,
+  decodeMaterializedAgentGraphClientActivity,
+  decodeMaterializedAgentGraphClientSnapshot,
+  decodeMaterializedAgentGraphOperatorInspection,
+  materializeAgentGraphClientProjection,
+  materializedAgentGraphTerminalHistoryPage,
   type AgentGraphClientSnapshot,
   type AgentGraphClientSnapshotOptions,
   type AgentGraphOperatorInspection,
@@ -57,7 +65,7 @@ export interface AgentGraphCoordinatorInput {
   sessionStore: AgentGraphCoordinatorSessionStore;
   runStore: Pick<AgentRunStore, 'listSessionRuns'>;
   runtimeEventStore: Pick<RuntimeEventStore, 'readImmutableRuntimeEvents'>;
-  controlStore: AgentGraphScheduleControlStore;
+  controlStore: AgentGraphScheduleControlStore & AgentGraphClientProjectionStore;
   runtime: AgentGraphCoordinatorRuntime;
   newId: () => string;
   /** Restrict an attempt-local coordinator to exactly one root Session graph. */
@@ -89,12 +97,14 @@ interface GraphDriver {
   abortController?: AbortController;
   task?: Promise<void>;
   stopTask?: Promise<void>;
+  clientProjectionTask?: Promise<void>;
+  runtimeFailureRunIds: Set<string>;
   lastResult?: AgentGraphScheduleReconciliationResult;
   lastError?: unknown;
 }
 
 export type AgentGraphClientChangedReason =
-  | 'schedule_committed'
+  | 'observation'
   | 'runtime_activity'
   | 'reconciled'
   | 'stopped';
@@ -170,7 +180,6 @@ export class AgentGraphCoordinator {
       },
       onScheduleUpdateCommitted: (update, authorization) => {
         this.#assertScheduleOwnedByRoot(update, rootSessionId, driver.graphId);
-        this.#notifyClientChanged(driver, 'schedule_committed');
         this.#wakeFromSchedule(driver, decodeScheduleWakeFence(authorization));
       },
     });
@@ -184,10 +193,50 @@ export class AgentGraphCoordinator {
     rootSessionId: string,
     options: AgentGraphClientSnapshotOptions = {},
   ): Promise<AgentGraphClientSnapshot> {
-    return buildAgentGraphClientSnapshot(
-      await this.#readClientModelInput(rootSessionId),
-      options,
+    await this.#assertRootGraphReader(rootSessionId);
+    const graphId = agentGraphIdForRootSession(rootSessionId);
+    const record = await this.#readOrRebuildClientProjection(
+      rootSessionId,
+      graphId,
     );
+    const snapshot = decodeMaterializedAgentGraphClientSnapshot(record.payload, {
+      rootSessionId,
+      graphId,
+      snapshotVersion: record.snapshotVersion,
+    });
+    const before = options.terminalCursor
+      ? decodeAgentGraphTerminalCursor(options.terminalCursor)
+      : undefined;
+    if (before && before.graphId !== graphId) {
+      throw new Error('Agent graph terminal history cursor belongs to another graph');
+    }
+    const terminalPage =
+      await this.#input.controlStore.listAgentGraphClientTerminalActivities(
+        graphId,
+        {
+          limit: AGENT_GRAPH_CLIENT_TERMINAL_PAGE_SIZE,
+          ...(before
+            ? {
+                before: {
+                  eventTime: before.eventTime,
+                  recordId: before.recordId,
+                },
+              }
+            : {}),
+        },
+      );
+    snapshot.terminalHistory = materializedAgentGraphTerminalHistoryPage(
+      graphId,
+      terminalPage.records.map((activity) =>
+        decodeMaterializedAgentGraphClientActivity(activity.payload, {
+          graphId,
+          recordId: activity.recordId,
+          eventTime: activity.eventTime,
+        }),
+      ),
+      terminalPage.hasMore,
+    );
+    return snapshot;
   }
 
   /** Inspect one operator without requiring it to be present in the bounded snapshot page. */
@@ -195,10 +244,25 @@ export class AgentGraphCoordinator {
     rootSessionId: string,
     operatorId: string,
   ): Promise<AgentGraphOperatorInspection> {
-    return inspectAgentGraphOperator(
-      await this.#readClientModelInput(rootSessionId),
+    await this.#assertRootGraphReader(rootSessionId);
+    const graphId = agentGraphIdForRootSession(rootSessionId);
+    const graph = await this.#readOrRebuildClientProjection(rootSessionId, graphId);
+    const operator =
+      await this.#input.controlStore.readAgentGraphClientOperatorProjection(
+        graphId,
+        operatorId,
+      );
+    if (!operator) {
+      throw new Error(`Agent graph operator ${operatorId} was not found`);
+    }
+    const inspection = decodeMaterializedAgentGraphOperatorInspection(operator.payload, {
+      rootSessionId,
+      graphId,
       operatorId,
-    );
+      snapshotVersion: operator.snapshotVersion,
+    });
+    inspection.snapshotVersion = graph.snapshotVersion;
+    return inspection;
   }
 
   /**
@@ -360,6 +424,8 @@ export class AgentGraphCoordinator {
       driver.stopping = false;
     }
     throwCollectedFailures(`Failed to stop agent graph ${driver.graphId}`, failures);
+    await this.#waitForClientProjectionUpdates(driver);
+    await this.#rebuildClientProjection(driver.rootSessionId, driver.graphId);
     this.#notifyClientChanged(driver, 'stopped');
   }
 
@@ -410,6 +476,12 @@ export class AgentGraphCoordinator {
       try {
         const result = await this.#reconcileOnce(driver, abortController.signal);
         driver.lastResult = result;
+        await this.#waitForClientProjectionUpdates(driver);
+        await this.#materializeClientProjection(
+          driver.rootSessionId,
+          driver.graphId,
+          result.observation,
+        );
         await notify(this.#input.onReconciliation, driver.rootSessionId, result);
         this.#notifyClientChanged(driver, 'reconciled');
       } catch (error) {
@@ -444,12 +516,37 @@ export class AgentGraphCoordinator {
       renderPrompt: this.#input.renderPrompt ?? renderDefaultScheduledWorkPrompt,
       abortSignal,
       supervisor: {
-        onObservation: this.#input.supervisor?.onObservation,
+        onObservation: (observation) => {
+          this.#queueClientProjectionUpdate(driver, async () => {
+            await this.#materializeClientProjection(
+              driver.rootSessionId,
+              driver.graphId,
+              observation,
+            );
+            this.#notifyClientChanged(driver, 'observation');
+          });
+          void notify(this.#input.supervisor?.onObservation, observation);
+        },
         onActivationReady: this.#input.supervisor?.onActivationReady,
         onRuntimeEvent: (event) => {
           if (!driver.paused) driver.requested = true;
-          if (isDurableGraphClientActivity(event.event.type)) {
-            this.#notifyClientChanged(driver, 'runtime_activity');
+          if (event.event.type === 'error') {
+            driver.runtimeFailureRunIds.add(event.claim.targetRunId);
+          }
+          const activationHadError = driver.runtimeFailureRunIds.has(
+            event.claim.targetRunId,
+          );
+          if (event.event.type === 'complete' || event.event.type === 'abort') {
+            driver.runtimeFailureRunIds.delete(event.claim.targetRunId);
+          }
+          if (isMaterializedGraphClientEvent(event.event.type)) {
+            this.#queueClientProjectionUpdate(driver, () =>
+              this.#advanceClientProjection(
+                driver,
+                event,
+                activationHadError,
+              ),
+            );
           }
           void notify(this.#input.supervisor?.onRuntimeEvent, event);
         },
@@ -462,9 +559,10 @@ export class AgentGraphCoordinator {
   ): Promise<BuildAgentGraphClientReadModelInput> {
     await this.#assertRootGraphReader(rootSessionId);
     const graphId = agentGraphIdForRootSession(rootSessionId);
-    const [provisions, scheduleUpdates] = await Promise.all([
+    const [provisions, scheduleUpdates, claimAdmissions] = await Promise.all([
       this.#input.controlStore.listAgentGraphOperatorProvisions(graphId),
       this.#input.controlStore.listAgentGraphScheduleUpdates(graphId),
+      this.#input.controlStore.listAgentGraphClientClaimAdmissions(graphId),
     ]);
     scheduleUpdates.forEach((update) =>
       this.#assertScheduleOwnedByRoot(update, rootSessionId, graphId),
@@ -475,8 +573,185 @@ export class AgentGraphCoordinator {
       graphId,
       provisions,
       scheduleUpdates,
+      claimAdmissions,
       observation: await this.#observeTopology(topology),
     };
+  }
+
+  async #readOrRebuildClientProjection(
+    rootSessionId: string,
+    graphId: string,
+  ) {
+    const driver = this.#drivers.get(graphId);
+    if (driver) await this.#waitForClientProjectionUpdates(driver);
+    const existing =
+      await this.#input.controlStore.readAgentGraphClientProjection(graphId);
+    if (existing) {
+      if (
+        existing.schemaVersion !==
+          AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION ||
+        existing.rootSessionId !== rootSessionId
+      ) {
+        throw new Error(`Invalid materialized agent graph projection ${graphId}`);
+      }
+      return existing;
+    }
+    return this.#rebuildClientProjection(rootSessionId, graphId);
+  }
+
+  async #rebuildClientProjection(rootSessionId: string, graphId: string) {
+    const input = await this.#readClientModelInput(rootSessionId);
+    if (input.graphId !== graphId) {
+      throw new Error(`Agent graph rebuild resolved ${input.graphId}, expected ${graphId}`);
+    }
+    return this.#commitClientProjection(
+      input,
+      materializeAgentGraphClientProjection(input),
+    );
+  }
+
+  async #materializeClientProjection(
+    rootSessionId: string,
+    graphId: string,
+    observation: AgentGraphSupervisorObservation,
+  ): Promise<void> {
+    const [provisions, scheduleUpdates, claimAdmissions] = await Promise.all([
+      this.#input.controlStore.listAgentGraphOperatorProvisions(graphId),
+      this.#input.controlStore.listAgentGraphScheduleUpdates(graphId),
+      this.#input.controlStore.listAgentGraphClientClaimAdmissions(graphId),
+    ]);
+    scheduleUpdates.forEach((update) =>
+      this.#assertScheduleOwnedByRoot(update, rootSessionId, graphId),
+    );
+    const input: BuildAgentGraphClientReadModelInput = {
+      rootSessionId,
+      graphId,
+      provisions,
+      scheduleUpdates,
+      claimAdmissions,
+      observation,
+    };
+    await this.#commitClientProjection(
+      input,
+      materializeAgentGraphClientProjection(input),
+    );
+  }
+
+  async #commitClientProjection(
+    input: BuildAgentGraphClientReadModelInput,
+    materialization: ReturnType<typeof materializeAgentGraphClientProjection>,
+  ) {
+    return this.#input.controlStore.commitAgentGraphClientProjection({
+      schemaVersion: AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION,
+      graphId: input.graphId,
+      rootSessionId: input.rootSessionId,
+      snapshotVersion: materialization.snapshot.snapshotVersion,
+      snapshot: materialization.snapshot,
+      replaceOperators: true,
+      operators: materialization.operators.map((operator) => ({
+        operatorId: operator.operator.operatorId,
+        payload: operator,
+      })),
+      terminalActivities: materialization.terminalActivities.map((activity) => ({
+        recordId: activity.recordId,
+        eventTime: activity.eventTime,
+        payload: activity,
+      })),
+    });
+  }
+
+  #queueClientProjectionUpdate(
+    driver: GraphDriver,
+    operation: () => Promise<void>,
+  ): void {
+    const previous = driver.clientProjectionTask ?? Promise.resolve();
+    const task = previous
+      .catch(() => {
+        // A later durable observation may repair a failed derived projection.
+      })
+      .then(operation);
+    driver.clientProjectionTask = task;
+    void task
+      .catch((error) =>
+        notify(this.#input.onError, driver.rootSessionId, error),
+      )
+      .finally(() => {
+        if (driver.clientProjectionTask === task) {
+          driver.clientProjectionTask = undefined;
+        }
+      });
+  }
+
+  async #waitForClientProjectionUpdates(driver: GraphDriver): Promise<void> {
+    await driver.clientProjectionTask?.catch(() => {
+      // The authoritative rebuild below repairs failed derived updates.
+    });
+  }
+
+  async #advanceClientProjection(
+    driver: GraphDriver,
+    event: AgentGraphSupervisorRuntimeEvent,
+    activationHadError: boolean,
+  ): Promise<void> {
+    const graph =
+      await this.#input.controlStore.readAgentGraphClientProjection(
+        driver.graphId,
+      );
+    const operator =
+      await this.#input.controlStore.readAgentGraphClientOperatorProjection(
+        driver.graphId,
+        event.claim.targetOperatorId,
+      );
+    if (!graph || !operator) {
+      throw new Error(
+        `Agent graph ${driver.graphId} has no materialized runtime activity target`,
+      );
+    }
+    const snapshot = decodeMaterializedAgentGraphClientSnapshot(graph.payload, {
+      rootSessionId: driver.rootSessionId,
+      graphId: driver.graphId,
+      snapshotVersion: graph.snapshotVersion,
+    });
+    const inspection = decodeMaterializedAgentGraphOperatorInspection(
+      operator.payload,
+      {
+        rootSessionId: driver.rootSessionId,
+        graphId: driver.graphId,
+        operatorId: event.claim.targetOperatorId,
+        snapshotVersion: operator.snapshotVersion,
+      },
+    );
+    const advanced = advanceMaterializedAgentGraphClientProjection(
+      snapshot,
+      inspection,
+      event,
+      activationHadError,
+    );
+    if (!advanced) return;
+    await this.#input.controlStore.commitAgentGraphClientProjection({
+      schemaVersion: AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION,
+      graphId: driver.graphId,
+      rootSessionId: driver.rootSessionId,
+      snapshotVersion: advanced.snapshot.snapshotVersion,
+      snapshot: advanced.snapshot,
+      replaceOperators: false,
+      operators: [
+        {
+          operatorId: advanced.operator.operator.operatorId,
+          payload: advanced.operator,
+        },
+      ],
+      terminalActivities: advanced.terminalActivity
+        ? [
+            {
+              recordId: advanced.terminalActivity.recordId,
+              eventTime: advanced.terminalActivity.eventTime,
+              payload: advanced.terminalActivity,
+            },
+          ]
+        : [],
+    });
+    this.#notifyClientChanged(driver, 'runtime_activity');
   }
 
   async #readTopology(graphId: string): Promise<AgentGraphTraceTopology> {
@@ -545,6 +820,7 @@ export class AgentGraphCoordinator {
       stopping: false,
       stopGeneration: 0,
       closed: false,
+      runtimeFailureRunIds: new Set(),
     };
     this.#drivers.set(graphId, created);
     return created;
@@ -656,7 +932,7 @@ function requireRootSessionId(rootSessionId: string): string {
   return normalized;
 }
 
-function isDurableGraphClientActivity(
+function isMaterializedGraphClientEvent(
   type: AgentGraphSupervisorRuntimeEvent['event']['type'],
 ): boolean {
   return ![

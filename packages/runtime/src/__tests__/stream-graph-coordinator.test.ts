@@ -28,6 +28,21 @@ describe('host-managed agent graph coordinator', () => {
     const sessionStore = createSessionStore(root);
     const runStore = createAgentRunStore(root);
     const runtimeEventStore = createRuntimeEventStore(root);
+    let graphRuntimeHistoryReads = 0;
+    const countedRuntimeEventStore = new Proxy(runtimeEventStore, {
+      get(target, property) {
+        if (property === 'readImmutableRuntimeEvents') {
+          return async (
+            ...args: Parameters<typeof target.readImmutableRuntimeEvents>
+          ) => {
+            graphRuntimeHistoryReads += 1;
+            return target.readImmutableRuntimeEvents(...args);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
     const backends = new BackendRegistry();
     backends.register('fake', (context) => new FakeBackend(context));
     const manager = new SessionManager({
@@ -76,7 +91,7 @@ describe('host-managed agent graph coordinator', () => {
       coordinator = createCoordinator({
         sessionStore,
         runStore,
-        runtimeEventStore,
+        runtimeEventStore: countedRuntimeEventStore,
         controlStore: delayedControlStore.store,
         manager,
       });
@@ -128,6 +143,7 @@ describe('host-managed agent graph coordinator', () => {
       assert.equal(firstProvisions[0]?.agentId, 'local-read');
       assert.equal((await controlStore.listAgentGraphIntentClaims(graphId)).length, 1);
       assert.equal((await coordinator.observe(rootSession.id)).projection.operators.length, 1);
+      const historyReadsBeforeClient = graphRuntimeHistoryReads;
       const childSessions = await manager.listChildSessions(rootSession.id);
       assert.equal(childSessions.length, 1);
       assert.equal(
@@ -150,13 +166,17 @@ describe('host-managed agent graph coordinator', () => {
       assert.equal(inspection.operator.childSessionId, childSessions[0]?.id);
       assert.equal(inspection.claims.length, 1);
       assert.equal(inspection.activations.length, 1);
+      assert.equal(
+        graphRuntimeHistoryReads,
+        historyReadsBeforeClient,
+        'client reads must use the materialized SQLite projection',
+      );
       await new Promise<void>((resolve) => setImmediate(resolve));
-      assert.ok(clientEvents.includes('schedule_committed'));
       assert.ok(clientEvents.includes('reconciled'));
       assert.equal(
         clientEvents.filter((reason) => reason === 'runtime_activity').length,
         2,
-        'partial text deltas must not flood durable-state invalidation hints',
+        'partial text deltas must not cause projection writes or invalidations',
       );
       await assert.rejects(
         coordinator.toolsForSession(childSessions[0]!.id),
@@ -169,7 +189,7 @@ describe('host-managed agent graph coordinator', () => {
       recovered = createCoordinator({
         sessionStore,
         runStore,
-        runtimeEventStore,
+        runtimeEventStore: countedRuntimeEventStore,
         controlStore: delayedControlStore.store,
         manager,
       });
@@ -237,6 +257,16 @@ describe('host-managed agent graph coordinator', () => {
   });
 
   test('keeps completed graph snapshots readable after the root Session is archived', async () => {
+    let projection:
+      | {
+          schemaVersion: 1;
+          graphId: string;
+          rootSessionId: string;
+          snapshotVersion: string;
+          payload: unknown;
+          materializedAt: number;
+        }
+      | undefined;
     const coordinator = new AgentGraphCoordinator({
       sessionStore: {
         listForRecovery: async () => [],
@@ -253,6 +283,29 @@ describe('host-managed agent graph coordinator', () => {
         listAgentGraphOperatorProvisions: async () => [],
         listAgentGraphScheduleUpdates: async () => [],
         listAgentGraphIntentClaims: async () => [],
+        listAgentGraphClientClaimAdmissions: async () => [],
+        readAgentGraphClientProjection: async () => projection,
+        commitAgentGraphClientProjection: async (request: {
+          graphId: string;
+          rootSessionId: string;
+          snapshotVersion: string;
+          snapshot: unknown;
+        }) => {
+          projection = {
+            schemaVersion: 1,
+            graphId: request.graphId,
+            rootSessionId: request.rootSessionId,
+            snapshotVersion: request.snapshotVersion,
+            payload: request.snapshot,
+            materializedAt: 1,
+          };
+          return projection;
+        },
+        readAgentGraphClientOperatorProjection: async () => undefined,
+        listAgentGraphClientTerminalActivities: async () => ({
+          records: [],
+          hasMore: false,
+        }),
       },
       runtime: {},
       newId: randomUUID,

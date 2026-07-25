@@ -1,9 +1,15 @@
 import type {
+  AgentGraphClientClaimAdmission,
   AgentGraphIntentClaim,
   AgentGraphOperatorProvision,
   AgentGraphScheduleUpdate,
+  SessionEvent,
 } from '@maka/core';
-import type { AgentGraphSupervisorObservation } from './stream-graph-dispatch.js';
+import { failureClassFromCompleteStopReason } from '@maka/core';
+import type {
+  AgentGraphSupervisorObservation,
+  AgentGraphSupervisorRuntimeEvent,
+} from './stream-graph-dispatch.js';
 import type {
   AgentGraphActivationStatus,
   AgentGraphRecord,
@@ -29,9 +35,16 @@ const MAX_VISIBLE_STOPPED_TARGETS = 128;
 const MAX_RECENT_CONTROL_DECISIONS = 32;
 const MAX_VISIBLE_CLAIMS = 256;
 const MAX_RECENT_ACTIVITY = 64;
-const MAX_TERMINAL_HISTORY = 64;
+export const AGENT_GRAPH_CLIENT_TERMINAL_PAGE_SIZE = 64;
 const MAX_OPERATOR_INSPECTION_ACTIVATIONS = 64;
 const MAX_OPERATOR_INSPECTION_RECORDS = 128;
+const MAX_OPERATOR_EDGE_REFS = 64;
+const MAX_OPERATOR_WORK_REFS = 64;
+const MAX_OPERATOR_READINESS = 8;
+const MAX_OPERATOR_READINESS_WAITS = 64;
+const MAX_OPERATOR_INSPECTION_EDGES = 512;
+const MAX_OPERATOR_INSPECTION_WORK = 256;
+const MAX_OPERATOR_INSPECTION_CLAIMS = 256;
 const MAX_INSTRUCTION_PREVIEW_CHARS = 500;
 
 export type AgentGraphClientOperatorStatus =
@@ -45,6 +58,7 @@ export type AgentGraphClientOperatorStatus =
 export type AgentGraphClientStatus =
   | 'empty'
   | 'active'
+  | 'closing'
   | 'waiting'
   | 'stopped'
   | 'failed'
@@ -71,7 +85,15 @@ export interface AgentGraphClientOperator {
     policyKind: 'map' | 'all_settled';
     status: 'waiting' | 'runnable';
     waitingFor: AgentGraphReadinessWait[];
+    omittedWaitingFor: number;
   }>;
+  omitted: {
+    inboundEdgeIds: number;
+    outboundEdgeIds: number;
+    scheduledWorkIds: number;
+    readiness: number;
+    readinessWaits: number;
+  };
   currentActivation?: {
     activationId: string;
     status: AgentGraphActivationStatus;
@@ -138,6 +160,7 @@ export interface AgentGraphClientClaimRef {
   operatorId: string;
   childSessionId: string;
   run: AgentGraphClientRunRef;
+  admissionState: AgentGraphClientClaimAdmission['state'];
   claimedAt: number;
 }
 
@@ -207,8 +230,14 @@ export interface AgentGraphOperatorInspection {
     run: AgentGraphClientRunRef;
   }>;
   recentRecords: AgentGraphClientActivity[];
-  omittedActivationCount: number;
-  omittedRecordCount: number;
+  omitted: {
+    inboundEdges: number;
+    outboundEdges: number;
+    work: number;
+    claims: number;
+    activations: number;
+    records: number;
+  };
 }
 
 export interface BuildAgentGraphClientReadModelInput {
@@ -216,7 +245,21 @@ export interface BuildAgentGraphClientReadModelInput {
   graphId: string;
   provisions: readonly AgentGraphOperatorProvision[];
   scheduleUpdates: readonly AgentGraphScheduleUpdate[];
+  schedule?: AgentGraphScheduleProjection;
+  claimAdmissions?: readonly AgentGraphClientClaimAdmission[];
   observation: AgentGraphSupervisorObservation;
+}
+
+export interface AgentGraphClientMaterialization {
+  snapshot: AgentGraphClientSnapshot;
+  operators: AgentGraphOperatorInspection[];
+  terminalActivities: AgentGraphClientActivity[];
+}
+
+export interface AdvancedAgentGraphClientProjection {
+  snapshot: AgentGraphClientSnapshot;
+  operator: AgentGraphOperatorInspection;
+  terminalActivity?: AgentGraphClientActivity;
 }
 
 export interface AgentGraphClientSnapshotOptions {
@@ -234,6 +277,7 @@ interface BuiltReadModel {
   claims: AgentGraphClientClaimRef[];
   recentControlDecisions: AgentGraphClientControlDecision[];
   activity: AgentGraphClientActivity[];
+  scheduledWorkIdsByOperator: Map<string, string[]>;
 }
 
 /**
@@ -247,6 +291,165 @@ export function buildAgentGraphClientSnapshot(
   options: AgentGraphClientSnapshotOptions = {},
 ): AgentGraphClientSnapshot {
   const model = buildReadModel(input);
+  return snapshotFromModel(input, model, options);
+}
+
+export function materializeAgentGraphClientProjection(
+  input: BuildAgentGraphClientReadModelInput,
+): AgentGraphClientMaterialization {
+  const model = buildReadModel(input);
+  return {
+    snapshot: snapshotFromModel(input, model, {}),
+    operators: model.operators.map((operator) =>
+      inspectionFromModel(input, model, operator.operatorId),
+    ),
+    terminalActivities: terminalActivities(model.activity),
+  };
+}
+
+/**
+ * Advance the bounded materialized client view from one already-durable
+ * SessionEvent without replaying the RuntimeEvent ledger.
+ */
+export function advanceMaterializedAgentGraphClientProjection(
+  snapshotInput: AgentGraphClientSnapshot,
+  inspectionInput: AgentGraphOperatorInspection,
+  runtime: AgentGraphSupervisorRuntimeEvent,
+  activationHadError: boolean,
+): AdvancedAgentGraphClientProjection | undefined {
+  const projected = projectClientSessionEvent(runtime.event, activationHadError);
+  if (!projected) return undefined;
+  if (
+    snapshotInput.graphId !== runtime.intent.graphId ||
+    inspectionInput.graphId !== runtime.intent.graphId ||
+    inspectionInput.operator.operatorId !== runtime.claim.targetOperatorId ||
+    inspectionInput.operator.childSessionId !== runtime.claim.targetSessionId
+  ) {
+    throw new Error('Agent graph runtime activity does not match its materialized projection');
+  }
+  const activity: AgentGraphClientActivity = {
+    recordId: clientRuntimeRecordId(runtime),
+    operatorId: runtime.claim.targetOperatorId,
+    activationId: runtime.claim.targetRunId,
+    eventTime: runtime.event.ts,
+    facets: projected.facets,
+    signals: projected.signals,
+    run: {
+      sessionId: runtime.claim.targetSessionId,
+      agentRunId: runtime.claim.targetRunId,
+      turnId: runtime.claim.targetTurnId,
+    },
+  };
+  const snapshot = structuredClone(snapshotInput);
+  const inspection = structuredClone(inspectionInput);
+  const previousActivation = inspection.activations.find(
+    (activation) => activation.activationId === runtime.claim.targetRunId,
+  );
+  const activationStatus: AgentGraphActivationStatus =
+    projected.terminalStatus ?? 'running';
+  const nextActivation = previousActivation
+    ? {
+        ...previousActivation,
+        status: activationStatus,
+        recordCount: previousActivation.recordCount + 1,
+        lastEventTime: runtime.event.ts,
+        lastRecordId: activity.recordId,
+        ...(projected.terminalStatus
+          ? { terminalRecordId: activity.recordId }
+          : {}),
+      }
+    : {
+        activationId: runtime.claim.targetRunId,
+        status: activationStatus,
+        recordCount: 1,
+        firstEventTime: runtime.event.ts,
+        lastEventTime: runtime.event.ts,
+        lastRecordId: activity.recordId,
+        ...(projected.terminalStatus
+          ? { terminalRecordId: activity.recordId }
+          : {}),
+        run: { ...activity.run },
+      };
+  const activationCount =
+    inspection.omitted.activations +
+    inspection.activations.length +
+    (previousActivation ? 0 : 1);
+  inspection.activations = [
+    ...inspection.activations.filter(
+      (activation) => activation.activationId !== nextActivation.activationId,
+    ),
+    nextActivation,
+  ].slice(-MAX_OPERATOR_INSPECTION_ACTIVATIONS);
+  inspection.omitted.activations = Math.max(
+    0,
+    activationCount - inspection.activations.length,
+  );
+  const operatorStatus: AgentGraphClientOperatorStatus = projected.terminalStatus
+    ? projected.terminalStatus
+    : projected.signals.some((signal) => signal.kind === 'attention')
+      ? 'blocked'
+      : 'running';
+  inspection.operator.status = operatorStatus;
+  inspection.operator.currentActivation = {
+    activationId: nextActivation.activationId,
+    status: nextActivation.status,
+    recordCount: nextActivation.recordCount,
+    firstEventTime: nextActivation.firstEventTime,
+    lastEventTime: nextActivation.lastEventTime,
+    ...(nextActivation.terminalRecordId
+      ? { terminalRecordId: nextActivation.terminalRecordId }
+      : {}),
+    run: { ...activity.run },
+  };
+  const inspectionRecordCount =
+    inspection.omitted.records + inspection.recentRecords.length + 1;
+  inspection.recentRecords = [...inspection.recentRecords, activity].slice(
+    -MAX_OPERATOR_INSPECTION_RECORDS,
+  );
+  inspection.omitted.records = Math.max(
+    0,
+    inspectionRecordCount - inspection.recentRecords.length,
+  );
+
+  const visibleOperatorIndex = snapshot.operators.findIndex(
+    (operator) => operator.operatorId === inspection.operator.operatorId,
+  );
+  if (visibleOperatorIndex >= 0) {
+    snapshot.operators[visibleOperatorIndex] = structuredClone(inspection.operator);
+  }
+  const activityCount =
+    snapshot.omitted.recentActivity + snapshot.recentActivity.length + 1;
+  snapshot.recentActivity = [...snapshot.recentActivity, activity].slice(
+    -MAX_RECENT_ACTIVITY,
+  );
+  snapshot.omitted.recentActivity = Math.max(
+    0,
+    activityCount - snapshot.recentActivity.length,
+  );
+  snapshot.latestEventTime = Math.max(
+    snapshot.latestEventTime ?? 0,
+    runtime.event.ts,
+  );
+  snapshot.snapshotVersion = stableHash({
+    schemaVersion: AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION,
+    previousSnapshotVersion: snapshotInput.snapshotVersion,
+    runtimeEventId: runtime.event.id,
+    operatorStatus,
+  });
+  inspection.snapshotVersion = snapshot.snapshotVersion;
+  snapshot.status = patchedGraphStatus(snapshot, inspection.operator);
+  return {
+    snapshot,
+    operator: inspection,
+    ...(projected.terminalStatus ? { terminalActivity: activity } : {}),
+  };
+}
+
+function snapshotFromModel(
+  input: BuildAgentGraphClientReadModelInput,
+  model: BuiltReadModel,
+  options: AgentGraphClientSnapshotOptions,
+): AgentGraphClientSnapshot {
   const visibleOperators = boundOperators(model.operators);
   const visibleOperatorIds = new Set(visibleOperators.map((operator) => operator.operatorId));
   const candidateEdges = model.edges.filter(
@@ -267,7 +470,7 @@ export function buildAgentGraphClientSnapshot(
     rootSessionId: input.rootSessionId,
     graphId: input.graphId,
     snapshotVersion: model.snapshotVersion,
-    status: graphStatus(model.schedule, model.operators),
+    status: graphStatus(model.schedule, model.operators, model.claims, model.activity),
     scheduleRevision: model.schedule.revision,
     topologyFingerprint: input.observation.readiness.topologyFingerprint,
     closed: model.schedule.closed,
@@ -302,6 +505,14 @@ export function inspectAgentGraphOperator(
 ): AgentGraphOperatorInspection {
   const expectedOperatorId = requireIdentity(operatorId, 'operator id');
   const model = buildReadModel(input);
+  return inspectionFromModel(input, model, expectedOperatorId);
+}
+
+function inspectionFromModel(
+  input: BuildAgentGraphClientReadModelInput,
+  model: BuiltReadModel,
+  expectedOperatorId: string,
+): AgentGraphOperatorInspection {
   const operator = model.operators.find(
     (candidate) => candidate.operatorId === expectedOperatorId,
   );
@@ -321,6 +532,23 @@ export function inspectAgentGraphOperator(
     (record) => record.operatorId === expectedOperatorId,
   );
   const recentRecords = allRecords.slice(-MAX_OPERATOR_INSPECTION_RECORDS);
+  const inboundEdges = model.edges.filter(
+    (edge) => edge.toOperatorId === expectedOperatorId,
+  );
+  const visibleInboundEdges = inboundEdges.slice(-MAX_OPERATOR_INSPECTION_EDGES);
+  const outboundEdges = model.edges.filter(
+    (edge) => edge.fromOperatorId === expectedOperatorId,
+  );
+  const visibleOutboundEdges = outboundEdges.slice(-MAX_OPERATOR_INSPECTION_EDGES);
+  const operatorWorkIds = new Set(
+    model.scheduledWorkIdsByOperator.get(expectedOperatorId) ?? [],
+  );
+  const work = model.work.filter((entry) => operatorWorkIds.has(entry.workId));
+  const visibleWork = work.slice(-MAX_OPERATOR_INSPECTION_WORK);
+  const claims = model.claims.filter(
+    (claim) => claim.operatorId === expectedOperatorId,
+  );
+  const visibleClaims = claims.slice(-MAX_OPERATOR_INSPECTION_CLAIMS);
   const claimByRunId = new Map(
     model.claims
       .filter((claim) => claim.operatorId === expectedOperatorId)
@@ -332,18 +560,10 @@ export function inspectAgentGraphOperator(
     graphId: input.graphId,
     snapshotVersion: model.snapshotVersion,
     operator,
-    inboundEdges: model.edges.filter(
-      (edge) => edge.toOperatorId === expectedOperatorId,
-    ),
-    outboundEdges: model.edges.filter(
-      (edge) => edge.fromOperatorId === expectedOperatorId,
-    ),
-    work: model.work.filter((work) =>
-      operator.scheduledWorkIds.includes(work.workId),
-    ),
-    claims: model.claims.filter(
-      (claim) => claim.operatorId === expectedOperatorId,
-    ),
+    inboundEdges: visibleInboundEdges,
+    outboundEdges: visibleOutboundEdges,
+    work: visibleWork,
+    claims: visibleClaims,
     activations: visibleActivations.map((activation) => ({
       activationId: activation.activationId,
       status: activation.status,
@@ -362,8 +582,14 @@ export function inspectAgentGraphOperator(
       ),
     })),
     recentRecords,
-    omittedActivationCount: allActivations.length - visibleActivations.length,
-    omittedRecordCount: allRecords.length - recentRecords.length,
+    omitted: {
+      inboundEdges: inboundEdges.length - visibleInboundEdges.length,
+      outboundEdges: outboundEdges.length - visibleOutboundEdges.length,
+      work: work.length - visibleWork.length,
+      claims: claims.length - visibleClaims.length,
+      activations: allActivations.length - visibleActivations.length,
+      records: allRecords.length - recentRecords.length,
+    },
   };
 }
 
@@ -371,10 +597,15 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
   requireIdentity(input.rootSessionId, 'root Session id');
   requireIdentity(input.graphId, 'graph id');
   assertObservation(input.graphId, input.observation);
-  const schedule = projectAgentGraphSchedule(input.graphId, input.scheduleUpdates);
+  const schedule =
+    input.schedule ?? projectAgentGraphSchedule(input.graphId, input.scheduleUpdates);
   const provisionByOperator = provisionsByOperator(input.graphId, input.provisions);
   const edges = uniqueEdges(input.graphId, input.provisions);
-  const claims = clientClaims(input.graphId, input.observation.claims);
+  const claims = clientClaims(
+    input.graphId,
+    input.observation.claims,
+    input.claimAdmissions ?? [],
+  );
   const activity = input.observation.projection.records.map(clientActivity);
   const work = schedule.work.map(clientWork);
   const operators = input.observation.projection.operators.map((binding) => {
@@ -384,14 +615,21 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
         `Agent graph operator ${binding.operatorId} has no matching durable provision`,
       );
     }
-    const readiness = input.observation.readiness.supervisorView
+    const allReadiness = input.observation.readiness.supervisorView
       .filter((entry) => entry.operatorId === binding.operatorId)
       .map((entry) => ({
         readinessId: entry.readinessId,
         policyKind: entry.policyKind,
         status: entry.status,
-        waitingFor: entry.waitingFor.map(cloneWait),
+        waitingFor: entry.waitingFor
+          .slice(0, MAX_OPERATOR_READINESS_WAITS)
+          .map(cloneWait),
+        omittedWaitingFor: Math.max(
+          0,
+          entry.waitingFor.length - MAX_OPERATOR_READINESS_WAITS,
+        ),
       }));
+    const readiness = allReadiness.slice(0, MAX_OPERATOR_READINESS);
     const state = input.observation.projection.state.operators[binding.operatorId];
     const currentActivation = state?.activations[state.currentActivationId];
     const currentClaim = currentActivation
@@ -409,6 +647,23 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
           .reverse()
           .find((record) => record.activationId === currentActivation.activationId)
       : undefined;
+    const allInboundEdgeIds = edges
+      .filter((edge) => edge.toOperatorId === binding.operatorId)
+      .map((edge) => edge.edgeId);
+    const inboundEdgeIds = allInboundEdgeIds.slice(-MAX_OPERATOR_EDGE_REFS);
+    const allOutboundEdgeIds = edges
+      .filter((edge) => edge.fromOperatorId === binding.operatorId)
+      .map((edge) => edge.edgeId);
+    const outboundEdgeIds = allOutboundEdgeIds.slice(-MAX_OPERATOR_EDGE_REFS);
+    const allScheduledWorkIds = work
+      .filter(
+        (entry) =>
+          entry.workId === provision.workId ||
+          (entry.target.kind === 'operator' &&
+            entry.target.operatorId === binding.operatorId),
+      )
+      .map((entry) => entry.workId);
+    const scheduledWorkIds = allScheduledWorkIds.slice(-MAX_OPERATOR_WORK_REFS);
     return {
       operatorId: binding.operatorId,
       childSessionId: binding.sessionId,
@@ -416,21 +671,20 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
       agentId: provision.agentId,
       provisionedAt: provision.provisionedAt,
       status: operatorStatus(state?.status, readiness, currentRecord),
-      inboundEdgeIds: edges
-        .filter((edge) => edge.toOperatorId === binding.operatorId)
-        .map((edge) => edge.edgeId),
-      outboundEdgeIds: edges
-        .filter((edge) => edge.fromOperatorId === binding.operatorId)
-        .map((edge) => edge.edgeId),
-      scheduledWorkIds: work
-        .filter(
-          (entry) =>
-            entry.workId === provision.workId ||
-            (entry.target.kind === 'operator' &&
-              entry.target.operatorId === binding.operatorId),
-        )
-        .map((entry) => entry.workId),
+      inboundEdgeIds,
+      outboundEdgeIds,
+      scheduledWorkIds,
       readiness,
+      omitted: {
+        inboundEdgeIds: allInboundEdgeIds.length - inboundEdgeIds.length,
+        outboundEdgeIds: allOutboundEdgeIds.length - outboundEdgeIds.length,
+        scheduledWorkIds: allScheduledWorkIds.length - scheduledWorkIds.length,
+        readiness: allReadiness.length - readiness.length,
+        readinessWaits: allReadiness.reduce(
+          (total, entry) => total + entry.omittedWaitingFor,
+          0,
+        ),
+      },
       ...(currentActivation
         ? {
             currentActivation: {
@@ -488,6 +742,10 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
       .at(-1)?.provisionId,
     claimCount: claims.length,
     latestClaimId: claims.at(-1)?.claimId,
+    claimAdmissions: claims.map((claim) => ({
+      claimId: claim.claimId,
+      state: claim.admissionState,
+    })),
     recordCount: activity.length,
     latestRecordId: activity.at(-1)?.recordId,
   });
@@ -502,6 +760,19 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
     claims,
     recentControlDecisions,
     activity,
+    scheduledWorkIdsByOperator: new Map(
+      operators.map((operator) => [
+        operator.operatorId,
+        work
+          .filter(
+            (entry) =>
+              entry.workId === provisionByOperator.get(operator.operatorId)?.workId ||
+              (entry.target.kind === 'operator' &&
+                entry.target.operatorId === operator.operatorId),
+          )
+          .map((entry) => entry.workId),
+      ]),
+    ),
   };
 }
 
@@ -524,8 +795,31 @@ function operatorStatus(
 function graphStatus(
   schedule: AgentGraphScheduleProjection,
   operators: readonly AgentGraphClientOperator[],
+  claims: readonly AgentGraphClientClaimRef[],
+  activity: readonly AgentGraphClientActivity[],
 ): AgentGraphClientStatus {
-  if (schedule.closed) return 'completed';
+  if (schedule.closed) {
+    const terminalRunIds = new Set(
+      activity
+        .filter((record) =>
+          record.signals.some((signal) => signal.kind === 'terminal'),
+        )
+        .map((record) => record.run.agentRunId),
+    );
+    const observedRunIds = new Set(
+      activity.map((record) => record.run.agentRunId),
+    );
+    const unsettledClaim = claims.some(
+      (claim) =>
+        !terminalRunIds.has(claim.run.agentRunId) &&
+        (claim.admissionState !== 'cancelled' ||
+          observedRunIds.has(claim.run.agentRunId)),
+    );
+    const runningOperator = operators.some((operator) =>
+      ['running', 'blocked'].includes(operator.status),
+    );
+    return unsettledClaim || runningOperator ? 'closing' : 'completed';
+  }
   if (operators.length === 0 && schedule.work.length === 0) return 'empty';
   if (
     operators.some((operator) =>
@@ -545,6 +839,138 @@ function graphStatus(
     return 'failed';
   }
   return 'waiting';
+}
+
+function patchedGraphStatus(
+  snapshot: AgentGraphClientSnapshot,
+  patchedOperator: AgentGraphClientOperator,
+): AgentGraphClientStatus {
+  const operators = snapshot.operators.map((operator) =>
+    operator.operatorId === patchedOperator.operatorId
+      ? patchedOperator
+      : operator,
+  );
+  if (snapshot.closed) {
+    if (
+      snapshot.omitted.operators > 0 ||
+      snapshot.omitted.claims > 0 ||
+      operators.some((operator) =>
+        ['running', 'blocked'].includes(operator.status),
+      )
+    ) {
+      return 'closing';
+    }
+    const operatorByRunId = new Map(
+      operators
+        .filter((operator) => operator.currentActivation)
+        .map((operator) => [
+          operator.currentActivation!.run.agentRunId,
+          operator,
+        ]),
+    );
+    return snapshot.claims.every((claim) => {
+      if (claim.admissionState === 'cancelled') {
+        return !operatorByRunId.has(claim.run.agentRunId);
+      }
+      const operator = operatorByRunId.get(claim.run.agentRunId);
+      return (
+        operator !== undefined &&
+        ['completed', 'failed', 'aborted', 'cancelled'].includes(
+          operator.status,
+        )
+      );
+    })
+      ? 'completed'
+      : 'closing';
+  }
+  return operators.some((operator) =>
+    ['running', 'blocked', 'runnable'].includes(operator.status),
+  )
+    ? 'active'
+    : snapshot.status;
+}
+
+function projectClientSessionEvent(
+  event: SessionEvent,
+  activationHadError: boolean,
+):
+  | {
+      facets: AgentGraphRecordFacet[];
+      signals: AgentGraphSupervisorSignal[];
+      terminalStatus?: Extract<
+        AgentGraphActivationStatus,
+        'completed' | 'failed' | 'aborted' | 'cancelled'
+      >;
+    }
+  | undefined {
+  switch (event.type) {
+    case 'text_delta':
+    case 'thinking_delta':
+    case 'tool_output_delta':
+    case 'tool_progress':
+    case 'queue_update':
+    case 'provider_retry':
+      return undefined;
+    case 'text_complete':
+    case 'steering_message':
+      return { facets: ['message'], signals: [] };
+    case 'thinking_complete':
+      return { facets: ['thinking'], signals: [] };
+    case 'tool_start':
+      return { facets: ['tool_call'], signals: [] };
+    case 'tool_result':
+      return { facets: ['tool_result'], signals: [] };
+    case 'permission_request':
+      return {
+        facets: ['permission_request'],
+        signals: [{ kind: 'attention', reason: 'permission_request' }],
+      };
+    case 'permission_decision_ack':
+      return { facets: ['permission_decision'], signals: [] };
+    case 'user_question_request':
+      return {
+        facets: ['user_question_request'],
+        signals: [{ kind: 'attention', reason: 'user_question_request' }],
+      };
+    case 'token_usage':
+      return { facets: ['usage'], signals: [] };
+    case 'error':
+      return { facets: ['error'], signals: [] };
+    case 'abort':
+      return {
+        facets: ['aborted'],
+        signals: [{ kind: 'terminal', status: 'aborted' }],
+        terminalStatus: 'aborted',
+      };
+    case 'complete': {
+      const terminalStatus =
+        event.stopReason === 'user_stop'
+          ? 'aborted'
+          : activationHadError ||
+              failureClassFromCompleteStopReason(event.stopReason)
+            ? 'failed'
+            : 'completed';
+      return {
+        facets: [terminalStatus],
+        signals: [{ kind: 'terminal', status: terminalStatus }],
+        terminalStatus,
+      };
+    }
+    case 'plan_submitted':
+      return { facets: ['runtime_fact'], signals: [] };
+  }
+}
+
+function clientRuntimeRecordId(
+  runtime: AgentGraphSupervisorRuntimeEvent,
+): string {
+  return `graph_record_${stableHash({
+    graphId: runtime.intent.graphId,
+    operatorId: runtime.claim.targetOperatorId,
+    sessionId: runtime.claim.targetSessionId,
+    runId: runtime.claim.targetRunId,
+    runtimeEventId: runtime.event.id,
+  }).slice('sha256:'.length, 'sha256:'.length + 32)}`;
 }
 
 function boundOperators(
@@ -584,30 +1010,65 @@ function terminalHistoryPage(
   activity: readonly AgentGraphClientActivity[],
   cursor: string | undefined,
 ): AgentGraphClientTerminalHistoryPage {
-  const terminal = activity
-    .filter((record) => record.signals.some((signal) => signal.kind === 'terminal'))
-    .reverse();
+  const terminal = terminalActivities(activity);
   let start = 0;
   if (cursor !== undefined) {
-    const decoded = decodeTerminalCursor(cursor);
+    const decoded = decodeAgentGraphTerminalCursor(cursor);
     if (decoded.graphId !== graphId) {
       throw new Error('Agent graph terminal history cursor belongs to another graph');
     }
-    const index = terminal.findIndex((record) => record.recordId === decoded.recordId);
+    const index = terminal.findIndex(
+      (record) =>
+        record.recordId === decoded.recordId &&
+        record.eventTime === decoded.eventTime,
+    );
     if (index < 0) {
       throw new Error('Agent graph terminal history cursor is stale or invalid');
     }
     start = index + 1;
   }
-  const records = terminal.slice(start, start + MAX_TERMINAL_HISTORY);
+  const records = terminal.slice(
+    start,
+    start + AGENT_GRAPH_CLIENT_TERMINAL_PAGE_SIZE,
+  );
   const hasMore = start + records.length < terminal.length;
   return {
     records,
     ...(hasMore && records.length > 0
       ? {
-          nextCursor: encodeTerminalCursor(
+          nextCursor: encodeAgentGraphTerminalCursor(
             graphId,
-            records[records.length - 1]!.recordId,
+            records[records.length - 1]!,
+          ),
+        }
+      : {}),
+  };
+}
+
+function terminalActivities(
+  activity: readonly AgentGraphClientActivity[],
+): AgentGraphClientActivity[] {
+  return activity
+    .filter((record) => record.signals.some((signal) => signal.kind === 'terminal'))
+    .sort(
+      (a, b) =>
+        b.eventTime - a.eventTime ||
+        compareIdentity(b.recordId, a.recordId),
+    );
+}
+
+export function materializedAgentGraphTerminalHistoryPage(
+  graphId: string,
+  records: readonly AgentGraphClientActivity[],
+  hasMore: boolean,
+): AgentGraphClientTerminalHistoryPage {
+  return {
+    records: records.map((record) => structuredClone(record)),
+    ...(hasMore && records.length > 0
+      ? {
+          nextCursor: encodeAgentGraphTerminalCursor(
+            graphId,
+            records[records.length - 1]!,
           ),
         }
       : {}),
@@ -654,7 +1115,15 @@ function clientFinish(finish: AgentGraphScheduleFinishView): AgentGraphClientFin
 function clientClaims(
   graphId: string,
   claims: readonly AgentGraphIntentClaim[],
+  admissions: readonly AgentGraphClientClaimAdmission[],
 ): AgentGraphClientClaimRef[] {
+  const admissionByIntent = new Map<string, AgentGraphClientClaimAdmission['state']>();
+  for (const admission of admissions) {
+    if (admissionByIntent.has(admission.intentId)) {
+      throw new Error(`Duplicate agent graph admission for ${admission.intentId}`);
+    }
+    admissionByIntent.set(admission.intentId, admission.state);
+  }
   return [...claims]
     .sort(
       (a, b) =>
@@ -674,6 +1143,7 @@ function clientClaims(
           agentRunId: claim.targetRunId,
           turnId: claim.targetTurnId,
         },
+        admissionState: admissionByIntent.get(claim.intentId) ?? 'executing',
         claimedAt: claim.claimedAt,
       };
     });
@@ -782,20 +1252,25 @@ function cloneWait(wait: AgentGraphReadinessWait): AgentGraphReadinessWait {
     : { ...wait };
 }
 
-function encodeTerminalCursor(graphId: string, recordId: string): string {
+export function encodeAgentGraphTerminalCursor(
+  graphId: string,
+  activity: Pick<AgentGraphClientActivity, 'recordId' | 'eventTime'>,
+): string {
   return Buffer.from(
     JSON.stringify({
       schemaVersion: AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION,
       graphId,
-      recordId,
+      recordId: activity.recordId,
+      eventTime: activity.eventTime,
     }),
     'utf8',
   ).toString('base64url');
 }
 
-function decodeTerminalCursor(cursor: string): {
+export function decodeAgentGraphTerminalCursor(cursor: string): {
   graphId: string;
   recordId: string;
+  eventTime: number;
 } {
   if (
     typeof cursor !== 'string' ||
@@ -811,18 +1286,116 @@ function decodeTerminalCursor(cursor: string): {
     const value = JSON.parse(json) as Record<string, unknown>;
     if (
       canonical !== cursor ||
-      Object.keys(value).sort().join(',') !== 'graphId,recordId,schemaVersion' ||
-      value.schemaVersion !== AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION
+      Object.keys(value).sort().join(',') !==
+        'eventTime,graphId,recordId,schemaVersion' ||
+      value.schemaVersion !== AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION ||
+      typeof value.eventTime !== 'number' ||
+      !Number.isSafeInteger(value.eventTime) ||
+      value.eventTime < 0
     ) {
       throw new Error('invalid cursor envelope');
     }
     return {
       graphId: requireIdentity(value.graphId, 'cursor graph id'),
       recordId: requireIdentity(value.recordId, 'cursor record id'),
+      eventTime: value.eventTime,
     };
   } catch {
     throw new Error('Invalid agent graph terminal history cursor');
   }
+}
+
+export function decodeMaterializedAgentGraphClientSnapshot(
+  value: unknown,
+  expected: {
+    rootSessionId: string;
+    graphId: string;
+    snapshotVersion: string;
+  },
+): AgentGraphClientSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid materialized agent graph client snapshot');
+  }
+  const snapshot = value as Partial<AgentGraphClientSnapshot>;
+  if (
+    snapshot.schemaVersion !== AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION ||
+    snapshot.rootSessionId !== expected.rootSessionId ||
+    snapshot.graphId !== expected.graphId ||
+    snapshot.snapshotVersion !== expected.snapshotVersion ||
+    !Array.isArray(snapshot.operators) ||
+    !Array.isArray(snapshot.edges) ||
+    !Array.isArray(snapshot.work) ||
+    !Array.isArray(snapshot.stoppedTargets) ||
+    !Array.isArray(snapshot.claims) ||
+    !Array.isArray(snapshot.recentControlDecisions) ||
+    !Array.isArray(snapshot.recentActivity) ||
+    !snapshot.terminalHistory ||
+    !Array.isArray(snapshot.terminalHistory.records)
+  ) {
+    throw new Error('Invalid materialized agent graph client snapshot');
+  }
+  return structuredClone(snapshot as AgentGraphClientSnapshot);
+}
+
+export function decodeMaterializedAgentGraphOperatorInspection(
+  value: unknown,
+  expected: {
+    rootSessionId: string;
+    graphId: string;
+    operatorId: string;
+    snapshotVersion: string;
+  },
+): AgentGraphOperatorInspection {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid materialized agent graph operator inspection');
+  }
+  const inspection = value as Partial<AgentGraphOperatorInspection>;
+  if (
+    inspection.schemaVersion !== AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION ||
+    inspection.rootSessionId !== expected.rootSessionId ||
+    inspection.graphId !== expected.graphId ||
+    inspection.snapshotVersion !== expected.snapshotVersion ||
+    inspection.operator?.operatorId !== expected.operatorId ||
+    !Array.isArray(inspection.inboundEdges) ||
+    !Array.isArray(inspection.outboundEdges) ||
+    !Array.isArray(inspection.work) ||
+    !Array.isArray(inspection.claims) ||
+    !Array.isArray(inspection.activations) ||
+    !Array.isArray(inspection.recentRecords)
+  ) {
+    throw new Error('Invalid materialized agent graph operator inspection');
+  }
+  return structuredClone(inspection as AgentGraphOperatorInspection);
+}
+
+export function decodeMaterializedAgentGraphClientActivity(
+  value: unknown,
+  expected: {
+    graphId: string;
+    recordId: string;
+    eventTime: number;
+  },
+): AgentGraphClientActivity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid materialized agent graph client activity');
+  }
+  const activity = value as Partial<AgentGraphClientActivity>;
+  if (
+    activity.recordId !== expected.recordId ||
+    activity.eventTime !== expected.eventTime ||
+    !activity.operatorId ||
+    !activity.activationId ||
+    !Array.isArray(activity.facets) ||
+    !Array.isArray(activity.signals) ||
+    !activity.run ||
+    typeof activity.run.sessionId !== 'string' ||
+    typeof activity.run.agentRunId !== 'string'
+  ) {
+    throw new Error(
+      `Invalid materialized agent graph client activity for ${expected.graphId}`,
+    );
+  }
+  return structuredClone(activity as AgentGraphClientActivity);
 }
 
 function requireIdentity(value: unknown, name: string): string {

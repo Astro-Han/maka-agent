@@ -133,16 +133,27 @@ export type {
   ViewAgentGraphToolResult,
 } from './stream-graph-supervisor-tools.js';
 export {
+  AGENT_GRAPH_CLIENT_TERMINAL_PAGE_SIZE,
   AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION,
+  advanceMaterializedAgentGraphClientProjection,
   buildAgentGraphClientSnapshot,
+  decodeAgentGraphTerminalCursor,
+  decodeMaterializedAgentGraphClientActivity,
+  decodeMaterializedAgentGraphClientSnapshot,
+  decodeMaterializedAgentGraphOperatorInspection,
+  encodeAgentGraphTerminalCursor,
   inspectAgentGraphOperator,
+  materializeAgentGraphClientProjection,
+  materializedAgentGraphTerminalHistoryPage,
 } from './stream-graph-read-model.js';
 export type {
   AgentGraphClientActivity,
+  AdvancedAgentGraphClientProjection,
   AgentGraphClientClaimRef,
   AgentGraphClientControlDecision,
   AgentGraphClientEdge,
   AgentGraphClientFinish,
+  AgentGraphClientMaterialization,
   AgentGraphClientOperator,
   AgentGraphClientOperatorStatus,
   AgentGraphClientRunRef,

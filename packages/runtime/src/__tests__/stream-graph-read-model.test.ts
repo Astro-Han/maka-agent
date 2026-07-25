@@ -89,7 +89,7 @@ describe('agent graph client read model', () => {
 
     const inspection = inspectAgentGraphOperator(input, operatorId);
     assert.equal(inspection.activations.length, 64);
-    assert.equal(inspection.omittedActivationCount, 6);
+    assert.equal(inspection.omitted.activations, 6);
     assert.equal(inspection.recentRecords.length, 70);
     assert.equal(inspection.operator.childSessionId, childSessionId);
   });
@@ -146,6 +146,162 @@ describe('agent graph client read model', () => {
     assert.deepEqual(snapshot.recentControlDecisions[0]?.addedWorkIds, [
       'graph_work_00000000000000000000000000000000',
     ]);
+  });
+
+  test('treats finish as admission closure until existing claims settle', () => {
+    const graphId = 'graph-1';
+    const operatorId = 'operator-1';
+    const childSessionId = 'child-1';
+    const running = terminalRecord({
+      graphId,
+      operatorId,
+      childSessionId,
+      index: 0,
+    });
+    running.facets = ['message'];
+    running.supervisorSignals = [];
+    const runningObservation = observationFromRecords(
+      graphId,
+      operatorId,
+      childSessionId,
+      [running],
+    );
+    const activationState =
+      runningObservation.projection.state.operators[operatorId]!.activations[
+        running.activationId
+      ]!;
+    activationState.status = 'running';
+    delete activationState.terminalRecordId;
+    runningObservation.projection.state.operators[operatorId]!.status = 'running';
+    runningObservation.claims = [
+      {
+        schemaVersion: 1,
+        claimId: `graph_claim_${'1'.repeat(32)}`,
+        graphId,
+        intentId: `graph_intent_${'2'.repeat(32)}`,
+        intentFingerprint: `sha256:${'3'.repeat(64)}`,
+        readinessContextFingerprint: `sha256:${'4'.repeat(64)}`,
+        targetOperatorId: operatorId,
+        targetSessionId: childSessionId,
+        targetTurnId: 'turn-0',
+        targetRunId: 'run-0',
+        claimedAt: 0,
+      },
+    ];
+    const finish = finishUpdate(graphId, running.recordId);
+    const closing = buildAgentGraphClientSnapshot({
+      rootSessionId: 'root-session',
+      graphId,
+      provisions: [provision(graphId, operatorId, childSessionId)],
+      scheduleUpdates: [finish],
+      observation: runningObservation,
+    });
+    assert.equal(closing.closed, true);
+    assert.equal(closing.status, 'closing');
+
+    assert.equal(
+      buildAgentGraphClientSnapshot({
+        rootSessionId: 'root-session',
+        graphId,
+        provisions: [provision(graphId, operatorId, childSessionId)],
+        scheduleUpdates: [finish],
+        observation: {
+          ...observationWithOneTerminal(graphId, operatorId, childSessionId),
+          claims: runningObservation.claims,
+        },
+      }).status,
+      'completed',
+    );
+  });
+
+  test('bounds nested operator and inspection collections with omitted counts', () => {
+    const graphId = 'graph-1';
+    const operatorId = 'operator-1';
+    const childSessionId = 'child-1';
+    const baseProvision = provision(graphId, operatorId, childSessionId);
+    const edges = Array.from({ length: 600 }, (_, index) => ({
+      edgeId: `edge-${index}`,
+      fromOperatorId: operatorId,
+      toOperatorId: `downstream-${index}`,
+    }));
+    const work = Array.from({ length: 300 }, (_, index) => ({
+      workId: `work-${index}`,
+      target: { kind: 'operator' as const, operatorId },
+      inputIds: [],
+      status: 'requested' as const,
+      instruction: `work ${index}`,
+      revision: index + 1,
+      committedAt: index + 1,
+    }));
+    const observation = observationWithOneTerminal(
+      graphId,
+      operatorId,
+      childSessionId,
+    );
+    observation.claims = Array.from({ length: 300 }, (_, index) => ({
+      schemaVersion: 1,
+      claimId: `claim-${index}`,
+      graphId,
+      intentId: `intent-${index}`,
+      intentFingerprint: `sha256:${'1'.repeat(64)}`,
+      readinessContextFingerprint: `sha256:${'2'.repeat(64)}`,
+      targetOperatorId: operatorId,
+      targetSessionId: childSessionId,
+      targetTurnId: `turn-${index}`,
+      targetRunId: `claimed-run-${index}`,
+      claimedAt: index,
+    }));
+    observation.readiness.supervisorView = Array.from(
+      { length: 80 },
+      (_, index) => ({
+        graphId,
+        topologyFingerprint: 'sha256:topology',
+        readinessId: `readiness-${index}`,
+        operatorId,
+        policyKind: 'all_settled' as const,
+        policyFingerprint: `policy-${index}`,
+        readinessContextFingerprint: `context-${index}`,
+        status: 'waiting' as const,
+        intentIds: [],
+        waitingFor: Array.from({ length: 300 }, (__, waitIndex) => ({
+          kind: 'activation_running' as const,
+          operatorId: `upstream-${waitIndex}`,
+          activationId: `activation-${waitIndex}`,
+        })),
+      }),
+    );
+    const input = {
+      rootSessionId: 'root-session',
+      graphId,
+      provisions: [{ ...baseProvision, edges }],
+      scheduleUpdates: [],
+      schedule: {
+        graphId,
+        revision: 300,
+        work,
+        stoppedTargets: [],
+        closed: false,
+      },
+      observation,
+    } as unknown as Parameters<typeof buildAgentGraphClientSnapshot>[0];
+    const snapshot = buildAgentGraphClientSnapshot(input);
+    const operator = snapshot.operators[0]!;
+    assert.equal(operator.outboundEdgeIds.length, 64);
+    assert.equal(operator.omitted.outboundEdgeIds, 536);
+    assert.equal(operator.scheduledWorkIds.length, 64);
+    assert.equal(operator.omitted.scheduledWorkIds, 236);
+    assert.equal(operator.readiness.length, 8);
+    assert.equal(operator.omitted.readiness, 72);
+    assert.equal(operator.readiness[0]?.waitingFor.length, 64);
+    assert.equal(operator.omitted.readinessWaits, 80 * 236);
+
+    const inspection = inspectAgentGraphOperator(input, operatorId);
+    assert.equal(inspection.outboundEdges.length, 512);
+    assert.equal(inspection.omitted.outboundEdges, 88);
+    assert.equal(inspection.work.length, 256);
+    assert.equal(inspection.omitted.work, 44);
+    assert.equal(inspection.claims.length, 256);
+    assert.equal(inspection.omitted.claims, 44);
   });
 });
 
@@ -278,6 +434,32 @@ function scheduleUpdate(
       },
     ],
     stop: [],
+    revision: 1,
+    committedAt: 1,
+  };
+}
+
+function finishUpdate(
+  graphId: string,
+  resultId: string,
+): AgentGraphScheduleUpdate {
+  return {
+    schemaVersion: 1,
+    updateId: `graph_update_${'5'.repeat(32)}`,
+    updateFingerprint: `sha256:${'6'.repeat(64)}`,
+    graphId,
+    source: {
+      sessionId: 'root-session',
+      runId: 'root-run',
+      turnId: 'root-turn',
+      toolCallId: 'finish-tool-call',
+    },
+    addWork: [],
+    stop: [],
+    finish: {
+      resultIds: [resultId],
+      reason: 'Enough evidence is available.',
+    },
     revision: 1,
     committedAt: 1,
   };

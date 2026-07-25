@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION,
   assertAgentGraphScheduleUpdateRequest,
   AgentGraphScheduleClosedError,
   AgentGraphScheduleRevisionConflictError,
@@ -26,6 +27,11 @@ import {
   type AgentGraphOperatorProvision,
   type AgentGraphOperatorProvisionRequest,
   type AgentGraphOperatorProvisionResult,
+  type AgentGraphClientClaimAdmission,
+  type AgentGraphClientProjectionRecord,
+  type AgentGraphClientOperatorProjectionRecord,
+  type AgentGraphClientTerminalActivityPage,
+  type CommitAgentGraphClientProjectionRequest,
   type SessionHeader,
   type SessionListFilter,
   type SubagentSessionParent,
@@ -637,6 +643,250 @@ export class SqliteSessionMetadataStore {
     return rows.map((row) =>
       decodeAgentGraphOperatorProvision(JSON.parse(row.payloadJson) as unknown),
     );
+  }
+
+  async commitAgentGraphClientProjection(
+    request: CommitAgentGraphClientProjectionRequest,
+  ): Promise<AgentGraphClientProjectionRecord> {
+    this.assertOpen();
+    assertAgentGraphClientProjectionRequest(request);
+    return this.transaction(() => {
+      const materializedAt = this.now();
+      const snapshotPayloadJson = encodeProjectionPayload(request.snapshot, 'snapshot');
+      this.db
+        .prepare(`
+          INSERT INTO agent_graph_client_projections(
+            graph_id,
+            root_session_id,
+            schema_version,
+            snapshot_version,
+            payload_json,
+            materialized_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(graph_id) DO UPDATE SET
+            root_session_id = excluded.root_session_id,
+            schema_version = excluded.schema_version,
+            snapshot_version = excluded.snapshot_version,
+            payload_json = excluded.payload_json,
+            materialized_at = excluded.materialized_at
+        `)
+        .run(
+          request.graphId,
+          request.rootSessionId,
+          request.schemaVersion,
+          request.snapshotVersion,
+          snapshotPayloadJson,
+          materializedAt,
+        );
+
+      if (request.replaceOperators) {
+        this.db
+          .prepare('DELETE FROM agent_graph_client_operator_projections WHERE graph_id = ?')
+          .run(request.graphId);
+      }
+      const insertOperator = this.db.prepare(`
+        INSERT INTO agent_graph_client_operator_projections(
+          graph_id,
+          operator_id,
+          snapshot_version,
+          payload_json,
+          materialized_at
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(graph_id, operator_id) DO UPDATE SET
+          snapshot_version = excluded.snapshot_version,
+          payload_json = excluded.payload_json,
+          materialized_at = excluded.materialized_at
+      `);
+      for (const operator of request.operators) {
+        insertOperator.run(
+          request.graphId,
+          operator.operatorId,
+          request.snapshotVersion,
+          encodeProjectionPayload(operator.payload, 'operator'),
+          materializedAt,
+        );
+      }
+
+      const readTerminal = this.db.prepare(`
+        SELECT event_time AS eventTime, payload_json AS payloadJson
+        FROM agent_graph_client_terminal_activity
+        WHERE graph_id = ? AND record_id = ?
+      `);
+      const insertTerminal = this.db.prepare(`
+        INSERT INTO agent_graph_client_terminal_activity(
+          graph_id,
+          record_id,
+          event_time,
+          payload_json
+        ) VALUES (?, ?, ?, ?)
+      `);
+      for (const terminal of request.terminalActivities) {
+        const payloadJson = encodeProjectionPayload(terminal.payload, 'terminal activity');
+        const existing = readTerminal.get(request.graphId, terminal.recordId) as
+          | AgentGraphClientTerminalActivityRow
+          | undefined;
+        if (existing) {
+          if (
+            existing.eventTime !== terminal.eventTime ||
+            existing.payloadJson !== payloadJson
+          ) {
+            throw new SessionMetadataConflictError(
+              `Agent graph terminal activity ${terminal.recordId} changed after materialization`,
+            );
+          }
+          continue;
+        }
+        insertTerminal.run(
+          request.graphId,
+          terminal.recordId,
+          terminal.eventTime,
+          payloadJson,
+        );
+      }
+
+      return {
+        schemaVersion: request.schemaVersion,
+        graphId: request.graphId,
+        rootSessionId: request.rootSessionId,
+        snapshotVersion: request.snapshotVersion,
+        payload: structuredClone(request.snapshot),
+        materializedAt,
+      };
+    });
+  }
+
+  async readAgentGraphClientProjection(
+    graphId: string,
+  ): Promise<AgentGraphClientProjectionRecord | undefined> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    const row = this.db
+      .prepare(`
+        SELECT
+          schema_version AS schemaVersion,
+          graph_id AS graphId,
+          root_session_id AS rootSessionId,
+          snapshot_version AS snapshotVersion,
+          payload_json AS payloadJson,
+          materialized_at AS materializedAt
+        FROM agent_graph_client_projections
+        WHERE graph_id = ?
+      `)
+      .get(graphId) as AgentGraphClientProjectionRow | undefined;
+    return row ? decodeAgentGraphClientProjectionRow(row) : undefined;
+  }
+
+  async readAgentGraphClientOperatorProjection(
+    graphId: string,
+    operatorId: string,
+  ): Promise<AgentGraphClientOperatorProjectionRecord | undefined> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    assertGraphLookupIdentity(operatorId, 'operator id');
+    const row = this.db
+      .prepare(`
+        SELECT
+          graph_id AS graphId,
+          operator_id AS operatorId,
+          snapshot_version AS snapshotVersion,
+          payload_json AS payloadJson,
+          materialized_at AS materializedAt
+        FROM agent_graph_client_operator_projections
+        WHERE graph_id = ? AND operator_id = ?
+      `)
+      .get(graphId, operatorId) as AgentGraphClientOperatorProjectionRow | undefined;
+    return row ? decodeAgentGraphClientOperatorProjectionRow(row) : undefined;
+  }
+
+  async listAgentGraphClientTerminalActivities(
+    graphId: string,
+    input: {
+      limit: number;
+      before?: { eventTime: number; recordId: string };
+    },
+  ): Promise<AgentGraphClientTerminalActivityPage> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 256) {
+      throw new Error('Agent graph terminal activity limit must be between 1 and 256');
+    }
+    if (input.before) {
+      assertGraphEventTime(input.before.eventTime);
+      assertGraphLookupIdentity(input.before.recordId, 'terminal record id');
+      const cursor = this.db
+        .prepare(`
+          SELECT event_time AS eventTime
+          FROM agent_graph_client_terminal_activity
+          WHERE graph_id = ? AND record_id = ?
+        `)
+        .get(graphId, input.before.recordId) as { eventTime?: unknown } | undefined;
+      if (cursor?.eventTime !== input.before.eventTime) {
+        throw new Error('Agent graph terminal activity cursor is stale or invalid');
+      }
+    }
+    const rows = this.db
+      .prepare(`
+        SELECT
+          graph_id AS graphId,
+          record_id AS recordId,
+          event_time AS eventTime,
+          payload_json AS payloadJson
+        FROM agent_graph_client_terminal_activity
+        WHERE graph_id = ?
+          ${
+            input.before
+              ? `AND (
+                  event_time < ?
+                  OR (event_time = ? AND record_id < ?)
+                )`
+              : ''
+          }
+        ORDER BY event_time DESC, record_id DESC
+        LIMIT ?
+      `)
+      .all(
+        graphId,
+        ...(input.before
+          ? [input.before.eventTime, input.before.eventTime, input.before.recordId]
+          : []),
+        input.limit + 1,
+      ) as unknown as AgentGraphClientTerminalActivityRowWithIdentity[];
+    return {
+      records: rows.slice(0, input.limit).map((row) => ({
+        graphId: row.graphId,
+        recordId: row.recordId,
+        eventTime: row.eventTime,
+        payload: JSON.parse(row.payloadJson) as unknown,
+      })),
+      hasMore: rows.length > input.limit,
+    };
+  }
+
+  async listAgentGraphClientClaimAdmissions(
+    graphId: string,
+  ): Promise<AgentGraphClientClaimAdmission[]> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    const rows = this.db
+      .prepare(`
+        SELECT
+          intent_id AS intentId,
+          admission_status AS state
+        FROM agent_graph_intent_claims
+        WHERE graph_id = ?
+        ORDER BY claimed_at ASC, intent_id ASC
+      `)
+      .all(graphId) as unknown as AgentGraphClientClaimAdmission[];
+    return rows.map((row) => {
+      if (
+        row.state !== 'claimed' &&
+        row.state !== 'executing' &&
+        row.state !== 'cancelled'
+      ) {
+        throw new Error(`Invalid agent graph admission state for ${row.intentId}`);
+      }
+      return { intentId: row.intentId, state: row.state };
+    });
   }
 
   async update(
@@ -1327,6 +1577,34 @@ interface AgentGraphOperatorProvisionRow {
   payloadJson: string;
 }
 
+interface AgentGraphClientProjectionRow {
+  schemaVersion: number;
+  graphId: string;
+  rootSessionId: string;
+  snapshotVersion: string;
+  payloadJson: string;
+  materializedAt: number;
+}
+
+interface AgentGraphClientOperatorProjectionRow {
+  graphId: string;
+  operatorId: string;
+  snapshotVersion: string;
+  payloadJson: string;
+  materializedAt: number;
+}
+
+interface AgentGraphClientTerminalActivityRow {
+  eventTime: number;
+  payloadJson: string;
+}
+
+interface AgentGraphClientTerminalActivityRowWithIdentity
+  extends AgentGraphClientTerminalActivityRow {
+  graphId: string;
+  recordId: string;
+}
+
 function decodeAgentGraphScheduleUpdateRow(
   row: AgentGraphScheduleUpdateRow,
 ): AgentGraphScheduleUpdate {
@@ -1385,6 +1663,94 @@ function assertGraphLookupIdentity(value: string, name: string): void {
     /[\u0000-\u001f\u007f]/.test(value)
   ) {
     throw new Error(`Invalid agent graph ${name}`);
+  }
+}
+
+function assertAgentGraphClientProjectionRequest(
+  request: CommitAgentGraphClientProjectionRequest,
+): void {
+  if (
+    request.schemaVersion !== AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION ||
+    typeof request.replaceOperators !== 'boolean' ||
+    !Array.isArray(request.operators) ||
+    !Array.isArray(request.terminalActivities)
+  ) {
+    throw new Error('Invalid agent graph client projection request');
+  }
+  assertGraphLookupIdentity(request.graphId, 'graph id');
+  assertSafeSessionId(request.rootSessionId);
+  assertGraphLookupIdentity(request.snapshotVersion, 'snapshot version');
+  const operatorIds = new Set<string>();
+  for (const operator of request.operators) {
+    assertGraphLookupIdentity(operator.operatorId, 'operator id');
+    if (operatorIds.has(operator.operatorId)) {
+      throw new Error(`Duplicate agent graph client operator ${operator.operatorId}`);
+    }
+    operatorIds.add(operator.operatorId);
+  }
+  const terminalIds = new Set<string>();
+  for (const terminal of request.terminalActivities) {
+    assertGraphLookupIdentity(terminal.recordId, 'terminal record id');
+    assertGraphEventTime(terminal.eventTime);
+    if (terminalIds.has(terminal.recordId)) {
+      throw new Error(`Duplicate agent graph terminal activity ${terminal.recordId}`);
+    }
+    terminalIds.add(terminal.recordId);
+  }
+}
+
+function encodeProjectionPayload(payload: unknown, name: string): string {
+  const encoded = JSON.stringify(payload);
+  if (encoded === undefined) {
+    throw new Error(`Invalid agent graph ${name} payload`);
+  }
+  return encoded;
+}
+
+function decodeAgentGraphClientProjectionRow(
+  row: AgentGraphClientProjectionRow,
+): AgentGraphClientProjectionRecord {
+  if (
+    row.schemaVersion !== AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION ||
+    !Number.isSafeInteger(row.materializedAt) ||
+    row.materializedAt < 0
+  ) {
+    throw new Error(`Invalid agent graph client projection for ${row.graphId}`);
+  }
+  assertGraphLookupIdentity(row.graphId, 'graph id');
+  assertSafeSessionId(row.rootSessionId);
+  assertGraphLookupIdentity(row.snapshotVersion, 'snapshot version');
+  return {
+    schemaVersion: row.schemaVersion,
+    graphId: row.graphId,
+    rootSessionId: row.rootSessionId,
+    snapshotVersion: row.snapshotVersion,
+    payload: JSON.parse(row.payloadJson) as unknown,
+    materializedAt: row.materializedAt,
+  };
+}
+
+function decodeAgentGraphClientOperatorProjectionRow(
+  row: AgentGraphClientOperatorProjectionRow,
+): AgentGraphClientOperatorProjectionRecord {
+  if (!Number.isSafeInteger(row.materializedAt) || row.materializedAt < 0) {
+    throw new Error(`Invalid agent graph operator projection for ${row.operatorId}`);
+  }
+  assertGraphLookupIdentity(row.graphId, 'graph id');
+  assertGraphLookupIdentity(row.operatorId, 'operator id');
+  assertGraphLookupIdentity(row.snapshotVersion, 'snapshot version');
+  return {
+    graphId: row.graphId,
+    operatorId: row.operatorId,
+    snapshotVersion: row.snapshotVersion,
+    payload: JSON.parse(row.payloadJson) as unknown,
+    materializedAt: row.materializedAt,
+  };
+}
+
+function assertGraphEventTime(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error('Invalid agent graph terminal activity event time');
   }
 }
 

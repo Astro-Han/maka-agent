@@ -20,7 +20,7 @@ describe('SqliteSessionMetadataStore', () => {
     try {
       const store = createSqliteSessionMetadataStore(path, { now: () => 100 });
       const header = fullHeader();
-      assert.equal(store.schemaVersion(), 9);
+      assert.equal(store.schemaVersion(), 10);
       assert.equal(store.journalMode(), 'wal');
       assert.deepEqual(await store.create(header), {
         header,
@@ -31,7 +31,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const reopened = createSqliteSessionMetadataStore(path, { now: () => 200 });
       try {
-        assert.equal(reopened.schemaVersion(), 9);
+        assert.equal(reopened.schemaVersion(), 10);
         assert.deepEqual(await reopened.read(header.id), {
           header,
           metadataVersion: 1,
@@ -52,7 +52,7 @@ describe('SqliteSessionMetadataStore', () => {
     const metadata = createSqliteSessionMetadataStore(path);
     try {
       assert.equal(runtime.schemaVersion(), 4);
-      assert.equal(metadata.schemaVersion(), 9);
+      assert.equal(metadata.schemaVersion(), 10);
       await metadata.create(fullHeader());
       await runtime.appendRuntimeEvent('session-1', 'run-1', {
         id: 'event-1',
@@ -160,7 +160,7 @@ describe('SqliteSessionMetadataStore', () => {
 
     const store = createSqliteSessionMetadataStore(path);
     try {
-      assert.equal(store.schemaVersion(), 9);
+      assert.equal(store.schemaVersion(), 10);
       assert.deepEqual(
         (
           await store.list({
@@ -493,6 +493,9 @@ describe('SqliteSessionMetadataStore', () => {
 
       const v4 = new DatabaseSync(path);
       v4.exec(`
+        DROP TABLE agent_graph_client_terminal_activity;
+        DROP TABLE agent_graph_client_operator_projections;
+        DROP TABLE agent_graph_client_projections;
         DROP TABLE agent_graph_operator_provisions;
         DROP TABLE agent_graph_schedule_updates;
         DROP TABLE agent_graph_intent_claims;
@@ -516,7 +519,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const migrated = createSqliteSessionMetadataStore(path);
       try {
-        assert.equal(migrated.schemaVersion(), 9);
+        assert.equal(migrated.schemaVersion(), 10);
         assert.equal(await migrated.remove(child.id), true);
         await assert.rejects(
           () => migrated.createSubagent({ ...child, id: 'retry-after-migration' }),
@@ -793,6 +796,116 @@ describe('SQLite agent graph operator provisions', () => {
       );
       assert.deepEqual(await store.listAgentGraphOperatorProvisions('graph-1'), []);
       await assert.rejects(store.read('graph-child'), /not found/);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe('SQLite agent graph client projections', () => {
+  test('materializes bounded current state and keyset-pages terminal activity', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', {
+      now: nextNow(1_000),
+    });
+    try {
+      const first = await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-1',
+        rootSessionId: 'root-session',
+        snapshotVersion: 'snapshot-1',
+        snapshot: { version: 1 },
+        replaceOperators: true,
+        operators: [
+          { operatorId: 'operator-1', payload: { status: 'running' } },
+          { operatorId: 'operator-2', payload: { status: 'completed' } },
+        ],
+        terminalActivities: [
+          { recordId: 'record-1', eventTime: 1, payload: { recordId: 'record-1' } },
+          { recordId: 'record-2', eventTime: 2, payload: { recordId: 'record-2' } },
+          { recordId: 'record-3', eventTime: 3, payload: { recordId: 'record-3' } },
+        ],
+      });
+      assert.equal(first.snapshotVersion, 'snapshot-1');
+      assert.deepEqual(
+        (await store.readAgentGraphClientProjection('graph-1'))?.payload,
+        { version: 1 },
+      );
+      assert.deepEqual(
+        (await store.readAgentGraphClientOperatorProjection('graph-1', 'operator-1'))
+          ?.payload,
+        { status: 'running' },
+      );
+      const firstPage = await store.listAgentGraphClientTerminalActivities(
+        'graph-1',
+        { limit: 2 },
+      );
+      assert.equal(firstPage.hasMore, true);
+      assert.deepEqual(
+        firstPage.records.map((record) => record.recordId),
+        ['record-3', 'record-2'],
+      );
+      const secondPage = await store.listAgentGraphClientTerminalActivities(
+        'graph-1',
+        {
+          limit: 2,
+          before: { eventTime: 2, recordId: 'record-2' },
+        },
+      );
+      assert.equal(secondPage.hasMore, false);
+      assert.deepEqual(
+        secondPage.records.map((record) => record.recordId),
+        ['record-1'],
+      );
+      await assert.rejects(
+        store.listAgentGraphClientTerminalActivities('graph-1', {
+          limit: 2,
+          before: { eventTime: 99, recordId: 'record-2' },
+        }),
+        /stale or invalid/,
+      );
+
+      await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-1',
+        rootSessionId: 'root-session',
+        snapshotVersion: 'snapshot-2',
+        snapshot: { version: 2 },
+        replaceOperators: true,
+        operators: [
+          { operatorId: 'operator-1', payload: { status: 'completed' } },
+        ],
+        terminalActivities: [
+          { recordId: 'record-3', eventTime: 3, payload: { recordId: 'record-3' } },
+        ],
+      });
+      assert.equal(
+        await store.readAgentGraphClientOperatorProjection('graph-1', 'operator-2'),
+        undefined,
+      );
+      assert.equal(
+        (
+          await store.readAgentGraphClientOperatorProjection(
+            'graph-1',
+            'operator-1',
+          )
+        )?.snapshotVersion,
+        'snapshot-2',
+      );
+      await assert.rejects(
+        store.commitAgentGraphClientProjection({
+          schemaVersion: 1,
+          graphId: 'graph-1',
+          rootSessionId: 'root-session',
+          snapshotVersion: 'snapshot-3',
+          snapshot: { version: 3 },
+          replaceOperators: true,
+          operators: [],
+          terminalActivities: [
+            { recordId: 'record-3', eventTime: 4, payload: { recordId: 'record-3' } },
+          ],
+        }),
+        /changed after materialization/,
+      );
     } finally {
       store.close();
     }
