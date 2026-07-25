@@ -51,6 +51,8 @@ export interface AgentGraphCoordinatorInput {
   controlStore: AgentGraphScheduleControlStore;
   runtime: AgentGraphCoordinatorRuntime;
   newId: () => string;
+  /** Restrict an attempt-local coordinator to exactly one root Session graph. */
+  rootSessionId?: string;
   maxNewActivations?: number;
   resolvePolicies?(
     topology: AgentGraphTraceTopology,
@@ -72,9 +74,12 @@ interface GraphDriver {
   graphId: string;
   requested: boolean;
   paused: boolean;
+  stopping: boolean;
+  stopGeneration: number;
   closed: boolean;
   abortController?: AbortController;
   task?: Promise<void>;
+  stopTask?: Promise<void>;
   lastResult?: AgentGraphScheduleReconciliationResult;
   lastError?: unknown;
 }
@@ -96,6 +101,12 @@ export class AgentGraphCoordinator {
     if (!Number.isSafeInteger(maxNewActivations) || maxNewActivations < 0) {
       throw new Error('Agent graph coordinator activation limit must be a non-negative integer');
     }
+    if (
+      input.rootSessionId !== undefined &&
+      (!input.rootSessionId.trim() || input.rootSessionId.trim() !== input.rootSessionId)
+    ) {
+      throw new Error('Agent graph coordinator root Session scope must be a canonical identity');
+    }
     this.#input = { ...input, maxNewActivations };
   }
 
@@ -111,7 +122,7 @@ export class AgentGraphCoordinator {
       graphId: driver.graphId,
       scheduleStore: this.#input.controlStore,
       observeGraph: () => this.observe(rootSessionId),
-      authorizeScheduleUpdate: (request) => {
+      authorizeScheduleUpdate: (request): ScheduleWakeFence => {
         if (
           request.graphId !== driver.graphId ||
           request.source.sessionId !== rootSessionId
@@ -120,10 +131,14 @@ export class AgentGraphCoordinator {
             `Agent graph schedule update is not authorized for root Session ${rootSessionId}`,
           );
         }
+        return {
+          stopGeneration: driver.stopGeneration,
+          mayResumePaused: driver.paused && !driver.stopping,
+        };
       },
-      onScheduleUpdateCommitted: (update) => {
+      onScheduleUpdateCommitted: (update, authorization) => {
         this.#assertScheduleOwnedByRoot(update, rootSessionId, driver.graphId);
-        this.wake(rootSessionId);
+        this.#wakeFromSchedule(driver, decodeScheduleWakeFence(authorization));
       },
     });
   }
@@ -132,14 +147,9 @@ export class AgentGraphCoordinator {
   wake(rootSessionId: string): void {
     if (this.#closed) return;
     const driver = this.#driver(rootSessionId);
+    if (driver.stopping) return;
     driver.paused = false;
-    driver.requested = true;
-    if (!driver.task) {
-      driver.task = this.#drive(driver).finally(() => {
-        driver.task = undefined;
-        if (driver.requested && !driver.closed && !this.#closed) this.wake(rootSessionId);
-      });
-    }
+    this.#requestDrive(driver);
   }
 
   /** Reconcile now and surface any host-level failure to explicit callers. */
@@ -170,6 +180,7 @@ export class AgentGraphCoordinator {
   async recover(): Promise<string[]> {
     const recovered: string[] = [];
     for (const header of await this.#input.sessionStore.listForRecovery()) {
+      if (this.#input.rootSessionId && header.id !== this.#input.rootSessionId) continue;
       if (header.subagentParent || header.isArchived || header.status === 'archived') continue;
       const graphId = agentGraphIdForRootSession(header.id);
       const updates = await this.#input.controlStore.listAgentGraphScheduleUpdates(graphId);
@@ -225,20 +236,38 @@ export class AgentGraphCoordinator {
   async stop(rootSessionId: string): Promise<void> {
     await this.#assertRootSupervisor(rootSessionId);
     const driver = this.#driver(rootSessionId);
+    if (driver.stopTask) return driver.stopTask;
+    const stopTask = this.#stopDriver(driver).finally(() => {
+      if (driver.stopTask === stopTask) driver.stopTask = undefined;
+    });
+    driver.stopTask = stopTask;
+    return stopTask;
+  }
+
+  async #stopDriver(driver: GraphDriver): Promise<void> {
+    driver.stopGeneration += 1;
     driver.paused = true;
+    driver.stopping = true;
     driver.requested = false;
     driver.abortController?.abort();
-    const topology = await this.#readTopology(driver.graphId);
-    const stopped = await Promise.allSettled(
-      topology.operators.map((operator) =>
-        this.#input.runtime.stopSession(operator.sessionId, { source: 'graph_supervisor' }),
-      ),
-    );
-    await this.waitForIdle(rootSessionId);
-    const failure = stopped.find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected',
-    );
-    if (failure) throw failure.reason;
+    const failures: unknown[] = [];
+    const activeTask = driver.task;
+    try {
+      await this.#stopKnownOperators(driver.graphId, failures);
+      if (activeTask) {
+        try {
+          await activeTask;
+        } catch (error) {
+          failures.push(error);
+        }
+        // Re-read after the driver settles so an operator provisioned in the
+        // stop race cannot escape the first topology snapshot.
+        await this.#stopKnownOperators(driver.graphId, failures);
+      }
+    } finally {
+      driver.stopping = false;
+    }
+    throwCollectedFailures(`Failed to stop agent graph ${driver.graphId}`, failures);
   }
 
   async close(): Promise<void> {
@@ -248,18 +277,33 @@ export class AgentGraphCoordinator {
       driver.closed = true;
       driver.abortController?.abort();
     }
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       [...this.#drivers.values()].map(async (driver) => {
-        const topology = await this.#readTopology(driver.graphId);
-        await Promise.allSettled(
-          topology.operators.map((operator) =>
-            this.#input.runtime.stopSession(operator.sessionId, {
-              source: 'graph_supervisor',
-            }),
-          ),
-        );
-        if (driver.task) await driver.task;
+        const failures: unknown[] = [];
+        if (driver.stopTask) {
+          try {
+            await driver.stopTask;
+          } catch (error) {
+            failures.push(error);
+          }
+        }
+        const activeTask = driver.task;
+        await this.#stopKnownOperators(driver.graphId, failures);
+        if (activeTask) {
+          try {
+            await activeTask;
+          } catch (error) {
+            failures.push(error);
+          }
+          await this.#stopKnownOperators(driver.graphId, failures);
+        }
+        if (driver.lastError !== undefined) failures.push(driver.lastError);
+        throwCollectedFailures(`Failed to close agent graph ${driver.graphId}`, failures);
       }),
+    );
+    throwCollectedFailures(
+      'Failed to close one or more agent graph coordinators',
+      results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
     );
   }
 
@@ -274,8 +318,10 @@ export class AgentGraphCoordinator {
         driver.lastResult = result;
         await notify(this.#input.onReconciliation, driver.rootSessionId, result);
       } catch (error) {
-        driver.lastError = error;
-        await notify(this.#input.onError, driver.rootSessionId, error);
+        if (!abortController.signal.aborted) {
+          driver.lastError = error;
+          await notify(this.#input.onError, driver.rootSessionId, error);
+        }
       } finally {
         if (driver.abortController === abortController) driver.abortController = undefined;
       }
@@ -322,6 +368,11 @@ export class AgentGraphCoordinator {
 
   async #assertRootSupervisor(rootSessionId: string): Promise<SessionHeader> {
     if (this.#closed) throw new Error('Agent graph coordinator is closed');
+    if (this.#input.rootSessionId && rootSessionId !== this.#input.rootSessionId) {
+      throw new Error(
+        `Agent graph coordinator is scoped to root Session ${this.#input.rootSessionId}`,
+      );
+    }
     const header = await this.#input.sessionStore.readHeader(rootSessionId);
     if (header.id !== rootSessionId) {
       throw new Error(`Session store returned ${header.id}, expected ${rootSessionId}`);
@@ -348,6 +399,11 @@ export class AgentGraphCoordinator {
   }
 
   #driver(rootSessionId: string): GraphDriver {
+    if (this.#input.rootSessionId && rootSessionId !== this.#input.rootSessionId) {
+      throw new Error(
+        `Agent graph coordinator is scoped to root Session ${this.#input.rootSessionId}`,
+      );
+    }
     const graphId = agentGraphIdForRootSession(rootSessionId);
     const existing = this.#drivers.get(graphId);
     if (existing) {
@@ -361,11 +417,79 @@ export class AgentGraphCoordinator {
       graphId,
       requested: false,
       paused: false,
+      stopping: false,
+      stopGeneration: 0,
       closed: false,
     };
     this.#drivers.set(graphId, created);
     return created;
   }
+
+  #wakeFromSchedule(driver: GraphDriver, fence: ScheduleWakeFence): void {
+    if (
+      this.#closed ||
+      driver.closed ||
+      driver.stopping ||
+      fence.stopGeneration !== driver.stopGeneration ||
+      (driver.paused && !fence.mayResumePaused)
+    ) {
+      return;
+    }
+    driver.paused = false;
+    this.#requestDrive(driver);
+  }
+
+  #requestDrive(driver: GraphDriver): void {
+    driver.requested = true;
+    if (driver.task) return;
+    driver.task = this.#drive(driver).finally(() => {
+      driver.task = undefined;
+      if (driver.requested && !driver.paused && !driver.closed && !this.#closed) {
+        this.#requestDrive(driver);
+      }
+    });
+  }
+
+  async #stopKnownOperators(graphId: string, failures: unknown[]): Promise<void> {
+    let topology: AgentGraphTraceTopology;
+    try {
+      topology = await this.#readTopology(graphId);
+    } catch (error) {
+      failures.push(error);
+      return;
+    }
+    const stopped = await Promise.allSettled(
+      topology.operators.map((operator) =>
+        this.#input.runtime.stopSession(operator.sessionId, { source: 'graph_supervisor' }),
+      ),
+    );
+    failures.push(
+      ...stopped.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
+    );
+  }
+}
+
+interface ScheduleWakeFence {
+  stopGeneration: number;
+  mayResumePaused: boolean;
+}
+
+function decodeScheduleWakeFence(value: unknown): ScheduleWakeFence {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !Number.isSafeInteger((value as ScheduleWakeFence).stopGeneration) ||
+    typeof (value as ScheduleWakeFence).mayResumePaused !== 'boolean'
+  ) {
+    throw new Error('Agent graph schedule wake fence is invalid');
+  }
+  return value as ScheduleWakeFence;
+}
+
+function throwCollectedFailures(message: string, failures: readonly unknown[]): void {
+  if (failures.length === 0) return;
+  if (failures.length === 1) throw failures[0];
+  throw new AggregateError(failures, message);
 }
 
 export function agentGraphIdForRootSession(rootSessionId: string): string {

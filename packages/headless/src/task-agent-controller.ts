@@ -351,18 +351,6 @@ export async function runTaskOnceWithStorage(
       now,
       runtimeSource: 'test',
     });
-    graphControlStore = createAgentGraphControlStore(deps.storageRoot);
-    graphCoordinator = new AgentGraphCoordinator({
-      sessionStore,
-      runStore: agentRunStore,
-      runtimeEventStore,
-      controlStore: graphControlStore,
-      runtime: sessionCapabilityManager,
-      newId,
-    });
-    sessionCapabilities.bind(sessionCapabilityManager, graphCoordinator);
-    await graphCoordinator.recover();
-
     const header = await sessionStore.create({
       cwd: agentWorkspaceDir,
       backend: config.backend,
@@ -375,6 +363,17 @@ export async function runTaskOnceWithStorage(
       ...(deps.orchestrationMode ? { orchestrationMode: deps.orchestrationMode } : {}),
       name: `task:${config.id}:${task.id}`,
     });
+    graphControlStore = createAgentGraphControlStore(deps.storageRoot);
+    graphCoordinator = new AgentGraphCoordinator({
+      sessionStore,
+      runStore: agentRunStore,
+      runtimeEventStore,
+      controlStore: graphControlStore,
+      runtime: sessionCapabilityManager,
+      newId,
+      rootSessionId: header.id,
+    });
+    sessionCapabilities.bind(sessionCapabilityManager, graphCoordinator);
     const turnId = newId();
     const active = createSingleRunActiveSession(backends, sessionStore, now, newId);
     parentActive = active;
@@ -830,9 +829,15 @@ export async function runTaskOnceWithStorage(
       settledByDeadline,
     };
   } finally {
-    await graphCoordinator?.close();
-    graphControlStore?.close();
-    await workspace.cleanup();
+    try {
+      await graphCoordinator?.close();
+    } finally {
+      try {
+        graphControlStore?.close();
+      } finally {
+        await workspace.cleanup();
+      }
+    }
   }
 }
 

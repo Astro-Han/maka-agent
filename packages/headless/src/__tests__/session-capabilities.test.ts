@@ -144,3 +144,24 @@ test('exposes graph supervisor tools only after the coordinator is bound', async
     graphTools,
   );
 });
+
+test('settles the scoped graph before stopping the root Session', async () => {
+  const order: string[] = [];
+  const bridge = createHeadlessSessionCapabilityBridge();
+  bridge.bind(
+    {
+      stopSession: async () => {
+        order.push('session');
+      },
+    } as unknown as SessionManager,
+    {
+      stop: async (sessionId: string) => {
+        assert.equal(sessionId, 'root-session');
+        order.push('graph');
+      },
+    } as AgentGraphCoordinator,
+  );
+
+  await bridge.settle('root-session');
+  assert.deepEqual(order, ['graph', 'session']);
+});

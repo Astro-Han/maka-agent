@@ -85,6 +85,14 @@ export function createHeadlessSessionCapabilityBridge(): {
     },
     async settle(sessionId, input) {
       const operations = [...activeOperations];
+      let graphStopError: unknown;
+      if (graphCoordinator) {
+        try {
+          await graphCoordinator.stop(sessionId);
+        } catch (error) {
+          graphStopError = error;
+        }
+      }
       let firstStopError: unknown;
       try {
         await requireManager().stopSession(sessionId, input);
@@ -102,6 +110,7 @@ export function createHeadlessSessionCapabilityBridge(): {
       const error = results.find(
         (result): result is PromiseRejectedResult => result.status === 'rejected',
       )?.reason;
+      if (graphStopError !== undefined) throw graphStopError;
       if (error !== undefined) throw error;
     },
   };

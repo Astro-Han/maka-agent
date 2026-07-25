@@ -18,6 +18,7 @@ import type { MakaTool, MakaToolContext } from '../tool-runtime.js';
 import {
   AgentGraphCoordinator,
   agentGraphIdForRootSession,
+  type AgentGraphCoordinatorInput,
 } from '../stream-graph-coordinator.js';
 import { UPDATE_AGENT_GRAPH_TOOL_NAME } from '../stream-graph-supervisor-tools.js';
 
@@ -43,6 +44,9 @@ describe('host-managed agent graph coordinator', () => {
       | undefined;
     let coordinator: AgentGraphCoordinator | undefined;
     let recovered: AgentGraphCoordinator | undefined;
+    let delayedControlStore:
+      | ReturnType<typeof createDelayableControlStore>
+      | undefined;
     try {
       const rootSession = await manager.createSession({
         cwd: root,
@@ -66,11 +70,12 @@ describe('host-managed agent graph coordinator', () => {
       controlStore = createSqliteSessionMetadataStore(
         join(root, SQLITE_SESSION_METADATA_DATABASE_NAME),
       );
+      delayedControlStore = createDelayableControlStore(controlStore);
       coordinator = createCoordinator({
         sessionStore,
         runStore,
         runtimeEventStore,
-        controlStore,
+        controlStore: delayedControlStore.store,
         manager,
       });
       const tools = await coordinator.toolsForSession(rootSession.id);
@@ -134,7 +139,7 @@ describe('host-managed agent graph coordinator', () => {
         sessionStore,
         runStore,
         runtimeEventStore,
-        controlStore,
+        controlStore: delayedControlStore.store,
         manager,
       });
       assert.deepEqual(await recovered.recover(), [rootSession.id]);
@@ -144,6 +149,45 @@ describe('host-managed agent graph coordinator', () => {
       );
       assert.equal((await controlStore.listAgentGraphIntentClaims(graphId)).length, 1);
       assert.equal((await manager.listChildSessions(rootSession.id)).length, 1);
+
+      const recoveredTools = await recovered.toolsForSession(rootSession.id);
+      const delayedUpdate = recoveredTools.find(
+        (tool) => tool.name === UPDATE_AGENT_GRAPH_TOOL_NAME,
+      );
+      assert.ok(delayedUpdate);
+      const gate = delayedControlStore.holdNextCommit();
+      const pendingUpdate = Promise.resolve(
+        delayedUpdate.impl(
+          {
+            add_work: [
+              {
+                agent_id: 'local-read',
+                instruction: 'This pre-stop update must remain paused.',
+                input_ids: [],
+              },
+            ],
+          },
+          toolContext(
+            rootSession.id,
+            sourceRun.runId,
+            sourceTurnId,
+            'tool-call-graph-stop-race',
+          ),
+        ),
+      );
+      await gate.started;
+      try {
+        await recovered.stop(rootSession.id);
+      } finally {
+        gate.release();
+      }
+      await pendingUpdate;
+      await recovered.waitForIdle(rootSession.id);
+      assert.equal(
+        (await controlStore.listAgentGraphOperatorProvisions(graphId)).length,
+        1,
+        'a schedule commit authorized before stop must not restart reconciliation',
+      );
     } finally {
       await coordinator?.close();
       await recovered?.close();
@@ -158,6 +202,97 @@ describe('host-managed agent graph coordinator', () => {
     assert.match(graphId, /^agent_graph_[a-f0-9]{32}$/);
     assert.equal(graphId, agentGraphIdForRootSession('root-session'));
     assert.notEqual(graphId, agentGraphIdForRootSession('other-root'));
+  });
+
+  test('surfaces topology cleanup failures from close', async () => {
+    const topologyFailure = new Error('graph topology unavailable');
+    const coordinator = new AgentGraphCoordinator({
+      sessionStore: {
+        listForRecovery: async () => [],
+        readHeader: async (sessionId: string) =>
+          ({
+            id: sessionId,
+            status: 'active',
+            isArchived: false,
+          }) as never,
+      },
+      runStore: { listSessionRuns: async () => [] },
+      runtimeEventStore: { readImmutableRuntimeEvents: async () => [] },
+      controlStore: {
+        listAgentGraphOperatorProvisions: async () => {
+          throw topologyFailure;
+        },
+      },
+      runtime: {},
+      newId: randomUUID,
+      rootSessionId: 'root-session',
+    } as unknown as AgentGraphCoordinatorInput);
+    await assert.rejects(
+      coordinator.toolsForSession('another-root'),
+      /scoped to root Session root-session/,
+    );
+    await coordinator.toolsForSession('root-session');
+    await assert.rejects(
+      coordinator.close(),
+      (error: unknown) =>
+        error === topologyFailure ||
+        (error instanceof AggregateError &&
+          error.errors.some(
+            (failure) =>
+              failure === topologyFailure ||
+              (failure instanceof AggregateError && failure.errors.includes(topologyFailure)),
+      )),
+    );
+  });
+
+  test('attempts every operator stop and surfaces all close failures', async () => {
+    const graphId = agentGraphIdForRootSession('root-session');
+    const stopped: string[] = [];
+    const coordinator = new AgentGraphCoordinator({
+      sessionStore: {
+        listForRecovery: async () => [],
+        readHeader: async (sessionId: string) =>
+          ({
+            id: sessionId,
+            status: 'active',
+            isArchived: false,
+          }) as never,
+      },
+      runStore: { listSessionRuns: async () => [] },
+      runtimeEventStore: { readImmutableRuntimeEvents: async () => [] },
+      controlStore: {
+        listAgentGraphOperatorProvisions: async () =>
+          ['a', 'b'].map((suffix, index) => ({
+            graphId,
+            provisionId: `provision-${suffix}`,
+            operatorId: `operator-${suffix}`,
+            targetSessionId: `child-${suffix}`,
+            provisionedAt: index,
+            edges: [],
+          })),
+      },
+      runtime: {
+        stopSession: async (sessionId: string) => {
+          stopped.push(sessionId);
+          throw new Error(`cannot stop ${sessionId}`);
+        },
+      },
+      newId: randomUUID,
+      rootSessionId: 'root-session',
+    } as unknown as AgentGraphCoordinatorInput);
+    await coordinator.toolsForSession('root-session');
+    await assert.rejects(
+      coordinator.close(),
+      (error: unknown) =>
+        error instanceof AggregateError &&
+        (error.errors.length === 2 ||
+          error.errors.some(
+            (failure) =>
+              failure instanceof AggregateError &&
+              failure.errors.length === 2,
+          )),
+    );
+    assert.deepEqual(stopped.sort(), ['child-a', 'child-b']);
   });
 });
 
@@ -176,6 +311,53 @@ function createCoordinator(input: {
   });
 }
 
+function createDelayableControlStore(
+  store: ReturnType<typeof createSqliteSessionMetadataStore>,
+): {
+  store: ReturnType<typeof createSqliteSessionMetadataStore>;
+  holdNextCommit(): { started: Promise<void>; release(): void };
+} {
+  let gate:
+    | {
+        started(): void;
+        release: Promise<void>;
+      }
+    | undefined;
+  const proxy = new Proxy(store, {
+    get(target, property) {
+      if (property === 'commitAgentGraphScheduleUpdate') {
+        return async (...args: Parameters<typeof target.commitAgentGraphScheduleUpdate>) => {
+          const activeGate = gate;
+          gate = undefined;
+          if (activeGate) {
+            activeGate.started();
+            await activeGate.release;
+          }
+          return target.commitAgentGraphScheduleUpdate(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return {
+    store: proxy,
+    holdNextCommit() {
+      if (gate) throw new Error('A delayed graph schedule commit is already pending');
+      let markStarted!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        markStarted = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      gate = { started: markStarted, release: released };
+      return { started, release };
+    },
+  };
+}
+
 function localReadTools(): MakaTool[] {
   return ['Read', 'Glob', 'Grep'].map((name) => ({
     name,
@@ -192,12 +374,13 @@ function toolContext(
   sessionId: string,
   runId: string,
   turnId: string,
+  toolCallId = 'tool-call-graph-start',
 ): MakaToolContext {
   return {
     sessionId,
     runId,
     turnId,
-    toolCallId: 'tool-call-graph-start',
+    toolCallId,
     cwd: '/workspace',
     abortSignal: new AbortController().signal,
     emitOutput() {},

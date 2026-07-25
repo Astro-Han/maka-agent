@@ -352,6 +352,15 @@ export async function runHarborCellWithStorage(
       invocation = result;
     },
   });
+  const session = await manager.createSession({
+    cwd: input.cwd,
+    backend: input.config.backend,
+    llmConnectionSlug: config.llmConnectionSlug,
+    model: config.model,
+    ...(config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : {}),
+    permissionMode: 'execute',
+    name: `harbor-cell:${input.config.id}`,
+  });
   const graphControlStore = createAgentGraphControlStore(input.storageRoot);
   const graphCoordinator = new AgentGraphCoordinator({
     sessionStore,
@@ -360,27 +369,9 @@ export async function runHarborCellWithStorage(
     controlStore: graphControlStore,
     runtime: manager,
     newId,
+    rootSessionId: session.id,
   });
   sessionCapabilities.bind(manager, graphCoordinator);
-
-  const session = await (async () => {
-    try {
-      await graphCoordinator.recover();
-      return await manager.createSession({
-        cwd: input.cwd,
-        backend: input.config.backend,
-        llmConnectionSlug: config.llmConnectionSlug,
-        model: config.model,
-        ...(config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : {}),
-        permissionMode: 'execute',
-        name: `harbor-cell:${input.config.id}`,
-      });
-    } catch (error) {
-      await graphCoordinator.close();
-      graphControlStore.close();
-      throw error;
-    }
-  })();
 
   let deadlineReached = false;
   let settlementError: unknown;
@@ -390,10 +381,9 @@ export async function runHarborCellWithStorage(
       ? undefined
       : setTimeout(() => {
           deadlineReached = true;
-          settlementAttempt = manager
-            .stopSession(session.id, {
+          settlementAttempt = sessionCapabilities
+            .settle(session.id, {
               source: 'benchmark_deadline',
-              mode: 'immediate',
             })
             .catch((error) => {
               settlementError = error;
@@ -450,9 +440,20 @@ export async function runHarborCellWithStorage(
   } finally {
     if (settlementTimer) clearTimeout(settlementTimer);
     try {
-      await graphCoordinator.close();
+      if (settlementAttempt) {
+        await settlementAttempt;
+      } else {
+        await sessionCapabilities.settle(
+          session.id,
+          deadlineReached ? { source: 'benchmark_deadline' } : undefined,
+        );
+      }
     } finally {
-      graphControlStore.close();
+      try {
+        await graphCoordinator.close();
+      } finally {
+        graphControlStore.close();
+      }
     }
   }
   await settlementAttempt;

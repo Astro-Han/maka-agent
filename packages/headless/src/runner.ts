@@ -171,18 +171,6 @@ export async function runExperimentWithStorage(
         invocation = result;
       },
     });
-    graphControlStore = createAgentGraphControlStore(deps.storageRoot);
-    graphCoordinator = new AgentGraphCoordinator({
-      sessionStore: storage.executionStores.sessionStore,
-      runStore,
-      runtimeEventStore: storage.executionStores.runtimeEventStore,
-      controlStore: graphControlStore,
-      runtime: manager,
-      newId,
-    });
-    sessionCapabilities.bind(manager, graphCoordinator);
-    await graphCoordinator.recover();
-
     const session = await manager.createSession({
       cwd: agentWorkspaceDir,
       backend: config.backend,
@@ -192,6 +180,17 @@ export async function runExperimentWithStorage(
       ...(deps.orchestrationMode ? { orchestrationMode: deps.orchestrationMode } : {}),
       name: `lab:${config.id}:${task.id}`,
     });
+    graphControlStore = createAgentGraphControlStore(deps.storageRoot);
+    graphCoordinator = new AgentGraphCoordinator({
+      sessionStore: storage.executionStores.sessionStore,
+      runStore,
+      runtimeEventStore: storage.executionStores.runtimeEventStore,
+      controlStore: graphControlStore,
+      runtime: manager,
+      newId,
+      rootSessionId: session.id,
+    });
+    sessionCapabilities.bind(manager, graphCoordinator);
 
     const turnId = newId();
     // Drain the turn to completion. The trajectory + status come from the
@@ -213,6 +212,7 @@ export async function runExperimentWithStorage(
         });
       }
     }
+    await sessionCapabilities.settle(session.id);
 
     const status = invocation?.status ?? 'failed';
     const runnerCompleted = status === 'completed';
@@ -303,8 +303,14 @@ export async function runExperimentWithStorage(
       await scoringWorkspace.cleanup();
     }
   } finally {
-    await graphCoordinator?.close();
-    graphControlStore?.close();
-    await workspace.cleanup();
+    try {
+      await graphCoordinator?.close();
+    } finally {
+      try {
+        graphControlStore?.close();
+      } finally {
+        await workspace.cleanup();
+      }
+    }
   }
 }
