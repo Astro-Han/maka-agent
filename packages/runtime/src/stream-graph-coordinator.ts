@@ -21,12 +21,21 @@ import {
 import type {
   AgentGraphSupervisorObservation,
   AgentGraphSupervisorObserver,
+  AgentGraphSupervisorRuntimeEvent,
 } from './stream-graph-dispatch.js';
 import {
   reconcileAgentGraphSchedule,
   type AgentGraphScheduleReconciliationResult,
   type RenderAgentGraphScheduledWorkPromptInput,
 } from './stream-graph-schedule-reconcile.js';
+import {
+  buildAgentGraphClientSnapshot,
+  inspectAgentGraphOperator,
+  type AgentGraphClientSnapshot,
+  type AgentGraphClientSnapshotOptions,
+  type AgentGraphOperatorInspection,
+  type BuildAgentGraphClientReadModelInput,
+} from './stream-graph-read-model.js';
 import { buildAgentGraphSupervisorTools } from './stream-graph-supervisor-tools.js';
 import type { AgentGraphTraceTopology } from './stream-graph-trace.js';
 import { stableHash } from './request-shape.js';
@@ -84,6 +93,28 @@ interface GraphDriver {
   lastError?: unknown;
 }
 
+export type AgentGraphClientChangedReason =
+  | 'schedule_committed'
+  | 'runtime_activity'
+  | 'reconciled'
+  | 'stopped';
+
+export interface AgentGraphClientChangedEvent {
+  schemaVersion: 1;
+  rootSessionId: string;
+  graphId: string;
+  reason: AgentGraphClientChangedReason;
+}
+
+export type AgentGraphClientChangedListener = (
+  event: AgentGraphClientChangedEvent,
+) => void | Promise<void>;
+
+interface AgentGraphClientSubscription {
+  rootSessionId?: string;
+  listener: AgentGraphClientChangedListener;
+}
+
 /**
  * Process-local execution authority for Session-backed agent graphs.
  *
@@ -94,6 +125,7 @@ interface GraphDriver {
 export class AgentGraphCoordinator {
   readonly #input: AgentGraphCoordinatorInput;
   readonly #drivers = new Map<string, GraphDriver>();
+  readonly #clientSubscriptions = new Set<AgentGraphClientSubscription>();
   #closed = false;
 
   constructor(input: AgentGraphCoordinatorInput) {
@@ -138,9 +170,69 @@ export class AgentGraphCoordinator {
       },
       onScheduleUpdateCommitted: (update, authorization) => {
         this.#assertScheduleOwnedByRoot(update, rootSessionId, driver.graphId);
+        this.#notifyClientChanged(driver, 'schedule_committed');
         this.#wakeFromSchedule(driver, decodeScheduleWakeFence(authorization));
       },
     });
+  }
+
+  /**
+   * Read one bounded snapshot entirely from durable topology, schedule,
+   * admission, AgentRun, and RuntimeEvent facts.
+   */
+  async getSnapshot(
+    rootSessionId: string,
+    options: AgentGraphClientSnapshotOptions = {},
+  ): Promise<AgentGraphClientSnapshot> {
+    return buildAgentGraphClientSnapshot(
+      await this.#readClientModelInput(rootSessionId),
+      options,
+    );
+  }
+
+  /** Inspect one operator without requiring it to be present in the bounded snapshot page. */
+  async inspectOperator(
+    rootSessionId: string,
+    operatorId: string,
+  ): Promise<AgentGraphOperatorInspection> {
+    return inspectAgentGraphOperator(
+      await this.#readClientModelInput(rootSessionId),
+      operatorId,
+    );
+  }
+
+  /**
+   * Subscribe to durable-state invalidation hints for one root graph.
+   *
+   * The callback is presentation-only and never gates reconciliation. Clients
+   * reconnect by calling getSnapshot(), not by replaying these process-local
+   * hints as authority.
+   */
+  subscribe(
+    rootSessionId: string,
+    listener: AgentGraphClientChangedListener,
+  ): () => void {
+    const normalizedRootSessionId = requireRootSessionId(rootSessionId);
+    if (
+      this.#input.rootSessionId &&
+      normalizedRootSessionId !== this.#input.rootSessionId
+    ) {
+      throw new Error(
+        `Agent graph coordinator is scoped to root Session ${this.#input.rootSessionId}`,
+      );
+    }
+    if (this.#closed) throw new Error('Agent graph coordinator is closed');
+    const subscription = { rootSessionId: normalizedRootSessionId, listener };
+    this.#clientSubscriptions.add(subscription);
+    return () => this.#clientSubscriptions.delete(subscription);
+  }
+
+  /** Host adapter hook for multiplexing several root graphs to local clients. */
+  subscribeAll(listener: AgentGraphClientChangedListener): () => void {
+    if (this.#closed) throw new Error('Agent graph coordinator is closed');
+    const subscription = { listener };
+    this.#clientSubscriptions.add(subscription);
+    return () => this.#clientSubscriptions.delete(subscription);
   }
 
   /** Wake reconciliation without making the caller part of the data path. */
@@ -268,6 +360,7 @@ export class AgentGraphCoordinator {
       driver.stopping = false;
     }
     throwCollectedFailures(`Failed to stop agent graph ${driver.graphId}`, failures);
+    this.#notifyClientChanged(driver, 'stopped');
   }
 
   async close(): Promise<void> {
@@ -301,6 +394,7 @@ export class AgentGraphCoordinator {
         throwCollectedFailures(`Failed to close agent graph ${driver.graphId}`, failures);
       }),
     );
+    this.#clientSubscriptions.clear();
     throwCollectedFailures(
       'Failed to close one or more agent graph coordinators',
       results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
@@ -317,6 +411,7 @@ export class AgentGraphCoordinator {
         const result = await this.#reconcileOnce(driver, abortController.signal);
         driver.lastResult = result;
         await notify(this.#input.onReconciliation, driver.rootSessionId, result);
+        this.#notifyClientChanged(driver, 'reconciled');
       } catch (error) {
         if (!abortController.signal.aborted) {
           driver.lastError = error;
@@ -353,10 +448,35 @@ export class AgentGraphCoordinator {
         onActivationReady: this.#input.supervisor?.onActivationReady,
         onRuntimeEvent: (event) => {
           if (!driver.paused) driver.requested = true;
+          if (isDurableGraphClientActivity(event.event.type)) {
+            this.#notifyClientChanged(driver, 'runtime_activity');
+          }
           void notify(this.#input.supervisor?.onRuntimeEvent, event);
         },
       },
     });
+  }
+
+  async #readClientModelInput(
+    rootSessionId: string,
+  ): Promise<BuildAgentGraphClientReadModelInput> {
+    await this.#assertRootGraphReader(rootSessionId);
+    const graphId = agentGraphIdForRootSession(rootSessionId);
+    const [provisions, scheduleUpdates] = await Promise.all([
+      this.#input.controlStore.listAgentGraphOperatorProvisions(graphId),
+      this.#input.controlStore.listAgentGraphScheduleUpdates(graphId),
+    ]);
+    scheduleUpdates.forEach((update) =>
+      this.#assertScheduleOwnedByRoot(update, rootSessionId, graphId),
+    );
+    const topology = topologyFromProvisions(graphId, provisions);
+    return {
+      rootSessionId,
+      graphId,
+      provisions,
+      scheduleUpdates,
+      observation: await this.#observeTopology(topology),
+    };
   }
 
   async #readTopology(graphId: string): Promise<AgentGraphTraceTopology> {
@@ -367,6 +487,14 @@ export class AgentGraphCoordinator {
   }
 
   async #assertRootSupervisor(rootSessionId: string): Promise<SessionHeader> {
+    const header = await this.#assertRootGraphReader(rootSessionId);
+    if (header.isArchived || header.status === 'archived') {
+      throw new Error('Archived Sessions cannot supervise an agent graph');
+    }
+    return header;
+  }
+
+  async #assertRootGraphReader(rootSessionId: string): Promise<SessionHeader> {
     if (this.#closed) throw new Error('Agent graph coordinator is closed');
     if (this.#input.rootSessionId && rootSessionId !== this.#input.rootSessionId) {
       throw new Error(
@@ -378,10 +506,7 @@ export class AgentGraphCoordinator {
       throw new Error(`Session store returned ${header.id}, expected ${rootSessionId}`);
     }
     if (header.subagentParent) {
-      throw new Error('Agent graph supervisor tools are available only to root Sessions');
-    }
-    if (header.isArchived || header.status === 'archived') {
-      throw new Error('Archived Sessions cannot supervise an agent graph');
+      throw new Error('Agent graph client reads are available only to root Sessions');
     }
     return header;
   }
@@ -450,6 +575,28 @@ export class AgentGraphCoordinator {
     });
   }
 
+  #notifyClientChanged(
+    driver: GraphDriver,
+    reason: AgentGraphClientChangedReason,
+  ): void {
+    if (this.#clientSubscriptions.size === 0) return;
+    const event: AgentGraphClientChangedEvent = {
+      schemaVersion: 1,
+      rootSessionId: driver.rootSessionId,
+      graphId: driver.graphId,
+      reason,
+    };
+    for (const subscription of this.#clientSubscriptions) {
+      if (
+        subscription.rootSessionId &&
+        subscription.rootSessionId !== driver.rootSessionId
+      ) {
+        continue;
+      }
+      void notify(subscription.listener, structuredClone(event));
+    }
+  }
+
   async #stopKnownOperators(graphId: string, failures: unknown[]): Promise<void> {
     let topology: AgentGraphTraceTopology;
     try {
@@ -493,15 +640,33 @@ function throwCollectedFailures(message: string, failures: readonly unknown[]): 
 }
 
 export function agentGraphIdForRootSession(rootSessionId: string): string {
-  const normalized = rootSessionId.trim();
-  if (!normalized || normalized !== rootSessionId) {
-    throw new Error('Agent graph root Session id must be a non-empty canonical identity');
-  }
+  requireRootSessionId(rootSessionId);
   const suffix = stableHash({
     schemaVersion: 1,
     rootSessionId,
   }).slice('sha256:'.length, 'sha256:'.length + 32);
   return `agent_graph_${suffix}`;
+}
+
+function requireRootSessionId(rootSessionId: string): string {
+  const normalized = rootSessionId.trim();
+  if (!normalized || normalized !== rootSessionId) {
+    throw new Error('Agent graph root Session id must be a non-empty canonical identity');
+  }
+  return normalized;
+}
+
+function isDurableGraphClientActivity(
+  type: AgentGraphSupervisorRuntimeEvent['event']['type'],
+): boolean {
+  return ![
+    'text_delta',
+    'thinking_delta',
+    'tool_output_delta',
+    'tool_progress',
+    'queue_update',
+    'provider_retry',
+  ].includes(type);
 }
 
 export function topologyFromProvisions(

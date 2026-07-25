@@ -47,6 +47,8 @@ describe('host-managed agent graph coordinator', () => {
     let delayedControlStore:
       | ReturnType<typeof createDelayableControlStore>
       | undefined;
+    const clientEvents: string[] = [];
+    let unsubscribe: (() => void) | undefined;
     try {
       const rootSession = await manager.createSession({
         cwd: root,
@@ -77,6 +79,10 @@ describe('host-managed agent graph coordinator', () => {
         runtimeEventStore,
         controlStore: delayedControlStore.store,
         manager,
+      });
+      unsubscribe = coordinator.subscribe(rootSession.id, (event) => {
+        assert.equal(event.rootSessionId, rootSession.id);
+        clientEvents.push(event.reason);
       });
       const tools = await coordinator.toolsForSession(rootSession.id);
       const update = tools.find((tool) => tool.name === UPDATE_AGENT_GRAPH_TOOL_NAME);
@@ -128,12 +134,37 @@ describe('host-managed agent graph coordinator', () => {
         childSessions[0]?.subagentParent?.graph?.operatorId,
         firstProvisions[0]?.operatorId,
       );
+      const snapshot = await coordinator.getSnapshot(rootSession.id);
+      assert.equal(snapshot.rootSessionId, rootSession.id);
+      assert.equal(snapshot.graphId, graphId);
+      assert.equal(snapshot.scheduleRevision, 1);
+      assert.equal(snapshot.operators.length, 1);
+      assert.equal(snapshot.operators[0]?.childSessionId, childSessions[0]?.id);
+      assert.equal(snapshot.operators[0]?.agentId, 'local-read');
+      assert.equal(snapshot.work[0]?.instructionPreview, 'Inspect the repository and report one concrete finding.');
+      assert.match(snapshot.snapshotVersion, /^sha256:[a-f0-9]{64}$/);
+      const inspection = await coordinator.inspectOperator(
+        rootSession.id,
+        firstProvisions[0]!.operatorId,
+      );
+      assert.equal(inspection.operator.childSessionId, childSessions[0]?.id);
+      assert.equal(inspection.claims.length, 1);
+      assert.equal(inspection.activations.length, 1);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.ok(clientEvents.includes('schedule_committed'));
+      assert.ok(clientEvents.includes('reconciled'));
+      assert.equal(
+        clientEvents.filter((reason) => reason === 'runtime_activity').length,
+        2,
+        'partial text deltas must not flood durable-state invalidation hints',
+      );
       await assert.rejects(
         coordinator.toolsForSession(childSessions[0]!.id),
         /only to root Sessions/,
       );
 
       await coordinator.close();
+      unsubscribe = undefined;
       coordinator = undefined;
       recovered = createCoordinator({
         sessionStore,
@@ -189,6 +220,7 @@ describe('host-managed agent graph coordinator', () => {
         'a schedule commit authorized before stop must not restart reconciliation',
       );
     } finally {
+      unsubscribe?.();
       await coordinator?.close();
       await recovered?.close();
       controlStore?.close();
@@ -202,6 +234,37 @@ describe('host-managed agent graph coordinator', () => {
     assert.match(graphId, /^agent_graph_[a-f0-9]{32}$/);
     assert.equal(graphId, agentGraphIdForRootSession('root-session'));
     assert.notEqual(graphId, agentGraphIdForRootSession('other-root'));
+  });
+
+  test('keeps completed graph snapshots readable after the root Session is archived', async () => {
+    const coordinator = new AgentGraphCoordinator({
+      sessionStore: {
+        listForRecovery: async () => [],
+        readHeader: async (sessionId: string) =>
+          ({
+            id: sessionId,
+            status: 'archived',
+            isArchived: true,
+          }) as never,
+      },
+      runStore: { listSessionRuns: async () => [] },
+      runtimeEventStore: { readImmutableRuntimeEvents: async () => [] },
+      controlStore: {
+        listAgentGraphOperatorProvisions: async () => [],
+        listAgentGraphScheduleUpdates: async () => [],
+        listAgentGraphIntentClaims: async () => [],
+      },
+      runtime: {},
+      newId: randomUUID,
+      rootSessionId: 'root-session',
+    } as unknown as AgentGraphCoordinatorInput);
+    const snapshot = await coordinator.getSnapshot('root-session');
+    assert.equal(snapshot.status, 'empty');
+    await assert.rejects(
+      coordinator.toolsForSession('root-session'),
+      /Archived Sessions cannot supervise/,
+    );
+    await coordinator.close();
   });
 
   test('surfaces topology cleanup failures from close', async () => {

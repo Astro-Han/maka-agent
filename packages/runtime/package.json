@@ -60,6 +60,7 @@
     "./stream-graph-dispatch": "./dist/stream-graph-dispatch.js",
     "./stream-graph-schedule-reconcile": "./dist/stream-graph-schedule-reconcile.js",
     "./stream-graph-supervisor-tools": "./dist/stream-graph-supervisor-tools.js",
+    "./stream-graph-read-model": "./dist/stream-graph-read-model.js",
     "./stream-graph-coordinator": "./dist/stream-graph-coordinator.js"
   },
   "scripts": {

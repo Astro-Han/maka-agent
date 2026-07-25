@@ -33,6 +33,27 @@ describe('IPC surface contract', () => {
     assert.deepEqual(staleMainHandlers, [], 'main process must not expose stale invoke handlers outside the preload bridge');
   });
 
+  it('exposes the bounded graph read model without renderer execution authority', async () => {
+    const [main, preload, bridge] = await Promise.all([
+      readMainProcessCombinedSource(),
+      readRepo('apps/desktop/src/preload/preload.ts'),
+      readRepo('apps/desktop/src/preload/bridge-contract.d.ts'),
+    ]);
+    for (const channel of [
+      'graphs:getSnapshot',
+      'graphs:inspectOperator',
+      'graphs:stop',
+    ]) {
+      assert.match(main, new RegExp(`ipcMain\\.handle\\(\\s*['"]${channel}['"]`));
+      assert.match(preload, new RegExp(`ipcRenderer\\.invoke\\(\\s*['"]${channel}['"]`));
+    }
+    assert.match(main, /coordinator\.subscribeAll/);
+    assert.match(preload, /payload\.rootSessionId === rootSessionId/);
+    assert.match(bridge, /AgentGraphClientSnapshot/);
+    assert.match(bridge, /AgentGraphOperatorInspection/);
+    assert.doesNotMatch(bridge, /AgentGraphScheduleControlStore|RuntimeEventStore/);
+  });
+
   it('exposes memory lifecycle IPC without renderer-forged metadata', async () => {
     const [main, preload] = await Promise.all([
       readMainProcessCombinedSource(),

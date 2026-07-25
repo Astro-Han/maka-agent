@@ -90,7 +90,14 @@ import type {
   UsageQuery,
   UsageSummaryV2,
 } from '@maka/core/usage-stats/types';
-import type { BotStatus, WechatBridgeQrCodeResult } from '@maka/runtime';
+import type {
+  AgentGraphClientChangedEvent,
+  AgentGraphClientSnapshot,
+  AgentGraphClientSnapshotOptions,
+  AgentGraphOperatorInspection,
+  BotStatus,
+  WechatBridgeQrCodeResult,
+} from '@maka/runtime';
 import type { GoalState } from '@maka/runtime';
 import type { BundledSkillCatalogEntry, ManagedSkillSourceEntry, ManagedSkillUpdatePreview, SkillEntry, SkillGovernanceDetails } from '@maka/ui';
 import type { ConfigCategory } from '@maka/storage';
@@ -134,6 +141,36 @@ const makaBridge = {
         handler(payload);
       ipcRenderer.on('deepResearch:changed', listener);
       return () => ipcRenderer.off('deepResearch:changed', listener);
+    },
+  },
+  graphs: {
+    getSnapshot(
+      rootSessionId: string,
+      options?: AgentGraphClientSnapshotOptions,
+    ): Promise<AgentGraphClientSnapshot> {
+      return ipcRenderer.invoke('graphs:getSnapshot', rootSessionId, options);
+    },
+    inspectOperator(
+      rootSessionId: string,
+      operatorId: string,
+    ): Promise<AgentGraphOperatorInspection> {
+      return ipcRenderer.invoke('graphs:inspectOperator', rootSessionId, operatorId);
+    },
+    stop(rootSessionId: string): Promise<void> {
+      return ipcRenderer.invoke('graphs:stop', rootSessionId);
+    },
+    subscribe(
+      rootSessionId: string,
+      handler: (event: AgentGraphClientChangedEvent) => void,
+    ): () => void {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: AgentGraphClientChangedEvent,
+      ) => {
+        if (payload.rootSessionId === rootSessionId) handler(payload);
+      };
+      ipcRenderer.on('graphs:changed', listener);
+      return () => ipcRenderer.off('graphs:changed', listener);
     },
   },
   sessions: {
