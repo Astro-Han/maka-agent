@@ -382,7 +382,7 @@ describe('SessionManager claimed graph intent execution', () => {
     expect((await runStore.listSessionRuns(child.id)).length).toBe(1);
   });
 
-  test('keeps a stop pending across graph admission until the turn can be cancelled', async () => {
+  test('keeps a stop pending across graph admission with an idle cached backend', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
@@ -404,6 +404,13 @@ describe('SessionManager claimed graph intent execution', () => {
     });
     const parent = await manager.createSession(makeInput());
     const child = await createGraphOperatorSession(store, parent.id);
+    await drain(
+      manager.sendMessage(child.id, {
+        turnId: 'completed-before-admission',
+        text: 'warm the cached operator backend',
+      }),
+    );
+    expect(backend?.sendInputs).toHaveLength(1);
     const claim = graphIntentClaim({ targetSessionId: child.id });
     const execution = manager.runClaimedAgentGraphIntent({
       ...graphExecutionInput(claim, 'activation stopped during admission'),
@@ -421,7 +428,7 @@ describe('SessionManager claimed graph intent execution', () => {
     });
     await Promise.resolve();
     expect(stopSettled).toBe(false);
-    expect(backend).toBe(undefined);
+    expect(backend?.sendInputs).toHaveLength(1);
 
     releaseAdmission.release();
     await stop;
@@ -429,7 +436,7 @@ describe('SessionManager claimed graph intent execution', () => {
 
     expect(result.status).toBe('cancelled');
     expect(backend?.stopCalls).toBe(1);
-    expect(backend?.sendInputs).toHaveLength(0);
+    expect(backend?.sendInputs).toHaveLength(1);
     expect((await runStore.readRun(child.id, claim.targetRunId)).status).toBe('cancelled');
   });
 

@@ -1082,7 +1082,8 @@ export class RuntimeKernel implements RuntimeKernelLike {
     // editor from the mirror captured before the clear.
     this.clearSteering(sessionId);
     const activeSessions = this.activeSessionsFor(sessionId);
-    if (activeSessions.length === 0 && (this.pendingTurnStarts.get(sessionId) ?? 0) > 0) {
+    const hasActiveRuns = activeSessions.some((active) => active.activeRuns.size > 0);
+    if (!hasActiveRuns && (this.pendingTurnStarts.get(sessionId) ?? 0) > 0) {
       await this.waitForPendingStop(sessionId, input);
       return;
     }
