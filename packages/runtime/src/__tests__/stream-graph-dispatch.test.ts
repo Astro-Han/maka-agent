@@ -167,6 +167,44 @@ describe('stream graph dispatch', () => {
       claimStore.close();
     }
   });
+
+  test('preserves sibling admissions when one execution fails after its claim', async () => {
+    const facts = new MemoryGraphFacts();
+    facts.seedCompleted('session-source', 'run-source', 'turn-source', 1);
+    const claimStore = createSqliteSessionMetadataStore(':memory:', { now: nextNumber(300) });
+    const executor = new MemoryGraphExecutor(claimStore, facts, new Set(['branch-b']));
+
+    try {
+      const result = await runAgentGraphToQuiescence({
+        topology: topology(),
+        runStore: facts,
+        runtimeEventStore: facts,
+        claimStore,
+        executor,
+        newId: nextId(),
+        maxNewActivations: 2,
+        resolvePolicies: fanOutJoinPolicies,
+        renderPrompt: ({ intent }) => `execute ${intent.operatorId}`,
+      });
+
+      assert.equal(result.status, 'failed');
+      assert.equal(result.newActivationCount, 2);
+      assert.equal(result.observedExistingActivationCount, 0);
+      assert.deepEqual(
+        result.dispatches.map((dispatch) => [dispatch.intent.operatorId, dispatch.claimCreated]),
+        [['branch-a', true]],
+      );
+      assert.equal(result.failures.length, 1);
+      assert.equal(result.failures[0]?.intent.operatorId, 'branch-b');
+      assert.equal(result.failures[0]?.claim?.targetOperatorId, 'branch-b');
+      assert.equal(result.failures[0]?.claimCreated, true);
+      assert.match(String(result.failures[0]?.error), /branch-b execution failed/);
+      assert.equal(executor.backendInvocations, 1);
+      assert.equal((await claimStore.listAgentGraphIntentClaims('graph-dispatch')).length, 2);
+    } finally {
+      claimStore.close();
+    }
+  });
 });
 
 function topology(): AgentGraphTraceTopology {
@@ -270,6 +308,7 @@ class MemoryGraphExecutor implements AgentGraphIntentExecutor {
   constructor(
     private readonly claims: AgentGraphIntentClaimStore,
     private readonly facts: MemoryGraphFacts,
+    private readonly failingOperators = new Set<string>(),
   ) {}
 
   async runClaimedAgentGraphIntent(
@@ -277,6 +316,9 @@ class MemoryGraphExecutor implements AgentGraphIntentExecutor {
   ): ReturnType<AgentGraphIntentExecutor['runClaimedAgentGraphIntent']> {
     const claim = await this.claims.readAgentGraphIntentClaim(input.graphId, input.intentId);
     if (!claim) throw new Error('missing claim');
+    if (this.failingOperators.has(claim.targetOperatorId)) {
+      throw new Error(`${claim.targetOperatorId} execution failed`);
+    }
     const isNew = !this.facts.hasRun(claim.targetSessionId, claim.targetRunId);
     await input.onReady?.({
       claimId: claim.claimId,

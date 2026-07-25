@@ -16,11 +16,13 @@ describe('stream graph admission', () => {
       intent: runnableIntent(),
       store,
       newId: () => generated.shift()!,
+      executionInput: { prompt: 'summarize the committed record' },
     });
     const retry = await claimAgentGraphRunnableIntent({
       intent: runnableIntent(),
       store,
       newId: () => generated.shift()!,
+      executionInput: { prompt: 'summarize the committed record' },
     });
 
     assert.equal(first.created, true);

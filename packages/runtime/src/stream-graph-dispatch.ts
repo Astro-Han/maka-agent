@@ -104,6 +104,11 @@ export interface AgentGraphDispatchedActivation {
 export interface AgentGraphDispatchFailure {
   intent: AgentGraphRunnableIntent;
   error: unknown;
+  /**
+   * Present when durable admission completed before execution failed.
+   */
+  claim?: AgentGraphIntentClaim;
+  claimCreated?: boolean;
 }
 
 export interface AgentGraphQuiescenceResult {
@@ -246,6 +251,11 @@ export async function runAgentGraphToQuiescence(
         else observedExistingActivationCount += 1;
       } else {
         failures.push(outcome.failure);
+        if (outcome.failure.claim) {
+          processedIntentIds.add(outcome.failure.intent.intentId);
+          if (outcome.failure.claimCreated) newActivationCount += 1;
+          else observedExistingActivationCount += 1;
+        }
       }
     }
 
@@ -317,6 +327,12 @@ async function dispatchIntent(
   input: RunAgentGraphToQuiescenceInput,
   prepared: PreparedDispatch,
 ): Promise<DispatchOutcome> {
+  let admission:
+    | {
+        claim: AgentGraphIntentClaim;
+        created: boolean;
+      }
+    | undefined;
   try {
     if (input.abortSignal?.aborted) {
       throw new Error('Agent graph dispatch was cancelled before admission');
@@ -327,6 +343,7 @@ async function dispatchIntent(
       newId: input.newId,
       executionInput: { prompt: prepared.prompt },
     });
+    admission = claimed;
     const result = await input.executor.runClaimedAgentGraphIntent({
       claimStore: input.claimStore,
       graphId: prepared.intent.graphId,
@@ -360,10 +377,17 @@ async function dispatchIntent(
   } catch (error) {
     return {
       status: 'rejected',
-      failure: {
-        intent: prepared.intent,
-        error,
-      },
+      failure: admission
+        ? {
+            intent: prepared.intent,
+            error,
+            claim: admission.claim,
+            claimCreated: admission.created,
+          }
+        : {
+            intent: prepared.intent,
+            error,
+          },
     };
   }
 }
