@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { SessionHeader } from '@maka/core';
+import type { AgentGraphOperatorProvisionRequest } from '@maka/core/agent-graph-topology';
 import {
   createSqliteSessionMetadataStore,
   SessionMetadataConflictError,
@@ -19,7 +20,7 @@ describe('SqliteSessionMetadataStore', () => {
     try {
       const store = createSqliteSessionMetadataStore(path, { now: () => 100 });
       const header = fullHeader();
-      assert.equal(store.schemaVersion(), 8);
+      assert.equal(store.schemaVersion(), 9);
       assert.equal(store.journalMode(), 'wal');
       assert.deepEqual(await store.create(header), {
         header,
@@ -30,7 +31,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const reopened = createSqliteSessionMetadataStore(path, { now: () => 200 });
       try {
-        assert.equal(reopened.schemaVersion(), 8);
+        assert.equal(reopened.schemaVersion(), 9);
         assert.deepEqual(await reopened.read(header.id), {
           header,
           metadataVersion: 1,
@@ -51,7 +52,7 @@ describe('SqliteSessionMetadataStore', () => {
     const metadata = createSqliteSessionMetadataStore(path);
     try {
       assert.equal(runtime.schemaVersion(), 4);
-      assert.equal(metadata.schemaVersion(), 8);
+      assert.equal(metadata.schemaVersion(), 9);
       await metadata.create(fullHeader());
       await runtime.appendRuntimeEvent('session-1', 'run-1', {
         id: 'event-1',
@@ -159,7 +160,7 @@ describe('SqliteSessionMetadataStore', () => {
 
     const store = createSqliteSessionMetadataStore(path);
     try {
-      assert.equal(store.schemaVersion(), 8);
+      assert.equal(store.schemaVersion(), 9);
       assert.deepEqual(
         (
           await store.list({
@@ -492,6 +493,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const v4 = new DatabaseSync(path);
       v4.exec(`
+        DROP TABLE agent_graph_operator_provisions;
         DROP TABLE agent_graph_schedule_updates;
         DROP TABLE agent_graph_intent_claims;
         DROP TABLE subagent_spawns;
@@ -514,7 +516,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const migrated = createSqliteSessionMetadataStore(path);
       try {
-        assert.equal(migrated.schemaVersion(), 8);
+        assert.equal(migrated.schemaVersion(), 9);
         assert.equal(await migrated.remove(child.id), true);
         await assert.rejects(
           () => migrated.createSubagent({ ...child, id: 'retry-after-migration' }),
@@ -684,6 +686,112 @@ describe('SqliteSessionMetadataStore', () => {
   });
 });
 
+describe('SQLite agent graph operator provisions', () => {
+  test('atomically commits one child Session and monotonic topology row', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', { now: nextNow(700) });
+    try {
+      await store.commitAgentGraphScheduleUpdate({
+        schemaVersion: 1,
+        updateId: `graph_update_${'1'.repeat(32)}`,
+        updateFingerprint: `sha256:${'2'.repeat(64)}`,
+        graphId: 'graph-1',
+        source: {
+          sessionId: 'supervisor-session',
+          runId: 'supervisor-run',
+          turnId: 'supervisor-turn',
+          toolCallId: 'schedule-tool',
+        },
+        addWork: [
+          {
+            workId: `graph_work_${'3'.repeat(32)}`,
+            target: { kind: 'agent', agentId: 'local-read' },
+            instruction: 'Inspect the input.',
+            inputIds: [],
+          },
+        ],
+        stop: [],
+      });
+      const request = graphProvisionRequest();
+      const first = await store.createAgentGraphOperator(graphChildHeader(), request, 1);
+      assert.equal(first.created, true);
+      assert.equal(first.record.header.id, 'graph-child');
+      assert.equal(first.provision.targetSessionId, 'graph-child');
+      assert.deepEqual(await store.listAgentGraphOperatorProvisions('graph-1'), [first.provision]);
+
+      const retryRequest = {
+        ...request,
+        initialTurnId: 'disposable-turn',
+        initialRunId: 'disposable-run',
+      };
+      const retry = await store.createAgentGraphOperator(
+        graphChildHeader({
+          id: 'disposable-child',
+          subagentSpawn: {
+            ...graphChildHeader().subagentSpawn!,
+            initialTurnId: retryRequest.initialTurnId,
+            initialRunId: retryRequest.initialRunId,
+          },
+        }),
+        retryRequest,
+        1,
+      );
+      assert.equal(retry.created, false);
+      assert.equal(retry.record.header.id, 'graph-child');
+      assert.equal(retry.provision.initialRunId, request.initialRunId);
+
+      await assert.rejects(
+        store.createAgentGraphOperator(
+          graphChildHeader({ id: 'drift-child' }),
+          { ...request, provisionFingerprint: `sha256:${'9'.repeat(64)}` },
+          1,
+        ),
+        /reused for different work/,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test('rolls back child and topology together on a provision failure', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', {
+      failpoint(point) {
+        if (point === 'after_agent_graph_operator_provision_write') throw new Error('crash');
+      },
+    });
+    try {
+      await store.commitAgentGraphScheduleUpdate({
+        schemaVersion: 1,
+        updateId: `graph_update_${'1'.repeat(32)}`,
+        updateFingerprint: `sha256:${'2'.repeat(64)}`,
+        graphId: 'graph-1',
+        source: {
+          sessionId: 'supervisor-session',
+          runId: 'supervisor-run',
+          turnId: 'supervisor-turn',
+          toolCallId: 'schedule-tool',
+        },
+        addWork: [
+          {
+            workId: `graph_work_${'3'.repeat(32)}`,
+            target: { kind: 'agent', agentId: 'local-read' },
+            instruction: 'Inspect the input.',
+            inputIds: [],
+          },
+        ],
+        stop: [],
+      });
+      await assert.rejects(
+        store.createAgentGraphOperator(graphChildHeader(), graphProvisionRequest(), 1),
+        /crash/,
+      );
+      assert.deepEqual(await store.listAgentGraphOperatorProvisions('graph-1'), []);
+      await assert.rejects(store.read('graph-child'), /not found/);
+    } finally {
+      store.close();
+    }
+  });
+});
+
 function fullHeader(overrides: Partial<SessionHeader> = {}): SessionHeader {
   return {
     id: 'session-1',
@@ -720,6 +828,71 @@ function fullHeader(overrides: Partial<SessionHeader> = {}): SessionHeader {
     schemaVersion: 1,
     ...overrides,
   };
+}
+
+function graphProvisionRequest(): AgentGraphOperatorProvisionRequest {
+  return {
+    schemaVersion: 1,
+    provisionId: `graph_provision_${'4'.repeat(32)}`,
+    provisionFingerprint: `sha256:${'5'.repeat(64)}`,
+    graphId: 'graph-1',
+    workId: `graph_work_${'3'.repeat(32)}`,
+    agentId: 'local-read',
+    operatorId: `graph_operator_${'6'.repeat(32)}`,
+    initialTurnId: 'graph-turn',
+    initialRunId: 'graph-run',
+    edges: [],
+  };
+}
+
+function graphChildHeader(overrides: Partial<SessionHeader> = {}): SessionHeader {
+  const request = graphProvisionRequest();
+  return fullHeader({
+    id: 'graph-child',
+    parentSessionId: undefined,
+    branchOfTurnId: undefined,
+    revisionRootSessionId: undefined,
+    revisionParentSessionId: undefined,
+    revisionOfTurnId: undefined,
+    revisionIndex: undefined,
+    revisionState: undefined,
+    status: 'active',
+    blockedReason: undefined,
+    orchestrationMode: 'default',
+    subagentParent: {
+      kind: 'subagent',
+      parentSessionId: 'supervisor-session',
+      spawnedBy: {
+        parentRunId: 'supervisor-run',
+        parentTurnId: 'supervisor-turn',
+        toolCallId: 'schedule-tool',
+      },
+      graph: {
+        graphId: request.graphId,
+        workId: request.workId,
+        operatorId: request.operatorId,
+      },
+      lifecycle: 'foreground',
+    },
+    subagentRuntime: {
+      schemaVersion: 1,
+      definitionVersion: 1,
+      agentId: request.agentId,
+      agentName: 'Local Read',
+      profile: 'local_read',
+      systemPrompt: 'Read only.',
+      toolNames: ['Read'],
+      categoryPolicy: { read: 'allow' },
+      permissionCeiling: 'ask',
+    },
+    subagentSpawn: {
+      schemaVersion: 1,
+      requestFingerprint: '5'.repeat(64),
+      initialTurnId: request.initialTurnId,
+      initialRunId: request.initialRunId,
+    },
+    ...overrides,
+  });
 }
 
 function nextNow(start: number): () => number {

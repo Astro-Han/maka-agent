@@ -57,6 +57,29 @@ describe('subagent session parent relation', () => {
       }),
       true,
     );
+    assert.equal(
+      isSubagentSessionParent({
+        ...relation,
+        graph: {
+          graphId: 'graph-1',
+          workId: `graph_work_${'a'.repeat(32)}`,
+          operatorId: `graph_operator_${'b'.repeat(32)}`,
+        },
+      }),
+      true,
+    );
+    assert.equal(
+      isSubagentSessionParent({
+        ...relation,
+        swarm: { swarmId: 'swarm-1', itemId: 'item-1' },
+        graph: {
+          graphId: 'graph-1',
+          workId: `graph_work_${'a'.repeat(32)}`,
+          operatorId: `graph_operator_${'b'.repeat(32)}`,
+        },
+      }),
+      false,
+    );
   });
 
   test('rejects malformed, unsupported, or extended persisted relations', () => {

@@ -5,6 +5,8 @@ import type {
   AgentGraphScheduleUpdateRequest,
 } from '@maka/core/agent-graph-schedule';
 import type { AgentGraphIntentClaimStore } from '@maka/core/agent-graph-control';
+import type { AgentGraphOperatorProvision } from '@maka/core/agent-graph-topology';
+import type { SessionHeader } from '@maka/core/session';
 import { createSqliteSessionMetadataStore } from '@maka/storage';
 import type {
   AgentGraphIntentExecutor,
@@ -97,6 +99,83 @@ describe('stream graph schedule reconciliation', () => {
     }
   });
 
+  test('materializes agent work as a child operator and claims its reserved first run', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', { now: nextNumber(150) });
+    const provisions: AgentGraphOperatorProvision[] = [];
+    const controlStore = controlStoreWithProvisions(store, provisions);
+    const observation = new MemoryGraphObservation();
+    const executor = new MemoryScheduleExecutor(controlStore, observation);
+    const stopController = new MemoryStopController(observation);
+    try {
+      const update = await commitSchedule(controlStore, 'tool-agent', {
+        add_work: [
+          {
+            agent_id: 'local-read',
+            instruction: 'Inspect one more source.',
+            input_ids: ['record-input'],
+          },
+        ],
+      });
+      let provisionCalls = 0;
+      const result = await reconcileAgentGraphSchedule({
+        topology: topology(),
+        controlStore,
+        executor,
+        stopController,
+        newId: nextId(),
+        maxNewActivations: 1,
+        observeGraph: (currentTopology) => observation.read(currentTopology),
+        async provisionOperator(input) {
+          provisionCalls += 1;
+          assert.equal(input.workId, update.addWork[0]!.workId);
+          assert.equal(input.source.toolCallId, 'tool-agent');
+          assert.deepEqual(
+            input.edges.map((edge) => edge.fromOperatorId),
+            ['writer'],
+          );
+          const provision: AgentGraphOperatorProvision = {
+            schemaVersion: 1,
+            provisionId: `graph_provision_${'1'.repeat(32)}`,
+            provisionFingerprint: `sha256:${'2'.repeat(64)}`,
+            graphId: input.graphId,
+            workId: input.workId,
+            agentId: input.agentId,
+            operatorId: input.operatorId,
+            initialTurnId: 'reserved-turn',
+            initialRunId: 'reserved-run',
+            edges: input.edges,
+            targetSessionId: 'session-dynamic',
+            provisionedAt: 151,
+          };
+          provisions.push(provision);
+          return {
+            provision,
+            created: true,
+            header: { id: provision.targetSessionId } as SessionHeader,
+          };
+        },
+        renderPrompt: ({ work }) => work.instruction,
+      });
+
+      assert.equal(result.status, 'reconciled');
+      assert.equal(provisionCalls, 1);
+      assert.equal(result.deferredWork.length, 0);
+      assert.equal(result.dispatches.length, 1);
+      assert.match(result.dispatches[0]!.intent.operatorId, /^graph_operator_[a-f0-9]{32}$/);
+      assert.equal(result.dispatches[0]!.claim.targetSessionId, 'session-dynamic');
+      assert.equal(result.dispatches[0]!.claim.targetTurnId, 'reserved-turn');
+      assert.equal(result.dispatches[0]!.claim.targetRunId, 'reserved-run');
+      assert.equal(
+        result.observation.projection.operators.some(
+          (operator) => operator.sessionId === 'session-dynamic',
+        ),
+        true,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
   test('stops an admitted activation before considering later work', async () => {
     const store = createSqliteSessionMetadataStore(':memory:', { now: nextNumber(200) });
     const observation = new MemoryGraphObservation();
@@ -175,6 +254,8 @@ describe('stream graph schedule reconciliation', () => {
       const racingStore: AgentGraphScheduleControlStore = {
         commitAgentGraphScheduleUpdate: (request) => store.commitAgentGraphScheduleUpdate(request),
         listAgentGraphScheduleUpdates: (graphId) => store.listAgentGraphScheduleUpdates(graphId),
+        listAgentGraphOperatorProvisions: (graphId) =>
+          store.listAgentGraphOperatorProvisions(graphId),
         claimAgentGraphIntent: (request) => store.claimAgentGraphIntent(request),
         readAgentGraphIntentClaim: (graphId, intentId) =>
           store.readAgentGraphIntentClaim(graphId, intentId),
@@ -242,6 +323,8 @@ describe('stream graph schedule reconciliation', () => {
       const pausingStore: AgentGraphScheduleControlStore = {
         commitAgentGraphScheduleUpdate: (request) => store.commitAgentGraphScheduleUpdate(request),
         listAgentGraphScheduleUpdates: (graphId) => store.listAgentGraphScheduleUpdates(graphId),
+        listAgentGraphOperatorProvisions: (graphId) =>
+          store.listAgentGraphOperatorProvisions(graphId),
         claimAgentGraphIntent: (request) => store.claimAgentGraphIntent(request),
         readAgentGraphIntentClaim: (graphId, intentId) =>
           store.readAgentGraphIntentClaim(graphId, intentId),
@@ -383,6 +466,30 @@ async function commitSchedule(
   return request;
 }
 
+function controlStoreWithProvisions(
+  store: AgentGraphScheduleControlStore,
+  provisions: AgentGraphOperatorProvision[],
+): AgentGraphScheduleControlStore {
+  return {
+    commitAgentGraphScheduleUpdate: (request) => store.commitAgentGraphScheduleUpdate(request),
+    listAgentGraphScheduleUpdates: (graphId) => store.listAgentGraphScheduleUpdates(graphId),
+    listAgentGraphOperatorProvisions: async (graphId) =>
+      provisions
+        .filter((provision) => provision.graphId === graphId)
+        .map((provision) => structuredClone(provision)),
+    claimAgentGraphIntent: (request) => store.claimAgentGraphIntent(request),
+    readAgentGraphIntentClaim: (graphId, intentId) =>
+      store.readAgentGraphIntentClaim(graphId, intentId),
+    listAgentGraphIntentClaims: (graphId) => store.listAgentGraphIntentClaims(graphId),
+    claimAgentGraphIntentAtScheduleRevision: (request, expectedRevision) =>
+      store.claimAgentGraphIntentAtScheduleRevision(request, expectedRevision),
+    beginAgentGraphIntentExecutionAtScheduleRevision: (graphId, intentId, expectedRevision) =>
+      store.beginAgentGraphIntentExecutionAtScheduleRevision(graphId, intentId, expectedRevision),
+    cancelAgentGraphIntentExecution: (graphId, intentId, reason) =>
+      store.cancelAgentGraphIntentExecution(graphId, intentId, reason),
+  };
+}
+
 class MemoryGraphObservation {
   private readonly activations = new Map<
     string,
@@ -408,29 +515,49 @@ class MemoryGraphObservation {
     }
   }
 
-  async read(): Promise<AgentGraphSupervisorObservation> {
-    const activationEntries = [...this.activations]
-      .filter(([, activation]) => activation.sessionId === 'session-writer')
-      .map(([activationId, activation]) => [
-        activationId,
-        {
-          activationId,
-          agentRunId: activationId,
-          status: activation.status,
-          recordCount: 1,
-          firstEventTime: 1,
-          lastEventTime: 2,
-          lastRecordId: `record-${activationId}`,
-          ...(activation.status === 'running'
-            ? {}
-            : { terminalRecordId: `record-${activationId}` }),
-        },
-      ]);
-    const current = activationEntries.at(-1)?.[0] as string | undefined;
+  async read(
+    currentTopology: AgentGraphTraceTopology = topology(),
+  ): Promise<AgentGraphSupervisorObservation> {
+    const operatorStates = Object.fromEntries(
+      currentTopology.operators.flatMap((binding) => {
+        const activationEntries = [...this.activations]
+          .filter(([, activation]) => activation.sessionId === binding.sessionId)
+          .map(([activationId, activation]) => [
+            activationId,
+            {
+              activationId,
+              agentRunId: activationId,
+              status: activation.status,
+              recordCount: 1,
+              firstEventTime: 1,
+              lastEventTime: 2,
+              lastRecordId: `record-${activationId}`,
+              ...(activation.status === 'running'
+                ? {}
+                : { terminalRecordId: `record-${activationId}` }),
+            },
+          ]);
+        const current = activationEntries.at(-1)?.[0] as string | undefined;
+        return current
+          ? [
+              [
+                binding.operatorId,
+                {
+                  operatorId: binding.operatorId,
+                  sessionId: binding.sessionId,
+                  status: this.activations.get(current)!.status,
+                  currentActivationId: current,
+                  activations: Object.fromEntries(activationEntries),
+                },
+              ],
+            ]
+          : [];
+      }),
+    );
     return structuredClone({
       projection: {
         graphId: GRAPH_ID,
-        operators: [{ operatorId: 'writer', sessionId: 'session-writer' }],
+        operators: currentTopology.operators.map((operator) => ({ ...operator })),
         ignoredPartialEvents: 0,
         records: [
           {
@@ -466,17 +593,7 @@ class MemoryGraphObservation {
         state: {
           graphId: GRAPH_ID,
           appliedRecordIds: ['record-input'],
-          operators: current
-            ? {
-                writer: {
-                  operatorId: 'writer',
-                  sessionId: 'session-writer',
-                  status: this.activations.get(current)!.status,
-                  currentActivationId: current,
-                  activations: Object.fromEntries(activationEntries),
-                },
-              }
-            : {},
+          operators: operatorStates,
         },
       },
       readiness: {
@@ -487,7 +604,7 @@ class MemoryGraphObservation {
           schemaVersion: 1,
           graphId: GRAPH_ID,
           topologyFingerprint: `sha256:${'a'.repeat(64)}`,
-          topologicalOrder: ['writer'],
+          topologicalOrder: currentTopology.operators.map((operator) => operator.operatorId),
           rootOperatorIds: ['writer'],
           sinkOperatorIds: ['writer'],
           recordIds: ['record-input'],

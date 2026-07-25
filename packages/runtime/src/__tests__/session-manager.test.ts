@@ -13,6 +13,8 @@ import type {
   QueueEnqueueOutcome,
   AgentGraphIntentClaim,
   AgentGraphIntentClaimStore,
+  AgentGraphOperatorProvisionRequest,
+  AgentGraphOperatorProvisionResult,
   AgentRunEvent,
   AgentRunHeader,
   AgentRunStore,
@@ -109,6 +111,72 @@ describe('SessionManager child-session read model', () => {
     expect((await manager.listChildSessions(parent.id)).map((session) => session.id)).toEqual([
       child.id,
     ]);
+  });
+});
+
+describe('SessionManager graph operator provisioning', () => {
+  test('snapshots a catalog agent into a metadata-only child with reserved activation ids', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends: new BackendRegistry(),
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(30),
+    });
+    const parent = await manager.createSession(
+      makeInput({
+        cwd: '/tmp/graph-project',
+        llmConnectionSlug: 'graph-connection',
+        model: 'graph-model',
+        thinkingLevel: 'medium',
+        permissionMode: 'ask',
+      }),
+    );
+    await runStore.createRun(
+      makeRunHeader({
+        sessionId: parent.id,
+        runId: 'supervisor-run',
+        turnId: 'supervisor-turn',
+        cwd: '/tmp/graph-project',
+      }),
+    );
+
+    const result = await manager.provisionAgentGraphOperator({
+      graphId: 'graph-1',
+      workId: `graph_work_${'1'.repeat(32)}`,
+      agentId: LOCAL_READ_AGENT_ID,
+      operatorId: `graph_operator_${'2'.repeat(32)}`,
+      source: {
+        sessionId: parent.id,
+        runId: 'supervisor-run',
+        turnId: 'supervisor-turn',
+        toolCallId: 'schedule-tool',
+      },
+      edges: [
+        {
+          edgeId: `graph_edge_${'3'.repeat(32)}`,
+          fromOperatorId: 'writer',
+          toOperatorId: `graph_operator_${'2'.repeat(32)}`,
+        },
+      ],
+      expectedScheduleRevision: 1,
+    });
+
+    expect(result.created).toBe(true);
+    expect(result.header.subagentParent?.graph).toEqual({
+      graphId: 'graph-1',
+      workId: `graph_work_${'1'.repeat(32)}`,
+      operatorId: `graph_operator_${'2'.repeat(32)}`,
+    });
+    expect(result.header.subagentRuntime?.agentId).toBe(LOCAL_READ_AGENT_ID);
+    expect(result.header.permissionMode).toBe('explore');
+    expect(result.provision.initialTurnId).toBe(result.header.subagentSpawn?.initialTurnId);
+    expect(result.provision.initialRunId).toBe(result.header.subagentSpawn?.initialRunId);
+    expect(await runStore.listSessionRuns(result.header.id)).toEqual([]);
   });
 });
 
@@ -15282,6 +15350,24 @@ class MemorySessionStore implements SessionStore {
       return { header: existing, created: false };
     }
     return { header: await this.create(input), created: true };
+  }
+
+  async createAgentGraphOperator(
+    input: CreateSessionInput,
+    request: AgentGraphOperatorProvisionRequest,
+    _expectedRevision: number,
+  ): Promise<{ header: SessionHeader } & AgentGraphOperatorProvisionResult> {
+    const header = await this.create(input);
+    return {
+      header,
+      created: true,
+      provision: {
+        ...request,
+        edges: request.edges.map((edge) => ({ ...edge })),
+        targetSessionId: header.id,
+        provisionedAt: 1,
+      },
+    };
   }
 
   async create(input: CreateSessionInput): Promise<SessionHeader> {
