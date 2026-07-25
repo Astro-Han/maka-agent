@@ -98,6 +98,30 @@ export type {
   ResolveAgentGraphPoliciesInput,
   RunAgentGraphToQuiescenceInput,
 } from './stream-graph-dispatch.js';
+export {
+  AGENT_GRAPH_SUPERVISOR_TOOL_NAMES,
+  UPDATE_AGENT_GRAPH_TOOL_NAME,
+  VIEW_AGENT_GRAPH_TOOL_NAME,
+  buildAgentGraphSupervisorTools,
+  compileAgentGraphScheduleUpdate,
+  projectAgentGraphSchedule,
+} from './stream-graph-supervisor-tools.js';
+export type {
+  AgentGraphScheduleFinishView,
+  AgentGraphScheduleProjection,
+  AgentGraphScheduleWorkView,
+  AgentGraphStoppedTargetView,
+  AgentGraphToolActivityView,
+  AgentGraphToolReadinessView,
+  AgentGraphToolRuntimeOperatorView,
+  AgentGraphToolRuntimeView,
+  AgentGraphToolScheduleView,
+  BuildAgentGraphSupervisorToolsInput,
+  UpdateAgentGraphToolInput,
+  UpdateAgentGraphToolResult,
+  ViewAgentGraphToolInput,
+  ViewAgentGraphToolResult,
+} from './stream-graph-supervisor-tools.js';
 export type {
   AgentGraphAllSettledReadinessPolicy,
   AgentGraphMapReadinessPolicy,
