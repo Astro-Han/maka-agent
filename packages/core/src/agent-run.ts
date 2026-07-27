@@ -83,6 +83,8 @@ export interface AgentRunHeader {
   automationId?: string;
   /** Durable graph milestone that caused this host-authored supervisor turn. */
   agentGraphWakeId?: string;
+  /** Durable delivery attempt for this host-authored supervisor turn. */
+  agentGraphWakeAttemptId?: string;
   failureClass?: string;
   failureMessage?: string;
   abortSource?: string;
@@ -193,6 +195,7 @@ const AGENT_RUN_HEADER_SHAPE = defineObjectShape<AgentRunHeader>()(
     'continuationSource',
     'automationId',
     'agentGraphWakeId',
+    'agentGraphWakeAttemptId',
     'failureClass',
     'failureMessage',
     'abortSource',
@@ -247,6 +250,7 @@ export function decodeAgentRunHeader(value: unknown): AgentRunHeader {
       value.workspaceIdentity,
       value.automationId,
       value.agentGraphWakeId,
+      value.agentGraphWakeAttemptId,
       value.failureClass,
       value.failureMessage,
       value.abortSource,

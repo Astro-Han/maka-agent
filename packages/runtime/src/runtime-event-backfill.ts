@@ -86,7 +86,7 @@ export function backfillRuntimeEventsFromStoredMessages(
           ...base,
           id: newId(),
           role: 'user',
-          author: 'user',
+          author: message.origin ? 'host' : 'user',
           content: {
             kind: 'text',
             text: message.text,

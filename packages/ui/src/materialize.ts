@@ -23,7 +23,7 @@ export interface ChatItem {
   /** Present when the turn was fired by an automation, not hand-typed. */
   automationOrigin?: { automationId: string };
   /** Present when the host resumed the root Agent at a durable graph milestone. */
-  agentGraphOrigin?: { graphId: string; wakeId: string };
+  agentGraphOrigin?: { graphId: string; wakeId: string; attemptId: string };
 }
 
 /**
@@ -485,6 +485,7 @@ export function materializeTurns(messages: StoredMessage[]): TurnViewModel[] {
               agentGraphOrigin: {
                 graphId: message.origin.graphId,
                 wakeId: message.origin.wakeId,
+                attemptId: message.origin.attemptId,
               },
             }
           : {}),

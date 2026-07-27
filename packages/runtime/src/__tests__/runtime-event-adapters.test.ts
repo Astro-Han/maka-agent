@@ -191,6 +191,32 @@ describe('storedMessageToRuntimeEvent', () => {
     });
   });
 
+  test('host-authored user-role messages preserve their canonical provenance', () => {
+    const e = storedMessageToRuntimeEvent(
+      {
+        ...user('u-graph', 'graph checkpoint'),
+        origin: {
+          kind: 'agent_graph',
+          graphId: 'graph-1',
+          wakeId: 'wake-1',
+          attemptId: 'attempt-1',
+        },
+      },
+      ctx,
+    );
+    expect(e?.role).toBe('user');
+    expect(e?.author).toBe('host');
+    expect(e?.content).toMatchObject({
+      kind: 'text',
+      origin: {
+        kind: 'agent_graph',
+        graphId: 'graph-1',
+        wakeId: 'wake-1',
+        attemptId: 'attempt-1',
+      },
+    });
+  });
+
   test('user message displayText round-trips through RuntimeEvent draft projection', () => {
     const typed = '/skill:alpha 帮我整理';
     const envelope = 'The user explicitly invoked…\n\n<user-message>\n帮我整理\n</user-message>';

@@ -100,7 +100,7 @@ export function storedMessageToRuntimeEvent(
         ts: d.ts,
         partial: false,
         role: 'user',
-        author: 'user',
+        author: message.origin ? 'host' : 'user',
         content: {
           kind: 'text',
           text: message.text,

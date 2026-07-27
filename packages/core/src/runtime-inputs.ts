@@ -96,6 +96,8 @@ export type TurnOrigin =
       graphId: string;
       /** Durable, graph-snapshot-scoped idempotency key for this supervisor wake. */
       wakeId: string;
+      /** Durable identity of one delivery attempt for the wake. */
+      attemptId: string;
     };
 
 export interface AgentSpec {

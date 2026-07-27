@@ -46,7 +46,8 @@ describe('RuntimeEvent role / author / status enums', () => {
   });
 
   test('locks the author enum (agent ≠ model) and guard', () => {
-    expect(RUNTIME_EVENT_AUTHORS).toEqual(['user', 'agent', 'tool', 'system']);
+    expect(RUNTIME_EVENT_AUTHORS).toEqual(['user', 'host', 'agent', 'tool', 'system']);
+    expect(isRuntimeEventAuthor('host')).toBe(true);
     expect(isRuntimeEventAuthor('agent')).toBe(true);
     expect(isRuntimeEventAuthor('model')).toBe(false);
     expect(isRuntimeEventAuthor(null)).toBe(false);

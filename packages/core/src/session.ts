@@ -600,7 +600,7 @@ export interface UserMessage {
    *  hand-type. Mirrors TurnOrigin in runtime-inputs. */
   origin?:
     | { kind: 'automation'; automationId: string }
-    | { kind: 'agent_graph'; graphId: string; wakeId: string };
+    | { kind: 'agent_graph'; graphId: string; wakeId: string; attemptId: string };
 }
 
 /** Prefer the human-facing view of a user message when one was stored. */
@@ -840,7 +840,7 @@ type AutomationOrigin = Extract<MessageOrigin, { kind: 'automation' }>;
 type AgentGraphOrigin = Extract<MessageOrigin, { kind: 'agent_graph' }>;
 const AUTOMATION_ORIGIN_SHAPE = defineObjectShape<AutomationOrigin>()(['kind', 'automationId'], []);
 const AGENT_GRAPH_ORIGIN_SHAPE = defineObjectShape<AgentGraphOrigin>()(
-  ['kind', 'graphId', 'wakeId'],
+  ['kind', 'graphId', 'wakeId', 'attemptId'],
   [],
 );
 
@@ -1015,7 +1015,8 @@ function isAgentGraphOrigin(value: unknown): value is AgentGraphOrigin {
     hasExactShape(value, AGENT_GRAPH_ORIGIN_SHAPE) &&
     value.kind === 'agent_graph' &&
     typeof value.graphId === 'string' &&
-    typeof value.wakeId === 'string'
+    typeof value.wakeId === 'string' &&
+    typeof value.attemptId === 'string'
   );
 }
 

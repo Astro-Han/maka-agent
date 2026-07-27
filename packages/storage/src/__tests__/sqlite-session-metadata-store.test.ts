@@ -20,7 +20,7 @@ describe('SqliteSessionMetadataStore', () => {
     try {
       const store = createSqliteSessionMetadataStore(path, { now: () => 100 });
       const header = fullHeader();
-      assert.equal(store.schemaVersion(), 10);
+      assert.equal(store.schemaVersion(), 11);
       assert.equal(store.journalMode(), 'wal');
       assert.deepEqual(await store.create(header), {
         header,
@@ -31,7 +31,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const reopened = createSqliteSessionMetadataStore(path, { now: () => 200 });
       try {
-        assert.equal(reopened.schemaVersion(), 10);
+        assert.equal(reopened.schemaVersion(), 11);
         assert.deepEqual(await reopened.read(header.id), {
           header,
           metadataVersion: 1,
@@ -65,7 +65,7 @@ describe('SqliteSessionMetadataStore', () => {
     const metadata = createSqliteSessionMetadataStore(path);
     try {
       assert.equal(runtime.schemaVersion(), 4);
-      assert.equal(metadata.schemaVersion(), 10);
+      assert.equal(metadata.schemaVersion(), 11);
       await metadata.create(fullHeader());
       await runtime.appendRuntimeEvent('session-1', 'run-1', {
         id: 'event-1',
@@ -173,7 +173,7 @@ describe('SqliteSessionMetadataStore', () => {
 
     const store = createSqliteSessionMetadataStore(path);
     try {
-      assert.equal(store.schemaVersion(), 10);
+      assert.equal(store.schemaVersion(), 11);
       assert.deepEqual(
         (
           await store.list({
@@ -506,6 +506,8 @@ describe('SqliteSessionMetadataStore', () => {
 
       const v4 = new DatabaseSync(path);
       v4.exec(`
+        DROP TABLE agent_graph_supervisor_wake_attempts;
+        DROP TABLE agent_graph_supervisor_wakes;
         DROP TABLE agent_graph_client_applied_records;
         DROP TABLE agent_graph_client_terminal_activity;
         DROP TABLE agent_graph_client_operator_projections;
@@ -533,7 +535,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const migrated = createSqliteSessionMetadataStore(path);
       try {
-        assert.equal(migrated.schemaVersion(), 10);
+        assert.equal(migrated.schemaVersion(), 11);
         assert.equal(await migrated.remove(child.id), true);
         await assert.rejects(
           () => migrated.createSubagent({ ...child, id: 'retry-after-migration' }),

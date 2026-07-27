@@ -759,12 +759,14 @@ describe('Agent Graph supervisor turn attribution', () => {
           kind: 'agent_graph',
           graphId: 'graph-1',
           wakeId: 'graph-1:snapshot-1',
+          attemptId: 'attempt-1',
         },
       },
     ] as StoredMessage[]);
     assert.deepEqual(turns[0]?.user?.agentGraphOrigin, {
       graphId: 'graph-1',
       wakeId: 'graph-1:snapshot-1',
+      attemptId: 'attempt-1',
     });
     assert.equal(
       turns[0]?.user?.text,

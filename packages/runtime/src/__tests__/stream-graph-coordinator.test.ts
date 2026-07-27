@@ -88,17 +88,22 @@ describe('host-managed agent graph coordinator', () => {
       delayedControlStore = createDelayableControlStore(controlStore);
       const activities = new SessionActivityRegistry();
       let supervisorWakeTurnCount = 0;
+      const supervisorWakeErrors: unknown[] = [];
       supervisorWake = new AgentGraphSupervisorWakeCoordinator({
         activityRegistry: activities,
-        readMessages: (sessionId) => manager.getMessages(sessionId),
+        wakeStore: delayedControlStore.store,
         readSnapshot: (sessionId) => (coordinator ?? recovered)!.getSnapshot(sessionId),
         startTurn: async (sessionId, input) => {
           supervisorWakeTurnCount += 1;
           for await (const _event of manager.sendMessage(sessionId, input)) {
             // A real root AgentRun consumes the durable graph wake prompt.
           }
+          return { kind: 'completed', turnId: input.turnId };
         },
         newId: randomUUID,
+        onError: (_rootSessionId, error) => {
+          supervisorWakeErrors.push(error);
+        },
       });
       coordinator = createCoordinator({
         sessionStore,
@@ -159,6 +164,7 @@ describe('host-managed agent graph coordinator', () => {
       );
       originalSupervisorActivity.release();
       await supervisorWake.waitForIdle();
+      assert.deepEqual(supervisorWakeErrors, []);
       assert.equal(supervisorWakeTurnCount, 1);
       const graphWake = (await manager.getMessages(rootSession.id)).find(
         (message) => message.type === 'user' && message.origin?.kind === 'agent_graph',
@@ -167,6 +173,7 @@ describe('host-managed agent graph coordinator', () => {
       assert.ok(graphWake.origin?.kind === 'agent_graph');
       assert.equal(graphWake.origin.graphId, agentGraphIdForRootSession(rootSession.id));
       assert.match(graphWake.origin.wakeId, /sha256:[a-f0-9]{64}$/);
+      assert.match(graphWake.origin.attemptId, /^[0-9a-f-]{36}$/);
       assert.match(graphWake.text, /view_agent_graph/);
       assert.ok(
         (await manager.getMessages(rootSession.id)).some(
@@ -174,6 +181,24 @@ describe('host-managed agent graph coordinator', () => {
         ),
         'the original root Agent must run again and produce a deliverable response',
       );
+      const wakeRun = (await runStore.listSessionRuns(rootSession.id)).find(
+        (run) => run.turnId === graphWake.turnId,
+      );
+      assert.ok(wakeRun);
+      assert.equal(wakeRun.agentGraphWakeId, graphWake.origin.wakeId);
+      assert.equal(wakeRun.agentGraphWakeAttemptId, graphWake.origin.attemptId);
+      assert.equal(
+        (await runtimeEventStore.readImmutableRuntimeEvents(rootSession.id, wakeRun.runId))[0]
+          ?.author,
+        'host',
+        'canonical provenance must distinguish the host-authored wake from human input',
+      );
+      const durableWake = await controlStore.readAgentGraphSupervisorWake(
+        graphWake.origin.graphId,
+        graphWake.origin.wakeId,
+      );
+      assert.equal(durableWake?.status, 'delivered');
+      assert.equal(durableWake?.attemptCount, 1);
 
       const firstProvisions = await controlStore.listAgentGraphOperatorProvisions(graphId);
       assert.equal(firstProvisions.length, 1);
@@ -298,6 +323,7 @@ describe('host-managed agent graph coordinator', () => {
       const projectionFailure = new Error('derived projection unavailable');
       const derivedFailures: unknown[] = [];
       delayedControlStore.failProjectionCommits(projectionFailure);
+      assert.equal(await supervisorWake.recover(), 0);
       recovered = createCoordinator({
         sessionStore,
         runStore,

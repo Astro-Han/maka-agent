@@ -1961,7 +1961,10 @@ function AppShellContent({
                 conversationItems={planConversationItems}
               />
               )}
-              {navSelection.section === 'sessions' && activeId ? (
+              {navSelection.section === 'sessions' &&
+              activeId &&
+              activeSessionForView &&
+              !activeSessionForView.subagentParent ? (
                 <AgentGraphPanel
                   rootSessionId={activeId}
                   enabled={(activeSessionForView?.orchestrationMode ?? 'default') === 'graph'}

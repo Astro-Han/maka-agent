@@ -39,6 +39,7 @@ describe('Desktop Graph Mode host contract', () => {
     assert.match(panel, /window\.maka\.graphs\.stop\(props\.rootSessionId\)/);
     assert.match(panel, /props\.onOpenSession\(operator\.childSessionId\)/);
     assert.match(shell, /<AgentGraphPanel/);
+    assert.match(shell, /activeId &&[\s\S]*activeSessionForView &&[\s\S]*!activeSessionForView\.subagentParent/);
   });
 
   it('keeps graph panel copy localized', async () => {

@@ -935,7 +935,10 @@ export class AgentRun {
         ? { automationId: this.input.userInput.origin.automationId }
         : {}),
       ...(this.input.userInput.origin?.kind === 'agent_graph'
-        ? { agentGraphWakeId: this.input.userInput.origin.wakeId }
+        ? {
+            agentGraphWakeId: this.input.userInput.origin.wakeId,
+            agentGraphWakeAttemptId: this.input.userInput.origin.attemptId,
+          }
         : {}),
     };
     try {

@@ -57,13 +57,45 @@ export class SessionActivityRegistry {
   }
 
   /** Waits until the session is idle, then atomically owns the next activity slot. */
-  async acquire(sessionId: string): Promise<SessionActivityLease> {
+  async acquire(sessionId: string, abortSignal?: AbortSignal): Promise<SessionActivityLease> {
     for (;;) {
+      throwIfAborted(abortSignal);
       const lease = this.reserveIfIdle(sessionId);
       if (lease) return lease;
-      await this.whenIdle(sessionId)!;
+      await waitForIdleOrAbort(this.whenIdle(sessionId)!, abortSignal);
     }
   }
+}
+
+function throwIfAborted(abortSignal?: AbortSignal): void {
+  if (!abortSignal?.aborted) return;
+  throw new DOMException('Session activity acquisition was aborted', 'AbortError');
+}
+
+async function waitForIdleOrAbort(
+  whenIdle: Promise<void>,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  if (!abortSignal) return whenIdle;
+  throwIfAborted(abortSignal);
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Session activity acquisition was aborted', 'AbortError'));
+    };
+    const cleanup = () => abortSignal.removeEventListener('abort', onAbort);
+    abortSignal.addEventListener('abort', onAbort, { once: true });
+    void whenIdle.then(
+      () => {
+        cleanup();
+        resolve();
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 export interface DrainGoalTurnInput {

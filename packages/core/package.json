@@ -44,6 +44,7 @@
     "./agent-graph-schedule": "./dist/agent-graph-schedule.js",
     "./agent-graph-topology": "./dist/agent-graph-topology.js",
     "./agent-graph-client-projection": "./dist/agent-graph-client-projection.js",
+    "./agent-graph-supervisor-wake": "./dist/agent-graph-supervisor-wake.js",
     "./task-ledger": "./dist/task-ledger.js",
     "./foreign-session": "./dist/foreign-session.js",
     "./deep-research-run": "./dist/deep-research-run.js",

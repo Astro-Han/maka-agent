@@ -17,6 +17,7 @@ export * from './agent-graph-control.js';
 export * from './agent-graph-schedule.js';
 export * from './agent-graph-topology.js';
 export * from './agent-graph-client-projection.js';
+export * from './agent-graph-supervisor-wake.js';
 export * from './runtime-policy.js';
 
 // events.ts

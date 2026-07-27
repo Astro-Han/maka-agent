@@ -486,7 +486,7 @@ export function buildInitialUserRuntimeEvent(input: InitialUserRuntimeEventInput
     ...(input.branch ? { branch: input.branch } : {}),
     partial: false,
     role: 'user',
-    author: 'user',
+    author: input.origin ? 'host' : 'user',
     content: {
       kind: 'text',
       text: input.text,
@@ -510,13 +510,15 @@ function assertInitialRuntimeEventMatchesRequest(
     runId: string;
   },
 ): void {
+  const expectedAuthor =
+    event.content?.kind === 'text' && event.content.origin !== undefined ? 'host' : 'user';
   if (
     event.sessionId !== request.sessionId ||
     event.invocationId !== request.invocationId ||
     event.runId !== request.runId ||
     event.turnId !== request.turnId ||
     event.role !== 'user' ||
-    event.author !== 'user' ||
+    event.author !== expectedAuthor ||
     event.content?.kind !== 'text'
   ) {
     throw new Error('initial RuntimeEvent does not match the invocation request');

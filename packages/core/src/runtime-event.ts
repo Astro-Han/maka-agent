@@ -65,7 +65,7 @@ export function isRuntimeEventRole(value: unknown): value is RuntimeEventRole {
  * Not every (author, role) combination is meaningful, but the runtime —
  * not this type module — owns the policy that constrains them.
  */
-export const RUNTIME_EVENT_AUTHORS = ['user', 'agent', 'tool', 'system'] as const;
+export const RUNTIME_EVENT_AUTHORS = ['user', 'host', 'agent', 'tool', 'system'] as const;
 export type RuntimeEventAuthor = (typeof RUNTIME_EVENT_AUTHORS)[number];
 
 export function isRuntimeEventAuthor(value: unknown): value is RuntimeEventAuthor {
@@ -552,9 +552,10 @@ function isTurnOrigin(value: unknown): value is TurnOrigin {
   }
   return (
     value.kind === 'agent_graph' &&
-    Object.keys(value).length === 3 &&
+    Object.keys(value).length === 4 &&
     typeof value.graphId === 'string' &&
-    typeof value.wakeId === 'string'
+    typeof value.wakeId === 'string' &&
+    typeof value.attemptId === 'string'
   );
 }
 

@@ -130,6 +130,7 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
   async function recoverInterruptedSessionsOnStartup(): Promise<void> {
     try {
       await runtime.recoverInterruptedSessions();
+      await agentGraphSupervisorWakeCoordinator.recover();
       await agentGraphCoordinator.recover();
       if (process.env.MAKA_RUNTIME_SAFE_BOUNDARY_RESUME !== '1') return;
       for (const session of await runtime.listSessions()) {

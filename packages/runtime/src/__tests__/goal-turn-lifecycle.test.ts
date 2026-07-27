@@ -52,6 +52,19 @@ describe('Goal turn lifecycle', () => {
     assert.equal(registry.whenIdle('session-1'), undefined);
   });
 
+  test('aborts a queued exclusive admission without acquiring after the session becomes idle', async () => {
+    const registry = new SessionActivityRegistry();
+    const busy = registry.reserve('session-1');
+    const controller = new AbortController();
+    const queued = registry.acquire('session-1', controller.signal);
+    controller.abort();
+    await assert.rejects(queued, (error: unknown) => {
+      return error instanceof Error && error.name === 'AbortError';
+    });
+    busy.release();
+    assert.equal(registry.whenIdle('session-1'), undefined);
+  });
+
   test('projects terminal permission handoff as suspended', async () => {
     async function* events(): AsyncIterable<SessionEvent> {
       yield complete('turn-1', 'permission_handoff');

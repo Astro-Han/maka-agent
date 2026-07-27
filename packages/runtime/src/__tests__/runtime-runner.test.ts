@@ -1,6 +1,11 @@
 import { describe, test } from 'node:test';
 import { expect } from '../test-helpers.js';
-import { RuntimeRunner, runtimeGateFromCallback, type RuntimeGate } from '../runtime-runner.js';
+import {
+  RuntimeRunner,
+  buildInitialUserRuntimeEvent,
+  runtimeGateFromCallback,
+  type RuntimeGate,
+} from '../runtime-runner.js';
 import type { AttachmentRef } from '@maka/core/events';
 import type {
   InvocationContext,
@@ -213,6 +218,36 @@ describe('RuntimeRunner', () => {
     // The flow event follows the user event and is on a different lane.
     expect(result.events[1]!.role).toBe('model');
     expect(result.events[1]!.author).toBe('agent');
+  });
+
+  test('preserves a host-authored initial user-role RuntimeEvent', async () => {
+    const providers = makeProviders();
+    const flow = new ScriptFlow((ctx) => [flowTerminalEvent(ctx, 'completed')]);
+    const runner = new RuntimeRunner({ flow, providers });
+    const request = makeRequest({
+      text: 'graph checkpoint',
+      initialRuntimeEvent: buildInitialUserRuntimeEvent({
+        id: 'evt-host',
+        invocationId: 'inv-host',
+        runId: 'run-host',
+        sessionId: 'sess-1',
+        turnId: 'turn-1',
+        ts: 1,
+        text: 'graph checkpoint',
+        origin: {
+          kind: 'agent_graph',
+          graphId: 'graph-1',
+          wakeId: 'wake-1',
+          attemptId: 'attempt-1',
+        },
+      }),
+    });
+
+    const result = await runner.run(request);
+
+    expect(result.events[0]?.role).toBe('user');
+    expect(result.events[0]?.author).toBe('host');
+    expect(result.events[0]?.content?.kind).toBe('text');
   });
 
   test('initial event declares the tool boundary protocol only when the durable boundary is active', async () => {

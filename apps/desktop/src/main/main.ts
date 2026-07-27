@@ -830,7 +830,7 @@ const runtime = new SessionManager({
 });
 agentGraphSupervisorWakeCoordinator = new AgentGraphSupervisorWakeCoordinator({
   activityRegistry: sessionActivities,
-  readMessages: (sessionId) => runtime.getMessages(sessionId),
+  wakeStore: agentGraphControlStore,
   readSnapshot: (rootSessionId) => agentGraphCoordinator.getSnapshot(rootSessionId),
   startTurn: async (sessionId, input, activity) => {
     await ensureSessionCanSend(sessionId);
