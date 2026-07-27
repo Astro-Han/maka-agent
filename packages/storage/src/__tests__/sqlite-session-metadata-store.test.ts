@@ -817,6 +817,64 @@ describe('SQLite agent graph operator provisions', () => {
 });
 
 describe('SQLite agent graph client projections', () => {
+  test('atomically reads a graph with an independently versioned operator row', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', {
+      now: nextNow(400),
+    });
+    try {
+      await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-atomic-read',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: null,
+        snapshotVersion: 'snapshot-1',
+        snapshot: { version: 1 },
+        replaceOperators: true,
+        operators: [
+          { operatorId: 'operator-1', payload: { status: 'running' } },
+          { operatorId: 'operator-2', payload: { status: 'waiting' } },
+        ],
+        terminalActivities: [],
+        activityRecords: [],
+      });
+      await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-atomic-read',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: 'snapshot-1',
+        snapshotVersion: 'snapshot-2',
+        snapshot: { version: 2 },
+        replaceOperators: false,
+        operators: [
+          { operatorId: 'operator-1', payload: { status: 'completed' } },
+        ],
+        terminalActivities: [],
+        activityRecords: [{ recordId: 'record-1', eventTime: 10 }],
+        incrementalRecordId: 'record-1',
+      });
+
+      const materialized =
+        await store.readAgentGraphClientProjectionWithOperator(
+          'graph-atomic-read',
+          'operator-2',
+        );
+      assert.equal(materialized?.projection.snapshotVersion, 'snapshot-2');
+      assert.equal(materialized?.operator?.snapshotVersion, 'snapshot-1');
+      assert.deepEqual(materialized?.operator?.payload, { status: 'waiting' });
+      assert.deepEqual(
+        await store.readAgentGraphClientProjectionWithOperator(
+          'graph-atomic-read',
+          'missing-operator',
+        ),
+        {
+          projection: materialized?.projection,
+        },
+      );
+    } finally {
+      store.close();
+    }
+  });
+
   test('CAS-fences stale writers and deduplicates incremental durable records', async () => {
     const store = createSqliteSessionMetadataStore(':memory:', {
       now: nextNow(500),

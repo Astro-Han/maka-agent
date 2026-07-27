@@ -159,6 +159,7 @@ describe('host-managed agent graph coordinator', () => {
       assert.equal(snapshot.operators[0]?.agentId, 'local-read');
       assert.equal(snapshot.work[0]?.instructionPreview, 'Inspect the repository and report one concrete finding.');
       assert.match(snapshot.snapshotVersion, /^sha256:[a-f0-9]{64}$/);
+      const readsBeforeInspection = delayedControlStore.projectionReadCounts();
       const inspection = await coordinator.inspectOperator(
         rootSession.id,
         firstProvisions[0]!.operatorId,
@@ -166,6 +167,10 @@ describe('host-managed agent graph coordinator', () => {
       assert.equal(inspection.operator.childSessionId, childSessions[0]?.id);
       assert.equal(inspection.claims.length, 1);
       assert.equal(inspection.activations.length, 1);
+      assert.deepEqual(delayedControlStore.projectionReadCounts(), {
+        composite: readsBeforeInspection.composite + 1,
+        operator: readsBeforeInspection.operator,
+      });
       assert.equal(
         graphRuntimeHistoryReads,
         historyReadsBeforeClient,
@@ -178,6 +183,26 @@ describe('host-managed agent graph coordinator', () => {
         2,
         'partial text deltas must not cause projection writes or invalidations',
       );
+      const incrementalProjectionCommits =
+        delayedControlStore.projectionCommits.filter(
+          (request) => request.incrementalRecordId !== undefined,
+        );
+      assert.equal(incrementalProjectionCommits.length, 2);
+      assert.ok(
+        incrementalProjectionCommits.every(
+          (request) => request.terminalActivities.length === 0,
+        ),
+        'yielded SessionEvents must never write immutable terminal history',
+      );
+      assert.equal(
+        (
+          await controlStore.listAgentGraphClientTerminalActivities(graphId, {
+            limit: 8,
+          })
+        ).records.length,
+        1,
+        'the authoritative RuntimeEvent fold must populate terminal history',
+      );
       await assert.rejects(
         coordinator.toolsForSession(childSessions[0]!.id),
         /only to root Sessions/,
@@ -186,14 +211,24 @@ describe('host-managed agent graph coordinator', () => {
       await coordinator.close();
       unsubscribe = undefined;
       coordinator = undefined;
+      const projectionFailure = new Error('derived projection unavailable');
+      const derivedFailures: unknown[] = [];
+      delayedControlStore.failProjectionCommits(projectionFailure);
       recovered = createCoordinator({
         sessionStore,
         runStore,
         runtimeEventStore: countedRuntimeEventStore,
         controlStore: delayedControlStore.store,
         manager,
+        onError: (_rootSessionId, error) => {
+          derivedFailures.push(error);
+        },
       });
       assert.deepEqual(await recovered.recover(), [rootSession.id]);
+      assert.ok(
+        derivedFailures.includes(projectionFailure),
+        'recover must report projection failure without failing graph authority',
+      );
       assert.equal(
         (await controlStore.listAgentGraphOperatorProvisions(graphId)).length,
         1,
@@ -232,6 +267,11 @@ describe('host-managed agent graph coordinator', () => {
       } finally {
         gate.release();
       }
+      assert.ok(
+        derivedFailures.filter((error) => error === projectionFailure).length >=
+          2,
+        'stop must report best-effort projection repair failure without rejecting',
+      );
       await pendingUpdate;
       await recovered.waitForIdle(rootSession.id);
       assert.equal(
@@ -418,6 +458,7 @@ function createCoordinator(input: {
   runtimeEventStore: ReturnType<typeof createRuntimeEventStore>;
   controlStore: ReturnType<typeof createSqliteSessionMetadataStore>;
   manager: SessionManager;
+  onError?: AgentGraphCoordinatorInput['onError'];
 }): AgentGraphCoordinator {
   return new AgentGraphCoordinator({
     ...input,
@@ -431,6 +472,11 @@ function createDelayableControlStore(
   store: ReturnType<typeof createSqliteSessionMetadataStore>,
 ): {
   store: ReturnType<typeof createSqliteSessionMetadataStore>;
+  projectionCommits: Array<
+    Parameters<typeof store.commitAgentGraphClientProjection>[0]
+  >;
+  projectionReadCounts(): { composite: number; operator: number };
+  failProjectionCommits(error: unknown): void;
   holdNextCommit(): { started: Promise<void>; release(): void };
 } {
   let gate:
@@ -439,6 +485,12 @@ function createDelayableControlStore(
         release: Promise<void>;
       }
     | undefined;
+  const projectionCommits: Array<
+    Parameters<typeof store.commitAgentGraphClientProjection>[0]
+  > = [];
+  let projectionFailure: unknown;
+  let compositeProjectionReads = 0;
+  let operatorProjectionReads = 0;
   const proxy = new Proxy(store, {
     get(target, property) {
       if (property === 'commitAgentGraphScheduleUpdate') {
@@ -452,12 +504,51 @@ function createDelayableControlStore(
           return target.commitAgentGraphScheduleUpdate(...args);
         };
       }
+      if (property === 'commitAgentGraphClientProjection') {
+        return async (
+          ...args: Parameters<
+            typeof target.commitAgentGraphClientProjection
+          >
+        ) => {
+          projectionCommits.push(structuredClone(args[0]));
+          if (projectionFailure !== undefined) throw projectionFailure;
+          return target.commitAgentGraphClientProjection(...args);
+        };
+      }
+      if (property === 'readAgentGraphClientProjectionWithOperator') {
+        return async (
+          ...args: Parameters<
+            typeof target.readAgentGraphClientProjectionWithOperator
+          >
+        ) => {
+          compositeProjectionReads += 1;
+          return target.readAgentGraphClientProjectionWithOperator(...args);
+        };
+      }
+      if (property === 'readAgentGraphClientOperatorProjection') {
+        return async (
+          ...args: Parameters<
+            typeof target.readAgentGraphClientOperatorProjection
+          >
+        ) => {
+          operatorProjectionReads += 1;
+          return target.readAgentGraphClientOperatorProjection(...args);
+        };
+      }
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
   return {
     store: proxy,
+    projectionCommits,
+    projectionReadCounts: () => ({
+      composite: compositeProjectionReads,
+      operator: operatorProjectionReads,
+    }),
+    failProjectionCommits(error) {
+      projectionFailure = error;
+    },
     holdNextCommit() {
       if (gate) throw new Error('A delayed graph schedule commit is already pending');
       let markStarted!: () => void;

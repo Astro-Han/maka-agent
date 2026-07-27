@@ -30,6 +30,7 @@ import {
   type AgentGraphOperatorProvisionResult,
   type AgentGraphClientClaimAdmission,
   type AgentGraphClientProjectionRecord,
+  type AgentGraphClientProjectionWithOperator,
   type AgentGraphClientOperatorProjectionRecord,
   type AgentGraphClientTerminalActivityPage,
   type CommitAgentGraphClientProjectionRequest,
@@ -863,6 +864,56 @@ export class SqliteSessionMetadataStore {
     return row ? decodeAgentGraphClientOperatorProjectionRow(row) : undefined;
   }
 
+  async readAgentGraphClientProjectionWithOperator(
+    graphId: string,
+    operatorId: string,
+  ): Promise<AgentGraphClientProjectionWithOperator | undefined> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    assertGraphLookupIdentity(operatorId, 'operator id');
+    const row = this.db
+      .prepare(`
+        SELECT
+          graph.schema_version AS projectionSchemaVersion,
+          graph.graph_id AS projectionGraphId,
+          graph.root_session_id AS projectionRootSessionId,
+          graph.snapshot_version AS projectionSnapshotVersion,
+          graph.payload_json AS projectionPayloadJson,
+          graph.materialized_at AS projectionMaterializedAt,
+          operator.graph_id AS operatorGraphId,
+          operator.operator_id AS operatorId,
+          operator.snapshot_version AS operatorSnapshotVersion,
+          operator.payload_json AS operatorPayloadJson,
+          operator.materialized_at AS operatorMaterializedAt
+        FROM agent_graph_client_projections AS graph
+        LEFT JOIN agent_graph_client_operator_projections AS operator
+          ON operator.graph_id = graph.graph_id
+          AND operator.operator_id = ?
+        WHERE graph.graph_id = ?
+      `)
+      .get(operatorId, graphId) as AgentGraphClientProjectionWithOperatorRow | undefined;
+    if (!row) return undefined;
+    const projection = decodeAgentGraphClientProjectionRow({
+      schemaVersion: row.projectionSchemaVersion,
+      graphId: row.projectionGraphId,
+      rootSessionId: row.projectionRootSessionId,
+      snapshotVersion: row.projectionSnapshotVersion,
+      payloadJson: row.projectionPayloadJson,
+      materializedAt: row.projectionMaterializedAt,
+    });
+    if (row.operatorGraphId === null) return { projection };
+    return {
+      projection,
+      operator: decodeAgentGraphClientOperatorProjectionRow({
+        graphId: row.operatorGraphId,
+        operatorId: row.operatorId!,
+        snapshotVersion: row.operatorSnapshotVersion!,
+        payloadJson: row.operatorPayloadJson!,
+        materializedAt: row.operatorMaterializedAt!,
+      }),
+    };
+  }
+
   async listAgentGraphClientTerminalActivities(
     graphId: string,
     input: {
@@ -1653,6 +1704,20 @@ interface AgentGraphClientOperatorProjectionRow {
   snapshotVersion: string;
   payloadJson: string;
   materializedAt: number;
+}
+
+interface AgentGraphClientProjectionWithOperatorRow {
+  projectionSchemaVersion: number;
+  projectionGraphId: string;
+  projectionRootSessionId: string;
+  projectionSnapshotVersion: string;
+  projectionPayloadJson: string;
+  projectionMaterializedAt: number;
+  operatorGraphId: string | null;
+  operatorId: string | null;
+  operatorSnapshotVersion: string | null;
+  operatorPayloadJson: string | null;
+  operatorMaterializedAt: number | null;
 }
 
 interface AgentGraphClientTerminalActivityRow {

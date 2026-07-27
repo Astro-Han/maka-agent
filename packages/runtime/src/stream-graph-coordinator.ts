@@ -241,11 +241,21 @@ export class AgentGraphCoordinator {
   ): Promise<AgentGraphOperatorInspection> {
     await this.#assertRootGraphReader(rootSessionId);
     const graphId = agentGraphIdForRootSession(rootSessionId);
-    const graph = await this.#readOrRebuildClientProjection(rootSessionId, graphId);
-    const operator = await this.#input.controlStore.readAgentGraphClientOperatorProjection(
+    await this.#readOrRebuildClientProjection(rootSessionId, graphId);
+    const materialized = await this.#input.controlStore.readAgentGraphClientProjectionWithOperator(
       graphId,
       operatorId,
     );
+    if (!materialized) {
+      throw new Error(`Agent graph ${graphId} has no materialized client projection`);
+    }
+    const { projection: graph, operator } = materialized;
+    if (
+      graph.schemaVersion !== AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION ||
+      graph.rootSessionId !== rootSessionId
+    ) {
+      throw new Error(`Invalid materialized agent graph projection ${graphId}`);
+    }
     if (!operator) {
       throw new Error(`Agent graph operator ${operatorId} was not found`);
     }
@@ -411,8 +421,7 @@ export class AgentGraphCoordinator {
       driver.stopping = false;
     }
     throwCollectedFailures(`Failed to stop agent graph ${driver.graphId}`, failures);
-    await this.#waitForClientProjectionUpdates(driver);
-    await this.#rebuildClientProjection(driver.rootSessionId, driver.graphId);
+    await this.#repairClientProjectionBestEffort(driver);
     this.#notifyClientChanged(driver, 'stopped');
   }
 
@@ -464,11 +473,6 @@ export class AgentGraphCoordinator {
         const result = await this.#reconcileOnce(driver, abortController.signal);
         driver.lastResult = result;
         await this.#waitForClientProjectionUpdates(driver);
-        await this.#materializeClientProjection(
-          driver.rootSessionId,
-          driver.graphId,
-          result.observation,
-        );
         await notify(this.#input.onReconciliation, driver.rootSessionId, result);
         this.#notifyClientChanged(driver, 'reconciled');
       } catch (error) {
@@ -681,8 +685,18 @@ export class AgentGraphCoordinator {
 
   async #waitForClientProjectionUpdates(driver: GraphDriver): Promise<void> {
     await driver.clientProjectionTask?.catch(() => {
-      // The authoritative rebuild below repairs failed derived updates.
+      // A best-effort repair or later durable observation may repair this
+      // derived read side; graph authority never depends on it.
     });
+  }
+
+  async #repairClientProjectionBestEffort(driver: GraphDriver): Promise<void> {
+    await this.#waitForClientProjectionUpdates(driver);
+    try {
+      await this.#rebuildClientProjection(driver.rootSessionId, driver.graphId);
+    } catch (error) {
+      await notify(this.#input.onError, driver.rootSessionId, error);
+    }
   }
 
   async #advanceClientProjection(
@@ -734,15 +748,11 @@ export class AgentGraphCoordinator {
               payload: advanced.operator,
             },
           ],
-          terminalActivities: advanced.terminalActivity
-            ? [
-                {
-                  recordId: advanced.terminalActivity.recordId,
-                  eventTime: advanced.terminalActivity.eventTime,
-                  payload: advanced.terminalActivity,
-                },
-              ]
-            : [],
+          // AgentRun may still rewrite this yielded SessionEvent at its
+          // terminal durability barrier (for example complete -> aborted in a
+          // stop race). Only the authoritative RuntimeEvent fold populates the
+          // immutable terminal-history table.
+          terminalActivities: [],
           activityRecords: [
             {
               recordId: advanced.activity.recordId,

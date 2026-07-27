@@ -11,6 +11,15 @@ export interface AgentGraphClientProjectionRecord {
   materializedAt: number;
 }
 
+export interface AgentGraphClientProjectionWithOperator {
+  projection: AgentGraphClientProjectionRecord;
+  /**
+   * The operator row may have an older content version when another operator
+   * advanced the graph. Both rows are nevertheless read from one DB snapshot.
+   */
+  operator?: AgentGraphClientOperatorProjectionRecord;
+}
+
 export interface AgentGraphClientOperatorProjectionRecord {
   graphId: string;
   operatorId: string;
@@ -95,6 +104,10 @@ export interface AgentGraphClientProjectionStore {
     graphId: string,
     operatorId: string,
   ): Promise<AgentGraphClientOperatorProjectionRecord | undefined>;
+  readAgentGraphClientProjectionWithOperator(
+    graphId: string,
+    operatorId: string,
+  ): Promise<AgentGraphClientProjectionWithOperator | undefined>;
   listAgentGraphClientTerminalActivities(
     graphId: string,
     input: {
