@@ -194,7 +194,7 @@ export function PermissionCenterPage() {
               copy={copy}
               locale={locale}
               busy={pendingPermAction !== null}
-              pendingKey={pendingPermAction === `${id}:request` ? 'request' : pendingPermAction === `${id}:openSettings` ? 'openSettings' : null}
+              pendingKey={pendingPermAction === `${id}:request` ? 'request' : pendingPermAction === `${id}:openSettings` ? 'openSettings' : pendingPermAction === `${id}:dragGrant` ? 'dragGrant' : null}
               onRequest={() => void runPermissionAction(id, 'request')}
               onOpenSettings={() => void runPermissionAction(id, 'openSettings')}
               onDragGrant={(sourceRect) => void runPermissionAction(id, 'dragGrant', sourceRect)}
@@ -289,6 +289,14 @@ function permissionActionFailureCopy(reason: string, message: string | undefined
       return copy.actionFailures.unsupported_platform;
     case 'unsupported_permission':
       return copy.actionFailures.unsupported_permission;
+    // Reasons only the drag-to-grant path can return. Without these the
+    // toast fell through to "please retry", which is wrong for
+    // already_open (retrying can never help — close the other card) and
+    // leaked the raw enum for open_settings_failed.
+    case 'already_open':
+      return copy.actionFailures.already_open;
+    case 'open_settings_failed':
+      return copy.actionFailures.open_settings_failed;
     case 'failed':
       return message ?? copy.actionFailures.failed;
     default:

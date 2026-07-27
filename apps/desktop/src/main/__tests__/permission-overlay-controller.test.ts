@@ -356,7 +356,10 @@ describe('docking to the System Settings window', () => {
     let call = 0;
     const h = createHarness({
       // 1440x900 work area, card 360x96 (see createHarness).
-      locateSettingsWindow: async () => frames[Math.min(call++, frames.length - 1)],
+      locateSettingsWindow: async () => {
+        const f = frames[Math.min(call++, frames.length - 1)];
+        return f ? { ok: true, frame: f } : { ok: false, reason: 'not_running' };
+      },
     });
     return h;
   }
@@ -402,12 +405,16 @@ describe('docking to the System Settings window', () => {
 
     for (let i = 0; i < 3; i++) { h.clock.tickIntervals(); await settle(); }
 
-    // Three ticks, one identical target: setBounds must not fight a user
-    // who is dragging the Settings window.
+    // One placement at start(), and nothing after: repeated identical
+    // frames must not re-set bounds and fight a user who is dragging the
+    // Settings window.
     assert.equal(h.windows[0].bounds.length, 1, 'repeated identical frames must not re-set bounds');
   });
 
   it('closes the card once Settings has been gone for several ticks', async () => {
+    // start() consumes the first frame for the initial placement, so every
+    // tick after this sees `null` — i.e. Settings disappeared after we had
+    // definitely seen it.
     const h = dockHarness([{ x: 400, y: 100, width: 720, height: 600 }, null]);
     await h.controller.start('accessibility');
     h.windows[0].ready();
@@ -433,7 +440,9 @@ describe('docking to the System Settings window', () => {
     h.clock.tickIntervals();
     await settle();
 
-    assert.equal(h.windows[0].bounds.length, 0, 'without a locator the card must not be moved');
+    // One placement at the cursor anchor, and no docking tracker at all.
+    assert.equal(h.windows[0].bounds.length, 1, 'placed once, at the cursor anchor');
+    assert.equal(h.clock.intervals.size, 1, 'only the grant poll — no docking tracker without a locator');
     assert.equal(h.windows[0].destroyed, false, 'and it must not be treated as "Settings gone"');
   });
 });
@@ -459,7 +468,7 @@ describe('docking across multiple displays', () => {
       getAnchor: () => ({ x: 700, y: 500, workArea: PRIMARY }),
       workAreaForPoint: (x: number, y: number) =>
         (x < 0 || y < 0 ? LEFT_ABOVE : PRIMARY),
-      locateSettingsWindow: async () => settings,
+      locateSettingsWindow: async () => ({ ok: true, frame: settings }),
       createWindow: (b) => {
         bounds.push(b);
         return {
@@ -486,5 +495,53 @@ describe('docking across multiple displays', () => {
       docked.y < 0,
       `card must sit below Settings on that display (expected ~-55, got y=${docked.y})`,
     );
+  });
+});
+
+describe('docking failures must not kill the card', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('survives a locator that can never work (missing binary)', async () => {
+    // What production actually produces in a packaged build: the dep IS
+    // supplied, and it fails every time. The card must stay on its cursor
+    // anchor, not conclude the user closed System Settings.
+    const h = createHarness({
+      locateSettingsWindow: async () => ({ ok: false, reason: 'binary_missing' }),
+    });
+    await h.controller.start('accessibility');
+    h.windows[0].ready();
+
+    for (let i = 0; i < DOCK_LOST_TICKS + 3; i++) { h.clock.tickIntervals(); await settle(); }
+
+    assert.equal(
+      h.windows[0].destroyed, false,
+      'a locator that cannot run means "cannot dock", not "Settings went away"',
+    );
+    assert.equal(h.controller.isOpen(), true);
+  });
+
+  it('gives System Settings time to appear before counting it missing', async () => {
+    // `openSystemSettings` resolves when the deep link is handed off, not
+    // when the window exists. A cold launch easily exceeds 5 ticks (1s).
+    let calls = 0;
+    const h = createHarness({
+      locateSettingsWindow: async () => {
+        calls += 1;
+        return calls > 8
+          ? { ok: true, frame: { x: 400, y: 100, width: 720, height: 600 } }
+          : { ok: false, reason: 'not_running' };
+      },
+    });
+    await h.controller.start('accessibility');
+    h.windows[0].ready();
+
+    for (let i = 0; i < 8; i++) { h.clock.tickIntervals(); await settle(); }
+    assert.equal(
+      h.windows[0].destroyed, false,
+      'the card must not give up before Settings has ever appeared',
+    );
+
+    h.clock.tickIntervals(); await settle();
+    assert.ok(h.windows[0].bounds.length > 0, 'and it should dock once Settings shows up');
   });
 });

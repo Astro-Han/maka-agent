@@ -23,6 +23,7 @@
 
 import type { DragGrantPermissionId } from '@maka/core';
 import { isDragGrantPermissionId } from '@maka/core';
+import type { LocatorResult } from './settings-window-locator.js';
 import type { SettingsWindowFrame } from './settings-window-locator.js';
 import { runFlight, type Rect } from './card-flight.js';
 
@@ -83,7 +84,7 @@ export interface PermissionOverlayDeps {
    * it. Absent (or resolving null) keeps the Stage 1 cursor anchor, which
    * is a working state — see docs/permission-onboarding-plan.md.
    */
-  locateSettingsWindow?(): Promise<SettingsWindowFrame | null>;
+  locateSettingsWindow?(): Promise<LocatorResult>;
   onGranted?(id: DragGrantPermissionId): void;
   log?(message: string): void;
   /** Animation clock + frame scheduler. Injected so tests never animate. */
@@ -140,6 +141,12 @@ export function createPermissionOverlayController(
   let closing: NodeJS.Timeout | null = null;
   let dock: NodeJS.Timeout | null = null;
   let cancelFlight: (() => void) | null = null;
+  // Docking memory, hoisted so the pre-flight locate in `start()` can seed
+  // it: without that, the first tick re-writes bounds the flight already
+  // delivered, and a card that has been located once still looks "never
+  // seen" to the went-away check.
+  let lastDockKey = '';
+  let everLocated = false;
 
   function stopTimers(): void {
     if (poll) { deps.clearInterval(poll); poll = null; }
@@ -240,33 +247,49 @@ export function createPermissionOverlayController(
     });
   }
 
-  function beginDocking(): void {
+  function beginDocking(target: PermissionOverlayWindowLike): void {
     const locate = deps.locateSettingsWindow;
     if (!locate) return;
-    let lastKey = '';
     let misses = 0;
 
     dock = deps.setInterval(() => {
-      if (!win || win.isDestroyed()) return;
-      void locate().then((frame) => {
-        if (!win || win.isDestroyed()) return;
-        if (!frame) {
-          // Stage 1 could not tell "Settings was closed" from "no locator",
-          // so an abandoned card just froze in place. Now that the locator
-          // can say, treat a sustained absence as the user walking away.
+      if (win !== target || target.isDestroyed()) return;
+      void locate().then((result) => {
+        // Identity, not just liveness: `locate()` is a real async spawn, so
+        // this continuation can land after teardown and after a NEW card
+        // opened. Checking only "some window is alive" would move that new
+        // window using the previous session's geometry.
+        if (win !== target || target.isDestroyed()) return;
+        if (!result.ok) {
+          // A locator that CANNOT run is not evidence about System
+          // Settings. Treating it as "the user closed the pane" is how a
+          // build shipped without the binary would kill its own card one
+          // second after opening it.
+          if (result.reason !== 'not_running' && result.reason !== 'no_settings_window') {
+            deps.log?.(`[permission-overlay] locator unavailable (${result.reason}) — staying on the cursor anchor`);
+            if (dock) { deps.clearInterval(dock); dock = null; }
+            return;
+          }
+          if (!everLocated) return;
           if (++misses < DOCK_LOST_TICKS) return;
           deps.log?.('[permission-overlay] System Settings went away — closing the card');
           teardown();
           return;
         }
+        const frame = result.frame;
+        everLocated = true;
         misses = 0;
         const next = dockedBounds(frame);
         const key = `${next.x},${next.y},${next.width},${next.height}`;
         // Only touch the window when the target actually moved: setBounds
         // on every tick fights the user's own drag of the Settings window.
-        if (key === lastKey) return;
-        lastKey = key;
-        win.setBounds(next);
+        // While the entrance flight owns the bounds, record the target but
+        // do not write it: the flight's 16ms steps would overwrite us and we
+        // would overwrite the flight, visibly fighting for its whole 620ms.
+        if (cancelFlight) { lastDockKey = ''; return; }
+        if (key === lastDockKey) return;
+        lastDockKey = key;
+        target.setBounds(next);
       });
     }, DOCK_POLL_MS);
   }
@@ -309,6 +332,8 @@ export function createPermissionOverlayController(
       }
 
       active = id;
+      lastDockKey = '';
+      everLocated = false;
       // Launch from the button when the caller told us where it is, so the
       // card is seen to come OUT of the control the user just pressed.
       // Without a source rect it simply appears at the resting position.
@@ -326,9 +351,30 @@ export function createPermissionOverlayController(
         created.send('permission-overlay:show', deps.buildCardPayload(id));
         created.showInactive();
       });
-      if (canFly) flyTo(created, sourceRect!, resting);
+      // Resolve the docked position BEFORE flying, so the card makes one
+      // continuous move from the button to where it will actually live.
+      // Flying to the cursor anchor first and letting the tracker correct
+      // it afterwards is what made the two fight over the same bounds.
+      let destination = resting;
+      if (deps.locateSettingsWindow) {
+        try {
+          const located = await deps.locateSettingsWindow();
+          if (located.ok) {
+            destination = dockedBounds(located.frame);
+            everLocated = true;
+            lastDockKey = `${destination.x},${destination.y},${destination.width},${destination.height}`;
+          }
+        } catch {
+          // A locator that throws is a "cannot dock", not a failure to open.
+        }
+      }
+      // `start()` awaited above; the card may have been dismissed meanwhile.
+      if (win !== created || created.isDestroyed()) return { ok: true };
+
+      if (canFly) flyTo(created, sourceRect!, destination);
+      else created.setBounds(destination);
       beginWatching(id);
-      beginDocking();
+      beginDocking(created);
       return { ok: true };
     },
 

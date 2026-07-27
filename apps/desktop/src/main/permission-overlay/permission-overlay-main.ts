@@ -30,7 +30,6 @@ import {
   defaultExists,
   defaultRunBinary,
   locateSettingsWindow,
-  type SettingsWindowFrame,
 } from './settings-window-locator.js';
 import { getPermissionOverlayCopy } from './permission-overlay-copy.js';
 import {
@@ -141,7 +140,10 @@ export function createPermissionOverlayMain(
     workAreaForPoint: (x, y) => screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) }).workArea,
     openSystemSettings: async (id) => {
       const result = await openSystemPermissionPane(id);
-      return result.ok ? { ok: true } : { ok: false, message: result.message ?? result.reason };
+      // Deliberately no `message` fallback to `result.reason`: that put a
+      // raw enum ("unsupported_permission") in the user's toast body. The
+      // renderer has localized copy keyed on the reason.
+      return result.ok ? { ok: true } : { ok: false, message: result.message };
     },
     isGranted,
     setInterval: (fn, ms) => setInterval(fn, ms),
@@ -176,16 +178,15 @@ export function createPermissionOverlayMain(
         return false;
       }
     },
-    locateSettingsWindow: async (): Promise<SettingsWindowFrame | null> => {
-      const result = await locateSettingsWindow({
-        binaryPath: locatorBinaryPath(app),
-        platform: process.platform,
-        timeoutMs: LOCATOR_TIMEOUT_MS,
-        exists: defaultExists,
-        runBinary: defaultRunBinary,
-      });
-      return result.ok ? result.frame : null;
-    },
+    // The REASON matters, not just success: "no binary" must not be
+    // mistaken for "the user closed System Settings".
+    locateSettingsWindow: () => locateSettingsWindow({
+      binaryPath: locatorBinaryPath(app),
+      platform: process.platform,
+      timeoutMs: LOCATOR_TIMEOUT_MS,
+      exists: defaultExists,
+      runBinary: defaultRunBinary,
+    }),
     createWindow: (bounds) => {
       const win = new BrowserWindow({
         ...bounds,
