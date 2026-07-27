@@ -29,7 +29,7 @@
   min-height: 32px;
   margin: var(--space-2) var(--space-3);
   /* P-RADIUS concentric formula: dialog shell 12px − 8px inset = 4px. */
-  border-radius: calc(var(--radius-modal)-8px);
+  border-radius: calc(var(--radius-modal) - 8px);
   border-color: var(--border);
   /* P-INSET: inset step-down on the elevated modal surface. */
   background: oklch(from var(--foreground) l c h / 0.03);

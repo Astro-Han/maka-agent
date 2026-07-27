@@ -65,12 +65,44 @@ function isWhitelistedVar(expr: string): boolean {
  * calc() must be exactly `calc(var(--radius-whitelisted) - <positive>px)`.
  * Positive allowlist — any other calc form (addition, multiplication,
  * division, double-negative, no token, non-whitelisted token) fails.
- * Tolerates whitespace inside var() and around operators.
+ * Tolerates whitespace inside var().
+ *
+ * The whitespace around `-` is REQUIRED, not optional: CSS mandates it
+ * (`calc(8px-2px)` is a parse error, and the whole declaration is dropped
+ * — the box silently renders square). This rule used to read `\s*-\s*`,
+ * which accepted the invalid spelling; combined with a corner splitter
+ * that broke on whitespace, the contract accepted *only* the invalid form
+ * and rejected the correct one. `search-modal.css` shipped square corners
+ * that way.
  */
-const CALC_ALLOW_RE = /^calc\(\s*var\(\s*(--radius-[\w-]+)\s*\)\s*-\s*([1-9]\d*(?:\.\d+)?|0?\.\d*[1-9])px\s*\)$/;
+const CALC_ALLOW_RE = /^calc\(\s*var\(\s*(--radius-[\w-]+)\s*\)\s+-\s+([1-9]\d*(?:\.\d+)?|0?\.\d*[1-9])px\s*\)$/;
 
 function isWhitelistedCalc(expr: string): boolean {
   const m = expr.match(CALC_ALLOW_RE);
+  if (!m) return false;
+  return RADIUS_TOKEN_WHITELIST.has(m[1]);
+}
+
+/**
+ * The Tailwind-arbitrary-value form of the same rule.
+ *
+ * In `rounded-[...]` a literal space would have to be written `_`, so the
+ * unspaced `calc(var(--radius-md)-1px)` is the NORMAL spelling there —
+ * and Tailwind emits it as valid CSS. Verified against the built bundle:
+ *
+ *   source `rounded-[calc(var(--radius-md)-1px)]`
+ *     → built `border-radius:calc(var(--radius-md) - 1px)`   ✅ normalized
+ *   source `border-radius: calc(var(--radius-modal)-8px)` (hand-written)
+ *     → built `border-radius:calc(var(--radius-modal)-8px)`  ❌ verbatim
+ *
+ * So spacing is optional here and mandatory in plain CSS. Same rule, two
+ * languages: judge the source you are actually reading.
+ */
+const CALC_ALLOW_TW_RE = /^calc\(\s*var\(\s*(--radius-[\w-]+)\s*\)\s*-\s*([1-9]\d*(?:\.\d+)?|0?\.\d*[1-9])px\s*\)$/;
+
+function isWhitelistedTailwindCalc(expr: string): boolean {
+  // `_` is Tailwind's escape for a literal space.
+  const m = expr.replace(/_/g, ' ').match(CALC_ALLOW_TW_RE);
   if (!m) return false;
   return RADIUS_TOKEN_WHITELIST.has(m[1]);
 }
@@ -87,6 +119,34 @@ function isAllowedCorner(corner: string): boolean {
 const RADIUS_DECL_RE = /border-radius\s*:\s*([^;}\n]+)\s*[;}]/gi;
 const RADIUS_LONGHAND_RE = /border-(?:top-left|top-right|bottom-left|bottom-right|start-start|start-end|end-start|end-end)-radius\s*:\s*([^;}\n]+)\s*[;}]/gi;
 
+/**
+ * Split a `border-radius` value into its corner tokens.
+ *
+ * Whitespace separates corners ONLY at paren depth 0. A naive
+ * `split(/\s+/)` tore the valid `calc(var(--radius-modal) - 8px)` into
+ * three nonsense "corners" (`calc(var(--radius-modal)`, `-`, `8px)`),
+ * none of which is an allowed corner — so the contract rejected correct
+ * CSS and accepted only the unspaced form, which CSS treats as a parse
+ * error. Depth tracking keeps a calc() intact as one corner.
+ */
+function splitCorners(value: string): string[] {
+  const corners: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of value) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    if (depth === 0 && /\s/.test(ch)) {
+      if (current !== '') corners.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current !== '') corners.push(current);
+  return corners;
+}
+
 function findCssOffenders(css: string, label: string): string[] {
   const stripped = stripCssComments(css);
   const offenders: string[] = [];
@@ -94,7 +154,8 @@ function findCssOffenders(css: string, label: string): string[] {
     for (const m of stripped.matchAll(re)) {
       const raw = m[1].trim();
       const cleaned = raw.replace(/!\s*important$/, '').trim();
-      if (cleaned.split(/\s+/).every(isAllowedCorner)) continue;
+      const corners = splitCorners(cleaned);
+      if (corners.length > 0 && corners.every(isAllowedCorner)) continue;
       offenders.push(`${label}: ${m[0].replace(/\s+/g, ' ').trim()}`);
     }
   }
@@ -128,7 +189,8 @@ async function collectTsxOffenders(): Promise<string[]> {
         }
         const val = (groups?.arb ?? groups?.dir ?? groups?.paren ?? groups?.dirpar ?? '').trim();
         if (LITERAL_OK.test(val)) continue;
-        if (isWhitelistedVar(val) || isWhitelistedCalc(val)) continue;
+        // Tailwind arbitrary value, not raw CSS — see CALC_ALLOW_TW_RE.
+        if (isWhitelistedVar(val) || isWhitelistedTailwindCalc(val)) continue;
         offenders.push(`${label}: rounded-[${val}]`);
       }
     }
@@ -563,6 +625,59 @@ describe('radius whitelist negative cases', () => {
     assert.equal(isWhitelistedCalc('calc( var(--radius-modal) - 1px )'), true, 'calc with spaces inside parens must pass');
     assert.equal(isWhitelistedCalc('calc(var(--radius-modal)  -  1px)'), true, 'calc with multiple spaces around minus must pass');
     assert.equal(isWhitelistedCalc('calc(var( --radius-modal ) - 1px)'), true, 'calc with spaces inside var() must pass');
+  });
+
+  /**
+   * CSS requires whitespace around `+`/`-` inside calc(). Without it the
+   * declaration is a parse error and is dropped, so the element renders
+   * at radius 0 — square corners that look deliberate. Measured in the
+   * renderer: `calc(var(--radius-modal)-8px)` computes to `0px`, the
+   * spaced form to `4px`.
+   */
+  it('rejects unspaced calc() in CSS, which the browser drops as a parse error', () => {
+    assert.equal(isWhitelistedCalc('calc(var(--radius-modal)-8px)'), false, 'no space either side must fail');
+    assert.equal(isWhitelistedCalc('calc(var(--radius-modal) -8px)'), false, 'no space before the minus must fail');
+    assert.equal(isWhitelistedCalc('calc(var(--radius-modal)- 8px)'), false, 'no space after the minus must fail');
+  });
+
+  it('accepts unspaced calc() in Tailwind arbitrary values, which Tailwind normalizes', () => {
+    // A literal space would need `_` here, so unspaced is the normal
+    // spelling — and the built bundle shows Tailwind emits `--radius-md - 1px`.
+    assert.equal(isWhitelistedTailwindCalc('calc(var(--radius-md)-1px)'), true, 'unspaced arbitrary value must pass');
+    assert.equal(isWhitelistedTailwindCalc('calc(var(--radius-sm)-1px)'), true, 'unspaced arbitrary value must pass');
+    assert.equal(isWhitelistedTailwindCalc('calc(var(--radius-md)_-_1px)'), true, 'underscore-escaped spaces must pass');
+    assert.equal(isWhitelistedTailwindCalc('calc(var(--radius-md) - 1px)'), true, 'already-spaced must still pass');
+    // The token allowlist and the shrink-only rule still apply here.
+    assert.equal(isWhitelistedTailwindCalc('calc(var(--radius-private)-1px)'), false, 'private token must fail');
+    assert.equal(isWhitelistedTailwindCalc('calc(var(--radius-md)+1px)'), false, 'addition must fail');
+  });
+
+  /**
+   * The splitter must not break a calc() apart on the whitespace CSS
+   * requires inside it — the bug that made the contract demand invalid
+   * CSS in the first place.
+   */
+  it('treats a spaced calc() as one corner, and still splits real multi-corner values', () => {
+    assert.deepEqual(splitCorners('calc(var(--radius-modal) - 8px)'), ['calc(var(--radius-modal) - 8px)']);
+    assert.deepEqual(
+      splitCorners('var(--radius-control) var(--radius-modal)'),
+      ['var(--radius-control)', 'var(--radius-modal)'],
+    );
+    assert.deepEqual(
+      splitCorners('calc(var(--radius-modal) - 8px) var(--radius-control)'),
+      ['calc(var(--radius-modal) - 8px)', 'var(--radius-control)'],
+    );
+
+    // End to end through the scanner: the valid spelling must pass and the
+    // invalid one must be flagged.
+    RADIUS_DECL_RE.lastIndex = 0;
+    assert.deepEqual(findCssOffenders('border-radius: calc(var(--radius-modal) - 8px);', 'test'), []);
+    RADIUS_DECL_RE.lastIndex = 0;
+    assert.equal(
+      findCssOffenders('border-radius: calc(var(--radius-modal)-8px);', 'test').length,
+      1,
+      'the unspaced form must be reported, not silently accepted',
+    );
   });
 
   it('var() with internal whitespace still passes for valid tokens', () => {
