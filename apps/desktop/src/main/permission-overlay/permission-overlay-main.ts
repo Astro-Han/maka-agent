@@ -25,6 +25,13 @@ import { fileURLToPath } from 'node:url';
 import type { UiLocale } from '@maka/core';
 import { openSystemPermissionPane } from '../permissions-actions.js';
 import { resolveAppBundle } from './app-bundle.js';
+import type { Rect } from './card-flight.js';
+import {
+  defaultExists,
+  defaultRunBinary,
+  locateSettingsWindow,
+  type SettingsWindowFrame,
+} from './settings-window-locator.js';
 import { getPermissionOverlayCopy } from './permission-overlay-copy.js';
 import {
   createPermissionOverlayController,
@@ -53,6 +60,23 @@ function overlayAssetDir(): string {
   // dist/main/permission-overlay -> dist/overlay
   return join(here, '..', '..', 'overlay');
 }
+
+/**
+ * The locator binary. Built by `build:locator` into `resources/native`,
+ * which electron-builder ships as `Contents/Resources/native`. Absent in
+ * a build without the Xcode toolchain — the card then falls back to
+ * cursor anchoring rather than failing.
+ */
+function locatorBinaryPath(app: Electron['app']): string {
+  // dist/main/permission-overlay -> apps/desktop, then resources/native.
+  const devPath = join(here, '..', '..', '..', 'resources', 'native', 'settings-window-locator');
+  if (!app.isPackaged) return devPath;
+  return join(process.resourcesPath, 'native', 'settings-window-locator');
+}
+
+/** Locator timeout. Well under the 200ms docking tick so a slow call
+ *  cannot let two spawns overlap. */
+const LOCATOR_TIMEOUT_MS = 150;
 
 export interface PermissionOverlayMainDeps {
   /**
@@ -124,6 +148,28 @@ export function createPermissionOverlayMain(
       };
     },
     log: (message) => console.warn(message),
+    // The main process has no requestAnimationFrame; a 16ms timer is the
+    // closest thing, and the flight is short enough that drift is invisible.
+    now: () => performance.now(),
+    requestTick: (fn) => { setTimeout(fn, 16); },
+    reducedMotion: () => {
+      try {
+        return systemPreferences.getAnimationSettings().prefersReducedMotion;
+      } catch {
+        // Never let an animation preference lookup break the flow.
+        return false;
+      }
+    },
+    locateSettingsWindow: async (): Promise<SettingsWindowFrame | null> => {
+      const result = await locateSettingsWindow({
+        binaryPath: locatorBinaryPath(app),
+        platform: process.platform,
+        timeoutMs: LOCATOR_TIMEOUT_MS,
+        exists: defaultExists,
+        runBinary: defaultRunBinary,
+      });
+      return result.ok ? result.frame : null;
+    },
     createWindow: (bounds) => {
       const win = new BrowserWindow({
         ...bounds,
@@ -282,6 +328,21 @@ function attachCardGestures(win: import('electron').BrowserWindow): void {
   });
 }
 
+/**
+ * The launch rect is renderer-supplied, so it is validated rather than
+ * trusted: it only ever decides where an animation starts, and a garbage
+ * value would put the card at NaN and make it invisible. Anything not a
+ * finite, positive-area rect degrades to "no flight".
+ */
+function sanitizeSourceRect(value: unknown): Rect | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const nums = [v.x, v.y, v.width, v.height];
+  if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  if ((v.width as number) <= 0 || (v.height as number) <= 0) return null;
+  return { x: v.x as number, y: v.y as number, width: v.width as number, height: v.height as number };
+}
+
 export interface PermissionOverlayIpcDeps {
   controller: PermissionOverlayController;
 }
@@ -296,8 +357,8 @@ export function registerPermissionOverlayIpc(deps: PermissionOverlayIpcDeps): vo
   const electron = requireElectron('electron') as Electron;
   const { ipcMain } = electron;
 
-  ipcMain.handle('permissions:startDragOnboarding', async (_event, id: unknown) => {
-    return deps.controller.start(id);
+  ipcMain.handle('permissions:startDragOnboarding', async (_event, id: unknown, sourceRect: unknown) => {
+    return deps.controller.start(id, sanitizeSourceRect(sourceRect));
   });
 }
 

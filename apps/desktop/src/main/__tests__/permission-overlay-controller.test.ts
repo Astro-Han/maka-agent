@@ -11,6 +11,7 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import {
+  DOCK_LOST_TICKS,
   GIVE_UP_MS,
   GRANT_CLOSE_DELAY_MS,
   GRANT_POLL_MS,
@@ -66,6 +67,7 @@ function createHarness(overrides: Partial<PermissionOverlayDeps> = {}) {
   const clock = createClock();
   interface FakeWindow {
     win: PermissionOverlayWindowLike;
+    bounds: Array<{ x: number; y: number; width: number; height: number }>;
     sent: Array<{ channel: string; payload: unknown }>;
     destroyed: boolean;
     shown: boolean;
@@ -85,6 +87,7 @@ function createHarness(overrides: Partial<PermissionOverlayDeps> = {}) {
       // One object throughout: the window methods mutate the same record
       // the test asserts against, so there is no copy to fall out of sync.
       const entry = {
+        bounds: [] as Array<{ x: number; y: number; width: number; height: number }>,
         sent: [] as Array<{ channel: string; payload: unknown }>,
         destroyed: false,
         shown: false,
@@ -92,7 +95,7 @@ function createHarness(overrides: Partial<PermissionOverlayDeps> = {}) {
         gone: () => {},
       } as unknown as FakeWindow;
       entry.win = {
-        setBounds: () => {},
+        setBounds: (next) => { entry.bounds.push(next); },
         showInactive: () => { entry.shown = true; },
         isDestroyed: () => entry.destroyed,
         destroy: () => { entry.destroyed = true; },
@@ -342,5 +345,95 @@ describe('app bundle resolution for the drag', () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.ok === false && result.reason, 'not_darwin');
+  });
+});
+
+describe('docking to the System Settings window', () => {
+  /** Drive the async docking tick to completion. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  function dockHarness(frames: Array<{ x: number; y: number; width: number; height: number } | null>) {
+    let call = 0;
+    const h = createHarness({
+      // 1440x900 work area, card 360x96 (see createHarness).
+      locateSettingsWindow: async () => frames[Math.min(call++, frames.length - 1)],
+    });
+    return h;
+  }
+
+  it('docks BELOW the Settings window so the card never covers the drop target', async () => {
+    const h = dockHarness([{ x: 400, y: 100, width: 720, height: 600 }]);
+    await h.controller.start('accessibility');
+    h.windows[0].ready();
+
+    h.clock.tickIntervals();
+    await settle();
+
+    const bounds = h.windows[0].bounds.at(-1);
+    assert.ok(bounds, 'the card should have been repositioned');
+    // Window spans y 100..700; the card must start below it, not over it.
+    assert.ok(
+      bounds.y >= 700,
+      `card must sit below the window's bottom edge (700), got ${bounds.y}`,
+    );
+    // Centred on the window: 400 + (720-360)/2 = 580.
+    assert.equal(bounds.x, 580);
+  });
+
+  it('tucks the card inside the lower edge when there is no room below', async () => {
+    // Window runs to y=880 on a 900-tall work area; 96px of card will not fit.
+    const h = dockHarness([{ x: 400, y: 280, width: 720, height: 600 }]);
+    await h.controller.start('accessibility');
+    h.windows[0].ready();
+    h.clock.tickIntervals();
+    await settle();
+
+    const bounds = h.windows[0].bounds.at(-1);
+    assert.ok(bounds, 'the card should have been repositioned');
+    assert.ok(bounds.y + 96 <= 900, `card ran off the bottom: ${JSON.stringify(bounds)}`);
+    assert.ok(bounds.y > 280, 'card should still be near the window, not flung to the top');
+  });
+
+  it('only moves the window when the target actually moved', async () => {
+    const frame = { x: 400, y: 100, width: 720, height: 600 };
+    const h = dockHarness([frame, frame, frame]);
+    await h.controller.start('accessibility');
+    h.windows[0].ready();
+
+    for (let i = 0; i < 3; i++) { h.clock.tickIntervals(); await settle(); }
+
+    // Three ticks, one identical target: setBounds must not fight a user
+    // who is dragging the Settings window.
+    assert.equal(h.windows[0].bounds.length, 1, 'repeated identical frames must not re-set bounds');
+  });
+
+  it('closes the card once Settings has been gone for several ticks', async () => {
+    const h = dockHarness([{ x: 400, y: 100, width: 720, height: 600 }, null]);
+    await h.controller.start('accessibility');
+    h.windows[0].ready();
+
+    h.clock.tickIntervals();
+    await settle();
+    assert.equal(h.windows[0].destroyed, false);
+
+    // A single miss is not enough — Settings may just be busy.
+    h.clock.tickIntervals();
+    await settle();
+    assert.equal(h.windows[0].destroyed, false, 'one miss must not close the card');
+
+    for (let i = 0; i < DOCK_LOST_TICKS; i++) { h.clock.tickIntervals(); await settle(); }
+    assert.equal(h.windows[0].destroyed, true, 'a sustained absence means the user closed Settings');
+    assert.equal(h.clock.pending(), 0, 'and every timer goes with it');
+  });
+
+  it('keeps the cursor anchor when no locator is available', async () => {
+    const h = createHarness(); // no locateSettingsWindow
+    await h.controller.start('accessibility');
+    h.windows[0].ready();
+    h.clock.tickIntervals();
+    await settle();
+
+    assert.equal(h.windows[0].bounds.length, 0, 'without a locator the card must not be moved');
+    assert.equal(h.windows[0].destroyed, false, 'and it must not be treated as "Settings gone"');
   });
 });
