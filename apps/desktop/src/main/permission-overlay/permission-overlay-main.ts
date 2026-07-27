@@ -138,6 +138,7 @@ export function createPermissionOverlayMain(
       const display = screen.getDisplayNearestPoint(point);
       return { x: point.x, y: point.y, workArea: display.workArea };
     },
+    workAreaForPoint: (x, y) => screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) }).workArea,
     openSystemSettings: async (id) => {
       const result = await openSystemPermissionPane(id);
       return result.ok ? { ok: true } : { ok: false, message: result.message ?? result.reason };

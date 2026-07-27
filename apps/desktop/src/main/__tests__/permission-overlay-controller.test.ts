@@ -437,3 +437,54 @@ describe('docking to the System Settings window', () => {
     assert.equal(h.windows[0].destroyed, false, 'and it must not be treated as "Settings gone"');
   });
 });
+
+describe('docking across multiple displays', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  /**
+   * Real geometry from a three-display Mac: the built-in panel is the
+   * primary at (0,0), and two externals sit ABOVE it at negative y, one
+   * of them at negative x. Negative origins are normal, not exotic.
+   */
+  const PRIMARY = { x: 0, y: 33, width: 1512, height: 949 };
+  const LEFT_ABOVE = { x: -1072, y: -1050, width: 1920, height: 1050 };
+
+  it('clamps to the display holding System Settings, not the one holding the cursor', async () => {
+    const bounds: Array<{ x: number; y: number; width: number; height: number }> = [];
+    // Settings is on the top-left external; the cursor is on the primary.
+    const settings = { x: -800, y: -900, width: 723, height: 837 };
+
+    const h = createHarness({
+      cardSize: { width: 530, height: 109 },
+      getAnchor: () => ({ x: 700, y: 500, workArea: PRIMARY }),
+      workAreaForPoint: (x: number, y: number) =>
+        (x < 0 || y < 0 ? LEFT_ABOVE : PRIMARY),
+      locateSettingsWindow: async () => settings,
+      createWindow: (b) => {
+        bounds.push(b);
+        return {
+          setBounds: (next) => bounds.push(next),
+          showInactive: () => {}, isDestroyed: () => false, destroy: () => {},
+          send: () => {}, onReady: () => {}, onGone: () => {},
+        };
+      },
+    });
+
+    await h.controller.start('accessibility');
+    h.clock.tickIntervals();
+    await settle();
+
+    const docked = bounds.at(-1);
+    assert.ok(docked, 'the card should have been docked');
+    // Centred under Settings: -800 + (723-530)/2 = -703.5 -> -704/-703.
+    assert.ok(
+      docked.x < 0,
+      `card must stay on the display holding Settings (expected ~-703, got x=${docked.x}). `
+      + 'Clamping to the cursor display drags it onto another monitor.',
+    );
+    assert.ok(
+      docked.y < 0,
+      `card must sit below Settings on that display (expected ~-55, got y=${docked.y})`,
+    );
+  });
+});

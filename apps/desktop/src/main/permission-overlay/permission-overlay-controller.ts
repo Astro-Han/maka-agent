@@ -57,8 +57,18 @@ export interface PermissionOverlayDeps {
   /** Card size, in DIP. */
   cardSize: { width: number; height: number };
   createWindow(bounds: { x: number; y: number; width: number; height: number }): PermissionOverlayWindowLike;
-  /** Work area of the display the card should appear on. */
+  /** Cursor position + the work area of the display it sits on. */
   getAnchor(): { x: number; y: number; workArea: { x: number; y: number; width: number; height: number } };
+  /**
+   * Work area of the display containing an arbitrary screen point.
+   *
+   * Docking must clamp against the display holding SYSTEM SETTINGS, which
+   * is not necessarily the one holding the cursor. Displays routinely have
+   * negative origins (an external above or left of the built-in panel), so
+   * clamping to the wrong one does not merely nudge the card — it drags it
+   * onto a different monitor.
+   */
+  workAreaForPoint?(x: number, y: number): { x: number; y: number; width: number; height: number };
   openSystemSettings(id: DragGrantPermissionId): Promise<{ ok: boolean; message?: string }>;
   /** Non-prompting read of the current grant state. */
   isGranted(id: DragGrantPermissionId): boolean;
@@ -186,7 +196,10 @@ export function createPermissionOverlayController(
    */
   function dockedBounds(frame: SettingsWindowFrame): Bounds {
     const { width, height } = deps.cardSize;
-    const { workArea } = deps.getAnchor();
+    // The display under the Settings window's centre — see workAreaForPoint.
+    const workArea = deps.workAreaForPoint
+      ? deps.workAreaForPoint(frame.x + frame.width / 2, frame.y + frame.height / 2)
+      : deps.getAnchor().workArea;
     const clamp = (value: number, min: number, max: number): number =>
       Math.round(Math.min(Math.max(value, min), max));
 
