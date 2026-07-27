@@ -1,8 +1,6 @@
 # Drag-to-grant permission onboarding (macOS)
 
-Status: **Stage 1 built** (`apps/desktop/src/main/permission-overlay/`,
-`apps/desktop/src/overlay/permission-overlay.*`). Stage 2 is still a proposal.
-Written 2026-07-27 for maka.
+Status: **proposal, not built.** Written 2026-07-27 for maka.
 
 ## The problem
 
@@ -81,66 +79,18 @@ short-lived onboarding overlay; it should not become a general facility.
 
 ## Staging
 
-**Stage 1 — pure Electron, no native code. DONE.** Everything except
-docking: the panel window, the deep link, the drag, the poller, the
-grant→close lifecycle, the copy. The card anchors to
-`screen.getCursorScreenPoint()`, clamped into that display's work area —
-the user just clicked our button, so the cursor is a good proxy for where
-they are looking, and it lands on the display they are actually using.
+**Stage 1 — pure Electron, no native code.** Everything except docking:
+the panel window, the deep link, the drag, the poller, the grant→close
+lifecycle, the copy. The card anchors to
+`screen.getCursorScreenPoint()` — the user just clicked our button, so
+the cursor is a good proxy for where they are looking. This is the whole
+feature minus the polish, and it ships without touching the build.
 
-Entry point is 引导授权 / "Guide me" in Settings → 权限与能力, shown only
-for the two drag-to-grant permissions and only where `canOpenSettings`
-is true (main sets it on darwin alone). The plain "open System Settings"
-link stays beside it — the drag is a shortcut, never the only route.
-
-The lifecycle lives in `permission-overlay-controller.ts`, fully injected
-and covered by `permission-overlay-controller.test.ts` with a fake clock:
-no window or timer stacking on re-entry, teardown on grant / dismiss /
-window-gone, and a give-up timeout so an abandoned flow cannot leave an
-immortal always-on-top card (a hole both reference implementations have).
-
-**Stage 2 — add the locator binary** as progressive enhancement. Not built. When it
+**Stage 2 — add the locator binary** as progressive enhancement. When it
 returns a frame, the card docks to the Settings window and follows it;
 when it returns `null`, fall back to the Stage 1 anchor. Unlike Alma,
 log the degradation loudly — a silent fallback is indistinguishable
 from a bug.
-
-## Stage 2 landmine: the two coordinate spaces do not match
-
-The reference locator returns **AppKit** coordinates — origin bottom-left
-of the containing screen:
-
-```swift
-y = screen.frame.maxY - localY - cgFrame.height
-```
-
-with a comment claiming that is what `setBounds` expects. It is not.
-Electron normalises screen coordinates to **top-left** origin on macOS,
-so feeding it a bottom-left `y` is a space mismatch. The docking math
-then adds a small offset (`y = frame.y + 14`) meaning "just below the
-window top", and the two spaces agree only when
-
-```
-screenHeight - windowTop - windowHeight  ==  windowTop
-```
-
-i.e. only when the Settings window is **vertically centred** — which is
-exactly where it opens by default, so the bug is invisible in a demo.
-Worked through for a 900px screen and a 600px window:
-
-| Settings window top | y passed to setBounds | intended | drift |
-|---:|---:|---:|---:|
-| 60  | 254 | 74  | **+180** |
-| 150 (centred) | 164 | 164 | 0 |
-| 250 | 64  | 264 | **−200** |
-
-So the card is correctly placed until the user moves the Settings window,
-then slides the wrong way by twice the displacement.
-
-Stage 2 must either return CG (top-left) coordinates and skip the AppKit
-conversion entirely, or convert and then convert back. Whichever we pick,
-the tracker needs a test that moves the window off-centre — a fixture
-using the default position proves nothing.
 
 ## Design notes worth stealing
 

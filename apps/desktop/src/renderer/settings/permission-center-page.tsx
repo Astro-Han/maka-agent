@@ -16,7 +16,7 @@ import type {
   PermissionSnapshot,
   UiLocale,
 } from '@maka/core';
-import { isDragGrantPermissionId, OS_PERMISSION_IDS } from '@maka/core';
+import { OS_PERMISSION_IDS } from '@maka/core';
 import { Button, Badge, Chip, EmptyState, RelativeTime, SectionHeader, StatTile, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { getPermissionCenterCopy, type PermissionCenterCopy } from '../locales/permission-center-copy';
 import { settingsActionErrorMessage } from './settings-error-copy';
@@ -34,12 +34,9 @@ import { useActionGuard } from './use-action-guard';
  *   the user can see WHY each capability lands on its readiness state.
  * - Surfaces every OS permission separately at the bottom so users can verify
  *   the underlying TCC state without re-deriving it from capabilities.
- * - The page still never pretends to REVOKE OS TCC — that is the OS's to
- *   give and take. It does now guide the grant: the drag-`.app` flow the
- *   original read-only note was waiting on exists (see
- *   `main/permission-overlay/`, docs/permission-onboarding-plan.md), so
- *   accessibility / screen recording offer a guided action beside the
- *   plain "open System Settings" link, which stays put.
+ * - **Read-only by design.** @xuan/@kenji review (2026-05-22): the UI must
+ *   NOT pretend to revoke OS TCC or guide the user through grant flows here;
+ *   that lands in PR-CU-0 / PR-CU-1 once the drag-`.app` helper exists.
  * - Audit hint slot is reserved (`auditEvents` is empty for now) — once
  *   PR-REAL-3 wires the audit log, the slot fills without UI change.
  */
@@ -94,7 +91,7 @@ export function PermissionCenterPage() {
 
   async function runPermissionAction(
     permId: OsPermissionId,
-    kind: 'request' | 'openSettings' | 'dragGrant',
+    kind: 'request' | 'openSettings',
   ) {
     const actionKey = `${permId}:${kind}`;
     if (!permissionActionGuard.begin(actionKey)) return;
@@ -103,9 +100,7 @@ export function PermissionCenterPage() {
       const result =
         kind === 'request'
           ? await window.maka.permissions.requestAccess(permId)
-          : kind === 'dragGrant'
-            ? await window.maka.permissions.startDragOnboarding(permId)
-            : await window.maka.permissions.openSystemSettings(permId);
+          : await window.maka.permissions.openSystemSettings(permId);
       if (result.ok) {
         // Refresh snapshot so the user sees the new state when they
         // return from System Settings.
@@ -196,7 +191,6 @@ export function PermissionCenterPage() {
               pendingKey={pendingPermAction === `${id}:request` ? 'request' : pendingPermAction === `${id}:openSettings` ? 'openSettings' : null}
               onRequest={() => void runPermissionAction(id, 'request')}
               onOpenSettings={() => void runPermissionAction(id, 'openSettings')}
-              onDragGrant={() => void runPermissionAction(id, 'dragGrant')}
             />
           ))}
         </ul>
@@ -446,10 +440,9 @@ function OsPermissionRow(props: {
   copy: PermissionCenterCopy;
   locale: UiLocale;
   busy: boolean;
-  pendingKey: 'request' | 'openSettings' | 'dragGrant' | null;
+  pendingKey: 'request' | 'openSettings' | null;
   onRequest: () => void;
   onOpenSettings: () => void;
-  onDragGrant: () => void;
 }) {
   const { snapshot, busy, pendingKey } = props;
   const permissionCopy = props.copy.osPermissions[snapshot.id];
@@ -462,14 +455,6 @@ function OsPermissionRow(props: {
 
   const showRequest = snapshot.canRequest && snapshot.status !== 'granted';
   const showOpenSettings = snapshot.canOpenSettings && snapshot.status !== 'granted';
-  // Drag-to-grant applies to the two permissions macOS gives no
-  // programmatic consent dialog for, where the stock path ends in a file
-  // picker. `canOpenSettings` is the platform proxy — main only sets it on
-  // darwin — so this never renders where the gesture cannot work.
-  const showDragGrant =
-    isDragGrantPermissionId(snapshot.id)
-    && snapshot.canOpenSettings
-    && snapshot.status !== 'granted';
 
   return (
     <li className="settingsOsPermissionRow" data-state={snapshot.status}>
@@ -508,27 +493,13 @@ function OsPermissionRow(props: {
         {showOpenSettings && (
           <Button
             type="button"
-            variant={showRequest || showDragGrant ? 'secondary' : 'default'}
+            variant={showRequest ? 'secondary' : 'default'}
             size="sm"
             onClick={props.onOpenSettings}
             disabled={busy}
             aria-busy={pendingKey === 'openSettings' ? 'true' : undefined}
           >
             {pendingKey === 'openSettings' ? props.copy.opening : props.copy.openSettings}
-          </Button>
-        )}
-        {/* The guided flow is the primary action where it exists: it does
-            what 前往系统设置 does and then stays to help. The plain link
-            keeps its place beside it so the manual route is never removed. */}
-        {showDragGrant && (
-          <Button
-            type="button"
-            size="sm"
-            onClick={props.onDragGrant}
-            disabled={busy}
-            aria-busy={pendingKey === 'dragGrant' ? 'true' : undefined}
-          >
-            {pendingKey === 'dragGrant' ? props.copy.dragGranting : props.copy.dragGrant}
           </Button>
         )}
         {showRequest && (

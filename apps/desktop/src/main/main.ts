@@ -5,8 +5,6 @@ import { wireAppLifecycle } from './app-lifecycle.js';
 import {
   collapseSessionRevisions,
   filterModelVisibleTaskLedgerTasks,
-  resolveSystemUiLocale,
-  resolveUiLocale,
 } from '@maka/core';
 import type {
   BotProvider,
@@ -119,10 +117,6 @@ import { registerWorkspaceInstructionsIpc } from './workspace-instructions-ipc-m
 import { registerOnboardingIpc } from './onboarding-ipc-main.js';
 import { registerSessionEntryIpc } from './session-entry-ipc-main.js';
 import { registerPermissionsIpc } from './permissions-ipc-main.js';
-import {
-  createPermissionOverlayMain,
-  registerPermissionOverlayIpc,
-} from './permission-overlay/permission-overlay-main.js';
 import { registerSettingsIpc } from './settings-ipc-main.js';
 import type { SettingsIpcHandle } from './settings-ipc-main.js';
 import { createE2eFixtureBotOnboardingAdapters } from './bot-onboarding-e2e-fixture.js';
@@ -997,22 +991,6 @@ function registerIpc(): void {
     botRegistry,
     getComputerUseCapabilityInput: computerUseCapabilityInput,
   });
-  // Drag-to-grant onboarding for the two TCC permissions macOS offers no
-  // programmatic consent dialog for. See docs/permission-onboarding-plan.md.
-  const permissionOverlay = createPermissionOverlayMain({
-    resolveLocale: async () => {
-      const settings = await settingsStore.get();
-      return resolveUiLocale(
-        settings.personalization.uiLocale,
-        resolveSystemUiLocale(app.getPreferredSystemLanguages()),
-      );
-    },
-  });
-  registerPermissionOverlayIpc({ controller: permissionOverlay });
-  // A screen-saver-level panel pinned to every Space is visible to the
-  // user if it outlives a slow quit; close it explicitly rather than
-  // relying on process teardown to race it away.
-  app.on('before-quit', () => permissionOverlay.dismiss());
   settingsIpc = registerSettingsIpc({
     settingsStore,
     botRegistry,

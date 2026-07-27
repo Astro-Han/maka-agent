@@ -74,7 +74,6 @@ export const MAIN_PROCESS_SOURCE_REPO_PATHS: readonly string[] = [
   'apps/desktop/src/main/onboarding-ipc-main.ts',
   'apps/desktop/src/main/permission-mode-default.ts',
   'apps/desktop/src/main/permissions-ipc-main.ts',
-  'apps/desktop/src/main/permission-overlay/permission-overlay-main.ts',
   'apps/desktop/src/main/plan-reminders-ipc-main.ts',
   'apps/desktop/src/main/plan-reminders-main.ts',
   'apps/desktop/src/main/project-context-root.ts',

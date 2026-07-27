@@ -160,14 +160,6 @@ export type PermissionActionResult =
       message?: string;
     };
 
-export type PermissionOverlayStartResult =
-  | { ok: true }
-  | {
-      ok: false;
-      reason: 'invalid_id' | 'unsupported_platform' | 'already_open' | 'open_settings_failed';
-      message?: string;
-    };
-
 export interface MakaBridge {
 
   tasks: {
@@ -339,13 +331,6 @@ export interface MakaBridge {
     getSnapshot(): Promise<PermissionSnapshot>;
     openSystemSettings(permId: string): Promise<PermissionActionResult>;
     requestAccess(permId: string): Promise<PermissionActionResult>;
-    /**
-     * macOS drag-to-grant onboarding: opens the right Privacy pane and
-     * floats a card the user can drag the app bundle out of. Only
-     * `accessibility` and `screen_recording` — the two permissions with
-     * no programmatic consent dialog.
-     */
-    startDragOnboarding(permId: string): Promise<PermissionOverlayStartResult>;
   };
   capabilities: {
     getSnapshot(): Promise<CapabilitySnapshotCollection>;
