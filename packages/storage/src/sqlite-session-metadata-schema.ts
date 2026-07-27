@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 9;
+export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 10;
 
 const MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
@@ -266,6 +266,50 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
 
     CREATE INDEX agent_graph_operator_provisions_by_graph
       ON agent_graph_operator_provisions(graph_id, provisioned_at, operator_id);
+  `,
+  ],
+  [
+    10,
+    `
+    CREATE TABLE agent_graph_client_projections (
+      graph_id TEXT PRIMARY KEY,
+      root_session_id TEXT NOT NULL,
+      schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+      snapshot_version TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      materialized_at INTEGER NOT NULL CHECK (materialized_at >= 0)
+    );
+
+    CREATE TABLE agent_graph_client_operator_projections (
+      graph_id TEXT NOT NULL,
+      operator_id TEXT NOT NULL,
+      snapshot_version TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      materialized_at INTEGER NOT NULL CHECK (materialized_at >= 0),
+      PRIMARY KEY(graph_id, operator_id)
+    );
+
+    CREATE TABLE agent_graph_client_terminal_activity (
+      graph_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      event_time INTEGER NOT NULL CHECK (event_time >= 0),
+      payload_json TEXT NOT NULL,
+      PRIMARY KEY(graph_id, record_id)
+    );
+
+    CREATE TABLE agent_graph_client_applied_records (
+      graph_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      event_time INTEGER NOT NULL CHECK (event_time >= 0),
+      PRIMARY KEY(graph_id, record_id)
+    );
+
+    CREATE INDEX agent_graph_client_terminal_activity_page
+      ON agent_graph_client_terminal_activity(
+        graph_id,
+        event_time DESC,
+        record_id DESC
+      );
   `,
   ],
 ]);

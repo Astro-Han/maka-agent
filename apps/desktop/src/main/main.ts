@@ -136,6 +136,7 @@ import {
 } from './desktop-backend-tool-surface.js';
 import { registerGatewayIpc } from './gateway-ipc-main.js';
 import { registerSessionsIpc } from './sessions-ipc-main.js';
+import { registerAgentGraphIpc } from './agent-graph-ipc-main.js';
 import {
   assertSessionCanSendFromHeader,
   isSessionLifecycleError,
@@ -932,6 +933,10 @@ function registerIpc(): void {
   registerWorkspaceSearchIpc({ getProjectRoot: resolveProjectRootForContext });
   registerGitIpc({ getProjectRoot: resolveProjectRootForContext });
   registerPlanReminderIpc({ planReminders, getWorkspacePrivacyContext });
+  registerAgentGraphIpc({
+    coordinator: agentGraphCoordinator,
+    sendToRenderer: safeSendToRenderer,
+  });
   registerSessionsIpc({
     runtime,
     store,

@@ -20,7 +20,7 @@ describe('SqliteSessionMetadataStore', () => {
     try {
       const store = createSqliteSessionMetadataStore(path, { now: () => 100 });
       const header = fullHeader();
-      assert.equal(store.schemaVersion(), 9);
+      assert.equal(store.schemaVersion(), 10);
       assert.equal(store.journalMode(), 'wal');
       assert.deepEqual(await store.create(header), {
         header,
@@ -31,7 +31,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const reopened = createSqliteSessionMetadataStore(path, { now: () => 200 });
       try {
-        assert.equal(reopened.schemaVersion(), 9);
+        assert.equal(reopened.schemaVersion(), 10);
         assert.deepEqual(await reopened.read(header.id), {
           header,
           metadataVersion: 1,
@@ -39,6 +39,19 @@ describe('SqliteSessionMetadataStore', () => {
         });
       } finally {
         reopened.close();
+      }
+      const schema = new DatabaseSync(path);
+      try {
+        assert.deepEqual(
+          schema.prepare('PRAGMA foreign_key_list(agent_graph_client_operator_projections)').all(),
+          [],
+        );
+        assert.deepEqual(
+          schema.prepare('PRAGMA foreign_key_list(agent_graph_client_terminal_activity)').all(),
+          [],
+        );
+      } finally {
+        schema.close();
       }
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -52,7 +65,7 @@ describe('SqliteSessionMetadataStore', () => {
     const metadata = createSqliteSessionMetadataStore(path);
     try {
       assert.equal(runtime.schemaVersion(), 4);
-      assert.equal(metadata.schemaVersion(), 9);
+      assert.equal(metadata.schemaVersion(), 10);
       await metadata.create(fullHeader());
       await runtime.appendRuntimeEvent('session-1', 'run-1', {
         id: 'event-1',
@@ -160,7 +173,7 @@ describe('SqliteSessionMetadataStore', () => {
 
     const store = createSqliteSessionMetadataStore(path);
     try {
-      assert.equal(store.schemaVersion(), 9);
+      assert.equal(store.schemaVersion(), 10);
       assert.deepEqual(
         (
           await store.list({
@@ -493,6 +506,10 @@ describe('SqliteSessionMetadataStore', () => {
 
       const v4 = new DatabaseSync(path);
       v4.exec(`
+        DROP TABLE agent_graph_client_applied_records;
+        DROP TABLE agent_graph_client_terminal_activity;
+        DROP TABLE agent_graph_client_operator_projections;
+        DROP TABLE agent_graph_client_projections;
         DROP TABLE agent_graph_operator_provisions;
         DROP TABLE agent_graph_schedule_updates;
         DROP TABLE agent_graph_intent_claims;
@@ -516,7 +533,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const migrated = createSqliteSessionMetadataStore(path);
       try {
-        assert.equal(migrated.schemaVersion(), 9);
+        assert.equal(migrated.schemaVersion(), 10);
         assert.equal(await migrated.remove(child.id), true);
         await assert.rejects(
           () => migrated.createSubagent({ ...child, id: 'retry-after-migration' }),
@@ -793,6 +810,271 @@ describe('SQLite agent graph operator provisions', () => {
       );
       assert.deepEqual(await store.listAgentGraphOperatorProvisions('graph-1'), []);
       await assert.rejects(store.read('graph-child'), /not found/);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe('SQLite agent graph client projections', () => {
+  test('atomically reads a graph with an independently versioned operator row', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', {
+      now: nextNow(400),
+    });
+    try {
+      await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-atomic-read',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: null,
+        snapshotVersion: 'snapshot-1',
+        snapshot: { version: 1 },
+        replaceOperators: true,
+        operators: [
+          { operatorId: 'operator-1', payload: { status: 'running' } },
+          { operatorId: 'operator-2', payload: { status: 'waiting' } },
+        ],
+        terminalActivities: [],
+        activityRecords: [],
+      });
+      await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-atomic-read',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: 'snapshot-1',
+        snapshotVersion: 'snapshot-2',
+        snapshot: { version: 2 },
+        replaceOperators: false,
+        operators: [
+          { operatorId: 'operator-1', payload: { status: 'completed' } },
+        ],
+        terminalActivities: [],
+        activityRecords: [{ recordId: 'record-1', eventTime: 10 }],
+        incrementalRecordId: 'record-1',
+      });
+
+      const materialized =
+        await store.readAgentGraphClientProjectionWithOperator(
+          'graph-atomic-read',
+          'operator-2',
+        );
+      assert.equal(materialized?.projection.snapshotVersion, 'snapshot-2');
+      assert.equal(materialized?.operator?.snapshotVersion, 'snapshot-1');
+      assert.deepEqual(materialized?.operator?.payload, { status: 'waiting' });
+      assert.deepEqual(
+        await store.readAgentGraphClientProjectionWithOperator(
+          'graph-atomic-read',
+          'missing-operator',
+        ),
+        {
+          projection: materialized?.projection,
+        },
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test('CAS-fences stale writers and deduplicates incremental durable records', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', {
+      now: nextNow(500),
+    });
+    try {
+      await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-cas',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: null,
+        snapshotVersion: 'snapshot-1',
+        snapshot: { version: 1 },
+        replaceOperators: true,
+        operators: [{ operatorId: 'operator-1', payload: { status: 'running' } }],
+        terminalActivities: [],
+        activityRecords: [],
+      });
+      await assert.rejects(
+        store.commitAgentGraphClientProjection({
+          schemaVersion: 1,
+          graphId: 'graph-cas',
+          rootSessionId: 'root-session',
+          expectedSnapshotVersion: null,
+          snapshotVersion: 'snapshot-create-race',
+          snapshot: { version: 99 },
+          replaceOperators: true,
+          operators: [],
+          terminalActivities: [],
+          activityRecords: [],
+        }),
+        /version conflict/,
+      );
+      await assert.rejects(
+        store.commitAgentGraphClientProjection({
+          schemaVersion: 1,
+          graphId: 'graph-cas',
+          rootSessionId: 'root-session',
+          expectedSnapshotVersion: 'stale-snapshot',
+          snapshotVersion: 'snapshot-stale-write',
+          snapshot: { version: 99 },
+          replaceOperators: false,
+          operators: [],
+          terminalActivities: [
+            {
+              recordId: 'stale-terminal',
+              eventTime: 9,
+              payload: { recordId: 'stale-terminal' },
+            },
+          ],
+          activityRecords: [{ recordId: 'stale-terminal', eventTime: 9 }],
+        }),
+        /version conflict/,
+      );
+      assert.deepEqual(
+        await store.listAgentGraphClientTerminalActivities('graph-cas', {
+          limit: 8,
+        }),
+        { records: [], hasMore: false },
+      );
+
+      const applied = await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-cas',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: 'snapshot-1',
+        snapshotVersion: 'snapshot-2',
+        snapshot: { version: 2 },
+        replaceOperators: false,
+        operators: [{ operatorId: 'operator-1', payload: { status: 'completed' } }],
+        terminalActivities: [],
+        activityRecords: [{ recordId: 'record-1', eventTime: 10 }],
+        incrementalRecordId: 'record-1',
+      });
+      assert.equal(applied.snapshotVersion, 'snapshot-2');
+
+      const duplicate = await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-cas',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: 'snapshot-2',
+        snapshotVersion: 'snapshot-3',
+        snapshot: { version: 3 },
+        replaceOperators: false,
+        operators: [{ operatorId: 'operator-1', payload: { status: 'failed' } }],
+        terminalActivities: [],
+        activityRecords: [{ recordId: 'record-1', eventTime: 10 }],
+        incrementalRecordId: 'record-1',
+      });
+      assert.equal(duplicate.snapshotVersion, 'snapshot-2');
+      assert.deepEqual((await store.readAgentGraphClientProjection('graph-cas'))?.payload, {
+        version: 2,
+      });
+      assert.deepEqual(
+        (await store.readAgentGraphClientOperatorProjection('graph-cas', 'operator-1'))?.payload,
+        { status: 'completed' },
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test('materializes bounded current state and keyset-pages terminal activity', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', {
+      now: nextNow(1_000),
+    });
+    try {
+      const first = await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-1',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: null,
+        snapshotVersion: 'snapshot-1',
+        snapshot: { version: 1 },
+        replaceOperators: true,
+        operators: [
+          { operatorId: 'operator-1', payload: { status: 'running' } },
+          { operatorId: 'operator-2', payload: { status: 'completed' } },
+        ],
+        terminalActivities: [
+          { recordId: 'record-1', eventTime: 1, payload: { recordId: 'record-1' } },
+          { recordId: 'record-2', eventTime: 2, payload: { recordId: 'record-2' } },
+          { recordId: 'record-3', eventTime: 3, payload: { recordId: 'record-3' } },
+        ],
+        activityRecords: [
+          { recordId: 'record-1', eventTime: 1 },
+          { recordId: 'record-2', eventTime: 2 },
+          { recordId: 'record-3', eventTime: 3 },
+        ],
+      });
+      assert.equal(first.snapshotVersion, 'snapshot-1');
+      assert.deepEqual((await store.readAgentGraphClientProjection('graph-1'))?.payload, {
+        version: 1,
+      });
+      assert.deepEqual(
+        (await store.readAgentGraphClientOperatorProjection('graph-1', 'operator-1'))?.payload,
+        { status: 'running' },
+      );
+      const firstPage = await store.listAgentGraphClientTerminalActivities('graph-1', { limit: 2 });
+      assert.equal(firstPage.hasMore, true);
+      assert.deepEqual(
+        firstPage.records.map((record) => record.recordId),
+        ['record-3', 'record-2'],
+      );
+      const secondPage = await store.listAgentGraphClientTerminalActivities('graph-1', {
+        limit: 2,
+        before: { eventTime: 2, recordId: 'record-2' },
+      });
+      assert.equal(secondPage.hasMore, false);
+      assert.deepEqual(
+        secondPage.records.map((record) => record.recordId),
+        ['record-1'],
+      );
+      await assert.rejects(
+        store.listAgentGraphClientTerminalActivities('graph-1', {
+          limit: 2,
+          before: { eventTime: 99, recordId: 'record-2' },
+        }),
+        /stale or invalid/,
+      );
+
+      await store.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId: 'graph-1',
+        rootSessionId: 'root-session',
+        expectedSnapshotVersion: 'snapshot-1',
+        snapshotVersion: 'snapshot-2',
+        snapshot: { version: 2 },
+        replaceOperators: true,
+        operators: [{ operatorId: 'operator-1', payload: { status: 'completed' } }],
+        terminalActivities: [
+          { recordId: 'record-3', eventTime: 3, payload: { recordId: 'record-3' } },
+        ],
+        activityRecords: [{ recordId: 'record-3', eventTime: 3 }],
+      });
+      assert.equal(
+        await store.readAgentGraphClientOperatorProjection('graph-1', 'operator-2'),
+        undefined,
+      );
+      assert.equal(
+        (await store.readAgentGraphClientOperatorProjection('graph-1', 'operator-1'))
+          ?.snapshotVersion,
+        'snapshot-2',
+      );
+      await assert.rejects(
+        store.commitAgentGraphClientProjection({
+          schemaVersion: 1,
+          graphId: 'graph-1',
+          rootSessionId: 'root-session',
+          expectedSnapshotVersion: 'snapshot-2',
+          snapshotVersion: 'snapshot-3',
+          snapshot: { version: 3 },
+          replaceOperators: true,
+          operators: [],
+          terminalActivities: [
+            { recordId: 'record-3', eventTime: 4, payload: { recordId: 'record-3' } },
+          ],
+          activityRecords: [{ recordId: 'record-3', eventTime: 4 }],
+        }),
+        /changed after materialization/,
+      );
     } finally {
       store.close();
     }
