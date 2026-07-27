@@ -346,7 +346,6 @@ export interface MakaBridge {
      * no programmatic consent dialog.
      */
     startDragOnboarding(permId: string): Promise<PermissionOverlayStartResult>;
-    dismissDragOnboarding(): Promise<{ ok: true }>;
   };
   capabilities: {
     getSnapshot(): Promise<CapabilitySnapshotCollection>;

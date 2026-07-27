@@ -999,17 +999,20 @@ function registerIpc(): void {
   });
   // Drag-to-grant onboarding for the two TCC permissions macOS offers no
   // programmatic consent dialog for. See docs/permission-onboarding-plan.md.
-  registerPermissionOverlayIpc({
-    controller: createPermissionOverlayMain({
-      resolveLocale: async () => {
-        const settings = await settingsStore.get();
-        return resolveUiLocale(
-          settings.personalization.uiLocale,
-          resolveSystemUiLocale(app.getPreferredSystemLanguages()),
-        );
-      },
-    }),
+  const permissionOverlay = createPermissionOverlayMain({
+    resolveLocale: async () => {
+      const settings = await settingsStore.get();
+      return resolveUiLocale(
+        settings.personalization.uiLocale,
+        resolveSystemUiLocale(app.getPreferredSystemLanguages()),
+      );
+    },
   });
+  registerPermissionOverlayIpc({ controller: permissionOverlay });
+  // A screen-saver-level panel pinned to every Space is visible to the
+  // user if it outlives a slow quit; close it explicitly rather than
+  // relying on process teardown to race it away.
+  app.on('before-quit', () => permissionOverlay.dismiss());
   settingsIpc = registerSettingsIpc({
     settingsStore,
     botRegistry,

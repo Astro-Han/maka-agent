@@ -287,9 +287,10 @@ export interface PermissionOverlayIpcDeps {
 }
 
 /**
- * The renderer-facing surface: only the two invoke channels the app's own
- * preload exposes. The card's own gestures are bound per-window in
- * `attachCardGestures`, not here.
+ * The renderer-facing surface: one invoke channel. The card's own
+ * gestures are bound per-window in `attachCardGestures`, and the card
+ * closes itself (its × button, the grant, or the give-up timeout), so
+ * the app never needs to reach in and dismiss it.
  */
 export function registerPermissionOverlayIpc(deps: PermissionOverlayIpcDeps): void {
   const electron = requireElectron('electron') as Electron;
@@ -297,11 +298,6 @@ export function registerPermissionOverlayIpc(deps: PermissionOverlayIpcDeps): vo
 
   ipcMain.handle('permissions:startDragOnboarding', async (_event, id: unknown) => {
     return deps.controller.start(id);
-  });
-
-  ipcMain.handle('permissions:dismissDragOnboarding', async () => {
-    deps.controller.dismiss();
-    return { ok: true };
   });
 }
 

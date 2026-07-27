@@ -84,11 +84,11 @@ export const GIVE_UP_MS = 10 * 60 * 1_000;
 
 export interface PermissionOverlayController {
   start(id: unknown): Promise<OverlayStartResult>;
+  /** Tear the card down: the × button, app quit, or a test. */
   dismiss(): void;
   isOpen(): boolean;
-  /** Visible for tests + the IPC layer: which permission is on screen. */
+  /** Which permission is on screen. Assertion surface for tests. */
   activePermission(): DragGrantPermissionId | null;
-  destroy(): void;
 }
 
 export function createPermissionOverlayController(
@@ -201,10 +201,6 @@ export function createPermissionOverlayController(
 
     activePermission(): DragGrantPermissionId | null {
       return active;
-    },
-
-    destroy(): void {
-      teardown();
     },
   };
 }
