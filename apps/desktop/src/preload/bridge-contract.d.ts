@@ -721,9 +721,9 @@ export interface MakaBridge {
       | { ok: true; created: boolean; skill: SkillEntry; filePath: string }
       | { ok: false; reason: 'blocked_path' | 'already_exists' | 'write_failed' }
     >;
-    delete(id: string): Promise<
+    delete(idOrRef: string): Promise<
       | { ok: true }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'delete_failed' }
+      | { ok: false; reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed' }
     >;
     open(id: string, target?: 'file' | 'directory'): Promise<
       | { ok: true; target: 'file' | 'directory' }

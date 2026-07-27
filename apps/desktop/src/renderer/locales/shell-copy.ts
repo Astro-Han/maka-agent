@@ -300,7 +300,7 @@ type ShellCopy = {
       'not_managed' | 'source_missing' | 'metadata_error' | 'blocked_path' | 'read_failed',
       string
     >;
-    deleteFailures: Record<'not_found' | 'blocked_path' | 'delete_failed', string>;
+    deleteFailures: Record<'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed', string>;
     runtimeFailures: Record<'not_found' | 'blocked_path' | 'state_error' | 'write_failed', string>;
   };
   sessionSettingsActions: {
@@ -832,7 +832,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailedTitle: '无法删除 Skill',
       deleteFallback: '无法删除 Skill，请稍后重试。',
       deletedTitle: '已删除 Skill',
-      deletedDescription: (id: string) => `${id} 已从当前工作区移除。`,
+      deletedDescription: (id: string) => `${id} 已移除。`,
       openFailedTitle: '无法打开 Skill',
       openFallback: '无法打开 Skill，请稍后重试。',
       createFailures: {
@@ -879,6 +879,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailures: {
         not_found: '当前工作区找不到这个 Skill。',
         blocked_path: 'Skill 路径不允许删除。',
+        blocked_scope: '项目内的 Skill 由仓库管理，请直接在项目里删除。',
         delete_failed: '删除 Skill 失败，请检查文件权限。',
       },
       runtimeFailures: {
@@ -1292,7 +1293,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailedTitle: 'Could not delete Skill',
       deleteFallback: 'The Skill could not be deleted. Try again later.',
       deletedTitle: 'Skill deleted',
-      deletedDescription: (id: string) => `${id} was removed from the current workspace.`,
+      deletedDescription: (id: string) => `${id} was removed.`,
       openFailedTitle: 'Could not open Skill',
       openFallback: 'The Skill could not be opened. Try again later.',
       createFailures: {
@@ -1340,6 +1341,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailures: {
         not_found: 'This Skill was not found in the current workspace.',
         blocked_path: 'The Skill path cannot be deleted.',
+        blocked_scope: 'Project Skills are managed by the repository. Delete it from the project instead.',
         delete_failed: 'The Skill could not be deleted. Check file permissions.',
       },
       runtimeFailures: {

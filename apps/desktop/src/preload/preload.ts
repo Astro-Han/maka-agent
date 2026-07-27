@@ -1128,11 +1128,11 @@ const makaBridge = {
     > {
       return ipcRenderer.invoke('skills:createStarter');
     },
-    delete(id: string): Promise<
+    delete(idOrRef: string): Promise<
       | { ok: true }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'delete_failed' }
+      | { ok: false; reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed' }
     > {
-      return ipcRenderer.invoke('skills:delete', id);
+      return ipcRenderer.invoke('skills:delete', idOrRef);
     },
     open(id: string, target: 'file' | 'directory' = 'file'): Promise<
       | { ok: true; target: 'file' | 'directory' }

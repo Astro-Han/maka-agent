@@ -1705,7 +1705,7 @@ function AppShellContent({
                   onUpdateManagedSkill={(skillId, options) => updateManagedSkill(skillId, options)}
                   onSetSkillEnabled={(skillId, enabled) => setSkillEnabled(skillId, enabled)}
                   onSetSkillPinned={(skillRef, pinned) => setSkillPinned(skillRef, pinned)}
-                  onDeleteSkill={(skillId) => deleteSkill(skillId)}
+                  onDeleteSkill={(skillRef) => deleteSkill(skillRef)}
                 />
               ) : navSelection.section === 'extensions' && navSelection.module === 'mcp' ? (
                 <McpPage hubHeader={extensionsHubHeader} />

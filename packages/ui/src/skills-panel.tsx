@@ -47,7 +47,7 @@ function SkillLibraryPanel(props: {
   onUpdateManagedSkill?(skillId: string, options?: { force?: boolean; expectedCurrentSha256?: string; expectedSourceSha256?: string }): boolean | Promise<boolean>;
   onSetSkillEnabled?(skillId: string, enabled: boolean): void | Promise<void>;
   onSetSkillPinned?(skillRef: string, pinned: boolean): void | Promise<void>;
-  onDeleteSkill?(skillId: string): void | Promise<void>;
+  onDeleteSkill?(skillRef: string): void | Promise<void>;
   actionBusy?: boolean;
   refreshPending?: boolean;
   createPending?: boolean;
@@ -92,17 +92,20 @@ function SkillLibraryPanel(props: {
       deleteConfirmTimerRef.current = null;
     }
   }
+  // Keyed by ref, not id: the same skill id can be discovered in more than one
+  // scope, and an id-keyed confirm would arm the delete on every copy at once.
   function requestDeleteSkill(skill: SkillEntry) {
     if (!props.onDeleteSkill) return;
-    if (confirmingDeleteSkillId !== skill.id) {
+    const ref = skill.ref ?? skill.id;
+    if (confirmingDeleteSkillId !== ref) {
       clearDeleteConfirmTimer();
-      setConfirmingDeleteSkillId(skill.id);
+      setConfirmingDeleteSkillId(ref);
       deleteConfirmTimerRef.current = setTimeout(() => setConfirmingDeleteSkillId(null), DELETE_CONFIRM_TIMEOUT_MS);
       return;
     }
     clearDeleteConfirmTimer();
     setConfirmingDeleteSkillId(null);
-    void props.onDeleteSkill(skill.id);
+    void props.onDeleteSkill(ref);
   }
   const [marketCategory, setMarketCategory] = useState<ManagedSkillCategory | typeof MARKET_CATEGORY_ALL>(MARKET_CATEGORY_ALL);
   const [marketSort, setMarketSort] = useState<MarketSort>('name');
@@ -464,8 +467,8 @@ function SkillLibraryPanel(props: {
               const updating = props.updatingSkillId === skill.id;
               const toggling = props.togglingSkillId === skillRef;
               const reviewing = reviewingSkillId === skill.id;
-              const deleting = props.deletingSkillId === skill.id;
-              const confirmingDelete = confirmingDeleteSkillId === skill.id;
+              const deleting = props.deletingSkillId === skillRef;
+              const confirmingDelete = confirmingDeleteSkillId === skillRef;
               const reviewableManagedUpdate = skill.managedUpdateStatus === 'update_available' || skill.managedUpdateStatus === 'local_modified';
               const canToggleSkill =
                 !isDiscoveryDiagnostic &&
@@ -792,7 +795,7 @@ export function SkillsModuleMain(props: {
   onUpdateManagedSkill?(skillId: string, options?: { force?: boolean; expectedCurrentSha256?: string; expectedSourceSha256?: string }): boolean | Promise<boolean>;
   onSetSkillEnabled?(skillId: string, enabled: boolean): void | Promise<void>;
   onSetSkillPinned?(skillRef: string, pinned: boolean): void | Promise<void>;
-  onDeleteSkill?(skillId: string): void | Promise<void>;
+  onDeleteSkill?(skillRef: string): void | Promise<void>;
 }) {
   const copy = getSkillsCopy(useUiLocale());
   const [pendingSkillAction, setPendingSkillAction] = useState<string | null>(null);

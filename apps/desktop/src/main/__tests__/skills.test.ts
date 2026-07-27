@@ -275,8 +275,12 @@ description: Workspace workflow.
       const entries = await listGovernedSkillEntries(workspaceRoot, options);
       assert.deepEqual(entries.map((skill) => skill.scope).sort(), ['project', 'user', 'workspace']);
       assert.equal(entries.find((skill) => skill.id === 'project-helper')?.ref, 'project:maka:project-helper');
-      assert.equal(entries.find((skill) => skill.id === 'user-helper')?.manageable, false);
+      // User-scope skills are the user's own installs under ~/.maka|.agents,
+      // so the panel deletes them. Project-scope skills live in the repo and
+      // are left to git — see isManageableSkill.
+      assert.equal(entries.find((skill) => skill.id === 'user-helper')?.manageable, true);
       assert.equal(entries.find((skill) => skill.id === 'workspace-helper')?.manageable, true);
+      assert.equal(entries.find((skill) => skill.id === 'project-helper')?.manageable, false);
 
       const pinned = await setSkillPinned(
         workspaceRoot,
@@ -682,6 +686,90 @@ description: 用于测试删除已安装技能。
 
       // Deleting an absent skill is a clean not_found, not a throw.
       assert.deepEqual(await deleteSkill(workspaceRoot, 'starter-skill'), { ok: false, reason: 'not_found' });
+    });
+  });
+
+  it('deletes a user-scope skill by ref and leaves project-scope skills alone', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const projectRoot = join(workspaceRoot, 'project');
+      const homeDir = join(workspaceRoot, 'home');
+      await mkdir(projectRoot, { recursive: true });
+      await mkdir(homeDir, { recursive: true });
+      await writeSkillAt(join(homeDir, '.agents', 'skills'), 'user-helper', 'User Helper', 'User workflow.');
+      await writeSkillAt(join(projectRoot, '.maka', 'skills'), 'project-helper', 'Project Helper', 'Project workflow.');
+      const options = { cwd: projectRoot, homeDir };
+
+      assert.deepEqual(
+        await deleteSkill(workspaceRoot, 'user:agents:user-helper', options),
+        { ok: true },
+      );
+      await assert.rejects(lstat(join(homeDir, '.agents', 'skills', 'user-helper')), { code: 'ENOENT' });
+
+      // Project scope is a policy refusal, not a path block, and the repo file
+      // must still be on disk afterwards.
+      assert.deepEqual(
+        await deleteSkill(workspaceRoot, 'project:maka:project-helper', options),
+        { ok: false, reason: 'blocked_scope' },
+      );
+      await lstat(join(projectRoot, '.maka', 'skills', 'project-helper'));
+
+      // A ref for a skill that no longer exists is a clean not_found.
+      assert.deepEqual(
+        await deleteSkill(workspaceRoot, 'user:agents:user-helper', options),
+        { ok: false, reason: 'not_found' },
+      );
+    });
+  });
+
+  it('refuses to delete a user-scope skill reached through a symlinked directory', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const outside = await mkdtemp(join(tmpdir(), 'maka-skill-user-delete-outside-'));
+      try {
+        const homeDir = join(workspaceRoot, 'home');
+        // A real skill outside the scan roots, linked into ~/.agents/skills.
+        await writeSkillAt(outside, 'linked-helper', 'Linked Helper', 'Linked workflow.');
+        await mkdir(join(homeDir, '.agents', 'skills'), { recursive: true });
+        await symlink(join(outside, 'linked-helper'), join(homeDir, '.agents', 'skills', 'linked-helper'));
+
+        const options = { cwd: workspaceRoot, homeDir };
+        // `not_found`, not `blocked_path`: discovery itself skips symlinked
+        // dir entries, so a linked skill never reaches the inventory and the
+        // delete has no ref to match. The lstat symlink guard inside
+        // deleteSkillByRef is defence in depth behind this.
+        assert.deepEqual(
+          await deleteSkill(workspaceRoot, 'user:agents:linked-helper', options),
+          { ok: false, reason: 'not_found' },
+        );
+        // The link target survives — deletion never followed the link out.
+        await lstat(join(outside, 'linked-helper', 'SKILL.md'));
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it('refuses a ref that resolves outside the enumerated discovery dirs', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const homeDir = join(workspaceRoot, 'home');
+      await mkdir(homeDir, { recursive: true });
+      await writeSkillAt(join(homeDir, '.agents', 'skills'), 'user-helper', 'User Helper', 'User workflow.');
+      const options = { cwd: workspaceRoot, homeDir };
+
+      // Refs are matched against the scan, so a forged one never resolves to a
+      // path at all — no traversal, no delete.
+      for (const forged of [
+        'user:agents:../../../etc',
+        'user:agents:user-helper/../../..',
+        'custom:0:user-helper',
+        'workspace:legacy:user-helper',
+      ]) {
+        assert.deepEqual(
+          await deleteSkill(workspaceRoot, forged, options),
+          { ok: false, reason: 'not_found' },
+          `forged ref ${forged} must not resolve`,
+        );
+      }
+      await lstat(join(homeDir, '.agents', 'skills', 'user-helper', 'SKILL.md'));
     });
   });
 
@@ -1476,9 +1564,9 @@ description: Exercise workspace-contained open paths.
     assert.match(renderer, /onUpdateManagedSkill=\{\(skillId, options\) => updateManagedSkill\(skillId, options\)\}/);
     assert.match(renderer, /onSetSkillEnabled=\{\(skillId, enabled\) => setSkillEnabled\(skillId, enabled\)\}/);
     assert.match(renderer, /onSetSkillPinned=\{\(skillRef, pinned\) => setSkillPinned\(skillRef, pinned\)\}/);
-    assert.match(renderer, /onDeleteSkill=\{\(skillId\) => deleteSkill\(skillId\)\}/);
+    assert.match(renderer, /onDeleteSkill=\{\(skillRef\) => deleteSkill\(skillRef\)\}/);
     assert.match(preload, /createStarter\(\)/);
-    assert.match(preload, /delete\(id: string\)/);
+    assert.match(preload, /delete\(idOrRef: string\)/);
     assert.match(preload, /open\(id: string, target: 'file' \| 'directory' = 'file'\)/);
     assert.match(preload, /previewUpdate\(skillId: string\)/);
     assert.match(preload, /updateManaged\(skillId: string, options\?: \{ force\?: boolean; expectedCurrentSha256\?: string; expectedSourceSha256\?: string \}\)/);
@@ -1604,11 +1692,14 @@ description: Exercise workspace-contained open paths.
     // Per-row delete: destructive two-step confirm (no dialog precedent here).
     // First click arms 确认删除; a second within the window fires onDeleteSkill.
     // aria-label names the skill and reflects the armed state (keyboard-safe).
-    assert.match(skillPanel, /onDeleteSkill\?\(skillId: string\): void \| Promise<void>/);
+    assert.match(skillPanel, /onDeleteSkill\?\(skillRef: string\): void \| Promise<void>/);
     assert.match(skillPanel, /className="maka-skill-library-delete-button"/);
     assert.match(skillPanel, /function requestDeleteSkill\(skill: SkillEntry\)/);
-    assert.match(skillPanel, /setConfirmingDeleteSkillId\(skill\.id\)[\s\S]*setTimeout\([\s\S]*setConfirmingDeleteSkillId\(null\)/, 'armed delete state must auto-revert so a stray first click cannot linger');
-    assert.match(skillPanel, /void props\.onDeleteSkill\(skill\.id\)/);
+    // Armed state is keyed by ref, not id: the same id can appear in several
+    // scopes and an id-keyed confirm would arm every copy at once.
+    assert.match(skillPanel, /const ref = skill\.ref \?\? skill\.id;/);
+    assert.match(skillPanel, /setConfirmingDeleteSkillId\(ref\)[\s\S]*setTimeout\([\s\S]*setConfirmingDeleteSkillId\(null\)/, 'armed delete state must auto-revert so a stray first click cannot linger');
+    assert.match(skillPanel, /void props\.onDeleteSkill\(ref\)/);
     assert.match(skillPanel, /aria-label=\{confirmingDelete \? copy\.row\.confirmDeleteAriaLabel\(skill\.name\) : copy\.row\.deleteAriaLabel\(skill\.name\)\}/);
     assert.match(skillPanel, /confirmingDelete \? copy\.row\.confirmDelete : copy\.row\.delete/);
     assert.match(skillPanel, /<div[\s\S]*className="maka-skill-library-row"[\s\S]*<\/div>/, 'Skill row body must be information, not the open-file control');

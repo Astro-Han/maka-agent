@@ -108,8 +108,29 @@ export interface SkillEntry {
   /** Legacy id preference matched multiple refs and needs explicit choices. */
   needsReview: boolean;
   discoveryDiagnosticReason?: SkillDiscoveryDiagnostic['reason'];
-  /** Only legacy workspace installs can be updated or deleted by this panel. */
+  /** Whether this panel can delete the skill. See {@link isManageableSkill}. */
   manageable: boolean;
+}
+
+/**
+ * Scopes the Skills panel is allowed to delete from.
+ *
+ * `workspace`/`legacy` is the original `{workspaceRoot}/skills/` install dir.
+ * `user` covers `~/.maka/skills` and `~/.agents/skills` — those are the user's
+ * own installs, so refusing to delete them left the panel showing skills it
+ * could not manage with no explanation for why the button was missing.
+ *
+ * `project` is deliberately excluded: `{cwd}/.maka/skills` and
+ * `{cwd}/.agents/skills` live inside the user's repo and are normally tracked
+ * by git. Deleting repo files from an agent panel is a different, more
+ * surprising action than removing something the user installed for themselves,
+ * so it stays out until it is asked for explicitly. `custom` is excluded for
+ * the same reason — its containment root is the scan dir itself, supplied by
+ * whoever constructed the scan, so there is no user-owned root to anchor to.
+ */
+export function isManageableSkill(scope: SkillScope, source: SkillDiscoverySource): boolean {
+  if (scope === 'user') return true;
+  return scope === 'workspace' && source === 'legacy';
 }
 
 export interface SkillGovernanceDetails {
@@ -152,7 +173,13 @@ export type CreateStarterSkillResult =
 
 export type DeleteSkillResult =
   | { ok: true }
-  | { ok: false; reason: 'not_found' | 'blocked_path' | 'delete_failed' };
+  /**
+   * `blocked_scope` is distinct from `blocked_path`: the skill was found and
+   * its path is sound, but its discovery scope is not one this panel deletes
+   * from (see {@link isManageableSkill}). Keeping it separate stops a policy
+   * refusal from reading as a path-traversal block in logs and toasts.
+   */
+  | { ok: false; reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed' };
 
 export type SkillOpenTarget = 'file' | 'directory';
 export type ResolveSkillOpenPathResult =
@@ -326,7 +353,7 @@ function toRejectedSkillEntry(skill: RejectedSkillDefinition): SkillEntry {
     source: skill.source,
     contextStatus: 'invalid',
     needsReview: false,
-    manageable: skill.scope === 'workspace' && skill.source === 'legacy',
+    manageable: isManageableSkill(skill.scope, skill.source),
   };
 }
 
@@ -383,7 +410,7 @@ export function toSkillEntry(
     ...(decision?.rank !== undefined ? { contextRank: decision.rank } : {}),
     ...(decision?.shadowedBy ? { shadowedBy: decision.shadowedBy } : {}),
     needsReview,
-    manageable: skill.scope === 'workspace' && skill.source === 'legacy',
+    manageable: isManageableSkill(skill.scope, skill.source),
     ...(skill.sourceType === 'managed' && skill.managedUpdateStatus ? { managedUpdateStatus: skill.managedUpdateStatus } : {}),
   };
 }
@@ -640,15 +667,98 @@ export async function createStarterSkill(root: string): Promise<CreateStarterSki
 }
 
 /**
- * Delete an installed skill directory under {root}/skills/<id>. Path-hardened
- * exactly like createStarterSkill / installManagedSkill: the skills dir and the
- * skill dir must both be real, contained directories (no symlinks, no escape
- * outside the workspace) before anything is removed. The recursive rm also
- * clears any managed-skill baseline metadata under the skill's .maka/ subtree.
+ * Delete a discovered skill directory by scope-aware `ref`.
+ *
+ * The caller only ever supplies the ref string; the directory to remove is
+ * re-derived from a fresh discovery scan, never from renderer-supplied input.
+ * On top of that the target must clear four checks before anything is removed:
+ *
+ *  1. its scope is deletable ({@link isManageableSkill}),
+ *  2. it is a real directory and not a symlink (so the rm cannot follow a link
+ *     out of the scan root),
+ *  3. its parent is one of the discovery dirs this scan actually enumerated —
+ *     the tight check, since the containment root for user scope is the whole
+ *     home dir,
+ *  4. and it is still inside its discovery root after realpath resolution.
+ *
+ * Mirrors `resolveSkillOpenPath`'s ref branch, with (1) and (3) added because
+ * this operation is destructive and irreversible.
  */
-export async function deleteSkill(root: string, id: string): Promise<DeleteSkillResult> {
-  if (!isSafeSkillId(id)) return { ok: false, reason: 'not_found' };
+async function deleteSkillByRef(
+  root: string,
+  ref: string,
+  options: SkillReadOptions = {},
+): Promise<DeleteSkillResult> {
+  if (ref.length > 512) return { ok: false, reason: 'not_found' };
 
+  const discovery = resolveSkillDiscoveryPaths(options.cwd ?? root, root, options.homeDir);
+  const scan = await scanSkillsWithDiagnostics(discovery);
+  const skill = [...scan.inventory, ...scan.rejected].find((candidate) => candidate.ref === ref);
+  if (!skill) return { ok: false, reason: 'not_found' };
+  if (!isManageableSkill(skill.scope, skill.source)) return { ok: false, reason: 'blocked_scope' };
+
+  let skillReal: string;
+  try {
+    const skillStat = await lstat(skill.path);
+    if (!skillStat.isDirectory() || skillStat.isSymbolicLink()) return { ok: false, reason: 'blocked_path' };
+    skillReal = await realpath(skill.path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: false, reason: 'not_found' };
+    return { ok: false, reason: 'blocked_path' };
+  }
+
+  // The skill must sit DIRECTLY in a dir the scan enumerated. Comparing against
+  // discovery dirs rather than `discoveryRoot` is what keeps a user-scope
+  // delete pinned to ~/.maka/skills or ~/.agents/skills instead of anywhere
+  // under $HOME.
+  const parentReal = dirname(skillReal);
+  const discoveryDirsReal = await Promise.all(
+    discovery.entries.map((entry) => realpath(entry.dir).catch(() => null)),
+  );
+  if (!discoveryDirsReal.some((dir) => dir !== null && dir === parentReal)) {
+    return { ok: false, reason: 'blocked_path' };
+  }
+
+  try {
+    const containmentReal = await realpath(skill.discoveryRoot);
+    if (!isPathInside(containmentReal, skillReal)) return { ok: false, reason: 'blocked_path' };
+  } catch {
+    return { ok: false, reason: 'blocked_path' };
+  }
+
+  try {
+    await rm(skillReal, { recursive: true });
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'delete_failed' };
+  }
+}
+
+/**
+ * Delete an installed skill directory. Accepts either a scope-aware `ref`
+ * (`user:agents:<id>`, `workspace:legacy:<id>`, …) which routes to
+ * {@link deleteSkillByRef}, or a bare workspace id for the original
+ * {root}/skills/<id> path kept below.
+ *
+ * The bare-id path is path-hardened exactly like createStarterSkill /
+ * installManagedSkill: the skills dir and the skill dir must both be real,
+ * contained directories (no symlinks, no escape outside the workspace) before
+ * anything is removed. The recursive rm also clears any managed-skill baseline
+ * metadata under the skill's .maka/ subtree.
+ */
+export async function deleteSkill(
+  root: string,
+  idOrRef: string,
+  options: SkillReadOptions = {},
+): Promise<DeleteSkillResult> {
+  // A ref always contains ':', which `isSafeSkillId` rejects — so a value that
+  // fails the id check but looks like a ref is routed rather than refused.
+  if (!isSafeSkillId(idOrRef)) {
+    if (!idOrRef.includes(':')) return { ok: false, reason: 'not_found' };
+    return deleteSkillByRef(root, idOrRef, options);
+  }
+
+  const id = idOrRef;
   const skillsDir = join(root, 'skills');
   let skillsReal: string;
   try {
