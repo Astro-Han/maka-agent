@@ -61,6 +61,37 @@
   justify-self: end;
 }
 
+/* Narrow controls give their slack back to the label.
+   ---------------------------------------------------
+   The default track split hands the control column `1fr` against the
+   label's `0.36fr`. That is right for a control that fills its column,
+   and wrong for one that cannot: a switch is 32px and a time field ~94px,
+   so on a 718px row the label was pinned to 173px with 465px of empty
+   track beside it. The hint then wrapped after ~9 characters — mid-word
+   in Chinese, which has no spaces to break at — while most of the row sat
+   blank. Sizing these two buckets to their content and giving the rest to
+   the label is the same trade the 460px container rule below already
+   makes, for the same reason; it was just never applied at full width.
+
+   Selects need a different shape — see the rule below. */
+.settingsRow:has(> [role="switch"]):not(:has(> :nth-child(3):not(input))),
+.settingsRow[data-control-width="compact"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* Selects can't take the intrinsic track above: their trigger is `w-full`
+   under a 320px cap, so an `auto` track collapses it to the width of
+   whatever option happens to be selected (measured: 320px → 118px).
+   They get an explicit cap instead, and it has to be BOTH absolute and
+   proportional. A flat `minmax(0, 320px)` holds 320px all the way down
+   and eats the label instead — at a 468px card (just above the 460px
+   stacking breakpoint) that leaves the label 82px. Capping by share as
+   well keeps the split sane at every width: measured 353/302 at a 720px
+   card, 214/188 at 468px. */
+.settingsRow[data-control-width="select"] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(320px, 45%));
+}
+
 .settingsRow:last-child {
   border-bottom: 0;
 }
