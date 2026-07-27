@@ -1010,6 +1010,9 @@ function registerIpc(): void {
       const header = await store.readHeader(sessionId);
       if (!header.subagentParent) await agentGraphCoordinator.stop(sessionId);
     },
+    notifyAgentGraphPermissionResponse: (sessionId) => {
+      agentGraphSupervisorWakeCoordinator.notifyPermissionResponse(sessionId);
+    },
     ensureSessionWorkspaceAvailable,
     createSession: createDesktopSession,
     getReadyConnection,

@@ -78,6 +78,83 @@ describe('Agent Graph supervisor wake delivery', () => {
     }
   });
 
+  test('retries a parked attempt only after its permission response loses the live waiter', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    let attempt = 0;
+    const coordinator = new AgentGraphSupervisorWakeCoordinator({
+      activityRegistry: new SessionActivityRegistry(),
+      wakeStore: store,
+      readSnapshot: async () => snapshot(),
+      startTurn: async (_sessionId, input): Promise<GoalTurnOutcome> => {
+        attempt += 1;
+        return attempt === 1
+          ? { kind: 'suspended', turnId: input.turnId, reason: 'permission handoff' }
+          : { kind: 'completed', turnId: input.turnId };
+      },
+      inspectAttempt: async () => 'waiting_permission',
+      newId: sequentialIds(),
+    });
+    try {
+      coordinator.notify('root-session', reconciliation());
+      await coordinator.waitForIdle();
+      assert.equal(
+        (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
+        'waiting_permission',
+      );
+
+      coordinator.notifyPermissionResponse('root-session');
+      await coordinator.waitForIdle();
+
+      const wake = await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1');
+      assert.equal(wake?.status, 'delivered');
+      assert.equal(wake?.attemptCount, 2);
+      assert.deepEqual(
+        (await store.listAgentGraphSupervisorWakeAttempts('graph-1', 'graph-1:snapshot-1')).map(
+          (candidate) => candidate.status,
+        ),
+        ['retryable_failed', 'delivered'],
+      );
+    } finally {
+      await coordinator.close();
+      store.close();
+    }
+  });
+
+  test('does not strand a permission response racing the suspended wake commit', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    let attempt = 0;
+    let coordinator!: AgentGraphSupervisorWakeCoordinator;
+    coordinator = new AgentGraphSupervisorWakeCoordinator({
+      activityRegistry: new SessionActivityRegistry(),
+      wakeStore: store,
+      readSnapshot: async () => snapshot(),
+      startTurn: async (_sessionId, input, activity): Promise<GoalTurnOutcome> => {
+        attempt += 1;
+        if (attempt === 1) {
+          activity.release();
+          coordinator.notifyPermissionResponse('root-session');
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          return { kind: 'suspended', turnId: input.turnId, reason: 'permission handoff' };
+        }
+        return { kind: 'completed', turnId: input.turnId };
+      },
+      inspectAttempt: async () => 'waiting_permission',
+      newId: sequentialIds(),
+    });
+    try {
+      coordinator.notify('root-session', reconciliation());
+      await coordinator.waitForIdle();
+      assert.equal(
+        (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
+        'delivered',
+      );
+      assert.equal(attempt, 2);
+    } finally {
+      await coordinator.close();
+      store.close();
+    }
+  });
+
   test('recovers a crash-interrupted running attempt and redelivers it', async () => {
     const store = createSqliteSessionMetadataStore(':memory:');
     await store.claimAgentGraphSupervisorWake({
@@ -148,7 +225,7 @@ describe('Agent Graph supervisor wake delivery', () => {
     }
   });
 
-  test('keeps a recovered waiting-permission AgentRun parked', async () => {
+  test('retries a recovered waiting-permission attempt after its live waiter is lost', async () => {
     const store = createSqliteSessionMetadataStore(':memory:');
     await createRunningAttempt(store);
     let delivered = 0;
@@ -166,10 +243,10 @@ describe('Agent Graph supervisor wake delivery', () => {
     try {
       assert.equal(await coordinator.recover(), 1);
       await coordinator.waitForIdle();
-      assert.equal(delivered, 0);
+      assert.equal(delivered, 1);
       assert.equal(
         (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
-        'waiting_permission',
+        'delivered',
       );
     } finally {
       await coordinator.close();

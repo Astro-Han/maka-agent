@@ -71,6 +71,24 @@ export class AgentGraphSupervisorWakeCoordinator {
     void task.finally(() => this.#tasks.delete(task));
   }
 
+  /**
+   * Reconciles a parked wake after the user answers a permission prompt.
+   *
+   * A live waiter keeps the original startTurn activity lease until the same
+   * attempt settles. If the stream already ended suspended, admission here
+   * proves that waiter is gone and makes the wake eligible for a fresh turn.
+   */
+  notifyPermissionResponse(rootSessionId: string): void {
+    if (this.#closed) return;
+    const task = this.#settlePermissionResponse(rootSessionId).catch((error) => {
+      if (!this.#closed && !isAbortError(error)) {
+        return notifyError(this.#input.onError, rootSessionId, error);
+      }
+    });
+    this.#tasks.add(task);
+    void task.finally(() => this.#tasks.delete(task));
+  }
+
   /** Converges persisted wakes from AgentRun facts and resumes only safe retries. */
   async recover(): Promise<number> {
     if (this.#closed) return 0;
@@ -234,8 +252,8 @@ export class AgentGraphSupervisorWakeCoordinator {
     wakeId: string,
     attemptId: string,
     failureReason: string,
-  ): Promise<void> {
-    await this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
+  ): Promise<AgentGraphSupervisorWakeRecord> {
+    return this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
       graphId,
       wakeId,
       attemptId,
@@ -262,16 +280,6 @@ export class AgentGraphSupervisorWakeCoordinator {
       });
       return 1;
     }
-    if (runStatus === 'waiting_permission') {
-      if (wake.status === 'waiting_permission') return 0;
-      await this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
-        graphId: wake.graphId,
-        wakeId: wake.wakeId,
-        attemptId,
-        status: 'waiting_permission',
-      });
-      return 1;
-    }
     await this.#markRetryable(
       wake.graphId,
       wake.wakeId,
@@ -281,6 +289,50 @@ export class AgentGraphSupervisorWakeCoordinator {
         : `host_restart:${runStatus}`,
     );
     return 1;
+  }
+
+  async #settlePermissionResponse(rootSessionId: string): Promise<void> {
+    const activity = await this.#input.activityRegistry.acquire(
+      rootSessionId,
+      this.#abortController.signal,
+    );
+    const retryable: AgentGraphSupervisorWakeRecord[] = [];
+    try {
+      if (this.#closed) return;
+      const unsettled = (
+        await this.#input.wakeStore.listUnsettledAgentGraphSupervisorWakes()
+      ).filter((wake) => wake.rootSessionId === rootSessionId);
+      for (const wake of unsettled) {
+        const attemptId = wake.currentAttemptId;
+        const turnId = wake.currentTurnId;
+        if (!attemptId || !turnId) {
+          throw new Error(
+            `Parked Agent graph supervisor wake ${wake.graphId}/${wake.wakeId} has no current attempt`,
+          );
+        }
+        const runStatus = await this.#input.inspectAttempt(rootSessionId, attemptId, turnId);
+        if (runStatus === 'completed') {
+          await this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
+            graphId: wake.graphId,
+            wakeId: wake.wakeId,
+            attemptId,
+            status: 'delivered',
+          });
+          continue;
+        }
+        retryable.push(
+          await this.#markRetryable(
+            wake.graphId,
+            wake.wakeId,
+            attemptId,
+            `permission_waiter_lost:${runStatus}`,
+          ),
+        );
+      }
+    } finally {
+      activity.release();
+    }
+    for (const wake of retryable) this.#scheduleRecoveredWake(wake);
   }
 }
 

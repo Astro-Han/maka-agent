@@ -109,6 +109,11 @@ describe('permission response IPC boundary', () => {
       'allow must revalidate the workspace before resuming a parked tool; deny must remain available',
     );
     assert.doesNotMatch(handler, /runtime\.respondToPermission\(sessionId,\s*response\)/);
+    assert.match(
+      handler,
+      /await runtime\.respondToPermission\(sessionId, normalized\);[\s\S]*notifyAgentGraphPermissionResponse\?\.\(sessionId\)/,
+      'graph wake settlement must run only after the normalized permission response is accepted',
+    );
   });
 
   it('normalizes turn action inputs before regenerate / branch runtime calls', () => {

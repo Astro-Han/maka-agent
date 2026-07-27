@@ -26,9 +26,6 @@ export function classifyAgentRunRecovery(
   events: readonly AgentRunEvent[],
 ): AgentRunRecoveryDecision | undefined {
   if (isTerminalRunStatus(header.status)) return undefined;
-  if (header.agentGraphWakeAttemptId && header.status === 'waiting_permission') {
-    return undefined;
-  }
 
   const lastEvent = lastNonCorruptEvent(events);
   const hasCorruptEvent = events.some((event) => event.type === 'event_corrupt');

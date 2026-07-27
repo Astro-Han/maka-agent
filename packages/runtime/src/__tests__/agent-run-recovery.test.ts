@@ -4,7 +4,7 @@ import type { AgentRunHeader } from '@maka/core';
 import { classifyAgentRunRecovery } from '../agent-run-recovery.js';
 
 describe('AgentRun startup recovery', () => {
-  test('leaves a graph supervisor wake permission handoff parked', () => {
+  test('fails a graph supervisor permission handoff once its live waiter is lost', () => {
     const header: AgentRunHeader = {
       runId: 'run-1',
       sessionId: 'session-1',
@@ -21,6 +21,9 @@ describe('AgentRun startup recovery', () => {
       updatedAt: 2,
     };
 
-    assert.equal(classifyAgentRunRecovery(header, []), undefined);
+    const decision = classifyAgentRunRecovery(header, []);
+    assert.equal(decision?.status, 'failed');
+    assert.equal(decision?.failureClass, 'app_restarted');
+    assert.equal(decision?.diagnostic?.recoveryReason, 'stale_permission_wait');
   });
 });
