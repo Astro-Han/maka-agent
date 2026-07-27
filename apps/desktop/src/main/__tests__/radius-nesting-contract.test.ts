@@ -54,14 +54,19 @@ describe('PR-RADIUS-NESTING-0 contract', () => {
   it('the modal-inset search input uses calc(var(--radius-modal) - 8px) (12 − 8 = 4px, not a tier)', async () => {
     const css = stripCssComments(await readAllRendererCss());
     const sites: Array<[string, string]> = [
-      ['.maka-search-modal-input-row', 'sidebar.css'],
+      ['.maka-search-modal-input-row', 'styles/search-modal.css'],
     ];
     for (const [selector, label] of sites) {
       const body = ruleBody(css, selector);
       assert.ok(body, `${selector} rule must exist (${label}) — stale contract entry or renamed selector`);
       assert.match(
         body,
-        /border-radius:\s*calc\(var\(--radius-modal\)\s*-\s*8px\)/,
+        // Whitespace around `-` is REQUIRED, not optional: CSS drops an
+        // unspaced calc() as a parse error and the input renders square.
+        // This was the last loose copy of the rule — the converge contract
+        // was tightened but this second gate on the same site still
+        // accepted the spelling that shipped the bug.
+        /border-radius:\s*calc\(var\(--radius-modal\)\s+-\s+8px\)/,
         `${selector} (${label}) must keep the concentric nesting calc(var(--radius-modal) - 8px) — dropping it to a hardcoded tier would make the input read too round against the 12px modal shell`,
       );
     }
