@@ -40,13 +40,23 @@ async function seedE2eInvocableSkills(userDataDir: string): Promise<void> {
   const projectRoot = path.join(userDataDir, 'project');
   const projectSkillRoot = path.join(projectRoot, '.maka', 'skills');
   const workspaceSkillRoot = path.join(workspaceRoot, 'skills');
+  // Under the sandboxed HOME (see buildE2eEnv), so `~/.agents/skills` here is
+  // the throwaway dir, never the developer's. This is the only user-scope
+  // skill the suite sees, which is what makes the delete journey assertable.
+  const userSkillRoot = path.join(userDataDir, 'home', '.agents', 'skills');
   await Promise.all([
     mkdir(path.join(projectSkillRoot, 'project-only'), { recursive: true }),
     mkdir(path.join(projectSkillRoot, 'host-incompatible'), { recursive: true }),
     mkdir(path.join(projectSkillRoot, 'agent-write'), { recursive: true }),
     mkdir(path.join(projectSkillRoot, 'deep-research-only'), { recursive: true }),
     mkdir(path.join(workspaceSkillRoot, 'workspace-only'), { recursive: true }),
+    mkdir(path.join(userSkillRoot, 'user-only'), { recursive: true }),
   ]);
+  await writeFile(
+    path.join(userSkillRoot, 'user-only', 'SKILL.md'),
+    `---\nname: User Only\ndescription: User-scoped install, deletable from the panel.\n---\n# User Only`,
+    'utf8',
+  );
   await Promise.all([
     writeFile(
       path.join(projectSkillRoot, 'project-only', 'SKILL.md'),
@@ -92,6 +102,7 @@ async function seedE2eInvocableSkills(userDataDir: string): Promise<void> {
  */
 function buildE2eEnv(
   userDataDir: string,
+  homeDir: string,
   e2eFixtureScenario?: string,
   locale?: 'zh' | 'en',
   platform?: 'darwin' | 'win32' | 'linux',
@@ -120,6 +131,17 @@ function buildE2eEnv(
   // unset under xvfb).
   env.MAKA_SKIP_SHELL_ENV = '1';
   env.MAKA_E2E_USER_DATA_DIR = userDataDir;
+  // Sandbox the home directory. User-scope skill discovery reads
+  // `~/.maka/skills` and `~/.agents/skills` via `os.homedir()`, and the Skills
+  // panel can now DELETE from those (#1517) — so without this a suite run
+  // would enumerate, and could remove, the developer's own installed skills.
+  // Overriding HOME sandboxes every consumer of the home dir at once, rather
+  // than plumbing an override through each skills API and hoping none is
+  // missed; `os.homedir()` returns $HOME on POSIX and %USERPROFILE% on
+  // Windows, so both are set. userData is pinned separately above, so this
+  // does not move the app's data dir.
+  env.HOME = homeDir;
+  env.USERPROFILE = homeDir;
   if (e2eFixtureScenario) env.MAKA_E2E_FIXTURE = e2eFixtureScenario;
   if (locale) env.MAKA_E2E_FIXTURE_LOCALE = locale;
   if (platform) env.MAKA_E2E_FIXTURE_PLATFORM = platform;
@@ -130,6 +152,21 @@ function buildE2eEnv(
   // visible window.
   if (process.env.CI && process.platform === 'linux') env.MAKA_E2E_SHOW_WINDOW = '1';
   return env;
+}
+
+/**
+ * The sandboxed HOME of the run currently under test. Set by withE2eWindow
+ * before Electron launches.
+ *
+ * Read it from inside a test BODY, never as a fixture: a fixture would have no
+ * declared dependency on the window fixture, so Playwright could resolve it
+ * before the window is set up and hand back a stale path.
+ */
+let currentHomeDir = '';
+
+export function e2eHomeDir(): string {
+  if (!currentHomeDir) throw new Error('e2eHomeDir() is only valid inside a test that opened a window');
+  return currentHomeDir;
 }
 
 /**
@@ -152,6 +189,11 @@ async function withE2eWindow(
   use: (page: Page) => Promise<void>,
 ): Promise<void> {
   const userDataDir = await mkdtemp(path.join(tmpdir(), 'maka-e2e-'));
+  // Lives inside the throwaway userData dir so the existing teardown removes
+  // it too — there is no second path to leak.
+  const homeDir = path.join(userDataDir, 'home');
+  await mkdir(homeDir, { recursive: true });
+  currentHomeDir = homeDir;
   let app: ElectronApplication | undefined;
   const mainLogs: string[] = [];
   const rendererLogs: string[] = [];
@@ -164,7 +206,7 @@ async function withE2eWindow(
     app = await electron.launch({
       args: ['.'],
       cwd: DESKTOP_ROOT,
-      env: buildE2eEnv(userDataDir, e2eFixtureScenario, locale, platform),
+      env: buildE2eEnv(userDataDir, homeDir, e2eFixtureScenario, locale, platform),
     });
     app.on('console', (message) => {
       mainLogs.push(message.text());
