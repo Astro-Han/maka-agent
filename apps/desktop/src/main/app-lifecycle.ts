@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { buildPricingLookup, setActiveProxy } from '@maka/runtime';
 import type {
   AgentGraphCoordinator,
+  AgentGraphSupervisorWakeCoordinator,
   BotRegistry,
   SessionManager,
   ShellRunProcessManager,
@@ -61,6 +62,7 @@ export interface AppLifecycleDeps {
   mainWindowController: ReturnType<typeof createMainWindowController>;
   runtime: SessionManager;
   agentGraphCoordinator: AgentGraphCoordinator;
+  agentGraphSupervisorWakeCoordinator: AgentGraphSupervisorWakeCoordinator;
   agentGraphControlStore: ReturnType<typeof createAgentGraphControlStore>;
   streamEvents: StreamEvents;
   /** Focus-or-create for the main window; stays in main.ts next to the
@@ -113,6 +115,7 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
     mainWindowController,
     runtime,
     agentGraphCoordinator,
+    agentGraphSupervisorWakeCoordinator,
     agentGraphControlStore,
     streamEvents,
     focusOrCreateMainWindow,
@@ -332,6 +335,7 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
       shellRuns.terminateAll(),
       mcpManager.close(),
       agentGraphCoordinator.close(),
+      agentGraphSupervisorWakeCoordinator.close(),
     ]);
     for (const result of results) {
       if (result.status === 'rejected') console.error('[shutdown] cleanup failed:', result.reason);

@@ -88,8 +88,15 @@ export interface UserMessageInput {
   origin?: TurnOrigin;
 }
 
-/** Non-user trigger source for a turn (e.g. a scheduled automation fire). */
-export type TurnOrigin = { kind: 'automation'; automationId: string };
+/** Non-user trigger source for a turn. */
+export type TurnOrigin =
+  | { kind: 'automation'; automationId: string }
+  | {
+      kind: 'agent_graph';
+      graphId: string;
+      /** Durable, graph-snapshot-scoped idempotency key for this supervisor wake. */
+      wakeId: string;
+    };
 
 export interface AgentSpec {
   id: string;

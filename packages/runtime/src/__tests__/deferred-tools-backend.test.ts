@@ -383,7 +383,7 @@ describe('AiSdkBackend deferred agent tools', () => {
     assert.match(capturedPrompts[0] ?? '', /only tool in its assistant step/);
   });
 
-  test('Graph Mode injects the supervisor prompt and pins graph controls at step 0', async () => {
+  test('Graph Mode injects the supervisor prompt and pins controls plus agent output at step 0', async () => {
     const capturedTools: string[][] = [];
     const capturedPrompts: string[] = [];
     const graphTools: MakaTool[] = [
@@ -420,16 +420,6 @@ describe('AiSdkBackend deferred agent tools', () => {
     });
 
     const backend = agentBackend(model, [], {
-      toolAvailability: {
-        economy: true,
-        groups: [
-          {
-            id: 'graph',
-            label: 'Agent graph controls',
-            toolNames: ['view_agent_graph', 'update_agent_graph'],
-          },
-        ],
-      },
       extraTools: graphTools,
     });
     await drain(
@@ -447,6 +437,7 @@ describe('AiSdkBackend deferred agent tools', () => {
 
     assert.ok(capturedTools[0]?.includes('view_agent_graph'));
     assert.ok(capturedTools[0]?.includes('update_agent_graph'));
+    assert.ok(capturedTools[0]?.includes(AGENT_OUTPUT_TOOL_NAME));
     assert.match(capturedPrompts[0] ?? '', /Orchestration Mode: Graph/);
     assert.match(capturedPrompts[0] ?? '', /supervisor beside the data path/);
   });

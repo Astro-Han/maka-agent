@@ -15,6 +15,7 @@
  */
 
 import type { AttachmentRef, QuoteRef } from './events.js';
+import type { TurnOrigin } from './runtime-inputs.js';
 import type { PermissionRequestPayload, PermissionResponse } from './permission.js';
 import type { UserQuestionRequest } from './user-question.js';
 import type {
@@ -119,6 +120,8 @@ export interface RuntimeEventTextContent {
    * only; UI/transcript/rewind projections should prefer it when present.
    */
   displayText?: string;
+  /** Durable provenance for a host-authored user-role turn. */
+  origin?: TurnOrigin;
   /**
    * Optional user-bound attachments carried with the text turn. Adapters
    * MUST preserve these when converting legacy UserMessage rows so
@@ -380,7 +383,7 @@ const RUNTIME_EVENT_SHAPE = defineObjectShape<RuntimeEvent>()(
 );
 const TEXT_CONTENT_SHAPE = defineObjectShape<RuntimeEventTextContent>()(
   ['kind', 'text'],
-  ['displayText', 'attachments', 'quotes', 'steering'],
+  ['displayText', 'origin', 'attachments', 'quotes', 'steering'],
 );
 const THINKING_CONTENT_SHAPE = defineObjectShape<RuntimeEventThinkingContent>()(
   ['kind', 'text'],
@@ -502,6 +505,7 @@ function isRuntimeEventContent(value: unknown): value is RuntimeEventContent {
         hasExactShape(value, TEXT_CONTENT_SHAPE) &&
         typeof value.text === 'string' &&
         isOptionalString(value.displayText) &&
+        (value.origin === undefined || isTurnOrigin(value.origin)) &&
         (value.attachments === undefined ||
           (Array.isArray(value.attachments) && value.attachments.every(isAttachmentRef))) &&
         (value.steering === undefined || value.steering === true)
@@ -539,6 +543,19 @@ function isRuntimeEventContent(value: unknown): value is RuntimeEventContent {
     default:
       return false;
   }
+}
+
+function isTurnOrigin(value: unknown): value is TurnOrigin {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'automation') {
+    return Object.keys(value).length === 2 && typeof value.automationId === 'string';
+  }
+  return (
+    value.kind === 'agent_graph' &&
+    Object.keys(value).length === 3 &&
+    typeof value.graphId === 'string' &&
+    typeof value.wakeId === 'string'
+  );
 }
 
 function isRuntimeEventActions(value: unknown): value is RuntimeEventActions {

@@ -864,7 +864,7 @@ export class AiSdkBackend implements AgentBackend {
       this.currentOrchestration.mode === 'swarm'
         ? new Set(['agent_swarm'])
         : this.currentOrchestration.mode === 'graph'
-          ? new Set(['view_agent_graph', 'update_agent_graph'])
+          ? new Set(['view_agent_graph', 'update_agent_graph', 'agent_output'])
           : new Set<string>();
     const plan = this.toolAvailabilityRuntime.prepare(
       (input.runtimeContext ?? []).filter((event) => event.turnId !== turnId),

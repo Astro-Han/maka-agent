@@ -439,6 +439,7 @@ function projectText(
       ...(event.content.displayText !== undefined
         ? { displayText: event.content.displayText }
         : {}),
+      ...(event.content.origin !== undefined ? { origin: event.content.origin } : {}),
       ...(event.content.attachments !== undefined && event.content.attachments.length > 0
         ? { attachments: event.content.attachments }
         : {}),
@@ -1145,6 +1146,7 @@ function semanticMessage(message: StoredMessage): unknown {
         turnId: message.turnId,
         text: message.text,
         displayText: message.displayText,
+        origin: message.origin,
         attachments: message.attachments ?? [],
         quotes: message.quotes ?? [],
       };

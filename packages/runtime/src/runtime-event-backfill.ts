@@ -91,6 +91,7 @@ export function backfillRuntimeEventsFromStoredMessages(
             kind: 'text',
             text: message.text,
             ...(message.displayText !== undefined ? { displayText: message.displayText } : {}),
+            ...(message.origin !== undefined ? { origin: message.origin } : {}),
             ...(message.attachments !== undefined && message.attachments.length > 0
               ? { attachments: message.attachments }
               : {}),

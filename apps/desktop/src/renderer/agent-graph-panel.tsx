@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { UiLocale } from '@maka/core';
 import type {
   AgentGraphClientOperator,
@@ -12,12 +12,13 @@ type GraphPanelCopy = {
   stop: string;
   stopping: string;
   stopFailed: string;
+  loadFailed: string;
   openSession: string;
   operators: string;
   selectedResults: string;
   noOperators: string;
   hiddenOperators(count: number): string;
-  progress(settled: number, total: number): string;
+  progress(settled: number, total: number, hasOmitted: boolean): string;
   status(status: AgentGraphClientSnapshot['status']): string;
   operatorStatus(status: AgentGraphClientOperator['status']): string;
   wait(operator: AgentGraphClientOperator): string | undefined;
@@ -32,12 +33,14 @@ export function getAgentGraphPanelCopy(locale: UiLocale): GraphPanelCopy {
       stop: '停止 Graph',
       stopping: '停止中…',
       stopFailed: '停止 Graph 失败，请重试。',
+      loadFailed: 'Graph 状态刷新失败。',
       openSession: '打开子会话',
       operators: 'Operators',
       selectedResults: '已选择结果',
       noOperators: '等待主 Agent 创建 operator…',
       hiddenOperators: (count) => `另有 ${count} 个 operator`,
-      progress: (settled, total) => `${settled}/${total} 已结束`,
+      progress: (settled, total, hasOmitted) =>
+        hasOmitted ? `可见 ${settled}/${total} 已结束` : `${settled}/${total} 已结束`,
       status: (status) =>
         ({
           empty: '等待调度',
@@ -70,12 +73,14 @@ export function getAgentGraphPanelCopy(locale: UiLocale): GraphPanelCopy {
     stop: 'Stop graph',
     stopping: 'Stopping…',
     stopFailed: 'Could not stop the graph. Try again.',
+    loadFailed: 'Could not refresh graph state.',
     openSession: 'Open child session',
     operators: 'Operators',
     selectedResults: 'Selected results',
     noOperators: 'Waiting for the main agent to create an operator…',
     hiddenOperators: (count) => `${count} more operator${count === 1 ? '' : 's'}`,
-    progress: (settled, total) => `${settled}/${total} settled`,
+    progress: (settled, total, hasOmitted) =>
+      hasOmitted ? `${settled}/${total} visible settled` : `${settled}/${total} settled`,
     status: (status) =>
       ({
         empty: 'Awaiting schedule',
@@ -113,6 +118,7 @@ export function AgentGraphPanel(props: {
   const [error, setError] = useState(false);
   const [stopPending, setStopPending] = useState(false);
   const [stopError, setStopError] = useState(false);
+  const refreshRef = useRef<() => void>(() => {});
   const copy = getAgentGraphPanelCopy(props.locale);
 
   useEffect(() => {
@@ -131,6 +137,7 @@ export function AgentGraphPanel(props: {
         queued = true;
         return;
       }
+      setLoading(true);
       task = window.maka.graphs
         .getSnapshot(props.rootSessionId)
         .then((next) => {
@@ -140,7 +147,7 @@ export function AgentGraphPanel(props: {
           }
         })
         .catch(() => {
-          if (!disposed && props.enabled) setError(true);
+          if (!disposed) setError(true);
         })
         .finally(() => {
           if (disposed) return;
@@ -153,10 +160,12 @@ export function AgentGraphPanel(props: {
         });
     };
 
+    refreshRef.current = refresh;
     const unsubscribe = window.maka.graphs.subscribe(props.rootSessionId, refresh);
     refresh();
     return () => {
       disposed = true;
+      if (refreshRef.current === refresh) refreshRef.current = () => {};
       unsubscribe();
     };
   }, [props.rootSessionId, props.enabled]);
@@ -173,7 +182,7 @@ export function AgentGraphPanel(props: {
     (snapshot.scheduleRevision > 0 ||
       snapshot.operators.length > 0 ||
       snapshot.omitted.operators > 0);
-  if (!props.enabled && !hasGraphActivity) return null;
+  if (!props.enabled && !hasGraphActivity && !error) return null;
 
   const stopGraph = async (): Promise<void> => {
     if (stopPending) return;
@@ -197,7 +206,12 @@ export function AgentGraphPanel(props: {
           <strong>{copy.title}</strong>
           {snapshot ? (
             <span className="maka-agent-graph-progress">
-              {copy.status(snapshot.status)} · {copy.progress(progress.settled, progress.total)}
+              {copy.status(snapshot.status)} ·{' '}
+              {copy.progress(
+                progress.settled,
+                progress.total,
+                snapshot.omitted.operators > 0,
+              )}
             </span>
           ) : null}
         </div>
@@ -219,24 +233,17 @@ export function AgentGraphPanel(props: {
       ) : null}
 
       {loading && !snapshot ? <p className="maka-agent-graph-empty">{copy.loading}</p> : null}
-      {error && !snapshot ? (
-        <button
-          type="button"
-          className="maka-agent-graph-retry"
-          onClick={() => {
-            setLoading(true);
-            window.maka.graphs
-              .getSnapshot(props.rootSessionId)
-              .then((next) => {
-                setSnapshot(next);
-                setError(false);
-              })
-              .catch(() => setError(true))
-              .finally(() => setLoading(false));
-          }}
-        >
-          {copy.retry}
-        </button>
+      {error ? (
+        <p className="maka-agent-graph-error" role="alert">
+          <span>{copy.loadFailed}</span>{' '}
+          <button
+            type="button"
+            className="maka-agent-graph-retry"
+            onClick={() => refreshRef.current()}
+          >
+            {copy.retry}
+          </button>
+        </p>
       ) : null}
 
       {snapshot ? (

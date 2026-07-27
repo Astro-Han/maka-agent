@@ -108,6 +108,8 @@ export type {
   ReconcileAgentGraphScheduleInput,
   RenderAgentGraphScheduledWorkPromptInput,
 } from './stream-graph-schedule-reconcile.js';
+export { AgentGraphSupervisorWakeCoordinator } from './agent-graph-supervisor-wake.js';
+export type { AgentGraphSupervisorWakeInput } from './agent-graph-supervisor-wake.js';
 export {
   AGENT_GRAPH_SUPERVISOR_TOOL_NAMES,
   UPDATE_AGENT_GRAPH_TOOL_NAME,

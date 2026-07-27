@@ -31,6 +31,7 @@ import type { WorkspacePrivacyContext } from '@maka/core/incognito';
 import { ok } from '@maka/core/result';
 import {
   AgentGraphCoordinator,
+  AgentGraphSupervisorWakeCoordinator,
   BackendRegistry,
   FakeBackend,
   PermissionEngine,
@@ -624,6 +625,7 @@ const {
   resolveDesktopSkillHost,
 });
 let agentGraphCoordinator: AgentGraphCoordinator;
+let agentGraphSupervisorWakeCoordinator: AgentGraphSupervisorWakeCoordinator;
 const desktopBackendToolSurfaceDeps = {
   isComputerUseRealModelE2e,
   ensureMcpReady,
@@ -826,6 +828,26 @@ const runtime = new SessionManager({
   newId: randomUUID,
   now: Date.now,
 });
+agentGraphSupervisorWakeCoordinator = new AgentGraphSupervisorWakeCoordinator({
+  activityRegistry: sessionActivities,
+  readMessages: (sessionId) => runtime.getMessages(sessionId),
+  readSnapshot: (rootSessionId) => agentGraphCoordinator.getSnapshot(rootSessionId),
+  startTurn: async (sessionId, input, activity) => {
+    await ensureSessionCanSend(sessionId);
+    const iterator = runtime.sendMessage(sessionId, input);
+    return (
+      await streamEvents(sessionId, iterator, {
+        turnId: input.turnId,
+        goalBoundary: 'none',
+        activity,
+      })
+    ).outcome;
+  },
+  newId: randomUUID,
+  onError: (rootSessionId) => {
+    emitSessionsChanged('status-change', rootSessionId);
+  },
+});
 agentGraphCoordinator = new AgentGraphCoordinator({
   sessionStore: store,
   runStore,
@@ -833,6 +855,9 @@ agentGraphCoordinator = new AgentGraphCoordinator({
   controlStore: agentGraphControlStore,
   runtime,
   newId: randomUUID,
+  onReconciliation: (rootSessionId, result) => {
+    agentGraphSupervisorWakeCoordinator.notify(rootSessionId, result);
+  },
 });
 let settingsIpc: SettingsIpcHandle | undefined;
 let mcpToolSnapshot = JSON.stringify(mcpManager.tools());
@@ -1310,6 +1335,7 @@ wireAppLifecycle({
   mainWindowController,
   runtime,
   agentGraphCoordinator,
+  agentGraphSupervisorWakeCoordinator,
   agentGraphControlStore,
   streamEvents,
   focusOrCreateMainWindow,

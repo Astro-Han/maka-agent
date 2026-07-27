@@ -105,6 +105,7 @@ export function storedMessageToRuntimeEvent(
           kind: 'text',
           text: message.text,
           ...(message.displayText !== undefined ? { displayText: message.displayText } : {}),
+          ...(message.origin !== undefined ? { origin: message.origin } : {}),
           ...(message.attachments !== undefined && message.attachments.length > 0
             ? { attachments: message.attachments }
             : {}),
@@ -251,6 +252,7 @@ export function runtimeEventToStoredMessageDraft(
       ts: event.ts,
       text: content.text,
       ...(content.displayText !== undefined ? { displayText: content.displayText } : {}),
+      ...(content.origin !== undefined ? { origin: content.origin } : {}),
       ...(content.attachments !== undefined && content.attachments.length > 0
         ? { attachments: content.attachments }
         : {}),

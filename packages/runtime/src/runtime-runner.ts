@@ -42,6 +42,7 @@ import type {
 import { createDefaultInvocationProviders } from './invocation-context.js';
 import type { FlowInput, RunnableAgentFlow } from './agent-flow.js';
 import type { RuntimeContinuation } from './runtime-resume.js';
+import type { TurnOrigin } from '@maka/core/runtime-inputs';
 
 // ============================================================================
 // RuntimeGate — narrow preflight seam
@@ -120,6 +121,7 @@ export interface InitialUserRuntimeEventInput {
   text: string;
   /** Human-facing view when it differs from `text`; see RuntimeEventTextContent. */
   displayText?: string;
+  origin?: TurnOrigin;
   attachments?: InvocationRequest['attachments'];
   quotes?: InvocationRequest['quotes'];
   toolBoundaryProtocol?: ToolBoundaryProtocol;
@@ -489,6 +491,7 @@ export function buildInitialUserRuntimeEvent(input: InitialUserRuntimeEventInput
       kind: 'text',
       text: input.text,
       ...(input.displayText !== undefined ? { displayText: input.displayText } : {}),
+      ...(input.origin !== undefined ? { origin: input.origin } : {}),
       ...(input.attachments !== undefined && input.attachments.length > 0
         ? { attachments: input.attachments }
         : {}),

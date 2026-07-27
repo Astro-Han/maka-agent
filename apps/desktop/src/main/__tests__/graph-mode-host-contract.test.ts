@@ -30,6 +30,11 @@ describe('Desktop Graph Mode host contract', () => {
     assert.match(panel, /\.getSnapshot\(props\.rootSessionId\)/);
     assert.match(panel, /window\.maka\.graphs\.subscribe\(props\.rootSessionId, refresh\)/);
     assert.match(panel, /subscribe\(props\.rootSessionId, refresh\);[\s\S]*refresh\(\)/);
+    assert.match(panel, /refreshRef\.current = refresh/);
+    assert.match(panel, /if \(refreshRef\.current === refresh\)/);
+    assert.match(panel, /if \(!props\.enabled && !hasGraphActivity && !error\) return null/);
+    assert.match(panel, /\{error \? \([\s\S]*copy\.loadFailed[\s\S]*refreshRef\.current\(\)/);
+    assert.doesNotMatch(panel, /error && !snapshot/);
     assert.match(panel, /snapshot\.scheduleRevision > 0/);
     assert.match(panel, /window\.maka\.graphs\.stop\(props\.rootSessionId\)/);
     assert.match(panel, /props\.onOpenSession\(operator\.childSessionId\)/);
@@ -45,5 +50,7 @@ describe('Desktop Graph Mode host contract', () => {
     assert.match(panel, /Loading graph state/);
     assert.match(panel, /打开子会话/);
     assert.match(panel, /Open child session/);
+    assert.match(panel, /可见 \$\{settled\}\/\$\{total\} 已结束/);
+    assert.match(panel, /\$\{settled\}\/\$\{total\} visible settled/);
   });
 });
