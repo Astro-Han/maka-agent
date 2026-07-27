@@ -17,13 +17,18 @@
     cursor: default;
   }
 
+  /* A wide, short bar (530x109): the draggable row on the left at roughly
+     the width of a real Settings list row, the explanation beside it.
+     Stacking these vertically would make the card as tall as a dialog and
+     stop it reading as something that belongs to the list. */
   #card {
     box-sizing: border-box;
     height: 100%;
     display: grid;
-    grid-template-rows: auto auto;
-    gap: 8px;
-    padding: 12px;
+    grid-template-columns: 220px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
     border-radius: 12px;
     /* Matches the app's surface treatment; the vibrancy read comes from
        the blur over whatever is behind the transparent window. */
@@ -85,6 +90,10 @@
   }
   #close:hover { color: #1d1d1f; }
 
+  /* On grant the card has nothing left to be dragged out of, so the row
+     goes and the confirmation takes the full width for the moment before
+     the card closes itself. */
+  body[data-granted="true"] #card { grid-template-columns: minmax(0, 1fr); }
   body[data-granted="true"] #row,
   body[data-granted="true"] #sub { display: none; }
   body[data-granted="true"] #headline { color: #1d7f34; }

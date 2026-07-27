@@ -37,9 +37,15 @@ import {
 const requireElectron = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** Card geometry, in DIP. Wide and short — it reads as a list row, which
- *  is what the user is about to drop it into. */
-const CARD = { width: 380, height: 132 };
+/**
+ * Card geometry, in DIP: a wide, short bar rather than a dialog.
+ *
+ * 530x109 matches the reference implementation, and the proportion is the
+ * point — the card has to sit over the width of the System Settings
+ * content pane and read as belonging to the list it is pointing at. A
+ * squarer card reads as a floating dialog that happens to be nearby.
+ */
+const CARD = { width: 530, height: 109 };
 
 type Electron = typeof import('electron');
 

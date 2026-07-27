@@ -105,6 +105,43 @@ when it returns `null`, fall back to the Stage 1 anchor. Unlike Alma,
 log the degradation loudly — a silent fallback is indistinguishable
 from a bug.
 
+## Stage 2 landmine: the two coordinate spaces do not match
+
+The reference locator returns **AppKit** coordinates — origin bottom-left
+of the containing screen:
+
+```swift
+y = screen.frame.maxY - localY - cgFrame.height
+```
+
+with a comment claiming that is what `setBounds` expects. It is not.
+Electron normalises screen coordinates to **top-left** origin on macOS,
+so feeding it a bottom-left `y` is a space mismatch. The docking math
+then adds a small offset (`y = frame.y + 14`) meaning "just below the
+window top", and the two spaces agree only when
+
+```
+screenHeight - windowTop - windowHeight  ==  windowTop
+```
+
+i.e. only when the Settings window is **vertically centred** — which is
+exactly where it opens by default, so the bug is invisible in a demo.
+Worked through for a 900px screen and a 600px window:
+
+| Settings window top | y passed to setBounds | intended | drift |
+|---:|---:|---:|---:|
+| 60  | 254 | 74  | **+180** |
+| 150 (centred) | 164 | 164 | 0 |
+| 250 | 64  | 264 | **−200** |
+
+So the card is correctly placed until the user moves the Settings window,
+then slides the wrong way by twice the displacement.
+
+Stage 2 must either return CG (top-left) coordinates and skip the AppKit
+conversion entirely, or convert and then convert back. Whichever we pick,
+the tracker needs a test that moves the window off-centre — a fixture
+using the default position proves nothing.
+
 ## Design notes worth stealing
 
 - **The drag image should look like the destination row**, not like the
