@@ -135,6 +135,7 @@ describe('SQLite agent graph intent claims', () => {
 
       const legacy = new DatabaseSync(path);
       legacy.exec(`
+        DROP TABLE agent_graph_client_applied_records;
         DROP TABLE agent_graph_client_terminal_activity;
         DROP TABLE agent_graph_client_operator_projections;
         DROP TABLE agent_graph_client_projections;

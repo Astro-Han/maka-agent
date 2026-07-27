@@ -41,10 +41,19 @@ export interface AgentGraphClientClaimAdmission {
   state: AgentGraphIntentAdmissionState;
 }
 
+export class AgentGraphClientProjectionConflictError extends Error {
+  readonly name = 'AgentGraphClientProjectionConflictError';
+}
+
 export interface CommitAgentGraphClientProjectionRequest {
   schemaVersion: typeof AGENT_GRAPH_CLIENT_PROJECTION_SCHEMA_VERSION;
   graphId: string;
   rootSessionId: string;
+  /**
+   * Compare-and-set fence for the graph projection.
+   * `null` is create-only; otherwise the current snapshot version must match.
+   */
+  expectedSnapshotVersion: string | null;
   snapshotVersion: string;
   snapshot: unknown;
   replaceOperators: boolean;
@@ -57,6 +66,15 @@ export interface CommitAgentGraphClientProjectionRequest {
     eventTime: number;
     payload: unknown;
   }>;
+  activityRecords: Array<{
+    recordId: string;
+    eventTime: number;
+  }>;
+  /**
+   * Marks an incremental delivery. If this durable record was already applied,
+   * the whole transaction is an idempotent no-op.
+   */
+  incrementalRecordId?: string;
 }
 
 /**
@@ -84,7 +102,5 @@ export interface AgentGraphClientProjectionStore {
       before?: AgentGraphClientTerminalActivityKey;
     },
   ): Promise<AgentGraphClientTerminalActivityPage>;
-  listAgentGraphClientClaimAdmissions(
-    graphId: string,
-  ): Promise<AgentGraphClientClaimAdmission[]>;
+  listAgentGraphClientClaimAdmissions(graphId: string): Promise<AgentGraphClientClaimAdmission[]>;
 }

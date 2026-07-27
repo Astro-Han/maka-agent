@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import type { AgentGraphOperatorProvision, AgentGraphScheduleUpdate } from '@maka/core';
 import type {
-  AgentGraphOperatorProvision,
-  AgentGraphScheduleUpdate,
-} from '@maka/core';
-import type { AgentGraphSupervisorObservation } from '../stream-graph-dispatch.js';
-import type {
-  AgentGraphActivationState,
-  AgentGraphRecord,
-} from '../stream-graph-projection.js';
+  AgentGraphSupervisorObservation,
+  AgentGraphSupervisorRuntimeEvent,
+} from '../stream-graph-dispatch.js';
+import type { AgentGraphActivationState, AgentGraphRecord } from '../stream-graph-projection.js';
 import {
+  advanceMaterializedAgentGraphClientProjection,
   buildAgentGraphClientSnapshot,
   inspectAgentGraphOperator,
+  materializeAgentGraphClientProjection,
+  type AgentGraphClientActivity,
 } from '../stream-graph-read-model.js';
 
 describe('agent graph client read model', () => {
@@ -29,10 +29,7 @@ describe('agent graph client read model', () => {
       }),
     );
     const activations = Object.fromEntries(
-      records.map((record, index) => [
-        record.activationId,
-        activation(record, index),
-      ]),
+      records.map((record, index) => [record.activationId, activation(record, index)]),
     );
     const observation = {
       projection: {
@@ -160,16 +157,11 @@ describe('agent graph client read model', () => {
     });
     running.facets = ['message'];
     running.supervisorSignals = [];
-    const runningObservation = observationFromRecords(
-      graphId,
-      operatorId,
-      childSessionId,
-      [running],
-    );
+    const runningObservation = observationFromRecords(graphId, operatorId, childSessionId, [
+      running,
+    ]);
     const activationState =
-      runningObservation.projection.state.operators[operatorId]!.activations[
-        running.activationId
-      ]!;
+      runningObservation.projection.state.operators[operatorId]!.activations[running.activationId]!;
     activationState.status = 'running';
     delete activationState.terminalRecordId;
     runningObservation.projection.state.operators[operatorId]!.status = 'running';
@@ -233,11 +225,7 @@ describe('agent graph client read model', () => {
       revision: index + 1,
       committedAt: index + 1,
     }));
-    const observation = observationWithOneTerminal(
-      graphId,
-      operatorId,
-      childSessionId,
-    );
+    const observation = observationWithOneTerminal(graphId, operatorId, childSessionId);
     observation.claims = Array.from({ length: 300 }, (_, index) => ({
       schemaVersion: 1,
       claimId: `claim-${index}`,
@@ -251,25 +239,22 @@ describe('agent graph client read model', () => {
       targetRunId: `claimed-run-${index}`,
       claimedAt: index,
     }));
-    observation.readiness.supervisorView = Array.from(
-      { length: 80 },
-      (_, index) => ({
-        graphId,
-        topologyFingerprint: 'sha256:topology',
-        readinessId: `readiness-${index}`,
-        operatorId,
-        policyKind: 'all_settled' as const,
-        policyFingerprint: `policy-${index}`,
-        readinessContextFingerprint: `context-${index}`,
-        status: 'waiting' as const,
-        intentIds: [],
-        waitingFor: Array.from({ length: 300 }, (__, waitIndex) => ({
-          kind: 'activation_running' as const,
-          operatorId: `upstream-${waitIndex}`,
-          activationId: `activation-${waitIndex}`,
-        })),
-      }),
-    );
+    observation.readiness.supervisorView = Array.from({ length: 80 }, (_, index) => ({
+      graphId,
+      topologyFingerprint: 'sha256:topology',
+      readinessId: `readiness-${index}`,
+      operatorId,
+      policyKind: 'all_settled' as const,
+      policyFingerprint: `policy-${index}`,
+      readinessContextFingerprint: `context-${index}`,
+      status: 'waiting' as const,
+      intentIds: [],
+      waitingFor: Array.from({ length: 300 }, (__, waitIndex) => ({
+        kind: 'activation_running' as const,
+        operatorId: `upstream-${waitIndex}`,
+        activationId: `activation-${waitIndex}`,
+      })),
+    }));
     const input = {
       rootSessionId: 'root-session',
       graphId,
@@ -302,6 +287,116 @@ describe('agent graph client read model', () => {
     assert.equal(inspection.omitted.work, 44);
     assert.equal(inspection.claims.length, 256);
     assert.equal(inspection.omitted.claims, 44);
+  });
+
+  test('materializes duplicate and out-of-order runtime records deterministically', () => {
+    const graphId = 'graph-order';
+    const operatorId = 'operator-1';
+    const childSessionId = 'child-1';
+    const baseInput = runningInput(graphId, operatorId, childSessionId);
+    const initial = materializeAgentGraphClientProjection(baseInput);
+    const message = supervisorRuntimeEvent({
+      graphId,
+      operatorId,
+      childSessionId,
+      eventId: 'event-message',
+      eventTime: 10,
+      eventType: 'text_complete',
+    });
+    const complete = supervisorRuntimeEvent({
+      graphId,
+      operatorId,
+      childSessionId,
+      eventId: 'event-complete',
+      eventTime: 20,
+      eventType: 'complete',
+    });
+
+    const messageFirst = advanceMaterializedAgentGraphClientProjection(
+      initial.snapshot,
+      initial.operators[0]!,
+      message,
+      false,
+    )!;
+    const forward = advanceMaterializedAgentGraphClientProjection(
+      messageFirst.snapshot,
+      messageFirst.operator,
+      complete,
+      false,
+    )!;
+    const completeFirst = advanceMaterializedAgentGraphClientProjection(
+      initial.snapshot,
+      initial.operators[0]!,
+      complete,
+      false,
+    )!;
+    const reverse = advanceMaterializedAgentGraphClientProjection(
+      completeFirst.snapshot,
+      completeFirst.operator,
+      message,
+      false,
+    )!;
+
+    assert.deepEqual(
+      { ...forward.snapshot, snapshotVersion: '' },
+      { ...reverse.snapshot, snapshotVersion: '' },
+    );
+    assert.equal(forward.snapshot.snapshotVersion, reverse.snapshot.snapshotVersion);
+    assert.deepEqual(forward.snapshot.recentActivity, reverse.snapshot.recentActivity);
+    assert.deepEqual(forward.operator.activations, reverse.operator.activations);
+    assert.equal(reverse.operator.operator.status, 'completed');
+    assert.equal(
+      advanceMaterializedAgentGraphClientProjection(
+        forward.snapshot,
+        forward.operator,
+        message,
+        false,
+      ),
+      undefined,
+    );
+
+    const canonicalRecords = forward.snapshot.recentActivity.map((activity, index) =>
+      graphRecordFromActivity(graphId, activity, index),
+    );
+    const canonicalObservation = observationFromRecords(
+      graphId,
+      operatorId,
+      childSessionId,
+      canonicalRecords,
+    );
+    canonicalObservation.readiness.topologyFingerprint =
+      baseInput.observation.readiness.topologyFingerprint;
+    canonicalObservation.projection.state.operators[operatorId]!.activations = {
+      'run-0': {
+        activationId: 'run-0',
+        agentRunId: 'run-0',
+        status: 'completed',
+        recordCount: 2,
+        firstEventTime: 10,
+        lastEventTime: 20,
+        lastRecordId: forward.activity.recordId,
+        terminalRecordId: forward.activity.recordId,
+      },
+    };
+    canonicalObservation.projection.state.operators[operatorId]!.currentActivationId = 'run-0';
+    canonicalObservation.projection.state.operators[operatorId]!.status = 'completed';
+    const rebuilt = materializeAgentGraphClientProjection({
+      ...baseInput,
+      observation: canonicalObservation,
+    });
+    const {
+      snapshotVersion: _rebuiltVersion,
+      terminalHistory: _rebuiltTerminalHistory,
+      ...rebuiltContent
+    } = rebuilt.snapshot;
+    const {
+      snapshotVersion: _forwardVersion,
+      terminalHistory: _forwardTerminalHistory,
+      ...forwardContent
+    } = forward.snapshot;
+    assert.deepEqual(rebuiltContent, forwardContent);
+    assert.equal(rebuilt.snapshot.snapshotVersion, forward.snapshot.snapshotVersion);
+    assert.deepEqual(rebuilt.snapshot.recentActivity, forward.snapshot.recentActivity);
   });
 });
 
@@ -338,12 +433,9 @@ function observationWithOneTerminal(
   operatorId: string,
   childSessionId: string,
 ): AgentGraphSupervisorObservation {
-  return observationFromRecords(
-    graphId,
-    operatorId,
-    childSessionId,
-    [terminalRecord({ graphId, operatorId, childSessionId, index: 0 })],
-  );
+  return observationFromRecords(graphId, operatorId, childSessionId, [
+    terminalRecord({ graphId, operatorId, childSessionId, index: 0 }),
+  ]);
 }
 
 function observationFromRecords(
@@ -410,10 +502,7 @@ function provision(
   };
 }
 
-function scheduleUpdate(
-  graphId: string,
-  instruction: string,
-): AgentGraphScheduleUpdate {
+function scheduleUpdate(graphId: string, instruction: string): AgentGraphScheduleUpdate {
   return {
     schemaVersion: 1,
     updateId: 'graph_update_00000000000000000000000000000000',
@@ -439,10 +528,7 @@ function scheduleUpdate(
   };
 }
 
-function finishUpdate(
-  graphId: string,
-  resultId: string,
-): AgentGraphScheduleUpdate {
+function finishUpdate(graphId: string, resultId: string): AgentGraphScheduleUpdate {
   return {
     schemaVersion: 1,
     updateId: `graph_update_${'5'.repeat(32)}`,
@@ -501,10 +587,7 @@ function terminalRecord(input: {
   };
 }
 
-function activation(
-  record: AgentGraphRecord,
-  index: number,
-): AgentGraphActivationState {
+function activation(record: AgentGraphRecord, index: number): AgentGraphActivationState {
   return {
     activationId: record.activationId,
     agentRunId: record.agentRunId,
@@ -514,5 +597,77 @@ function activation(
     lastEventTime: index,
     lastRecordId: record.recordId,
     terminalRecordId: record.recordId,
+  };
+}
+
+function runningInput(graphId: string, operatorId: string, childSessionId: string) {
+  const input = emptyInput(graphId);
+  input.provisions = [provision(graphId, operatorId, childSessionId)];
+  input.observation.projection.operators = [{ operatorId, sessionId: childSessionId }];
+  return input;
+}
+
+function supervisorRuntimeEvent(input: {
+  graphId: string;
+  operatorId: string;
+  childSessionId: string;
+  eventId: string;
+  eventTime: number;
+  eventType: 'text_complete' | 'complete';
+}): AgentGraphSupervisorRuntimeEvent {
+  return {
+    intent: {
+      graphId: input.graphId,
+    },
+    claim: {
+      targetOperatorId: input.operatorId,
+      targetSessionId: input.childSessionId,
+      targetRunId: 'run-0',
+      targetTurnId: 'turn-0',
+    },
+    event: {
+      id: input.eventId,
+      type: input.eventType,
+      ts: input.eventTime,
+      sessionId: input.childSessionId,
+      runId: 'run-0',
+      turnId: 'turn-0',
+      ...(input.eventType === 'complete' ? { stopReason: 'end_turn' } : { text: 'message' }),
+    },
+  } as unknown as AgentGraphSupervisorRuntimeEvent;
+}
+
+function graphRecordFromActivity(
+  graphId: string,
+  activity: AgentGraphClientActivity,
+  index: number,
+): AgentGraphRecord {
+  return {
+    schemaVersion: 1,
+    recordId: activity.recordId,
+    graphId,
+    operatorId: activity.operatorId,
+    activationId: activity.activationId,
+    sessionId: activity.run.sessionId,
+    agentRunId: activity.run.agentRunId,
+    eventTime: activity.eventTime,
+    orderKey: {
+      runCreatedAt: 0,
+      operatorId: activity.operatorId,
+      runId: activity.run.agentRunId,
+      committedEventOrdinal: index,
+      runtimeEventId: `runtime-${index}`,
+    },
+    type: 'agent_runtime_event',
+    facets: [...activity.facets],
+    supervisorSignals: activity.signals.map((signal) => ({ ...signal })),
+    source: {
+      kind: 'runtime_event',
+      runtimeEventId: `runtime-${index}`,
+      sessionId: activity.run.sessionId,
+      runId: activity.run.agentRunId,
+      turnId: activity.run.turnId ?? 'turn-0',
+      ts: activity.eventTime,
+    },
   };
 }

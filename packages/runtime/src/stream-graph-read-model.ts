@@ -113,9 +113,7 @@ export interface AgentGraphClientEdge {
 
 export interface AgentGraphClientScheduledWork {
   workId: string;
-  target:
-    | { kind: 'agent'; agentId: string }
-    | { kind: 'operator'; operatorId: string };
+  target: { kind: 'agent'; agentId: string } | { kind: 'operator'; operatorId: string };
   inputIds: string[];
   replaces?: string;
   status: AgentGraphScheduleWorkView['status'];
@@ -253,12 +251,14 @@ export interface BuildAgentGraphClientReadModelInput {
 export interface AgentGraphClientMaterialization {
   snapshot: AgentGraphClientSnapshot;
   operators: AgentGraphOperatorInspection[];
+  activityRecords: AgentGraphClientActivity[];
   terminalActivities: AgentGraphClientActivity[];
 }
 
 export interface AdvancedAgentGraphClientProjection {
   snapshot: AgentGraphClientSnapshot;
   operator: AgentGraphOperatorInspection;
+  activity: AgentGraphClientActivity;
   terminalActivity?: AgentGraphClientActivity;
 }
 
@@ -267,7 +267,6 @@ export interface AgentGraphClientSnapshotOptions {
 }
 
 interface BuiltReadModel {
-  snapshotVersion: string;
   schedule: AgentGraphScheduleProjection;
   operators: AgentGraphClientOperator[];
   edges: AgentGraphClientEdge[];
@@ -298,11 +297,13 @@ export function materializeAgentGraphClientProjection(
   input: BuildAgentGraphClientReadModelInput,
 ): AgentGraphClientMaterialization {
   const model = buildReadModel(input);
+  const snapshot = snapshotFromModel(input, model, {});
   return {
-    snapshot: snapshotFromModel(input, model, {}),
+    snapshot,
     operators: model.operators.map((operator) =>
-      inspectionFromModel(input, model, operator.operatorId),
+      inspectionFromModel(input, model, operator.operatorId, snapshot.snapshotVersion),
     ),
+    activityRecords: model.activity,
     terminalActivities: terminalActivities(model.activity),
   };
 }
@@ -342,21 +343,53 @@ export function advanceMaterializedAgentGraphClientProjection(
   };
   const snapshot = structuredClone(snapshotInput);
   const inspection = structuredClone(inspectionInput);
+  if (
+    snapshot.recentActivity.some((record) => record.recordId === activity.recordId) ||
+    inspection.recentRecords.some((record) => record.recordId === activity.recordId)
+  ) {
+    return undefined;
+  }
   const previousActivation = inspection.activations.find(
     (activation) => activation.activationId === runtime.claim.targetRunId,
   );
-  const activationStatus: AgentGraphActivationStatus =
-    projected.terminalStatus ?? 'running';
+  const incomingIsLast =
+    !previousActivation ||
+    compareActivityKey(
+      runtime.event.ts,
+      activity.recordId,
+      previousActivation.lastEventTime,
+      previousActivation.lastRecordId,
+    ) > 0;
+  const previousTerminalRecord = previousActivation?.terminalRecordId
+    ? inspection.recentRecords.find(
+        (record) => record.recordId === previousActivation.terminalRecordId,
+      )
+    : undefined;
+  const previousIsTerminal =
+    previousActivation !== undefined &&
+    ['completed', 'failed', 'aborted', 'cancelled'].includes(previousActivation.status);
+  const incomingTerminalWins =
+    projected.terminalStatus !== undefined &&
+    (!previousIsTerminal ||
+      (previousTerminalRecord !== undefined &&
+        compareClientActivity(activity, previousTerminalRecord) > 0));
+  const activationStatus: AgentGraphActivationStatus = incomingTerminalWins
+    ? projected.terminalStatus!
+    : previousIsTerminal
+      ? previousActivation.status
+      : 'running';
+  const terminalRecordId = incomingTerminalWins
+    ? activity.recordId
+    : previousActivation?.terminalRecordId;
   const nextActivation = previousActivation
     ? {
         ...previousActivation,
         status: activationStatus,
         recordCount: previousActivation.recordCount + 1,
-        lastEventTime: runtime.event.ts,
-        lastRecordId: activity.recordId,
-        ...(projected.terminalStatus
-          ? { terminalRecordId: activity.recordId }
-          : {}),
+        firstEventTime: Math.min(previousActivation.firstEventTime, runtime.event.ts),
+        lastEventTime: incomingIsLast ? runtime.event.ts : previousActivation.lastEventTime,
+        lastRecordId: incomingIsLast ? activity.recordId : previousActivation.lastRecordId,
+        ...(terminalRecordId ? { terminalRecordId } : {}),
       }
     : {
         activationId: runtime.claim.targetRunId,
@@ -365,51 +398,61 @@ export function advanceMaterializedAgentGraphClientProjection(
         firstEventTime: runtime.event.ts,
         lastEventTime: runtime.event.ts,
         lastRecordId: activity.recordId,
-        ...(projected.terminalStatus
-          ? { terminalRecordId: activity.recordId }
-          : {}),
+        ...(projected.terminalStatus ? { terminalRecordId: activity.recordId } : {}),
         run: { ...activity.run },
       };
   const activationCount =
-    inspection.omitted.activations +
-    inspection.activations.length +
-    (previousActivation ? 0 : 1);
+    inspection.omitted.activations + inspection.activations.length + (previousActivation ? 0 : 1);
   inspection.activations = [
     ...inspection.activations.filter(
       (activation) => activation.activationId !== nextActivation.activationId,
     ),
     nextActivation,
-  ].slice(-MAX_OPERATOR_INSPECTION_ACTIVATIONS);
-  inspection.omitted.activations = Math.max(
-    0,
-    activationCount - inspection.activations.length,
-  );
-  const operatorStatus: AgentGraphClientOperatorStatus = projected.terminalStatus
-    ? projected.terminalStatus
-    : projected.signals.some((signal) => signal.kind === 'attention')
-      ? 'blocked'
-      : 'running';
+  ]
+    .sort(
+      (a, b) =>
+        a.firstEventTime - b.firstEventTime || compareIdentity(a.activationId, b.activationId),
+    )
+    .slice(-MAX_OPERATOR_INSPECTION_ACTIVATIONS);
+  inspection.omitted.activations = Math.max(0, activationCount - inspection.activations.length);
+  const currentActivation = inspection.activations.at(-1);
+  let operatorStatus = inspection.operator.status;
+  if (currentActivation?.activationId === nextActivation.activationId) {
+    operatorStatus = projected.terminalStatus
+      ? projected.terminalStatus
+      : ['completed', 'failed', 'aborted', 'cancelled'].includes(operatorStatus)
+        ? operatorStatus
+        : projected.signals.some((signal) => signal.kind === 'attention') ||
+            operatorStatus === 'blocked'
+          ? 'blocked'
+          : 'running';
+  }
   inspection.operator.status = operatorStatus;
-  inspection.operator.currentActivation = {
-    activationId: nextActivation.activationId,
-    status: nextActivation.status,
-    recordCount: nextActivation.recordCount,
-    firstEventTime: nextActivation.firstEventTime,
-    lastEventTime: nextActivation.lastEventTime,
-    ...(nextActivation.terminalRecordId
-      ? { terminalRecordId: nextActivation.terminalRecordId }
-      : {}),
-    run: { ...activity.run },
-  };
-  const inspectionRecordCount =
-    inspection.omitted.records + inspection.recentRecords.length + 1;
-  inspection.recentRecords = [...inspection.recentRecords, activity].slice(
-    -MAX_OPERATOR_INSPECTION_RECORDS,
-  );
-  inspection.omitted.records = Math.max(
-    0,
-    inspectionRecordCount - inspection.recentRecords.length,
-  );
+  if (currentActivation) {
+    const currentRun =
+      currentActivation.activationId === nextActivation.activationId
+        ? activity.run
+        : inspection.operator.currentActivation?.run;
+    if (!currentRun) {
+      throw new Error('Agent graph activation is missing its materialized run reference');
+    }
+    inspection.operator.currentActivation = {
+      activationId: currentActivation.activationId,
+      status: currentActivation.status,
+      recordCount: currentActivation.recordCount,
+      firstEventTime: currentActivation.firstEventTime,
+      lastEventTime: currentActivation.lastEventTime,
+      ...(currentActivation.terminalRecordId
+        ? { terminalRecordId: currentActivation.terminalRecordId }
+        : {}),
+      run: { ...currentRun },
+    };
+  }
+  const inspectionRecordCount = inspection.omitted.records + inspection.recentRecords.length + 1;
+  inspection.recentRecords = [...inspection.recentRecords, activity]
+    .sort(compareClientActivity)
+    .slice(-MAX_OPERATOR_INSPECTION_RECORDS);
+  inspection.omitted.records = Math.max(0, inspectionRecordCount - inspection.recentRecords.length);
 
   const visibleOperatorIndex = snapshot.operators.findIndex(
     (operator) => operator.operatorId === inspection.operator.operatorId,
@@ -417,30 +460,19 @@ export function advanceMaterializedAgentGraphClientProjection(
   if (visibleOperatorIndex >= 0) {
     snapshot.operators[visibleOperatorIndex] = structuredClone(inspection.operator);
   }
-  const activityCount =
-    snapshot.omitted.recentActivity + snapshot.recentActivity.length + 1;
-  snapshot.recentActivity = [...snapshot.recentActivity, activity].slice(
-    -MAX_RECENT_ACTIVITY,
-  );
-  snapshot.omitted.recentActivity = Math.max(
-    0,
-    activityCount - snapshot.recentActivity.length,
-  );
-  snapshot.latestEventTime = Math.max(
-    snapshot.latestEventTime ?? 0,
-    runtime.event.ts,
-  );
-  snapshot.snapshotVersion = stableHash({
-    schemaVersion: AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION,
-    previousSnapshotVersion: snapshotInput.snapshotVersion,
-    runtimeEventId: runtime.event.id,
-    operatorStatus,
-  });
-  inspection.snapshotVersion = snapshot.snapshotVersion;
+  const activityCount = snapshot.omitted.recentActivity + snapshot.recentActivity.length + 1;
+  snapshot.recentActivity = [...snapshot.recentActivity, activity]
+    .sort(compareClientActivity)
+    .slice(-MAX_RECENT_ACTIVITY);
+  snapshot.omitted.recentActivity = Math.max(0, activityCount - snapshot.recentActivity.length);
+  snapshot.latestEventTime = Math.max(snapshot.latestEventTime ?? 0, runtime.event.ts);
   snapshot.status = patchedGraphStatus(snapshot, inspection.operator);
+  snapshot.snapshotVersion = clientSnapshotVersion(snapshot);
+  inspection.snapshotVersion = snapshot.snapshotVersion;
   return {
     snapshot,
     operator: inspection,
+    activity,
     ...(projected.terminalStatus ? { terminalActivity: activity } : {}),
   };
 }
@@ -454,22 +486,19 @@ function snapshotFromModel(
   const visibleOperatorIds = new Set(visibleOperators.map((operator) => operator.operatorId));
   const candidateEdges = model.edges.filter(
     (edge) =>
-      visibleOperatorIds.has(edge.fromOperatorId) &&
-      visibleOperatorIds.has(edge.toOperatorId),
+      visibleOperatorIds.has(edge.fromOperatorId) && visibleOperatorIds.has(edge.toOperatorId),
   );
   const edges = candidateEdges.slice(0, MAX_VISIBLE_EDGES);
   const work = boundWork(model.work);
   const stoppedTargets = model.stoppedTargets.slice(-MAX_VISIBLE_STOPPED_TARGETS);
   const claims = model.claims.slice(-MAX_VISIBLE_CLAIMS);
-  const recentControlDecisions = model.recentControlDecisions.slice(
-    -MAX_RECENT_CONTROL_DECISIONS,
-  );
+  const recentControlDecisions = model.recentControlDecisions.slice(-MAX_RECENT_CONTROL_DECISIONS);
   const recentActivity = model.activity.slice(-MAX_RECENT_ACTIVITY);
-  return {
+  const snapshot: AgentGraphClientSnapshot = {
     schemaVersion: AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION,
     rootSessionId: input.rootSessionId,
     graphId: input.graphId,
-    snapshotVersion: model.snapshotVersion,
+    snapshotVersion: '',
     status: graphStatus(model.schedule, model.operators, model.claims, model.activity),
     scheduleRevision: model.schedule.revision,
     topologyFingerprint: input.observation.readiness.topologyFingerprint,
@@ -492,11 +521,12 @@ function snapshotFromModel(
       work: model.work.length - work.length,
       stoppedTargets: model.stoppedTargets.length - stoppedTargets.length,
       claims: model.claims.length - claims.length,
-      controlDecisions:
-        model.recentControlDecisions.length - recentControlDecisions.length,
+      controlDecisions: model.recentControlDecisions.length - recentControlDecisions.length,
       recentActivity: model.activity.length - recentActivity.length,
     },
   };
+  snapshot.snapshotVersion = clientSnapshotVersion(snapshot);
+  return snapshot;
 }
 
 export function inspectAgentGraphOperator(
@@ -505,17 +535,17 @@ export function inspectAgentGraphOperator(
 ): AgentGraphOperatorInspection {
   const expectedOperatorId = requireIdentity(operatorId, 'operator id');
   const model = buildReadModel(input);
-  return inspectionFromModel(input, model, expectedOperatorId);
+  const snapshotVersion = snapshotFromModel(input, model, {}).snapshotVersion;
+  return inspectionFromModel(input, model, expectedOperatorId, snapshotVersion);
 }
 
 function inspectionFromModel(
   input: BuildAgentGraphClientReadModelInput,
   model: BuiltReadModel,
   expectedOperatorId: string,
+  snapshotVersion: string,
 ): AgentGraphOperatorInspection {
-  const operator = model.operators.find(
-    (candidate) => candidate.operatorId === expectedOperatorId,
-  );
+  const operator = model.operators.find((candidate) => candidate.operatorId === expectedOperatorId);
   if (!operator) {
     throw new Error(`Agent graph operator ${expectedOperatorId} was not found`);
   }
@@ -523,31 +553,20 @@ function inspectionFromModel(
   const allActivations = runtimeState
     ? Object.values(runtimeState.activations).sort(
         (a, b) =>
-          a.firstEventTime - b.firstEventTime ||
-          compareIdentity(a.activationId, b.activationId),
+          a.firstEventTime - b.firstEventTime || compareIdentity(a.activationId, b.activationId),
       )
     : [];
   const visibleActivations = allActivations.slice(-MAX_OPERATOR_INSPECTION_ACTIVATIONS);
-  const allRecords = model.activity.filter(
-    (record) => record.operatorId === expectedOperatorId,
-  );
+  const allRecords = model.activity.filter((record) => record.operatorId === expectedOperatorId);
   const recentRecords = allRecords.slice(-MAX_OPERATOR_INSPECTION_RECORDS);
-  const inboundEdges = model.edges.filter(
-    (edge) => edge.toOperatorId === expectedOperatorId,
-  );
+  const inboundEdges = model.edges.filter((edge) => edge.toOperatorId === expectedOperatorId);
   const visibleInboundEdges = inboundEdges.slice(-MAX_OPERATOR_INSPECTION_EDGES);
-  const outboundEdges = model.edges.filter(
-    (edge) => edge.fromOperatorId === expectedOperatorId,
-  );
+  const outboundEdges = model.edges.filter((edge) => edge.fromOperatorId === expectedOperatorId);
   const visibleOutboundEdges = outboundEdges.slice(-MAX_OPERATOR_INSPECTION_EDGES);
-  const operatorWorkIds = new Set(
-    model.scheduledWorkIdsByOperator.get(expectedOperatorId) ?? [],
-  );
+  const operatorWorkIds = new Set(model.scheduledWorkIdsByOperator.get(expectedOperatorId) ?? []);
   const work = model.work.filter((entry) => operatorWorkIds.has(entry.workId));
   const visibleWork = work.slice(-MAX_OPERATOR_INSPECTION_WORK);
-  const claims = model.claims.filter(
-    (claim) => claim.operatorId === expectedOperatorId,
-  );
+  const claims = model.claims.filter((claim) => claim.operatorId === expectedOperatorId);
   const visibleClaims = claims.slice(-MAX_OPERATOR_INSPECTION_CLAIMS);
   const claimByRunId = new Map(
     model.claims
@@ -558,7 +577,7 @@ function inspectionFromModel(
     schemaVersion: AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION,
     rootSessionId: input.rootSessionId,
     graphId: input.graphId,
-    snapshotVersion: model.snapshotVersion,
+    snapshotVersion,
     operator,
     inboundEdges: visibleInboundEdges,
     outboundEdges: visibleOutboundEdges,
@@ -571,9 +590,7 @@ function inspectionFromModel(
       firstEventTime: activation.firstEventTime,
       lastEventTime: activation.lastEventTime,
       lastRecordId: activation.lastRecordId,
-      ...(activation.terminalRecordId
-        ? { terminalRecordId: activation.terminalRecordId }
-        : {}),
+      ...(activation.terminalRecordId ? { terminalRecordId: activation.terminalRecordId } : {}),
       run: runRefForActivation(
         operator.childSessionId,
         activation.agentRunId,
@@ -601,12 +618,10 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
     input.schedule ?? projectAgentGraphSchedule(input.graphId, input.scheduleUpdates);
   const provisionByOperator = provisionsByOperator(input.graphId, input.provisions);
   const edges = uniqueEdges(input.graphId, input.provisions);
-  const claims = clientClaims(
-    input.graphId,
-    input.observation.claims,
-    input.claimAdmissions ?? [],
-  );
-  const activity = input.observation.projection.records.map(clientActivity);
+  const claims = clientClaims(input.graphId, input.observation.claims, input.claimAdmissions ?? []);
+  const activity = input.observation.projection.records
+    .map(clientActivity)
+    .sort(compareClientActivity);
   const work = schedule.work.map(clientWork);
   const operators = input.observation.projection.operators.map((binding) => {
     const provision = provisionByOperator.get(binding.operatorId);
@@ -621,13 +636,8 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
         readinessId: entry.readinessId,
         policyKind: entry.policyKind,
         status: entry.status,
-        waitingFor: entry.waitingFor
-          .slice(0, MAX_OPERATOR_READINESS_WAITS)
-          .map(cloneWait),
-        omittedWaitingFor: Math.max(
-          0,
-          entry.waitingFor.length - MAX_OPERATOR_READINESS_WAITS,
-        ),
+        waitingFor: entry.waitingFor.slice(0, MAX_OPERATOR_READINESS_WAITS).map(cloneWait),
+        omittedWaitingFor: Math.max(0, entry.waitingFor.length - MAX_OPERATOR_READINESS_WAITS),
       }));
     const readiness = allReadiness.slice(0, MAX_OPERATOR_READINESS);
     const state = input.observation.projection.state.operators[binding.operatorId];
@@ -639,9 +649,7 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
             claim.run.agentRunId === currentActivation.agentRunId,
         )
       : undefined;
-    const operatorRecords = activity.filter(
-      (record) => record.operatorId === binding.operatorId,
-    );
+    const operatorRecords = activity.filter((record) => record.operatorId === binding.operatorId);
     const currentRecord = currentActivation
       ? [...operatorRecords]
           .reverse()
@@ -659,8 +667,7 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
       .filter(
         (entry) =>
           entry.workId === provision.workId ||
-          (entry.target.kind === 'operator' &&
-            entry.target.operatorId === binding.operatorId),
+          (entry.target.kind === 'operator' && entry.target.operatorId === binding.operatorId),
       )
       .map((entry) => entry.workId);
     const scheduledWorkIds = allScheduledWorkIds.slice(-MAX_OPERATOR_WORK_REFS);
@@ -680,10 +687,7 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
         outboundEdgeIds: allOutboundEdgeIds.length - outboundEdgeIds.length,
         scheduledWorkIds: allScheduledWorkIds.length - scheduledWorkIds.length,
         readiness: allReadiness.length - readiness.length,
-        readinessWaits: allReadiness.reduce(
-          (total, entry) => total + entry.omittedWaitingFor,
-          0,
-        ),
+        readinessWaits: allReadiness.reduce((total, entry) => total + entry.omittedWaitingFor, 0),
       },
       ...(currentActivation
         ? {
@@ -726,31 +730,7 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
       stoppedTargetIds: update.stop.map((entry) => entry.targetId),
       selectedResultIds: update.finish ? [...update.finish.resultIds] : [],
     }));
-  const snapshotVersion = stableHash({
-    schemaVersion: AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION,
-    rootSessionId: input.rootSessionId,
-    graphId: input.graphId,
-    scheduleRevision: schedule.revision,
-    topologyFingerprint: input.observation.readiness.topologyFingerprint,
-    provisionCount: input.provisions.length,
-    latestProvisionId: [...input.provisions]
-      .sort(
-        (a, b) =>
-          a.provisionedAt - b.provisionedAt ||
-          compareIdentity(a.provisionId, b.provisionId),
-      )
-      .at(-1)?.provisionId,
-    claimCount: claims.length,
-    latestClaimId: claims.at(-1)?.claimId,
-    claimAdmissions: claims.map((claim) => ({
-      claimId: claim.claimId,
-      state: claim.admissionState,
-    })),
-    recordCount: activity.length,
-    latestRecordId: activity.at(-1)?.recordId,
-  });
   return {
-    snapshotVersion,
     schedule,
     operators,
     edges,
@@ -767,8 +747,7 @@ function buildReadModel(input: BuildAgentGraphClientReadModelInput): BuiltReadMo
           .filter(
             (entry) =>
               entry.workId === provisionByOperator.get(operator.operatorId)?.workId ||
-              (entry.target.kind === 'operator' &&
-                entry.target.operatorId === operator.operatorId),
+              (entry.target.kind === 'operator' && entry.target.operatorId === operator.operatorId),
           )
           .map((entry) => entry.workId),
       ]),
@@ -801,19 +780,14 @@ function graphStatus(
   if (schedule.closed) {
     const terminalRunIds = new Set(
       activity
-        .filter((record) =>
-          record.signals.some((signal) => signal.kind === 'terminal'),
-        )
+        .filter((record) => record.signals.some((signal) => signal.kind === 'terminal'))
         .map((record) => record.run.agentRunId),
     );
-    const observedRunIds = new Set(
-      activity.map((record) => record.run.agentRunId),
-    );
+    const observedRunIds = new Set(activity.map((record) => record.run.agentRunId));
     const unsettledClaim = claims.some(
       (claim) =>
         !terminalRunIds.has(claim.run.agentRunId) &&
-        (claim.admissionState !== 'cancelled' ||
-          observedRunIds.has(claim.run.agentRunId)),
+        (claim.admissionState !== 'cancelled' || observedRunIds.has(claim.run.agentRunId)),
     );
     const runningOperator = operators.some((operator) =>
       ['running', 'blocked'].includes(operator.status),
@@ -821,20 +795,14 @@ function graphStatus(
     return unsettledClaim || runningOperator ? 'closing' : 'completed';
   }
   if (operators.length === 0 && schedule.work.length === 0) return 'empty';
-  if (
-    operators.some((operator) =>
-      ['running', 'blocked', 'runnable'].includes(operator.status),
-    )
-  ) {
+  if (operators.some((operator) => ['running', 'blocked', 'runnable'].includes(operator.status))) {
     return 'active';
   }
   const activeWork = schedule.work.filter((work) => work.status === 'requested');
   if (activeWork.length === 0 && schedule.stoppedTargets.length > 0) return 'stopped';
   if (
     operators.length > 0 &&
-    operators.every((operator) =>
-      ['failed', 'aborted', 'cancelled'].includes(operator.status),
-    )
+    operators.every((operator) => ['failed', 'aborted', 'cancelled'].includes(operator.status))
   ) {
     return 'failed';
   }
@@ -846,27 +814,20 @@ function patchedGraphStatus(
   patchedOperator: AgentGraphClientOperator,
 ): AgentGraphClientStatus {
   const operators = snapshot.operators.map((operator) =>
-    operator.operatorId === patchedOperator.operatorId
-      ? patchedOperator
-      : operator,
+    operator.operatorId === patchedOperator.operatorId ? patchedOperator : operator,
   );
   if (snapshot.closed) {
     if (
       snapshot.omitted.operators > 0 ||
       snapshot.omitted.claims > 0 ||
-      operators.some((operator) =>
-        ['running', 'blocked'].includes(operator.status),
-      )
+      operators.some((operator) => ['running', 'blocked'].includes(operator.status))
     ) {
       return 'closing';
     }
     const operatorByRunId = new Map(
       operators
         .filter((operator) => operator.currentActivation)
-        .map((operator) => [
-          operator.currentActivation!.run.agentRunId,
-          operator,
-        ]),
+        .map((operator) => [operator.currentActivation!.run.agentRunId, operator]),
     );
     return snapshot.claims.every((claim) => {
       if (claim.admissionState === 'cancelled') {
@@ -875,19 +836,25 @@ function patchedGraphStatus(
       const operator = operatorByRunId.get(claim.run.agentRunId);
       return (
         operator !== undefined &&
-        ['completed', 'failed', 'aborted', 'cancelled'].includes(
-          operator.status,
-        )
+        ['completed', 'failed', 'aborted', 'cancelled'].includes(operator.status)
       );
     })
       ? 'completed'
       : 'closing';
   }
-  return operators.some((operator) =>
-    ['running', 'blocked', 'runnable'].includes(operator.status),
-  )
+  return operators.some((operator) => ['running', 'blocked', 'runnable'].includes(operator.status))
     ? 'active'
-    : snapshot.status;
+    : operators.length === 0 && snapshot.work.length === 0
+      ? 'empty'
+      : snapshot.work.every((work) => work.status !== 'requested') &&
+          snapshot.stoppedTargets.length > 0
+        ? 'stopped'
+        : operators.length > 0 &&
+            operators.every((operator) =>
+              ['failed', 'aborted', 'cancelled'].includes(operator.status),
+            )
+          ? 'failed'
+          : 'waiting';
 }
 
 function projectClientSessionEvent(
@@ -946,8 +913,7 @@ function projectClientSessionEvent(
       const terminalStatus =
         event.stopReason === 'user_stop'
           ? 'aborted'
-          : activationHadError ||
-              failureClassFromCompleteStopReason(event.stopReason)
+          : activationHadError || failureClassFromCompleteStopReason(event.stopReason)
             ? 'failed'
             : 'completed';
       return {
@@ -961,9 +927,7 @@ function projectClientSessionEvent(
   }
 }
 
-function clientRuntimeRecordId(
-  runtime: AgentGraphSupervisorRuntimeEvent,
-): string {
+function clientRuntimeRecordId(runtime: AgentGraphSupervisorRuntimeEvent): string {
   return `graph_record_${stableHash({
     graphId: runtime.intent.graphId,
     operatorId: runtime.claim.targetOperatorId,
@@ -977,13 +941,10 @@ function boundOperators(
   operators: readonly AgentGraphClientOperator[],
 ): AgentGraphClientOperator[] {
   const live = operators.filter(
-    (operator) =>
-      !['completed', 'failed', 'aborted', 'cancelled'].includes(operator.status),
+    (operator) => !['completed', 'failed', 'aborted', 'cancelled'].includes(operator.status),
   );
   const terminal = operators
-    .filter((operator) =>
-      ['completed', 'failed', 'aborted', 'cancelled'].includes(operator.status),
-    )
+    .filter((operator) => ['completed', 'failed', 'aborted', 'cancelled'].includes(operator.status))
     .sort(
       (a, b) =>
         (a.currentActivation?.lastEventTime ?? a.provisionedAt) -
@@ -1018,28 +979,20 @@ function terminalHistoryPage(
       throw new Error('Agent graph terminal history cursor belongs to another graph');
     }
     const index = terminal.findIndex(
-      (record) =>
-        record.recordId === decoded.recordId &&
-        record.eventTime === decoded.eventTime,
+      (record) => record.recordId === decoded.recordId && record.eventTime === decoded.eventTime,
     );
     if (index < 0) {
       throw new Error('Agent graph terminal history cursor is stale or invalid');
     }
     start = index + 1;
   }
-  const records = terminal.slice(
-    start,
-    start + AGENT_GRAPH_CLIENT_TERMINAL_PAGE_SIZE,
-  );
+  const records = terminal.slice(start, start + AGENT_GRAPH_CLIENT_TERMINAL_PAGE_SIZE);
   const hasMore = start + records.length < terminal.length;
   return {
     records,
     ...(hasMore && records.length > 0
       ? {
-          nextCursor: encodeAgentGraphTerminalCursor(
-            graphId,
-            records[records.length - 1]!,
-          ),
+          nextCursor: encodeAgentGraphTerminalCursor(graphId, records[records.length - 1]!),
         }
       : {}),
   };
@@ -1050,11 +1003,7 @@ function terminalActivities(
 ): AgentGraphClientActivity[] {
   return activity
     .filter((record) => record.signals.some((signal) => signal.kind === 'terminal'))
-    .sort(
-      (a, b) =>
-        b.eventTime - a.eventTime ||
-        compareIdentity(b.recordId, a.recordId),
-    );
+    .sort((a, b) => b.eventTime - a.eventTime || compareIdentity(b.recordId, a.recordId));
 }
 
 export function materializedAgentGraphTerminalHistoryPage(
@@ -1066,10 +1015,7 @@ export function materializedAgentGraphTerminalHistoryPage(
     records: records.map((record) => structuredClone(record)),
     ...(hasMore && records.length > 0
       ? {
-          nextCursor: encodeAgentGraphTerminalCursor(
-            graphId,
-            records[records.length - 1]!,
-          ),
+          nextCursor: encodeAgentGraphTerminalCursor(graphId, records[records.length - 1]!),
         }
       : {}),
   };
@@ -1092,9 +1038,7 @@ function clientWork(work: AgentGraphScheduleWorkView): AgentGraphClientScheduled
   };
 }
 
-function clientStoppedTarget(
-  stopped: AgentGraphStoppedTargetView,
-): AgentGraphClientStoppedTarget {
+function clientStoppedTarget(stopped: AgentGraphStoppedTargetView): AgentGraphClientStoppedTarget {
   return {
     targetId: stopped.targetId,
     reason: stopped.reason,
@@ -1125,10 +1069,7 @@ function clientClaims(
     admissionByIntent.set(admission.intentId, admission.state);
   }
   return [...claims]
-    .sort(
-      (a, b) =>
-        a.claimedAt - b.claimedAt || compareIdentity(a.claimId, b.claimId),
-    )
+    .sort((a, b) => a.claimedAt - b.claimedAt || compareIdentity(a.claimId, b.claimId))
     .map((claim) => {
       if (claim.graphId !== graphId) {
         throw new Error(`Agent graph claim ${claim.claimId} belongs to another graph`);
@@ -1172,8 +1113,7 @@ function runRefForActivation(
   records: readonly AgentGraphClientActivity[],
 ): AgentGraphClientRunRef {
   const turnId =
-    claim?.run.turnId ??
-    records.find((record) => record.run.agentRunId === agentRunId)?.run.turnId;
+    claim?.run.turnId ?? records.find((record) => record.run.agentRunId === agentRunId)?.run.turnId;
   return {
     sessionId,
     agentRunId,
@@ -1187,9 +1127,7 @@ function provisionsByOperator(
 ): Map<string, AgentGraphOperatorProvision> {
   const result = new Map<string, AgentGraphOperatorProvision>();
   for (const provision of [...provisions].sort(
-    (a, b) =>
-      a.provisionedAt - b.provisionedAt ||
-      compareIdentity(a.provisionId, b.provisionId),
+    (a, b) => a.provisionedAt - b.provisionedAt || compareIdentity(a.provisionId, b.provisionId),
   )) {
     if (provision.graphId !== graphId) {
       throw new Error(`Agent graph provision ${provision.provisionId} belongs to another graph`);
@@ -1233,10 +1171,7 @@ function uniqueEdges(
   return [...edges.values()].sort((a, b) => compareIdentity(a.edgeId, b.edgeId));
 }
 
-function assertObservation(
-  graphId: string,
-  observation: AgentGraphSupervisorObservation,
-): void {
+function assertObservation(graphId: string, observation: AgentGraphSupervisorObservation): void {
   if (
     observation.projection.graphId !== graphId ||
     observation.readiness.graphId !== graphId ||
@@ -1286,8 +1221,7 @@ export function decodeAgentGraphTerminalCursor(cursor: string): {
     const value = JSON.parse(json) as Record<string, unknown>;
     if (
       canonical !== cursor ||
-      Object.keys(value).sort().join(',') !==
-        'eventTime,graphId,recordId,schemaVersion' ||
+      Object.keys(value).sort().join(',') !== 'eventTime,graphId,recordId,schemaVersion' ||
       value.schemaVersion !== AGENT_GRAPH_CLIENT_SNAPSHOT_SCHEMA_VERSION ||
       typeof value.eventTime !== 'number' ||
       !Number.isSafeInteger(value.eventTime) ||
@@ -1391,9 +1325,7 @@ export function decodeMaterializedAgentGraphClientActivity(
     typeof activity.run.sessionId !== 'string' ||
     typeof activity.run.agentRunId !== 'string'
   ) {
-    throw new Error(
-      `Invalid materialized agent graph client activity for ${expected.graphId}`,
-    );
+    throw new Error(`Invalid materialized agent graph client activity for ${expected.graphId}`);
   }
   return structuredClone(activity as AgentGraphClientActivity);
 }
@@ -1409,6 +1341,31 @@ function requireIdentity(value: unknown, name: string): string {
     throw new Error(`Invalid agent graph ${name}`);
   }
   return value;
+}
+
+function compareActivityKey(
+  eventTimeA: number,
+  recordIdA: string,
+  eventTimeB: number,
+  recordIdB: string,
+): number {
+  return eventTimeA - eventTimeB || compareIdentity(recordIdA, recordIdB);
+}
+
+function compareClientActivity(
+  a: Pick<AgentGraphClientActivity, 'eventTime' | 'recordId'>,
+  b: Pick<AgentGraphClientActivity, 'eventTime' | 'recordId'>,
+): number {
+  return compareActivityKey(a.eventTime, a.recordId, b.eventTime, b.recordId);
+}
+
+function clientSnapshotVersion(snapshot: AgentGraphClientSnapshot): string {
+  const {
+    snapshotVersion: _snapshotVersion,
+    terminalHistory: _terminalHistory,
+    ...boundedContent
+  } = snapshot;
+  return stableHash(boundedContent);
 }
 
 function compareIdentity(a: string, b: string): number {

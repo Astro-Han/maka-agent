@@ -286,10 +286,7 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
       snapshot_version TEXT NOT NULL,
       payload_json TEXT NOT NULL,
       materialized_at INTEGER NOT NULL CHECK (materialized_at >= 0),
-      PRIMARY KEY(graph_id, operator_id),
-      FOREIGN KEY(graph_id)
-        REFERENCES agent_graph_client_projections(graph_id)
-        ON DELETE CASCADE
+      PRIMARY KEY(graph_id, operator_id)
     );
 
     CREATE TABLE agent_graph_client_terminal_activity (
@@ -297,10 +294,14 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
       record_id TEXT NOT NULL,
       event_time INTEGER NOT NULL CHECK (event_time >= 0),
       payload_json TEXT NOT NULL,
-      PRIMARY KEY(graph_id, record_id),
-      FOREIGN KEY(graph_id)
-        REFERENCES agent_graph_client_projections(graph_id)
-        ON DELETE CASCADE
+      PRIMARY KEY(graph_id, record_id)
+    );
+
+    CREATE TABLE agent_graph_client_applied_records (
+      graph_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      event_time INTEGER NOT NULL CHECK (event_time >= 0),
+      PRIMARY KEY(graph_id, record_id)
     );
 
     CREATE INDEX agent_graph_client_terminal_activity_page
