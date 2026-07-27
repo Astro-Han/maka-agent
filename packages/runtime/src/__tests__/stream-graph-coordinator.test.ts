@@ -63,6 +63,7 @@ describe('host-managed agent graph coordinator', () => {
       | ReturnType<typeof createDelayableControlStore>
       | undefined;
     const clientEvents: string[] = [];
+    const transientProjectionErrors: unknown[] = [];
     let unsubscribe: (() => void) | undefined;
     try {
       const rootSession = await manager.createSession({
@@ -94,6 +95,9 @@ describe('host-managed agent graph coordinator', () => {
         runtimeEventStore: countedRuntimeEventStore,
         controlStore: delayedControlStore.store,
         manager,
+        onError: (_rootSessionId, error) => {
+          transientProjectionErrors.push(error);
+        },
       });
       unsubscribe = coordinator.subscribe(rootSession.id, (event) => {
         assert.equal(event.rootSessionId, rootSession.id);
@@ -206,6 +210,59 @@ describe('host-managed agent graph coordinator', () => {
       await assert.rejects(
         coordinator.toolsForSession(childSessions[0]!.id),
         /only to root Sessions/,
+      );
+
+      const canonicalProjection =
+        await controlStore.readAgentGraphClientProjection(graphId);
+      assert.ok(canonicalProjection);
+      const staleSnapshot = structuredClone(
+        canonicalProjection.payload as { snapshotVersion: string },
+      );
+      staleSnapshot.snapshotVersion = 'snapshot-stale-v1';
+      await controlStore.commitAgentGraphClientProjection({
+        schemaVersion: 1,
+        graphId,
+        rootSessionId: rootSession.id,
+        expectedSnapshotVersion: canonicalProjection.snapshotVersion,
+        snapshotVersion: staleSnapshot.snapshotVersion,
+        snapshot: staleSnapshot,
+        replaceOperators: false,
+        operators: [],
+        terminalActivities: [],
+        activityRecords: [],
+      });
+      const transientProjectionFailure = new Error(
+        'transient derived projection failure',
+      );
+      delayedControlStore.failNextProjectionCommits(
+        1,
+        transientProjectionFailure,
+      );
+      const commitsBeforeRepair =
+        delayedControlStore.projectionCommits.length;
+      const runtimeActivityBeforeRepair = clientEvents.filter(
+        (reason) => reason === 'runtime_activity',
+      ).length;
+      await coordinator.reconcile(rootSession.id);
+      assert.ok(
+        transientProjectionErrors.includes(transientProjectionFailure),
+      );
+      assert.equal(
+        (
+          await controlStore.readAgentGraphClientProjection(graphId)
+        )?.snapshotVersion,
+        canonicalProjection.snapshotVersion,
+        'reconcile tail must repair a one-shot projection failure without new graph activity',
+      );
+      assert.ok(
+        delayedControlStore.projectionCommits.length >=
+          commitsBeforeRepair + 2,
+        'one failed materialization must be followed by an authoritative repair',
+      );
+      assert.equal(
+        clientEvents.filter((reason) => reason === 'runtime_activity').length,
+        runtimeActivityBeforeRepair,
+        'repair liveness must not depend on new graph runtime activity',
       );
 
       await coordinator.close();
@@ -477,6 +534,7 @@ function createDelayableControlStore(
   >;
   projectionReadCounts(): { composite: number; operator: number };
   failProjectionCommits(error: unknown): void;
+  failNextProjectionCommits(count: number, error: unknown): void;
   holdNextCommit(): { started: Promise<void>; release(): void };
 } {
   let gate:
@@ -489,6 +547,7 @@ function createDelayableControlStore(
     Parameters<typeof store.commitAgentGraphClientProjection>[0]
   > = [];
   let projectionFailure: unknown;
+  let remainingProjectionFailures: number | 'always' = 0;
   let compositeProjectionReads = 0;
   let operatorProjectionReads = 0;
   const proxy = new Proxy(store, {
@@ -511,7 +570,13 @@ function createDelayableControlStore(
           >
         ) => {
           projectionCommits.push(structuredClone(args[0]));
-          if (projectionFailure !== undefined) throw projectionFailure;
+          if (remainingProjectionFailures === 'always') {
+            throw projectionFailure;
+          }
+          if (remainingProjectionFailures > 0) {
+            remainingProjectionFailures -= 1;
+            throw projectionFailure;
+          }
           return target.commitAgentGraphClientProjection(...args);
         };
       }
@@ -548,6 +613,14 @@ function createDelayableControlStore(
     }),
     failProjectionCommits(error) {
       projectionFailure = error;
+      remainingProjectionFailures = 'always';
+    },
+    failNextProjectionCommits(count, error) {
+      if (!Number.isSafeInteger(count) || count < 1) {
+        throw new Error('Projection failure count must be a positive integer');
+      }
+      projectionFailure = error;
+      remainingProjectionFailures = count;
     },
     holdNextCommit() {
       if (gate) throw new Error('A delayed graph schedule commit is already pending');

@@ -100,6 +100,7 @@ interface GraphDriver {
   task?: Promise<void>;
   stopTask?: Promise<void>;
   clientProjectionTask?: Promise<void>;
+  clientProjectionDirty: boolean;
   runtimeFailureRunIds: Set<string>;
   lastResult?: AgentGraphScheduleReconciliationResult;
   lastError?: unknown;
@@ -473,6 +474,9 @@ export class AgentGraphCoordinator {
         const result = await this.#reconcileOnce(driver, abortController.signal);
         driver.lastResult = result;
         await this.#waitForClientProjectionUpdates(driver);
+        if (driver.clientProjectionDirty) {
+          await this.#repairClientProjectionBestEffort(driver);
+        }
         await notify(this.#input.onReconciliation, driver.rootSessionId, result);
         this.#notifyClientChanged(driver, 'reconciled');
       } catch (error) {
@@ -508,14 +512,18 @@ export class AgentGraphCoordinator {
       abortSignal,
       supervisor: {
         onObservation: (observation) => {
-          this.#queueClientProjectionUpdate(driver, async () => {
-            await this.#materializeClientProjection(
-              driver.rootSessionId,
-              driver.graphId,
-              observation,
-            );
-            this.#notifyClientChanged(driver, 'observation');
-          });
+          this.#queueClientProjectionUpdate(
+            driver,
+            async () => {
+              await this.#materializeClientProjection(
+                driver.rootSessionId,
+                driver.graphId,
+                observation,
+              );
+              this.#notifyClientChanged(driver, 'observation');
+            },
+            true,
+          );
           void notify(this.#input.supervisor?.onObservation, observation);
         },
         onActivationReady: this.#input.supervisor?.onActivationReady,
@@ -563,7 +571,12 @@ export class AgentGraphCoordinator {
 
   async #readOrRebuildClientProjection(rootSessionId: string, graphId: string) {
     const driver = this.#drivers.get(graphId);
-    if (driver) await this.#waitForClientProjectionUpdates(driver);
+    if (driver) {
+      await this.#waitForClientProjectionUpdates(driver);
+      if (driver.clientProjectionDirty) {
+        await this.#repairClientProjectionBestEffort(driver);
+      }
+    }
     const existing = await this.#input.controlStore.readAgentGraphClientProjection(graphId);
     if (existing) {
       if (
@@ -574,7 +587,9 @@ export class AgentGraphCoordinator {
       }
       return existing;
     }
-    return this.#rebuildClientProjection(rootSessionId, graphId);
+    const rebuilt = await this.#rebuildClientProjection(rootSessionId, graphId);
+    if (driver) driver.clientProjectionDirty = false;
+    return rebuilt;
   }
 
   async #rebuildClientProjection(rootSessionId: string, graphId: string) {
@@ -666,16 +681,31 @@ export class AgentGraphCoordinator {
     });
   }
 
-  #queueClientProjectionUpdate(driver: GraphDriver, operation: () => Promise<void>): void {
+  #queueClientProjectionUpdate(
+    driver: GraphDriver,
+    operation: () => Promise<void>,
+    authoritative = false,
+  ): void {
     const previous = driver.clientProjectionTask ?? Promise.resolve();
     const task = previous
       .catch(() => {
         // A later durable observation may repair a failed derived projection.
       })
-      .then(operation);
+      .then(async () => {
+        try {
+          await operation();
+          if (authoritative) driver.clientProjectionDirty = false;
+        } catch (error) {
+          driver.clientProjectionDirty = true;
+          await notify(this.#input.onError, driver.rootSessionId, error);
+          throw error;
+        }
+      });
     driver.clientProjectionTask = task;
     void task
-      .catch((error) => notify(this.#input.onError, driver.rootSessionId, error))
+      .catch(() => {
+        // Failure state and reporting are owned inside the serialized task.
+      })
       .finally(() => {
         if (driver.clientProjectionTask === task) {
           driver.clientProjectionTask = undefined;
@@ -694,7 +724,9 @@ export class AgentGraphCoordinator {
     await this.#waitForClientProjectionUpdates(driver);
     try {
       await this.#rebuildClientProjection(driver.rootSessionId, driver.graphId);
+      driver.clientProjectionDirty = false;
     } catch (error) {
+      driver.clientProjectionDirty = true;
       await notify(this.#input.onError, driver.rootSessionId, error);
     }
   }
@@ -840,6 +872,7 @@ export class AgentGraphCoordinator {
       stopping: false,
       stopGeneration: 0,
       closed: false,
+      clientProjectionDirty: false,
       runtimeFailureRunIds: new Set(),
     };
     this.#drivers.set(graphId, created);
