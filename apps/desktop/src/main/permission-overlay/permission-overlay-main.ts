@@ -92,8 +92,9 @@ export function createPermissionOverlayMain(
   deps: PermissionOverlayMainDeps,
 ): PermissionOverlayController {
   let locale: UiLocale = 'en';
+  let iconDataUrl: string | null = null;
   const electron = requireElectron('electron') as Electron;
-  const { BrowserWindow, app, nativeImage, screen, systemPreferences } = electron;
+  const { BrowserWindow, app, screen, systemPreferences } = electron;
 
   function isGranted(id: DragGrantPermissionId): boolean {
     if (process.platform !== 'darwin') return false;
@@ -103,16 +104,30 @@ export function createPermissionOverlayMain(
     return systemPreferences.getMediaAccessStatus('screen') === 'granted';
   }
 
-  function appIconDataUrl(bundlePath: string | null): string | null {
+  /**
+   * The icon of the bundle the user is about to drag.
+   *
+   * `app.getFileIcon`, not `nativeImage.createFromPath` on the `.icns`:
+   * nativeImage decodes PNG/JPEG and friends, NOT icns, so probing
+   * `Contents/Resources/icon.icns` returns an empty image and the card
+   * renders a blank tile. (The file is there — that is exactly how this
+   * shipped broken.) `getFileIcon` asks the OS for the icon the bundle
+   * actually displays, which is also the right answer semantically: what
+   * you see on the card is what Finder and the Privacy list will show.
+   *
+   * Async, hence resolved once per run in the `start()` wrapper below
+   * rather than inside the synchronous payload builder.
+   */
+  async function resolveAppIconDataUrl(bundlePath: string | null): Promise<string | null> {
     if (!bundlePath) return null;
-    for (const name of ['icon.icns', 'electron.icns']) {
-      const candidate = join(bundlePath, 'Contents', 'Resources', name);
-      if (!existsSync(candidate)) continue;
-      const image = nativeImage.createFromPath(candidate);
-      if (image.isEmpty()) continue;
-      return image.resize({ width: 64, height: 64 }).toDataURL();
+    try {
+      const icon = await app.getFileIcon(bundlePath, { size: 'large' });
+      if (icon.isEmpty()) return null;
+      return icon.resize({ width: 64, height: 64 }).toDataURL();
+    } catch {
+      // A missing icon is cosmetic; never let it break the flow.
+      return null;
     }
-    return null;
   }
 
   const controller = createPermissionOverlayController({
@@ -142,7 +157,7 @@ export function createPermissionOverlayMain(
       return {
         permission: id,
         appName: app.getName(),
-        iconDataUrl: appIconDataUrl(bundlePath),
+        iconDataUrl,
         draggable: bundlePath !== null,
         copy: serializeCopy(locale, id, app.getName()),
       };
@@ -232,13 +247,19 @@ export function createPermissionOverlayMain(
   // not a reason to block the flow — the last known value still renders.
   return {
     ...controller,
-    async start(id: unknown) {
+    async start(id: unknown, sourceRect?: Rect | null) {
       try {
         locale = await deps.resolveLocale();
       } catch (error) {
         console.warn('[permission-overlay] locale lookup failed, keeping', locale, error);
       }
-      return controller.start(id);
+      const bundle = resolveAppBundle({
+        executablePath: app.getPath('exe'),
+        platform: process.platform,
+        exists: existsSync,
+      });
+      iconDataUrl = await resolveAppIconDataUrl(bundle.ok ? bundle.bundlePath : null);
+      return controller.start(id, sourceRect);
     },
   };
 }
@@ -277,7 +298,7 @@ function attachCardGestures(win: import('electron').BrowserWindow): void {
       exists: existsSync,
     });
 
-  win.webContents.on('ipc-message', (_event, channel, payload: unknown) => {
+  win.webContents.on('ipc-message', async (_event, channel, payload: unknown) => {
     if (channel === 'permission-overlay:dismiss') {
       if (!win.isDestroyed()) win.close();
       return;
@@ -318,10 +339,13 @@ function attachCardGestures(win: import('electron').BrowserWindow): void {
       if (!fromRenderer.isEmpty()) icon = fromRenderer;
     }
     if (icon.isEmpty()) {
-      const fallback = nativeImage.createFromPath(
-        join(resolved.bundlePath, 'Contents', 'Resources', 'icon.icns'),
-      );
-      if (!fallback.isEmpty()) icon = fallback.resize({ width: 64, height: 64 });
+      // Same trap as the card's tile: nativeImage cannot decode `.icns`,
+      // so reading Contents/Resources/icon.icns here yields an empty image
+      // and the drag would carry no picture at all. Ask the OS instead.
+      try {
+        const fallback = await app.getFileIcon(resolved.bundlePath, { size: 'large' });
+        if (!fallback.isEmpty()) icon = fallback.resize({ width: 64, height: 64 });
+      } catch { /* a drag with no image still drags. */ }
     }
 
     if (!win.isDestroyed()) win.webContents.startDrag({ file: resolved.bundlePath, icon });
