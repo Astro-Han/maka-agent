@@ -147,9 +147,18 @@ export function createPermissionOverlayMain(
           preload: join(overlayAssetDir(), 'permission-overlay-preload.cjs'),
           nodeIntegration: false,
           contextIsolation: true,
-          sandbox: false,
+          // Matches the cursor overlay. The preload only needs
+          // contextBridge + ipcRenderer, both of which work sandboxed —
+          // there is nothing here worth weakening the sandbox for.
+          sandbox: true,
         },
       });
+      // The card's three gestures are bound to THIS window's webContents,
+      // not to global ipcMain. A global `ipcMain.on` would let any
+      // renderer in the app trigger a native drag of the .app bundle or
+      // pop Finder; scoping them means only the overlay page can, which
+      // is the same containment the cursor overlay uses.
+      attachCardGestures(win);
       win.setAlwaysOnTop(true, 'screen-saver');
       // Survives Space switches and Settings going fullscreen; without it
       // the card is hidden with our other windows when Settings activates.
@@ -201,43 +210,55 @@ function serializeCopy(locale: UiLocale, id: DragGrantPermissionId, appName: str
   };
 }
 
-export interface PermissionOverlayIpcDeps {
-  controller: PermissionOverlayController;
-}
-
 /**
- * The drag itself.
+ * Bind the card's gestures to one window.
  *
- * `webContents.startDrag` is the only way to hand a file to *another*
- * process: it writes a `kUTTypeFileURL` onto NSPasteboard, which is what
- * makes the drop legible to System Settings. An HTML5 `dragstart` in the
- * renderer stays inside our own process and System Settings never sees it.
+ * Deliberately `webContents.on('ipc-message')` rather than global
+ * `ipcMain.on`: these three channels start a native drag of the app
+ * bundle, close the card, and pop Finder. On global ipcMain any renderer
+ * in the app could reach them; scoped here, only the overlay page can.
+ * Same containment the cursor overlay uses, and the listeners die with
+ * the window rather than accumulating one set per card opened.
  */
-export function registerPermissionOverlayIpc(deps: PermissionOverlayIpcDeps): void {
+function attachCardGestures(win: import('electron').BrowserWindow): void {
   const electron = requireElectron('electron') as Electron;
-  const { ipcMain, app, nativeImage, shell } = electron;
+  const { app, nativeImage, shell } = electron;
 
-  ipcMain.handle('permissions:startDragOnboarding', async (_event, id: unknown) => {
-    return deps.controller.start(id);
-  });
-
-  ipcMain.handle('permissions:dismissDragOnboarding', async () => {
-    deps.controller.dismiss();
-    return { ok: true };
-  });
-
-  ipcMain.on('permission-overlay:start-drag', (event, payload: unknown) => {
-    if (process.platform !== 'darwin') return;
-    const bundle = resolveAppBundle({
+  const bundle = (): ReturnType<typeof resolveAppBundle> =>
+    resolveAppBundle({
       executablePath: app.getPath('exe'),
       platform: process.platform,
       exists: existsSync,
     });
-    if (!bundle.ok) {
-      // No bundle to drag. The card already renders the manual route in
-      // this case; surface it rather than starting a drag that macOS will
-      // refuse, and give the user something to act on.
-      console.warn(`[permission-overlay] no .app bundle to drag (exe: ${bundle.executablePath})`);
+
+  win.webContents.on('ipc-message', (_event, channel, payload: unknown) => {
+    if (channel === 'permission-overlay:dismiss') {
+      if (!win.isDestroyed()) win.close();
+      return;
+    }
+
+    if (channel === 'permission-overlay:reveal-bundle') {
+      // Dev-mode / unpacked fallback: if we cannot hand the bundle over by
+      // drag, at least put the user in front of it in Finder instead of
+      // leaving the gesture silently dead.
+      const resolved = bundle();
+      shell.showItemInFolder(resolved.ok ? resolved.bundlePath : resolved.executablePath);
+      return;
+    }
+
+    if (channel !== 'permission-overlay:start-drag') return;
+    if (process.platform !== 'darwin') return;
+
+    // `webContents.startDrag` is the only way to hand a file to *another*
+    // process: it writes a `kUTTypeFileURL` onto NSPasteboard, which is
+    // what makes the drop legible to System Settings. An HTML5 dragstart
+    // stays inside our process and System Settings never sees it.
+    //
+    // The path is resolved HERE, never taken from the payload — the card
+    // may choose the drag image and nothing else.
+    const resolved = bundle();
+    if (!resolved.ok) {
+      console.warn(`[permission-overlay] no .app bundle to drag (exe: ${resolved.executablePath})`);
       return;
     }
 
@@ -252,28 +273,35 @@ export function registerPermissionOverlayIpc(deps: PermissionOverlayIpcDeps): vo
     }
     if (icon.isEmpty()) {
       const fallback = nativeImage.createFromPath(
-        join(bundle.bundlePath, 'Contents', 'Resources', 'icon.icns'),
+        join(resolved.bundlePath, 'Contents', 'Resources', 'icon.icns'),
       );
       if (!fallback.isEmpty()) icon = fallback.resize({ width: 64, height: 64 });
     }
 
-    event.sender.startDrag({ file: bundle.bundlePath, icon });
+    if (!win.isDestroyed()) win.webContents.startDrag({ file: resolved.bundlePath, icon });
+  });
+}
+
+export interface PermissionOverlayIpcDeps {
+  controller: PermissionOverlayController;
+}
+
+/**
+ * The renderer-facing surface: only the two invoke channels the app's own
+ * preload exposes. The card's own gestures are bound per-window in
+ * `attachCardGestures`, not here.
+ */
+export function registerPermissionOverlayIpc(deps: PermissionOverlayIpcDeps): void {
+  const electron = requireElectron('electron') as Electron;
+  const { ipcMain } = electron;
+
+  ipcMain.handle('permissions:startDragOnboarding', async (_event, id: unknown) => {
+    return deps.controller.start(id);
   });
 
-  ipcMain.on('permission-overlay:dismiss', () => {
+  ipcMain.handle('permissions:dismissDragOnboarding', async () => {
     deps.controller.dismiss();
-  });
-
-  ipcMain.on('permission-overlay:reveal-bundle', () => {
-    const bundle = resolveAppBundle({
-      executablePath: app.getPath('exe'),
-      platform: process.platform,
-      exists: existsSync,
-    });
-    // Dev-mode / unpacked fallback: if we cannot hand the bundle over by
-    // drag, at least put the user in front of it in Finder instead of
-    // leaving the gesture silently dead.
-    shell.showItemInFolder(bundle.ok ? bundle.bundlePath : bundle.executablePath);
+    return { ok: true };
   });
 }
 
