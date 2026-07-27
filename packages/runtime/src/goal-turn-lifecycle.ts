@@ -163,7 +163,7 @@ function observeGoalTurnOutcome(
   current: GoalTurnOutcome | undefined,
   event: SessionEvent,
 ): GoalTurnOutcome | undefined {
-  if (current) return current;
+  if (current && current.kind !== 'suspended') return current;
   const failureClass =
     event.type === 'complete' ? failureClassFromCompleteStopReason(event.stopReason) : undefined;
   if (event.type === 'error' || failureClass !== undefined) {
@@ -176,9 +176,9 @@ function observeGoalTurnOutcome(
   if (event.type === 'abort' || (event.type === 'complete' && event.stopReason === 'user_stop')) {
     return { kind: 'aborted', turnId: event.turnId };
   }
-  if (event.type !== 'complete') return undefined;
+  if (event.type !== 'complete') return current;
   if (event.stopReason === 'permission_handoff') {
-    return {
+    return current ?? {
       kind: 'suspended',
       turnId: event.turnId,
       reason: 'Turn is waiting for user permission.',

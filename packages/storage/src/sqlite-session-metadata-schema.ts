@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 11;
+export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 12;
 
 const MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
@@ -347,6 +347,77 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
         REFERENCES agent_graph_supervisor_wakes(graph_id, wake_id)
         ON DELETE CASCADE
     );
+
+    CREATE INDEX agent_graph_supervisor_wakes_by_status
+      ON agent_graph_supervisor_wakes(status, updated_at, graph_id, wake_id);
+  `,
+  ],
+  [
+    12,
+    `
+    DROP INDEX agent_graph_supervisor_wakes_by_status;
+
+    CREATE TABLE agent_graph_supervisor_wakes_v12 (
+      graph_id TEXT NOT NULL,
+      wake_id TEXT NOT NULL,
+      schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+      snapshot_version TEXT NOT NULL,
+      root_session_id TEXT NOT NULL,
+      status TEXT NOT NULL
+        CHECK (
+          status IN (
+            'pending',
+            'running',
+            'waiting_permission',
+            'delivered',
+            'retryable_failed'
+          )
+        ),
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+      current_attempt_id TEXT,
+      current_turn_id TEXT,
+      failure_reason TEXT,
+      created_at INTEGER NOT NULL CHECK (created_at >= 0),
+      updated_at INTEGER NOT NULL CHECK (updated_at >= 0),
+      PRIMARY KEY(graph_id, wake_id)
+    );
+
+    CREATE TABLE agent_graph_supervisor_wake_attempts_v12 (
+      graph_id TEXT NOT NULL,
+      wake_id TEXT NOT NULL,
+      attempt_id TEXT NOT NULL UNIQUE,
+      turn_id TEXT NOT NULL,
+      status TEXT NOT NULL
+        CHECK (
+          status IN (
+            'running',
+            'waiting_permission',
+            'delivered',
+            'retryable_failed'
+          )
+        ),
+      failure_reason TEXT,
+      started_at INTEGER NOT NULL CHECK (started_at >= 0),
+      completed_at INTEGER,
+      PRIMARY KEY(graph_id, wake_id, attempt_id),
+      FOREIGN KEY(graph_id, wake_id)
+        REFERENCES agent_graph_supervisor_wakes_v12(graph_id, wake_id)
+        ON DELETE CASCADE
+    );
+
+    INSERT INTO agent_graph_supervisor_wakes_v12
+    SELECT * FROM agent_graph_supervisor_wakes;
+
+    INSERT INTO agent_graph_supervisor_wake_attempts_v12
+    SELECT * FROM agent_graph_supervisor_wake_attempts;
+
+    DROP TABLE agent_graph_supervisor_wake_attempts;
+    DROP TABLE agent_graph_supervisor_wakes;
+
+    ALTER TABLE agent_graph_supervisor_wakes_v12
+      RENAME TO agent_graph_supervisor_wakes;
+    ALTER TABLE agent_graph_supervisor_wake_attempts_v12
+      RENAME TO agent_graph_supervisor_wake_attempts;
 
     CREATE INDEX agent_graph_supervisor_wakes_by_status
       ON agent_graph_supervisor_wakes(status, updated_at, graph_id, wake_id);

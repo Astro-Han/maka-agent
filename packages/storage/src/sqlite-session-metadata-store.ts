@@ -697,7 +697,11 @@ export class SqliteSessionMetadataStore {
     assertAgentGraphSupervisorWakeAttempt(request);
     return this.transaction(() => {
       const wake = this.requireAgentGraphSupervisorWakeSync(request.graphId, request.wakeId);
-      if (wake.status === 'delivered' || wake.status === 'running') {
+      if (
+        wake.status === 'delivered' ||
+        wake.status === 'running' ||
+        wake.status === 'waiting_permission'
+      ) {
         return { wake, acquired: false };
       }
       const now = this.now();
@@ -757,38 +761,45 @@ export class SqliteSessionMetadataStore {
         request.wakeId,
         request.attemptId,
       );
-      if (
-        wake.currentAttemptId !== request.attemptId ||
-        attempt.status !== 'running' ||
-        wake.status !== 'running'
-      ) {
+      if (wake.currentAttemptId !== request.attemptId || attempt.status !== wake.status) {
         if (wake.status === request.status && attempt.status === request.status) return wake;
         throw new SessionMetadataConflictError(
           'Agent graph supervisor wake attempt is no longer current',
         );
       }
+      if (attempt.status !== 'running' && attempt.status !== 'waiting_permission') {
+        if (wake.status === request.status && attempt.status === request.status) return wake;
+        throw new SessionMetadataConflictError(
+          'Agent graph supervisor wake attempt is already terminal',
+        );
+      }
+      if (attempt.status === 'waiting_permission' && request.status === 'waiting_permission') {
+        return wake;
+      }
       const now = this.now();
       const failureReason =
         request.status === 'retryable_failed' ? request.failureReason : undefined;
+      const completedAt = request.status === 'waiting_permission' ? null : now;
       this.db
         .prepare(`
           UPDATE agent_graph_supervisor_wake_attempts
           SET status = ?, failure_reason = ?, completed_at = ?
-          WHERE graph_id = ? AND wake_id = ? AND attempt_id = ? AND status = 'running'
+          WHERE graph_id = ? AND wake_id = ? AND attempt_id = ? AND status = ?
         `)
         .run(
           request.status,
           failureReason ?? null,
-          now,
+          completedAt,
           request.graphId,
           request.wakeId,
           request.attemptId,
+          attempt.status,
         );
       this.db
         .prepare(`
           UPDATE agent_graph_supervisor_wakes
           SET status = ?, failure_reason = ?, updated_at = ?
-          WHERE graph_id = ? AND wake_id = ? AND current_attempt_id = ? AND status = 'running'
+          WHERE graph_id = ? AND wake_id = ? AND current_attempt_id = ? AND status = ?
         `)
         .run(
           request.status,
@@ -797,6 +808,7 @@ export class SqliteSessionMetadataStore {
           request.graphId,
           request.wakeId,
           request.attemptId,
+          wake.status,
         );
       return this.requireAgentGraphSupervisorWakeSync(request.graphId, request.wakeId);
     });
@@ -863,26 +875,42 @@ export class SqliteSessionMetadataStore {
     return rows.map(decodeAgentGraphSupervisorWakeRow);
   }
 
+  async listUnsettledAgentGraphSupervisorWakes(): Promise<AgentGraphSupervisorWakeRecord[]> {
+    this.assertOpen();
+    const rows = this.db
+      .prepare(`
+        SELECT
+          schema_version AS schemaVersion,
+          graph_id AS graphId,
+          wake_id AS wakeId,
+          snapshot_version AS snapshotVersion,
+          root_session_id AS rootSessionId,
+          status,
+          attempt_count AS attemptCount,
+          current_attempt_id AS currentAttemptId,
+          current_turn_id AS currentTurnId,
+          failure_reason AS failureReason,
+          created_at AS createdAt,
+          updated_at AS updatedAt
+        FROM agent_graph_supervisor_wakes
+        WHERE status IN ('running', 'waiting_permission')
+        ORDER BY updated_at ASC, graph_id ASC, wake_id ASC
+      `)
+      .all() as unknown as AgentGraphSupervisorWakeRow[];
+    return rows.map(decodeAgentGraphSupervisorWakeRow);
+  }
+
   async recoverAgentGraphSupervisorWakes(): Promise<number> {
     this.assertOpen();
     return this.transaction(() => {
       const now = this.now();
-      this.db
-        .prepare(`
-          UPDATE agent_graph_supervisor_wake_attempts
-          SET status = 'retryable_failed',
-              failure_reason = 'host_restart',
-              completed_at = ?
-          WHERE status = 'running'
-        `)
-        .run(now);
       const recovered = this.db
         .prepare(`
           UPDATE agent_graph_supervisor_wakes
           SET status = 'retryable_failed',
               failure_reason = 'host_restart',
               updated_at = ?
-          WHERE status IN ('pending', 'running')
+          WHERE status = 'pending'
         `)
         .run(now).changes;
       return Number(recovered);
@@ -2097,7 +2125,9 @@ function decodeAgentGraphSupervisorWakeRow(
 ): AgentGraphSupervisorWakeRecord {
   if (
     row.schemaVersion !== AGENT_GRAPH_SUPERVISOR_WAKE_SCHEMA_VERSION ||
-    !['pending', 'running', 'delivered', 'retryable_failed'].includes(row.status) ||
+    !['pending', 'running', 'waiting_permission', 'delivered', 'retryable_failed'].includes(
+      row.status,
+    ) ||
     !Number.isSafeInteger(row.attemptCount) ||
     row.attemptCount < 0 ||
     !Number.isSafeInteger(row.createdAt) ||
@@ -2131,7 +2161,7 @@ function decodeAgentGraphSupervisorWakeAttemptRow(
   row: AgentGraphSupervisorWakeAttemptRow,
 ): AgentGraphSupervisorWakeAttemptRecord {
   if (
-    !['running', 'delivered', 'retryable_failed'].includes(row.status) ||
+    !['running', 'waiting_permission', 'delivered', 'retryable_failed'].includes(row.status) ||
     !Number.isSafeInteger(row.startedAt) ||
     row.startedAt < 0 ||
     (row.completedAt !== null && (!Number.isSafeInteger(row.completedAt) || row.completedAt < 0))
@@ -2234,7 +2264,11 @@ function assertAgentGraphSupervisorWakeCompletion(
   assertGraphLookupIdentity(request.graphId, 'graph id');
   assertGraphLookupIdentity(request.wakeId, 'supervisor wake id');
   assertGraphLookupIdentity(request.attemptId, 'supervisor wake attempt id');
-  if (request.status !== 'delivered' && request.status !== 'retryable_failed') {
+  if (
+    request.status !== 'waiting_permission' &&
+    request.status !== 'delivered' &&
+    request.status !== 'retryable_failed'
+  ) {
     throw new Error('Invalid agent graph supervisor wake completion status');
   }
   if (

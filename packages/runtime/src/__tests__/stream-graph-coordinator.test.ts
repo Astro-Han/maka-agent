@@ -100,6 +100,13 @@ describe('host-managed agent graph coordinator', () => {
           }
           return { kind: 'completed', turnId: input.turnId };
         },
+        inspectAttempt: async (sessionId, attemptId, turnId) => {
+          const run = (await runStore.listSessionRuns(sessionId)).find(
+            (candidate) =>
+              candidate.agentGraphWakeAttemptId === attemptId && candidate.turnId === turnId,
+          );
+          return run?.status ?? 'missing';
+        },
         newId: randomUUID,
         onError: (_rootSessionId, error) => {
           supervisorWakeErrors.push(error);

@@ -3,6 +3,7 @@ export const AGENT_GRAPH_SUPERVISOR_WAKE_SCHEMA_VERSION = 1 as const;
 export type AgentGraphSupervisorWakeStatus =
   | 'pending'
   | 'running'
+  | 'waiting_permission'
   | 'delivered'
   | 'retryable_failed';
 
@@ -26,7 +27,7 @@ export interface AgentGraphSupervisorWakeAttemptRecord {
   wakeId: string;
   attemptId: string;
   turnId: string;
-  status: 'running' | 'delivered' | 'retryable_failed';
+  status: 'running' | 'waiting_permission' | 'delivered' | 'retryable_failed';
   failureReason?: string;
   startedAt: number;
   completedAt?: number;
@@ -51,7 +52,7 @@ export interface CompleteAgentGraphSupervisorWakeAttemptRequest {
   graphId: string;
   wakeId: string;
   attemptId: string;
-  status: 'delivered' | 'retryable_failed';
+  status: 'waiting_permission' | 'delivered' | 'retryable_failed';
   failureReason?: string;
 }
 
@@ -77,6 +78,7 @@ export interface AgentGraphSupervisorWakeStore {
     graphId: string,
     wakeId: string,
   ): Promise<AgentGraphSupervisorWakeAttemptRecord[]>;
+  listUnsettledAgentGraphSupervisorWakes(): Promise<AgentGraphSupervisorWakeRecord[]>;
   listRetryableAgentGraphSupervisorWakes(): Promise<AgentGraphSupervisorWakeRecord[]>;
   recoverAgentGraphSupervisorWakes(): Promise<number>;
 }

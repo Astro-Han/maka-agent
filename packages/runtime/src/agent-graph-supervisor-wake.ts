@@ -1,5 +1,6 @@
 import {
   AGENT_GRAPH_SUPERVISOR_WAKE_SCHEMA_VERSION,
+  type AgentRunHeader,
   type AgentGraphSupervisorWakeRecord,
   type AgentGraphSupervisorWakeStore,
   type UserMessageInput,
@@ -22,7 +23,13 @@ export interface AgentGraphSupervisorWakeInput {
     sessionId: string,
     input: UserMessageInput,
     activity: SessionActivityLease,
+    abortSignal: AbortSignal,
   ): Promise<GoalTurnOutcome>;
+  inspectAttempt(
+    rootSessionId: string,
+    attemptId: string,
+    turnId: string,
+  ): Promise<AgentRunHeader['status'] | 'missing'>;
   newId(): string;
   maxDeliveryAttempts?: number;
   onError?(rootSessionId: string, error: unknown): void | Promise<void>;
@@ -64,10 +71,14 @@ export class AgentGraphSupervisorWakeCoordinator {
     void task.finally(() => this.#tasks.delete(task));
   }
 
-  /** Makes crash-interrupted attempts eligible and actively resumes them. */
+  /** Converges persisted wakes from AgentRun facts and resumes only safe retries. */
   async recover(): Promise<number> {
     if (this.#closed) return 0;
-    const recovered = await this.#input.wakeStore.recoverAgentGraphSupervisorWakes();
+    let recovered = await this.#input.wakeStore.recoverAgentGraphSupervisorWakes();
+    for (const wake of await this.#input.wakeStore.listUnsettledAgentGraphSupervisorWakes()) {
+      if (this.#closed) return recovered;
+      recovered += await this.#recoverUnsettledWake(wake);
+    }
     if (this.#closed) return recovered;
     for (const wake of await this.#input.wakeStore.listRetryableAgentGraphSupervisorWakes()) {
       this.#scheduleRecoveredWake(wake);
@@ -180,6 +191,7 @@ export class AgentGraphSupervisorWakeCoordinator {
               },
             },
             activity,
+            this.#abortController.signal,
           );
           if (outcome.kind === 'completed') {
             await this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
@@ -187,6 +199,15 @@ export class AgentGraphSupervisorWakeCoordinator {
               wakeId: wake.wakeId,
               attemptId,
               status: 'delivered',
+            });
+            return;
+          }
+          if (outcome.kind === 'suspended') {
+            await this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
+              graphId: wake.graphId,
+              wakeId: wake.wakeId,
+              attemptId,
+              status: 'waiting_permission',
             });
             return;
           }
@@ -221,6 +242,45 @@ export class AgentGraphSupervisorWakeCoordinator {
       status: 'retryable_failed',
       failureReason: failureReason.slice(0, 4_000) || 'unknown failure',
     });
+  }
+
+  async #recoverUnsettledWake(wake: AgentGraphSupervisorWakeRecord): Promise<number> {
+    const attemptId = wake.currentAttemptId;
+    const turnId = wake.currentTurnId;
+    if (!attemptId || !turnId) {
+      throw new Error(
+        `Unsettled Agent graph supervisor wake ${wake.graphId}/${wake.wakeId} has no current attempt`,
+      );
+    }
+    const runStatus = await this.#input.inspectAttempt(wake.rootSessionId, attemptId, turnId);
+    if (runStatus === 'completed') {
+      await this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
+        graphId: wake.graphId,
+        wakeId: wake.wakeId,
+        attemptId,
+        status: 'delivered',
+      });
+      return 1;
+    }
+    if (runStatus === 'waiting_permission') {
+      if (wake.status === 'waiting_permission') return 0;
+      await this.#input.wakeStore.completeAgentGraphSupervisorWakeAttempt({
+        graphId: wake.graphId,
+        wakeId: wake.wakeId,
+        attemptId,
+        status: 'waiting_permission',
+      });
+      return 1;
+    }
+    await this.#markRetryable(
+      wake.graphId,
+      wake.wakeId,
+      attemptId,
+      runStatus === 'failed' || runStatus === 'cancelled'
+        ? `agent_run_${runStatus}`
+        : `host_restart:${runStatus}`,
+    );
+    return 1;
   }
 }
 

@@ -832,16 +832,41 @@ agentGraphSupervisorWakeCoordinator = new AgentGraphSupervisorWakeCoordinator({
   activityRegistry: sessionActivities,
   wakeStore: agentGraphControlStore,
   readSnapshot: (rootSessionId) => agentGraphCoordinator.getSnapshot(rootSessionId),
-  startTurn: async (sessionId, input, activity) => {
-    await ensureSessionCanSend(sessionId);
-    const iterator = runtime.sendMessage(sessionId, input);
-    return (
-      await streamEvents(sessionId, iterator, {
-        turnId: input.turnId,
-        goalBoundary: 'none',
-        activity,
-      })
-    ).outcome;
+  startTurn: async (sessionId, input, activity, abortSignal) => {
+    let stopPromise: Promise<void> | undefined;
+    const stop = () => {
+      stopPromise ??= runtime.stopSession(sessionId, { source: 'graph_supervisor' });
+    };
+    abortSignal.addEventListener('abort', stop, { once: true });
+    if (abortSignal.aborted) stop();
+    try {
+      await ensureSessionCanSend(sessionId);
+      if (abortSignal.aborted) {
+        return { kind: 'aborted', turnId: input.turnId };
+      }
+      const iterator = runtime.sendMessage(sessionId, input);
+      return (
+        await streamEvents(sessionId, iterator, {
+          turnId: input.turnId,
+          goalBoundary: 'none',
+          activity,
+        })
+      ).outcome;
+    } finally {
+      abortSignal.removeEventListener('abort', stop);
+      await stopPromise;
+    }
+  },
+  inspectAttempt: async (rootSessionId, attemptId, turnId) => {
+    const runs = (await runStore.listSessionRuns(rootSessionId)).filter(
+      (run) => run.agentGraphWakeAttemptId === attemptId && run.turnId === turnId,
+    );
+    if (runs.length > 1) {
+      throw new Error(
+        `Agent graph supervisor wake attempt ${attemptId} has multiple AgentRuns`,
+      );
+    }
+    return runs[0]?.status ?? 'missing';
   },
   newId: randomUUID,
   onError: (rootSessionId) => {

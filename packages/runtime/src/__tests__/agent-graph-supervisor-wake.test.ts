@@ -24,6 +24,7 @@ describe('Agent Graph supervisor wake delivery', () => {
         }
         return { kind: 'completed', turnId: input.turnId };
       },
+      inspectAttempt: async () => 'missing',
       newId: sequentialIds(),
     });
     try {
@@ -45,7 +46,7 @@ describe('Agent Graph supervisor wake delivery', () => {
     }
   });
 
-  test('retries a suspended outcome instead of treating its persisted prompt as delivery', async () => {
+  test('parks a suspended outcome without redelivering its persisted prompt', async () => {
     const store = createSqliteSessionMetadataStore(':memory:');
     let attempt = 0;
     const coordinator = new AgentGraphSupervisorWakeCoordinator({
@@ -54,10 +55,9 @@ describe('Agent Graph supervisor wake delivery', () => {
       readSnapshot: async () => snapshot(),
       startTurn: async (_sessionId, input): Promise<GoalTurnOutcome> => {
         attempt += 1;
-        return attempt === 1
-          ? { kind: 'suspended', turnId: input.turnId, reason: 'permission handoff' }
-          : { kind: 'completed', turnId: input.turnId };
+        return { kind: 'suspended', turnId: input.turnId, reason: 'permission handoff' };
       },
+      inspectAttempt: async () => 'waiting_permission',
       newId: sequentialIds(),
     });
     try {
@@ -65,8 +65,13 @@ describe('Agent Graph supervisor wake delivery', () => {
       await coordinator.waitForIdle();
       assert.equal(
         (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.attemptCount,
-        2,
+        1,
       );
+      assert.equal(
+        (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
+        'waiting_permission',
+      );
+      assert.equal(attempt, 1);
     } finally {
       await coordinator.close();
       store.close();
@@ -97,6 +102,7 @@ describe('Agent Graph supervisor wake delivery', () => {
         delivered += 1;
         return { kind: 'completed', turnId: input.turnId };
       },
+      inspectAttempt: async () => 'failed',
       newId: sequentialIds(),
     });
     try {
@@ -106,6 +112,64 @@ describe('Agent Graph supervisor wake delivery', () => {
       assert.equal(
         (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
         'delivered',
+      );
+    } finally {
+      await coordinator.close();
+      store.close();
+    }
+  });
+
+  test('converges a completed crash-window AgentRun without duplicate delivery', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    await createRunningAttempt(store);
+    let delivered = 0;
+    const coordinator = new AgentGraphSupervisorWakeCoordinator({
+      activityRegistry: new SessionActivityRegistry(),
+      wakeStore: store,
+      readSnapshot: async () => snapshot(),
+      startTurn: async (_sessionId, input) => {
+        delivered += 1;
+        return { kind: 'completed', turnId: input.turnId };
+      },
+      inspectAttempt: async () => 'completed',
+      newId: sequentialIds(),
+    });
+    try {
+      assert.equal(await coordinator.recover(), 1);
+      await coordinator.waitForIdle();
+      assert.equal(delivered, 0);
+      assert.equal(
+        (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
+        'delivered',
+      );
+    } finally {
+      await coordinator.close();
+      store.close();
+    }
+  });
+
+  test('keeps a recovered waiting-permission AgentRun parked', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    await createRunningAttempt(store);
+    let delivered = 0;
+    const coordinator = new AgentGraphSupervisorWakeCoordinator({
+      activityRegistry: new SessionActivityRegistry(),
+      wakeStore: store,
+      readSnapshot: async () => snapshot(),
+      startTurn: async (_sessionId, input) => {
+        delivered += 1;
+        return { kind: 'completed', turnId: input.turnId };
+      },
+      inspectAttempt: async () => 'waiting_permission',
+      newId: sequentialIds(),
+    });
+    try {
+      assert.equal(await coordinator.recover(), 1);
+      await coordinator.waitForIdle();
+      assert.equal(delivered, 0);
+      assert.equal(
+        (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
+        'waiting_permission',
       );
     } finally {
       await coordinator.close();
@@ -126,6 +190,7 @@ describe('Agent Graph supervisor wake delivery', () => {
         turns += 1;
         return { kind: 'completed', turnId: input.turnId };
       },
+      inspectAttempt: async () => 'missing',
       newId: sequentialIds(),
     });
     try {
@@ -141,7 +206,65 @@ describe('Agent Graph supervisor wake delivery', () => {
       store.close();
     }
   });
+
+  test('close aborts an in-flight wake turn and leaves its attempt retryable', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    const started = deferred();
+    const coordinator = new AgentGraphSupervisorWakeCoordinator({
+      activityRegistry: new SessionActivityRegistry(),
+      wakeStore: store,
+      readSnapshot: async () => snapshot(),
+      startTurn: async (_sessionId, input, _activity, abortSignal) => {
+        started.resolve();
+        await new Promise<void>((resolve) => {
+          if (abortSignal.aborted) resolve();
+          else abortSignal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return { kind: 'aborted', turnId: input.turnId };
+      },
+      inspectAttempt: async () => 'missing',
+      newId: sequentialIds(),
+    });
+    try {
+      coordinator.notify('root-session', reconciliation());
+      await started.promise;
+      await coordinator.close();
+      assert.equal(
+        (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.status,
+        'retryable_failed',
+      );
+    } finally {
+      await coordinator.close();
+      store.close();
+    }
+  });
 });
+
+async function createRunningAttempt(
+  store: ReturnType<typeof createSqliteSessionMetadataStore>,
+): Promise<void> {
+  await store.claimAgentGraphSupervisorWake({
+    schemaVersion: 1,
+    graphId: 'graph-1',
+    wakeId: 'graph-1:snapshot-1',
+    snapshotVersion: 'snapshot-1',
+    rootSessionId: 'root-session',
+  });
+  await store.beginAgentGraphSupervisorWakeAttempt({
+    graphId: 'graph-1',
+    wakeId: 'graph-1:snapshot-1',
+    attemptId: 'crashed-attempt',
+    turnId: 'crashed-turn',
+  });
+}
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 function snapshot(): AgentGraphClientSnapshot {
   return {
