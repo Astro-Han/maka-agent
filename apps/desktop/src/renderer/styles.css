@@ -24,6 +24,7 @@
 @import "./styles/chat-header.css";
 @import "./styles/task-ledger.css";
 @import "./styles/plan-mode.css";
+@import "./styles/agent-graph.css";
 @import "./styles/error.css";
 @import "./styles/toast.css";
 @import "./styles/help.css";

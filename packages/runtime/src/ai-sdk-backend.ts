@@ -166,6 +166,7 @@ import {
 } from './provider-request-telemetry.js';
 import { ToolAvailabilityRuntime, type ToolAvailabilityConfig } from './tool-availability.js';
 import { renderSwarmModePrompt } from './swarm-mode.js';
+import { renderGraphModePrompt } from './graph-mode.js';
 import {
   applyRuntimeEventContextBudget,
   buildContextBudgetDiagnosticShell,
@@ -859,9 +860,15 @@ export class AiSdkBackend implements AgentBackend {
     // the execute-boundary gating, and the diagnostics. Seed prior-turn group
     // activations from the durable ledger (the current turn is excluded — it has
     // not committed yet) so a group loaded earlier stays advertised.
+    const requiredOrchestrationTools =
+      this.currentOrchestration.mode === 'swarm'
+        ? new Set(['agent_swarm'])
+        : this.currentOrchestration.mode === 'graph'
+          ? new Set(['view_agent_graph', 'update_agent_graph'])
+          : new Set<string>();
     const plan = this.toolAvailabilityRuntime.prepare(
       (input.runtimeContext ?? []).filter((event) => event.turnId !== turnId),
-      this.currentOrchestration.mode === 'swarm' ? new Set(['agent_swarm']) : new Set(),
+      requiredOrchestrationTools,
     );
     const providerTools = plan.providerTools;
     let activeToolResultPruneDiagnosticPatch: ActiveToolResultPruneDiagnosticPatch = {};
@@ -940,6 +947,7 @@ export class AiSdkBackend implements AgentBackend {
         const systemPrompt = joinPromptFragments([
           await this.resolveSystemPrompt(),
           this.currentOrchestration?.mode === 'swarm' ? renderSwarmModePrompt() : undefined,
+          this.currentOrchestration?.mode === 'graph' ? renderGraphModePrompt() : undefined,
         ]);
         const turnTailPrompt = input.continuation
           ? undefined

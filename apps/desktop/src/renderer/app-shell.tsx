@@ -24,6 +24,7 @@ import {
   collapseSessionRevisions,
   filterLinkedSessionTree,
   hasSettledInitialOnboarding,
+  parseGraphCommand,
   parseSwarmCommand,
   projectRevisionLinkedSessionTree,
   resolveUiLocale,
@@ -49,6 +50,7 @@ import {
 import { useKeyboardHelp } from './keyboard-help';
 import { useCommandPalette } from './command-palette';
 import { ChatMessageSurface } from './chat-message-surface';
+import { AgentGraphPanel } from './agent-graph-panel';
 import { ChatComposerRegion } from './chat-composer-region';
 import { ChatWorkbar } from './chat-workbar';
 import {
@@ -240,6 +242,7 @@ function AppShellContent({
   const [newChatQuickChatMode, setNewChatQuickChatMode] = useState<QuickChatMode | undefined>();
   const [pendingCollaborationModeBySession, setPendingCollaborationModeBySession] = useState<Record<string, boolean>>({});
   const [newChatSwarmModeActive, setNewChatSwarmModeActive] = useState(false);
+  const [newChatGraphModeActive, setNewChatGraphModeActive] = useState(false);
   const [pendingOrchestrationModeBySession, setPendingOrchestrationModeBySession] = useState<Record<string, boolean>>({});
   // P3: session ids with a live embedded-browser view. The right-side
   // BrowserPanel mounts only for these, so ordinary chats reserve no space.
@@ -667,6 +670,7 @@ function AppShellContent({
     const sessionId = activeIdRef.current;
     if (!sessionId) {
       setNewChatSwarmModeActive(active);
+      if (active) setNewChatGraphModeActive(false);
       return true;
     }
     if (!addPendingSessionAction(
@@ -688,6 +692,44 @@ function AppShellContent({
         toastApi.error(
           shellCopy.swarmModeFailedTitle,
           localizedShellErrorMessage(error, shellCopy.swarmModeFallback, uiLocale),
+        );
+      }
+      return false;
+    } finally {
+      clearPendingSessionAction(
+        sessionId,
+        orchestrationModeChangeRegistry.keysRef,
+        setPendingOrchestrationModeBySession,
+      );
+    }
+  }
+
+  async function setGraphMode(active: boolean): Promise<boolean> {
+    const sessionId = activeIdRef.current;
+    if (!sessionId) {
+      setNewChatGraphModeActive(active);
+      if (active) setNewChatSwarmModeActive(false);
+      return true;
+    }
+    if (!addPendingSessionAction(
+      sessionId,
+      orchestrationModeChangeRegistry.keysRef,
+      setPendingOrchestrationModeBySession,
+    )) return false;
+
+    try {
+      const next = await window.maka.sessions.setOrchestrationMode(
+        sessionId,
+        active ? 'graph' : 'default',
+      );
+      setSessions((current) => current.map((session) => session.id === next.id ? next : session));
+      await refreshSessions();
+      return true;
+    } catch (error) {
+      if (activeIdRef.current === sessionId) {
+        toastApi.error(
+          shellCopy.graphModeFailedTitle,
+          localizedShellErrorMessage(error, shellCopy.graphModeFallback, uiLocale),
         );
       }
       return false;
@@ -1121,7 +1163,11 @@ function AppShellContent({
     validPendingNewChatModel,
     pendingNewChatThinkingLevel: newChatThinkingLevel ?? null,
     newChatCollaborationMode: newChatPlanModeActive ? 'plan' : 'agent',
-    newChatOrchestrationMode: newChatSwarmModeActive ? 'swarm' : 'default',
+    newChatOrchestrationMode: newChatGraphModeActive
+      ? 'graph'
+      : newChatSwarmModeActive
+        ? 'swarm'
+        : 'default',
   });
 
   const { handleTurnFooterAction } = useStableActions(createAppShellTurnActions, {
@@ -1167,6 +1213,7 @@ function AppShellContent({
       revision && activeIdRef.current === revision.draftSessionId,
     );
     const swarmCommand = parseSwarmCommand(text);
+    const graphCommand = parseGraphCommand(text);
     if (
       revisionSend &&
       revision &&
@@ -1184,7 +1231,7 @@ function AppShellContent({
         toastApi.info(actionCopy.revisionUnavailableTitle, actionCopy.revisionAttachmentsUnsupported);
         return false;
       }
-      if ((skillIds.length === 0 && text.trim() === '/compact') || swarmCommand) {
+      if ((skillIds.length === 0 && text.trim() === '/compact') || swarmCommand || graphCommand) {
         toastApi.info(actionCopy.revisionUnavailableTitle, actionCopy.revisionCommandUnsupported);
         return false;
       }
@@ -1237,6 +1284,40 @@ function AppShellContent({
       const ok = await send(swarmCommand.task, pending, {
         ...(skillIds.length > 0 ? { skillIds } : {}),
         turnOrchestration: { mode: 'swarm', source: 'slash_command' },
+        ...(quotes ? { quotes } : {}),
+      });
+      if (ok !== false && pending) clearSubmittedAttachments(pending);
+      if (ok !== false && quotes) clearQuotes();
+      return ok;
+    }
+    if (graphCommand) {
+      if (graphCommand.kind === 'status') {
+        const active = activeIdRef.current
+          ? (activeSessionForView?.orchestrationMode ?? 'default') === 'graph'
+          : newChatGraphModeActive;
+        toastApi.info(
+          active ? shellCopy.graphModeEnabledTitle : shellCopy.graphModeDisabledTitle,
+          shellCopy.graphModeStatusDescription,
+        );
+        return true;
+      }
+      if (graphCommand.kind === 'set_mode') {
+        const changed = await setGraphMode(graphCommand.mode === 'graph');
+        if (changed) {
+          toastApi.info(
+            graphCommand.mode === 'graph'
+              ? shellCopy.graphModeEnabledTitle
+              : shellCopy.graphModeDisabledTitle,
+            shellCopy.graphModeStatusDescription,
+          );
+        }
+        return changed;
+      }
+      const pending = pendingAttachments.length > 0 ? pendingAttachments : undefined;
+      const quotes = pendingQuotes.length > 0 ? pendingQuotes : undefined;
+      const ok = await send(graphCommand.task, pending, {
+        ...(skillIds.length > 0 ? { skillIds } : {}),
+        turnOrchestration: { mode: 'graph', source: 'slash_command' },
         ...(quotes ? { quotes } : {}),
       });
       if (ok !== false && pending) clearSubmittedAttachments(pending);
@@ -1880,6 +1961,14 @@ function AppShellContent({
                 conversationItems={planConversationItems}
               />
               )}
+              {navSelection.section === 'sessions' && activeId ? (
+                <AgentGraphPanel
+                  rootSessionId={activeId}
+                  enabled={(activeSessionForView?.orchestrationMode ?? 'default') === 'graph'}
+                  locale={uiLocale}
+                  onOpenSession={openSessionInChat}
+                />
+              ) : null}
               {navSelection.section === 'sessions' && (
                 <PlanExecutionPanel planMode={planMode} />
               )}
@@ -2044,6 +2133,24 @@ function AppShellContent({
                 }
                 onSwarmModeChange={(active) => {
                   void setSwarmMode(active);
+                }}
+                graphModeActive={activeId
+                  ? (activeSessionForView?.orchestrationMode ?? 'default') === 'graph'
+                  : newChatGraphModeActive}
+                graphModePending={activeId ? pendingOrchestrationModeBySession[activeId] === true : false}
+                graphModeDisabledReason={
+                  activeId && pendingOrchestrationModeBySession[activeId] === true
+                    ? shellCopy.graphModeChanging
+                    : activeStreamingLive
+                        ? shellCopy.graphModeStreaming
+                      : activeId && activeSessionForView?.status === 'running'
+                          ? shellCopy.graphModeRunning
+                        : activeId && activeSessionForView?.status === 'waiting_for_user'
+                            ? shellCopy.graphModeWaiting
+                          : undefined
+                }
+                onGraphModeChange={(active) => {
+                  void setGraphMode(active);
                 }}
               />
             </div>

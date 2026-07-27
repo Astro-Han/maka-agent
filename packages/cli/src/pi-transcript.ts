@@ -177,7 +177,7 @@ export interface MakaPiTranscriptMetadata {
   model: string;
   connectionSlug: string;
   permissionMode: string;
-  orchestrationMode?: 'default' | 'swarm';
+  orchestrationMode?: 'default' | 'swarm' | 'graph';
   thinkingLevel?: ThinkingLevel;
   thinkingLevels?: readonly ThinkingLevel[];
   sessionId?: string | null;
@@ -1278,6 +1278,8 @@ export function renderMakaPiStatusLine(metadata: MakaPiTranscriptMetadata, width
   }
   if (metadata.orchestrationMode === 'swarm') {
     parts.push(ansi.accent('swarm'));
+  } else if (metadata.orchestrationMode === 'graph') {
+    parts.push(ansi.accent('graph'));
   }
   const usage = metadata.usage;
   if (usage) {

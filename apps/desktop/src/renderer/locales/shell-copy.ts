@@ -433,6 +433,15 @@ type ShellCopy = {
     swarmModeEnabledTitle: string;
     swarmModeDisabledTitle: string;
     swarmModeStatusDescription: string;
+    graphModeChanging: string;
+    graphModeStreaming: string;
+    graphModeRunning: string;
+    graphModeWaiting: string;
+    graphModeFailedTitle: string;
+    graphModeFallback: string;
+    graphModeEnabledTitle: string;
+    graphModeDisabledTitle: string;
+    graphModeStatusDescription: string;
     resizeWorkbar: string;
   };
 };
@@ -1105,6 +1114,15 @@ const SHELL_COPY_BY_LOCALE = {
       swarmModeEnabledTitle: 'Swarm Mode 已开启',
       swarmModeDisabledTitle: 'Swarm Mode 未开启',
       swarmModeStatusDescription: '使用 /swarm on、/swarm off，或 /swarm <任务> 单次运行。',
+      graphModeChanging: 'Graph Mode 正在切换，完成后再继续操作。',
+      graphModeStreaming: '当前对话正在流式输出，等结束后再切换 Graph Mode。',
+      graphModeRunning: '当前对话正在运行，等结束后再切换 Graph Mode。',
+      graphModeWaiting: '当前有工具调用正在等待确认，处理后再切换 Graph Mode。',
+      graphModeFailedTitle: '切换 Graph Mode 失败',
+      graphModeFallback: 'Graph Mode 暂时无法切换，请稍后重试。',
+      graphModeEnabledTitle: 'Graph Mode 已开启',
+      graphModeDisabledTitle: 'Graph Mode 未开启',
+      graphModeStatusDescription: '使用 /graph on、/graph off，或 /graph <任务> 单次运行。',
       resizeWorkbar: '调整会话工作栏宽度',
     },
   },
@@ -1606,6 +1624,15 @@ const SHELL_COPY_BY_LOCALE = {
       swarmModeEnabledTitle: 'Swarm Mode is on',
       swarmModeDisabledTitle: 'Swarm Mode is off',
       swarmModeStatusDescription: 'Use /swarm on, /swarm off, or /swarm <task> for one turn.',
+      graphModeChanging: 'Graph Mode is changing. Wait for it to finish before continuing.',
+      graphModeStreaming: 'This conversation is streaming. Wait for it to finish before changing Graph Mode.',
+      graphModeRunning: 'This conversation is running. Wait for it to finish before changing Graph Mode.',
+      graphModeWaiting: 'A tool call is waiting for confirmation. Respond before changing Graph Mode.',
+      graphModeFailedTitle: 'Could not change Graph Mode',
+      graphModeFallback: 'Graph Mode could not be changed. Try again later.',
+      graphModeEnabledTitle: 'Graph Mode is on',
+      graphModeDisabledTitle: 'Graph Mode is off',
+      graphModeStatusDescription: 'Use /graph on, /graph off, or /graph <task> for one turn.',
       resizeWorkbar: 'Resize conversation workbar',
     },
   },

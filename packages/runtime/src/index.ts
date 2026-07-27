@@ -196,6 +196,7 @@ export type {
 export { PermissionEngine, createDefaultPermissionEngineDeps } from './permission-engine.js';
 export type { EvaluateResult, EvaluateInput, PermissionEngineDeps } from './permission-engine.js';
 export { renderSwarmModePrompt } from './swarm-mode.js';
+export { renderGraphModePrompt } from './graph-mode.js';
 
 export {
   MAX_ADDITIONAL_PERMISSION_JUSTIFICATION_CHARS,

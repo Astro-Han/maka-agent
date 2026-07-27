@@ -92,6 +92,10 @@ export interface ConversationCopy {
     enableSwarmMode: string;
     disableSwarmMode: string;
     swarmModeOnTitle: string;
+    graphModeLabel: string;
+    enableGraphMode: string;
+    disableGraphMode: string;
+    graphModeOnTitle: string;
     /** Inline hint shown above the composer when no model connection exists yet. */
     noModelHint: string;
     /** Link-button on that hint that opens Settings · 模型. */
@@ -337,6 +341,8 @@ const CONVERSATION_COPY = {
       planModeOnTitle: 'Plan 模式已启用，点击关闭',
       swarmModeLabel: 'Swarm', enableSwarmMode: '开启 Swarm Mode', disableSwarmMode: '退出 Swarm Mode',
       swarmModeOnTitle: 'Swarm 模式已启用，点击关闭',
+      graphModeLabel: 'Graph', enableGraphMode: '开启 Graph Mode', disableGraphMode: '退出 Graph Mode',
+      graphModeOnTitle: 'Graph 模式已启用，点击关闭',
       noModelHint: '还没有可用的模型连接，无法发送。', noModelAction: '前往模型设置', noModelSendTitle: '先添加一个模型连接才能发送。',
     },
     model: {
@@ -474,6 +480,8 @@ const CONVERSATION_COPY = {
       planModeOnTitle: 'Plan mode is on — click to turn off',
       swarmModeLabel: 'Swarm', enableSwarmMode: 'Enable Swarm Mode', disableSwarmMode: 'Disable Swarm Mode',
       swarmModeOnTitle: 'Swarm mode is on — click to turn off',
+      graphModeLabel: 'Graph', enableGraphMode: 'Enable Graph Mode', disableGraphMode: 'Disable Graph Mode',
+      graphModeOnTitle: 'Graph mode is on — click to turn off',
       noModelHint: 'No model connection yet, so sending is unavailable.', noModelAction: 'Go to model settings', noModelSendTitle: 'Add a model connection before sending.',
     },
     model: {

@@ -184,6 +184,29 @@ describe('localized conversation journey', () => {
     );
   });
 
+  it('localizes the active Graph Mode indicator', () => {
+    const zh = render(
+      'zh',
+      <Composer
+        onSend={() => {}}
+        onStop={() => {}}
+        graphModeActive
+        onGraphModeChange={() => {}}
+      />,
+    );
+    const en = render(
+      'en',
+      <Composer
+        onSend={() => {}}
+        onStop={() => {}}
+        graphModeActive
+        onGraphModeChange={() => {}}
+      />,
+    );
+    assert.match(zh, /Graph 模式已启用/);
+    assert.match(en, /Graph mode is on/);
+  });
+
   it('keeps the ＋ menu reachable while streaming (#1444)', () => {
     const markup = render(
       'zh',

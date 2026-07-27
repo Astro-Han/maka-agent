@@ -1,0 +1,49 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { describe, it } from 'node:test';
+import { readRendererShellSources } from './renderer-shell-source-helpers.js';
+
+describe('Desktop Graph Mode host contract', () => {
+  it('uses the shared command parser and trusted one-turn override', async () => {
+    const renderer = await readRendererShellSources(['app-shell.tsx', 'app-shell-chat-actions.ts']);
+    assert.match(renderer, /parseGraphCommand\(text\)/);
+    assert.match(renderer, /send\(graphCommand\.task, pending, \{/);
+    assert.match(renderer, /turnOrchestration: \{ mode: 'graph', source: 'slash_command' \}/);
+  });
+
+  it('persists graph as the exclusive session orchestration mode', async () => {
+    const renderer = await readRendererShellSources(['app-shell.tsx', 'app-shell-chat-actions.ts']);
+    assert.match(renderer, /activeSessionForView\?\.orchestrationMode \?\? 'default'/);
+    assert.match(renderer, /active \? 'graph' : 'default'/);
+    assert.match(renderer, /newChatGraphModeActive[\s\S]*\? 'graph'/);
+    assert.match(renderer, /if \(active\) setNewChatSwarmModeActive\(false\)/);
+    assert.match(renderer, /if \(active\) setNewChatGraphModeActive\(false\)/);
+  });
+
+  it('renders the bounded graph read model and opens linked child Sessions', async () => {
+    const panel = await readFile(
+      fileURLToPath(new URL('../../../src/renderer/agent-graph-panel.tsx', import.meta.url)),
+      'utf8',
+    );
+    const shell = await readRendererShellSources(['app-shell.tsx']);
+    assert.match(panel, /\.getSnapshot\(props\.rootSessionId\)/);
+    assert.match(panel, /window\.maka\.graphs\.subscribe\(props\.rootSessionId, refresh\)/);
+    assert.match(panel, /subscribe\(props\.rootSessionId, refresh\);[\s\S]*refresh\(\)/);
+    assert.match(panel, /snapshot\.scheduleRevision > 0/);
+    assert.match(panel, /window\.maka\.graphs\.stop\(props\.rootSessionId\)/);
+    assert.match(panel, /props\.onOpenSession\(operator\.childSessionId\)/);
+    assert.match(shell, /<AgentGraphPanel/);
+  });
+
+  it('keeps graph panel copy localized', async () => {
+    const panel = await readFile(
+      fileURLToPath(new URL('../../../src/renderer/agent-graph-panel.tsx', import.meta.url)),
+      'utf8',
+    );
+    assert.match(panel, /正在读取 Graph 状态/);
+    assert.match(panel, /Loading graph state/);
+    assert.match(panel, /打开子会话/);
+    assert.match(panel, /Open child session/);
+  });
+});

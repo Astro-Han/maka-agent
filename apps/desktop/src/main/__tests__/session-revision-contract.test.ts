@@ -59,7 +59,7 @@ describe('session revision (edit-and-resend) contract', () => {
     );
     assert.match(
       shell,
-      /if \(\(skillIds\.length === 0 && text\.trim\(\) === '\/compact'\) \|\| swarmCommand\) \{[\s\S]*revisionCommandUnsupported/,
+      /if \(\(skillIds\.length === 0 && text\.trim\(\) === '\/compact'\) \|\| swarmCommand \|\| graphCommand\) \{[\s\S]*revisionCommandUnsupported/,
       'revision drafts must reject local slash commands before preparing a durable version',
     );
     assert.match(
