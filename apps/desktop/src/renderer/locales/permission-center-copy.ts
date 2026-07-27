@@ -70,6 +70,9 @@ export type PermissionCenterCopy = {
   openSettings: string;
   requesting: string;
   request: string;
+  /** macOS drag-to-grant onboarding (accessibility / screen recording). */
+  dragGrant: string;
+  dragGranting: string;
   officeGuidance: readonly [string, string];
 };
 
@@ -113,7 +116,7 @@ const PERMISSION_CENTER_COPY = {
     requiredPermissions: '所需系统权限', requiredPermissionsAria: (label) => `${label}所需系统权限列表`, guidance: '处理建议', guidanceAria: (label) => `${label}处理建议列表`,
     officeAria: 'Office 文档安装辅助', installCopied: '已复制安装命令', installCopiedDetail: '在终端执行后点击刷新重新探测。', copyFailed: '复制失败', copyFailedDetail: '剪贴板不可用或被系统拒绝。',
     copying: '复制中…', copyInstall: '复制 macOS/Linux 安装命令', openDownload: '打开二进制下载页', noAudit: '暂无审计记录', auditAria: (label) => `${label}审计记录列表`,
-    impact: '影响功能', opening: '打开中…', openSettings: '前往系统设置', requesting: '请求中…', request: '请求授权',
+    impact: '影响功能', opening: '打开中…', openSettings: '前往系统设置', requesting: '请求中…', request: '请求授权', dragGrant: '引导授权', dragGranting: '引导中…',
     officeGuidance: ['安装 officecli 后重启 Maka 或刷新能力快照。', '安装后在终端确认 `officecli --version` 可以输出版本号。'],
   },
   en: {
@@ -155,7 +158,7 @@ const PERMISSION_CENTER_COPY = {
     requiredPermissions: 'Required system permissions', requiredPermissionsAria: (label) => `${label} required system permissions`, guidance: 'Suggested actions', guidanceAria: (label) => `${label} suggested actions`,
     officeAria: 'Office document installation help', installCopied: 'Install command copied', installCopiedDetail: 'Run it in a terminal, then refresh to probe again.', copyFailed: 'Copy failed', copyFailedDetail: 'The clipboard is unavailable or access was denied by the system.',
     copying: 'Copying…', copyInstall: 'Copy macOS/Linux install command', openDownload: 'Open binary downloads', noAudit: 'No audit records', auditAria: (label) => `${label} audit records`,
-    impact: 'Affects', opening: 'Opening…', openSettings: 'Open System Settings', requesting: 'Requesting…', request: 'Request permission',
+    impact: 'Affects', opening: 'Opening…', openSettings: 'Open System Settings', requesting: 'Requesting…', request: 'Request permission', dragGrant: 'Guide me', dragGranting: 'Opening…',
     officeGuidance: ['Restart Maka or refresh the capability snapshot after installing officecli.', 'Confirm that `officecli --version` prints a version in your terminal.'],
   },
 } satisfies UiCatalog<PermissionCenterCopy>;

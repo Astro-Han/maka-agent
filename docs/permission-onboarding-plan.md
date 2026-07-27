@@ -1,6 +1,8 @@
 # Drag-to-grant permission onboarding (macOS)
 
-Status: **proposal, not built.** Written 2026-07-27 for maka.
+Status: **Stage 1 built** (`apps/desktop/src/main/permission-overlay/`,
+`apps/desktop/src/overlay/permission-overlay.*`). Stage 2 is still a proposal.
+Written 2026-07-27 for maka.
 
 ## The problem
 
@@ -79,14 +81,25 @@ short-lived onboarding overlay; it should not become a general facility.
 
 ## Staging
 
-**Stage 1 — pure Electron, no native code.** Everything except docking:
-the panel window, the deep link, the drag, the poller, the grant→close
-lifecycle, the copy. The card anchors to
-`screen.getCursorScreenPoint()` — the user just clicked our button, so
-the cursor is a good proxy for where they are looking. This is the whole
-feature minus the polish, and it ships without touching the build.
+**Stage 1 — pure Electron, no native code. DONE.** Everything except
+docking: the panel window, the deep link, the drag, the poller, the
+grant→close lifecycle, the copy. The card anchors to
+`screen.getCursorScreenPoint()`, clamped into that display's work area —
+the user just clicked our button, so the cursor is a good proxy for where
+they are looking, and it lands on the display they are actually using.
 
-**Stage 2 — add the locator binary** as progressive enhancement. When it
+Entry point is 引导授权 / "Guide me" in Settings → 权限与能力, shown only
+for the two drag-to-grant permissions and only where `canOpenSettings`
+is true (main sets it on darwin alone). The plain "open System Settings"
+link stays beside it — the drag is a shortcut, never the only route.
+
+The lifecycle lives in `permission-overlay-controller.ts`, fully injected
+and covered by `permission-overlay-controller.test.ts` with a fake clock:
+no window or timer stacking on re-entry, teardown on grant / dismiss /
+window-gone, and a give-up timeout so an abandoned flow cannot leave an
+immortal always-on-top card (a hole both reference implementations have).
+
+**Stage 2 — add the locator binary** as progressive enhancement. Not built. When it
 returns a frame, the card docks to the Settings window and follows it;
 when it returns `null`, fall back to the Stage 1 anchor. Unlike Alma,
 log the degradation loudly — a silent fallback is indistinguishable

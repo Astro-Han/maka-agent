@@ -6,6 +6,7 @@ import type {
   MakaBridge,
   OnboardingSnapshot,
   PermissionActionResult,
+  PermissionOverlayStartResult,
   RendererIngestInput,
   WorkspaceInstructionsState,
 } from './bridge-contract.js';
@@ -422,6 +423,12 @@ const makaBridge = {
     },
     requestAccess(permId: string): Promise<PermissionActionResult> {
       return ipcRenderer.invoke('permissions:requestAccess', permId);
+    },
+    startDragOnboarding(permId: string): Promise<PermissionOverlayStartResult> {
+      return ipcRenderer.invoke('permissions:startDragOnboarding', permId);
+    },
+    dismissDragOnboarding(): Promise<{ ok: true }> {
+      return ipcRenderer.invoke('permissions:dismissDragOnboarding');
     },
   },
   capabilities: {
