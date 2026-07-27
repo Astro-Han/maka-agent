@@ -412,6 +412,21 @@
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  /* #1524 gave the compact and select buckets their own full-width track
+     splits at `.settingsRow[data-control-width="…"]` — specificity 0,2,0.
+     A container query adds NO specificity to the rules inside it, so those
+     two outrank the plain `.settingsRow` stacking rule above (0,1,0) and
+     those rows kept two columns all the way down. Restate them here at
+     matching specificity so they stack like every other row.
+
+     The `justify-self: start` rules just below are the tell that stacking
+     was always the intent for these buckets: start-aligning a control only
+     makes sense once it sits under its label rather than beside it. */
+  .settingsRow[data-control-width="compact"],
+  .settingsRow[data-control-width="select"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   /* Values and controls sit under their label now; right-alignment against
      the card edge would detach them from it. */
   .settingsRow > span {
