@@ -92,6 +92,7 @@ export interface SessionsIpcDeps {
   invalidateSessionBindings?: (sessionId: string) => void;
   clearSkillHost?: (sessionId: string) => void;
   stopAgentGraph?: (sessionId: string) => Promise<void>;
+  notifyAgentGraphPermissionResponse?: (sessionId: string) => void;
   ensureSessionWorkspaceAvailable: (sessionId: string) => Promise<void>;
   createSession: (input: CreateSessionInput) => ReturnType<SessionManager['createSession']>;
   getReadyConnection: (
@@ -192,6 +193,7 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
     invalidateSessionBindings,
     clearSkillHost,
     stopAgentGraph,
+    notifyAgentGraphPermissionResponse,
     ensureSessionWorkspaceAvailable,
     createSession,
     getReadyConnection,
@@ -326,7 +328,8 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
     if (normalized.decision === 'allow') {
       await ensureSessionWorkspaceAvailable(sessionId);
     }
-    return runtime.respondToPermission(sessionId, normalized);
+    await runtime.respondToPermission(sessionId, normalized);
+    notifyAgentGraphPermissionResponse?.(sessionId);
   });
   ipcMain.handle('sessions:respondToUserQuestion', async (_event, sessionId: string, response) => {
     const normalized = normalizeUserQuestionResponse(response);

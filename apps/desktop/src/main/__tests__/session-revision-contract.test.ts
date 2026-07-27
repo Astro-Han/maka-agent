@@ -59,7 +59,7 @@ describe('session revision (edit-and-resend) contract', () => {
     );
     assert.match(
       shell,
-      /if \(\(skillIds\.length === 0 && text\.trim\(\) === '\/compact'\) \|\| swarmCommand\) \{[\s\S]*revisionCommandUnsupported/,
+      /if \(\(skillIds\.length === 0 && text\.trim\(\) === '\/compact'\) \|\| swarmCommand \|\| graphCommand\) \{[\s\S]*revisionCommandUnsupported/,
       'revision drafts must reject local slash commands before preparing a durable version',
     );
     assert.match(
@@ -92,7 +92,7 @@ describe('session revision (edit-and-resend) contract', () => {
     const turn = await readFile(resolve(REPO_ROOT, 'packages/ui/src/chat-turn.tsx'), 'utf8');
     assert.match(
       turn,
-      /props\.onEditUserMessage && !turn\.user\.automationOrigin/,
+      /props\.onEditUserMessage &&[\s\S]*!turn\.user\.automationOrigin &&[\s\S]*!turn\.user\.agentGraphOrigin/,
     );
     assert.match(
       turn,

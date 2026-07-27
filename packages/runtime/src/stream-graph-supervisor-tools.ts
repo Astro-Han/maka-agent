@@ -204,8 +204,10 @@ export interface AgentGraphToolScheduleView {
 
 export interface AgentGraphToolRuntimeOperatorView {
   operatorId: string;
+  childSessionId: string;
   status: 'not_started' | AgentGraphActivationStatus;
   currentActivationId?: string;
+  currentRunId?: string;
   lastEventTime?: number;
 }
 
@@ -252,9 +254,7 @@ export interface BuildAgentGraphSupervisorToolsInput {
   scheduleStore: AgentGraphScheduleStore;
   observeGraph(): Promise<AgentGraphSupervisorObservation>;
   /** Host ownership check performed before append-only schedule admission. */
-  authorizeScheduleUpdate?(
-    request: AgentGraphScheduleUpdateRequest,
-  ): unknown | Promise<unknown>;
+  authorizeScheduleUpdate?(request: AgentGraphScheduleUpdateRequest): unknown | Promise<unknown>;
   /**
    * Host lifecycle hook invoked after the schedule update is durable.
    *
@@ -575,10 +575,12 @@ function agentGraphToolRuntimeView(
       const state = observation.projection.state.operators[binding.operatorId];
       return {
         operatorId: binding.operatorId,
+        childSessionId: binding.sessionId,
         status: state?.status ?? 'not_started',
         ...(state
           ? {
               currentActivationId: state.currentActivationId,
+              currentRunId: state.activations[state.currentActivationId]?.agentRunId,
               lastEventTime: state.activations[state.currentActivationId]?.lastEventTime,
             }
           : {}),

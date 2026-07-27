@@ -78,6 +78,7 @@ interface BackendOpts {
   toolAvailability?: ToolAvailabilityConfig | null;
   recordLlmCall?: (record: LlmCallRecord) => void;
   durable?: ReturnType<typeof createDurableTurnHarness>;
+  extraTools?: readonly MakaTool[];
 }
 
 function backend(
@@ -122,7 +123,7 @@ function agentBackend(
     modelId: 'mock-model-id',
     permissionEngine: new PermissionEngine({ newId: () => 'perm', now: () => 1 }),
     modelFactory: () => model,
-    tools: buildParentAgentTools(),
+    tools: [...buildParentAgentTools(), ...(opts.extraTools ?? [])],
     ...(opts.durable ? { loadTurnRuntimeEvents: opts.durable.loadTurnRuntimeEvents } : {}),
     ...(resolved ? { toolAvailability: resolved } : {}),
     spawnChildSession: async (input) => {
@@ -380,6 +381,65 @@ describe('AiSdkBackend deferred agent tools', () => {
     assert.match(capturedPrompts[0] ?? '', /preferred default execution strategy/);
     assert.match(capturedPrompts[0] ?? '', /You may continue directly/);
     assert.match(capturedPrompts[0] ?? '', /only tool in its assistant step/);
+  });
+
+  test('Graph Mode injects the supervisor prompt and pins controls plus agent output at step 0', async () => {
+    const capturedTools: string[][] = [];
+    const capturedPrompts: string[] = [];
+    const graphTools: MakaTool[] = [
+      {
+        name: 'view_agent_graph',
+        description: 'View graph',
+        parameters: z.object({}),
+        permissionRequired: false,
+        impl: () => ({ ok: true }),
+      },
+      {
+        name: 'update_agent_graph',
+        description: 'Update graph',
+        parameters: z.object({}),
+        permissionRequired: false,
+        impl: () => ({ ok: true }),
+      },
+    ];
+    const model = new MockLanguageModelV4({
+      doStream: async ({ tools: stepTools, prompt }) => {
+        capturedTools.push((stepTools ?? []).map((tool) => tool.name));
+        capturedPrompts.push(JSON.stringify(prompt));
+        return {
+          stream: convertArrayToReadableStream<LanguageModelV4StreamPart>([
+            { type: 'stream-start', warnings: [] },
+            {
+              type: 'finish',
+              finishReason: { unified: 'stop', raw: 'stop' },
+              usage: ZERO_USAGE,
+            },
+          ]),
+        };
+      },
+    });
+
+    const backend = agentBackend(model, [], {
+      extraTools: graphTools,
+    });
+    await drain(
+      backend.send({
+        turnId: 'turn-graph-mode',
+        text: 'coordinate the graph',
+        context: [],
+        orchestration: {
+          mode: 'graph',
+          source: 'turn_override',
+          agentSwarmAuthorization: 'none',
+        },
+      }),
+    );
+
+    assert.ok(capturedTools[0]?.includes('view_agent_graph'));
+    assert.ok(capturedTools[0]?.includes('update_agent_graph'));
+    assert.ok(capturedTools[0]?.includes(AGENT_OUTPUT_TOOL_NAME));
+    assert.match(capturedPrompts[0] ?? '', /Orchestration Mode: Graph/);
+    assert.match(capturedPrompts[0] ?? '', /supervisor beside the data path/);
   });
 
   test('agent tools are hidden by default and visible after load_tools(agent)', async () => {

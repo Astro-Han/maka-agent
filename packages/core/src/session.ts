@@ -596,9 +596,11 @@ export interface UserMessage {
   attachments?: AttachmentRef[];
   /** Inline quoted excerpts carried into this message; rendered as chips. */
   quotes?: QuoteRef[];
-  /** Non-user trigger source (automation fire). Lets the chat mark turns the
-   *  user did not hand-type. Mirrors TurnOrigin in runtime-inputs. */
-  origin?: { kind: 'automation'; automationId: string };
+  /** Non-user trigger source. Lets the chat mark turns the user did not
+   *  hand-type. Mirrors TurnOrigin in runtime-inputs. */
+  origin?:
+    | { kind: 'automation'; automationId: string }
+    | { kind: 'agent_graph'; graphId: string; wakeId: string; attemptId: string };
 }
 
 /** Prefer the human-facing view of a user message when one was stored. */
@@ -833,8 +835,14 @@ const SYSTEM_NOTE_MESSAGE_SHAPE = defineObjectShape<SystemNoteMessage>()(
 );
 type AssistantThinking = NonNullable<AssistantMessage['thinking']>;
 const ASSISTANT_THINKING_SHAPE = defineObjectShape<AssistantThinking>()(['text'], ['signature']);
-type AutomationOrigin = NonNullable<UserMessage['origin']>;
+type MessageOrigin = NonNullable<UserMessage['origin']>;
+type AutomationOrigin = Extract<MessageOrigin, { kind: 'automation' }>;
+type AgentGraphOrigin = Extract<MessageOrigin, { kind: 'agent_graph' }>;
 const AUTOMATION_ORIGIN_SHAPE = defineObjectShape<AutomationOrigin>()(['kind', 'automationId'], []);
+const AGENT_GRAPH_ORIGIN_SHAPE = defineObjectShape<AgentGraphOrigin>()(
+  ['kind', 'graphId', 'wakeId', 'attemptId'],
+  [],
+);
 
 const SYSTEM_NOTE_KINDS = new Set([
   'session_start',
@@ -871,7 +879,7 @@ function decodeStoredMessage(
         isOptionalString(message.displayText) &&
         (message.attachments === undefined ||
           (Array.isArray(message.attachments) && message.attachments.every(isAttachmentRef))) &&
-        (message.origin === undefined || isAutomationOrigin(message.origin))
+        (message.origin === undefined || isMessageOrigin(message.origin))
       )
         return message as unknown as UserMessage;
       break;
@@ -999,6 +1007,21 @@ function isAutomationOrigin(value: unknown): value is AutomationOrigin {
     value.kind === 'automation' &&
     typeof value.automationId === 'string'
   );
+}
+
+function isAgentGraphOrigin(value: unknown): value is AgentGraphOrigin {
+  return (
+    isRecord(value) &&
+    hasExactShape(value, AGENT_GRAPH_ORIGIN_SHAPE) &&
+    value.kind === 'agent_graph' &&
+    typeof value.graphId === 'string' &&
+    typeof value.wakeId === 'string' &&
+    typeof value.attemptId === 'string'
+  );
+}
+
+function isMessageOrigin(value: unknown): value is MessageOrigin {
+  return isAutomationOrigin(value) || isAgentGraphOrigin(value);
 }
 
 function isOptionalFiniteDuration(value: unknown): boolean {

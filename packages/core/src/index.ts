@@ -11,11 +11,13 @@ export * from './mcp.js';
 export * from './collaboration.js';
 export * from './orchestration.js';
 export * from './swarm-command.js';
+export * from './graph-command.js';
 export * from './plan.js';
 export * from './agent-graph-control.js';
 export * from './agent-graph-schedule.js';
 export * from './agent-graph-topology.js';
 export * from './agent-graph-client-projection.js';
+export * from './agent-graph-supervisor-wake.js';
 export * from './runtime-policy.js';
 
 // events.ts

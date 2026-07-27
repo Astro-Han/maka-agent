@@ -86,11 +86,12 @@ export function backfillRuntimeEventsFromStoredMessages(
           ...base,
           id: newId(),
           role: 'user',
-          author: 'user',
+          author: message.origin ? 'host' : 'user',
           content: {
             kind: 'text',
             text: message.text,
             ...(message.displayText !== undefined ? { displayText: message.displayText } : {}),
+            ...(message.origin !== undefined ? { origin: message.origin } : {}),
             ...(message.attachments !== undefined && message.attachments.length > 0
               ? { attachments: message.attachments }
               : {}),

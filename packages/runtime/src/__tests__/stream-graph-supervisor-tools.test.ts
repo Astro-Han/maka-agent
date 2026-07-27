@@ -46,6 +46,8 @@ describe('stream graph supervisor tools', () => {
       assert.equal((await store.listAgentGraphScheduleUpdates('graph-supervised')).length, 1);
       assert.deepEqual(first.schedule.work[0]?.inputIds, ['result-a', 'result-b']);
       assert.equal(first.runtime.operators[0]?.status, 'running');
+      assert.equal(first.runtime.operators[0]?.childSessionId, 'session-writer');
+      assert.equal(first.runtime.operators[0]?.currentRunId, 'run-writer');
       assert.deepEqual(first.runtime.readiness[0]?.waitingFor, [
         { kind: 'input_route', upstreamOperatorIds: ['researcher'] },
       ]);

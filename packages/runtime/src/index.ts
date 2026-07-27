@@ -108,6 +108,8 @@ export type {
   ReconcileAgentGraphScheduleInput,
   RenderAgentGraphScheduledWorkPromptInput,
 } from './stream-graph-schedule-reconcile.js';
+export { AgentGraphSupervisorWakeCoordinator } from './agent-graph-supervisor-wake.js';
+export type { AgentGraphSupervisorWakeInput } from './agent-graph-supervisor-wake.js';
 export {
   AGENT_GRAPH_SUPERVISOR_TOOL_NAMES,
   UPDATE_AGENT_GRAPH_TOOL_NAME,
@@ -196,6 +198,7 @@ export type {
 export { PermissionEngine, createDefaultPermissionEngineDeps } from './permission-engine.js';
 export type { EvaluateResult, EvaluateInput, PermissionEngineDeps } from './permission-engine.js';
 export { renderSwarmModePrompt } from './swarm-mode.js';
+export { renderGraphModePrompt } from './graph-mode.js';
 
 export {
   MAX_ADDITIONAL_PERMISSION_JUSTIFICATION_CHARS,

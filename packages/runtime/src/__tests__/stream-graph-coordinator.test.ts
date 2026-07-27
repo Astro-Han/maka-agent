@@ -14,6 +14,8 @@ import {
 } from '@maka/storage';
 import { FakeBackend } from '../fake-backend.js';
 import { BackendRegistry, SessionManager } from '../session-manager.js';
+import { SessionActivityRegistry } from '../goal-turn-lifecycle.js';
+import { AgentGraphSupervisorWakeCoordinator } from '../agent-graph-supervisor-wake.js';
 import type { MakaTool, MakaToolContext } from '../tool-runtime.js';
 import {
   AgentGraphCoordinator,
@@ -32,9 +34,7 @@ describe('host-managed agent graph coordinator', () => {
     const countedRuntimeEventStore = new Proxy(runtimeEventStore, {
       get(target, property) {
         if (property === 'readImmutableRuntimeEvents') {
-          return async (
-            ...args: Parameters<typeof target.readImmutableRuntimeEvents>
-          ) => {
+          return async (...args: Parameters<typeof target.readImmutableRuntimeEvents>) => {
             graphRuntimeHistoryReads += 1;
             return target.readImmutableRuntimeEvents(...args);
           };
@@ -54,14 +54,11 @@ describe('host-managed agent graph coordinator', () => {
       newId: randomUUID,
       now: Date.now,
     });
-    let controlStore:
-      | ReturnType<typeof createSqliteSessionMetadataStore>
-      | undefined;
+    let controlStore: ReturnType<typeof createSqliteSessionMetadataStore> | undefined;
     let coordinator: AgentGraphCoordinator | undefined;
     let recovered: AgentGraphCoordinator | undefined;
-    let delayedControlStore:
-      | ReturnType<typeof createDelayableControlStore>
-      | undefined;
+    let supervisorWake: AgentGraphSupervisorWakeCoordinator | undefined;
+    let delayedControlStore: ReturnType<typeof createDelayableControlStore> | undefined;
     const clientEvents: string[] = [];
     const transientProjectionErrors: unknown[] = [];
     let unsubscribe: (() => void) | undefined;
@@ -89,12 +86,41 @@ describe('host-managed agent graph coordinator', () => {
         join(root, SQLITE_SESSION_METADATA_DATABASE_NAME),
       );
       delayedControlStore = createDelayableControlStore(controlStore);
+      const activities = new SessionActivityRegistry();
+      let supervisorWakeTurnCount = 0;
+      const supervisorWakeErrors: unknown[] = [];
+      supervisorWake = new AgentGraphSupervisorWakeCoordinator({
+        activityRegistry: activities,
+        wakeStore: delayedControlStore.store,
+        readSnapshot: (sessionId) => (coordinator ?? recovered)!.getSnapshot(sessionId),
+        startTurn: async (sessionId, input) => {
+          supervisorWakeTurnCount += 1;
+          for await (const _event of manager.sendMessage(sessionId, input)) {
+            // A real root AgentRun consumes the durable graph wake prompt.
+          }
+          return { kind: 'completed', turnId: input.turnId };
+        },
+        inspectAttempt: async (sessionId, attemptId, turnId) => {
+          const run = (await runStore.listSessionRuns(sessionId)).find(
+            (candidate) =>
+              candidate.agentGraphWakeAttemptId === attemptId && candidate.turnId === turnId,
+          );
+          return run?.status ?? 'missing';
+        },
+        newId: randomUUID,
+        onError: (_rootSessionId, error) => {
+          supervisorWakeErrors.push(error);
+        },
+      });
       coordinator = createCoordinator({
         sessionStore,
         runStore,
         runtimeEventStore: countedRuntimeEventStore,
         controlStore: delayedControlStore.store,
         manager,
+        onReconciliation: (rootSessionId, result) => {
+          supervisorWake!.notify(rootSessionId, result);
+        },
         onError: (_rootSessionId, error) => {
           transientProjectionErrors.push(error);
         },
@@ -123,10 +149,8 @@ describe('host-managed agent graph coordinator', () => {
           ),
         /not authorized/,
       );
-      assert.equal(
-        (await controlStore.listAgentGraphScheduleUpdates(graphId)).length,
-        0,
-      );
+      assert.equal((await controlStore.listAgentGraphScheduleUpdates(graphId)).length, 0);
+      const originalSupervisorActivity = activities.reserve(rootSession.id);
       await update.impl(
         {
           add_work: [
@@ -140,9 +164,50 @@ describe('host-managed agent graph coordinator', () => {
         toolContext(rootSession.id, sourceRun.runId, sourceTurnId),
       );
       await coordinator.waitForIdle(rootSession.id);
+      assert.equal(
+        supervisorWakeTurnCount,
+        0,
+        'the host wake must wait until the original supervisor turn returns',
+      );
+      originalSupervisorActivity.release();
+      await supervisorWake.waitForIdle();
+      assert.deepEqual(supervisorWakeErrors, []);
+      assert.equal(supervisorWakeTurnCount, 1);
+      const graphWake = (await manager.getMessages(rootSession.id)).find(
+        (message) => message.type === 'user' && message.origin?.kind === 'agent_graph',
+      );
+      assert.ok(graphWake?.type === 'user');
+      assert.ok(graphWake.origin?.kind === 'agent_graph');
+      assert.equal(graphWake.origin.graphId, agentGraphIdForRootSession(rootSession.id));
+      assert.match(graphWake.origin.wakeId, /sha256:[a-f0-9]{64}$/);
+      assert.match(graphWake.origin.attemptId, /^[0-9a-f-]{36}$/);
+      assert.match(graphWake.text, /view_agent_graph/);
+      assert.ok(
+        (await manager.getMessages(rootSession.id)).some(
+          (message) => message.type === 'assistant' && message.turnId === graphWake.turnId,
+        ),
+        'the original root Agent must run again and produce a deliverable response',
+      );
+      const wakeRun = (await runStore.listSessionRuns(rootSession.id)).find(
+        (run) => run.turnId === graphWake.turnId,
+      );
+      assert.ok(wakeRun);
+      assert.equal(wakeRun.agentGraphWakeId, graphWake.origin.wakeId);
+      assert.equal(wakeRun.agentGraphWakeAttemptId, graphWake.origin.attemptId);
+      assert.equal(
+        (await runtimeEventStore.readImmutableRuntimeEvents(rootSession.id, wakeRun.runId))[0]
+          ?.author,
+        'host',
+        'canonical provenance must distinguish the host-authored wake from human input',
+      );
+      const durableWake = await controlStore.readAgentGraphSupervisorWake(
+        graphWake.origin.graphId,
+        graphWake.origin.wakeId,
+      );
+      assert.equal(durableWake?.status, 'delivered');
+      assert.equal(durableWake?.attemptCount, 1);
 
-      const firstProvisions =
-        await controlStore.listAgentGraphOperatorProvisions(graphId);
+      const firstProvisions = await controlStore.listAgentGraphOperatorProvisions(graphId);
       assert.equal(firstProvisions.length, 1);
       assert.equal(firstProvisions[0]?.agentId, 'local-read');
       assert.equal((await controlStore.listAgentGraphIntentClaims(graphId)).length, 1);
@@ -161,7 +226,10 @@ describe('host-managed agent graph coordinator', () => {
       assert.equal(snapshot.operators.length, 1);
       assert.equal(snapshot.operators[0]?.childSessionId, childSessions[0]?.id);
       assert.equal(snapshot.operators[0]?.agentId, 'local-read');
-      assert.equal(snapshot.work[0]?.instructionPreview, 'Inspect the repository and report one concrete finding.');
+      assert.equal(
+        snapshot.work[0]?.instructionPreview,
+        'Inspect the repository and report one concrete finding.',
+      );
       assert.match(snapshot.snapshotVersion, /^sha256:[a-f0-9]{64}$/);
       const readsBeforeInspection = delayedControlStore.projectionReadCounts();
       const inspection = await coordinator.inspectOperator(
@@ -187,15 +255,12 @@ describe('host-managed agent graph coordinator', () => {
         2,
         'partial text deltas must not cause projection writes or invalidations',
       );
-      const incrementalProjectionCommits =
-        delayedControlStore.projectionCommits.filter(
-          (request) => request.incrementalRecordId !== undefined,
-        );
+      const incrementalProjectionCommits = delayedControlStore.projectionCommits.filter(
+        (request) => request.incrementalRecordId !== undefined,
+      );
       assert.equal(incrementalProjectionCommits.length, 2);
       assert.ok(
-        incrementalProjectionCommits.every(
-          (request) => request.terminalActivities.length === 0,
-        ),
+        incrementalProjectionCommits.every((request) => request.terminalActivities.length === 0),
         'yielded SessionEvents must never write immutable terminal history',
       );
       assert.equal(
@@ -212,8 +277,7 @@ describe('host-managed agent graph coordinator', () => {
         /only to root Sessions/,
       );
 
-      const canonicalProjection =
-        await controlStore.readAgentGraphClientProjection(graphId);
+      const canonicalProjection = await controlStore.readAgentGraphClientProjection(graphId);
       assert.ok(canonicalProjection);
       const staleSnapshot = structuredClone(
         canonicalProjection.payload as { snapshotVersion: string },
@@ -231,32 +295,27 @@ describe('host-managed agent graph coordinator', () => {
         terminalActivities: [],
         activityRecords: [],
       });
-      const transientProjectionFailure = new Error(
-        'transient derived projection failure',
-      );
-      delayedControlStore.failNextProjectionCommits(
-        1,
-        transientProjectionFailure,
-      );
-      const commitsBeforeRepair =
-        delayedControlStore.projectionCommits.length;
+      const transientProjectionFailure = new Error('transient derived projection failure');
+      delayedControlStore.failNextProjectionCommits(1, transientProjectionFailure);
+      const commitsBeforeRepair = delayedControlStore.projectionCommits.length;
       const runtimeActivityBeforeRepair = clientEvents.filter(
         (reason) => reason === 'runtime_activity',
       ).length;
       await coordinator.reconcile(rootSession.id);
-      assert.ok(
-        transientProjectionErrors.includes(transientProjectionFailure),
-      );
+      await supervisorWake.waitForIdle();
       assert.equal(
-        (
-          await controlStore.readAgentGraphClientProjection(graphId)
-        )?.snapshotVersion,
+        supervisorWakeTurnCount,
+        1,
+        'the same durable graph snapshot must not wake the supervisor twice',
+      );
+      assert.ok(transientProjectionErrors.includes(transientProjectionFailure));
+      assert.equal(
+        (await controlStore.readAgentGraphClientProjection(graphId))?.snapshotVersion,
         canonicalProjection.snapshotVersion,
         'reconcile tail must repair a one-shot projection failure without new graph activity',
       );
       assert.ok(
-        delayedControlStore.projectionCommits.length >=
-          commitsBeforeRepair + 2,
+        delayedControlStore.projectionCommits.length >= commitsBeforeRepair + 2,
         'one failed materialization must be followed by an authoritative repair',
       );
       assert.equal(
@@ -271,25 +330,32 @@ describe('host-managed agent graph coordinator', () => {
       const projectionFailure = new Error('derived projection unavailable');
       const derivedFailures: unknown[] = [];
       delayedControlStore.failProjectionCommits(projectionFailure);
+      assert.equal(await supervisorWake.recover(), 0);
       recovered = createCoordinator({
         sessionStore,
         runStore,
         runtimeEventStore: countedRuntimeEventStore,
         controlStore: delayedControlStore.store,
         manager,
+        onReconciliation: (rootSessionId, result) => {
+          supervisorWake!.notify(rootSessionId, result);
+        },
         onError: (_rootSessionId, error) => {
           derivedFailures.push(error);
         },
       });
       assert.deepEqual(await recovered.recover(), [rootSession.id]);
+      await supervisorWake.waitForIdle();
+      assert.equal(
+        supervisorWakeTurnCount,
+        1,
+        'restart recovery must honor the persisted graph wake idempotency marker',
+      );
       assert.ok(
         derivedFailures.includes(projectionFailure),
         'recover must report projection failure without failing graph authority',
       );
-      assert.equal(
-        (await controlStore.listAgentGraphOperatorProvisions(graphId)).length,
-        1,
-      );
+      assert.equal((await controlStore.listAgentGraphOperatorProvisions(graphId)).length, 1);
       assert.equal((await controlStore.listAgentGraphIntentClaims(graphId)).length, 1);
       assert.equal((await manager.listChildSessions(rootSession.id)).length, 1);
 
@@ -310,12 +376,7 @@ describe('host-managed agent graph coordinator', () => {
               },
             ],
           },
-          toolContext(
-            rootSession.id,
-            sourceRun.runId,
-            sourceTurnId,
-            'tool-call-graph-stop-race',
-          ),
+          toolContext(rootSession.id, sourceRun.runId, sourceTurnId, 'tool-call-graph-stop-race'),
         ),
       );
       await gate.started;
@@ -325,8 +386,7 @@ describe('host-managed agent graph coordinator', () => {
         gate.release();
       }
       assert.ok(
-        derivedFailures.filter((error) => error === projectionFailure).length >=
-          2,
+        derivedFailures.filter((error) => error === projectionFailure).length >= 2,
         'stop must report best-effort projection repair failure without rejecting',
       );
       await pendingUpdate;
@@ -340,6 +400,7 @@ describe('host-managed agent graph coordinator', () => {
       unsubscribe?.();
       await coordinator?.close();
       await recovered?.close();
+      await supervisorWake?.close();
       controlStore?.close();
       await sessionStore.close?.();
       await rm(root, { recursive: true, force: true });
@@ -454,7 +515,7 @@ describe('host-managed agent graph coordinator', () => {
             (failure) =>
               failure === topologyFailure ||
               (failure instanceof AggregateError && failure.errors.includes(topologyFailure)),
-      )),
+          )),
     );
   });
 
@@ -500,9 +561,7 @@ describe('host-managed agent graph coordinator', () => {
         error instanceof AggregateError &&
         (error.errors.length === 2 ||
           error.errors.some(
-            (failure) =>
-              failure instanceof AggregateError &&
-              failure.errors.length === 2,
+            (failure) => failure instanceof AggregateError && failure.errors.length === 2,
           )),
     );
     assert.deepEqual(stopped.sort(), ['child-a', 'child-b']);
@@ -515,6 +574,7 @@ function createCoordinator(input: {
   runtimeEventStore: ReturnType<typeof createRuntimeEventStore>;
   controlStore: ReturnType<typeof createSqliteSessionMetadataStore>;
   manager: SessionManager;
+  onReconciliation?: AgentGraphCoordinatorInput['onReconciliation'];
   onError?: AgentGraphCoordinatorInput['onError'];
 }): AgentGraphCoordinator {
   return new AgentGraphCoordinator({
@@ -525,13 +585,9 @@ function createCoordinator(input: {
   });
 }
 
-function createDelayableControlStore(
-  store: ReturnType<typeof createSqliteSessionMetadataStore>,
-): {
+function createDelayableControlStore(store: ReturnType<typeof createSqliteSessionMetadataStore>): {
   store: ReturnType<typeof createSqliteSessionMetadataStore>;
-  projectionCommits: Array<
-    Parameters<typeof store.commitAgentGraphClientProjection>[0]
-  >;
+  projectionCommits: Array<Parameters<typeof store.commitAgentGraphClientProjection>[0]>;
   projectionReadCounts(): { composite: number; operator: number };
   failProjectionCommits(error: unknown): void;
   failNextProjectionCommits(count: number, error: unknown): void;
@@ -543,9 +599,7 @@ function createDelayableControlStore(
         release: Promise<void>;
       }
     | undefined;
-  const projectionCommits: Array<
-    Parameters<typeof store.commitAgentGraphClientProjection>[0]
-  > = [];
+  const projectionCommits: Array<Parameters<typeof store.commitAgentGraphClientProjection>[0]> = [];
   let projectionFailure: unknown;
   let remainingProjectionFailures: number | 'always' = 0;
   let compositeProjectionReads = 0;
@@ -564,11 +618,7 @@ function createDelayableControlStore(
         };
       }
       if (property === 'commitAgentGraphClientProjection') {
-        return async (
-          ...args: Parameters<
-            typeof target.commitAgentGraphClientProjection
-          >
-        ) => {
+        return async (...args: Parameters<typeof target.commitAgentGraphClientProjection>) => {
           projectionCommits.push(structuredClone(args[0]));
           if (remainingProjectionFailures === 'always') {
             throw projectionFailure;
@@ -582,9 +632,7 @@ function createDelayableControlStore(
       }
       if (property === 'readAgentGraphClientProjectionWithOperator') {
         return async (
-          ...args: Parameters<
-            typeof target.readAgentGraphClientProjectionWithOperator
-          >
+          ...args: Parameters<typeof target.readAgentGraphClientProjectionWithOperator>
         ) => {
           compositeProjectionReads += 1;
           return target.readAgentGraphClientProjectionWithOperator(...args);
@@ -592,9 +640,7 @@ function createDelayableControlStore(
       }
       if (property === 'readAgentGraphClientOperatorProjection') {
         return async (
-          ...args: Parameters<
-            typeof target.readAgentGraphClientOperatorProjection
-          >
+          ...args: Parameters<typeof target.readAgentGraphClientOperatorProjection>
         ) => {
           operatorProjectionReads += 1;
           return target.readAgentGraphClientOperatorProjection(...args);

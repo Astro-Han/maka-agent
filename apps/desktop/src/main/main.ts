@@ -31,6 +31,7 @@ import type { WorkspacePrivacyContext } from '@maka/core/incognito';
 import { ok } from '@maka/core/result';
 import {
   AgentGraphCoordinator,
+  AgentGraphSupervisorWakeCoordinator,
   BackendRegistry,
   FakeBackend,
   PermissionEngine,
@@ -624,6 +625,7 @@ const {
   resolveDesktopSkillHost,
 });
 let agentGraphCoordinator: AgentGraphCoordinator;
+let agentGraphSupervisorWakeCoordinator: AgentGraphSupervisorWakeCoordinator;
 const desktopBackendToolSurfaceDeps = {
   isComputerUseRealModelE2e,
   ensureMcpReady,
@@ -826,6 +828,51 @@ const runtime = new SessionManager({
   newId: randomUUID,
   now: Date.now,
 });
+agentGraphSupervisorWakeCoordinator = new AgentGraphSupervisorWakeCoordinator({
+  activityRegistry: sessionActivities,
+  wakeStore: agentGraphControlStore,
+  readSnapshot: (rootSessionId) => agentGraphCoordinator.getSnapshot(rootSessionId),
+  startTurn: async (sessionId, input, activity, abortSignal) => {
+    let stopPromise: Promise<void> | undefined;
+    const stop = () => {
+      stopPromise ??= runtime.stopSession(sessionId, { source: 'graph_supervisor' });
+    };
+    abortSignal.addEventListener('abort', stop, { once: true });
+    if (abortSignal.aborted) stop();
+    try {
+      await ensureSessionCanSend(sessionId);
+      if (abortSignal.aborted) {
+        return { kind: 'aborted', turnId: input.turnId };
+      }
+      const iterator = runtime.sendMessage(sessionId, input);
+      return (
+        await streamEvents(sessionId, iterator, {
+          turnId: input.turnId,
+          goalBoundary: 'none',
+          activity,
+        })
+      ).outcome;
+    } finally {
+      abortSignal.removeEventListener('abort', stop);
+      await stopPromise;
+    }
+  },
+  inspectAttempt: async (rootSessionId, attemptId, turnId) => {
+    const runs = (await runStore.listSessionRuns(rootSessionId)).filter(
+      (run) => run.agentGraphWakeAttemptId === attemptId && run.turnId === turnId,
+    );
+    if (runs.length > 1) {
+      throw new Error(
+        `Agent graph supervisor wake attempt ${attemptId} has multiple AgentRuns`,
+      );
+    }
+    return runs[0]?.status ?? 'missing';
+  },
+  newId: randomUUID,
+  onError: (rootSessionId) => {
+    emitSessionsChanged('status-change', rootSessionId);
+  },
+});
 agentGraphCoordinator = new AgentGraphCoordinator({
   sessionStore: store,
   runStore,
@@ -833,6 +880,9 @@ agentGraphCoordinator = new AgentGraphCoordinator({
   controlStore: agentGraphControlStore,
   runtime,
   newId: randomUUID,
+  onReconciliation: (rootSessionId, result) => {
+    agentGraphSupervisorWakeCoordinator.notify(rootSessionId, result);
+  },
 });
 let settingsIpc: SettingsIpcHandle | undefined;
 let mcpToolSnapshot = JSON.stringify(mcpManager.tools());
@@ -959,6 +1009,9 @@ function registerIpc(): void {
     stopAgentGraph: async (sessionId) => {
       const header = await store.readHeader(sessionId);
       if (!header.subagentParent) await agentGraphCoordinator.stop(sessionId);
+    },
+    notifyAgentGraphPermissionResponse: (sessionId) => {
+      agentGraphSupervisorWakeCoordinator.notifyPermissionResponse(sessionId);
     },
     ensureSessionWorkspaceAvailable,
     createSession: createDesktopSession,
@@ -1310,6 +1363,7 @@ wireAppLifecycle({
   mainWindowController,
   runtime,
   agentGraphCoordinator,
+  agentGraphSupervisorWakeCoordinator,
   agentGraphControlStore,
   streamEvents,
   focusOrCreateMainWindow,

@@ -429,6 +429,16 @@ export const TurnView = memo(function TurnView(props: {
           <span>{copy.automationTriggered}</span>
         </Marker>
       )}
+      {turn.user?.agentGraphOrigin && (
+        <Marker
+          variant="automation-origin"
+          role="note"
+          title={copy.agentGraphTitle(turn.user.agentGraphOrigin.graphId)}
+        >
+          <GitBranch size={12} aria-hidden="true" />
+          <span>{copy.agentGraphTriggered}</span>
+        </Marker>
+      )}
       {turn.user && (
         <Message
           variant="user"
@@ -444,7 +454,9 @@ export const TurnView = memo(function TurnView(props: {
             quotes={turn.user.quotes}
             onReadAttachmentBytes={props.onReadAttachmentBytes}
             onEditUserMessage={
-              props.onEditUserMessage && !turn.user.automationOrigin
+              props.onEditUserMessage &&
+              !turn.user.automationOrigin &&
+              !turn.user.agentGraphOrigin
                 ? () => props.onEditUserMessage?.(turn.turnId)
                 : undefined
             }
