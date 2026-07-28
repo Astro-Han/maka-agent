@@ -2,7 +2,7 @@
 
 # Maka Backend Architecture
 
-> This is the entry point for Maka Agent backend architecture. It does not repeat each deep-dive article. It establishes the system spine and helps readers reach the right chapter by engineering question. The current series covers Runtime, tools and context, durable Headless tasks, Self-check, and the AHE self-iteration boundary.
+> This is the entry point for Maka Agent backend architecture. It does not repeat each deep-dive article. It establishes the system spine and helps readers reach the right chapter by engineering question. The current series covers Runtime, tools and context, durable Headless tasks, Self-check, the AHE self-iteration boundary, and Graph scheduling over child Sessions.
 
 ## Architecture in one sentence
 
@@ -16,9 +16,13 @@ flowchart LR
     R --> L["Runtime Event Log"]
     R --> H["Headless Task Event Log"]
     T --> L
+    S --> G["Agent Graph Control Plane"]
+    G --> R
 
     L --> C["Provider Context Projection"]
     L --> V["Session / UI Read Models"]
+    L --> GP["Graph Records / Client Projection"]
+    GP --> G
     L -. "trajectory refs" .-> H
 
     H --> P["TaskRun Projection"]
@@ -27,9 +31,9 @@ flowchart LR
     E --> A["External Evolution Loop"]
 ```
 
-Read left to right. Entry points hand user intent to Runtime; model and tool execution produce facts; those facts are projected into model context, interactive views, durable task state, and evolution evidence. Providers, concrete storage implementations, and UI components are omitted so the diagram can preserve the backend spine shared by this series.
+Read left to right. Entry points hand user intent to Runtime; model and tool execution produce facts; those facts are projected into model context, interactive views, Graph scheduling inputs, durable task state, and evolution evidence. Graph coordinates child Sessions from durable schedule metadata but sends execution back through the same Runtime. Providers, concrete storage implementations, and UI components are omitted so the diagram can preserve the backend spine shared by this series.
 
-## A three-layer mental model
+## A four-layer mental model
 
 ### 1. Execution facts
 
@@ -37,19 +41,25 @@ An Agent Run produces model messages, Tool Calls, Tool Results, permission decis
 
 Relevant chapters: 1, 2, and 3.
 
-### 2. Durable tasks
+### 2. Coordinated Agent work
+
+When dependent Agent work benefits from dynamic topology, Graph treats child Sessions as operator containers, Session-inline AgentRuns as activations, and committed RuntimeEvents as reference-only records. SQLite owns schedule, topology, admission, and supervisor-wake metadata; Runtime keeps execution authority. The main Agent stays beside the graph to observe, intervene, and synthesize without gating normal record delivery.
+
+Relevant chapter: 7.
+
+### 3. Durable tasks
 
 When a task outlives one Turn or process, Headless uses an independent task identity, Task Event Log, and TaskRun projection to preserve progress across Attempts. Self-check provides bounded feedback inside that task loop but does not own final fact authority.
 
 Relevant chapters: 4 and 5.
 
-### 3. Evolution
+### 4. Evolution
 
 AHE organizes outcomes and traces from multiple TaskRuns into evolution evidence bound to target identity. It remains outside the interactive Runtime and advances system changes through a constrained change surface, falsifiable manifests, candidate evaluation, and rollback lineage.
 
 Relevant chapter: 6.
 
-## Six-chapter index
+## Seven-chapter index
 
 | Chapter | Core question | Implementation status | Read |
 |---|---|---|---|
@@ -59,6 +69,7 @@ Relevant chapter: 6.
 | 4. The Durable Task Loop | How does Maka continue a task that outlives a Turn, Run, or process? | Current + Target | [English](./docs/architecture/durable-task-loop-headless-draft.md) · [中文](./docs/architecture/durable-task-loop-headless-draft.zh-CN.md) |
 | 5. Self-Check Is Not Self-Trust | How can an Agent inspect and repair its work without turning self-report into authority? | Current + Target | [English](./docs/architecture/self-check-bounded-feedback-loop-draft.md) · [中文](./docs/architecture/self-check-bounded-feedback-loop-draft.zh-CN.md) |
 | 6. Self-Iteration Happens Outside the Runtime | How does Maka turn run experience into falsifiable and reversible system improvement? | Current + Target | [English](./docs/architecture/ahe-self-iteration-boundary-draft.md) · [中文](./docs/architecture/ahe-self-iteration-boundary-draft.zh-CN.md) |
+| 7. Graph Is a Schedule, Not a Second Runtime | How does Maka coordinate dynamic dependent Agent work while the main Agent supervises beside the data path? | Current | [English](./docs/architecture/agent-graph-stream-scheduling-draft.md) · [中文](./docs/architecture/agent-graph-stream-scheduling-draft.zh-CN.md) |
 
 **Current + Target** means the article covers verified implementation and visibly labeled target direction. It does not mean Target sections are implemented. The `implementation_status` and `last_verified` fields in each article's front matter are the more precise status source.
 
@@ -84,13 +95,17 @@ Read `4 → 5`, then revisit Chapter 2's rule that context pruning must not dele
 
 Read `1 → 4 → 5 → 6`. Chapter 6 depends on the Event Log, TaskRun projection, and authority boundaries established earlier.
 
+### Changing Graph, child Sessions, or multi-Agent scheduling
+
+Read `1 → 7`. Chapter 1 establishes RuntimeEvent and AgentRun authority; Chapter 7 explains how Graph projects those facts into records, binds operators to child Sessions, linearizes schedule and admission in SQLite, and returns control to the root supervisor Agent. Add `2 → 3` when changing how child output is retrieved or compacted.
+
 ## Code boundaries
 
 | Area | Primary responsibility |
 |---|---|
 | `packages/core` | Pure contracts for Session, Runtime Event, AgentRun, and permission |
-| `packages/storage` | File-backed stores for sessions, settings, and run ledgers |
-| `packages/runtime` | SessionManager, AgentRun, model adapters, tool execution, context, and recovery |
+| `packages/storage` | Durable stores for sessions, settings, run ledgers, and the SQLite metadata control plane |
+| `packages/runtime` | SessionManager, AgentRun, model adapters, tool execution, context, recovery, and Graph reconciliation |
 | `packages/headless` | TaskRun, Autonomous Loop, Self-check, result export, and AHE protocol |
 | `apps/desktop/src/main` | Electron main-process composition, IPC, and product-entry adapters |
 
@@ -100,7 +115,7 @@ The “code map” in each deep-dive article is the preferred implementation ent
 - [`docs/archive/runtime-v2-architecture-evolution.md`](./docs/archive/runtime-v2-architecture-evolution.md)
 - [`docs/archive/runtime-v2-implementation-notes.md`](./docs/archive/runtime-v2-implementation-notes.md)
 
-Those documents provide historical design context and implementation notes. The six chapters indexed here are the narrative entry point for current backend mechanisms.
+Those documents provide historical design context and implementation notes. The seven chapters indexed here are the narrative entry point for current backend mechanisms.
 
 ## Documentation layout
 
