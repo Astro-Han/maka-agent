@@ -17,6 +17,7 @@ import {
   type FilesystemWorkerResult,
   type FilesystemWorkerTarget,
 } from './protocol.js';
+import { isLikelySandboxDenial } from '../sandbox/detect.js';
 
 const DEFAULT_GLOB_LIMIT = 200;
 const MAX_GREP_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -239,7 +240,9 @@ export async function executeFilesystemOperation(
       if (result.exitCode !== 0) {
         const detail = result.stderrTail.trim();
         throw operationError(
-          'filesystem_error',
+          isLikelySandboxDenial({ stdout: result.stdout, stderr: detail, sandboxed: true })
+            ? 'filesystem_denied'
+            : 'filesystem_error',
           detail
             ? `Grep failed while searching files.\n${detail}`
             : 'Grep failed while searching files.',

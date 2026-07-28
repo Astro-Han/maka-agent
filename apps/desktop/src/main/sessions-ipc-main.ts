@@ -3,7 +3,6 @@ import { basename } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { ipcMain } from 'electron';
 import {
-  DEFAULT_SESSION_NAME,
   isCollaborationMode,
   isOrchestrationMode,
   isPermissionMode,
@@ -14,6 +13,7 @@ import {
 } from '@maka/core';
 import type {
   CreateSessionInput,
+  CreateSessionRequestInput,
   SessionEvent,
   SessionChangedEvent,
   SessionChangedReason,
@@ -31,7 +31,7 @@ import { resolveSessionSend } from './session-send-resolve.js';
 import { resizeImageForAttachment } from './attachment-resize-native.js';
 import { releaseBrowserSession } from './browser/session.js';
 import { sessionReadMessagesFailureMessage } from './session-read-error-copy.js';
-import { resolveDefaultPermissionMode } from './permission-mode-default.js';
+import { resolveCreateSessionInput } from './create-session-input.js';
 import {
   normalizePermissionResponse,
   normalizeRegenerateTurnInput,
@@ -214,16 +214,14 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
     return tasks.map(sanitizeTaskLedgerTask);
   });
   ipcMain.handle('sessions:list', (_event, filter?: SessionListFilter) => runtime.listSessions(filter));
-  ipcMain.handle('sessions:create', async (_event, input?: Partial<CreateSessionInput>) => {
+  ipcMain.handle('sessions:create', async (_event, input?: CreateSessionRequestInput) => {
     const cwd = input?.cwd ?? (await currentProjectRoot());
-    const collaborationMode = input?.collaborationMode ?? 'agent';
-    if (!isCollaborationMode(collaborationMode)) {
-      throw new TypeError('Invalid collaboration mode.');
-    }
-    const orchestrationMode = input?.orchestrationMode ?? 'default';
-    if (!isOrchestrationMode(orchestrationMode)) {
-      throw new TypeError('Invalid orchestration mode.');
-    }
+    // #1433: `mode` is a product intent, not a session field. What it implies,
+    // what the renderer may ask for directly, and what the configured default
+    // fills in are all resolved in one pure place (create-session-input.ts),
+    // which is also the only place any of it can be tested.
+    const { permissionMode, collaborationMode, orchestrationMode, name, labels } =
+      await resolveCreateSessionInput(input, { readSettings: () => settingsStore.get() });
     if (input?.backend === 'fake') {
       if (!canCreateFakeSession()) {
         throw new Error('FakeBackend sessions are only available in development.');
@@ -233,11 +231,11 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
         backend: 'fake',
         llmConnectionSlug: input.llmConnectionSlug ?? 'fake',
         model: input.model ?? 'fake-model',
-        permissionMode: input.permissionMode ?? (await resolveDefaultPermissionMode(() => settingsStore.get())),
+        permissionMode,
         collaborationMode,
         orchestrationMode,
-        name: input.name ?? DEFAULT_SESSION_NAME,
-        labels: input.labels,
+        name,
+        labels,
       });
       emitSessionsChanged('created', session.id);
       return session;
@@ -253,11 +251,11 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
       llmConnectionSlug: connection.slug,
       model,
       ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
-      permissionMode: input?.permissionMode ?? (await resolveDefaultPermissionMode(() => settingsStore.get())),
+      permissionMode,
       collaborationMode,
       orchestrationMode,
-      name: input?.name ?? DEFAULT_SESSION_NAME,
-      labels: input?.labels,
+      name,
+      labels,
     });
     emitSessionsChanged('created', session.id);
     return session;

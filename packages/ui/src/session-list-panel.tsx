@@ -1,7 +1,7 @@
 import type { PlanReminder, SessionSummary } from '@maka/core';
 import type { NavModuleMemory, NavSelection } from './nav-selection.js';
 import { SessionHistoryList, type SessionHistoryGroup, type SessionRowActions } from './session-history-list.js';
-import { SessionSidebarFooter, SessionSidebarNav } from './session-sidebar-nav.js';
+import { SessionSidebarFooter, SessionSidebarNav, type SidebarUpdateReminder } from './session-sidebar-nav.js';
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from './primitives/menu.js';
 import { Button as UiButton } from './ui.js';
 import { ListTodo } from './icons.js';
@@ -25,9 +25,10 @@ export function SessionListPanel(props: {
   moduleMemory?: NavModuleMemory;
   onSelect(selection: NavSelection): void;
   onOpenSettings(): void;
+  updateReminder?: SidebarUpdateReminder;
+  onOpenUpdate?(): void;
   onNew(): void;
   rowActions?: SessionRowActions;
-  sidebarCollapsed?: boolean;
 }) {
   const copy = getConversationCopy(useUiLocale()).sessions;
   const {
@@ -40,7 +41,6 @@ export function SessionListPanel(props: {
     <aside
       className="maka-session-panel agents-sidebar"
       aria-label={copy.listAriaLabel}
-      data-collapsed={props.sidebarCollapsed ? 'true' : undefined}
     >
       <header className="maka-session-panel-header">
         <div className="maka-sidebar-drag-strip" />
@@ -64,9 +64,9 @@ export function SessionListPanel(props: {
             >
               <ListTodo size={15} aria-hidden="true" />
             </MenuTrigger>
-            <MenuPopup align="end">
+            <MenuPopup className="w-max !min-w-0" align="end">
               <MenuRadioGroup value={viewMode} onValueChange={(mode) => onViewModeChange(mode as SessionViewMode)}>
-                <MenuRadioItem value="conversation">{copy.groupByConversation}</MenuRadioItem>
+                <MenuRadioItem value="conversation">{copy.groupByTime}</MenuRadioItem>
                 <MenuRadioItem value="project">{copy.groupByProject}</MenuRadioItem>
               </MenuRadioGroup>
             </MenuPopup>
@@ -84,7 +84,11 @@ export function SessionListPanel(props: {
         onSelectSession={props.onSelectSession}
         rowActions={props.rowActions}
       />
-      <SessionSidebarFooter onOpenSettings={props.onOpenSettings} />
+      <SessionSidebarFooter
+        updateReminder={props.updateReminder}
+        onOpenSettings={props.onOpenSettings}
+        onOpenUpdate={props.onOpenUpdate}
+      />
     </aside>
   );
 }

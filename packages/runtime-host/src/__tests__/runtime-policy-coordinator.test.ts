@@ -67,11 +67,12 @@ test('production composition shares one gate across mutation and backend activat
       model: 'fake-model',
       permissionMode: 'ask',
     });
-    await setupStores.sessionStore.close?.();
 
     composition = await createExecutionRuntimeHostComposition({
       owner,
+      hostEpoch: context.hostEpoch,
       acquireResidency: context.acquireResidency,
+      retainUntilProcessExit: () => undefined,
       requestDrain: () => undefined,
     });
     await composition.recover();
@@ -95,7 +96,7 @@ test('production composition shares one gate across mutation and backend activat
         {
           sessionId: session.id,
           turnId,
-          text: FAKE_ASK_USER_QUESTION_PROMPT,
+          content: { text: FAKE_ASK_USER_QUESTION_PROMPT },
         },
         context,
       ),
@@ -157,11 +158,12 @@ test('production policy mutation drains and poisons activation when cached backe
       model: 'fake-model',
       permissionMode: 'ask',
     });
-    await setupStores.sessionStore.close?.();
 
     composition = await createExecutionRuntimeHostComposition({
       owner,
+      hostEpoch: context.hostEpoch,
       acquireResidency: context.acquireResidency,
+      retainUntilProcessExit: () => undefined,
       requestDrain: () => {
         drainRequests += 1;
       },
@@ -170,7 +172,11 @@ test('production policy mutation drains and poisons activation when cached backe
 
     const firstTurnId = randomUUID();
     const started = await composition.handlers['turn.start'](
-      { sessionId: session.id, turnId: firstTurnId, text: 'cache this backend' },
+      {
+        sessionId: session.id,
+        turnId: firstTurnId,
+        content: { text: 'cache this backend' },
+      },
       context,
     );
     assert.equal(started.ok, true);

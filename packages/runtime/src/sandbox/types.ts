@@ -26,6 +26,15 @@ export interface SandboxPathContext {
   runtimeReadableRoots?: readonly string[];
   /** Runtime binaries/frameworks that the helper process may map and execute. */
   executableRoots?: readonly string[];
+  /** Host directories a trusted helper needs writable to materialize an exact result. */
+  runtimeWritableRoots?: readonly string[];
+  /** Exact writable files pinned by an open host descriptor until sandbox launch. */
+  pinnedWritableFiles?: readonly {
+    path: string;
+    fd: number;
+    sourceFd: number;
+    releaseSource?: () => void;
+  }[];
 }
 
 export interface SandboxCommand {

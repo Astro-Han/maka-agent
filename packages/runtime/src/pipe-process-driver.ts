@@ -2,7 +2,12 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
 import type { ShellSpawnPlan } from './shell-detect.js';
-import { buildSpawnStdio, writeChildFdInputs, type ChildFdInput } from './child-fd-input.js';
+import {
+  buildSpawnStdio,
+  closeChildFdSources,
+  writeChildFdInputs,
+  type ChildFdInput,
+} from './child-fd-input.js';
 
 export interface PipeProcessExit {
   exitCode: number | null;
@@ -30,13 +35,17 @@ export class PipeProcessDriver {
   private exited = false;
 
   constructor(private readonly options: PipeProcessDriverOptions) {
-    this.child = spawn(options.plan.file, options.plan.args, {
-      cwd: options.cwd,
-      env: options.env,
-      shell: options.plan.useShellOption,
-      stdio: buildSpawnStdio(options.fdInputs),
-      detached: process.platform !== 'win32',
-    });
+    try {
+      this.child = spawn(options.plan.file, options.plan.args, {
+        cwd: options.cwd,
+        env: options.env,
+        shell: options.plan.useShellOption,
+        stdio: buildSpawnStdio(options.fdInputs),
+        detached: process.platform !== 'win32',
+      });
+    } finally {
+      closeChildFdSources(options.fdInputs);
+    }
     if (!this.child.stdout || !this.child.stderr) {
       this.child.kill('SIGKILL');
       throw new Error('Pipe process did not expose stdout and stderr');

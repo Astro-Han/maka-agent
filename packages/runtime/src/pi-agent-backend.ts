@@ -11,13 +11,27 @@ import type {
   ToolResultMessage,
   TokenUsageMessage,
 } from '@maka/core';
-import { computerUseApprovalSummary, decodeCanonicalToolResultContent } from '@maka/core';
-import type { BackendSendInput, PermissionDecision } from '@maka/core/backend-types';
+import {
+  computerUseApprovalSummary,
+  decodeCanonicalToolResultContent,
+  TOOL_OUTPUT_DELTA_MAX_CHARS,
+} from '@maka/core';
+import type {
+  BackendSendInput,
+  HostedInteractionBridge,
+  PermissionDecision,
+} from '@maka/core/backend-types';
 import { redactSecrets } from '@maka/core/redaction';
 import { isToolCategory, type ToolCategory } from '@maka/core/permission';
 
 import type { AgentBackend } from '@maka/core/backend-types';
 import type { AppendMessageFn } from './ai-sdk-backend.js';
+import {
+  RuntimeInteractionAdmissionRejectedError,
+  RuntimeInteractionClosedError,
+  RuntimeInteractionFailStopError,
+  RuntimeInteractionInvariantError,
+} from './interaction-authority.js';
 import { PermissionEngine } from './permission-engine.js';
 
 export interface PiAgentBackendInput {
@@ -284,7 +298,7 @@ export class PiAgentBackend implements AgentBackend {
             break;
           }
           case 'permission_request': {
-            yield* this.handlePermissionRequest(turnId, frame);
+            yield* this.handlePermissionRequest(turnId, frame, input.hostedInteraction);
             break;
           }
           case 'error': {
@@ -318,6 +332,7 @@ export class PiAgentBackend implements AgentBackend {
       if (complete) yield complete;
       yield this.completeEvent(turnId, 'end_turn');
     } catch (error) {
+      if (isInteractionControlError(error)) throw error;
       if (this.stopped) {
         await persistAssistant();
         yield this.abortEvent(turnId);
@@ -368,6 +383,7 @@ export class PiAgentBackend implements AgentBackend {
   private async *handlePermissionRequest(
     turnId: string,
     frame: Extract<PiAgentFrame, { type: 'permission_request' }>,
+    hostedInteraction?: HostedInteractionBridge,
   ): AsyncIterable<SessionEvent> {
     const frameArgs = structuredClone(frame.args);
     const canonicalArgs = await this.ensureToolCall(
@@ -386,6 +402,7 @@ export class PiAgentBackend implements AgentBackend {
       ...(frame.categoryHint ? { categoryHint: frame.categoryHint } : {}),
       mode: this.input.header.permissionMode,
       ...(frame.hint ? { hint: redactBoundedText(frame.hint, 240) } : {}),
+      ...(hostedInteraction ? { runId: hostedInteraction.runId, hostedInteraction } : {}),
     });
 
     if (verdict.kind === 'block') {
@@ -398,11 +415,43 @@ export class PiAgentBackend implements AgentBackend {
 
     if (verdict.kind === 'allow') return;
 
-    yield verdict.event;
+    let admissionState: 'pending' | 'settled' | undefined;
+    if (hostedInteraction) {
+      void verdict.parked.catch(() => undefined);
+      const settlement = verdict.settlement;
+      if (!settlement) {
+        throw new RuntimeInteractionInvariantError(
+          `Hosted Pi permission ${verdict.event.requestId} has no PermissionEngine settlement`,
+        );
+      }
+      try {
+        const admission = await hostedInteraction.admitPermissionRequest({
+          request: verdict.event,
+          ...(verdict.rememberScopeId ? { rememberScopeId: verdict.rememberScopeId } : {}),
+          settlement,
+        });
+        admissionState = admission.state;
+      } catch (error) {
+        this.input.permissionEngine.rejectRequest(
+          turnId,
+          verdict.event.requestId,
+          error instanceof Error
+            ? error
+            : new RuntimeInteractionInvariantError(
+                `Pi permission admission failed for ${verdict.event.requestId}`,
+              ),
+        );
+        await verdict.parked.catch(() => undefined);
+        throw error;
+      }
+    }
+
+    if (admissionState !== 'settled') yield verdict.event;
     let response: PermissionDecision;
     try {
       response = await verdict.parked;
     } catch (error) {
+      if (isInteractionControlError(error)) throw error;
       const content: ToolResultContent = {
         kind: 'text',
         text: redactBoundedText(error instanceof Error ? error.message : String(error)),
@@ -412,31 +461,42 @@ export class PiAgentBackend implements AgentBackend {
       return;
     }
 
-    const decisionMsg: PermissionDecisionMessage = {
-      type: 'permission_decision',
-      id: response.requestId,
-      turnId,
-      ts: this.now(),
-      toolUseId: frame.toolUseId,
-      toolName: frame.toolName,
-      decision: response.decision,
-      ...(response.rememberForTurn !== undefined
-        ? { rememberForTurn: response.rememberForTurn }
-        : {}),
-    };
-    await this.input.appendMessage(decisionMsg);
-    yield {
-      type: 'permission_decision_ack',
-      id: this.newId(),
-      turnId,
-      ts: this.now(),
-      requestId: response.requestId,
-      toolUseId: frame.toolUseId,
-      decision: response.decision,
-      ...(response.rememberForTurn !== undefined
-        ? { rememberForTurn: response.rememberForTurn }
-        : {}),
-    };
+    if (hostedInteraction) {
+      yield {
+        type: 'permission_answer_ack',
+        id: this.newId(),
+        turnId,
+        ts: this.now(),
+        requestId: response.requestId,
+        toolUseId: frame.toolUseId,
+      };
+    } else {
+      const decisionMsg: PermissionDecisionMessage = {
+        type: 'permission_decision',
+        id: response.requestId,
+        turnId,
+        ts: this.now(),
+        toolUseId: frame.toolUseId,
+        toolName: frame.toolName,
+        decision: response.decision,
+        ...(response.rememberForTurn !== undefined
+          ? { rememberForTurn: response.rememberForTurn }
+          : {}),
+      };
+      await this.input.appendMessage(decisionMsg);
+      yield {
+        type: 'permission_decision_ack',
+        id: this.newId(),
+        turnId,
+        ts: this.now(),
+        requestId: response.requestId,
+        toolUseId: frame.toolUseId,
+        decision: response.decision,
+        ...(response.rememberForTurn !== undefined
+          ? { rememberForTurn: response.rememberForTurn }
+          : {}),
+      };
+    }
 
     if (response.decision === 'deny') {
       this.suppressedToolUseIds.add(frame.toolUseId);
@@ -562,6 +622,15 @@ export class PiAgentBackend implements AgentBackend {
   }
 }
 
+function isInteractionControlError(error: unknown): boolean {
+  return (
+    error instanceof RuntimeInteractionAdmissionRejectedError ||
+    error instanceof RuntimeInteractionClosedError ||
+    error instanceof RuntimeInteractionInvariantError ||
+    error instanceof RuntimeInteractionFailStopError
+  );
+}
+
 function projectPiToolArgs(toolName: string, args: unknown, categoryHint?: ToolCategory): unknown {
   const projected =
     categoryHint === 'computer_use' || toolName === 'maka_computer'
@@ -685,9 +754,13 @@ function normalizeToolResultContent(content: unknown): ToolResultContent {
   }
 }
 
-function redactBoundedText(text: string, maxChars = 8192): string {
+const TRUNCATED_TEXT_MARKER = '\n[内容已截断]';
+
+function redactBoundedText(text: string, maxChars = TOOL_OUTPUT_DELTA_MAX_CHARS): string {
   const redacted = redactSecrets(text);
-  return redacted.length > maxChars ? `${redacted.slice(0, maxChars)}\n[内容已截断]` : redacted;
+  if (redacted.length <= maxChars) return redacted;
+  const marker = TRUNCATED_TEXT_MARKER.slice(0, maxChars);
+  return `${redacted.slice(0, maxChars - marker.length)}${marker}`;
 }
 
 function redactUnknown(value: unknown): unknown {

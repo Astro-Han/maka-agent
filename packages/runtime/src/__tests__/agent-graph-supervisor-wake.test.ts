@@ -57,7 +57,7 @@ describe('Agent Graph supervisor wake delivery', () => {
         attempt += 1;
         return { kind: 'suspended', turnId: input.turnId, reason: 'permission handoff' };
       },
-      inspectAttempt: async () => 'waiting_permission',
+      inspectAttempt: async () => 'waiting_for_user',
       newId: sequentialIds(),
     });
     try {
@@ -91,7 +91,7 @@ describe('Agent Graph supervisor wake delivery', () => {
           ? { kind: 'suspended', turnId: input.turnId, reason: 'permission handoff' }
           : { kind: 'completed', turnId: input.turnId };
       },
-      inspectAttempt: async () => 'waiting_permission',
+      inspectAttempt: async () => 'waiting_for_user',
       newId: sequentialIds(),
     });
     try {
@@ -138,7 +138,7 @@ describe('Agent Graph supervisor wake delivery', () => {
         }
         return { kind: 'completed', turnId: input.turnId };
       },
-      inspectAttempt: async () => 'waiting_permission',
+      inspectAttempt: async () => 'waiting_for_user',
       newId: sequentialIds(),
     });
     try {
@@ -237,7 +237,7 @@ describe('Agent Graph supervisor wake delivery', () => {
         delivered += 1;
         return { kind: 'completed', turnId: input.turnId };
       },
-      inspectAttempt: async () => 'waiting_permission',
+      inspectAttempt: async () => 'waiting_for_user',
       newId: sequentialIds(),
     });
     try {

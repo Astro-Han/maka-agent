@@ -16,6 +16,7 @@ import {
   projectRuntimeEventsToStoredMessages,
   projectRuntimeEventsToStoredMessagesWithArchiveStatuses,
 } from '../runtime-event-read-model.js';
+import { buildRuntimeEventModelReplayPlan } from '../model-history.js';
 import { materializeSession } from '../materializer.js';
 import { BackendRegistry, SessionManager, type SessionStore } from '../session-manager.js';
 
@@ -511,6 +512,104 @@ describe('projectRuntimeEventsToStoredMessages', () => {
     });
   });
 
+  test('replays generic provider tool results without Maka result decoding', () => {
+    const events = [
+      ev({
+        id: 'evt-generic-primitive-call',
+        role: 'model',
+        author: 'agent',
+        content: {
+          kind: 'function_call',
+          id: 'generic-primitive-1',
+          name: 'ProviderPrimitive',
+          args: {},
+        },
+      }),
+      ev({
+        id: 'evt-generic-primitive-result',
+        role: 'tool',
+        author: 'tool',
+        content: {
+          kind: 'function_response',
+          id: 'generic-primitive-1',
+          name: 'ProviderPrimitive',
+          result: 42 as never,
+        },
+      }),
+      ev({
+        id: 'evt-generic-json-call',
+        role: 'model',
+        author: 'agent',
+        content: {
+          kind: 'function_call',
+          id: 'generic-json-1',
+          name: 'ProviderJson',
+          args: {},
+        },
+      }),
+      ev({
+        id: 'evt-generic-json-result',
+        role: 'tool',
+        author: 'tool',
+        content: {
+          kind: 'function_response',
+          id: 'generic-json-1',
+          name: 'ProviderJson',
+          result: { providerPayload: true, values: [1, 2, 3] } as never,
+        },
+      }),
+      ev({
+        id: 'evt-generic-subagent-collision-call',
+        role: 'model',
+        author: 'agent',
+        content: {
+          kind: 'function_call',
+          id: 'generic-subagent-collision-1',
+          name: 'ProviderJson',
+          args: {},
+        },
+      }),
+      ev({
+        id: 'evt-generic-subagent-collision-result',
+        role: 'tool',
+        author: 'tool',
+        content: {
+          kind: 'function_response',
+          id: 'generic-subagent-collision-1',
+          name: 'ProviderJson',
+          result: {
+            kind: 'subagent',
+            status: 'waiting_permission',
+            providerPayload: true,
+          } as never,
+        },
+      }),
+    ];
+
+    const replay = buildRuntimeEventModelReplayPlan(events);
+
+    expect(replay.items.map((item) => item.kind)).toEqual([
+      'tool_call',
+      'tool_result',
+      'tool_call',
+      'tool_result',
+      'tool_call',
+      'tool_result',
+    ]);
+    expect(
+      replay.items.filter((item) => item.kind === 'tool_result').map((item) => item.output),
+    ).toEqual([
+      42,
+      { providerPayload: true, values: [1, 2, 3] },
+      {
+        kind: 'subagent',
+        status: 'waiting_permission',
+        providerPayload: true,
+      },
+    ]);
+    expect(replay.diagnostics).toEqual([]);
+  });
+
   test('restores a settled Agent Swarm function response', () => {
     const result = {
       kind: 'agent_swarm' as const,
@@ -776,6 +875,74 @@ describe('projectRuntimeEventsToStoredMessages', () => {
     expect(out.diagnostics).toEqual([]);
   });
 
+  test('question answer acknowledgements remain non-visible audit facts', () => {
+    const out = projectRuntimeEventsToStoredMessages(
+      [
+        ev({
+          id: 'question-1-answered',
+          role: 'system',
+          author: 'user',
+          actions: { userQuestionAnswerAccepted: { requestId: 'question-1' } },
+          refs: { toolCallId: 'tool-1' },
+        }),
+      ],
+      { runHeaders: [header] },
+    );
+
+    expect(out.messages).toEqual([]);
+    expect(out.diagnostics).toEqual([]);
+  });
+
+  test('terminal recovery bundle facts are accepted without creating legacy message rows', () => {
+    const out = projectRuntimeEventsToStoredMessages(
+      [
+        ev({
+          id: 'toolop-1-reconcile',
+          role: 'system',
+          author: 'system',
+          actions: {
+            toolRecovery: {
+              kind: 'maka.tool.reconcile_result',
+              version: 1,
+              payload: {
+                protocol: 'tool_reconcile_v1',
+                operationId: 'toolop-1',
+                observation: 'unreadable',
+                observationSchema: 'state_identity_v1',
+                observationDigest:
+                  'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              },
+            },
+          },
+          refs: { toolCallId: 'tool-1', operationId: 'toolop-1' },
+        }),
+        ev({
+          id: 'toolop-1-decision',
+          role: 'system',
+          author: 'system',
+          actions: {
+            toolRecovery: {
+              kind: 'maka.tool.recovery_decision',
+              version: 1,
+              payload: {
+                protocol: 'tool_recovery_v1',
+                operationId: 'toolop-1',
+                disposition: 'parked',
+                reasonCode: 'reconcile_unreadable',
+                evidenceEventIds: ['call-1', 'dispatch-1', 'toolop-1-reconcile'],
+              },
+            },
+          },
+          refs: { toolCallId: 'tool-1', operationId: 'toolop-1' },
+        }),
+      ],
+      { runHeaders: [header] },
+    );
+
+    expect(out.messages).toEqual([]);
+    expect(out.diagnostics).toEqual([]);
+  });
+
   test('continuation-start recovery facts are accepted without creating legacy message rows', () => {
     const out = projectRuntimeEventsToStoredMessages(
       [
@@ -812,7 +979,12 @@ describe('projectRuntimeEventsToStoredMessages', () => {
           ts: ts + 5,
           role: 'model',
           author: 'agent',
-          content: { kind: 'thinking', text: 'private reasoning', signature: 'sig-1' },
+          content: {
+            kind: 'thinking',
+            text: 'private reasoning',
+            signature: 'sig-1',
+            providerOptions: { maka: { kimiReasoningField: 'reasoning' } },
+          },
           refs: { storedMessageId: 'legacy-assistant' },
         }),
         ev({
@@ -834,7 +1006,11 @@ describe('projectRuntimeEventsToStoredMessages', () => {
         ts: ts + 6,
         text: 'visible answer',
         modelId: 'claude-sonnet-4-5',
-        thinking: { text: 'private reasoning', signature: 'sig-1' },
+        thinking: {
+          text: 'private reasoning',
+          signature: 'sig-1',
+          providerOptions: { maka: { kimiReasoningField: 'reasoning' } },
+        },
       },
     ];
 

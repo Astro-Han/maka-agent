@@ -34,6 +34,7 @@ interface ScriptedBackendCtor {
   events: SessionEvent[];
   /** Optional gate: send() awaits this after yielding each event. */
   gate?: () => Promise<void>;
+  stopFailure?: Error;
 }
 
 class ScriptedBackend implements AgentBackend {
@@ -47,12 +48,14 @@ class ScriptedBackend implements AgentBackend {
   yieldedEvents = 0;
   private readonly events: SessionEvent[];
   private readonly gate?: () => Promise<void>;
+  private readonly stopFailure?: Error;
 
   constructor(c: ScriptedBackendCtor) {
     this.kind = c.kind ?? 'ai-sdk';
     this.sessionId = c.sessionId ?? 'session-1';
     this.events = c.events;
     this.gate = c.gate;
+    this.stopFailure = c.stopFailure;
   }
 
   async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
@@ -67,6 +70,7 @@ class ScriptedBackend implements AgentBackend {
 
   async stop(reason: 'user_stop' | 'redirect'): Promise<void> {
     this.stopCalls.push(reason);
+    if (this.stopFailure) throw this.stopFailure;
   }
 
   async respondToPermission(decision: PermissionDecision): Promise<void> {
@@ -135,6 +139,25 @@ describe('AiSdkFlow seam', () => {
     // Structural: an AiSdkFlow is assignable to the AgentFlow contract.
     const _asFlow: import('../agent-flow.js').AgentFlow = flow;
     void _asFlow;
+  });
+
+  test('single-flights a pending backend stop and retries after it settles', async () => {
+    const stopFailure = new Error('backend stop failed');
+    const backend = new ScriptedBackend({ events: [], stopFailure });
+    const flow = new AiSdkFlow({ backend });
+
+    const results = await Promise.allSettled([flow.stop('user_stop'), flow.stop('redirect')]);
+
+    assert.deepEqual(
+      results.map((result) => result.status),
+      ['rejected', 'rejected'],
+    );
+    assert.equal(results[0]?.status === 'rejected' && results[0].reason, stopFailure);
+    assert.equal(results[1]?.status === 'rejected' && results[1].reason, stopFailure);
+    assert.deepEqual(backend.stopCalls, ['user_stop']);
+
+    await assert.rejects(flow.stop('redirect'), stopFailure);
+    assert.deepEqual(backend.stopCalls, ['user_stop', 'redirect']);
   });
 
   test('maps a normal turn preserving event order and terminal guarantee', async () => {
@@ -375,6 +398,51 @@ describe('AiSdkFlow seam', () => {
 
     // permission_handoff stopReason maps to completed (run streamed to a halt).
     assert.equal(out[2].status, 'completed');
+  });
+
+  test('maps hosted permission answer acknowledgement without decision fields', () => {
+    const mapped = mapSessionEventToRuntimeEvent(
+      ev({
+        type: 'permission_answer_ack',
+        requestId: 'req-hosted-1',
+        toolUseId: 'tool-hosted-1',
+      }),
+      ctx,
+    );
+
+    assert.deepEqual(mapped.actions, {
+      permissionAnswerAccepted: { requestId: 'req-hosted-1' },
+    });
+    assert.deepEqual(mapped.refs, { toolCallId: 'tool-hosted-1' });
+    const actions = mapped.actions;
+    assert.ok(actions);
+    assert.equal(Object.hasOwn(actions, 'permissionDecision'), false);
+    assert.ok(actions.permissionAnswerAccepted);
+    assert.equal(Object.hasOwn(actions.permissionAnswerAccepted, 'decision'), false);
+    assert.doesNotThrow(() => decodeRuntimeEvent(JSON.parse(JSON.stringify(mapped))));
+  });
+
+  test('maps hosted permission closure acknowledgement as a strict system action', () => {
+    const mapped = mapSessionEventToRuntimeEvent(
+      ev({
+        type: 'permission_closure_ack',
+        requestId: 'req-hosted-timeout-1',
+        toolUseId: 'tool-hosted-timeout-1',
+        reason: 'timed_out',
+      }),
+      ctx,
+    );
+
+    assert.equal(mapped.role, 'system');
+    assert.equal(mapped.author, 'system');
+    assert.deepEqual(mapped.actions, {
+      permissionClosureAccepted: {
+        requestId: 'req-hosted-timeout-1',
+        reason: 'timed_out',
+      },
+    });
+    assert.deepEqual(mapped.refs, { toolCallId: 'tool-hosted-timeout-1' });
+    assert.deepEqual(decodeRuntimeEvent(JSON.parse(JSON.stringify(mapped))), mapped);
   });
 
   test('maps additional permission requests without exposing raw tool args', () => {
@@ -1045,6 +1113,24 @@ describe('mapSessionEventToRuntimeEvent (pure)', () => {
         },
       ],
     });
+  });
+
+  test('user_question_answer_ack maps without duplicating the canonical answer', () => {
+    const mapped = mapSessionEventToRuntimeEvent(
+      ev({
+        type: 'user_question_answer_ack',
+        requestId: 'question-1',
+        toolUseId: 'tool-1',
+      }),
+      ctx,
+    );
+
+    assert.equal(mapped.role, 'system');
+    assert.equal(mapped.author, 'user');
+    assert.deepEqual(mapped.actions?.userQuestionAnswerAccepted, {
+      requestId: 'question-1',
+    });
+    assert.equal(mapped.refs?.toolCallId, 'tool-1');
   });
 
   test('tool_result without a prior tool_start still maps (name falls back to empty)', () => {

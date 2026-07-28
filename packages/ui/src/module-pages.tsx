@@ -60,7 +60,7 @@ export function SkillsPage(props: {
   onUpdateManagedSkill?(skillId: string, options?: { force?: boolean; expectedCurrentSha256?: string; expectedSourceSha256?: string }): boolean | Promise<boolean>;
   onSetSkillEnabled?(skillId: string, enabled: boolean): void | Promise<void>;
   onSetSkillPinned?(skillRef: string, pinned: boolean): void | Promise<void>;
-  onDeleteSkill?(skillId: string): void | Promise<void>;
+  onDeleteSkill?(skillRef: string): void | Promise<void>;
 }) {
   const copy = getSharedUiCopy(useUiLocale()).modules;
   const auditReport = deriveCapabilityAuditReport({
@@ -75,9 +75,10 @@ export function SkillsPage(props: {
 }
 
 export function AutomationsPage(props: {
-  skills?: SkillEntry[];
   hubHeader?: ModuleHubHeader;
   reminders?: PlanReminder[];
+  createRequestNonce?: number;
+  onCreateRequestHandled?: () => void;
   keepSystemAwake?: boolean;
   onKeepSystemAwakeChange?: (next: boolean) => Promise<void>;
   onRefresh?: () => void | Promise<void>;
@@ -90,14 +91,10 @@ export function AutomationsPage(props: {
   onDelete?: (id: string) => void | Promise<void>;
 }) {
   const copy = getSharedUiCopy(useUiLocale()).modules;
-  const auditReport = deriveCapabilityAuditReport({
-    skills: props.skills ?? [],
-    planReminders: props.reminders ?? [],
-  });
   return (
     <Suspense fallback={<ModulePageFallback label={props.hubHeader?.title ?? copy.automations} message={copy.loadingAutomations} />}>
       <main className="maka-main detailPane maka-module-main agents-chat-panel" aria-label={props.hubHeader?.title ?? copy.automations}>
-        <PlanReminderPanel {...props} reminders={props.reminders ?? []} auditReport={auditReport} />
+        <PlanReminderPanel {...props} reminders={props.reminders ?? []} />
       </main>
     </Suspense>
   );

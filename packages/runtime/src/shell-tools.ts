@@ -14,6 +14,7 @@ import type {
   SandboxEscalationPlannerContext,
 } from './sandbox-escalation.js';
 import type { SandboxType } from './sandbox/types.js';
+import { isLikelySandboxDenial } from './sandbox/detect.js';
 import { runShellWithBoundedTail, type BoundedShellResult } from './shell-exec.js';
 import { bashToolShellGuidance, defaultShellPlan, type ShellPlan } from './shell-detect.js';
 import { truncateToolOutput } from './tool-output.js';
@@ -184,6 +185,7 @@ export function buildManagedBashTool(
           env?: NodeJS.ProcessEnv;
           fdInputs?: readonly ChildFdInput[];
           sandboxType?: SandboxType;
+          onCompletion?: (outcome: { successful: boolean }) => void;
         }
       | undefined;
     planAdditionalPermissions?: (
@@ -263,24 +265,51 @@ export function buildManagedBashTool(
       : {}),
     impl: async ({ command, timeout_ms, run_in_background, pty }, ctx) => {
       const transformed = options.transformCommand?.({ command, pty: pty === true, ctx });
-      return shellRuns[run_in_background ? 'runBackgroundBash' : 'runForegroundBash']({
-        sessionId: ctx.sessionId,
-        ...(ctx.runId ? { sourceRunId: ctx.runId } : {}),
-        sourceTurnId: ctx.turnId,
-        sourceToolCallId: ctx.toolCallId,
-        cwd: transformed?.cwd ?? ctx.cwd,
-        command,
-        ...(pty !== undefined ? { pty } : {}),
-        ...(transformed?.argv ? { argv: transformed.argv } : { shell }),
-        ...(transformed?.env ? { env: transformed.env } : {}),
-        ...(transformed?.fdInputs ? { fdInputs: transformed.fdInputs } : {}),
-        ...(timeout_ms !== undefined ? { timeoutMs: timeout_ms } : {}),
-        abortSignal: ctx.abortSignal,
-        emitOutput: ctx.emitOutput,
-        ...(transformed?.sandboxType ? { sandboxType: transformed.sandboxType } : {}),
-        ...(ctx.permissionContext ? { permissionContext: ctx.permissionContext } : {}),
-      });
+      const onCompletion = onceCompletion(transformed?.onCompletion);
+      try {
+        const result = await shellRuns[
+          run_in_background ? 'runBackgroundBash' : 'runForegroundBash'
+        ]({
+          sessionId: ctx.sessionId,
+          ...(ctx.runId ? { sourceRunId: ctx.runId } : {}),
+          sourceTurnId: ctx.turnId,
+          sourceToolCallId: ctx.toolCallId,
+          cwd: transformed?.cwd ?? ctx.cwd,
+          command,
+          ...(pty !== undefined ? { pty } : {}),
+          ...(transformed?.argv ? { argv: transformed.argv } : { shell }),
+          ...(transformed?.env ? { env: transformed.env } : {}),
+          ...(transformed?.fdInputs ? { fdInputs: transformed.fdInputs } : {}),
+          ...(timeout_ms !== undefined ? { timeoutMs: timeout_ms } : {}),
+          abortSignal: ctx.abortSignal,
+          emitOutput: ctx.emitOutput,
+          ...(transformed?.sandboxType ? { sandboxType: transformed.sandboxType } : {}),
+          ...(onCompletion ? { onCompletion } : {}),
+          ...(ctx.permissionContext ? { permissionContext: ctx.permissionContext } : {}),
+        });
+        if (result.kind === 'terminal' || result.status !== 'running') {
+          onCompletion?.({
+            successful: result.status === 'completed' && result.exitCode === 0,
+          });
+        }
+        return result;
+      } catch (error) {
+        onCompletion?.({ successful: false });
+        throw error;
+      }
     },
+  };
+}
+
+function onceCompletion(
+  callback: ((outcome: { successful: boolean }) => void) | undefined,
+): ((outcome: { successful: boolean }) => void) | undefined {
+  if (!callback) return undefined;
+  let completed = false;
+  return (outcome) => {
+    if (completed) return;
+    completed = true;
+    callback(outcome);
   };
 }
 
@@ -382,7 +411,11 @@ export function shapeTerminalResult(input: {
       stderrTruncated: Boolean(input.result.stderrTruncated) || stderrView.truncated,
       redacted: stdout !== input.result.stdout || stderr !== input.result.stderr,
     },
-    ...(isLikelySandboxDenial(input.result)
+    ...(isLikelySandboxDenial({
+      stdout: input.result.stdout,
+      stderr: input.result.stderr,
+      sandboxed: 'sandboxed' in input.result && input.result.sandboxed === true,
+    })
       ? {
           sandboxDenial: {
             likely: true,
@@ -395,13 +428,6 @@ export function shapeTerminalResult(input: {
         }
       : {}),
   };
-}
-
-function isLikelySandboxDenial(result: ForegroundBashResult | BoundedShellResult): boolean {
-  if (!('sandboxed' in result) || result.sandboxed !== true) return false;
-  return /operation not permitted|sandbox-exec|sandbox(?:ed)?[^\n]*den(?:y|ied)/i.test(
-    `${result.stderr}\n${result.stdout}`,
-  );
 }
 
 function terminalStatus(

@@ -6,8 +6,9 @@ import type {
   MakaBridge,
   OnboardingSnapshot,
   PermissionActionResult,
-  QuickChatResult,
+  PermissionOverlayStartResult,
   RendererIngestInput,
+  AppUpdateStatus,
   WorkspaceInstructionsState,
 } from './bridge-contract.js';
 import type {
@@ -103,7 +104,7 @@ import type { BundledSkillCatalogEntry, ManagedSkillSourceEntry, ManagedSkillUpd
 import type { ConfigCategory } from '@maka/storage';
 import type { TestProxyInput } from '@maka/core/settings/network-settings';
 import type { Result } from '@maka/core/result';
-import type { CreateSessionInput } from '@maka/core';
+import type { CreateSessionRequestInput } from '@maka/core';
 import type {
   McpConfigFile,
   McpServerConfig,
@@ -113,7 +114,6 @@ import type {
 import type {
   AttachmentRef,
   OnboardingMilestoneId,
-  QuickChatMode,
   QuoteRef,
 } from '@maka/core';
 
@@ -177,7 +177,13 @@ const makaBridge = {
     list(filter?: SessionListFilter): Promise<SessionSummary[]> {
       return ipcRenderer.invoke('sessions:list', filter);
     },
-    create(input?: Partial<CreateSessionInput>): Promise<SessionSummary> {
+    /**
+     * The single session-creation channel (#1433). `mode` names a
+     * product intent — main derives the permission boundary, name and
+     * labels it implies (`create-session-input.ts`); the renderer cannot
+     * reach a boundary like `explore` by asking for it directly.
+     */
+    create(input?: CreateSessionRequestInput): Promise<SessionSummary> {
       return ipcRenderer.invoke('sessions:create', input);
     },
     async send(
@@ -438,18 +444,6 @@ const makaBridge = {
       return ipcRenderer.invoke('onboarding:clearMilestone', id);
     },
   },
-  quickChat: {
-    /**
-     * PR110b: Quick Chat entry. Input is intentionally minimal —
-     * `{ prompt?: string }`. The main process always uses the
-     * derived ready default and never accepts user-supplied
-     * connection/model overrides at this stage (PR110c/d will add
-     * model picker UI).
-     */
-    start(input?: { prompt?: string; mode?: QuickChatMode; skillIds?: string[] }): Promise<QuickChatResult> {
-      return ipcRenderer.invoke('quickChat:start', input);
-    },
-  },
   expertTeam: {
     list(): Promise<{ teams: ExpertTeamSummary[] }> {
       return ipcRenderer.invoke('expertTeam:list');
@@ -467,6 +461,9 @@ const makaBridge = {
     },
     requestAccess(permId: string): Promise<PermissionActionResult> {
       return ipcRenderer.invoke('permissions:requestAccess', permId);
+    },
+    startDragOnboarding(permId: string): Promise<PermissionOverlayStartResult> {
+      return ipcRenderer.invoke('permissions:startDragOnboarding', permId);
     },
   },
   capabilities: {
@@ -659,6 +656,39 @@ const makaBridge = {
     },
     logout(): Promise<SubscriptionActionResult> {
       return ipcRenderer.invoke('openai-codex:logout');
+    },
+  },
+  xaiOAuth: {
+    getAuthUrl(): Promise<AuthorizationUrlPayload | SubscriptionActionResult> {
+      return ipcRenderer.invoke('xai-oauth:get-auth-url');
+    },
+    openAuthUrl(authRequestId: string): Promise<SubscriptionActionResult> {
+      return ipcRenderer.invoke('xai-oauth:open-auth-url', authRequestId);
+    },
+    completeAuthorization(authRequestId: string): Promise<SubscriptionActionResult> {
+      return ipcRenderer.invoke('xai-oauth:complete-authorization', authRequestId);
+    },
+    cancelAuthorization(authRequestId?: string): Promise<{ ok: true }> {
+      return ipcRenderer.invoke('xai-oauth:cancel-authorization', authRequestId);
+    },
+    getAccountState(): Promise<{
+      provider: 'xai-oauth';
+      runtimeState:
+        | 'not_logged_in'
+        | 'authorizing'
+        | 'authenticated'
+        | 'refreshing'
+        | 'refresh_failed'
+        | 'storage_failed';
+      errorMessage?: string;
+    }> {
+      return ipcRenderer.invoke('xai-oauth:get-account-state');
+    },
+    refreshTokens(): Promise<SubscriptionActionResult> {
+      return ipcRenderer.invoke('xai-oauth:refresh-tokens');
+    },
+    logout(): Promise<SubscriptionActionResult> {
+      return ipcRenderer.invoke('xai-oauth:logout');
     },
   },
   githubCopilotSubscription: {
@@ -984,6 +1014,26 @@ const makaBridge = {
     }> {
       return ipcRenderer.invoke('app:info');
     },
+    subscribeUpdateStatus(handler: (status: AppUpdateStatus) => void): () => void {
+      const listener = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus) => handler(status);
+      ipcRenderer.on('app:updateStatusChanged', listener);
+      return () => ipcRenderer.off('app:updateStatusChanged', listener);
+    },
+    updateStatus(): Promise<AppUpdateStatus> {
+      return ipcRenderer.invoke('app:updateStatus');
+    },
+    checkForUpdates(): Promise<AppUpdateStatus> {
+      return ipcRenderer.invoke('app:checkForUpdates');
+    },
+    downloadUpdate(): Promise<AppUpdateStatus> {
+      return ipcRenderer.invoke('app:downloadUpdate');
+    },
+    installUpdate(): Promise<{ ok: true } | { ok: false; reason: 'not_downloaded' | 'install_failed' }> {
+      return ipcRenderer.invoke('app:installUpdate');
+    },
+    openUpdateDownload(): Promise<{ ok: true } | { ok: false; reason: 'not_available' | 'open_failed' }> {
+      return ipcRenderer.invoke('app:openUpdateDownload');
+    },
     sessionProjectInfo(sessionId: string): Promise<{
       projectPath: string;
       projectGit: { isGitRepo: boolean; branch?: string };
@@ -1101,7 +1151,6 @@ const makaBridge = {
         llmConnectionSlug?: string;
         model?: string;
         collaborationMode?: 'agent' | 'plan';
-        mode?: QuickChatMode;
       },
     ): Promise<import('@maka/runtime').InvocableSkillEntry[]> {
       return ipcRenderer.invoke('skills:listInvocable', sessionId, newSessionContext);
@@ -1170,11 +1219,11 @@ const makaBridge = {
     > {
       return ipcRenderer.invoke('skills:createStarter');
     },
-    delete(id: string): Promise<
+    delete(idOrRef: string): Promise<
       | { ok: true }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'delete_failed' }
+      | { ok: false; reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed' }
     > {
-      return ipcRenderer.invoke('skills:delete', id);
+      return ipcRenderer.invoke('skills:delete', idOrRef);
     },
     open(id: string, target: 'file' | 'directory' = 'file'): Promise<
       | { ok: true; target: 'file' | 'directory' }

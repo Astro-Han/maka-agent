@@ -87,6 +87,73 @@ describe('fixed prompt controller', () => {
     });
   });
 
+  test('rejects an execution identity with the wrong Agent tool policy', async () => {
+    await withDir(async (dir) => {
+      const systemPromptPath = join(dir, 'system_prompt.md');
+      await writeFile(systemPromptPath, 'fixed prompt\n', 'utf8');
+      const agentConfig: Config = { ...config, agentTools: true };
+      const output = harborOutput({
+        taskId: 'task-a',
+        executionIdentity: {
+          llmConnectionSlug: 'fake',
+          model: 'fake-model',
+          systemPromptHash: hashSystemPrompt('fixed prompt\n'),
+          pricingProfile: 'test-profile',
+          agentTools: false,
+        },
+      });
+
+      const result = await runFixedPromptController({
+        runId: 'run-1',
+        roundId: 'round-1',
+        config: agentConfig,
+        systemPromptPath,
+        resultsJsonlPath: join(dir, 'results.jsonl'),
+        resultsTsvPath: join(dir, 'results.tsv'),
+        tasks: [{ id: 'task-a', path: '/bench/task-a' }],
+        requireExecutionIdentity: true,
+        expectedPricingProfile: 'test-profile',
+        taskRunner: async () => output,
+      });
+
+      assert.equal(result.events[0]?.type, 'task_plumbing_failed');
+      assert.equal(result.events[0]?.errorClass, 'execution_identity_mismatch');
+    });
+  });
+
+  test('rejects an execution identity missing the Agent tool policy', async () => {
+    await withDir(async (dir) => {
+      const systemPromptPath = join(dir, 'system_prompt.md');
+      await writeFile(systemPromptPath, 'fixed prompt\n', 'utf8');
+      const output = harborOutput({
+        taskId: 'task-a',
+        legacyExecutionIdentity: true,
+        executionIdentity: {
+          llmConnectionSlug: 'fake',
+          model: 'fake-model',
+          systemPromptHash: hashSystemPrompt('fixed prompt\n'),
+          pricingProfile: 'test-profile',
+        },
+      });
+
+      const result = await runFixedPromptController({
+        runId: 'run-1',
+        roundId: 'round-1',
+        config,
+        systemPromptPath,
+        resultsJsonlPath: join(dir, 'results.jsonl'),
+        resultsTsvPath: join(dir, 'results.tsv'),
+        tasks: [{ id: 'task-a', path: '/bench/task-a' }],
+        requireExecutionIdentity: true,
+        expectedPricingProfile: 'test-profile',
+        taskRunner: async () => output,
+      });
+
+      assert.equal(result.events[0]?.type, 'task_plumbing_failed');
+      assert.equal(result.events[0]?.errorClass, 'execution_identity_mismatch');
+    });
+  });
+
   test('resumes from completed task events in the WAL', async () => {
     await withDir(async (dir) => {
       const systemPromptPath = join(dir, 'system_prompt.md');
@@ -1058,6 +1125,7 @@ describe('fixed prompt controller', () => {
         model: 'fake-model',
         systemPromptHash: hashSystemPrompt('fixed prompt\n'),
         pricingProfile: 'test-profile',
+        agentTools: false,
       };
       const result = await runFixedPromptController({
         runId: 'run-1',
@@ -2076,6 +2144,14 @@ describe('fixed prompt controller', () => {
     await withDir(async (dir) => {
       const systemPromptPath = join(dir, 'system_prompt.md');
       await writeFile(systemPromptPath, 'fixed prompt\n', 'utf8');
+      const rawOutput = harborOutput({
+        taskId: 'task-a',
+        reward: 0,
+        status: 'failed',
+        errorClass: 'aborted',
+        deadlineSettlement: { source: 'benchmark.deadline', mode: 'immediate' },
+      });
+      let taskRuns = 0;
 
       const result = await runFixedPromptController({
         runId: 'run-1',
@@ -2085,22 +2161,21 @@ describe('fixed prompt controller', () => {
         resultsJsonlPath: join(dir, 'results.jsonl'),
         resultsTsvPath: join(dir, 'results.tsv'),
         tasks: [{ id: 'task-a', path: '/bench/task-a' }],
-        taskRunner: async () =>
-          harborOutput({
-            taskId: 'task-a',
-            reward: 0,
-            status: 'failed',
-            errorClass: 'aborted',
-            deadlineSettlement: { source: 'benchmark.deadline', mode: 'immediate' },
-          }),
+        taskRunner: async () => {
+          taskRuns += 1;
+          return rawOutput;
+        },
         now: () => 100,
         newId: idFactory(),
       });
 
+      assert.equal(taskRuns, 1);
+      assert.equal(rawOutput.cell.errorClass, 'aborted');
       assert.equal(result.events[0]?.type, 'task_completed');
       assert.equal(result.events[0]?.passed, false);
       assert.equal(result.events[0]?.scored, true);
       assert.equal(result.events[0]?.eligible, true);
+      assert.equal(result.events[0]?.errorClass, 'budget_exhausted');
     });
   });
 
@@ -2777,6 +2852,7 @@ function harborOutput(input: {
   errorClass?: string;
   status?: TaskRunOutput['cell']['status'];
   executionIdentity?: TaskRunOutput['cell']['executionIdentity'];
+  legacyExecutionIdentity?: boolean;
   deadlineSettlement?: TaskRunOutput['cell']['deadlineSettlement'];
   verifier?: TaskRunOutput['harbor']['verifier'];
   providerTelemetryPath?: string;
@@ -2794,7 +2870,13 @@ function harborOutput(input: {
       ...(input.omitPromptHash
         ? {}
         : { promptHash: input.promptHash ?? hashSystemPrompt('fixed prompt\n') }),
-      ...(input.executionIdentity ? { executionIdentity: input.executionIdentity } : {}),
+      ...(input.executionIdentity
+        ? {
+            executionIdentity: input.legacyExecutionIdentity
+              ? input.executionIdentity
+              : { agentTools: false, ...input.executionIdentity },
+          }
+        : {}),
       ...(input.deadlineSettlement ? { deadlineSettlement: input.deadlineSettlement } : {}),
       ...(input.omitTokenSummary
         ? {}

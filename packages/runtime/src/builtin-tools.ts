@@ -7,9 +7,18 @@
 
 import { z } from 'zod';
 import { jsonSchema, zodSchema } from 'ai';
-import { realpathSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  futimesSync,
+  lstatSync,
+  openSync,
+  realpathSync,
+  unlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import {
   applyAdditionalPermissionProfile,
   compilePermissionProfile,
@@ -46,6 +55,7 @@ export type { MakaTool, MakaToolContext };
 import { withFileWriteLock } from './file-write-lock.js';
 import type { SandboxManager } from './sandbox/sandbox-manager.js';
 import { SandboxCommandError } from './sandbox/errors.js';
+import { isLikelySandboxDenial } from './sandbox/detect.js';
 import { linuxExecutableRoots } from './sandbox/linux-sandbox.js';
 import type { SandboxPlatform, SandboxType } from './sandbox/types.js';
 import type { ChildFdInput } from './child-fd-input.js';
@@ -55,6 +65,7 @@ import {
   normalizeAdditionalPermissionPath,
   planDeclaredBashAdditionalPermission,
   planFileToolAdditionalPermission,
+  type AdditionalPermissionGrant,
   type AdditionalPermissionPlannerContext,
   type AdditionalPermissionPlanResult,
 } from './additional-permissions.js';
@@ -88,6 +99,8 @@ export interface BuildBuiltinToolsOptions {
   filesystemWorker?: Pick<FilesystemWorkerClient, 'execute'>;
   /** Enable inferred one-call path expansion for filesystem tools. */
   enableFileToolAdditionalPermissions?: boolean;
+  /** Host-surface gate for Edit. Defaults to enabled. */
+  includeEdit?: boolean;
   /** Test/embedding override. Production callers use the current process platform. */
   sandboxPlatform?: SandboxPlatform;
   snapshotImage?: (input: {
@@ -176,11 +189,21 @@ export function buildBuiltinTools(options: BuildBuiltinToolsOptions = {}): MakaT
     : fileReadParameters;
   const shell = options.shell ?? defaultShellPlan();
   const sandboxPlatform = options.sandboxPlatform ?? process.platform;
-  if (options.enableBashAdditionalPermissions && sandboxPlatform !== 'darwin') {
-    throw new Error('Bash additional permissions are currently supported only on macOS.');
+  if (
+    options.enableBashAdditionalPermissions &&
+    sandboxPlatform !== 'darwin' &&
+    sandboxPlatform !== 'linux'
+  ) {
+    throw new Error('Bash additional permissions are currently supported only on macOS and Linux.');
   }
-  if (options.enableFileToolAdditionalPermissions && sandboxPlatform !== 'darwin') {
-    throw new Error('File tool additional permissions are currently supported only on macOS.');
+  if (
+    options.enableFileToolAdditionalPermissions &&
+    sandboxPlatform !== 'darwin' &&
+    sandboxPlatform !== 'linux'
+  ) {
+    throw new Error(
+      'File tool additional permissions are currently supported only on macOS and Linux.',
+    );
   }
   const bashAdditionalPermissionPlanner =
     options.sandboxManager && options.enableBashAdditionalPermissions
@@ -246,7 +269,7 @@ export function buildBuiltinTools(options: BuildBuiltinToolsOptions = {}): MakaT
     ...(options.backgroundTasks ? [buildStopBackgroundTaskTool(options.backgroundTasks)] : []),
     ...(options.ptyControls ? [buildWriteStdinTool(options.ptyControls)] : []),
   ];
-  return [
+  const tools: MakaTool[] = [
     ...bashTools,
     ...backgroundTools,
     ...(options.archiveResources ? [buildArchiveReadTool(options.archiveResources)] : []),
@@ -669,6 +692,7 @@ export function buildBuiltinTools(options: BuildBuiltinToolsOptions = {}): MakaT
       },
     },
   ];
+  return tools.filter((tool) => options.includeEdit !== false || tool.name !== 'Edit');
 }
 
 interface ExecutorBashSandboxOptions {
@@ -748,35 +772,41 @@ function buildExecutorBashTool(
             ctx,
           )
         : undefined;
-      const result = await executor.exec({
-        command,
-        cwd: transformed?.cwd ?? cwd,
-        ...(transformed?.argv ? { argv: transformed.argv } : {}),
-        ...(transformed?.env ? { env: transformed.env } : {}),
-        ...(transformed?.fdInputs ? { fdInputs: transformed.fdInputs } : {}),
-        timeoutMs: timeout,
-        ...(abortSignal ? { abortSignal } : {}),
-        emitOutput,
-        shell,
-      });
-      const executionResult = {
-        ...result,
-        ...(transformed?.sandboxType ? { sandboxType: transformed.sandboxType } : {}),
-        ...(transformed?.profileName ? { profileName: transformed.profileName } : {}),
-        sandboxed:
-          transformed?.sandboxType === 'macos-seatbelt' || transformed?.sandboxType === 'linux',
-      };
-      if (executionResult.timedOut)
-        throw terminalError(`Command timed out after ${timeout}ms`, executionResult, 124);
-      if (executionResult.aborted) throw terminalError('Command aborted', executionResult, 130);
-      if (executionResult.exitCode !== 0) {
-        throw terminalError(
-          `Command failed with exit code ${executionResult.exitCode}`,
-          executionResult,
-          executionResult.exitCode,
-        );
+      let successful = false;
+      try {
+        const result = await executor.exec({
+          command,
+          cwd: transformed?.cwd ?? cwd,
+          ...(transformed?.argv ? { argv: transformed.argv } : {}),
+          ...(transformed?.env ? { env: transformed.env } : {}),
+          ...(transformed?.fdInputs ? { fdInputs: transformed.fdInputs } : {}),
+          timeoutMs: timeout,
+          ...(abortSignal ? { abortSignal } : {}),
+          emitOutput,
+          shell,
+        });
+        const executionResult = {
+          ...result,
+          ...(transformed?.sandboxType ? { sandboxType: transformed.sandboxType } : {}),
+          ...(transformed?.profileName ? { profileName: transformed.profileName } : {}),
+          sandboxed:
+            transformed?.sandboxType === 'macos-seatbelt' || transformed?.sandboxType === 'linux',
+        };
+        if (executionResult.timedOut)
+          throw terminalError(`Command timed out after ${timeout}ms`, executionResult, 124);
+        if (executionResult.aborted) throw terminalError('Command aborted', executionResult, 130);
+        if (executionResult.exitCode !== 0) {
+          throw terminalError(
+            `Command failed with exit code ${executionResult.exitCode}`,
+            executionResult,
+            executionResult.exitCode,
+          );
+        }
+        successful = true;
+        return shapeTerminalResult({ cwd, command, result: executionResult });
+      } finally {
+        transformed?.onCompletion?.({ successful });
       }
-      return shapeTerminalResult({ cwd, command, result: executionResult });
     },
   };
 }
@@ -816,6 +846,7 @@ function sandboxCommand(
       fdInputs?: readonly ChildFdInput[];
       sandboxType?: SandboxType;
       profileName?: string;
+      onCompletion?: (outcome: { successful: boolean }) => void;
     }
   | undefined {
   const cwd = canonicalExistingPath(ctx.cwd);
@@ -867,37 +898,70 @@ function sandboxCommand(
     return undefined;
   }
 
-  const result = manager.transform({
-    platform,
-    command: {
-      program: '/bin/sh',
-      args: ['-c', command],
-      cwd,
-      env,
-      profile: effective.profile,
-      pathContext: {
-        workspaceRoots: effective.workspaceRoots,
-        tmpdir: tmpdir(),
-        slashTmp: '/tmp',
-        ...(platform === 'darwin'
-          ? {
-              executableRoots: macosRuntimeExecutableRoots(process.execPath),
-            }
-          : {}),
-        ...(platform === 'linux'
-          ? {
-              minimalRoots: linuxExecutableRoots({
-                execPath: process.execPath,
-                path: env.PATH,
-              }),
-            }
-          : {}),
+  let preparedTargets: readonly PreparedExactWriteTarget[] = [];
+  try {
+    preparedTargets = prepareLinuxBashExactWriteTargets(platform, additionalGrant);
+  } catch {
+    throw new SandboxCommandError({
+      domain,
+      stage: 'validation',
+      reason: 'exact_write_target_changed',
+      backend: 'linux',
+      recoverable: false,
+      profileName: effective.profile.name ?? effective.profile.type,
+      message: 'An approved exact write target could not be prepared safely.',
+    });
+  }
+  const onCompletion = preparedExactWriteCompletion(preparedTargets);
+
+  let result: ReturnType<SandboxManager['transform']>;
+  try {
+    result = manager.transform({
+      platform,
+      command: {
+        program: '/bin/sh',
+        args: ['-c', command],
+        cwd,
+        env,
+        profile: effective.profile,
+        pathContext: {
+          workspaceRoots: effective.workspaceRoots,
+          tmpdir: tmpdir(),
+          slashTmp: '/tmp',
+          ...(platform === 'darwin'
+            ? {
+                executableRoots: macosRuntimeExecutableRoots(process.execPath),
+              }
+            : {}),
+          ...(platform === 'linux'
+            ? {
+                minimalRoots: linuxExecutableRoots({
+                  execPath: process.execPath,
+                  path: env.PATH,
+                }),
+                ...(preparedTargets.length > 0
+                  ? {
+                      pinnedWritableFiles: preparedTargets.map((target) => ({
+                        path: target.path,
+                        fd: target.childFd,
+                        sourceFd: target.sourceFd,
+                        releaseSource: target.releaseSource,
+                      })),
+                    }
+                  : {}),
+              }
+            : {}),
+        },
       },
-    },
-    ...(additionalGrant ? { additionalPermissions: additionalGrant.profile } : {}),
-    ...(escalationGrant ? { preference: 'forbid' as const } : {}),
-  });
+      ...(additionalGrant ? { additionalPermissions: additionalGrant.profile } : {}),
+      ...(escalationGrant ? { preference: 'forbid' as const } : {}),
+    });
+  } catch (error) {
+    onCompletion?.({ successful: false });
+    throw error;
+  }
   if (!result.ok) {
+    onCompletion?.({ successful: false });
     throw new SandboxCommandError({
       domain,
       stage: 'transform',
@@ -915,7 +979,138 @@ function sandboxCommand(
     ...(result.exec.fdInputs ? { fdInputs: result.exec.fdInputs } : {}),
     sandboxType: result.exec.sandboxType,
     profileName: result.exec.effectiveProfile.name ?? result.exec.effectiveProfile.type,
+    ...(onCompletion ? { onCompletion } : {}),
   };
+}
+
+interface PreparedExactWriteTarget {
+  readonly path: string;
+  readonly sourceFd: number;
+  readonly releaseSource: () => void;
+  readonly childFd: number;
+  readonly device: bigint;
+  readonly inode: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+function prepareLinuxBashExactWriteTargets(
+  platform: SandboxPlatform,
+  grant: AdditionalPermissionGrant | undefined,
+): readonly PreparedExactWriteTarget[] {
+  if (platform !== 'linux' || !grant) return [];
+  const exactWrites = new Set(
+    grant.profile.fileSystem?.entries
+      .filter((entry) => entry.access === 'write' && entry.scope === 'exact')
+      .map((entry) => entry.path) ?? [],
+  );
+  const prepared: PreparedExactWriteTarget[] = [];
+  try {
+    for (const target of grant.normalizedPaths) {
+      if (
+        target.access !== 'write' ||
+        target.scope !== 'exact' ||
+        target.targetType !== 'missing' ||
+        !exactWrites.has(target.enforcementPath)
+      ) {
+        continue;
+      }
+      const fd = openMissingExactWriteTarget(target.enforcementPath);
+      let sourceOpen = true;
+      const releaseSource = () => {
+        if (!sourceOpen) return;
+        sourceOpen = false;
+        closeSync(fd);
+      };
+      try {
+        // A deliberately old marker distinguishes a successful no-op from an
+        // intentional empty write, which updates mtime/ctime even at size zero.
+        futimesSync(fd, 1, 1);
+        const metadata = fstatSync(fd, { bigint: true });
+        prepared.push({
+          path: target.enforcementPath,
+          sourceFd: fd,
+          releaseSource,
+          childFd: 4 + prepared.length,
+          device: metadata.dev,
+          inode: metadata.ino,
+          mtimeNs: metadata.mtimeNs,
+          ctimeNs: metadata.ctimeNs,
+        });
+      } catch (error) {
+        releaseSource();
+        throw error;
+      }
+    }
+    return prepared;
+  } catch (error) {
+    completePreparedExactWriteTargets(prepared);
+    throw error;
+  }
+}
+
+/** @internal Exported for the Linux parent-swap regression test. */
+export function openMissingExactWriteTarget(path: string, afterParentPinned?: () => void): number {
+  const parent = dirname(path);
+  if (realpathSync(parent) !== parent) throw new Error('Exact write target parent changed.');
+
+  const createFlags =
+    constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0);
+  if (process.platform !== 'linux') return openSync(path, createFlags, 0o666);
+
+  const linuxConstants = constants as typeof constants & { O_PATH?: number };
+  const parentFlags =
+    (linuxConstants.O_PATH ?? constants.O_RDONLY) |
+    (constants.O_DIRECTORY ?? 0) |
+    (constants.O_NOFOLLOW ?? 0);
+  const parentFd = openSync(parent, parentFlags);
+  try {
+    const pinnedParent = `/proc/self/fd/${parentFd}`;
+    afterParentPinned?.();
+    if (realpathSync(pinnedParent) !== parent) {
+      throw new Error('Exact write target parent changed after pinning.');
+    }
+    return openSync(`${pinnedParent}/${basename(path)}`, createFlags, 0o666);
+  } finally {
+    closeSync(parentFd);
+  }
+}
+
+function preparedExactWriteCompletion(
+  targets: readonly PreparedExactWriteTarget[],
+): ((outcome: { successful: boolean }) => void) | undefined {
+  if (targets.length === 0) return undefined;
+  let completed = false;
+  return () => {
+    if (completed) return;
+    completed = true;
+    completePreparedExactWriteTargets(targets);
+  };
+}
+
+function completePreparedExactWriteTargets(targets: readonly PreparedExactWriteTarget[]): void {
+  for (const target of targets) {
+    try {
+      target.releaseSource();
+    } catch {
+      // Launch cleanup is best effort; the close-once owner prevents fd-number reuse bugs.
+    }
+    try {
+      const metadata = lstatSync(target.path, { bigint: true });
+      const untouched = metadata.mtimeNs === target.mtimeNs && metadata.ctimeNs === target.ctimeNs;
+      if (
+        metadata.isFile() &&
+        metadata.dev === target.device &&
+        metadata.ino === target.inode &&
+        metadata.size === 0n &&
+        untouched
+      ) {
+        unlinkSync(target.path);
+      }
+    } catch {
+      // The target was already removed or changed; never delete an unverified replacement.
+    }
+  }
 }
 
 function profileRequiresSandbox(profile: PermissionProfile): boolean {
@@ -1061,7 +1256,11 @@ function terminalError(
   },
   code: number,
 ): Error {
-  const sandboxDenied = isLikelySandboxDenial(result);
+  const sandboxDenied = isLikelySandboxDenial({
+    stdout: result.stdout,
+    stderr: result.stderr,
+    sandboxed: result.sandboxed === true,
+  });
   const error = sandboxDenied
     ? new SandboxCommandError({
         domain: 'command',
@@ -1084,15 +1283,6 @@ function terminalError(
     ...(sandboxDenied ? { reason: 'sandbox_denial', recoverable: true } : {}),
   });
   return error;
-}
-
-function isLikelySandboxDenial(
-  result: Pick<WorkspaceExecResult, 'stdout' | 'stderr'> & { sandboxed?: boolean },
-): boolean {
-  if (result.sandboxed !== true) return false;
-  return /operation not permitted|sandbox-exec|sandbox(?:ed)?[^\n]*den(?:y|ied)/i.test(
-    `${result.stderr}\n${result.stdout}`,
-  );
 }
 
 function assertRelativeGlobPattern(pattern: string): void {

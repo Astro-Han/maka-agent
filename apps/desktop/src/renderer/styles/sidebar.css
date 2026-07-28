@@ -11,15 +11,6 @@
   contain: layout paint style;
 }
 
-.maka-session-panel[data-collapsed="true"] {
-  /* Collapsed rail hides the session-list heading (display: none below). A
-     display:none item does NOT participate in grid layout, so reserving a
-     5th row for it drops the footer into the minmax(0, 1fr) track. Keep the
-     4-row layout matching the four participating children
-     (header / nav / list / footer). */
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
-
 .maka-session-panel-header {
   display: grid;
   gap: var(--space-1);
@@ -36,25 +27,6 @@
   );
   box-sizing: border-box;
   -webkit-app-region: drag;
-}
-
-.maka-session-panel[data-collapsed="true"] .maka-session-panel-footer {
-  justify-items: center;
-  padding-inline: var(--space-2);
-}
-
-.maka-session-panel[data-collapsed="true"] .maka-sidebar-settings-button > span {
-  display: none;
-}
-
-.maka-session-panel[data-collapsed="true"] .maka-session-list {
-  border-top: 0;
-}
-.maka-session-panel[data-collapsed="true"] .maka-list-stack,
-.maka-session-panel[data-collapsed="true"] .maka-empty-state {
-  /* Justified: collapsed mode must suppress the shared list / empty-state
-     layout regardless of the primitive's own display utilities. */
-  display: none !important;
 }
 
 .maka-session-list {
@@ -82,7 +54,9 @@
 }
 
 .maka-session-panel-footer {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1-5);
   align-items: center;
   padding: var(--space-2) var(--space-2) var(--space-2);
   border-top: 0;
@@ -97,6 +71,66 @@
      icon axis and 16px chrome size (icon-system contract). */
   grid-template-columns: var(--icon-size) minmax(0, 1fr);
   align-items: center;
+}
+
+.maka-sidebar-update-button {
+  position: relative;
+  min-width: 0;
+  height: 34px;
+  display: inline-grid;
+  grid-template-columns: auto;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-3);
+  background: var(--control);
+  color: var(--control-foreground);
+  font-size: var(--font-size-ui);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--leading-none);
+  box-shadow: none;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+  transition:
+    background-color var(--duration-base) var(--ease-out-strong),
+    transform var(--duration-quick) var(--ease-out-strong);
+}
+
+.maka-sidebar-update-button > span:not(.maka-sidebar-update-progress) {
+  position: relative;
+}
+
+.maka-sidebar-update-button[data-update-state="downloading"] {
+  cursor: default;
+  background: oklch(from var(--control) calc(l + 0.04) calc(c * 0.68) h);
+  opacity: 1;
+}
+
+.maka-sidebar-update-button[data-update-state="downloaded"] {
+  background: var(--control);
+}
+
+.maka-sidebar-update-progress {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(var(--maka-update-progress, 0));
+  transform-origin: left center;
+  background: oklch(from var(--control) calc(l - 0.08) c h);
+  transition: transform var(--duration-base) var(--ease-out-strong);
+}
+
+.maka-sidebar-update-button:hover {
+  background: oklch(from var(--control) calc(l - 0.04) c h);
+}
+
+.maka-sidebar-update-button:disabled:hover {
+  background: oklch(from var(--control) calc(l + 0.04) calc(c * 0.68) h);
+}
+
+.maka-sidebar-update-button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* Color intentionally not declared: nav glyphs are tinted by the
@@ -152,25 +186,6 @@
   padding: 0 var(--space-1);
   font-size: var(--font-size-caption);
   font-variant-numeric: tabular-nums;
-}
-
-.maka-session-panel[data-collapsed="true"] .maka-sidebar-modules {
-  padding: var(--space-1) var(--space-1);
-}
-
-.maka-session-panel[data-collapsed="true"] .maka-nav-row {
-  grid-template-columns: 1fr;
-  padding: var(--space-1-5) 0;
-  place-items: center;
-}
-
-.maka-session-panel[data-collapsed="true"] .maka-nav-row span:nth-child(2),
-.maka-session-panel[data-collapsed="true"] .maka-nav-row small {
-  display: none;
-}
-
-.maka-session-panel[data-collapsed="true"] .maka-session-list-toolbar {
-  display: none;
 }
 
 .maka-list-stack {

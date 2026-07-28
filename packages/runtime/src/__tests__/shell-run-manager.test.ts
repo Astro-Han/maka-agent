@@ -168,6 +168,82 @@ describe('ShellRunProcessManager', () => {
     );
   });
 
+  test('notifies resource owners when foreground and background commands reach terminal state', async () => {
+    const store = createShellRunStore(await workspace());
+    const manager = createManager(store);
+    const completions: boolean[] = [];
+    await manager.runForegroundBash(
+      shellInput({
+        cwd: await workspace(),
+        command: 'foreground completion',
+        argv: [process.execPath, '-e', 'process.exit(0)'],
+        onCompletion: (outcome) => completions.push(outcome.successful),
+      }),
+    );
+    await manager.runBackgroundBash(
+      shellInput({
+        cwd: await workspace(),
+        command: 'background completion',
+        argv: [process.execPath, '-e', 'process.exit(7)'],
+        onCompletion: (outcome) => completions.push(outcome.successful),
+      }),
+    );
+
+    await waitUntil(async () => {
+      try {
+        return (await store.readShellRun('session-1', 'shell-run-2')).status === 'failed';
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }
+    });
+    await waitUntil(() => completions.length === 2);
+    assert.deepEqual(completions, [true, false]);
+  });
+
+  test('notifies resource owners exactly once when startup fails before admission', async () => {
+    const completions: boolean[] = [];
+    const preAborted = new AbortController();
+    preAborted.abort();
+    const manager = await createTestManager();
+    const cwd = await workspace();
+
+    await assert.rejects(
+      () =>
+        manager.runForegroundBash(
+          shellInput({
+            cwd,
+            command: 'pre-aborted',
+            abortSignal: preAborted.signal,
+            onCompletion: (outcome) => completions.push(outcome.successful),
+          }),
+        ),
+      /aborted before shell process started/i,
+    );
+    await assert.rejects(() =>
+      manager.runBackgroundBash(
+        shellInput({
+          cwd,
+          command: 'invalid argv',
+          argv: [],
+          onCompletion: (outcome) => completions.push(outcome.successful),
+        }),
+      ),
+    );
+    const saturated = await createTestManager(undefined, { maxLiveShellRuns: 0 });
+    await assert.rejects(() =>
+      saturated.runForegroundBash(
+        shellInput({
+          cwd,
+          command: 'slot rejected',
+          onCompletion: (outcome) => completions.push(outcome.successful),
+        }),
+      ),
+    );
+
+    assert.deepEqual(completions, [false, false, false]);
+  });
+
   test('applies only explicit background timeouts and enforces their upper bound', async () => {
     const manager = await createTestManager();
     const initial = await manager.runBackgroundBash(
@@ -1754,6 +1830,7 @@ function shellInput(input: {
   abortSignal?: AbortSignal;
   emitOutput?: (stream: 'stdout' | 'stderr', chunk: string) => void;
   shell?: ShellPlan;
+  onCompletion?: (outcome: { successful: boolean }) => void;
 }) {
   return {
     sessionId: 'session-1',
@@ -1769,6 +1846,7 @@ function shellInput(input: {
     ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
     ...(input.abortSignal !== undefined ? { abortSignal: input.abortSignal } : {}),
     ...(input.shell !== undefined ? { shell: input.shell } : {}),
+    ...(input.onCompletion !== undefined ? { onCompletion: input.onCompletion } : {}),
     emitOutput: input.emitOutput ?? (() => undefined),
   };
 }

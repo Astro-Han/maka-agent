@@ -137,6 +137,79 @@ class CellReportingBackend implements AgentBackend {
   async dispose(): Promise<void> {}
 }
 
+class CellChildAdmissionProbeBackend implements AgentBackend {
+  readonly kind: BackendKind = 'ai-sdk';
+  readonly sessionId: string;
+
+  constructor(
+    sessionId: string,
+    private readonly context: HeadlessBackendContext,
+    private readonly observed: { spawned?: boolean; error?: string },
+  ) {
+    this.sessionId = sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    assert.ok(this.context.spawnChildSession);
+    assert.ok(input.runId);
+    try {
+      await this.context.spawnChildSession(this.sessionId, {
+        spawnedBy: {
+          parentRunId: input.runId,
+          parentTurnId: input.turnId,
+          toolCallId: 'cell-child-admission-probe',
+        },
+        agentProfile: 'local_read',
+        prompt: 'inspect the task workspace',
+      });
+      this.observed.spawned = true;
+    } catch (error) {
+      this.observed.spawned = false;
+      this.observed.error = error instanceof Error ? error.message : String(error);
+    }
+    yield {
+      type: 'complete',
+      id: 'cell-child-admission-probe-complete',
+      turnId: input.turnId,
+      ts: Date.now(),
+      stopReason: 'end_turn',
+    };
+  }
+
+  async stop(): Promise<void> {}
+  async respondToPermission(_decision: PermissionDecision): Promise<void> {}
+  async dispose(): Promise<void> {}
+}
+
+class RunStartOrderingProbeBackend implements AgentBackend {
+  readonly kind: BackendKind = 'fake';
+  readonly sessionId: string;
+
+  constructor(
+    sessionId: string,
+    private readonly events: string[],
+    private readonly delayMs: number,
+  ) {
+    this.sessionId = sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    this.events.push('backend-send');
+    await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    yield {
+      type: 'complete',
+      id: 'run-start-ordering-complete',
+      turnId: input.turnId,
+      ts: Date.now(),
+      stopReason: 'end_turn',
+    };
+  }
+
+  async stop(): Promise<void> {}
+  async respondToPermission(_decision: PermissionDecision): Promise<void> {}
+  async dispose(): Promise<void> {}
+}
+
 const registerCellBackend = (registry: BackendRegistry): void => {
   registry.register(
     'fake',
@@ -915,6 +988,7 @@ describe('runHarborCell', () => {
         systemPromptMode: 'custom',
         systemPromptHash: `sha256:${createHash('sha256').update(JSON.stringify(config.systemPrompt)).digest('hex')}`,
         pricingProfile: 'deepseek-v4-flash-tbench-v1',
+        agentTools: false,
       });
 
       const outputJson = JSON.parse(
@@ -927,6 +1001,85 @@ describe('runHarborCell', () => {
       );
       assert.match(runtimeEvents, /"id":"cell-usage"/);
       assert.match(runtimeEvents, /"systemPromptHash":"sha256:cell-prompt"/);
+    });
+  });
+
+  test('does not provision child tools when Agent tools are disabled by default', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      const observed: { spawned?: boolean; error?: string } = {};
+      await runHarborCell({
+        config: { ...config, backend: 'ai-sdk' },
+        instruction: 'probe child admission',
+        cwd: workspaceDir,
+        outputDir,
+        storageRoot,
+        registerBackends: (registry, context) => {
+          registry.register(
+            'ai-sdk',
+            (ctx) => new CellChildAdmissionProbeBackend(ctx.sessionId, context, observed),
+          );
+        },
+        realBackendIsolation: {
+          kind: 'external',
+          label: 'unit isolated executor',
+          toolExecutor: {
+            async exec() {
+              return { exitCode: 0, stdout: '', stderr: '' };
+            },
+          },
+        },
+      });
+
+      assert.equal(observed.spawned, false);
+      assert.match(observed.error ?? '', /missing tools/i);
+    });
+  });
+
+  test('fires onRunStarted after run.begin and before provider execution', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      const events: string[] = [];
+      await runHarborCell({
+        config,
+        instruction: 'measure run start ordering',
+        cwd: workspaceDir,
+        outputDir,
+        storageRoot,
+        onRunStarted: () => {
+          events.push('run-started');
+        },
+        registerBackends: (registry) => {
+          registry.register(
+            'fake',
+            (ctx) => new RunStartOrderingProbeBackend(ctx.sessionId, events, 50),
+          );
+        },
+      });
+
+      assert.deepEqual(events.slice(0, 2), ['run-started', 'backend-send']);
+    });
+  });
+
+  test('rejects resume input that disagrees with the stored execution config', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      const first = await runHarborCell({
+        config,
+        instruction: 'create resumable session',
+        cwd: workspaceDir,
+        outputDir,
+        storageRoot,
+      });
+
+      await assert.rejects(
+        runHarborCell({
+          config: { ...config, model: 'different-model' },
+          instruction: 'resume with conflicting config',
+          cwd: workspaceDir,
+          outputDir: join(outputDir, 'resume'),
+          storageRoot,
+          resumeSessionId: first.invocation.sessionId,
+        }),
+        /resume session model.*different-model.*fake-model/i,
+      );
     });
   });
 
@@ -1158,6 +1311,7 @@ describe('runHarborCell', () => {
         systemPromptMode: 'custom',
         systemPromptHash: `sha256:${createHash('sha256').update(JSON.stringify(config.systemPrompt)).digest('hex')}`,
         pricingProfile: 'deepseek-v4-flash-tbench-v1',
+        agentTools: false,
       });
     });
   });
@@ -1187,6 +1341,32 @@ describe('runHarborCell', () => {
         JSON.parse(await readFile(join(outputDir, HARBOR_CELL_OUTPUT_FILENAME), 'utf8')),
         result.output,
       );
+    });
+  });
+
+  test('env entrypoint enables Agent tools only for canonical MAKA_AGENT_TOOLS=true', async () => {
+    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
+      let observedAgentTools: boolean | undefined;
+      const result = await runHarborCellFromEnv(
+        {
+          MAKA_BACKEND: 'fake',
+          MAKA_INSTRUCTION: 'solve from env',
+          MAKA_MODEL: 'fake-model',
+          MAKA_WORKDIR: workspaceDir,
+          MAKA_OUTPUT_DIR: outputDir,
+          MAKA_STORAGE_ROOT: storageRoot,
+          MAKA_AGENT_TOOLS: 'true',
+        },
+        {
+          registerBackends: (registry, context) => {
+            observedAgentTools = context.config.agentTools;
+            registerCellBackend(registry);
+          },
+        },
+      );
+
+      assert.equal(observedAgentTools, true);
+      assert.equal(result.output.executionIdentity?.agentTools, true);
     });
   });
 
@@ -1887,11 +2067,13 @@ describe('runHarborCell', () => {
     await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
       const previousEnv = { ...process.env };
       const seenPrompts: string[] = [];
+      const seenAgentTools: Array<boolean | undefined> = [];
       const registerCapturingBackend = (
         registry: BackendRegistry,
         context: HeadlessBackendContext,
       ): void => {
         seenPrompts.push(context.config.systemPrompt ?? '');
+        seenAgentTools.push(context.config.agentTools);
         registry.register(
           'ai-sdk',
           (ctx) =>
@@ -1914,6 +2096,7 @@ describe('runHarborCell', () => {
         process.env.MAKA_STORAGE_ROOT = storageRoot;
         process.env.MAKA_SYSTEM_PROMPT = 'Use the host prompt.';
         process.env.MAKA_ECONOMY_TASK_MODE = 'true';
+        process.env.MAKA_AGENT_TOOLS = 'true';
         await main({ registerBackends: registerCapturingBackend });
       } finally {
         process.env = previousEnv;
@@ -1921,6 +2104,7 @@ describe('runHarborCell', () => {
 
       assert.match(seenPrompts[0] ?? '', /Use the host prompt/);
       assert.match(seenPrompts[0] ?? '', /Economy-task benchmark policy/);
+      assert.equal(seenAgentTools[0], true);
     });
   });
 
@@ -2113,6 +2297,9 @@ describe('runHarborCell', () => {
       for (const expected of ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep']) {
         assert.ok(toolNames.includes(expected), `expected provider schema tool ${expected}`);
       }
+      for (const unexpected of ['agent_spawn', 'agent_swarm', 'agent_list', 'agent_output']) {
+        assert.ok(!toolNames.includes(unexpected), `unexpected default Agent tool ${unexpected}`);
+      }
       assert.equal(
         backendInput.tools.find((tool) => tool.name === 'Bash')?.permissionRequired,
         false,
@@ -2146,6 +2333,55 @@ describe('runHarborCell', () => {
       );
       assert.equal(scopedInput.systemPrompt, 'Durable child prompt.');
       assert.equal(scopedInput.toolAvailability, undefined);
+    });
+  });
+
+  test('Harbor ai-sdk backend registration binds the deferred Agent group only when enabled', async () => {
+    await withDirs(async ({ workspaceDir, artifactStore }) => {
+      const registry = new BackendRegistry();
+      const toolExecutor = fakeToolExecutor();
+      const register = buildAiSdkCellBackendRegistration({
+        provider: 'openai',
+        model: 'gpt-5.6-sol',
+        env: { OPENAI_API_KEY: 'test-key' },
+        now: () => 123,
+        newId: () => 'id',
+      });
+      await register(registry, {
+        config: {
+          id: 'harbor-ai-sdk-agent-tools',
+          backend: 'ai-sdk',
+          llmConnectionSlug: 'openai',
+          model: 'gpt-5.6-sol',
+          systemPrompt: DEFAULT_HEADLESS_SYSTEM_PROMPT,
+          agentTools: true,
+        },
+        task: { id: 'harbor-cell', instruction: 'solve', workspaceDir },
+        storageRoot: workspaceDir,
+        workspaceDir,
+        artifactStore,
+        realBackendIsolation: { kind: 'external', label: 'Harbor task container', toolExecutor },
+        toolExecutor,
+      });
+
+      const backend = await registry.build('ai-sdk', backendContext(workspaceDir));
+      const backendInput = (
+        backend as unknown as {
+          input: {
+            tools: Array<{ name: string }>;
+            toolAvailability?: { groups?: Array<{ id: string; toolNames: string[] }> };
+          };
+        }
+      ).input;
+      const toolNames = backendInput.tools.map((tool) => tool.name);
+
+      for (const expected of ['agent_spawn', 'agent_swarm', 'agent_list', 'agent_output']) {
+        assert.ok(toolNames.includes(expected), `expected enabled Agent tool ${expected}`);
+      }
+      assert.deepEqual(
+        backendInput.toolAvailability?.groups?.find((group) => group.id === 'agent')?.toolNames,
+        ['agent_spawn', 'agent_swarm', 'agent_list', 'agent_output'],
+      );
     });
   });
 
@@ -2965,7 +3201,7 @@ describe('runHarborCell', () => {
       assert.ok(backendInput.recordProviderRequestCapture);
       await backendInput.loadSynthesisCache({ sessionId: 'session-1' });
       const capture: ProviderRequestCaptureRecord = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         traceId: 'trace-1',
         captureId: 'capture-1',
         turnId: 'turn-1',
@@ -2973,6 +3209,7 @@ describe('runHarborCell', () => {
         providerId: 'openai',
         modelId: 'gpt-4o-mini',
         requestHash: 'sha256:request',
+        requestPayloadWithoutProviderOptionsHash: 'sha256:shared-request',
         requestBytes: 18,
         segments: [],
         serializedRequest: '{"prompt":"hello"}',

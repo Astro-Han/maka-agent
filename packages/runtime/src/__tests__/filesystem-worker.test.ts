@@ -101,6 +101,18 @@ describe('filesystem worker operations', () => {
       assert.equal(failed.error.code, 'filesystem_error');
       assert.match(failed.error.message, /rg: invalid regular expression/);
     }
+
+    const sandboxDenied = await executeFilesystemWorkerRequest(request, {
+      grepExecutable: '/usr/bin/rg',
+      runGrep: async () => ({
+        exitCode: 9,
+        stdout: '',
+        stderrTail:
+          'dyld: Library not loaded: /opt/toolchain/lib/libsearch.dylib (file system sandbox blocked open())',
+      }),
+    });
+    assert.equal(sandboxDenied.ok, false);
+    if (!sandboxDenied.ok) assert.equal(sandboxDenied.error.code, 'filesystem_denied');
   });
 
   test('reads a validated image through the approved path capability', async () => {

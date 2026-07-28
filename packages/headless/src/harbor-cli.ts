@@ -39,7 +39,9 @@ import { runTaskOnceWithStorage } from './task-agent-controller.js';
 import { taxonomyFromResultRecord } from './task-contracts.js';
 import { taskRunLocator } from './task-run-identity.js';
 import { requireProviderCredentialEnv } from './provider-env.js';
+import { createProviderEnvFetch, type ProviderEnvFetch } from './provider-env-fetch.js';
 import { resolveHeadlessSystemPrompt } from './system-prompts.js';
+import { booleanEnv } from './headless-run-env.js';
 
 type HarborMode = 'cell' | 'task-run';
 type HarborIsolationMode = 'none' | 'harbor-local' | 'harbor-http';
@@ -73,11 +75,13 @@ interface HarborRunOptions {
   maxRuntimeSteps?: number;
   maxWallTimeMs?: number;
   softTimeoutMs?: number;
+  deadlineAtMs?: number;
   replayPriorAttemptRuntimeContext: boolean;
   now: () => number;
   newId: () => string;
   registerBackends?: RunHarborCellInput['registerBackends'];
   realBackendIsolation?: RealBackendIsolation;
+  providerEnvFetch?: ProviderEnvFetch;
 }
 
 const HARBOR_RUN_FLAGS = [
@@ -138,6 +142,8 @@ async function harborRunCommand(args: string[]): Promise<number> {
   } catch (error) {
     console.error(`maka eval harbor run: ${(error as Error).message}`);
     return 1;
+  } finally {
+    await options.providerEnvFetch?.close();
   }
 }
 
@@ -196,9 +202,11 @@ async function runHarborTaskRunMode(
     ...(options.realBackendIsolation ? { realBackendIsolation: options.realBackendIsolation } : {}),
     now: options.now,
     newId: options.newId,
-    ...(options.softTimeoutMs !== undefined
-      ? { deadlineAtMs: options.now() + options.softTimeoutMs }
-      : {}),
+    ...(options.deadlineAtMs !== undefined
+      ? { deadlineAtMs: options.deadlineAtMs }
+      : options.softTimeoutMs !== undefined
+        ? { deadlineAtMs: options.now() + options.softTimeoutMs }
+        : {}),
   };
   const run = options.autonomous
     ? await runAutonomousTaskWithStorage(
@@ -353,6 +361,7 @@ async function writeTaskRunExecutionIdentity(
     systemPromptMode: prompt.mode,
     systemPromptHash: prompt.systemPromptHash,
     pricingProfile: options.env.MAKA_TRIAL_PRICING_SOURCE ?? 'unconfigured',
+    agentTools: options.config.agentTools === true,
   });
   await writeHarborCellExecutionIdentity(options.cellArtifactDir, executionIdentity);
   return executionIdentity;
@@ -395,7 +404,7 @@ export async function resolveHarborRunOptions(
   const requestedWorkdir = valueOf(parsed, env, 'workdir', 'MAKA_WORKDIR') ?? process.cwd();
   const workdir = isolation === 'harbor-http' ? requestedWorkdir : resolve(requestedWorkdir);
   const sourceWorkspaceDir =
-    isolation === 'harbor-http' ? resolve(join(outDir, 'host-workspace-source')) : workdir;
+    isolation && isolation !== 'none' ? resolve(join(outDir, 'host-workspace-source')) : workdir;
   const instruction = await instructionFromOptions(parsed, env);
   const officialVerifier = officialVerifierKind(
     valueOf(parsed, env, 'official-verifier', 'MAKA_OFFICIAL_VERIFIER') ?? 'external-harbor',
@@ -416,22 +425,37 @@ export async function resolveHarborRunOptions(
     '--max-wall-time-sec',
   );
   const softTimeoutMs = harborCellSoftTimeoutMsFromEnv(env);
+  const deadlineAtMs = optionalPositiveInt(
+    env.MAKA_CELL_DEADLINE_AT_MS,
+    'MAKA_CELL_DEADLINE_AT_MS',
+  );
   const config = buildConfig({
     parsed,
     env,
     backend,
     heavyTask: parsed.bools['heavy-task'] || truthyEnv(env.MAKA_HEAVY_TASK_MODE),
-    economyTask: parsed.bools['economy-task'] || truthyEnv(env.MAKA_ECONOMY_TASK_MODE),
+    economyTask: parsed.bools['economy-task']
+      ? true
+      : booleanEnv(env.MAKA_ECONOMY_TASK_MODE, 'MAKA_ECONOMY_TASK_MODE'),
+    agentTools: booleanEnv(env.MAKA_AGENT_TOOLS, 'MAKA_AGENT_TOOLS') ?? false,
   });
-  const registerBackends = buildBackendRegistration({
-    backend,
-    env,
-    now,
-    newId,
-    cellArtifactDir,
-    maxSteps,
-  });
-  const realBackendIsolation = buildIsolation(isolation, env, workdir);
+  const realBackendIsolation = buildIsolation(isolation, env, workdir, outDir);
+  const providerEnvFetch = backend === 'ai-sdk' ? createProviderEnvFetch(env) : undefined;
+  let registerBackends: RunHarborCellInput['registerBackends'];
+  try {
+    registerBackends = buildBackendRegistration({
+      backend,
+      env,
+      now,
+      newId,
+      cellArtifactDir,
+      ...(providerEnvFetch ? { fetch: providerEnvFetch.fetch } : {}),
+      maxSteps,
+    });
+  } catch (error) {
+    await providerEnvFetch?.close();
+    throw error;
+  }
   return {
     mode,
     backend,
@@ -457,6 +481,7 @@ export async function resolveHarborRunOptions(
     ...(maxRuntimeSteps !== undefined ? { maxRuntimeSteps } : {}),
     ...(maxWallTimeSec !== undefined ? { maxWallTimeMs: maxWallTimeSec * 1000 } : {}),
     ...(softTimeoutMs !== undefined ? { softTimeoutMs } : {}),
+    ...(deadlineAtMs !== undefined ? { deadlineAtMs } : {}),
     replayPriorAttemptRuntimeContext:
       parsed.bools['replay-prior-attempt-runtime-context'] ||
       truthyEnv(env.MAKA_REPLAY_PRIOR_ATTEMPT_RUNTIME_CONTEXT),
@@ -464,6 +489,7 @@ export async function resolveHarborRunOptions(
     newId,
     ...(registerBackends ? { registerBackends } : {}),
     ...(realBackendIsolation ? { realBackendIsolation } : {}),
+    ...(providerEnvFetch ? { providerEnvFetch } : {}),
   };
 }
 
@@ -538,9 +564,21 @@ function buildConfig(input: {
   env: RunHarborCellEnv;
   backend: BackendKind;
   heavyTask: boolean;
-  economyTask: boolean;
+  economyTask: boolean | undefined;
+  agentTools: boolean;
 }): Config {
   const thinkingLevel = reasoningEffortFromEnv(input.env.MAKA_REASONING_EFFORT);
+  const economyTaskMode =
+    input.economyTask === undefined
+      ? {}
+      : {
+          economyTaskMode: {
+            enabled: input.economyTask,
+            reason: input.economyTask
+              ? 'maka eval harbor run --economy-task'
+              : 'maka eval harbor run MAKA_ECONOMY_TASK_MODE=false',
+          },
+        };
   if (input.backend === 'fake') {
     return {
       id: input.parsed.flags['config-id'] ?? input.env.MAKA_CONFIG_ID ?? 'harbor-fake',
@@ -548,12 +586,11 @@ function buildConfig(input: {
       llmConnectionSlug: input.env.MAKA_LLM_CONNECTION_SLUG ?? 'fake',
       model: input.env.MAKA_MODEL ?? input.env.HARBOR_MODEL ?? 'fake',
       ...(thinkingLevel ? { thinkingLevel } : {}),
+      agentTools: input.agentTools,
       ...(input.heavyTask
         ? { heavyTaskMode: { enabled: true, reason: 'maka eval harbor run --heavy-task' } }
         : {}),
-      ...(input.economyTask
-        ? { economyTaskMode: { enabled: true, reason: 'maka eval harbor run --economy-task' } }
-        : {}),
+      ...economyTaskMode,
     };
   }
   if (input.backend !== 'ai-sdk') {
@@ -572,15 +609,14 @@ function buildConfig(input: {
     llmConnectionSlug: input.env.MAKA_LLM_CONNECTION_SLUG ?? modelSpec.provider,
     model: modelSpec.model,
     ...(thinkingLevel ? { thinkingLevel } : {}),
+    agentTools: input.agentTools,
     ...(input.env.MAKA_SYSTEM_PROMPT !== undefined
       ? { systemPrompt: input.env.MAKA_SYSTEM_PROMPT }
       : {}),
     ...(input.heavyTask
       ? { heavyTaskMode: { enabled: true, reason: 'maka eval harbor run --heavy-task' } }
       : {}),
-    ...(input.economyTask
-      ? { economyTaskMode: { enabled: true, reason: 'maka eval harbor run --economy-task' } }
-      : {}),
+    ...economyTaskMode,
   };
 }
 
@@ -590,6 +626,7 @@ function buildBackendRegistration(input: {
   now: () => number;
   newId: () => string;
   cellArtifactDir: string;
+  fetch?: typeof globalThis.fetch;
   maxSteps?: number;
 }): RunHarborCellInput['registerBackends'] | undefined {
   if (input.backend === 'fake') return undefined;
@@ -604,6 +641,7 @@ function buildBackendRegistration(input: {
     env: input.env,
     now: input.now,
     newId: input.newId,
+    ...(input.fetch ? { fetch: input.fetch } : {}),
     recordUsageCheckpoint: (usage) => writeHarborCellUsageCheckpoint(input.cellArtifactDir, usage),
     ...(input.maxSteps !== undefined ? { maxSteps: input.maxSteps } : {}),
   });
@@ -613,6 +651,7 @@ function buildIsolation(
   mode: HarborIsolationMode | undefined,
   env: RunHarborCellEnv,
   workdir: string,
+  outDir: string,
 ): RealBackendIsolation | undefined {
   if (!mode || mode === 'none') return undefined;
   if (mode === 'harbor-local') {
@@ -620,6 +659,7 @@ function buildIsolation(
       kind: 'external',
       label: 'Harbor task container',
       workspaceDir: workdir,
+      submittedSnapshotRoot: join(outDir, 'submitted-snapshots'),
       toolExecutor: createHarborCellLocalToolExecutor(env),
     };
   }

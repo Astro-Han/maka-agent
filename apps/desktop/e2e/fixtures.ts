@@ -40,13 +40,23 @@ async function seedE2eInvocableSkills(userDataDir: string): Promise<void> {
   const projectRoot = path.join(userDataDir, 'project');
   const projectSkillRoot = path.join(projectRoot, '.maka', 'skills');
   const workspaceSkillRoot = path.join(workspaceRoot, 'skills');
+  // Under the sandboxed HOME (see buildE2eEnv), so `~/.agents/skills` here is
+  // the throwaway dir, never the developer's. This is the only user-scope
+  // skill the suite sees, which is what makes the delete journey assertable.
+  const userSkillRoot = path.join(userDataDir, 'home', '.agents', 'skills');
   await Promise.all([
     mkdir(path.join(projectSkillRoot, 'project-only'), { recursive: true }),
     mkdir(path.join(projectSkillRoot, 'host-incompatible'), { recursive: true }),
     mkdir(path.join(projectSkillRoot, 'agent-write'), { recursive: true }),
     mkdir(path.join(projectSkillRoot, 'deep-research-only'), { recursive: true }),
     mkdir(path.join(workspaceSkillRoot, 'workspace-only'), { recursive: true }),
+    mkdir(path.join(userSkillRoot, 'user-only'), { recursive: true }),
   ]);
+  await writeFile(
+    path.join(userSkillRoot, 'user-only', 'SKILL.md'),
+    `---\nname: User Only\ndescription: User-scoped install, deletable from the panel.\n---\n# User Only`,
+    'utf8',
+  );
   await Promise.all([
     writeFile(
       path.join(projectSkillRoot, 'project-only', 'SKILL.md'),
@@ -92,6 +102,7 @@ async function seedE2eInvocableSkills(userDataDir: string): Promise<void> {
  */
 function buildE2eEnv(
   userDataDir: string,
+  homeDir: string,
   e2eFixtureScenario?: string,
   locale?: 'zh' | 'en',
   platform?: 'darwin' | 'win32' | 'linux',
@@ -114,7 +125,23 @@ function buildE2eEnv(
     }
   }
   env.MAKA_E2E = '1';
+  // The login-shell PATH probe must not make E2E command resolution depend on
+  // the developer or CI account. buildE2eEnv owns the launched environment,
+  // so it owns the deterministic skip flag (unlike relying on TERM, which is
+  // unset under xvfb).
+  env.MAKA_SKIP_SHELL_ENV = '1';
   env.MAKA_E2E_USER_DATA_DIR = userDataDir;
+  // Sandbox the home directory. User-scope skill discovery reads
+  // `~/.maka/skills` and `~/.agents/skills` via `os.homedir()`, and the Skills
+  // panel can now DELETE from those (#1517) — so without this a suite run
+  // would enumerate, and could remove, the developer's own installed skills.
+  // Overriding HOME sandboxes every consumer of the home dir at once, rather
+  // than plumbing an override through each skills API and hoping none is
+  // missed; `os.homedir()` returns $HOME on POSIX and %USERPROFILE% on
+  // Windows, so both are set. userData is pinned separately above, so this
+  // does not move the app's data dir.
+  env.HOME = homeDir;
+  env.USERPROFILE = homeDir;
   if (e2eFixtureScenario) env.MAKA_E2E_FIXTURE = e2eFixtureScenario;
   if (locale) env.MAKA_E2E_FIXTURE_LOCALE = locale;
   if (platform) env.MAKA_E2E_FIXTURE_PLATFORM = platform;
@@ -125,6 +152,21 @@ function buildE2eEnv(
   // visible window.
   if (process.env.CI && process.platform === 'linux') env.MAKA_E2E_SHOW_WINDOW = '1';
   return env;
+}
+
+/**
+ * The sandboxed HOME of the run currently under test. Set by withE2eWindow
+ * before Electron launches.
+ *
+ * Read it from inside a test BODY, never as a fixture: a fixture would have no
+ * declared dependency on the window fixture, so Playwright could resolve it
+ * before the window is set up and hand back a stale path.
+ */
+let currentHomeDir = '';
+
+export function e2eHomeDir(): string {
+  if (!currentHomeDir) throw new Error('e2eHomeDir() is only valid inside a test that opened a window');
+  return currentHomeDir;
 }
 
 /**
@@ -147,6 +189,11 @@ async function withE2eWindow(
   use: (page: Page) => Promise<void>,
 ): Promise<void> {
   const userDataDir = await mkdtemp(path.join(tmpdir(), 'maka-e2e-'));
+  // Lives inside the throwaway userData dir so the existing teardown removes
+  // it too — there is no second path to leak.
+  const homeDir = path.join(userDataDir, 'home');
+  await mkdir(homeDir, { recursive: true });
+  currentHomeDir = homeDir;
   let app: ElectronApplication | undefined;
   const mainLogs: string[] = [];
   const rendererLogs: string[] = [];
@@ -159,7 +206,7 @@ async function withE2eWindow(
     app = await electron.launch({
       args: ['.'],
       cwd: DESKTOP_ROOT,
-      env: buildE2eEnv(userDataDir, e2eFixtureScenario, locale, platform),
+      env: buildE2eEnv(userDataDir, homeDir, e2eFixtureScenario, locale, platform),
     });
     app.on('console', (message) => {
       mainLogs.push(message.text());
@@ -211,15 +258,20 @@ export const test = base.extend<{
   staleSessionsWindow: Page;
   sessionWorkbarWindow: Page;
   botSettingsWindow: Page;
+  permissionSettingsWindow: Page;
+  usageSettingsWindow: Page;
+  searchSettingsWindow: Page;
   zhLocaleWindow: Page;
   enLocaleWindow: Page;
   localeSwitchWindow: Page;
   invocableSkillsWindow: Page;
+  planRemindersWindow: Page;
+  oauthReloginWindow: Page;
 }>({
   // Seeded: a pre-staged connection clears onboarding so the composer is ready.
   // Used by chat / session / settings / attachment specs.
   window: async ({}, use) => {
-    await withE2eWindow({ seed: true, readinessSelector: '.maka-onboarding-quickchat-input', locale: 'zh' }, use);
+    await withE2eWindow({ seed: true, readinessSelector: '.maka-composer-textarea', locale: 'zh' }, use);
   },
   // Empty: no connection staged — exercises the true first-run boot path.
   // Used by first-run only.
@@ -306,6 +358,54 @@ export const test = base.extend<{
       use,
     );
   },
+  // #1361: Permission Center with a typed OS-permission snapshot (see
+  // `main/permission-snapshot-e2e-fixture.ts`). The narrow-layout contract is
+  // about rows that carry grant buttons, which the host's real TCC state cannot
+  // guarantee — a granted dev machine renders none, and Linux CI reports most
+  // permissions as `unsupported`.
+  permissionSettingsWindow: async ({}, use) => {
+    await withE2eWindow(
+      {
+        seed: false,
+        readinessSelector: '.settingsOsPermissionRow',
+        e2eFixtureScenario: 'settings-permissions',
+        locale: 'zh',
+      },
+      use,
+    );
+  },
+  // #1364: Usage with seeded request traffic + details-on settings, so the
+  // request-log DataTable actually renders (the default window fixture keeps
+  // `showDetails` false and has no logs — the table CSS could regress without
+  // failing anything).
+  usageSettingsWindow: async ({}, use) => {
+    await withE2eWindow(
+      {
+        seed: false,
+        // The tabs bar, not the table: the renderer's first stats fetch can
+        // race the fixture seeding, so the spec refreshes until the seeded
+        // request log lands.
+        readinessSelector: '.settingsUsageTabsBar',
+        e2eFixtureScenario: 'settings-usage',
+        locale: 'zh',
+      },
+      use,
+    );
+  },
+  // #1364: Web Search with a configured Tavily key; queries are answered by
+  // the typed fixture in `main/web-search-e2e-fixture.ts` (e2e runs offline),
+  // so the hostile-width result list is reachable deterministically.
+  searchSettingsWindow: async ({}, use) => {
+    await withE2eWindow(
+      {
+        seed: false,
+        readinessSelector: '.settingsWebSearchQueryInputRow',
+        e2eFixtureScenario: 'settings-search',
+        locale: 'zh',
+      },
+      use,
+    );
+  },
   // Representative e2e-fixture renderer launches in both supported locales.
   // These use the same production LocaleProvider override path as screenshot capture.
   zhLocaleWindow: async ({}, use) => {
@@ -323,17 +423,39 @@ export const test = base.extend<{
   // Keep this fixture unpinned so the Follow system assertion observes the
   // actual host language while the legacy fixtures remain deterministic.
   localeSwitchWindow: async ({}, use) => {
-    await withE2eWindow({ seed: true, readinessSelector: '.maka-onboarding-quickchat-input' }, use);
+    await withE2eWindow({ seed: true, readinessSelector: '.maka-composer-textarea' }, use);
   },
   // Project + Maka-workspace Skills with one deliberately host-incompatible
   // entry. Proves `/` uses Runtime discovery/gating rather than management UI data.
   invocableSkillsWindow: async ({}, use) => {
     await withE2eWindow({
       seed: true,
-      readinessSelector: '.maka-onboarding-quickchat-input',
+      readinessSelector: '.maka-composer-textarea',
       locale: 'zh',
       invocableSkills: true,
     }, use);
+  },
+  planRemindersWindow: async ({}, use) => {
+    await withE2eWindow(
+      {
+        seed: false,
+        readinessSelector: '.maka-plan-card',
+        e2eFixtureScenario: 'plan-reminders',
+        locale: 'zh',
+      },
+      use,
+    );
+  },
+  oauthReloginWindow: async ({}, use) => {
+    await withE2eWindow(
+      {
+        seed: false,
+        readinessSelector: '[role="dialog"]',
+        e2eFixtureScenario: 'oauth-relogin',
+        locale: 'zh',
+      },
+      use,
+    );
   },
 });
 

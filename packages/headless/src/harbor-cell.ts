@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type {
+  AgentRunEvent,
   AgentRunHeader,
   BackendKind,
   PricingConfig,
@@ -28,6 +29,7 @@ import {
   type SynthesisCacheArtifactStore,
   type SynthesisCacheLoader,
   type SynthesisCacheWriter,
+  type TurnStartOptions,
 } from '@maka/runtime';
 import {
   createAttachmentByteReader,
@@ -85,6 +87,7 @@ import {
   buildHarborCellAiSdkTools,
   createHarborCellLocalToolExecutor,
 } from './harbor-cell-tool-executor.js';
+import { createProviderEnvFetch, type ProviderEnvFetch } from './provider-env-fetch.js';
 
 // The Harbor cell orchestration module keeps `#harbor-cell` (and './harbor-cell.js')
 // as the stable public surface. After the sink-file split the moved symbols live in
@@ -139,6 +142,10 @@ export interface RunHarborCellInput {
   settleAfterMs?: number;
   now?: () => number;
   newId?: () => string;
+  /** Resume one already-materialized session instead of creating a fresh session. */
+  resumeSessionId?: string;
+  /** Optional measurement hook passed through Runtime's run-start boundary. */
+  onRunStarted?: TurnStartOptions['onRunStarted'];
 }
 
 export interface HarborCellContinuationPolicy {
@@ -293,6 +300,9 @@ export async function runHarborCellWithStorage(
   const sessionStore = storage.executionStores.sessionStore;
   const agentRunStore = storage.executionStores.agentRunStore;
   const runtimeEventStore = storage.executionStores.runtimeEventStore;
+  const resumedSession = input.resumeSessionId
+    ? await sessionStore.readHeaderSnapshot(input.resumeSessionId)
+    : undefined;
   const backends = new BackendRegistry();
   const sessionCapabilities = createHeadlessSessionCapabilityBridge();
   const task: Task = {
@@ -304,6 +314,23 @@ export async function runHarborCellWithStorage(
   const economyTaskMode = resolveEconomyTaskMode(input.config, task);
   const prompt = resolveHeadlessSystemPrompt(input.config, { heavyTaskMode, economyTaskMode });
   const config = { ...input.config, systemPrompt: prompt.systemPrompt };
+  if (resumedSession) {
+    const executionFacts = [
+      ['cwd', input.cwd, resumedSession.cwd],
+      ['backend', input.config.backend, resumedSession.backend],
+      ['llmConnectionSlug', config.llmConnectionSlug, resumedSession.llmConnectionSlug],
+      ['model', config.model, resumedSession.model],
+      ['thinkingLevel', config.thinkingLevel, resumedSession.thinkingLevel],
+      ['permissionMode', 'execute', resumedSession.permissionMode],
+    ] as const;
+    for (const [name, expected, observed] of executionFacts) {
+      if (expected !== observed) {
+        throw new Error(
+          `Harbor resume session ${name} expected ${String(expected)}, observed ${String(observed)}`,
+        );
+      }
+    }
+  }
   const registerBackends =
     input.registerBackends ?? ((registry: BackendRegistry) => registerFakeBackend(registry));
   await registerBackends(backends, {
@@ -329,6 +356,7 @@ export async function runHarborCellWithStorage(
     systemPromptMode: prompt.mode,
     systemPromptHash: prompt.systemPromptHash,
     pricingProfile: input.pricingProfile ?? 'unconfigured',
+    agentTools: config.agentTools === true,
   };
   await writeHarborCellExecutionIdentity(input.outputDir, executionIdentity);
 
@@ -338,7 +366,7 @@ export async function runHarborCellWithStorage(
     runStore: agentRunStore,
     runtimeEventStore,
     backends,
-    ...(input.realBackendIsolation?.toolExecutor
+    ...(config.agentTools && input.realBackendIsolation?.toolExecutor
       ? {
           childTools: buildChildAgentTools(
             buildIsolatedHeadlessTools(input.realBackendIsolation.toolExecutor),
@@ -352,15 +380,17 @@ export async function runHarborCellWithStorage(
       invocation = result;
     },
   });
-  const session = await manager.createSession({
-    cwd: input.cwd,
-    backend: input.config.backend,
-    llmConnectionSlug: config.llmConnectionSlug,
-    model: config.model,
-    ...(config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : {}),
-    permissionMode: 'execute',
-    name: `harbor-cell:${input.config.id}`,
-  });
+  const session =
+    resumedSession ??
+    (await manager.createSession({
+      cwd: input.cwd,
+      backend: input.config.backend,
+      llmConnectionSlug: config.llmConnectionSlug,
+      model: config.model,
+      ...(config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : {}),
+      permissionMode: 'execute',
+      name: `harbor-cell:${input.config.id}`,
+    }));
   const graphControlStore = createAgentGraphControlStore(input.storageRoot);
   const graphCoordinator = new AgentGraphCoordinator({
     sessionStore,
@@ -372,7 +402,6 @@ export async function runHarborCellWithStorage(
     rootSessionId: session.id,
   });
   sessionCapabilities.bind(manager, graphCoordinator);
-
   let deadlineReached = false;
   let settlementError: unknown;
   let settlementAttempt: Promise<void> | undefined;
@@ -413,7 +442,10 @@ export async function runHarborCellWithStorage(
       for await (const event of manager.sendMessage(
         session.id,
         { turnId, text: nextText },
-        { runId },
+        {
+          runId,
+          ...(input.onRunStarted ? { onRunStarted: input.onRunStarted } : {}),
+        },
       )) {
         if ((event as { type?: string }).type === 'permission_request') {
           const { requestId } = event as { requestId: string };
@@ -570,6 +602,7 @@ async function readHarborCellUsageCheckpoint(
   }
 }
 
+/** Export top-level invocation ledgers for provider-request benchmark evidence. */
 export async function writeHarborTaskRunTrace(input: {
   outputDir: string;
   storage: HeadlessStorageWriter;
@@ -577,9 +610,49 @@ export async function writeHarborTaskRunTrace(input: {
 }): Promise<string> {
   const storage = authenticateHeadlessStorageWriter(input.storage);
   const eventGroups = await Promise.all(
-    input.invocations.map((invocation) =>
-      storage.executionStores.agentRunStore.readEvents(invocation.sessionId, invocation.runId),
-    ),
+    input.invocations.map(async (invocation) => {
+      const [header, events] = await Promise.all([
+        storage.executionStores.agentRunStore.readRun(invocation.sessionId, invocation.runId),
+        storage.executionStores.agentRunStore.readEventsForEvidence(
+          invocation.sessionId,
+          invocation.runId,
+        ),
+      ]);
+      const evidenceEvents =
+        header.traceWriteError && !events.some((event) => event.type === 'trace_write_failed')
+          ? [
+              ...events,
+              {
+                type: 'trace_write_failed',
+                id: `run-header-trace-write-failed-${header.runId}`,
+                runId: header.runId,
+                sessionId: header.sessionId,
+                turnId: header.turnId,
+                ts: header.updatedAt,
+                message: header.traceWriteError,
+              } satisfies AgentRunEvent,
+            ]
+          : events;
+      if (header.backendKind !== 'ai-sdk' || evidenceEvents.some(isProviderRequestTraceEvidence)) {
+        return evidenceEvents;
+      }
+      return [
+        ...evidenceEvents,
+        {
+          type: 'event_corrupt',
+          id: `run-provider-request-evidence-missing-${header.runId}`,
+          runId: header.runId,
+          sessionId: header.sessionId,
+          turnId: header.turnId,
+          ts: header.updatedAt,
+          message: `Provider request trace evidence is missing for invocation ${invocation.invocationId}`,
+          data: {
+            reason: 'missing_provider_request_evidence',
+            invocationId: invocation.invocationId,
+          },
+        } satisfies AgentRunEvent,
+      ];
+    }),
   );
   const chunks = eventGroups.map((events) =>
     events.map((event) => JSON.stringify(event)).join('\n'),
@@ -591,6 +664,14 @@ export async function writeHarborTaskRunTrace(input: {
     nonEmptyChunks.length > 0 ? `${nonEmptyChunks.join('\n')}\n` : '',
   );
   return traceEventsPath;
+}
+
+function isProviderRequestTraceEvidence(event: AgentRunEvent): boolean {
+  return (
+    event.type === 'provider_request_captured' ||
+    event.type === 'provider_request_attempt_recorded' ||
+    event.type === 'trace_write_failed'
+  );
 }
 
 export async function runHarborCellFromEnv(
@@ -614,9 +695,11 @@ export async function runHarborCellFromEnv(
   const maxSteps = harborCellMaxStepsFromEnv(resolvedEnv);
   const settleAfterMs = harborCellSoftTimeoutMsFromEnv(resolvedEnv);
   const reasoningEffort = reasoningEffortFromEnv(resolvedEnv.MAKA_REASONING_EFFORT);
+  const agentTools = booleanEnv(resolvedEnv.MAKA_AGENT_TOOLS, 'MAKA_AGENT_TOOLS') ?? false;
   const baseConfig = {
     id: resolvedEnv.MAKA_CONFIG_ID ?? 'harbor-cell',
     backend,
+    agentTools,
     ...(reasoningEffort ? { thinkingLevel: reasoningEffort } : {}),
     ...(resolvedEnv.MAKA_SYSTEM_PROMPT !== undefined
       ? { systemPrompt: resolvedEnv.MAKA_SYSTEM_PROMPT }
@@ -625,6 +708,7 @@ export async function runHarborCellFromEnv(
   };
   let config: Config;
   let registerBackends = options.registerBackends;
+  let providerEnvFetch: ProviderEnvFetch | undefined;
 
   switch (backend) {
     case 'ai-sdk': {
@@ -637,15 +721,19 @@ export async function runHarborCellFromEnv(
         llmConnectionSlug: resolvedEnv.MAKA_LLM_CONNECTION_SLUG ?? modelSpec.provider,
         model: modelSpec.model,
       };
-      registerBackends ??= buildAiSdkCellBackendRegistration({
-        provider: modelSpec.provider,
-        model: modelSpec.model,
-        env: resolvedEnv,
-        now,
-        newId,
-        ...(maxSteps !== undefined ? { maxSteps } : {}),
-        recordUsageCheckpoint: (usage) => writeHarborCellUsageCheckpoint(outputDir, usage),
-      });
+      if (!registerBackends) {
+        providerEnvFetch = createProviderEnvFetch(resolvedEnv);
+        registerBackends = buildAiSdkCellBackendRegistration({
+          provider: modelSpec.provider,
+          model: modelSpec.model,
+          env: resolvedEnv,
+          now,
+          newId,
+          ...(providerEnvFetch ? { fetch: providerEnvFetch.fetch } : {}),
+          ...(maxSteps !== undefined ? { maxSteps } : {}),
+          recordUsageCheckpoint: (usage) => writeHarborCellUsageCheckpoint(outputDir, usage),
+        });
+      }
       break;
     }
     case 'pi-agent': {
@@ -691,30 +779,34 @@ export async function runHarborCellFromEnv(
       break;
   }
 
-  return await runHarborCell({
-    config,
-    instruction: await instructionFromEnv(resolvedEnv),
-    cwd: resolvedEnv.MAKA_WORKDIR ?? process.cwd(),
-    outputDir,
-    storageRoot,
-    pricingProfile: resolvedEnv.MAKA_TRIAL_PRICING_SOURCE ?? 'unconfigured',
-    ...(contextBudgetPolicy ? { contextBudgetPolicy } : {}),
-    ...(continuationPolicy ? { continuationPolicy } : {}),
-    ...(taskLedgerExperimentPolicy ? { taskToolSummaryEnabled: true } : {}),
-    ...(settleAfterMs !== undefined ? { settleAfterMs } : {}),
-    ...(registerBackends ? { registerBackends } : {}),
-    ...(backendNeedsIsolation(backend)
-      ? {
-          realBackendIsolation: {
-            kind: 'external',
-            label: 'Harbor task container',
-            toolExecutor: createHarborCellLocalToolExecutor(resolvedEnv),
-          },
-        }
-      : {}),
-    ...(options.now ? { now: options.now } : {}),
-    ...(options.newId ? { newId: options.newId } : {}),
-  });
+  try {
+    return await runHarborCell({
+      config,
+      instruction: await instructionFromEnv(resolvedEnv),
+      cwd: resolvedEnv.MAKA_WORKDIR ?? process.cwd(),
+      outputDir,
+      storageRoot,
+      pricingProfile: resolvedEnv.MAKA_TRIAL_PRICING_SOURCE ?? 'unconfigured',
+      ...(contextBudgetPolicy ? { contextBudgetPolicy } : {}),
+      ...(continuationPolicy ? { continuationPolicy } : {}),
+      ...(taskLedgerExperimentPolicy ? { taskToolSummaryEnabled: true } : {}),
+      ...(settleAfterMs !== undefined ? { settleAfterMs } : {}),
+      ...(registerBackends ? { registerBackends } : {}),
+      ...(backendNeedsIsolation(backend)
+        ? {
+            realBackendIsolation: {
+              kind: 'external',
+              label: 'Harbor task container',
+              toolExecutor: createHarborCellLocalToolExecutor(resolvedEnv),
+            },
+          }
+        : {}),
+      ...(options.now ? { now: options.now } : {}),
+      ...(options.newId ? { newId: options.newId } : {}),
+    });
+  } finally {
+    await providerEnvFetch?.close();
+  }
 }
 
 export function reasoningEffortFromEnv(
@@ -879,6 +971,7 @@ export function buildAiSdkCellBackendRegistration(input: {
   env: RunHarborCellEnv;
   now: () => number;
   newId: () => string;
+  fetch?: typeof globalThis.fetch;
   maxSteps?: number;
   recordUsageCheckpoint?: (usage: HarborCellUsageCheckpoint) => void | Promise<void>;
 }): NonNullable<RunHarborCellInput['registerBackends']> {
@@ -928,8 +1021,11 @@ export function buildAiSdkCellBackendRegistration(input: {
         connection,
         sessionId: ctx.sessionId,
         modelId: input.model,
+        ...(input.fetch ? { fetchFn: input.fetch } : {}),
       });
+      const providerFetch = subscriptionFetch ?? input.fetch;
       const hostTools = buildHarborCellAiSdkTools(context.toolExecutor!, {
+        agentTools: context.config.agentTools,
         ...(context.heavyTaskEvidence ? { heavyTaskEvidence: context.heavyTaskEvidence } : {}),
         ...(context.heavyTaskProgress ? { heavyTaskProgress: context.heavyTaskProgress } : {}),
         ...(context.heavyTaskSelfCheck ? { heavyTaskSelfCheck: context.heavyTaskSelfCheck } : {}),
@@ -951,7 +1047,7 @@ export function buildAiSdkCellBackendRegistration(input: {
         modelFactory: (modelInput) =>
           getAIModel({
             ...modelInput,
-            ...(subscriptionFetch ? { fetch: subscriptionFetch } : {}),
+            ...(providerFetch ? { fetch: providerFetch } : {}),
           }),
         tools,
         toolAvailability: ctx.tools

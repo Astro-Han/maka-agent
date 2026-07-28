@@ -3,13 +3,13 @@ import {
   buildAgentTeamChildTools,
   buildAgentTeamLeadTools,
   buildAskUserQuestionTool,
-  buildBuiltinTools,
   buildChildAgentTools,
   buildDeferredToolGroupsFromCatalog,
   buildHostCapabilitiesFromBinding,
   buildParentAgentTools,
   assertProductBindingCatalogClean,
   createBuiltinSandboxManager,
+  isBuiltinFilesystemWorkerSandboxAvailable,
   createSandboxDiagnosticsProvider,
   createFilesystemWorkerLaunchSpecProvider,
   FilesystemWorkerClient,
@@ -46,6 +46,7 @@ import type { createMainTaskLedgerWiring } from './task-ledger-wiring.js';
 import type { createMainAutomationWiring } from './automation-wiring.js';
 import type { createMainGoalWiring } from './goal-wiring.js';
 import type { ToolArtifactPersistence } from './tool-artifact-persistence.js';
+import { buildDesktopBuiltinTools } from './desktop-builtin-tools.js';
 
 type TaskLedgerWiring = ReturnType<typeof createMainTaskLedgerWiring>;
 type AutomationWiring = ReturnType<typeof createMainAutomationWiring>;
@@ -101,9 +102,10 @@ export function assembleDesktopTools(deps: DesktopToolAssemblyDeps) {
 
   const sandboxManager = createBuiltinSandboxManager();
   const filesystemWorkerLaunchSpecProvider =
-    process.platform === 'darwin'
+    sandboxManager && isBuiltinFilesystemWorkerSandboxAvailable()
       ? createFilesystemWorkerLaunchSpecProvider({
           runtime: 'electron',
+          platform: process.platform,
           executable: process.execPath,
           resourceLocation: app.isPackaged
             ? { kind: 'desktop-packaged', resourcesPath: process.resourcesPath }
@@ -204,7 +206,7 @@ export function assembleDesktopTools(deps: DesktopToolAssemblyDeps) {
   // the shared catalog ∩ this binding (#1099 S2). Skill listing uses the same host.
   const toolsBeforeSkill: MakaTool[] = [
     buildAskUserQuestionTool(),
-    ...buildBuiltinTools({
+    ...buildDesktopBuiltinTools({
       shellRuns,
       runtimeResources: shellRuns,
       archiveResources: { readArchivedToolResultResource },
@@ -217,7 +219,7 @@ export function assembleDesktopTools(deps: DesktopToolAssemblyDeps) {
         enableBashAdditionalPermissions: true,
         enableFileToolAdditionalPermissions: true,
       } : {}),
-    }).filter((tool: MakaTool) => tool.name !== 'Edit'),
+    }),
   ];
   const toolsAfterSkill: MakaTool[] = [
     // External reference plan-mode borrow: a bounded read-only local worker for
@@ -280,7 +282,7 @@ export function assembleDesktopTools(deps: DesktopToolAssemblyDeps) {
   // Child agents stay file-only for local reads; parent runtime refs such as
   // maka://runtime/background-tasks/<id> are not part of their tool surface.
   const childAgentTools = buildChildAgentTools([
-    ...buildBuiltinTools({
+    ...buildDesktopBuiltinTools({
       archiveResources: { readArchivedToolResultResource },
       snapshotImage: snapshotReadImage,
       ...(sandboxManager ? { sandboxManager } : {}),
@@ -289,7 +291,7 @@ export function assembleDesktopTools(deps: DesktopToolAssemblyDeps) {
         enableBashAdditionalPermissions: true,
         enableFileToolAdditionalPermissions: true,
       } : {}),
-    }).filter((tool: MakaTool) => tool.name !== 'Edit'),
+    }),
     webSearchTool,
     ...agentTeamChildTools,
   ]);

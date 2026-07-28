@@ -34,14 +34,31 @@ export type OperationHandlerMap = {
 };
 
 export type DomainOperationKey = Exclude<OperationKey, 'host.status'>;
-export type TurnOperationKey = Extract<OperationKey, `turn.${string}`>;
+export type TurnOperationKey = Extract<OperationKey, 'turn.start' | 'turn.query' | 'turn.stop'>;
 export type RuntimePolicyOperationKey = Extract<
   OperationKey,
   `runtime.policy.${string}` | `connection.catalog.${string}` | `credential.vault.${string}`
 >;
+export type MessageOperationKey = Extract<
+  OperationKey,
+  'turn.message.submit' | 'queue.retract' | 'turn.interrupt'
+>;
+export type InteractionOperationKey = Extract<OperationKey, `interaction.${string}`>;
+export type SessionContinuityOperationKey = Extract<
+  OperationKey,
+  'subscription.open' | 'subscription.close'
+>;
+export type TaskLedgerOperationKey = Extract<OperationKey, 'task.ledger.query'>;
 export type DomainOperationHandlerMap = Pick<OperationHandlerMap, DomainOperationKey>;
 export type TurnOperationHandlerMap = Pick<OperationHandlerMap, TurnOperationKey>;
 export type RuntimePolicyOperationHandlerMap = Pick<OperationHandlerMap, RuntimePolicyOperationKey>;
+export type MessageOperationHandlerMap = Pick<OperationHandlerMap, MessageOperationKey>;
+export type InteractionOperationHandlerMap = Pick<OperationHandlerMap, InteractionOperationKey>;
+export type SessionContinuityOperationHandlerMap = Pick<
+  OperationHandlerMap,
+  SessionContinuityOperationKey
+>;
+export type TaskLedgerOperationHandlerMap = Pick<OperationHandlerMap, TaskLedgerOperationKey>;
 
 export function composeOperationHandlers(
   ...handlerMaps: readonly Partial<OperationHandlerMap>[]

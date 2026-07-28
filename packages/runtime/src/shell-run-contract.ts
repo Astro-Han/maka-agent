@@ -68,6 +68,8 @@ export interface ShellRunBashInput {
   permissionContext?: ToolExecutionPermissionContext;
   /** Effective command sandbox selected before process launch. */
   sandboxType?: SandboxType;
+  /** Invoked exactly once after startup failure or terminal process completion. */
+  onCompletion?: (outcome: { successful: boolean }) => void;
 }
 
 export interface ShellRunWriteInput {

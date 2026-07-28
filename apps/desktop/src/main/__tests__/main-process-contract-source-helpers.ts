@@ -1,8 +1,56 @@
-import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
-const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
+/**
+ * Walk up to the workspace root by looking for it, rather than counting `..`
+ * segments. Contract tests run from `dist/main/__tests__`, so a fixed chain
+ * silently resolves to `/` if the build output ever moves — the failure then
+ * reads as "story directory missing" instead of "root lookup broke".
+ */
+function findRepoRoot(start: string): string {
+  let dir = resolve(start);
+  for (;;) {
+    if (
+      existsSync(join(dir, 'apps', 'desktop', 'package.json'))
+      && existsSync(join(dir, 'packages', 'ui', 'package.json'))
+    ) {
+      return dir;
+    }
+    const parent = resolve(dir, '..');
+    if (parent === dir) throw new Error(`Unable to locate repo root from ${start}`);
+    dir = parent;
+  }
+}
+
+export const REPO_ROOT = findRepoRoot(import.meta.dirname);
+
+/**
+ * Every production module of the main process, discovered rather than listed.
+ *
+ * The curated list below is the older seam and still serves the assertions
+ * that need one concatenated string. This one exists for the assertions that
+ * claim a NEGATIVE over the whole process ("nothing else does X"), where a
+ * subset is not evidence: a hand-maintained list and a top-level-only
+ * `readdir` both answer "not in the part I looked at", which is the wrong
+ * question. `src/main` is 133 production modules, 33 of them below the top
+ * level.
+ */
+export async function mainProcessSourceFiles(): Promise<string[]> {
+  const root = resolve(REPO_ROOT, 'apps/desktop/src/main');
+  const walk = async (dir: string): Promise<string[]> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const found = await Promise.all(
+      entries.map(async (entry) => {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) return entry.name === '__tests__' ? [] : walk(full);
+        return entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts') ? [full] : [];
+      }),
+    );
+    return found.flat();
+  };
+  return (await walk(root)).sort();
+}
 
 export const MAIN_PROCESS_SOURCE_REPO_PATHS: readonly string[] = [
   'apps/desktop/src/main/main.ts',
@@ -27,11 +75,13 @@ export const MAIN_PROCESS_SOURCE_REPO_PATHS: readonly string[] = [
   'apps/desktop/src/main/onboarding-ipc-main.ts',
   'apps/desktop/src/main/permission-mode-default.ts',
   'apps/desktop/src/main/permissions-ipc-main.ts',
+  'apps/desktop/src/main/permission-overlay/permission-overlay-main.ts',
   'apps/desktop/src/main/plan-reminders-ipc-main.ts',
   'apps/desktop/src/main/plan-reminders-main.ts',
   'apps/desktop/src/main/project-context-root.ts',
   'apps/desktop/src/main/project-root-controller.ts',
   'apps/desktop/src/main/session-entry-ipc-main.ts',
+  'apps/desktop/src/main/create-session-input.ts',
   'apps/desktop/src/main/session-branch.ts',
   'apps/desktop/src/main/session-revision.ts',
   'apps/desktop/src/main/session-stream.ts',
@@ -71,4 +121,10 @@ export function readMainProcessCombinedSourceSync(): string {
  *  module's own `export async function resolveDefaultPermissionMode`). */
 export async function readMainTsSource(): Promise<string> {
   return readFile(resolve(REPO_ROOT, 'apps/desktop/src/main/main.ts'), 'utf8');
+}
+
+/** Read just apps/desktop/src/main/sessions-ipc-main.ts — the single
+ *  session-creation IPC since #1433 merged `quickChat:start` into it. */
+export async function readSessionsIpcSource(): Promise<string> {
+  return readFile(resolve(REPO_ROOT, 'apps/desktop/src/main/sessions-ipc-main.ts'), 'utf8');
 }

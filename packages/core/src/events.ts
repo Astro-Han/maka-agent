@@ -29,6 +29,7 @@ import type {
   PrefixChangeReason,
   PromptSegmentEstimate,
 } from './usage-stats/types.js';
+import { defineObjectShape, hasExactShape, isRecord } from './record-schema.js';
 
 export const TOOL_OUTPUT_STREAMS = ['stdout', 'stderr'] as const;
 export const TOOL_OUTPUT_DELTA_MAX_CHARS = 8192;
@@ -77,6 +78,229 @@ export interface QuoteRef {
   sourceTurnId?: string;
 }
 
+/** Canonical user-authored content shared by storage, runtime, and Host wire. */
+export interface MessageContent {
+  /**
+   * Authoritative model-facing input. This may be a composed envelope when a
+   * client injects context such as explicit skill instructions.
+   */
+  text: string;
+  /** Human-facing text when it differs from `text`; omit when equal. */
+  displayText?: string;
+  /** Ordered attachment references; omit when empty. Attachment bytes never travel here. */
+  attachments?: AttachmentRef[];
+  /** Ordered inline excerpts; omit when empty. Provenance remains part of content identity. */
+  quotes?: QuoteRef[];
+}
+
+const MESSAGE_CONTENT_SHAPE = defineObjectShape<MessageContent>()(
+  ['text'],
+  ['displayText', 'attachments', 'quotes'],
+);
+const ATTACHMENT_REF_SHAPE = defineObjectShape<AttachmentRef>()(
+  ['kind', 'name', 'mimeType', 'bytes', 'ref'],
+  [],
+);
+const QUOTE_REF_SHAPE = defineObjectShape<QuoteRef>()(['text'], ['label', 'sourceTurnId']);
+const SESSION_FILE_REF_SHAPE = defineObjectShape<Extract<StorageRef, { kind: 'session_file' }>>()(
+  ['kind', 'sessionId', 'relativePath'],
+  [],
+);
+const WORKSPACE_FILE_REF_SHAPE = defineObjectShape<
+  Extract<StorageRef, { kind: 'workspace_file' }>
+>()(['kind', 'relativePath'], []);
+const EXTERNAL_FILE_REF_SHAPE = defineObjectShape<Extract<StorageRef, { kind: 'external_file' }>>()(
+  ['kind', 'absolutePath'],
+  [],
+);
+
+export function normalizeMessageContent(content: MessageContent): MessageContent {
+  return {
+    text: content.text,
+    ...(content.displayText !== undefined && content.displayText !== content.text
+      ? { displayText: content.displayText }
+      : {}),
+    ...(content.attachments !== undefined && content.attachments.length > 0
+      ? {
+          attachments: content.attachments.map((attachment) => ({
+            ...attachment,
+            bytes: Object.is(attachment.bytes, -0) ? 0 : attachment.bytes,
+            ref: { ...attachment.ref },
+          })),
+        }
+      : {}),
+    ...(content.quotes !== undefined && content.quotes.length > 0
+      ? {
+          quotes: content.quotes.map((quote) => ({
+            text: quote.text,
+            ...(quote.label !== undefined ? { label: quote.label } : {}),
+            ...(quote.sourceTurnId !== undefined ? { sourceTurnId: quote.sourceTurnId } : {}),
+          })),
+        }
+      : {}),
+  };
+}
+
+export function decodeMessageContent(value: unknown): MessageContent {
+  if (!isMessageContent(value)) throw new TypeError('Invalid MessageContent');
+  return normalizeMessageContent(value);
+}
+
+export function isMessageContent(value: unknown): value is MessageContent {
+  return (
+    isRecord(value) &&
+    hasExactShape(value, MESSAGE_CONTENT_SHAPE) &&
+    typeof value.text === 'string' &&
+    (value.displayText === undefined || typeof value.displayText === 'string') &&
+    (value.attachments === undefined ||
+      (Array.isArray(value.attachments) && value.attachments.every(isAttachmentRef))) &&
+    (value.quotes === undefined || (Array.isArray(value.quotes) && value.quotes.every(isQuoteRef)))
+  );
+}
+
+export function isQuoteRef(value: unknown): value is QuoteRef {
+  return (
+    isRecord(value) &&
+    hasExactShape(value, QUOTE_REF_SHAPE) &&
+    typeof value.text === 'string' &&
+    (value.label === undefined || typeof value.label === 'string') &&
+    (value.sourceTurnId === undefined || typeof value.sourceTurnId === 'string')
+  );
+}
+
+export function isAttachmentRef(value: unknown): value is AttachmentRef {
+  return (
+    isRecord(value) &&
+    hasExactShape(value, ATTACHMENT_REF_SHAPE) &&
+    (value.kind === 'image' ||
+      value.kind === 'pdf' ||
+      value.kind === 'doc' ||
+      value.kind === 'code' ||
+      value.kind === 'other') &&
+    typeof value.name === 'string' &&
+    typeof value.mimeType === 'string' &&
+    typeof value.bytes === 'number' &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes >= 0 &&
+    isStorageRef(value.ref)
+  );
+}
+
+/** A structurally valid attachment whose metadata and locator are canonical at durable boundaries. */
+export function isCanonicalAttachmentRef(value: unknown): value is AttachmentRef {
+  return (
+    isAttachmentRef(value) &&
+    value.name.length > 0 &&
+    value.mimeType.length > 0 &&
+    isCanonicalStorageRef(value.ref)
+  );
+}
+
+export function isStorageRef(value: unknown): value is StorageRef {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'session_file') {
+    return (
+      hasExactShape(value, SESSION_FILE_REF_SHAPE) &&
+      typeof value.sessionId === 'string' &&
+      typeof value.relativePath === 'string'
+    );
+  }
+  if (value.kind === 'workspace_file') {
+    return hasExactShape(value, WORKSPACE_FILE_REF_SHAPE) && typeof value.relativePath === 'string';
+  }
+  return (
+    value.kind === 'external_file' &&
+    hasExactShape(value, EXTERNAL_FILE_REF_SHAPE) &&
+    typeof value.absolutePath === 'string'
+  );
+}
+
+export function isCanonicalStorageRef(value: unknown): value is StorageRef {
+  if (!isStorageRef(value)) return false;
+  if (value.kind === 'external_file') return isCanonicalAbsolutePath(value.absolutePath);
+  if (value.kind === 'session_file' && !/^[A-Za-z0-9_-]{1,128}$/.test(value.sessionId)) {
+    return false;
+  }
+  return isCanonicalRelativePath(value.relativePath);
+}
+
+function isCanonicalRelativePath(path: string): boolean {
+  return (
+    path.length > 0 &&
+    !path.includes('\0') &&
+    !path.includes('\\') &&
+    !path.startsWith('/') &&
+    !/^[A-Za-z]:/.test(path) &&
+    path.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+  );
+}
+
+function isCanonicalAbsolutePath(path: string): boolean {
+  if (path.length === 0 || path.includes('\0')) return false;
+  if (path.startsWith('/')) return true;
+  if (/^[A-Za-z]:[\\/]/.test(path)) return true;
+  return /^\\\\[^\\/]+[\\/][^\\/]+/.test(path);
+}
+
+export function messageContentsEqual(left: MessageContent, right: MessageContent): boolean {
+  const leftDisplayText = left.displayText === left.text ? undefined : left.displayText;
+  const rightDisplayText = right.displayText === right.text ? undefined : right.displayText;
+  const leftAttachments = left.attachments?.length ? left.attachments : undefined;
+  const rightAttachments = right.attachments?.length ? right.attachments : undefined;
+  const leftQuotes = left.quotes?.length ? left.quotes : undefined;
+  const rightQuotes = right.quotes?.length ? right.quotes : undefined;
+  return (
+    left.text === right.text &&
+    leftDisplayText === rightDisplayText &&
+    ((leftAttachments === undefined && rightAttachments === undefined) ||
+      (leftAttachments !== undefined &&
+        rightAttachments !== undefined &&
+        leftAttachments.length === rightAttachments.length &&
+        leftAttachments.every((attachment, index) =>
+          attachmentRefsEqual(attachment, rightAttachments[index]!),
+        ))) &&
+    ((leftQuotes === undefined && rightQuotes === undefined) ||
+      (leftQuotes !== undefined &&
+        rightQuotes !== undefined &&
+        leftQuotes.length === rightQuotes.length &&
+        leftQuotes.every((quote, index) => quoteRefsEqual(quote, rightQuotes[index]!))))
+  );
+}
+
+function quoteRefsEqual(left: QuoteRef, right: QuoteRef): boolean {
+  return (
+    left.text === right.text &&
+    left.label === right.label &&
+    left.sourceTurnId === right.sourceTurnId
+  );
+}
+
+function attachmentRefsEqual(left: AttachmentRef, right: AttachmentRef): boolean {
+  if (
+    left.kind !== right.kind ||
+    left.name !== right.name ||
+    left.mimeType !== right.mimeType ||
+    left.bytes !== right.bytes ||
+    left.ref.kind !== right.ref.kind
+  ) {
+    return false;
+  }
+  switch (left.ref.kind) {
+    case 'session_file':
+      return (
+        right.ref.kind === 'session_file' &&
+        left.ref.sessionId === right.ref.sessionId &&
+        left.ref.relativePath === right.ref.relativePath
+      );
+    case 'workspace_file':
+      return (
+        right.ref.kind === 'workspace_file' && left.ref.relativePath === right.ref.relativePath
+      );
+    case 'external_file':
+      return right.ref.kind === 'external_file' && left.ref.absolutePath === right.ref.absolutePath;
+  }
+}
+
 // ============================================================================
 // Event union
 // ============================================================================
@@ -100,8 +324,11 @@ export type SessionEvent =
   | ToolProgressEvent
   | ToolResultEvent
   | AnyPermissionRequestEvent
+  | PermissionAnswerAckEvent
+  | PermissionClosureAckEvent
   | PermissionDecisionAckEvent
   | UserQuestionRequestEvent
+  | UserQuestionAnswerAckEvent
   | PlanSubmittedEvent
   | TokenUsageEvent
   | SteeringMessageEvent
@@ -135,6 +362,8 @@ export interface ThinkingCompleteEvent extends BaseEvent {
   text: string;
   /** Anthropic signed thinking — MUST be re-sent on replay. */
   signature?: string;
+  /** Provider-owned replay metadata that must survive backend recreation. */
+  providerOptions?: Record<string, unknown>;
 }
 
 export interface ToolStartEvent extends BaseEvent {
@@ -359,7 +588,7 @@ export type ToolResultContent =
       agentName: string;
       turnId: string;
       runId?: string;
-      status: 'completed' | 'failed' | 'cancelled' | 'running' | 'waiting_permission';
+      status: 'completed' | 'failed' | 'cancelled' | 'running' | 'waiting_for_user';
       permissionMode: PermissionMode;
       summary: string;
       artifactIds: readonly string[];
@@ -481,9 +710,41 @@ export interface UserQuestionRequestEvent extends BaseEvent, UserQuestionRequest
 }
 
 /**
- * Echo of the user's permission decision back through the event stream so
- * all UI observers (and JSONL audit) see the same outcome. Mirrors the
- * PermissionDecisionMessage that storage appends.
+ * Echo that the backend accepted a user-question answer.
+ * The canonical answer remains owned by InteractionStore.
+ */
+export interface UserQuestionAnswerAckEvent extends BaseEvent {
+  type: 'user_question_answer_ack';
+  requestId: string;
+  toolUseId: string;
+}
+
+/**
+ * Echo that the hosted runtime accepted a permission answer.
+ * The canonical decision remains owned by the Interaction outcome.
+ */
+export interface PermissionAnswerAckEvent extends BaseEvent {
+  type: 'permission_answer_ack';
+  requestId: string;
+  toolUseId: string;
+}
+
+export type PermissionClosureReason = 'timed_out';
+
+/**
+ * Echo that the hosted runtime durably closed an unanswered permission request.
+ * This acknowledgement carries identity and closure reason only.
+ */
+export interface PermissionClosureAckEvent extends BaseEvent {
+  type: 'permission_closure_ack';
+  requestId: string;
+  toolUseId: string;
+  reason: PermissionClosureReason;
+}
+
+/**
+ * Embedded/legacy echo of a permission decision. Hosted execution uses the
+ * identity-only PermissionAnswerAckEvent instead.
  */
 export interface PermissionDecisionAckEvent extends BaseEvent {
   type: 'permission_decision_ack';
@@ -557,7 +818,7 @@ export interface TokenUsageEvent extends BaseEvent {
 export interface SteeringMessageEvent extends BaseEvent {
   type: 'steering_message';
   messageId: string;
-  text: string;
+  content: MessageContent;
 }
 
 /**

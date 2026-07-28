@@ -131,6 +131,8 @@ interface LiveShellRunBase {
   nativeExit: CompletionLatch<DriverExit>;
   startupSettled: CompletionLatch<void>;
   finished: CompletionLatch<ShellRunRecord>;
+  onCompletion?: (outcome: { successful: boolean }) => void;
+  completionNotified: boolean;
 }
 
 interface ShellRunSlotReservation {
@@ -205,11 +207,19 @@ export class ShellRunProcessManager
   }
 
   async runBackgroundBash(input: ShellRunBashInput): Promise<ShellRunToolResult> {
-    if (input.abortSignal?.aborted)
-      throw abortError('Command aborted before shell process started');
-    const mode: ShellMode = input.pty ? 'pty' : 'pipes';
-    const timeoutMs = normalizeBackgroundTimeoutMs(input.timeoutMs);
-    const live = await this.start(input, mode, timeoutMs, false);
+    const onCompletion = onceShellRunCompletion(input.onCompletion);
+    const ownedInput = onCompletion ? { ...input, onCompletion } : input;
+    let live: LiveShellRun;
+    try {
+      if (input.abortSignal?.aborted)
+        throw abortError('Command aborted before shell process started');
+      const mode: ShellMode = input.pty ? 'pty' : 'pipes';
+      const timeoutMs = normalizeBackgroundTimeoutMs(input.timeoutMs);
+      live = await this.start(ownedInput, mode, timeoutMs, false);
+    } catch (error) {
+      notifyFailedStartup(onCompletion);
+      throw error;
+    }
     const record = await this.persistObservation(live);
     if (input.abortSignal?.aborted) {
       this.requestForcedTermination(live, 'cancel');
@@ -228,12 +238,20 @@ export class ShellRunProcessManager
   }
 
   async runForegroundBash(input: ShellRunBashInput): Promise<TerminalToolResult> {
-    if (input.pty)
-      throw new Error('Foreground Bash does not support PTY mode; set run_in_background=true');
-    if (input.abortSignal?.aborted)
-      throw abortError('Command aborted before shell process started');
-    const timeoutMs = normalizeForegroundTimeoutMs(input.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS);
-    const live = await this.start(input, 'pipes', timeoutMs, true);
+    const onCompletion = onceShellRunCompletion(input.onCompletion);
+    const ownedInput = onCompletion ? { ...input, onCompletion } : input;
+    let live: LiveShellRun;
+    try {
+      if (input.pty)
+        throw new Error('Foreground Bash does not support PTY mode; set run_in_background=true');
+      if (input.abortSignal?.aborted)
+        throw abortError('Command aborted before shell process started');
+      const timeoutMs = normalizeForegroundTimeoutMs(input.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS);
+      live = await this.start(ownedInput, 'pipes', timeoutMs, true);
+    } catch (error) {
+      notifyFailedStartup(onCompletion);
+      throw error;
+    }
     if ((await live.finished.waitFor(input.abortSignal)) === 'abort') {
       this.requestForcedTermination(live, 'cancel');
     }
@@ -716,6 +734,8 @@ export class ShellRunProcessManager
       nativeExit: new CompletionLatch<DriverExit>(),
       startupSettled: new CompletionLatch<void>(),
       finished: new CompletionLatch<ShellRunRecord>(),
+      ...(input.onCompletion ? { onCompletion: input.onCompletion } : {}),
+      completionNotified: false,
     };
   }
 
@@ -1001,11 +1021,26 @@ export class ShellRunProcessManager
         live.finished.reject(error);
         throw error;
       }
+      this.notifyCompletionOwner(
+        live,
+        finalRecord.status === 'completed' && finalRecord.exitCode === 0,
+      );
       live.finished.resolve(finalRecord);
       return finalRecord;
     } finally {
+      this.notifyCompletionOwner(live, false);
       this.live.delete(live.shellRunId);
       this.releaseLiveSlot(live);
+    }
+  }
+
+  private notifyCompletionOwner(live: LiveShellRun, successful: boolean): void {
+    if (live.completionNotified) return;
+    live.completionNotified = true;
+    try {
+      live.onCompletion?.({ successful });
+    } catch {
+      // Resource cleanup must not corrupt the durable shell-run terminal state.
     }
   }
 
@@ -1233,6 +1268,7 @@ export class ShellRunProcessManager
         /* startup cleanup continues */
       }
     } finally {
+      this.notifyCompletionOwner(live, false);
       this.live.delete(live.shellRunId);
       this.releaseLiveSlot(live);
     }
@@ -1448,6 +1484,26 @@ export class ShellRunProcessManager
     reservation.released = true;
     this.reservedShellRuns -= 1;
     if (reservation.mode === 'pty') this.reservedPtyRuns -= 1;
+  }
+}
+
+function onceShellRunCompletion(
+  callback: ShellRunBashInput['onCompletion'],
+): ShellRunBashInput['onCompletion'] {
+  if (!callback) return undefined;
+  let completed = false;
+  return (outcome) => {
+    if (completed) return;
+    completed = true;
+    callback(outcome);
+  };
+}
+
+function notifyFailedStartup(callback: ShellRunBashInput['onCompletion']): void {
+  try {
+    callback?.({ successful: false });
+  } catch {
+    // Resource cleanup errors must not replace the original startup failure.
   }
 }
 

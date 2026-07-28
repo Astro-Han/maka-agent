@@ -538,3 +538,194 @@ describe('MARKDOWN-PROSE-RENDER-OWNER-0 contract (#739)', () => {
     );
   });
 });
+
+/**
+ * MARKDOWN-PROSE-CJK-MIXED-SPACING-0: Maka is CJK-first and its assistant
+ * prose is dense mixed script, so `.maka-prose` asks for CJK/Latin autospace
+ * and gives inline code pills their own margin. Both rationales live next to
+ * the rules in prose.css; this locks that they are still there.
+ *
+ * The third pair of tests is the one that matters. Both spacing rules are
+ * PROSE decoration that reaches fenced code unless carved back out —
+ * autospace inherits, and `.maka-prose code` (0,1,1) matches `pre > code` too.
+ * Shipping them uncarved put the first line of every code block 3.25px right
+ * of the lines below it and drifted mixed-script lines off the monospace grid.
+ * That is the invariant #1431 already locked for ligatures, reached a second
+ * time by different properties, so these guard the BOUNDARY as a property
+ * class: they fail for any future shaping declaration too, not just these two.
+ *
+ * Numbers here come from the built Electron app, never headless — headless
+ * falls PingFang SC back to a serif face while `document.fonts.check` still
+ * returns true, which voids every font-dependent measurement taken there.
+ */
+describe('MARKDOWN-PROSE-CJK-MIXED-SPACING-0 contract', () => {
+  it('.maka-prose asks for CJK/Latin autospace (Chromium defaults to no-autospace)', async () => {
+    const css = stripCssComments(await readFile(PROSE_CSS, 'utf8'));
+    const prose = cssBlocks(css).find(({ selectors }) => selectors === '.maka-prose');
+    assert.ok(prose, 'expected a bare .maka-prose base rule in prose.css');
+    assert.match(
+      prose!.decls,
+      /text-autospace:\s*normal/,
+      ".maka-prose must set text-autospace: normal — Chromium's initial value is no-autospace, so a CJK-first product gets no CJK/Latin boundary spacing unless it asks (measured +1.55px per boundary at 13px)",
+    );
+  });
+
+  it('inline code keeps a margin gap so code pills do not glue to surrounding Chinese', async () => {
+    const css = stripCssComments(await readFile(PROSE_CSS, 'utf8'));
+    const code = cssBlocks(css).find(({ selectors }) => /^\.maka-prose\s+code$/.test(selectors));
+    assert.ok(code, 'expected a .maka-prose code rule');
+    assert.match(
+      code!.decls,
+      /margin-inline:\s*0\.25em/,
+      '.maka-prose code must carry margin-inline: 0.25em — text-autospace alone leaves only 1.55px against a pill that already has inline padding and a background',
+    );
+  });
+
+  /**
+   * Glyph-reshaping properties that INHERIT into fenced code, each with the
+   * value that actually neutralises it there. The first version of this
+   * contract only checked that the property NAME reappeared in the code-block
+   * tier, which passed when a carve-out was reverted to the leaking value —
+   * a presence check wearing a neutralisation check's error message.
+   */
+  const INHERITED_SHAPING: Array<[property: string, neutral: RegExp]> = [
+    ['text-autospace', /no-autospace/],
+    ['text-spacing-trim', /space-all/],
+    ['letter-spacing', /normal|:\s*0/],
+    ['word-spacing', /normal|:\s*0/],
+    ['font-variant-ligatures', /none/],
+    ['font-feature-settings', /normal/],
+    ['text-transform', /none/],
+  ];
+
+  /**
+   * Pill chrome on `.maka-prose code`, which also matches `pre > code`. The
+   * block reset must zero each — `border`/`padding` already leaked once, and
+   * `margin` leaked in round 1 (the pill's margin-inline offset the first
+   * source line of every code block by 3.25px).
+   */
+  const PILL_CHROME = ['margin', 'padding', 'background', 'border', 'border-radius'];
+
+  /** Longhand-aware property match: `margin` also matches `margin-inline`. */
+  const declares = (decls: string, property: string) =>
+    new RegExp(`(?:^|;)\\s*${property}(?:-[a-z-]+)?\\s*:`).test(decls);
+
+  /** The declaration text for `property` in `decls`, longhands included. */
+  const valueOf = (decls: string, property: string) =>
+    decls.match(new RegExp(`(?:^|;)\\s*${property}(?:-[a-z-]+)?\\s*:([^;]*)`))?.[1]?.trim() ?? '';
+
+  /**
+   * Rules that can hold a fenced block, so an inherited property set on them
+   * reaches code. A list item and a blockquote can contain one; `h1`–`h4`,
+   * `th` and `td` cannot (headings are single-line and GFM table cells are
+   * line-delimited), which is why `.maka-prose h1`'s letter-spacing is not a
+   * leak and must not trip this.
+   *
+   * Known limit: `cssBlocks` is a flat splitter, so a rule nested inside an
+   * at-rule is invisible here. prose.css has no `@media`; if one is added,
+   * this scan needs to grow with it.
+   */
+  const fencedCodeAncestors = (blocks: Array<{ selectors: string; decls: string }>) =>
+    blocks.filter(({ selectors }) => selectors
+      .split(',')
+      .some((one) => /^\.maka-prose(\s+(li|blockquote))?$/.test(one.trim())));
+
+  it('prose text shaping is neutralised at the fenced-code boundary', async () => {
+    const css = stripCssComments(await readFile(PROSE_CSS, 'utf8'));
+    const blocks = cssBlocks(css);
+    const pre = blocks.find(({ selectors }) => selectors === '.maka-prose .maka-code-block pre');
+    const preCode = blocks.find(({ selectors }) => selectors === '.maka-prose .maka-code-block pre code');
+    assert.ok(pre, 'expected a .maka-prose .maka-code-block pre rule');
+    assert.ok(preCode, 'expected a .maka-prose .maka-code-block pre code reset');
+    const carvedOut = `${pre!.decls};${preCode!.decls}`;
+
+    for (const [property, neutral] of INHERITED_SHAPING) {
+      const setter = fencedCodeAncestors(blocks).find(({ decls }) => declares(decls, property));
+      if (!setter) continue;
+      assert.ok(
+        declares(carvedOut, property),
+        `${setter.selectors} sets ${property}, which inherits into fenced code and shifts glyphs off the monospace grid. Code is a literal surface (#1431) — the .maka-code-block pre tier must carve ${property} back out`,
+      );
+      assert.match(
+        valueOf(carvedOut, property),
+        neutral,
+        `the code-block carve-out for ${property} must actually neutralise it, not just re-declare it — a carve-out reverted to the prose value re-ships the leak`,
+      );
+    }
+  });
+
+  it('inline-pill chrome is zeroed at the fenced-code boundary', async () => {
+    const css = stripCssComments(await readFile(PROSE_CSS, 'utf8'));
+    const blocks = cssBlocks(css);
+    const code = blocks.find(({ selectors }) => /^\.maka-prose\s+code$/.test(selectors));
+    const preCode = blocks.find(({ selectors }) => selectors === '.maka-prose .maka-code-block pre code');
+    assert.ok(code, 'expected a .maka-prose code rule');
+    assert.ok(preCode, 'expected a .maka-prose .maka-code-block pre code reset');
+
+    for (const property of PILL_CHROME) {
+      if (!declares(code!.decls, property)) continue;
+      assert.ok(
+        declares(preCode!.decls, property),
+        `.maka-prose code (0,1,1) matches pre > code too, so ${property} leaks into fenced code. The .maka-code-block pre code reset must neutralise ${property}`,
+      );
+      assert.match(
+        valueOf(preCode!.decls, property),
+        /^(0(px)?|none|transparent)$/,
+        `the pre code reset for ${property} must zero it — re-declaring it with a non-neutral value re-ships the leak (round 1: margin-inline offset the first source line by 3.25px)`,
+      );
+    }
+  });
+
+  it('the inline pill does not indent the block it starts', async () => {
+    const css = stripCssComments(await readFile(PROSE_CSS, 'utf8'));
+    const blocks = cssBlocks(css);
+    const code = blocks.find(({ selectors }) => /^\.maka-prose\s+code$/.test(selectors));
+    if (!declares(code!.decls, 'margin')) return;
+    const edge = blocks.find(({ selectors }) => /\.maka-prose\s+code:first-child/.test(selectors));
+    assert.ok(
+      edge,
+      'the pill margin is an inline gap between the pill and its NEIGHBOURING text, but at a block edge there is no neighbour — it indents the block instead (measured 2.98px on a paragraph, list item and blockquote that open with inline code, against 0 for one opening with plain text). A .maka-prose code:first-child rule must drop the leading margin',
+    );
+    assert.match(
+      edge!.decls,
+      /margin-inline-start:\s*0/,
+      '.maka-prose code:first-child must zero margin-inline-start so a block opening with a pill keeps the same left edge as its neighbours',
+    );
+  });
+
+  it('hard breaks render as a block span with height — a native <br> cannot be spaced by CSS', async () => {
+    const css = stripCssComments(await readFile(PROSE_CSS, 'utf8'));
+    const hb = cssBlocks(css).find(({ selectors }) => /\.maka-hardbreak$/.test(selectors));
+    assert.ok(hb, 'expected a .maka-hardbreak rule in prose.css');
+    assert.match(
+      hb!.decls,
+      /display:\s*block/,
+      '.maka-hardbreak must be display: block — an inline box cannot take a height, which is exactly why a native <br> is unfixable in CSS',
+    );
+    assert.match(
+      hb!.decls,
+      /height:\s*var\(--space-1-5\)/,
+      '.maka-hardbreak must take its 6px from --space-1-5 so the hard-break gap lands between the 4px line gap and the 16px paragraph gap',
+    );
+    // The DOM half — `<br>` + span, and remark-breaks still producing the
+    // break — is locked by rendering in packages/ui's markdown-body.test.ts.
+
+    // `remark-breaks` makes EVERY single newline a hard break, so the 6px
+    // lands on list-item and blockquote continuation lines too, where it
+    // inverts the grouping: measured 10.5px inside one list item against
+    // 6.5px between two of them. Those containers already group their own
+    // content; only a paragraph break carries the section split.
+    const scoped = cssBlocks(css).find(({ selectors }) =>
+      /\.maka-prose\s+li\s+\.maka-hardbreak/.test(selectors));
+    assert.ok(
+      scoped,
+      'the hard-break gap must be dropped inside li/blockquote — a continuation line there rendered further apart (10.5px) than two separate list items (6.5px), inverting the grouping',
+    );
+    assert.match(
+      scoped!.selectors,
+      /blockquote\s+\.maka-hardbreak/,
+      'blockquote needs the same carve-out as li — its content is already grouped, so a break inside it is a continuation, not a section split',
+    );
+    assert.match(scoped!.decls, /height:\s*0/, 'the carve-out must zero the gap');
+  });
+});

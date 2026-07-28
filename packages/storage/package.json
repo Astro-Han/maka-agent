@@ -1,6 +1,7 @@
 {
   "name": "@maka/storage",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -9,8 +10,10 @@
     ".": "./dist/index.js",
     "./execution-stores": "./dist/execution-stores.js",
     "./agent-graph-control-store": "./dist/agent-graph-control-store.js",
+    "./interaction-store": "./dist/interaction-store.js",
     "./root-authority": "./dist/root-authority.js",
     "./runtime-policy-stores": "./dist/runtime-policy-stores.js",
+    "./task-ledger-authority": "./dist/task-ledger-authority.js",
     "./workspace-identity": "./dist/workspace-identity.js",
     "./write-queue": "./dist/write-queue.js"
   },

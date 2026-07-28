@@ -74,6 +74,16 @@ describe('buildProviderOptions: thinking level', () => {
     assert.deepEqual(buildProviderOptions(conn('kimi-coding-plan'), 'k3', 'max'), expected);
   });
 
+  test('Kimi K3 sends max reasoning effort through the selected OpenAI-compatible namespace', () => {
+    const connection = {
+      ...conn('kimi-coding-plan'),
+      models: [{ id: 'k3', apiProtocol: 'openai-chat' as const }],
+    };
+    const expected = { kimiCodingPlan: { reasoningEffort: 'max' } };
+    assert.deepEqual(buildProviderOptions(connection, 'k3'), expected);
+    assert.deepEqual(buildProviderOptions(connection, 'k3', 'max'), expected);
+  });
+
   test('openai gpt-5.5 sends reasoningEffort (none for off, max for max); gpt-4o drops level', () => {
     assert.deepEqual(buildProviderOptions(conn('openai'), 'gpt-4o', 'high'), {
       openai: { store: false },
@@ -182,12 +192,38 @@ describe('buildProviderOptions: thinking level', () => {
     assert.deepEqual(buildProviderOptions(conn('deepseek'), 'deepseek-chat', 'high'), {});
   });
 
-  test('xAI Grok 4.5 sends its declared reasoning effort under the xai namespace', () => {
-    assert.deepEqual([...thinkingVariantsForModel('xai', 'grok-4.5')], ['low', 'medium', 'high']);
-    assert.deepEqual(buildProviderOptions(conn('xai'), 'grok-4.5', 'high'), {
-      xai: { reasoningEffort: 'high' },
-    });
-    assert.deepEqual(buildProviderOptions(conn('xai'), 'grok-4.5', 'off'), {});
+  test('xAI Grok 4.5 requests encrypted Responses reasoning under the native OpenAI namespace', () => {
+    for (const providerType of ['xai', 'xai-oauth'] as const) {
+      assert.deepEqual(
+        [...thinkingVariantsForModel(providerType, 'grok-4.5')],
+        ['low', 'medium', 'high'],
+      );
+      assert.deepEqual(buildProviderOptions(conn(providerType), 'grok-4.5'), {
+        openai: {
+          store: false,
+          forceReasoning: true,
+          reasoningSummary: null,
+          include: ['reasoning.encrypted_content'],
+        },
+      });
+      assert.deepEqual(buildProviderOptions(conn(providerType), 'grok-4.5', 'high'), {
+        openai: {
+          store: false,
+          forceReasoning: true,
+          reasoningSummary: null,
+          include: ['reasoning.encrypted_content'],
+          reasoningEffort: 'high',
+        },
+      });
+      assert.deepEqual(buildProviderOptions(conn(providerType), 'grok-4.5', 'off'), {
+        openai: {
+          store: false,
+          forceReasoning: true,
+          reasoningSummary: null,
+          include: ['reasoning.encrypted_content'],
+        },
+      });
+    }
   });
 
   test('Cloudflare Workers AI sends Kimi K2.6 reasoning effort and its real thinking-off wire', () => {
@@ -319,6 +355,37 @@ describe('buildProviderOptions: thinking level', () => {
 });
 
 describe('getAIModel: models.dev registry providers', () => {
+  test('routes the existing Kimi provider through its explicitly selected protocol', () => {
+    const anthropic = getAIModel({
+      connection: conn('kimi-coding-plan'),
+      apiKey: 'test-key',
+      modelId: 'k3',
+    });
+    const openai = getAIModel({
+      connection: {
+        ...conn('kimi-coding-plan'),
+        models: [{ id: 'k3', apiProtocol: 'openai-chat' }],
+      },
+      apiKey: 'test-key',
+      modelId: 'k3',
+    });
+
+    assert.equal(anthropic.provider, 'anthropic.messages');
+    assert.equal(openai.provider, 'kimi-coding-plan.chat');
+    assert.throws(
+      () =>
+        getAIModel({
+          connection: {
+            ...conn('kimi-coding-plan'),
+            models: [{ id: 'k3', apiProtocol: 'openai-responses' }],
+          },
+          apiKey: 'test-key',
+          modelId: 'k3',
+        }),
+      /Kimi Coding Plan.*openai-chat.*anthropic-messages/,
+    );
+  });
+
   test('routes SiliconFlow through the shared OpenAI-compatible adapter without rewriting model ids', () => {
     const model = getAIModel({
       connection: conn('siliconflow'),
@@ -343,6 +410,24 @@ describe('getAIModel: models.dev registry providers', () => {
       const model = getAIModel({ connection: conn(providerType), apiKey: 'test-key', modelId });
       assert.equal(model.provider, expectedProvider, `${providerType}/${modelId}`);
       assert.equal(model.modelId, modelId);
+    }
+  });
+
+  test('routes only xAI Grok 4.5 through Responses', () => {
+    for (const providerType of ['xai', 'xai-oauth'] as const) {
+      const responses = getAIModel({
+        connection: conn(providerType),
+        apiKey: 'xai-test-key',
+        modelId: 'grok-4.5',
+      });
+      const chat = getAIModel({
+        connection: conn(providerType),
+        apiKey: 'xai-test-key',
+        modelId: 'grok-4.3',
+      });
+
+      assert.equal(responses.provider, 'openai.responses');
+      assert.equal(chat.provider, `${providerType}.chat`);
     }
   });
 

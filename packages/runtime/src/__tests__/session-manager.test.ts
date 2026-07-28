@@ -1,4 +1,5 @@
 import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import {
@@ -48,8 +49,8 @@ import {
   type SessionStore,
 } from '../session-manager.js';
 import { RuntimeKernel, type RuntimeKernelLike } from '../runtime-kernel.js';
-import { FakeBackend } from '../fake-backend.js';
-import { RuntimeReadModel } from '../runtime-read-model.js';
+import { FAKE_ASK_USER_QUESTION_PROMPT, FakeBackend } from '../fake-backend.js';
+import { RuntimeReadModel, RuntimeReadModelError } from '../runtime-read-model.js';
 import type { AgentBackend } from '@maka/core/backend-types';
 import type { MakaTool } from '../tool-runtime.js';
 import type { ShellRunProcessManager } from '../shell-run-manager.js';
@@ -74,6 +75,20 @@ import {
   materializeExpertAgentDefinition,
 } from '../expert-catalog.js';
 import { AGENT_TEAM_CHILD_TOOL_NAMES } from '../agent-team-tool-names.js';
+import {
+  RuntimeMessageAuthorityInvariantError,
+  type RuntimeHostedRootAuthority,
+  type RuntimeMessageRunIdentity,
+} from '../message-authority.js';
+import {
+  RuntimeInteractionInvariantError,
+  type CanonicalPermissionOutcomeReader,
+  type CanonicalPermissionOutcomeRecord,
+  type RuntimeInteractionAuthority,
+  type RuntimeInteractionRunIdentity,
+  type RuntimePermissionContinuation,
+  type RuntimeUserQuestionContinuation,
+} from '../interaction-authority.js';
 
 describe('SessionManager child-session read model', () => {
   test('lists typed child sessions without treating branches as children', async () => {
@@ -181,6 +196,39 @@ describe('SessionManager graph operator provisioning', () => {
 });
 
 describe('SessionManager claimed graph intent execution', () => {
+  test('rejects hosted graph execution before durable state or backend activation', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    let backendBuilds = 0;
+    backends.register('fake', (ctx) => {
+      backendBuilds += 1;
+      return new TestBackend(ctx);
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      messageAuthority: hostedRootAuthority(),
+      newId: nextId(),
+      now: nextNow(20),
+    });
+    const parent = await manager.createSession(makeInput({ name: 'Supervisor' }));
+    const child = await createGraphOperatorSession(store, parent.id);
+    const claim = graphIntentClaim({ targetSessionId: child.id });
+
+    await expectRejects(
+      manager.runClaimedAgentGraphIntent(graphExecutionInput(claim, 'must not start')),
+      /requires a Runtime Host graph composition/,
+    );
+
+    expect(await runStore.listSessionRuns(child.id)).toEqual([]);
+    expect(await store.readMessages(child.id)).toEqual([]);
+    expect(backendBuilds).toBe(0);
+  });
+
   test('runs the exact claimed session-inline activation and durably deduplicates retries', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
@@ -562,6 +610,54 @@ describe('SessionManager claimed graph intent execution', () => {
     expect((await runStore.listSessionRuns(child.id)).length).toBe(1);
   });
 
+  test('target Session stop owns a claimed graph execution before its first runtime preflight', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(90),
+    });
+    const parent = await manager.createSession(makeInput());
+    const child = await createGraphOperatorSession(store, parent.id);
+    const claim = graphIntentClaim({
+      targetSessionId: child.id,
+      targetTurnId: 'stopped-graph-turn',
+      targetRunId: 'stopped-graph-run',
+    });
+    const readStarted = makeGate();
+    const releaseRead = makeGate();
+    store.nextReadHeaderGate = { started: readStarted, release: releaseRead };
+
+    const executing = manager.runClaimedAgentGraphIntent(
+      graphExecutionInput(claim, 'must stop before provider dispatch'),
+    );
+    await readStarted.promise;
+    let stopSettled = false;
+    const stopping = manager.stopSession(child.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseRead.release();
+    const [result] = await Promise.all([executing, stopping]);
+    expect(result.status).toBe('cancelled');
+    expect(backend?.sendInputs).toEqual([]);
+    expect((await runStore.readRun(child.id, claim.targetRunId)).status).toBe('cancelled');
+    expect((await store.readHeader(child.id)).status === 'blocked').toBe(false);
+  });
+
   test('fails closed before runtime when claim routing collides or targets a main session', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
@@ -920,7 +1016,7 @@ describe('SessionManager child-session runtime primitive', () => {
         async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
           childAttempts += 1;
           childInputs.push(input);
-          if (childAttempts === 1) {
+          if (childAttempts <= 2) {
             yield {
               type: 'error',
               id: `${input.turnId}-error`,
@@ -990,26 +1086,46 @@ describe('SessionManager child-session runtime primitive', () => {
     expect(child.status).toBe('failed');
     expect(child.failureClass).toBe('RateLimit');
 
-    const retried = await manager.retryChildAgent(parent.id, {
+    const resumed = await manager.resumeChildAgent(parent.id, {
       parentRunId: parentRun.runId,
       sourceRunId: child.runId,
+      prompt: 'retry with additional guidance',
+    });
+    expect(resumed.status).toBe('failed');
+    expect(resumed.failureClass).toBe('RateLimit');
+    await expectRejects(
+      manager.retryChildAgent(parent.id, {
+        parentRunId: parentRun.runId,
+        sourceRunId: child.runId,
+      }),
+      /already has a successor/,
+    );
+
+    const retried = await manager.retryChildAgent(parent.id, {
+      parentRunId: parentRun.runId,
+      sourceRunId: resumed.runId!,
       execution: {
         kind: 'child_session',
         sessionId: child.childSessionId,
-        currentRunId: child.runId,
+        currentRunId: resumed.runId!,
       },
     });
     expect(retried.status).toBe('completed');
     expect(retried.childSessionId).toBe(child.childSessionId);
-    expect(retried.retriedFromRunId).toBe(child.runId);
+    expect(retried.retriedFromRunId).toBe(resumed.runId);
     expect(childInputs.map((input) => input.text)).toEqual([
       'inspect with a transient provider failure',
+      'retry with additional guidance',
       '',
     ]);
     const retryRun = await runStore.readRun(child.childSessionId, retried.runId!);
     expect(isSessionInlineRun(retryRun)).toBe(true);
     expect(retryRun.parentRunId).toBe(undefined);
-    expect(retryRun.retriedFromRunId).toBe(child.runId);
+    expect(retryRun.retriedFromRunId).toBe(resumed.runId);
+    await expectRejects(
+      manager.prepareChildAgentResume(parent.id, child.runId),
+      /already has a successor/,
+    );
     expect((await manager.prepareChildAgentResume(parent.id, retried.runId!)).execution).toEqual({
       kind: 'child_session',
       sessionId: child.childSessionId,
@@ -1030,7 +1146,129 @@ describe('SessionManager child-session runtime primitive', () => {
     while (!(await parentTurn.next()).done) {}
   });
 
-  test('deduplicates concurrent and durable retries while rejecting request drift', async () => {
+  test('linked retry exposes its hinted target Session before the first ledger read', async () => {
+    const ledgerReadStarted = makeGate();
+    const releaseLedgerRead = makeGate();
+    let gateLedgerRead = false;
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore({
+      beforeRuntimeEventRead: async () => {
+        if (!gateLedgerRead) return;
+        gateLedgerRead = false;
+        ledgerReadStarted.release();
+        await releaseLedgerRead.promise;
+      },
+    });
+    const backends = new BackendRegistry();
+    const parentGate = makeGate();
+    const childInputs: BackendSendInput[] = [];
+    backends.register('fake', (ctx) => {
+      if (!ctx.header.subagentRuntime) return new TestBackend(ctx, parentGate);
+      return {
+        kind: 'fake' as const,
+        sessionId: ctx.sessionId,
+        async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+          childInputs.push(input);
+          yield {
+            type: 'error',
+            id: `${input.turnId}-error`,
+            turnId: input.turnId,
+            ts: 1,
+            recoverable: true,
+            reason: 'RateLimit',
+            message: 'provider 429',
+          };
+          yield {
+            type: 'complete',
+            id: `${input.turnId}-complete`,
+            turnId: input.turnId,
+            ts: 2,
+            stopReason: 'error',
+          };
+        },
+        async stop(): Promise<void> {},
+        async respondToPermission(): Promise<void> {},
+        async dispose(): Promise<void> {},
+      };
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(155),
+      runtimeSource: 'test',
+    });
+    const parent = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const parentTurn = manager
+      .sendMessage(parent.id, { turnId: 'parent-linked-retry', text: 'keep parent active' })
+      [Symbol.asyncIterator]();
+    await parentTurn.next();
+    const [parentRun] = await runStore.listSessionRuns(parent.id);
+    if (!parentRun) throw new Error('parent run was not recorded');
+    const child = await manager.spawnChildSession(parent.id, {
+      spawnedBy: {
+        parentRunId: parentRun.runId,
+        parentTurnId: parentRun.turnId,
+        toolCallId: 'target-stop-retry',
+      },
+      agentProfile: LOCAL_READ_AGENT_PROFILE,
+      prompt: 'fail once before target stop',
+    });
+    expect(child.status).toBe('failed');
+
+    gateLedgerRead = true;
+    const retried = manager.retryChildAgent(parent.id, {
+      parentRunId: parentRun.runId,
+      sourceRunId: child.runId,
+      execution: {
+        kind: 'child_session',
+        sessionId: child.childSessionId,
+        currentRunId: child.runId,
+      },
+    });
+    await ledgerReadStarted.promise;
+    let stopSettled = false;
+    const stopping = manager
+      .stopSession(child.childSessionId, { source: 'stop_button' })
+      .finally(() => {
+        stopSettled = true;
+      });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseLedgerRead.release();
+    const [result] = await Promise.all([retried, stopping]);
+    expect(result.status).toBe('cancelled');
+    expect(result.retriedFromRunId).toBe(child.runId);
+    expect(childInputs).toHaveLength(1);
+    const retryRun = (await runStore.listSessionRuns(child.childSessionId)).find(
+      (run) => run.retriedFromRunId === child.runId,
+    );
+    expect(retryRun?.status).toBe('cancelled');
+    expect((await store.readHeader(child.childSessionId)).status === 'blocked').toBe(false);
+
+    await expectRejects(
+      manager.retryChildAgent(parent.id, {
+        parentRunId: parentRun.runId,
+        sourceRunId: child.runId,
+        execution: {
+          kind: 'child_session',
+          sessionId: child.childSessionId,
+          currentRunId: 'stale-hinted-run',
+        },
+      }),
+      /execution identity changed/,
+    );
+    await manager.stopSession(child.childSessionId, { source: 'stop_button' });
+
+    parentGate.release();
+    while (!(await parentTurn.next()).done) {}
+  });
+
+  test('hosted child spawn joins the exact in-flight identity and rejects request drift', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
@@ -1050,6 +1288,7 @@ describe('SessionManager child-session runtime primitive', () => {
       childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
       newId: nextId(),
       now: nextNow(150),
+      messageAuthority: hostedRootAuthority(),
     });
     const parent = await manager.createSession(makeInput());
     const parentTurn = manager
@@ -1092,6 +1331,87 @@ describe('SessionManager child-session runtime primitive', () => {
     expect(durableRetry.summary).toBe('ok');
     expect((await manager.listChildSessions(parent.id)).length).toBe(1);
     expect(backendsBySession.get(firstResult.childSessionId)?.sendInputs.length).toBe(1);
+
+    parentGate.release();
+    while (!(await parentTurn.next()).done) {}
+  });
+
+  test('hosted linked-child gate precedes resume preparation and remains held through terminal', async () => {
+    const store = new MemorySessionStore();
+    const preparationEntered = makeGate();
+    const allowPreparation = makeGate();
+    let watchedRunId: string | undefined;
+    let preparationReads = 0;
+    const runStore = new MemoryAgentRunStore({
+      beforeRuntimeEventRead: async (_sessionId, runId) => {
+        if (runId !== watchedRunId) return;
+        preparationReads += 1;
+        preparationEntered.release();
+        await allowPreparation.promise;
+      },
+    });
+    const backends = new BackendRegistry();
+    const parentGate = makeGate();
+    backends.register(
+      'fake',
+      (ctx) => new TestBackend(ctx, ctx.header.subagentRuntime ? undefined : parentGate),
+    );
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(165),
+      messageAuthority: hostedRootAuthority(),
+    });
+    const parent = await manager.createSession(makeInput());
+    const parentTurn = manager
+      .sendMessage(parent.id, { turnId: 'parent-turn', text: 'keep parent active' })
+      [Symbol.asyncIterator]();
+    await parentTurn.next();
+    const [parentRun] = await runStore.listSessionRuns(parent.id);
+    if (!parentRun) throw new Error('parent run was not recorded');
+    const child = await manager.spawnChildSession(parent.id, {
+      spawnedBy: {
+        parentRunId: parentRun.runId,
+        parentTurnId: parentRun.turnId,
+        toolCallId: 'hosted-gate-cut',
+      },
+      agentProfile: LOCAL_READ_AGENT_PROFILE,
+      prompt: 'inspect the gate cut',
+    });
+
+    watchedRunId = child.runId;
+    const first = manager.resumeChildAgent(parent.id, {
+      parentRunId: parentRun.runId,
+      sourceRunId: child.runId,
+      prompt: 'first successor',
+    });
+    await preparationEntered.promise;
+    const second = manager.resumeChildAgent(parent.id, {
+      parentRunId: parentRun.runId,
+      sourceRunId: child.runId,
+      prompt: 'stale second successor',
+    });
+    const outcomes = Promise.allSettled([first, second]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const readsBeforeRelease = preparationReads;
+    allowPreparation.release();
+
+    const [firstOutcome, secondOutcome] = await outcomes;
+    expect(readsBeforeRelease).toBe(1);
+    expect(firstOutcome.status).toBe('fulfilled');
+    expect(secondOutcome.status).toBe('rejected');
+    expect(secondOutcome.status === 'rejected' ? String(secondOutcome.reason) : '').toContain(
+      'already has an active execution',
+    );
+    expect(
+      (await runStore.listSessionRuns(child.childSessionId)).filter(
+        (run) => run.resumedFromRunId === child.runId,
+      ).length,
+    ).toBe(1);
 
     parentGate.release();
     while (!(await parentTurn.next()).done) {}
@@ -2045,6 +2365,7 @@ describe('SessionManager manual compaction', () => {
         (event) => event.actions?.tokenUsage?.contextBudget,
       ),
     ).toBe(true);
+    await manager.stopSession(session.id, { source: 'stop_button' });
   });
 
   test('persists one visible warning when manual compaction fails open', async () => {
@@ -2109,14 +2430,108 @@ describe('SessionManager manual compaction', () => {
       manager.compactSession(session.id, { turnId: 'turn-compact' }),
     );
     await readStarted.promise;
-    await manager.stopSession(session.id, { source: 'stop_button' });
+    let stopSettled = false;
+    const stop = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+    expect(compactCalls).toEqual([]);
+
     readGate.release();
+    await stop;
     const compactEvents = await compactPromise.catch(() => []);
 
     expect(compactCalls).toEqual([]);
     expect(compactEvents.some((event) => event.type === 'token_usage')).toBe(false);
     const compactRun = (await runStore.listSessionRuns(session.id)).find(
       (run) => run.turnId === 'turn-compact',
+    );
+    expect(compactRun?.status).toBe('cancelled');
+  });
+
+  test('manual compaction begin failure after reservation has no unhandled claim rejection', async () => {
+    const store = new MemorySessionStore();
+    const updateHeader = store.updateHeader.bind(store);
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const compactCalls: Array<{ turnId: string; runtimeContextCount: number }> = [];
+    backends.register('fake', (ctx) => new CompactingTestBackend(ctx, compactCalls));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(16_000),
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'bypass' }),
+    );
+    await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
+
+    const beginFailure = new Error('compact running status rejected after reservation');
+    let failCompactStart = true;
+    store.updateHeader = async (sessionId, patch) => {
+      if (failCompactStart && patch.status === 'running') {
+        failCompactStart = false;
+        throw beginFailure;
+      }
+      return await updateHeader(sessionId, patch);
+    };
+
+    await expectRejects(
+      collectSessionEvents(
+        manager.compactSession(session.id, { turnId: 'turn-compact-begin-failure' }),
+      ),
+      /compact running status rejected after reservation/,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(compactCalls).toEqual([]);
+  });
+
+  test('stopSession waits for compaction blocked before Run reservation', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const compactCalls: Array<{ turnId: string; runtimeContextCount: number }> = [];
+    backends.register('fake', (ctx) => new CompactingTestBackend(ctx, compactCalls));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(17_000),
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'bypass' }),
+    );
+    const readStarted = makeGate();
+    const releaseRead = makeGate();
+    store.nextReadHeaderGate = { started: readStarted, release: releaseRead };
+
+    const compact = collectSessionEvents(
+      manager.compactSession(session.id, { turnId: 'turn-compact-pending' }),
+    );
+    await readStarted.promise;
+    let stopSettled = false;
+    const stop = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+    expect(compactCalls).toEqual([]);
+
+    releaseRead.release();
+    await stop;
+    await compact.catch(() => []);
+
+    expect(compactCalls).toEqual([]);
+    const compactRun = (await runStore.listSessionRuns(session.id)).find(
+      (run) => run.turnId === 'turn-compact-pending',
     );
     expect(compactRun?.status).toBe('cancelled');
   });
@@ -2340,6 +2755,71 @@ describe('SessionManager manual compaction', () => {
     if (strict.ok) throw new Error('Strict refresh unexpectedly succeeded');
     expect(strict.error instanceof Error).toBe(true);
     expect((strict.error as Error).message).toBe('injected concurrent disposal failure');
+    expect(disposeCalls).toBe(1);
+  });
+
+  test('backend refresh reports a retained child generation disposal failure', async () => {
+    const store = new MemorySessionStore();
+    let builds = 0;
+    let disposeCalls = 0;
+    const backends = new BackendRegistry();
+    backends.register(
+      'fake',
+      (ctx) =>
+        new (class extends TestBackend {
+          constructor() {
+            super(ctx);
+            builds += 1;
+          }
+
+          override async dispose(): Promise<void> {
+            disposeCalls += 1;
+            throw new Error('injected child generation disposal failure');
+          }
+        })(),
+    );
+    const newId = nextId();
+    const now = nextNow(26_800);
+    const childTools = [testTool('Read'), testTool('Glob'), testTool('Grep')];
+    const runtimeKernel = new RuntimeKernel({
+      store,
+      backends,
+      childTools,
+      newId,
+      now,
+    });
+    const manager = new SessionManager({
+      store,
+      backends,
+      runtimeKernel,
+      childTools,
+      newId,
+      now,
+    });
+    const session = await manager.createSession(makeInput());
+
+    await drain(
+      manager.startChildTurn(session.id, {
+        turnId: 'child-disposal-failure',
+        parentRunId: 'parent-run',
+        spec: {
+          id: LOCAL_READ_AGENT_ID,
+          name: 'Researcher',
+          systemPrompt: 'read only',
+        },
+        prompt: 'inspect',
+      }),
+    );
+
+    await expectRejects(
+      runtimeKernel.disposeBackend(session.id),
+      /injected child generation disposal failure/,
+    );
+    await expectRejects(
+      manager.refreshIdleBackends(),
+      /injected child generation disposal failure/,
+    );
+    expect(builds).toBe(1);
     expect(disposeCalls).toBe(1);
   });
 
@@ -4008,6 +4488,105 @@ describe('SessionManager permission mode updates', () => {
     });
   });
 
+  test('stop after the durable continuation-start commit fences backend dispatch', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const continuationCommitted = makeGate();
+    const releaseContinuationCommit = makeGate();
+    let backendCalls = 0;
+    backends.register(
+      'fake',
+      (ctx) =>
+        new CountingFinalTextBackend(ctx, () => {
+          backendCalls += 1;
+        }),
+    );
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      inspectContinuationSafety: inspectStableContinuationSafety,
+      continuationFailpoint: async (point) => {
+        if (point !== 'after_continuation_start_committed') return;
+        continuationCommitted.release();
+        await releaseContinuationCommit.promise;
+      },
+      newId: nextId(),
+      now: nextNow(6_576),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+    const header = await store.readHeader(session.id);
+    const sourceRunId = 'source-run-post-commit-stop';
+    const sourceTurnId = 'source-turn-post-commit-stop';
+    const sourceInvocationId = 'source-invocation-post-commit-stop';
+    await seedRuntimeRun(
+      runStore,
+      makeRunHeader({
+        runId: sourceRunId,
+        sessionId: session.id,
+        turnId: sourceTurnId,
+        status: 'failed',
+        cwd: header.cwd,
+        createdAt: 1,
+        updatedAt: 2,
+        completedAt: 2,
+        failureClass: 'app_restarted',
+      }),
+      [
+        runtimeEvent({
+          id: 'source-user-post-commit-stop',
+          invocationId: sourceInvocationId,
+          runId: sourceRunId,
+          sessionId: session.id,
+          turnId: sourceTurnId,
+          ts: 1,
+          role: 'user',
+          author: 'user',
+          content: { kind: 'text', text: 'continue only if the Run still owns dispatch' },
+        }),
+        runtimeEvent({
+          id: 'source-terminal-post-commit-stop',
+          invocationId: sourceInvocationId,
+          runId: sourceRunId,
+          sessionId: session.id,
+          turnId: sourceTurnId,
+          ts: 2,
+          status: 'failed',
+          actions: { endInvocation: true, stateDelta: { failureClass: 'app_restarted' } },
+        }),
+      ],
+    );
+    const plan = await manager.planSafeBoundaryContinuation(session.id, {
+      sourceRunId,
+      currentCwd: header.cwd,
+      sourceWorkspaceIdentity: 'workspace-1',
+      currentWorkspaceIdentity: 'workspace-1',
+      backgroundOperationsSettled: true,
+      availableToolNames: [],
+    });
+    if (!plan.continuation) throw new Error('expected continuation');
+
+    const execution = collectSessionEvents(
+      manager.resumeSafeBoundaryContinuation(plan.continuation),
+    );
+    await continuationCommitted.promise;
+    await manager.stopSession(session.id, { source: 'stop_button' });
+    releaseContinuationCommit.release();
+    await execution.catch(() => []);
+
+    expect(backendCalls).toBe(0);
+    const targetRun = await runStore.readRun(session.id, plan.continuation.runId);
+    expect(targetRun.status).toBe('cancelled');
+    const targetEvents = await runStore.readRuntimeEvents(session.id, plan.continuation.runId);
+    expect(
+      targetEvents.filter((event) => event.actions?.stateDelta?.continuationStart === true),
+    ).toHaveLength(1);
+    expect(targetEvents.filter(isTerminalRuntimeEvent)).toHaveLength(1);
+  });
+
   test('does not call the backend when the durable continuation claim cannot be created', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore({ failContinuationCreate: true });
@@ -4534,7 +5113,7 @@ describe('SessionManager permission mode updates', () => {
     const runtimeEvents = await runStore.readRuntimeEvents(session.id, run.runId);
     const terminalEvents = runtimeEvents.filter(isTerminalRuntimeEvent);
 
-    expect(['created', 'running', 'waiting_permission'].includes(run.status)).toBe(true);
+    expect(['created', 'running', 'waiting_for_user'].includes(run.status)).toBe(true);
     expect(run.completedAt).toBeUndefined();
     expect(runtimeEvents.map((event) => event.role)).toEqual(['user', 'model']);
     expect(runtimeEvents[0]?.content).toEqual({ kind: 'text', text: 'hello' });
@@ -5108,6 +5687,272 @@ describe('SessionManager permission mode updates', () => {
       'runtime question',
       'runtime answer',
     ]);
+  });
+
+  test('SessionManager projects hosted permission details from the canonical outcome', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const header = makeRunHeader({ status: 'completed' });
+    await store.create(makeInput());
+    await seedCanonicalPermissionRun(runStore, header);
+    const canonicalPermissionOutcomes: CanonicalPermissionOutcomeReader = {
+      readPermissionOutcome: async (requestId) =>
+        canonicalPermissionRecord(header, {
+          requestId,
+          outcome: {
+            kind: 'permission_answer' as const,
+            decision: 'allow' as const,
+            rememberForTurn: true,
+            reviewer: 'auto_review' as const,
+            rationale: 'The requested write is limited to the reviewed path.',
+            riskLevel: 'medium' as const,
+            committedAt: 125,
+          },
+        }),
+    };
+    const backends = new BackendRegistry();
+    const interactionAuthority: RuntimeInteractionAuthority = {
+      bindRun: () => {
+        throw new Error('read-only test authority cannot bind a Run');
+      },
+    };
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(125),
+      interactionAuthority,
+      canonicalPermissionOutcomes,
+    });
+
+    const messages = await manager.getMessages(header.sessionId);
+
+    expect(messages.find((message) => message.type === 'permission_decision')).toEqual({
+      type: 'permission_decision',
+      id: 'request-canonical',
+      turnId: header.turnId,
+      ts: 125,
+      toolUseId: 'tool-canonical',
+      toolName: 'Write',
+      decision: 'allow',
+      rememberForTurn: true,
+      reviewer: 'auto_review',
+      rationale: 'The requested write is limited to the reviewed path.',
+      riskLevel: 'medium',
+      hint: 'write approval',
+    });
+
+    const cachedView = await new RuntimeReadModel({
+      runStore,
+      runtimeEventStore: runStore,
+      projectionCache: {
+        readMessages: async () =>
+          messages.filter((message) => message.type !== 'permission_decision'),
+      },
+      canonicalPermissionOutcomes,
+    }).getSessionView(header.sessionId);
+
+    expect(cachedView.diagnostics).toEqual([]);
+  });
+
+  test('SessionManager joins a canonical hosted permission without a ledger request', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const header = makeRunHeader({ status: 'completed' });
+    await store.create(makeInput());
+    await seedCanonicalPermissionRun(runStore, header, false);
+    const canonicalPermissionOutcomes: CanonicalPermissionOutcomeReader = {
+      readPermissionOutcome: async (requestId) =>
+        canonicalPermissionRecord(header, {
+          requestId,
+          outcome: {
+            kind: 'permission_answer',
+            decision: 'allow',
+            rememberForTurn: true,
+            reviewer: 'auto_review',
+            committedAt: 125,
+          },
+        }),
+    };
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends: new BackendRegistry(),
+      newId: nextId(),
+      now: nextNow(125),
+      interactionAuthority: {
+        bindRun: () => {
+          throw new Error('read-only test authority cannot bind a Run');
+        },
+      },
+      canonicalPermissionOutcomes,
+    });
+
+    const messages = await manager.getMessages(header.sessionId);
+
+    expect(messages.find((message) => message.type === 'permission_decision')).toEqual({
+      type: 'permission_decision',
+      id: 'request-canonical',
+      turnId: header.turnId,
+      ts: 125,
+      toolUseId: 'tool-canonical',
+      toolName: 'Write',
+      decision: 'allow',
+      rememberForTurn: true,
+      reviewer: 'auto_review',
+    });
+  });
+
+  test('RuntimeReadModel fails closed for a missing or mismatched hosted permission outcome', async () => {
+    const header = makeRunHeader({ status: 'completed' });
+    const canonical = canonicalPermissionRecord(header);
+    const outcomes: Array<CanonicalPermissionOutcomeRecord | undefined> = [
+      undefined,
+      {
+        ...canonical,
+        sessionId: 'wrong-session',
+        outcome: {
+          kind: 'permission_answer' as const,
+          decision: 'deny' as const,
+          rememberForTurn: false as const,
+          reviewer: 'user' as const,
+          committedAt: 125,
+        },
+      },
+    ];
+    for (const outcome of outcomes) {
+      const runStore = new MemoryAgentRunStore();
+      await seedCanonicalPermissionRun(runStore, header);
+      await assert.rejects(
+        new RuntimeReadModel({
+          runStore,
+          runtimeEventStore: runStore,
+          canonicalPermissionOutcomes: {
+            readPermissionOutcome: async () => outcome,
+          },
+        }).getSessionView(header.sessionId),
+        (error: unknown) =>
+          error instanceof RuntimeReadModelError &&
+          error.diagnostics.some((diagnostic) => diagnostic.code === 'incomplete_event'),
+      );
+    }
+  });
+
+  test('RuntimeReadModel converts hosted permission outcome read failure to a hard diagnostic', async () => {
+    const runStore = new MemoryAgentRunStore();
+    const header = makeRunHeader({ status: 'completed' });
+    await seedCanonicalPermissionRun(runStore, header);
+
+    await assert.rejects(
+      new RuntimeReadModel({
+        runStore,
+        runtimeEventStore: runStore,
+        canonicalPermissionOutcomes: {
+          readPermissionOutcome: async () => {
+            throw new Error('interaction store read failed');
+          },
+        },
+      }).getSessionView(header.sessionId),
+      (error: unknown) =>
+        error instanceof RuntimeReadModelError &&
+        error.diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'incomplete_event' &&
+            diagnostic.message.includes('readPermissionOutcome failed'),
+        ),
+    );
+  });
+
+  test('RuntimeReadModel bounds concurrent hosted permission outcome reads', {
+    timeout: 2_000,
+  }, async (t) => {
+    const runStore = new MemoryAgentRunStore();
+    const header = makeRunHeader({ status: 'completed' });
+    const requestIds = Array.from({ length: 20 }, (_, index) => `request-${index}`);
+    await seedRuntimeRun(runStore, header, [
+      runtimeEvent({
+        id: 'permission-concurrency-user',
+        sessionId: header.sessionId,
+        runId: header.runId,
+        turnId: header.turnId,
+        ts: 99,
+        role: 'user',
+        author: 'user',
+        content: { kind: 'text', text: 'approve the operations' },
+      }),
+      ...requestIds.map((requestId, index) =>
+        runtimeEvent({
+          id: `permission-concurrency-${index}`,
+          sessionId: header.sessionId,
+          runId: header.runId,
+          turnId: header.turnId,
+          ts: 100 + index,
+          author: 'user',
+          actions: { permissionAnswerAccepted: { requestId } },
+          refs: { toolCallId: `tool-${requestId}` },
+        }),
+      ),
+      runtimeEvent({
+        id: 'permission-concurrency-terminal',
+        sessionId: header.sessionId,
+        runId: header.runId,
+        turnId: header.turnId,
+        ts: 200,
+        status: 'completed',
+        actions: { endInvocation: true },
+      }),
+    ]);
+
+    let activeReads = 0;
+    let maxActiveReads = 0;
+    let startedReads = 0;
+    let releaseReads!: () => void;
+    const readsReleased = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    t.after(() => releaseReads());
+    let initialWorkersStarted!: () => void;
+    const initialWorkers = new Promise<void>((resolve) => {
+      initialWorkersStarted = resolve;
+    });
+    const viewPromise = new RuntimeReadModel({
+      runStore,
+      runtimeEventStore: runStore,
+      canonicalPermissionOutcomes: {
+        readPermissionOutcome: async (requestId) => {
+          activeReads += 1;
+          startedReads += 1;
+          maxActiveReads = Math.max(maxActiveReads, activeReads);
+          if (startedReads === 8) initialWorkersStarted();
+          await readsReleased;
+          activeReads -= 1;
+          const canonical = canonicalPermissionRecord(header);
+          return {
+            ...canonical,
+            requestId,
+            request: {
+              ...canonical.request,
+              toolUseId: `tool-${requestId}`,
+            },
+          };
+        },
+      },
+    }).getSessionView(header.sessionId);
+
+    await initialWorkers;
+    expect(startedReads).toBe(8);
+    expect(maxActiveReads).toBe(8);
+    releaseReads();
+    const view = await viewPromise;
+
+    expect(startedReads).toBe(requestIds.length);
+    expect(maxActiveReads).toBe(8);
+    expect(view.messages.filter((message) => message.type === 'permission_decision').length).toBe(
+      requestIds.length,
+    );
   });
 
   test('RuntimeReadModel excludes child runs from the default session transcript', async () => {
@@ -6984,6 +7829,114 @@ describe('SessionManager permission mode updates', () => {
     ).toBe(true);
   });
 
+  test('getMessages overlays a canonical permission acceptance from a running ledger', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const session = await store.create(makeInput());
+    const header = makeRunHeader({
+      sessionId: session.id,
+      runId: 'active-run',
+      turnId: 'active-turn',
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 125,
+    });
+    await runStore.createRun(header);
+    await store.appendMessages(session.id, [
+      {
+        type: 'user',
+        id: 'active-user',
+        turnId: header.turnId,
+        ts: 100,
+        text: 'write the file',
+      },
+      {
+        type: 'turn_state',
+        id: 'active-state',
+        turnId: header.turnId,
+        ts: 101,
+        status: 'running',
+        partialOutputRetained: false,
+      },
+    ]);
+    await runStore.appendRuntimeEvent(
+      session.id,
+      header.runId,
+      runtimeEvent({
+        id: 'active-permission-request',
+        sessionId: session.id,
+        runId: header.runId,
+        turnId: header.turnId,
+        ts: 110,
+        actions: {
+          permissionRequest: {
+            kind: 'tool_permission',
+            requestId: 'request-canonical',
+            toolUseId: 'tool-canonical',
+            toolName: 'Write',
+            category: 'file_write',
+            reason: 'file_write',
+            args: { path: '/tmp/file' },
+            rememberForTurnAllowed: true,
+            hint: 'write approval',
+          },
+        },
+        refs: { toolCallId: 'tool-canonical' },
+      }),
+    );
+    await runStore.appendRuntimeEvent(
+      session.id,
+      header.runId,
+      runtimeEvent({
+        id: 'active-permission-acceptance',
+        sessionId: session.id,
+        runId: header.runId,
+        turnId: header.turnId,
+        ts: 126,
+        actions: { permissionAnswerAccepted: { requestId: 'request-canonical' } },
+        refs: { toolCallId: 'tool-canonical' },
+      }),
+    );
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends: new BackendRegistry(),
+      newId: nextId(),
+      now: nextNow(125),
+      interactionAuthority: {
+        bindRun: () => {
+          throw new Error('read-only test authority cannot bind a Run');
+        },
+      },
+      canonicalPermissionOutcomes: {
+        readPermissionOutcome: async () =>
+          canonicalPermissionRecord(header, {
+            outcome: {
+              kind: 'permission_answer',
+              decision: 'allow',
+              rememberForTurn: true,
+              reviewer: 'auto_review',
+              committedAt: 125,
+            },
+          }),
+      },
+    });
+
+    expect(
+      (await manager.getMessages(session.id)).find(
+        (message) => message.type === 'permission_decision',
+      ),
+    ).toMatchObject({
+      type: 'permission_decision',
+      id: 'request-canonical',
+      turnId: header.turnId,
+      toolUseId: 'tool-canonical',
+      decision: 'allow',
+      reviewer: 'auto_review',
+    });
+  });
+
   test('active RuntimeEvent ledger without a projection cache produces an explicit read-model error', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
@@ -7263,6 +8216,72 @@ describe('SessionManager permission mode updates', () => {
     expect(regenState?.regeneratedFromTurnId).toBe('source');
   });
 
+  test('regenerate is stop-visible during its first source-ledger preflight', async () => {
+    const preflightStarted = makeGate();
+    const releasePreflight = makeGate();
+    let gatePreflight = false;
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore({
+      beforeListSessionRuns: async () => {
+        if (!gatePreflight) return;
+        gatePreflight = false;
+        preflightStarted.release();
+        await releasePreflight.promise;
+      },
+    });
+    const backends = new BackendRegistry();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_775),
+    });
+    const session = await manager.createSession(makeInput());
+    await seedRuntimeReadTurn({
+      store,
+      runStore,
+      sessionId: session.id,
+      turnId: 'source',
+      runId: 'source-run',
+      userText: 'do not regenerate after stop',
+      assistantText: 'source answer',
+      legacyIdPrefix: 'legacy-stop',
+    });
+
+    gatePreflight = true;
+    const regenerating = manager
+      .regenerateTurn(session.id, {
+        sourceTurnId: 'source',
+        turnId: 'regen-stopped-preflight',
+      })
+      [Symbol.asyncIterator]();
+    const firstEvent = regenerating.next();
+    await preflightStarted.promise;
+    let stopSettled = false;
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releasePreflight.release();
+    await stopping;
+    expect((await firstEvent).done).toBe(true);
+    expect(backend?.sendInputs).toEqual([]);
+    const regenerated = (await runStore.listSessionRuns(session.id)).find(
+      (run) => run.turnId === 'regen-stopped-preflight',
+    );
+    expect(regenerated?.status).toBe('cancelled');
+    expect((await store.readHeader(session.id)).status === 'blocked').toBe(false);
+  });
+
   test('regenerate accepts an aborted source turn (retry semantics merged into regenerate)', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
@@ -7373,6 +8392,131 @@ describe('SessionManager permission mode updates', () => {
       type: 'assistant',
       turnId: 'source',
       text: 'runtime branch answer',
+    });
+  });
+
+  test('conversation copies materialize requestless hosted permission history', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const backendInstances: TestBackend[] = [];
+    backends.register('fake', (ctx) => {
+      const backend = new TestBackend(ctx);
+      backendInstances.push(backend);
+      return backend;
+    });
+    const session = await store.create(makeInput({ name: 'Parent' }));
+    const header = makeRunHeader({
+      sessionId: session.id,
+      runId: 'source-run',
+      turnId: 'source',
+      status: 'completed',
+      createdAt: 100,
+      updatedAt: 130,
+      completedAt: 130,
+    });
+    await seedCanonicalPermissionRun(runStore, header, false);
+    const sourcePermissionEvents = await runStore.readRuntimeEvents(session.id, header.runId);
+    expect(sourcePermissionEvents.some((event) => event.actions?.permissionRequest)).toBe(false);
+    expect(sourcePermissionEvents.some((event) => event.content?.kind === 'function_call')).toBe(
+      false,
+    );
+    await seedRuntimeRun(
+      runStore,
+      makeRunHeader({
+        sessionId: session.id,
+        runId: 'later-run',
+        turnId: 'later',
+        status: 'completed',
+        createdAt: 140,
+        updatedAt: 141,
+        completedAt: 141,
+      }),
+      [
+        runtimeEvent({
+          id: 'later-user',
+          sessionId: session.id,
+          runId: 'later-run',
+          turnId: 'later',
+          ts: 140,
+          role: 'user',
+          author: 'user',
+          content: { kind: 'text', text: 'replace this turn' },
+        }),
+        runtimeEvent({
+          id: 'later-terminal',
+          sessionId: session.id,
+          runId: 'later-run',
+          turnId: 'later',
+          ts: 141,
+          status: 'completed',
+          actions: { endInvocation: true },
+        }),
+      ],
+    );
+    let sourceInteractionAvailable = true;
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_755),
+      interactionAuthority: testInteractionAuthority(),
+      canonicalPermissionOutcomes: {
+        readPermissionOutcome: async () =>
+          sourceInteractionAvailable ? canonicalPermissionRecord(header) : undefined,
+      },
+    });
+
+    const child = await manager.branchFromTurn(session.id, {
+      sourceTurnId: header.turnId,
+      name: 'Child',
+    });
+    const revision = await manager.reviseBeforeTurn(session.id, { sourceTurnId: 'later' });
+    sourceInteractionAvailable = false;
+
+    const [childSourceRun] = await runStore.listSessionRuns(child.id);
+    const childSourceEvents = childSourceRun
+      ? await runStore.readRuntimeEvents(child.id, childSourceRun.runId)
+      : [];
+    expect(
+      childSourceEvents.find((event) => event.actions?.permissionDecision)?.actions
+        ?.permissionDecision,
+    ).toMatchObject({
+      requestId: 'request-canonical',
+      toolName: 'Write',
+      decision: 'deny',
+    });
+    expect(childSourceEvents.some((event) => event.actions?.permissionRequest)).toBe(false);
+    expect(childSourceEvents.some((event) => event.actions?.permissionAnswerAccepted)).toBe(false);
+
+    for (const copiedSession of [child, revision]) {
+      expect(
+        (await manager.getMessages(copiedSession.id)).find(
+          (message) => message.type === 'permission_decision',
+        ),
+      ).toMatchObject({
+        type: 'permission_decision',
+        id: 'request-canonical',
+        turnId: header.turnId,
+        toolUseId: 'tool-canonical',
+        toolName: 'Write',
+        decision: 'deny',
+        reviewer: 'user',
+      });
+    }
+
+    await drain(manager.sendMessage(child.id, { turnId: 'child-next', text: 'continue' }));
+    expect(
+      backendInstances
+        .find((backend) => backend.sessionId === child.id)
+        ?.sendInputs[0]?.context.find((message) => message.type === 'permission_decision'),
+    ).toMatchObject({
+      id: 'request-canonical',
+      toolUseId: 'tool-canonical',
+      toolName: 'Write',
+      decision: 'deny',
     });
   });
 
@@ -8261,7 +9405,7 @@ describe('SessionManager permission mode updates', () => {
     ).toBe(true);
     await expectRejects(
       manager.prepareChildAgentResume(session.id, source.runId),
-      /already has a resume successor/,
+      /already has a successor/,
     );
     expect(await manager.prepareChildAgentResume(session.id, resumed.runId!)).toMatchObject({
       sourceRunId: resumed.runId,
@@ -8429,13 +9573,40 @@ describe('SessionManager permission mode updates', () => {
     expect(first.failureClass).toBe('RateLimit');
     if (!first.runId) throw new Error('rate-limited child run id was not recorded');
 
-    const second = await manager.retryChildAgent(session.id, {
+    const second = await manager.resumeChildAgent(session.id, {
       parentRunId: parentRun.runId,
       sourceRunId: first.runId,
+      prompt: 'retry with additional guidance',
     });
     expect(second.status).toBe('failed');
     expect(second.failureClass).toBe('RateLimit');
     if (!second.runId) throw new Error('second rate-limited child run id was not recorded');
+    await expectRejects(
+      manager.retryChildAgent(session.id, {
+        parentRunId: parentRun.runId,
+        sourceRunId: first.runId,
+      }),
+      /already has a successor/,
+    );
+
+    const retryAbort = new AbortController();
+    retryAbort.abort();
+    const runsBeforeAbortedRetry = await runStore.listSessionRuns(session.id);
+    let abortedRetryReady = 0;
+    await expectRejects(
+      manager.retryChildAgent(session.id, {
+        parentRunId: parentRun.runId,
+        sourceRunId: second.runId,
+        abortSignal: retryAbort.signal,
+        onReady: () => {
+          abortedRetryReady += 1;
+        },
+      }),
+      /cancelled before start/,
+    );
+    expect((await runStore.listSessionRuns(session.id)).length).toBe(runsBeforeAbortedRetry.length);
+    expect(sendInputs).toHaveLength(2);
+    expect(abortedRetryReady).toBe(0);
 
     const retried = await manager.retryChildAgent(session.id, {
       parentRunId: parentRun.runId,
@@ -8444,7 +9615,11 @@ describe('SessionManager permission mode updates', () => {
 
     expect(retried.status).toBe('completed');
     expect(retried.retriedFromRunId).toBe(second.runId);
-    expect(sendInputs.map((input) => input.text)).toEqual(['inspect auth', '', '']);
+    expect(sendInputs.map((input) => input.text)).toEqual([
+      'inspect auth',
+      'retry with additional guidance',
+      '',
+    ]);
     expect(
       sendInputs[2]?.runtimeContext?.some(
         (event) =>
@@ -8734,7 +9909,466 @@ describe('SessionManager permission mode updates', () => {
     expect((await store.readHeader(session.id)).permissionMode).toBe('execute');
   });
 
-  test('stopSession retries a pending stop after the backend rejects', async () => {
+  test('stopSession waits for a child start blocked before Run reservation', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    let childBackend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      childBackend = new TestBackend(ctx);
+      return childBackend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const readStarted = makeGate();
+    const releaseRead = makeGate();
+    store.nextReadHeaderGate = { started: readStarted, release: releaseRead };
+    const child = manager
+      .startChildTurn(session.id, {
+        turnId: 'pending-child-turn',
+        parentRunId: 'parent-run',
+        spec: { id: LOCAL_READ_AGENT_ID, name: 'Researcher', systemPrompt: 'read only' },
+        prompt: 'must not dispatch after stop',
+      })
+      [Symbol.asyncIterator]();
+    const firstEvent = child.next();
+    await readStarted.promise;
+
+    let stopSettled = false;
+    const stop = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseRead.release();
+    await stop;
+    expect((await firstEvent).done).toBe(true);
+    expect(childBackend?.sendInputs).toEqual([]);
+    const childRun = (await runStore.listSessionRuns(session.id)).find(
+      (run) => run.turnId === 'pending-child-turn',
+    );
+    expect(childRun?.status).toBe('cancelled');
+  });
+
+  test('stopSession owns an active Run and a parent turn admitted before reservation', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const activeGate = makeGate();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx, activeGate);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const active = manager
+      .sendMessage(session.id, { turnId: 'active-parent-turn', text: 'hold active' })
+      [Symbol.asyncIterator]();
+    expect((await active.next()).value?.type).toBe('text_delta');
+
+    const readStarted = makeGate();
+    const releaseRead = makeGate();
+    store.nextReadHeaderGate = { started: readStarted, release: releaseRead };
+    const pending = manager
+      .sendMessage(session.id, {
+        turnId: 'pending-parent-turn',
+        text: 'must become stopped, not failed',
+      })
+      [Symbol.asyncIterator]();
+    const pendingEvent = pending.next();
+    await readStarted.promise;
+
+    let stopSettled = false;
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseRead.release();
+    activeGate.release();
+    await stopping;
+    expect((await pendingEvent).done).toBe(true);
+    while (!(await active.next()).done) {}
+    expect(backend?.sendInputs.map((input) => input.turnId)).toEqual(['active-parent-turn']);
+    const runs = await runStore.listSessionRuns(session.id);
+    expect(runs.find((run) => run.turnId === 'active-parent-turn')?.status).toBe('cancelled');
+    expect(runs.find((run) => run.turnId === 'pending-parent-turn')?.status).toBe('cancelled');
+    expect((await store.readHeader(session.id)).status).toBe('aborted');
+  });
+
+  test('public child spawn is stop-visible while async onReady is pending', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const readyStarted = makeGate();
+    const releaseReady = makeGate();
+    const spawned = manager.spawnChildAgent(session.id, {
+      turnId: 'child-on-ready-stop',
+      parentRunId: 'parent-run',
+      spec: { id: LOCAL_READ_AGENT_ID, name: 'Researcher', systemPrompt: 'read only' },
+      prompt: 'must not reach the provider',
+      onReady: async () => {
+        readyStarted.release();
+        await releaseReady.promise;
+      },
+    });
+    await readyStarted.promise;
+
+    let stopSettled = false;
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseReady.release();
+    const [result] = await Promise.all([spawned, stopping]);
+    expect(result.status).toBe('cancelled');
+    expect(backend?.sendInputs).toEqual([]);
+    const run = (await runStore.listSessionRuns(session.id)).find(
+      (candidate) => candidate.turnId === 'child-on-ready-stop',
+    );
+    expect(run?.status).toBe('cancelled');
+    expect((await store.readHeader(session.id)).status === 'blocked').toBe(false);
+  });
+
+  test('public child resume is stop-visible during its first ledger read', async () => {
+    const ledgerReadStarted = makeGate();
+    const releaseLedgerRead = makeGate();
+    let gateLedgerRead = false;
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore({
+      beforeRuntimeEventRead: async () => {
+        if (!gateLedgerRead) return;
+        gateLedgerRead = false;
+        ledgerReadStarted.release();
+        await releaseLedgerRead.promise;
+      },
+    });
+    const backends = new BackendRegistry();
+    const builtBackends: TestBackend[] = [];
+    backends.register('fake', (ctx) => {
+      const backend = new TestBackend(ctx);
+      builtBackends.push(backend);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const source = await manager.spawnChildAgent(session.id, {
+      turnId: 'child-resume-source',
+      parentRunId: 'parent-run',
+      spec: { id: LOCAL_READ_AGENT_ID, name: 'Researcher', systemPrompt: 'read only' },
+      prompt: 'complete source',
+    });
+    expect(source.status).toBe('completed');
+    expect(source.runId).toBeDefined();
+
+    gateLedgerRead = true;
+    const resumed = manager.resumeChildAgent(session.id, {
+      parentRunId: 'parent-run',
+      sourceRunId: source.runId!,
+      prompt: 'must stop before provider replay',
+    });
+    await ledgerReadStarted.promise;
+    let stopSettled = false;
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseLedgerRead.release();
+    const [result] = await Promise.all([resumed, stopping]);
+    expect(result.status).toBe('cancelled');
+    expect(
+      builtBackends.flatMap((backend) => backend.sendInputs.map((input) => input.turnId)),
+    ).toEqual(['child-resume-source']);
+    const resumedRun = (await runStore.listSessionRuns(session.id)).find(
+      (run) => run.resumedFromRunId === source.runId,
+    );
+    expect(resumedRun?.status).toBe('cancelled');
+    expect((await store.readHeader(session.id)).status === 'blocked').toBe(false);
+  });
+
+  test('public child retry is stop-visible during its first ledger read', async () => {
+    const ledgerReadStarted = makeGate();
+    const releaseLedgerRead = makeGate();
+    let gateLedgerRead = false;
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore({
+      beforeRuntimeEventRead: async () => {
+        if (!gateLedgerRead) return;
+        gateLedgerRead = false;
+        ledgerReadStarted.release();
+        await releaseLedgerRead.promise;
+      },
+    });
+    const sendInputs: BackendSendInput[] = [];
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => ({
+      kind: 'fake' as const,
+      sessionId: ctx.sessionId,
+      async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+        sendInputs.push(input);
+        yield {
+          type: 'error',
+          id: `${input.turnId}-rate-limit`,
+          turnId: input.turnId,
+          ts: 1,
+          recoverable: true,
+          reason: 'RateLimit',
+          message: 'provider 429',
+        };
+        yield {
+          type: 'complete',
+          id: `${input.turnId}-complete`,
+          turnId: input.turnId,
+          ts: 2,
+          stopReason: 'error',
+        };
+      },
+      async stop(): Promise<void> {},
+      async respondToPermission(): Promise<void> {},
+      async dispose(): Promise<void> {},
+    }));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const source = await manager.spawnChildAgent(session.id, {
+      turnId: 'child-retry-source',
+      parentRunId: 'parent-run',
+      spec: { id: LOCAL_READ_AGENT_ID, name: 'Researcher', systemPrompt: 'read only' },
+      prompt: 'fail with a provider rate limit',
+    });
+    expect(source.status).toBe('failed');
+    expect(source.failureClass).toBe('RateLimit');
+    if (!source.runId) throw new Error('rate-limited child run id was not recorded');
+
+    gateLedgerRead = true;
+    const retried = manager.retryChildAgent(session.id, {
+      parentRunId: 'parent-run',
+      sourceRunId: source.runId,
+    });
+    await ledgerReadStarted.promise;
+    let stopSettled = false;
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseLedgerRead.release();
+    const [result] = await Promise.all([retried, stopping]);
+    expect(result.status).toBe('cancelled');
+    expect(result.retriedFromRunId).toBe(source.runId);
+    expect(sendInputs.map((input) => input.turnId)).toEqual(['child-retry-source']);
+    const retryRun = (await runStore.listSessionRuns(session.id)).find(
+      (run) => run.retriedFromRunId === source.runId,
+    );
+    expect(retryRun?.status).toBe('cancelled');
+    expect((await store.readHeader(session.id)).status === 'blocked').toBe(false);
+  });
+
+  test('stop-owned parent activation stays cancelled when backend build rejects', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const buildStarted = makeGate();
+    const releaseBuild = makeGate();
+    backends.register('fake', async () => {
+      buildStarted.release();
+      await releaseBuild.promise;
+      throw new Error('backend activation rejected');
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const turn = manager
+      .sendMessage(session.id, {
+        turnId: 'stop-owned-build-reject',
+        text: 'must remain a cancelled Run',
+      })
+      [Symbol.asyncIterator]();
+    const firstEvent = turn.next();
+    await buildStarted.promise;
+
+    let stopSettled = false;
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' }).finally(() => {
+      stopSettled = true;
+    });
+    await Promise.resolve();
+    expect(stopSettled).toBe(false);
+
+    releaseBuild.release();
+    await expectRejects(firstEvent, /backend activation rejected/);
+    await stopping;
+    const run = await runStore.readRun(
+      session.id,
+      (await runStore.listSessionRuns(session.id))[0]!.runId,
+    );
+    expect(run.status).toBe('cancelled');
+    expect(run.failureClass).toBe(undefined);
+    expect((await store.readHeader(session.id)).status).toBe('aborted');
+  });
+
+  test('stop-owned activation rejects stop when cancelled terminal persistence fails', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore({ failRuntimeEventAppendAfter: 1 });
+    const backends = new BackendRegistry();
+    const buildStarted = makeGate();
+    const releaseBuild = makeGate();
+    backends.register('fake', async () => {
+      buildStarted.release();
+      await releaseBuild.promise;
+      throw new Error('backend activation rejected');
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const turn = manager
+      .sendMessage(session.id, {
+        turnId: 'stop-owned-terminal-write-reject',
+        text: 'stop must observe cancelled terminal persistence',
+      })
+      [Symbol.asyncIterator]();
+    const firstEvent = turn.next();
+    await buildStarted.promise;
+
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' });
+    const joinedStopping = manager.stopSession(session.id, { source: 'stop_button' });
+    releaseBuild.release();
+
+    await Promise.all([
+      expectRejects(firstEvent, /runtime event append failed/),
+      expectRejects(stopping, /runtime event append failed/),
+      expectRejects(joinedStopping, /runtime event append failed/),
+    ]);
+    const [run] = await runStore.listSessionRuns(session.id);
+    if (!run) throw new Error('stop-owned Run was not recorded');
+    expect(run.status).toBe('created');
+    expect(
+      (await runStore.readRuntimeEvents(session.id, run.runId)).some(isTerminalRuntimeEvent),
+    ).toBe(false);
+  });
+
+  test('stop rejects instead of hanging when attached Run settlement throws synchronously', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const buildStarted = makeGate();
+    const releaseBuild = makeGate();
+    backends.register('fake', async (ctx) => {
+      buildStarted.release();
+      await releaseBuild.promise;
+      return new TestBackend(ctx);
+    });
+    const ids = nextId();
+    let rejectStopOwnershipId = false;
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: () => {
+        if (rejectStopOwnershipId) {
+          rejectStopOwnershipId = false;
+          throw new Error('stop ownership id failed');
+        }
+        return ids();
+      },
+      now: nextNow(6_845),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const turn = manager
+      .sendMessage(session.id, {
+        turnId: 'stop-owned-settlement-failure',
+        text: 'must settle exactly once',
+      })
+      [Symbol.asyncIterator]();
+    const firstEvent = turn.next();
+    await buildStarted.promise;
+    const stopping = manager.stopSession(session.id, { source: 'stop_button' });
+    rejectStopOwnershipId = true;
+    releaseBuild.release();
+
+    await expectRejects(stopping, /stop ownership id failed/);
+    await expectRejects(firstEvent, /stop ownership id failed/);
+    const [run] = await runStore.listSessionRuns(session.id);
+    expect(run?.status).toBe('cancelled');
+    expect(run?.failureClass).toBe(undefined);
+    expect((await store.readHeader(session.id)).status === 'blocked').toBe(false);
+  });
+
+  test('stopSession keeps a rejected backend generation quarantined across retries', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
@@ -8773,8 +10407,12 @@ describe('SessionManager permission mode updates', () => {
       manager.stopSession(session.id, { source: 'stop_button' }),
       /first stop failed/,
     );
-    await manager.stopSession(session.id, { source: 'stop_button' });
-    expect(childBackend?.stopCalls).toBe(2);
+    await expectRejects(
+      manager.stopSession(session.id, { source: 'stop_button' }),
+      /first stop failed/,
+    );
+    expect(childBackend?.stopCalls).toBe(1);
+    childGate.release();
     while (!(await child.next()).done) {}
     const childRun = (await runStore.listSessionRuns(session.id)).find(
       (run) => run.turnId === 'child-turn',
@@ -8836,7 +10474,7 @@ describe('SessionManager permission mode updates', () => {
     ).toHaveLength(1);
   });
 
-  test('stopSession waits for a turn that is still registering', async () => {
+  test('stopSession waits for a registering turn and fences it before backend send', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
@@ -8855,6 +10493,7 @@ describe('SessionManager permission mode updates', () => {
       runtimeSource: 'test',
     });
     const session = await manager.createSession(makeInput());
+    await drain(manager.sendMessage(session.id, { turnId: 'turn-warm-cache', text: 'warm cache' }));
     const readStarted = makeGate();
     const releaseRead = makeGate();
     store.nextReadHeaderGate = { started: readStarted, release: releaseRead };
@@ -8877,15 +10516,174 @@ describe('SessionManager permission mode updates', () => {
     expect(stopSettled).toBe(false);
     releaseRead.release();
     await stop;
-    await firstEvent;
-    while (!(await turn.next()).done) {}
+    expect((await firstEvent).done).toBe(true);
 
     expect(backend?.stopCalls).toBe(1);
     expect(backend?.stopModes).toEqual(['after_step']);
-    expect(backend?.sendInputs).toHaveLength(0);
+    expect(backend?.sendInputs.map((input) => input.turnId)).toEqual(['turn-warm-cache']);
   });
 
-  test('stopSession retries only backends that failed in a multi-session stop', async () => {
+  test('stopSession fences dispatch after the public onRunStarted hook', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_847),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+    const hookStarted = makeGate();
+    const releaseHook = makeGate();
+    const turn = manager
+      .sendMessage(
+        session.id,
+        { turnId: 'turn-post-start-hook-stop', text: 'must not dispatch' },
+        {
+          onRunStarted: async () => {
+            hookStarted.release();
+            await releaseHook.promise;
+          },
+        },
+      )
+      [Symbol.asyncIterator]();
+    const firstEvent = turn.next();
+    await hookStarted.promise;
+
+    await manager.stopSession(session.id, { source: 'stop_button' });
+    releaseHook.release();
+    expect((await firstEvent).done).toBe(true);
+    expect(backend?.sendInputs).toEqual([]);
+    const stoppedRun = (await runStore.listSessionRuns(session.id)).find(
+      (run) => run.turnId === 'turn-post-start-hook-stop',
+    );
+    expect(stoppedRun?.status).toBe('cancelled');
+  });
+
+  test('concurrent cold turns share one backend generation and one control broadcast target', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const buildStarted = makeGate();
+    const releaseBuild = makeGate();
+    const releaseSend = makeGate();
+    let builds = 0;
+    let backend: PermissionBroadcastBackend | undefined;
+    backends.register('fake', async (ctx) => {
+      builds += 1;
+      buildStarted.release();
+      await releaseBuild.promise;
+      backend = new PermissionBroadcastBackend(ctx, releaseSend);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_847),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+    const first = manager
+      .sendMessage(session.id, { turnId: 'cold-turn-1', text: 'first' })
+      [Symbol.asyncIterator]();
+    const second = manager
+      .sendMessage(session.id, { turnId: 'cold-turn-2', text: 'second' })
+      [Symbol.asyncIterator]();
+    const firstEvent = first.next();
+    await buildStarted.promise;
+    const secondEvent = second.next();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(builds).toBe(1);
+
+    releaseBuild.release();
+    expect((await firstEvent).value?.type).toBe('text_delta');
+    expect((await secondEvent).value?.type).toBe('text_delta');
+    await manager.respondToPermission(session.id, {
+      requestId: 'control-broadcast',
+      decision: 'deny',
+    });
+    expect(backend?.permissionResponses).toBe(1);
+    expect(builds).toBe(1);
+
+    releaseSend.release();
+    while (!(await first.next()).done) {}
+    while (!(await second.next()).done) {}
+    expect(backend?.sendInputs).toHaveLength(2);
+  });
+
+  test('concurrent cold child starts share their route generation without an orphan', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const buildStarted = makeGate();
+    const releaseBuild = makeGate();
+    const releaseSend = makeGate();
+    let builds = 0;
+    let backend: PermissionBroadcastBackend | undefined;
+    backends.register('fake', async (ctx) => {
+      builds += 1;
+      buildStarted.release();
+      await releaseBuild.promise;
+      backend = new PermissionBroadcastBackend(ctx, releaseSend);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(6_847),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    const childInput = {
+      turnId: 'cold-child-turn',
+      parentRunId: 'parent-run',
+      spec: { id: LOCAL_READ_AGENT_ID, name: 'Researcher', systemPrompt: 'read only' },
+      prompt: 'share one child route',
+    };
+    const first = manager.startChildTurn(session.id, childInput)[Symbol.asyncIterator]();
+    const second = manager.startChildTurn(session.id, childInput)[Symbol.asyncIterator]();
+    const firstEvent = first.next();
+    await buildStarted.promise;
+    const secondEvent = second.next();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(builds).toBe(1);
+
+    releaseBuild.release();
+    const outcomes = await Promise.allSettled([firstEvent, secondEvent]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+    await manager.respondToPermission(session.id, {
+      requestId: 'child-control-broadcast',
+      decision: 'deny',
+    });
+    expect(backend?.permissionResponses).toBe(1);
+    expect(builds).toBe(1);
+
+    releaseSend.release();
+    const activeChild = outcomes[0]?.status === 'fulfilled' ? first : second;
+    while (!(await activeChild.next()).done) {}
+    expect(backend?.sendInputs).toHaveLength(1);
+  });
+
+  test('stopSession does not reenter a failed backend in a multi-generation stop', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
@@ -8932,11 +10730,15 @@ describe('SessionManager permission mode updates', () => {
       manager.stopSession(session.id, { source: 'stop_button' }),
       /first stop failed/,
     );
-    await manager.stopSession(session.id, { source: 'stop_button' });
+    await expectRejects(
+      manager.stopSession(session.id, { source: 'stop_button' }),
+      /first stop failed/,
+    );
 
     expect(parentBackend?.stopCalls).toBe(1);
-    expect(childBackend?.stopCalls).toBe(2);
+    expect(childBackend?.stopCalls).toBe(1);
     parentGate.release();
+    childGate.release();
     while (!(await parent.next()).done) {}
     while (!(await child.next()).done) {}
   });
@@ -8989,6 +10791,57 @@ describe('SessionManager permission mode updates', () => {
     ).toHaveLength(1);
     sendGate.release();
     while (!(await turn.next()).done) {}
+  });
+
+  test('stopSession retains a failed projection after its Run exits without reentering backend stop', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const sendGate = makeGate();
+    let backend: CountingStopBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new CountingStopBackend(ctx, sendGate);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_850),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+    const turn = manager
+      .sendMessage(session.id, { turnId: 'turn-retained-stop', text: 'hello' })
+      [Symbol.asyncIterator]();
+    await turn.next();
+    store.failUpdateHeaderFor.add(session.id);
+
+    await expectRejects(
+      manager.stopSession(session.id, { source: 'stop_button' }),
+      /Cannot update header/,
+    );
+    sendGate.release();
+    while (!(await turn.next()).done) {}
+    store.failUpdateHeaderFor.delete(session.id);
+
+    await manager.stopSession(session.id, { source: 'stop_button' });
+
+    expect(backend?.stopCalls).toBe(1);
+    const messages = await store.readMessages(session.id);
+    expect(
+      messages.filter(
+        (message) =>
+          message.type === 'turn_state' &&
+          message.turnId === 'turn-retained-stop' &&
+          message.status === 'aborted',
+      ),
+    ).toHaveLength(1);
+    expect(
+      messages.filter((message) => message.type === 'system_note' && message.kind === 'abort'),
+    ).toHaveLength(1);
   });
 
   test('spawnChildAgent fails closed instead of running a degraded catalog agent', async () => {
@@ -9789,7 +11642,7 @@ describe('SessionManager permission mode updates', () => {
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
     const [runBeforeRecovery] = await runStore.listSessionRuns(session.id);
-    expect(runBeforeRecovery?.status).toBe('waiting_permission');
+    expect(runBeforeRecovery?.status).toBe('waiting_for_user');
 
     await manager.recoverInterruptedSessions();
 
@@ -10349,6 +12202,52 @@ describe('SessionManager permission mode updates', () => {
     const events = await runStore.readEvents(session.id, run!.runId);
     expect(events.some((event) => event.type === 'provider_request_captured')).toBe(true);
     expect(events.some((event) => event.id === 'attempt-2')).toBe(true);
+  });
+
+  test('carries a provider attempt failure latch into the terminal run header', async () => {
+    const store = new MemorySessionStore();
+    let failAttemptAppend = true;
+    let failFailureLatch = true;
+    let failFailureSentinel = true;
+    const runStore = new MemoryAgentRunStore({
+      beforeAgentRunUpdate: async (_sessionId, _runId, patch) => {
+        if (patch.traceWriteError && failFailureLatch) {
+          failFailureLatch = false;
+          throw new Error('trace failure latch update failed');
+        }
+      },
+      beforeAgentRunEventAppend: async (_sessionId, _runId, event) => {
+        if (event.type === 'provider_request_attempt_recorded' && failAttemptAppend) {
+          failAttemptAppend = false;
+          throw new Error('provider attempt append failed');
+        }
+        if (event.type === 'trace_write_failed' && failFailureSentinel) {
+          failFailureSentinel = false;
+          throw new Error('trace failure sentinel append failed');
+        }
+      },
+    });
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new ProviderRequestTraceBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(12_763),
+    });
+    const session = await manager.createSession(makeInput());
+
+    await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
+
+    const [run] = await runStore.listSessionRuns(session.id);
+    expect(run?.status).toBe('completed');
+    expect(run?.traceWriteError).toMatch(
+      /append provider request attempt: provider attempt append failed/,
+    );
+    const events = await runStore.readEvents(session.id, run!.runId);
+    expect(events.some((event) => event.type === 'trace_write_failed')).toBe(false);
   });
 
   test('finalizes the run when a required provider capture append fails', async () => {
@@ -12014,7 +13913,7 @@ describe('SessionManager permission mode updates', () => {
         sessionId: session.id,
         runId: 'run-1',
         turnId: 'turn-1',
-        status: 'waiting_permission',
+        status: 'waiting_for_user',
       }),
       [
         makeRunEvent({
@@ -12083,7 +13982,7 @@ describe('SessionManager permission mode updates', () => {
 
     expect((await store.readHeader(session.id)).status).toBe('active');
     const [run] = await runStore.listSessionRuns(session.id);
-    expect(run?.status === 'running' || run?.status === 'waiting_permission').toBe(false);
+    expect(run?.status === 'running' || run?.status === 'waiting_for_user').toBe(false);
     const [turn] = await store.listTurns(session.id);
     expect(turn?.status === 'running').toBe(false);
   });
@@ -12908,6 +14807,575 @@ describe('SessionManager steering and followup queues', () => {
     return events;
   }
 
+  test('hosted root runs consume the Host owner and release it exactly once', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new FakeBackend(ctx));
+    const identities: RuntimeMessageRunIdentity[] = [];
+    const acked: string[] = [];
+    const nacked: string[] = [];
+    let pulled = false;
+    let releases = 0;
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(1_000),
+      messageAuthority: {
+        bindRun: (identity) => {
+          identities.push(identity);
+          return {
+            ...identity,
+            pull: () => {
+              if (pulled) return [];
+              pulled = true;
+              return [
+                {
+                  id: 'host-lease-1',
+                  messageId: 'host-message-1',
+                  content: { text: 'host steer', displayText: 'visible host steer' },
+                },
+              ];
+            },
+            ack: (leaseIds) => acked.push(...leaseIds),
+            nack: (leaseIds) => nacked.push(...leaseIds),
+            release: () => {
+              releases += 1;
+            },
+          };
+        },
+      },
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'bypass' }),
+    );
+
+    const events = await drainAll(
+      manager.sendMessage(session.id, { turnId: 'turn-host-message', text: 'start' }),
+    );
+    const [run] = await runStore.listSessionRuns(session.id);
+    expect(identities).toEqual([
+      { sessionId: session.id, turnId: 'turn-host-message', runId: run?.runId },
+    ]);
+    expect(acked).toEqual(['host-lease-1']);
+    expect(nacked).toEqual([]);
+    expect(releases).toBe(1);
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'steering_message' &&
+          event.messageId === 'host-message-1' &&
+          event.content.displayText === 'visible host steer',
+      ),
+    ).toBe(true);
+    expect(events.some((event) => event.type === 'queue_update')).toBe(false);
+    for (const operation of [
+      () => manager.steer(session.id, 'runtime mirror'),
+      () => manager.queueMessage(session.id, 'runtime mirror'),
+      () => manager.drainFollowup(session.id),
+      () => manager.retractQueue(session.id),
+    ]) {
+      let error: unknown;
+      try {
+        operation();
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error instanceof RuntimeMessageAuthorityInvariantError).toBe(true);
+    }
+  });
+
+  test('hosted Interaction binds the durable Run identity and closes before release', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new FakeBackend(ctx));
+    const identities: RuntimeInteractionRunIdentity[] = [];
+    const lifecycle: string[] = [];
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(1_000),
+      interactionAuthority: {
+        bindRun: (identity) => {
+          identities.push(identity);
+          return {
+            ...identity,
+            acceptPermissionRequest: async () => ({ state: 'pending' }),
+            commitPermissionAnswer: async ({ answer }) => ({
+              kind: 'permission_answer',
+              answer,
+            }),
+            commitPermissionTimeout: async () => ({ kind: 'closure', reason: 'timed_out' }),
+            acceptUserQuestionRequest: async () => {},
+            close: async (reason) => {
+              lifecycle.push(`close:${reason}`);
+            },
+            release: () => lifecycle.push('release'),
+          };
+        },
+      },
+      canonicalPermissionOutcomes: noCanonicalPermissionOutcomes,
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'bypass' }),
+    );
+
+    await drainAll(
+      manager.sendMessage(session.id, { turnId: 'turn-host-interaction', text: 'go' }),
+    );
+    const [run] = await runStore.listSessionRuns(session.id);
+    expect(identities).toEqual([
+      { sessionId: session.id, turnId: 'turn-host-interaction', runId: run?.runId },
+    ]);
+    expect(lifecycle).toEqual(['close:turn_terminal', 'release']);
+  });
+
+  test('hosted permission answer waits for its durable ack before resuming and entering the tool', {
+    timeout: 2_000,
+  }, async (t) => {
+    const ackAppendStarted = makeGate();
+    const releaseAckAppend = makeGate();
+    t.after(() => releaseAckAppend.release());
+    let toolExecutions = 0;
+    let continuation: RuntimePermissionContinuation | undefined;
+    let answerPermission: (() => Promise<void>) | undefined;
+    let ackDurable: boolean | undefined;
+    const runStore = new MemoryAgentRunStore({
+      beforeRuntimeEventAppend: async (_sessionId, _runId, event, options) => {
+        if (!event.actions?.permissionAnswerAccepted) return;
+        ackDurable = options?.durable;
+        ackAppendStarted.release();
+        await releaseAckAppend.promise;
+      },
+    });
+    const interactionAuthority: RuntimeInteractionAuthority = {
+      bindRun: (identity) => ({
+        ...identity,
+        acceptPermissionRequest: async ({ continuation: accepted }) => {
+          continuation = accepted;
+          answerPermission = () => accepted.applyAnswer({ decision: 'allow' });
+          return { state: 'pending' };
+        },
+        commitPermissionAnswer: async ({ continuation: accepted, answer }) => {
+          await accepted.applyAnswer(answer);
+          return { kind: 'permission_answer', answer };
+        },
+        commitPermissionTimeout: async ({ continuation: accepted }) => {
+          await accepted.applyClosure('timed_out');
+          return { kind: 'closure', reason: 'timed_out' };
+        },
+        acceptUserQuestionRequest: async () => {},
+        close: async () => {},
+        release: () => {},
+      }),
+    };
+    const model = steeringToolThenDoneModel(true);
+    const { manager, session, store } = await steeringDeliverySession(
+      runStore,
+      model,
+      async () => {
+        const [run] = await runStore.listSessionRuns(session.id);
+        const runtimeEvents = await runStore.readRuntimeEvents(session.id, run!.runId);
+        expect(runtimeEvents.some((event) => event.actions?.permissionAnswerAccepted)).toBe(true);
+        expect(run?.status).toBe('running');
+        expect((await store.readHeader(session.id)).status).toBe('running');
+        toolExecutions += 1;
+      },
+      {
+        permissionRequired: true,
+        permissionMode: 'ask',
+        interactionAuthority,
+      },
+    );
+
+    const turn = drainAll(
+      manager.sendMessage(
+        session.id,
+        { turnId: 'turn-hosted-answer-durable', text: 'go' },
+        { durability: 'required' },
+      ),
+    );
+    await waitUntil(() => continuation !== undefined);
+    await waitUntil(async () => {
+      const [run] = await runStore.listSessionRuns(session.id);
+      return (
+        run?.status === 'waiting_for_user' &&
+        (await store.readHeader(session.id)).status === 'waiting_for_user'
+      );
+    });
+
+    await answerPermission!();
+    await ackAppendStarted.promise;
+    expect(ackDurable).toBe(true);
+    const [waitingRun] = await runStore.listSessionRuns(session.id);
+    expect(toolExecutions).toBe(0);
+    expect(waitingRun?.status).toBe('waiting_for_user');
+    expect((await store.readHeader(session.id)).status).toBe('waiting_for_user');
+    expect(
+      (await runStore.readRuntimeEvents(session.id, waitingRun!.runId)).some(
+        (event) => event.actions?.permissionAnswerAccepted,
+      ),
+    ).toBe(false);
+
+    releaseAckAppend.release();
+    await turn;
+    expect(toolExecutions).toBe(1);
+    expect(model.doStreamCalls.length).toBe(2);
+  });
+
+  test('hosted permission answer fails stop when its durable ack append is rejected', {
+    timeout: 2_000,
+  }, async () => {
+    let toolExecutions = 0;
+    let continuation: RuntimePermissionContinuation | undefined;
+    let answerPermission: (() => Promise<void>) | undefined;
+    let ackDurable: boolean | undefined;
+    const runStore = new MemoryAgentRunStore({
+      beforeRuntimeEventAppend: (_sessionId, _runId, event, options) => {
+        if (!event.actions?.permissionAnswerAccepted) return;
+        ackDurable = options?.durable;
+        throw new Error('permission answer ack append rejected');
+      },
+    });
+    const interactionAuthority: RuntimeInteractionAuthority = {
+      bindRun: (identity) => ({
+        ...identity,
+        acceptPermissionRequest: async ({ continuation: accepted }) => {
+          continuation = accepted;
+          answerPermission = () => accepted.applyAnswer({ decision: 'allow' });
+          return { state: 'pending' };
+        },
+        commitPermissionAnswer: async ({ continuation: accepted, answer }) => {
+          await accepted.applyAnswer(answer);
+          return { kind: 'permission_answer', answer };
+        },
+        commitPermissionTimeout: async ({ continuation: accepted }) => {
+          await accepted.applyClosure('timed_out');
+          return { kind: 'closure', reason: 'timed_out' };
+        },
+        acceptUserQuestionRequest: async () => {},
+        close: async () => {},
+        release: () => {},
+      }),
+    };
+    const { manager, session } = await steeringDeliverySession(
+      runStore,
+      steeringToolThenDoneModel(true),
+      () => {
+        toolExecutions += 1;
+      },
+      {
+        permissionRequired: true,
+        permissionMode: 'ask',
+        interactionAuthority,
+      },
+    );
+
+    const turn = drainAll(
+      manager.sendMessage(
+        session.id,
+        { turnId: 'turn-hosted-answer-rejected', text: 'go' },
+        { durability: 'required' },
+      ),
+    );
+    await waitUntil(() => continuation !== undefined);
+    await answerPermission!();
+    let failure: unknown;
+    try {
+      await turn;
+    } catch (error) {
+      failure = error;
+    }
+
+    expect((failure as Error).message).toBe('permission answer ack append rejected');
+    expect(ackDurable).toBe(true);
+    expect(toolExecutions).toBe(0);
+    const [run] = await runStore.listSessionRuns(session.id);
+    expect(
+      (await runStore.readRuntimeEvents(session.id, run!.runId)).some(
+        (event) => event.actions?.permissionAnswerAccepted,
+      ),
+    ).toBe(false);
+  });
+
+  test('hosted permission timeout waits for its durable closure ack before continuing with a synthetic error', {
+    timeout: 2_000,
+  }, async (t) => {
+    const ackAppendStarted = makeGate();
+    const releaseAckAppend = makeGate();
+    t.after(() => releaseAckAppend.release());
+    let toolExecutions = 0;
+    let closureApplications = 0;
+    let ackDurable: boolean | undefined;
+    const runStore = new MemoryAgentRunStore({
+      beforeRuntimeEventAppend: async (_sessionId, _runId, event, options) => {
+        if (!event.actions?.permissionClosureAccepted) return;
+        ackDurable = options?.durable;
+        ackAppendStarted.release();
+        await releaseAckAppend.promise;
+      },
+    });
+    const interactionAuthority: RuntimeInteractionAuthority = {
+      bindRun: (identity) => ({
+        ...identity,
+        acceptPermissionRequest: async () => ({ state: 'pending' }),
+        commitPermissionAnswer: async ({ continuation, answer }) => {
+          await continuation.applyAnswer(answer);
+          return { kind: 'permission_answer', answer };
+        },
+        commitPermissionTimeout: async ({ continuation }) => {
+          closureApplications += 1;
+          await continuation.applyClosure('timed_out');
+          return { kind: 'closure', reason: 'timed_out' };
+        },
+        acceptUserQuestionRequest: async () => {},
+        close: async () => {},
+        release: () => {},
+      }),
+    };
+    const model = steeringToolThenDoneModel(true);
+    const { manager, session, store } = await steeringDeliverySession(
+      runStore,
+      model,
+      () => {
+        toolExecutions += 1;
+      },
+      {
+        permissionRequired: true,
+        permissionMode: 'ask',
+        permissionTimeoutMs: 5,
+        interactionAuthority,
+      },
+    );
+
+    const turn = drainAll(
+      manager.sendMessage(
+        session.id,
+        { turnId: 'turn-hosted-timeout-durable', text: 'go' },
+        { durability: 'required' },
+      ),
+    );
+    await ackAppendStarted.promise;
+    expect(ackDurable).toBe(true);
+    const [waitingRun] = await runStore.listSessionRuns(session.id);
+    expect(closureApplications).toBe(1);
+    expect(toolExecutions).toBe(0);
+    expect(waitingRun?.status).toBe('waiting_for_user');
+    expect((await store.readHeader(session.id)).status).toBe('waiting_for_user');
+    expect(
+      (await runStore.readRuntimeEvents(session.id, waitingRun!.runId)).some(
+        (event) => event.actions?.permissionClosureAccepted,
+      ),
+    ).toBe(false);
+    expect(model.doStreamCalls.length).toBe(1);
+
+    releaseAckAppend.release();
+    const events = await turn;
+    const runtimeEvents = await runStore.readRuntimeEvents(session.id, waitingRun!.runId);
+    expect(
+      runtimeEvents.some(
+        (event) => event.actions?.permissionClosureAccepted?.reason === 'timed_out',
+      ),
+    ).toBe(true);
+    expect(
+      runtimeEvents.some(
+        (event) => event.content?.kind === 'function_response' && event.content.isError === true,
+      ),
+    ).toBe(true);
+    expect(events.some((event) => event.type === 'permission_closure_ack')).toBe(true);
+    expect(toolExecutions).toBe(0);
+    expect(model.doStreamCalls.length).toBe(2);
+  });
+
+  test('hosted stopped question abandonment preserves stop closure before release', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new FakeBackend(ctx));
+    const lifecycle: string[] = [];
+    let question: RuntimeUserQuestionContinuation | undefined;
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(1_000),
+      interactionAuthority: {
+        bindRun: (identity) => ({
+          ...identity,
+          acceptPermissionRequest: async () => ({ state: 'pending' }),
+          commitPermissionAnswer: async ({ answer }) => ({
+            kind: 'permission_answer',
+            answer,
+          }),
+          commitPermissionTimeout: async () => ({ kind: 'closure', reason: 'timed_out' }),
+          acceptUserQuestionRequest: async ({ continuation }) => {
+            question = continuation;
+          },
+          close: async (reason) => {
+            lifecycle.push(`close:${reason}`);
+            await question?.applyClosure(reason);
+            lifecycle.push('local-settled');
+          },
+          release: () => lifecycle.push('release'),
+        }),
+      },
+      canonicalPermissionOutcomes: noCanonicalPermissionOutcomes,
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'ask' }),
+    );
+    const iterator = manager
+      .sendMessage(session.id, {
+        turnId: 'turn-host-question-abandoned',
+        text: FAKE_ASK_USER_QUESTION_PROMPT,
+      })
+      [Symbol.asyncIterator]();
+
+    let request: SessionEvent | undefined;
+    while (request?.type !== 'user_question_request') {
+      const next = await iterator.next();
+      if (next.done) break;
+      request = next.value;
+    }
+    expect(request?.type).toBe('user_question_request');
+    await manager.stopSession(session.id, { source: 'stop_button' });
+    expect(lifecycle).toEqual(['close:turn_stopped', 'local-settled']);
+    await iterator.return?.(undefined);
+    expect(lifecycle).toEqual(['close:turn_stopped', 'local-settled', 'release']);
+  });
+
+  test('hosted RuntimeKernel rejects a backend request without an admission receipt', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new UnadmittedQuestionBackend(ctx));
+    let releases = 0;
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(1_000),
+      interactionAuthority: {
+        bindRun: (identity) => ({
+          ...identity,
+          acceptPermissionRequest: async () => ({ state: 'pending' }),
+          commitPermissionAnswer: async ({ answer }) => ({
+            kind: 'permission_answer',
+            answer,
+          }),
+          commitPermissionTimeout: async () => ({ kind: 'closure', reason: 'timed_out' }),
+          acceptUserQuestionRequest: async () => {},
+          close: async () => {},
+          release: () => {
+            releases += 1;
+          },
+        }),
+      },
+      canonicalPermissionOutcomes: noCanonicalPermissionOutcomes,
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'ask' }),
+    );
+
+    let failure: unknown;
+    try {
+      await drainAll(manager.sendMessage(session.id, { turnId: 'turn-forged', text: 'start' }));
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure instanceof RuntimeInteractionInvariantError).toBe(true);
+    expect(releases).toBe(1);
+  });
+
+  test('hosted owner is released when the event consumer abandons the run', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new FakeBackend(ctx));
+    let releases = 0;
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(1_000),
+      messageAuthority: {
+        bindRun: (identity) => ({
+          ...identity,
+          pull: () => [],
+          ack: () => {},
+          nack: () => {},
+          release: () => {
+            releases += 1;
+          },
+        }),
+      },
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'bypass' }),
+    );
+    const iterator = manager
+      .sendMessage(session.id, { turnId: 'turn-host-abandoned', text: 'start' })
+      [Symbol.asyncIterator]();
+
+    await iterator.next();
+    await iterator.return?.(undefined);
+    expect(releases).toBe(1);
+  });
+
+  test('hosted owner is released when backend execution fails', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new ThrowBeforeTerminalBackend(ctx));
+    let releases = 0;
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(1_000),
+      messageAuthority: {
+        bindRun: (identity) => ({
+          ...identity,
+          pull: () => [],
+          ack: () => {},
+          nack: () => {},
+          release: () => {
+            releases += 1;
+          },
+        }),
+      },
+    });
+    const session = await manager.createSession(
+      makeInput({ backend: 'fake', permissionMode: 'bypass' }),
+    );
+
+    let failure: unknown;
+    try {
+      await drainAll(
+        manager.sendMessage(session.id, { turnId: 'turn-host-failed', text: 'start' }),
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect((failure as Error).message).toBe('backend failed before terminal');
+    expect(releases).toBe(1);
+  });
+
   test('steer injects a user message mid-turn and emits queue snapshots', async () => {
     const { manager } = steeringManager();
     const session = await manager.createSession(
@@ -12922,7 +15390,9 @@ describe('SessionManager steering and followup queues', () => {
     expect(steerOutcome).toEqual({ kind: 'queued' });
     // The interjection is echoed as a first-class user event…
     expect(
-      events.some((event) => event.type === 'steering_message' && event.text === 'also do X'),
+      events.some(
+        (event) => event.type === 'steering_message' && event.content.text === 'also do X',
+      ),
     ).toBe(true);
     // …the enqueue and the step-boundary consumption both push a queue snapshot…
     const queueUpdates = events.filter(
@@ -13050,7 +15520,9 @@ describe('SessionManager steering and followup queues', () => {
     });
     expect(outcome?.kind).toBe('queued');
     expect(
-      events.some((event) => event.type === 'steering_message' && event.text === 'now consumed'),
+      events.some(
+        (event) => event.type === 'steering_message' && event.content.text === 'now consumed',
+      ),
     ).toBe(true);
   });
 
@@ -13095,7 +15567,7 @@ describe('SessionManager steering and followup queues', () => {
     expect(backend?.pulls.get('turn-b')).toEqual([['for the owner']]);
     expect(
       secondEvents.some(
-        (event) => event.type === 'steering_message' && event.text === 'for the owner',
+        (event) => event.type === 'steering_message' && event.content.text === 'for the owner',
       ),
     ).toBe(true);
   });
@@ -13648,15 +16120,15 @@ async function drainAll(iterable: AsyncIterable<SessionEvent>): Promise<SessionE
   return events;
 }
 
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  for (let i = 0; i < 500 && !predicate(); i += 1) {
+async function waitUntil(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  for (let i = 0; i < 500 && !(await predicate()); i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
-  expect(predicate()).toBe(true);
+  expect(await predicate()).toBe(true);
 }
 
 /** Mock model: first request calls the Probe tool, second finishes with text. */
-function steeringToolThenDoneModel(): MockLanguageModelV4 {
+function steeringToolThenDoneModel(permissionRequired = false): MockLanguageModelV4 {
   const usage = {
     inputTokens: { total: 100, noCache: 100, cacheRead: 0, cacheWrite: 0 },
     outputTokens: { total: 10, text: 10, reasoning: 0 },
@@ -13671,8 +16143,8 @@ function steeringToolThenDoneModel(): MockLanguageModelV4 {
               {
                 type: 'tool-call',
                 toolCallId: 'tool-1',
-                toolName: 'Probe',
-                input: JSON.stringify({ q: 'x' }),
+                toolName: permissionRequired ? 'Bash' : 'Probe',
+                input: JSON.stringify(permissionRequired ? { command: 'echo x' } : { q: 'x' }),
               },
               { type: 'finish', finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage },
             ]
@@ -13700,7 +16172,13 @@ function steeringToolThenDoneModel(): MockLanguageModelV4 {
 async function steeringDeliverySession(
   runStore: MemoryAgentRunStore,
   model: MockLanguageModelV4,
-  duringTool: (manager: SessionManager, sessionId: string) => void,
+  duringTool: (manager: SessionManager, sessionId: string) => Promise<void> | void,
+  options: {
+    permissionRequired?: boolean;
+    permissionMode?: PermissionMode;
+    permissionTimeoutMs?: number;
+    interactionAuthority?: RuntimeInteractionAuthority;
+  } = {},
 ) {
   const store = new MemorySessionStore();
   const backends = new BackendRegistry();
@@ -13726,14 +16204,19 @@ async function steeringDeliverySession(
         modelId: 'mock-model-id',
         permissionEngine: new PermissionEngine({ newId: () => 'perm-1', now: () => 1 }),
         modelFactory: () => model,
+        ...(options.permissionTimeoutMs !== undefined
+          ? { permissionTimeoutMs: options.permissionTimeoutMs }
+          : {}),
         tools: [
           {
-            name: 'Probe',
-            description: 'Probe description',
-            parameters: z.object({ q: z.string() }),
-            permissionRequired: false,
+            name: options.permissionRequired ? 'Bash' : 'Probe',
+            description: options.permissionRequired ? 'Shell description' : 'Probe description',
+            parameters: options.permissionRequired
+              ? z.object({ command: z.string() })
+              : z.object({ q: z.string() }),
+            permissionRequired: options.permissionRequired ?? false,
             impl: async () => {
-              duringTool(manager, sessionId);
+              await duringTool(manager, sessionId);
               return { ok: true };
             },
           },
@@ -13744,19 +16227,26 @@ async function steeringDeliverySession(
         now: nextNow(1),
       }),
   );
-  manager = new SessionManager({
+  const managerDeps = {
     store,
     runStore,
     runtimeEventStore: runStore,
     backends,
     newId: nextId(),
     now: nextNow(1_000),
-  });
+  };
+  manager = options.interactionAuthority
+    ? new SessionManager({
+        ...managerDeps,
+        interactionAuthority: options.interactionAuthority,
+        canonicalPermissionOutcomes: noCanonicalPermissionOutcomes,
+      })
+    : new SessionManager(managerDeps);
   const session = await manager.createSession(
-    makeInput({ backend: 'fake', permissionMode: 'bypass' }),
+    makeInput({ backend: 'fake', permissionMode: options.permissionMode ?? 'bypass' }),
   );
   sessionId = session.id;
-  return { manager, session };
+  return { manager, session, store };
 }
 
 /**
@@ -13784,7 +16274,7 @@ class GatedSteeringBackend implements AgentBackend {
     await gate.promise;
     const leases = input.pullSteering?.() ?? [];
     const record = this.pulls.get(input.turnId) ?? [];
-    record.push(leases.map((lease) => lease.text));
+    record.push(leases.map((lease) => lease.content.text));
     this.pulls.set(input.turnId, record);
     let seq = 0;
     for (const lease of leases) {
@@ -13794,8 +16284,8 @@ class GatedSteeringBackend implements AgentBackend {
         id: `${input.turnId}-steer-${seq}`,
         turnId: input.turnId,
         ts: seq,
-        messageId: `${input.turnId}-steer-m-${seq}`,
-        text: lease.text,
+        messageId: lease.messageId,
+        content: lease.content,
       };
     }
     // Delivery for this fake is the echo itself; ack the leases.
@@ -13845,6 +16335,14 @@ class DelegatingRuntimeKernel implements RuntimeKernelLike {
   cachedHeaders: SessionHeader[] = [];
 
   constructor(private readonly events: readonly SessionEvent[] = []) {}
+
+  claimExecution(sessionId: string): ReturnType<RuntimeKernelLike['claimExecution']> {
+    return {
+      sessionId,
+      isStopRequested: () => false,
+      release: () => {},
+    };
+  }
 
   async *startTurn(
     sessionId: string,
@@ -13932,6 +16430,38 @@ class DelegatingRuntimeKernel implements RuntimeKernelLike {
   }
 }
 
+class UnadmittedQuestionBackend implements AgentBackend {
+  readonly kind = 'fake' as const;
+  readonly sessionId: string;
+
+  constructor(ctx: BackendFactoryContext) {
+    this.sessionId = ctx.sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    yield {
+      type: 'user_question_request',
+      id: 'unadmitted-event',
+      turnId: input.turnId,
+      ts: 1,
+      requestId: 'unadmitted-request',
+      toolUseId: 'unadmitted-tool',
+      questions: [
+        {
+          question: 'Continue?',
+          options: [{ label: 'Yes' }, { label: 'No' }],
+        },
+      ],
+    };
+  }
+
+  async stop(): Promise<void> {}
+
+  async respondToPermission(): Promise<void> {}
+
+  async dispose(): Promise<void> {}
+}
+
 class TestBackend implements AgentBackend {
   readonly kind = 'fake' as const;
   readonly sessionId: string;
@@ -13979,6 +16509,14 @@ class TestBackend implements AgentBackend {
     if (this.ctx.store instanceof MemorySessionStore) {
       this.ctx.store.disposeCount += 1;
     }
+  }
+}
+
+class PermissionBroadcastBackend extends TestBackend {
+  permissionResponses = 0;
+
+  override async respondToPermission(_decision: PermissionDecision): Promise<void> {
+    this.permissionResponses += 1;
   }
 }
 
@@ -14612,7 +17150,7 @@ class ProviderRequestTraceBackend implements AgentBackend {
 
   async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
     await this.ctx.recordProviderRequestCapture?.({
-      schemaVersion: 1,
+      schemaVersion: 2,
       traceId: 'provider-trace-1',
       captureId: 'capture-1',
       turnId: input.turnId,
@@ -14620,6 +17158,7 @@ class ProviderRequestTraceBackend implements AgentBackend {
       providerId: 'fake',
       modelId: 'fake-model',
       requestHash: 'sha256:request',
+      requestPayloadWithoutProviderOptionsHash: 'sha256:shared-request',
       requestBytes: 100,
       segments: [],
       artifactId: 'artifact-capture',
@@ -14676,7 +17215,7 @@ class ProviderCaptureGateBackend implements AgentBackend {
 
   async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
     await this.ctx.recordProviderRequestCapture?.({
-      schemaVersion: 1,
+      schemaVersion: 2,
       traceId: 'provider-trace-gated',
       captureId: 'capture-gated',
       turnId: input.turnId,
@@ -14684,6 +17223,7 @@ class ProviderCaptureGateBackend implements AgentBackend {
       providerId: 'fake',
       modelId: 'fake-model',
       requestHash: 'sha256:gated',
+      requestPayloadWithoutProviderOptionsHash: 'sha256:shared-gated',
       requestBytes: 100,
       segments: [],
       artifactId: 'artifact-gated',
@@ -14737,7 +17277,7 @@ class ProviderCaptureAfterAttemptFailureBackend implements AgentBackend {
     await this.attemptFailureRecorded;
     try {
       await this.ctx.recordProviderRequestCapture?.({
-        schemaVersion: 1,
+        schemaVersion: 2,
         traceId: 'provider-trace-1',
         captureId: 'capture-2',
         turnId: input.turnId,
@@ -14745,6 +17285,7 @@ class ProviderCaptureAfterAttemptFailureBackend implements AgentBackend {
         providerId: 'fake',
         modelId: 'fake-model',
         requestHash: 'sha256:request-2',
+        requestPayloadWithoutProviderOptionsHash: 'sha256:shared-request-2',
         requestBytes: 120,
         segments: [],
         artifactId: 'artifact-capture-2',
@@ -15552,11 +18093,13 @@ class MemoryAgentRunStore implements AgentRunStore, RuntimeEventStore {
       failUpdateRunOnce?: boolean;
       failUpdateRunStatusOnce?: AgentRunHeader['status'];
       failContinuationCreate?: boolean;
+      beforeListSessionRuns?: (sessionId: string) => Promise<void> | void;
       beforeRuntimeEventRead?: (sessionId: string, runId: string) => Promise<void> | void;
       beforeRuntimeEventAppend?: (
         sessionId: string,
         runId: string,
         event: RuntimeEvent,
+        options?: { durable?: boolean },
       ) => Promise<void> | void;
       beforeRunRead?: (sessionId: string, runId: string) => Promise<void> | void;
       beforeAgentRunEventAppend?: (
@@ -15565,6 +18108,11 @@ class MemoryAgentRunStore implements AgentRunStore, RuntimeEventStore {
         event: AgentRunEvent,
       ) => Promise<void> | void;
       beforeAgentRunEventRead?: (sessionId: string, runId: string) => Promise<void> | void;
+      beforeAgentRunUpdate?: (
+        sessionId: string,
+        runId: string,
+        patch: Partial<AgentRunHeader>,
+      ) => Promise<void> | void;
     } = {},
   ) {}
 
@@ -15581,6 +18129,7 @@ class MemoryAgentRunStore implements AgentRunStore, RuntimeEventStore {
     runId: string,
     patch: Partial<AgentRunHeader>,
   ): Promise<AgentRunHeader> {
+    await this.options.beforeAgentRunUpdate?.(sessionId, runId, patch);
     if (this.options.failUpdateRunOnce) {
       this.options.failUpdateRunOnce = false;
       throw new Error('update run failed');
@@ -15608,6 +18157,7 @@ class MemoryAgentRunStore implements AgentRunStore, RuntimeEventStore {
 
   async listSessionRuns(sessionId: string): Promise<AgentRunHeader[]> {
     this.listSessionRunsCalls += 1;
+    await this.options.beforeListSessionRuns?.(sessionId);
     return Array.from(this.headers.values())
       .filter((header) => header.sessionId === sessionId)
       .sort((a, b) => a.createdAt - b.createdAt || a.runId.localeCompare(b.runId))
@@ -15626,8 +18176,13 @@ class MemoryAgentRunStore implements AgentRunStore, RuntimeEventStore {
     return (this.events.get(key(sessionId, runId)) ?? []).map(copyEvent);
   }
 
-  async appendRuntimeEvent(sessionId: string, runId: string, event: RuntimeEvent): Promise<void> {
-    await this.options.beforeRuntimeEventAppend?.(sessionId, runId, event);
+  async appendRuntimeEvent(
+    sessionId: string,
+    runId: string,
+    event: RuntimeEvent,
+    options?: { durable?: boolean },
+  ): Promise<void> {
+    await this.options.beforeRuntimeEventAppend?.(sessionId, runId, event, options);
     if (this.options.failRuntimeEventAppends) throw new Error('runtime event append failed');
     this.runtimeEventAppendCount += 1;
     if (
@@ -15957,6 +18512,29 @@ function makeTestRuntimePolicyGate(): {
       await Promise.all([...activeActivations]);
       return operation();
     },
+  };
+}
+
+function hostedRootAuthority(): RuntimeHostedRootAuthority {
+  return {
+    bindRun: (identity) => ({
+      ...identity,
+      pull: () => [],
+      ack: () => {},
+      nack: () => {},
+      release: () => {},
+    }),
+    executeRoot: async (input) => {
+      for await (const event of input.start({
+        runId: input.runId,
+        userMessageId: input.userMessageId,
+        onRunStarted: () => input.onReady?.(),
+      })) {
+        input.onEvent?.(event);
+      }
+    },
+    stopRoot: async () => {},
+    stopSession: async () => {},
   };
 }
 
@@ -16337,6 +18915,125 @@ function runtimeEvent(overrides: Partial<RuntimeEvent>): RuntimeEvent {
     role: 'system',
     author: 'system',
     ...overrides,
+  };
+}
+
+async function seedCanonicalPermissionRun(
+  runStore: MemoryAgentRunStore,
+  header: AgentRunHeader,
+  includeLedgerRequest = true,
+): Promise<void> {
+  const events = [
+    runtimeEvent({
+      id: 'permission-user-canonical',
+      sessionId: header.sessionId,
+      runId: header.runId,
+      turnId: header.turnId,
+      ts: 99,
+      role: 'user',
+      author: 'user',
+      content: { kind: 'text', text: 'write the file' },
+    }),
+    ...(includeLedgerRequest
+      ? [
+          runtimeEvent({
+            id: 'permission-request-canonical',
+            sessionId: header.sessionId,
+            runId: header.runId,
+            turnId: header.turnId,
+            ts: 100,
+            actions: {
+              permissionRequest: {
+                kind: 'tool_permission',
+                requestId: 'request-canonical',
+                toolUseId: 'tool-canonical',
+                toolName: 'Write',
+                category: 'file_write',
+                reason: 'file_write',
+                args: { path: '/tmp/file' },
+                rememberForTurnAllowed: true,
+                hint: 'write approval',
+              },
+            },
+            refs: { toolCallId: 'tool-canonical' },
+          }),
+        ]
+      : []),
+    runtimeEvent({
+      id: 'permission-answer-canonical',
+      sessionId: header.sessionId,
+      runId: header.runId,
+      turnId: header.turnId,
+      ts: 126,
+      author: 'user',
+      actions: {
+        permissionAnswerAccepted: { requestId: 'request-canonical' },
+      },
+      refs: { toolCallId: 'tool-canonical' },
+    }),
+    runtimeEvent({
+      id: 'permission-terminal-canonical',
+      sessionId: header.sessionId,
+      runId: header.runId,
+      turnId: header.turnId,
+      ts: 130,
+      status: 'completed',
+      actions: { endInvocation: true },
+    }),
+  ];
+  await seedRuntimeRun(runStore, header, events);
+}
+
+function canonicalPermissionRecord(
+  header: AgentRunHeader,
+  overrides: Partial<CanonicalPermissionOutcomeRecord> = {},
+): CanonicalPermissionOutcomeRecord {
+  return {
+    sessionId: header.sessionId,
+    runId: header.runId,
+    turnId: header.turnId,
+    requestId: 'request-canonical',
+    request: {
+      kind: 'permission',
+      toolUseId: 'tool-canonical',
+      prompt: {
+        kind: 'tool_permission',
+        toolName: 'Write',
+        category: 'file_write',
+        reason: 'file_write',
+        review: { kind: 'path', operation: 'write', path: '/tmp/file' },
+        rememberForTurnAllowed: true,
+      },
+    },
+    outcome: {
+      kind: 'permission_answer',
+      decision: 'deny',
+      rememberForTurn: false,
+      reviewer: 'user',
+      committedAt: 125,
+    },
+    ...overrides,
+  };
+}
+
+const noCanonicalPermissionOutcomes: CanonicalPermissionOutcomeReader = {
+  readPermissionOutcome: async () => undefined,
+};
+
+function testInteractionAuthority(): RuntimeInteractionAuthority {
+  return {
+    bindRun: (identity) => ({
+      ...identity,
+      acceptPermissionRequest: async () => ({ state: 'pending' }),
+      commitPermissionAnswer: async ({ answer }) => ({
+        kind: 'permission_answer',
+        answer,
+      }),
+      commitPermissionTimeout: async () => ({ kind: 'closure', reason: 'timed_out' }),
+      acceptUserQuestionRequest: async () => {},
+      close: async () => {},
+      release: () => {},
+    }),
   };
 }
 

@@ -97,6 +97,14 @@ const STROKE_EXCEPTION_FILES = new Set([
 //   - apps/desktop/src/renderer/settings/provider-brand-marks.tsx — the LLM
 //     provider brand marks (SiliconCloud, Ollama, xAI, …); every path here is
 //     byte-provenance-pinned above to an upstream brand package.
+//   - packages/ui/src/maka-wordmark.tsx — Maka's own wordmark (#1433). The
+//     one mark here that is first-party rather than vendored: its path was
+//     traced with potrace from the `maka` lockup in
+//     apps/desktop/assets/icon.png, so the geometry has the same "official
+//     logo, reproduced exactly" provenance the vendored marks have. lucide
+//     obviously ships no Maka glyph, and routing a product logo through the
+//     generic icon funnel would subject it to the shared stroke and sizing
+//     seam, which is exactly what a mark must not follow.
 //   - apps/desktop/src/renderer/mcp-brand-marks.tsx — the MCP catalog brand
 //     marks. This is the SANCTIONED pattern for library-sourced marks: the
 //     `<svg>` is an inert MOUNTING SHELL that wraps `<path>` children whose
@@ -113,6 +121,7 @@ const STROKE_EXCEPTION_FILES = new Set([
 // justification (inert shell around library-sourced path geometry).
 const INLINE_SVG_ALLOWLIST = new Set([
   resolve(REPO_ROOT, 'packages/ui/src/bot-brand-logo.tsx'),
+  resolve(REPO_ROOT, 'packages/ui/src/maka-wordmark.tsx'),
   resolve(REPO_ROOT, 'apps/desktop/src/renderer/settings/provider-brand-marks.tsx'),
   resolve(REPO_ROOT, 'apps/desktop/src/renderer/mcp-brand-marks.tsx'),
 ]);
@@ -302,7 +311,11 @@ describe('icon + typography governance contract', () => {
       /Real xAI\/Grok mark vendored byte-for-byte from Lobe Icons:[\s\S]*@lobehub\/icons-static-svg@1\.91\.0[\s\S]*32f4083f7a20b67ecdc7b29c0af031ada5a29c52[\s\S]*packages\/static-svg\/icons\/xai\.svg[\s\S]*license: MIT[\s\S]*function XAI\(\)[\s\S]*<ProviderAssetMask src=\{xaiMarkUrl\} \/>/,
       'xAI must render the traceable upstream SVG asset as a currentColor mask instead of a generic or hand-drawn mark',
     );
-    assert.match(marks, /case 'xai':\s*return <XAI \/>/, 'the stable xai provider id must resolve to the upstream mark');
+    assert.match(
+      marks,
+      /case 'xai':\s*case 'xai-oauth':\s*return <XAI \/>/,
+      'both xAI credential paths must resolve to the same upstream mark',
+    );
     assert.match(catalog, /<ProviderLogo type=\{props\.type\} \/>/, 'catalog cards must consume the shared provider logo seam');
     assert.match(
       providerDialog,

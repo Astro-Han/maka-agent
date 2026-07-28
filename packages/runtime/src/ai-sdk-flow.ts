@@ -32,6 +32,7 @@
 
 import {
   failureClassFromCompleteStopReason,
+  normalizeMessageContent,
   type AnyPermissionRequestEvent,
   type CompleteEvent,
   type SessionEvent,
@@ -50,7 +51,11 @@ import {
   type RuntimeEventStatus,
 } from '@maka/core/runtime-event';
 
-import type { AgentBackend, BackendSessionEvent } from '@maka/core/backend-types';
+import type {
+  AgentBackend,
+  BackendSessionEvent,
+  HostedInteractionBridge,
+} from '@maka/core/backend-types';
 import { type AgentFlow, type AgentFlowControl, type FlowInput } from './agent-flow.js';
 import type { InvocationContext } from './invocation-context.js';
 
@@ -252,6 +257,7 @@ function malformedSandboxEscalationRequest(requestId: string, field: string): Ty
  *   - tool_result (function resp)  → role 'tool',    author 'tool'
  *   - permission_request           → role 'system',  author 'system'
  *   - permission_decision_ack      → role 'system',  author 'user'
+ *   - user_question_answer_ack     → role 'system',  author 'user'
  *   - plan_submitted               → role 'system',  author 'agent'
  *   - token_usage                  → role 'system',  author 'system'
  *   - error                        → role 'system',  author 'system'
@@ -324,6 +330,9 @@ function mapBackendSessionEvent(
           kind: 'thinking',
           text: event.text,
           ...(event.signature !== undefined ? { signature: event.signature } : {}),
+          ...(event.providerOptions !== undefined
+            ? { providerOptions: structuredClone(event.providerOptions) }
+            : {}),
         },
         refs: { providerEventId: event.messageId },
       };
@@ -436,6 +445,31 @@ function mapBackendSessionEvent(
         },
         refs: { toolCallId: event.toolUseId },
       };
+    case 'permission_answer_ack':
+      return {
+        ...base,
+        role: 'system',
+        author: 'user',
+        actions: {
+          permissionAnswerAccepted: {
+            requestId: event.requestId,
+          },
+        },
+        refs: { toolCallId: event.toolUseId },
+      };
+    case 'permission_closure_ack':
+      return {
+        ...base,
+        role: 'system',
+        author: 'system',
+        actions: {
+          permissionClosureAccepted: {
+            requestId: event.requestId,
+            reason: event.reason,
+          },
+        },
+        refs: { toolCallId: event.toolUseId },
+      };
     case 'user_question_request':
       return {
         ...base,
@@ -450,6 +484,18 @@ function mapBackendSessionEvent(
         },
         refs: { toolCallId: event.toolUseId },
       };
+    case 'user_question_answer_ack':
+      return {
+        ...base,
+        role: 'system',
+        author: 'user',
+        actions: {
+          userQuestionAnswerAccepted: {
+            requestId: event.requestId,
+          },
+        },
+        refs: { toolCallId: event.toolUseId },
+      };
 
     // ── Steering: a user message injected mid-turn at a step boundary ─────
     // Persisted as a first-class user event so the ledger, transcript, and
@@ -459,9 +505,9 @@ function mapBackendSessionEvent(
         ...base,
         role: 'user',
         author: 'user',
-        // Raw text + steering marker: read models render the text as-is,
-        // model replay wraps it in the canonical steering envelope.
-        content: { kind: 'text', text: event.text, steering: true },
+        // Canonical content + steering marker: read models may prefer
+        // displayText, while model replay uses text and materializes attachments.
+        content: { kind: 'text', ...normalizeMessageContent(event.content), steering: true },
         refs: { providerEventId: event.messageId },
       };
 
@@ -647,6 +693,12 @@ function completeRuntimeEvent(
 export interface AiSdkFlowInput {
   /** The wrapped stepping engine. Production: AiSdkBackend. Tests: any AgentBackend. */
   backend: AgentBackend;
+  /** Backend-activation stop owner. Standalone flows create a local fallback when omitted. */
+  stopBackend?: AgentBackend['stop'];
+  /** Exact hosted Interaction Run forwarded only for this flow invocation. */
+  hostedInteraction?: HostedInteractionBridge;
+  /** Synchronous exact-Run ownership fence immediately before backend dispatch. */
+  beforeDispatch?: () => void;
   /**
    * Optional production projection hook. Called for every raw backend
    * SessionEvent after it has been mapped to a RuntimeEvent and before the
@@ -682,13 +734,19 @@ export class AiSdkFlow implements AgentFlow, AgentFlowControl {
   readonly kind: string;
   readonly sessionId: string;
   private readonly backend: AgentBackend;
+  private readonly hostedInteraction: HostedInteractionBridge | undefined;
+  private readonly beforeDispatch: AiSdkFlowInput['beforeDispatch'];
   private readonly onSessionEvent: AiSdkFlowInput['onSessionEvent'];
   private readonly onError: AiSdkFlowInput['onError'];
   private readonly onFinally: AiSdkFlowInput['onFinally'];
   private readonly drainAfterTerminal: boolean;
+  private readonly stopBackend: AgentBackend['stop'];
 
   constructor(input: AiSdkFlowInput) {
     this.backend = input.backend;
+    this.stopBackend = input.stopBackend ?? createSingleFlightBackendStop(input.backend);
+    this.hostedInteraction = input.hostedInteraction;
+    this.beforeDispatch = input.beforeDispatch;
     this.sessionId = input.backend.sessionId;
     this.kind = input.backend.kind;
     this.onSessionEvent = input.onSessionEvent;
@@ -730,6 +788,7 @@ export class AiSdkFlow implements AgentFlow, AgentFlowControl {
     let terminalAccepted = false;
     let errorEmitted = false;
     try {
+      this.beforeDispatch?.();
       for await (const sessionEvent of this.backend.send({
         invocationId: ctx.invocationId,
         runId: ctx.runId,
@@ -749,6 +808,7 @@ export class AiSdkFlow implements AgentFlow, AgentFlowControl {
         ...(input.pullSteering !== undefined ? { pullSteering: input.pullSteering } : {}),
         ...(input.ackSteering !== undefined ? { ackSteering: input.ackSteering } : {}),
         ...(input.nackSteering !== undefined ? { nackSteering: input.nackSteering } : {}),
+        ...(this.hostedInteraction ? { hostedInteraction: this.hostedInteraction } : {}),
       })) {
         if (terminalEmitted) continue;
         // Ingress authority check: queue_update has exactly one legal
@@ -792,8 +852,8 @@ export class AiSdkFlow implements AgentFlow, AgentFlowControl {
     }
   }
 
-  async stop(reason: 'user_stop' | 'redirect'): Promise<void> {
-    await this.backend.stop(reason);
+  stop(reason: 'user_stop' | 'redirect'): Promise<void> {
+    return this.stopBackend(reason);
   }
 
   async respondToPermission(decision: PermissionDecision): Promise<void> {
@@ -807,6 +867,20 @@ export class AiSdkFlow implements AgentFlow, AgentFlowControl {
   async dispose(): Promise<void> {
     await this.backend.dispose();
   }
+}
+
+export function createSingleFlightBackendStop(backend: AgentBackend): AgentBackend['stop'] {
+  let pending: Promise<void> | undefined;
+  return (reason, mode) => {
+    if (pending) return pending;
+    const attempt = Promise.resolve().then(() => backend.stop(reason, mode));
+    pending = attempt;
+    const clear = (): void => {
+      if (pending === attempt) pending = undefined;
+    };
+    void attempt.then(clear, clear);
+    return attempt;
+  };
 }
 
 function missingTerminalSessionEvents(

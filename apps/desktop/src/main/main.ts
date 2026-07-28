@@ -1,18 +1,17 @@
-import { app, ipcMain, powerSaveBlocker, shell } from 'electron';
+import { app, dialog, ipcMain, powerSaveBlocker, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { wireAppLifecycle } from './app-lifecycle.js';
 import {
   collapseSessionRevisions,
-  DEFAULT_SESSION_NAME,
   filterModelVisibleTaskLedgerTasks,
-  DEEP_RESEARCH_SESSION_LABEL,
+  resolveSystemUiLocale,
+  resolveUiLocale,
 } from '@maka/core';
 import type {
   BotProvider,
   ConnectionEvent,
   CreateSessionInput,
-  PermissionMode,
   SessionChangedEvent,
   SessionChangedReason,
   SessionEvent,
@@ -24,7 +23,9 @@ import { assembleDesktopTools } from './tool-assembly.js';
 import { createToolArtifactPersistence } from './tool-artifact-persistence.js';
 import { ClaudeSubscriptionService } from './oauth/claude-subscription-service.js';
 import { OpenAiCodexService } from './oauth/openai-codex-service.js';
+import { createOpenAiCodexE2eFixtureService } from './openai-codex-e2e-fixture.js';
 import { GitHubCopilotSubscriptionService } from './oauth/github-copilot-subscription-service.js';
+import { XaiOAuthService } from './oauth/xai-oauth-service.js';
 import { CursorSubscriptionService } from './oauth/cursor-subscription-service.js';
 import { AntigravitySubscriptionService } from './oauth/antigravity-subscription-service.js';
 import type { WorkspacePrivacyContext } from '@maka/core/incognito';
@@ -74,7 +75,6 @@ import {
   createTelemetryRepo,
 } from '@maka/storage';
 import { createAgentGraphControlStore } from '@maka/storage/agent-graph-control-store';
-import { resolveStorageRoot } from '@maka/storage/root-authority';
 import { resolveWorkspaceIdentity } from '@maka/storage/workspace-identity';
 import { McpClientManager } from '@maka/mcp';
 import { registerMcpIpcMain } from './mcp-ipc-main.js';
@@ -85,11 +85,10 @@ import {
 } from './chat-readiness.js';
 import { createFileCredentialStore } from './credential-store.js';
 import { bindOnboardingDeps, createOnboardingService } from './onboarding-service.js';
-import { handleQuickChatStart as runQuickChatStart, type QuickChatResult } from './quick-chat.js';
 import { createDailyReviewArchiveStore } from './daily-review-archive-store.js';
-import { resolveDefaultPermissionMode } from './permission-mode-default.js';
 import { resolveE2eFixture, seedE2eFixture } from './e2e-fixture.js';
 import { resolveBuildInfo } from './build-info.js';
+import { resolveShellEnv } from './shell-env.js';
 import { OpenGatewayService } from './open-gateway.js';
 import { LocalMemoryService } from './local-memory-service.js';
 import { createAttachmentApprovalRegistry } from './attachment-approval.js';
@@ -124,6 +123,10 @@ import { registerWorkspaceInstructionsIpc } from './workspace-instructions-ipc-m
 import { registerOnboardingIpc } from './onboarding-ipc-main.js';
 import { registerSessionEntryIpc } from './session-entry-ipc-main.js';
 import { registerPermissionsIpc } from './permissions-ipc-main.js';
+import {
+  createPermissionOverlayMain,
+  registerPermissionOverlayIpc,
+} from './permission-overlay/permission-overlay-main.js';
 import { registerSettingsIpc } from './settings-ipc-main.js';
 import type { SettingsIpcHandle } from './settings-ipc-main.js';
 import { createE2eFixtureBotOnboardingAdapters } from './bot-onboarding-e2e-fixture.js';
@@ -149,6 +152,7 @@ import {
   isSessionWorkspaceUnavailableError,
   resolveProjectContextRoot,
 } from './project-context-root.js';
+import { resolveDesktopStorageRoot } from './storage-root-startup.js';
 
 // E2E switches must never fire in a packaged build, and must never run against
 // the real user data: a stray MAKA_E2E on a build/dev machine would otherwise
@@ -183,6 +187,14 @@ if (!app.requestSingleInstanceLock()) {
 
 const buildInfo = resolveBuildInfo(app.isPackaged, app.getAppPath());
 
+// Resolve the user's login-shell PATH before any stores, tools, or child
+// processes are created. On macOS, apps launched from Finder/Dock inherit a
+// minimal PATH that lacks /opt/homebrew/bin, ~/.local/bin, etc. Only PATH is
+// imported; application-control variables remain owned by this process.
+// Skipped on Windows, when MAKA_SKIP_SHELL_ENV=1, and when launched from a
+// terminal (TERM/COLORTERM set).
+await resolveShellEnv();
+
 // PR-VISUAL-SMOKE-HEADLESS: resolve the fixture defensively. An unknown
 // scenario (e.g. a stale build, or a typo'd MAKA_E2E_FIXTURE) throws
 // here during top-level module evaluation. Left uncaught it surfaces a
@@ -213,7 +225,31 @@ if (e2eFixture) {
   console.log(`[e2e-fixture] scenario=${e2eFixture.scenario} workspace=${workspaceRoot}`);
   await seedE2eFixture({ workspaceRoot, fixture: e2eFixture, credentialStore });
 } else {
-  await resolveStorageRoot({ path: workspaceRoot, kind: 'interactive' });
+  const storageRoot = await resolveDesktopStorageRoot(workspaceRoot, {
+    confirmRepair: confirmDesktopStorageRootRepair,
+  });
+  if (!storageRoot) {
+    app.exit(0);
+    await new Promise<never>(() => {});
+  }
+}
+
+async function confirmDesktopStorageRootRepair(): Promise<boolean> {
+  await app.whenReady();
+  const isChinese = resolveSystemUiLocale(app.getPreferredSystemLanguages()) === 'zh';
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    title: isChinese ? 'Maka 工作区需要修复' : 'Maka workspace needs repair',
+    message: isChinese ? 'Maka 无法验证这个工作区。' : 'Maka cannot verify this workspace.',
+    detail: isChinese
+      ? `系统中的磁盘标识可能发生了变化。仅当这是本机原来的 Maka 工作区、而不是复制出的工作区时，才选择修复。\n\n${workspaceRoot}`
+      : `The disk identity may have changed. Repair only if this is the original Maka workspace on this computer, not a copied workspace.\n\n${workspaceRoot}`,
+    buttons: isChinese ? ['修复工作区', '退出'] : ['Repair Workspace', 'Exit'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  return response === 0;
 }
 // 保持系统唤醒 (settings.system.keepSystemAwake): holds an Electron
 // `powerSaveBlocker` so in-process scheduled tasks keep firing while the
@@ -267,12 +303,18 @@ const claudeSubscription = new ClaudeSubscriptionService({
 // IPC payloads never carry tokens, each gated behind its own
 // MAKA_*_EXPERIMENTAL env var. Antigravity is a `preview` placeholder
 // until the Google client_id question is resolved.
-const openAiCodex = new OpenAiCodexService({
-  userDataDir: app.getPath('userData'),
-  openExternal: (url) => shell.openExternal(url),
-  credentialStore,
-});
+const openAiCodex = e2eFixture?.scenario === 'oauth-relogin'
+  ? createOpenAiCodexE2eFixtureService()
+  : new OpenAiCodexService({
+      userDataDir: app.getPath('userData'),
+      openExternal: (url) => shell.openExternal(url),
+      credentialStore,
+    });
 const githubCopilotSubscription = new GitHubCopilotSubscriptionService({ credentialStore });
+const xaiOAuth = new XaiOAuthService({
+  credentialStore,
+  openExternal: (url) => shell.openExternal(url),
+});
 const buildSubscriptionModelFetch = createSubscriptionModelFetch({
   claudeSubscription,
 });
@@ -282,16 +324,29 @@ const oauthModelConnections = createOAuthModelConnectionsMainService({
   claudeSubscription,
   openAiCodex,
   githubCopilotSubscription,
+  xaiOAuth,
+  ...(e2eFixture?.scenario === 'oauth-relogin'
+    ? { fetchModels: async () => [{ id: 'gpt-5.6-sol' }] }
+    : {}),
 });
 const isClaudeSubscriptionAuthenticatedState = oauthModelConnections.isClaudeSubscriptionAuthenticatedState;
-const isOpenAiCodexAuthenticatedState = oauthModelConnections.isOpenAiCodexAuthenticatedState;
 
 function syncClaudeSubscriptionConnection(): Promise<LlmConnection | null> {
   return oauthModelConnections.syncClaudeSubscriptionConnection();
 }
+function activateXaiOAuthConnection(): Promise<LlmConnection | null> {
+  return oauthModelConnections.activateXaiOAuthConnection();
+}
+function syncXaiOAuthConnection(): Promise<LlmConnection | null> {
+  return oauthModelConnections.syncXaiOAuthConnection();
+}
 
 function syncOpenAiCodexConnection(): Promise<LlmConnection | null> {
   return oauthModelConnections.syncOpenAiCodexConnection();
+}
+
+function activateOpenAiCodexConnection(): Promise<LlmConnection | null> {
+  return oauthModelConnections.activateOpenAiCodexConnection();
 }
 
 function syncGitHubCopilotConnection(): Promise<LlmConnection | null> {
@@ -659,8 +714,8 @@ const previousBotStatus = new Map<BotProvider, Pick<BotStatus, 'readiness' | 're
 let botIncoming: ReturnType<typeof createBotIncomingMainService>;
 // Single authority for the "current project root" selection, shared across the
 // app/window, git, workspace-search, workspace-instructions, and session-entry
-// IPC surfaces. botIncoming, automation cron runs, and quick-chat read the
-// current selection through the thin `resolveCurrentProjectRoot` adapter below.
+// IPC surfaces. botIncoming and automation cron runs read the current
+// selection through the thin `resolveCurrentProjectRoot` adapter below.
 const projectRootController = createProjectRootController({
   lastProjectPathFile: join(workspaceRoot, 'last-project-path.json'),
   fallbackRoots: () => [process.cwd(), app.getAppPath()],
@@ -672,6 +727,7 @@ const resolveProjectRootForContext = (sessionId: unknown): Promise<string> =>
     readSessionCwd: async (id) => (await store.readHeader(id)).cwd,
   });
 const botRegistry = new BotRegistry({
+  botDataDir: join(app.getPath('userData'), 'bots'),
   onIncomingMessage: (message: BotIncomingMessage) => {
     // Only log incoming bot messages in dev — production stdout leaking
     // platform + chatId is operational noise at best and a small privacy
@@ -752,10 +808,11 @@ backends.register('fake', (ctx) =>
   new FakeBackend({ sessionId: ctx.sessionId, header: ctx.header, store: ctx.store, appendMessage: ctx.appendMessage }),
 );
 
-// E2E: also route 'ai-sdk' (requested by sessions:create and quickChat:start)
-// through the deterministic fake backend, so no session-creation path can
-// escape the E2E seam and hit a real provider. Registered after the real
-// ai-sdk factory to override it (BackendRegistry uses last-write-wins).
+// E2E: also route 'ai-sdk' (requested by sessions:create, the single
+// session-creation IPC) through the deterministic fake backend, so no
+// session-creation path can escape the E2E seam and hit a real provider.
+// Registered after the real ai-sdk factory to override it (BackendRegistry
+// uses last-write-wins).
 // Production builds never set MAKA_E2E.
 if (isE2e) {
   backends.register('ai-sdk', (ctx) =>
@@ -795,7 +852,7 @@ const runtime = new SessionManager({
         runs.some(
           (run) =>
             run.parentRunId !== undefined &&
-            ['created', 'running', 'waiting_permission'].includes(run.status),
+            ['created', 'running', 'waiting_for_user'].includes(run.status),
         )
       );
     },
@@ -1026,13 +1083,16 @@ function registerIpc(): void {
     claudeSubscription,
     openAiCodex,
     githubCopilotSubscription,
+    xaiOAuth,
     cursorSubscription,
     antigravitySubscription,
     isClaudeSubscriptionAuthenticatedState,
-    isOpenAiCodexAuthenticatedState,
     syncClaudeSubscriptionConnection,
+    activateOpenAiCodexConnection,
     syncOpenAiCodexConnection,
     syncGitHubCopilotConnection,
+    activateXaiOAuthConnection,
+    syncXaiOAuthConnection,
     emitConnectionListChanged,
   });
   registerWebSearchIpc({ settingsStore, getWorkspacePrivacyContext });
@@ -1055,7 +1115,6 @@ function registerIpc(): void {
     ensureSessionCanSend,
     createSession: createDesktopSession,
     streamEvents,
-    quickChatStart: (input) => handleQuickChatStart(input, currentProjectRoot),
   });
   registerPermissionsIpc({
     settingsStore,
@@ -1064,9 +1123,26 @@ function registerIpc(): void {
     botRegistry,
     getComputerUseCapabilityInput: computerUseCapabilityInput,
   });
+  // Drag-to-grant onboarding for the two TCC permissions macOS offers no
+  // programmatic consent dialog for. See docs/permission-onboarding-plan.md.
+  const permissionOverlay = createPermissionOverlayMain({
+    resolveLocale: async () => {
+      const settings = await settingsStore.get();
+      return resolveUiLocale(
+        settings.personalization.uiLocale,
+        resolveSystemUiLocale(app.getPreferredSystemLanguages()),
+      );
+    },
+  });
+  registerPermissionOverlayIpc({ controller: permissionOverlay });
+  // A screen-saver-level panel pinned to every Space is visible to the
+  // user if it outlives a slow quit; close it explicitly rather than
+  // relying on process teardown to race it away.
+  app.on('before-quit', () => permissionOverlay.dismiss());
   settingsIpc = registerSettingsIpc({
     settingsStore,
     botRegistry,
+    botDataDir: join(app.getPath('userData'), 'bots'),
     normalizeSettingsPatch,
     applySettingsRuntimeEffects,
     ...(e2eFixture?.scenario === 'settings-bots'
@@ -1249,67 +1325,6 @@ async function listDesktopInvocableSkills(
     if (sessionId && isSessionWorkspaceUnavailableError(error)) return [];
     throw error;
   }
-}
-
-/**
- * PR110b: Quick Chat entry — thin adapter over the extracted helper.
- * The discriminated-union logic + readiness gating lives in
- * `./quick-chat.ts` so it can be unit-tested without spinning up an
- * Electron app.
- */
-async function handleQuickChatStart(
-  rawInput: unknown,
-  getCurrentProjectRoot: () => Promise<string>,
-): Promise<QuickChatResult> {
-  return runQuickChatStart(rawInput, {
-    getOnboardingState: async () => (await onboardingService.getSnapshot()).state,
-    createSession: async (input) => {
-      // Re-run requireReadyConnection inside the create path to close
-      // the race window between `getSnapshot()` and `createSession()`
-      // (e.g. user revoked credential in another window).
-      // Deep Research always forces 'explore' (read-only exploration
-      // boundary) regardless of the user's default; any other Quick Chat
-      // session seeds from the same default as the regular sessions:create
-      // path. The settings read is independent of the connection check, and
-      // this sits on the first-message latency path — run them in parallel.
-      const [ready, permissionMode] = await Promise.all([
-        getReadyConnection(input.defaultConnectionSlug, input.defaultModel),
-        input.mode === 'deep_research'
-          ? Promise.resolve<PermissionMode>('explore')
-          : resolveDefaultPermissionMode(() => settingsStore.get()),
-      ]);
-      return createDesktopSession({
-        cwd: await getCurrentProjectRoot(),
-        backend: 'ai-sdk',
-        llmConnectionSlug: ready.connection.slug,
-        model: ready.model,
-        permissionMode,
-        name: input.mode === 'deep_research' ? 'Deep Research' : DEFAULT_SESSION_NAME,
-        labels: input.mode === 'deep_research' ? [DEEP_RESEARCH_SESSION_LABEL] : [],
-      });
-    },
-    emitCreated: (sessionId) => emitSessionsChanged('created', sessionId),
-    ensureCanSend: (sessionId) => ensureSessionCanSend(sessionId),
-    prepareSkillInvocation: (sessionId, text, skillIds) =>
-      prepareDesktopSkillInvocation(sessionId, text, skillIds),
-    removeSession: (sessionId) => runtime.remove(sessionId),
-    sendFirstMessage: async (sessionId, text, displayText) => {
-      // @xuan PR110b: do NOT return the turnId — its lifetime / id
-      // ownership belongs to SessionManager + the eventual
-      // sessions:event stream, not to Quick Chat. The user message
-      // id is generated inside `runtime.sendMessage()`.
-      const turnId = randomUUID();
-      const iterator = runtime.sendMessage(sessionId, {
-        turnId,
-        text,
-        ...(displayText ? { displayText } : {}),
-      });
-      void streamEvents(sessionId, iterator, {
-        turnId,
-        goalBoundary: 'external',
-      });
-    },
-  });
 }
 
 function emitConnectionListChanged(): void {

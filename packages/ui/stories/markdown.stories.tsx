@@ -2,6 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { Markdown, MakaUriContext } from '../src/markdown.js';
 import { Bubble } from '../src/primitives/chat.js';
 
+// Fidelity convention (#1433): every story below names the real app path
+// that reaches it. See apps/desktop/stories/FIDELITY.md.
+
 const meta = {
   title: 'Product/Markdown',
   parameters: {
@@ -66,6 +69,8 @@ const jsonBlock = code('json', [
 
 const plainBlock = code('', 'plain or unknown\nindented sample');
 
+// Real path: chat → an assistant answer that mixes headings, emphasis, a list, a quote
+// and a table — the ordinary shape of a long reply.
 export const RichAssistantAnswer: Story = {
   render: () => (
     <ProseFrame>
@@ -82,7 +87,7 @@ export const RichAssistantAnswer: Story = {
             '2. 其余会话按最近活动时间排序；',
             '3. 运行中、等待和阻塞等状态只显示为低干扰行图标。',
             '',
-            '> 注意：按项目视图仍然保留项目折叠，扁平化只作用于按会话视图。',
+            '> 注意：按项目视图仍然保留项目折叠，扁平化只作用于按时间视图。',
             '',
             '| 行状态 | 视觉标识 | 是否改变分组 |',
             '| --- | --- | --- |',
@@ -99,6 +104,8 @@ export const RichAssistantAnswer: Story = {
   ),
 };
 
+// Real path: chat → an assistant answer containing fenced code in several languages,
+// plus one unlabelled block.
 export const CodeBlockVariety: Story = {
   render: () => (
     <ProseFrame>
@@ -123,6 +130,7 @@ export const CodeBlockVariety: Story = {
   ),
 };
 
+// Real path: chat → an assistant answer built mostly from nested lists and block quotes.
 export const ListsAndQuote: Story = {
   render: () => (
     <ProseFrame>
@@ -149,6 +157,9 @@ export const ListsAndQuote: Story = {
   ),
 };
 
+// Real path: chat → an assistant answer containing links. Only ChatView installs
+// MakaUriContext (app-shell.tsx), so this is where maka:// links navigate and unsafe
+// ones render as 链接无效.
 export const LinkRouting: Story = {
   render: () => (
     <ProseFrame>
@@ -181,6 +192,8 @@ export const LinkRouting: Story = {
 // Tables shrink-wrap to content and only scroll when wider than the prose
 // measure — this story pins the over-wide branch (frameless horizontal
 // scroller) next to the narrow tables in the stories above.
+// Real path: chat → an assistant answer whose table is wider than the prose measure, so
+// it becomes a horizontal scroller.
 export const WideTable: Story = {
   render: () => (
     <ProseFrame>
@@ -202,6 +215,8 @@ export const WideTable: Story = {
   ),
 };
 
+// Real path: chat → a long assistant answer, pinned at the 680px prose measure to check
+// vertical rhythm across many blocks.
 export const LongFormArticle: Story = {
   render: () => (
     <ProseFrame width={680}>

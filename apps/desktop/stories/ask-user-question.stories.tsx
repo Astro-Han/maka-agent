@@ -5,6 +5,9 @@ import { expect, userEvent, within } from 'storybook/test';
 
 import './ask-user-question.css';
 
+// Fidelity convention (#1433): every story below names the real app path
+// that reaches it. See apps/desktop/stories/FIDELITY.md.
+
 const meta = {
   title: 'Product/Ask User Question',
   parameters: {
@@ -56,6 +59,10 @@ function PreviewColumn(props: {
   );
 }
 
+// Real path: chat → the agent calls AskUserQuestion → the prompt takes over the composer
+// slot, below the turn that asked. The two columns are a review scaffold, not one
+// screen: each is the same reachable prompt at a different chat-column width (default
+// vs. a narrow window or an open artifact pane).
 export const StandardAndNarrow: Story = {
   render: () => (
     <main className="maka-question-review-board">
@@ -65,6 +72,8 @@ export const StandardAndNarrow: Story = {
   ),
 };
 
+// Real path: same prompt, after the user picks 其他 and types a free-text answer — driven
+// here by the play function.
 export const OtherAnswerSelected: Story = {
   render: () => (
     <main className="maka-question-review-board">

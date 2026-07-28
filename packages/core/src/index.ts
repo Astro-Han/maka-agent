@@ -20,6 +20,7 @@ export * from './agent-graph-client-projection.js';
 export * from './agent-graph-supervisor-wake.js';
 export * from './agent-graph-timeline.js';
 export * from './runtime-policy.js';
+export * from './interaction.js';
 
 // events.ts
 export type {
@@ -46,6 +47,9 @@ export type {
   SandboxEscalationRequestEvent,
   AnyPermissionRequestEvent,
   PermissionRequestEvent,
+  PermissionAnswerAckEvent,
+  PermissionClosureAckEvent,
+  PermissionClosureReason,
   PermissionDecisionAckEvent,
   UserQuestionRequestEvent,
   PlanSubmittedEvent,
@@ -64,6 +68,7 @@ export type {
   StorageRef,
   AttachmentRef,
   QuoteRef,
+  MessageContent,
   AttachmentIngestItem,
   CompleteStopReason,
   ContextBudgetExhaustedDetail,
@@ -76,7 +81,15 @@ export type {
   UserQuestionResult,
 } from './user-question.js';
 export {
+  decodeMessageContent,
   failureClassFromCompleteStopReason,
+  isAttachmentRef,
+  isCanonicalAttachmentRef,
+  isCanonicalStorageRef,
+  isMessageContent,
+  isStorageRef,
+  messageContentsEqual,
+  normalizeMessageContent,
   TOOL_ACTIVITY_KINDS,
   TOOL_OUTPUT_DELTA_MAX_CHARS,
   TOOL_OUTPUT_STREAMS,
@@ -113,6 +126,9 @@ export type {
   RuntimeEventContentKind,
   RuntimeEventTokenUsage,
   RuntimeEventPermissionDecision,
+  RuntimeEventPermissionAnswerAccepted,
+  RuntimeEventPermissionClosureAccepted,
+  RuntimeEventUserQuestionAnswerAccepted,
   RuntimeEventProtocolMarker,
   RuntimeEventToolDispatch,
   RuntimeEventActions,
@@ -168,6 +184,63 @@ export {
 // runtime-event-store.ts
 export type { RuntimeEventStore } from './runtime-event-store.js';
 export { DurableStoreWriteError } from './runtime-event-store.js';
+export type {
+  RuntimeRecoveryBundleCommit,
+  RuntimeRecoveryBundleStore,
+} from './runtime-event-store.js';
+export { TOOL_RECOVERY_BUNDLE_CAPABILITY_V1 } from './runtime-event-store.js';
+export type {
+  ToolLedgerIssue,
+  ToolLedgerIssueCode,
+  GenericToolLedgerAppendValidation,
+  ToolLedgerLane,
+  ToolLedgerLaneValidation,
+  ToolLedgerScanOperation,
+  ToolLedgerScanResult,
+  ToolLedgerTransitionKind,
+  ToolLedgerTransitionValidation,
+} from './tool-ledger-scanner.js';
+export {
+  scanToolLedger,
+  validateGenericToolLedgerAppend,
+  validateToolLedgerEventLane,
+  validateToolLedgerTransition,
+} from './tool-ledger-scanner.js';
+export type {
+  ToolReconcileObservation,
+  ToolReconcileResultFact,
+  ToolRecoveryCompletedDecisionFact,
+  ToolRecoveryDecisionFact,
+  ToolRecoveryFactEnvelope,
+  ToolRecoveryParkedDecisionFact,
+  ToolRecoveryParkReason,
+} from './tool-recovery-fact.js';
+export {
+  TOOL_RECONCILE_RESULT_FACT_KIND,
+  TOOL_RECOVERY_DECISION_FACT_KIND,
+  TOOL_RECOVERY_FACT_VERSION,
+  isToolReconcileResultFact,
+  isToolRecoveryDecisionFact,
+  isToolRecoveryFactEnvelope,
+} from './tool-recovery-fact.js';
+export type {
+  ScannedToolRecoveryInterpretation,
+  ToolRecoveryBundleValidationCode,
+  ToolRecoveryBundleValidationResult,
+  ToolRecoveryEventBundle,
+  ToolRecoveryOperationIdentity,
+} from './tool-recovery-bundle.js';
+export {
+  ToolRecoveryBundleValidationError,
+  assertToolRecoveryEventBundle,
+  interpretScannedToolRecovery,
+  validateToolRecoveryEventBundle,
+} from './tool-recovery-bundle.js';
+export { canonicalToolArgsHash, stableJsonStringify } from './tool-args-identity.js';
+export {
+  encodeCanonicalRuntimeEvent,
+  type CanonicalRuntimeEventEncoding,
+} from './canonical-runtime-event.js';
 
 // session.ts
 export type {
@@ -221,7 +294,10 @@ export {
   decodeStoredMessageForRecovery,
   userFacingText,
 } from './session.js';
-export { decodeCanonicalToolResultContent } from './tool-result-record-schema.js';
+export {
+  decodeCanonicalToolResultContent,
+  normalizeToolResultContentForRead,
+} from './tool-result-record-schema.js';
 
 // model-thinking.ts
 export type { ThinkingLevel } from './model-thinking.js';
@@ -239,6 +315,7 @@ export type {
   AgentRunInputSummary,
   AgentRunStatus,
   AgentRunStore,
+  RootExecutionDescriptor,
 } from './agent-run.js';
 export {
   AGENT_RUN_STATUSES,
@@ -542,6 +619,7 @@ export type {
   BranchFromTurnInput,
   ChildAgentTurnInput,
   CreateSessionInput,
+  CreateSessionRequestInput,
   RegenerateTurnInput,
   ReviseBeforeTurnInput,
   TurnOrchestration,
@@ -581,6 +659,7 @@ export type {
   DeriveCapabilityReadinessInput,
   FeatureEnablementState,
   MemoryAcceptanceState,
+  DragGrantPermissionId,
   OsPermissionId,
   OsPermissionSnapshot,
   OsPermissionState,
@@ -593,6 +672,8 @@ export {
   CAPABILITY_READINESS_STATES,
   FEATURE_ENABLEMENT_STATES,
   MEMORY_ACCEPTANCE_STATES,
+  DRAG_GRANT_PERMISSION_IDS,
+  isDragGrantPermissionId,
   OS_PERMISSION_IDS,
   OS_PERMISSION_STATES,
   RUNTIME_PROBE_STATES,
@@ -1136,6 +1217,7 @@ export {
   READY_PROVIDER_TYPES,
   backendKindOf,
   connectionEnabledModelIds,
+  isWiredOAuthProvider,
   reconcileConnectionAfterModelFetch,
   effectiveBaseUrl,
   migrateConnectionV1ToV2,
@@ -1519,7 +1601,7 @@ export {
 } from './web-search.js';
 
 // explore-agent.ts — read-only deep research session profile.
-export type { QuickChatMode } from './explore-agent.js';
+export type { SessionStartMode } from './explore-agent.js';
 export {
   DEEP_RESEARCH_EVIDENCE_CHECKLIST,
   DEEP_RESEARCH_IMPLEMENTATION_PROMPT_MAX_CHARS,
@@ -1529,12 +1611,9 @@ export {
   DEEP_RESEARCH_SCOPE_OPTIONS,
   DEEP_RESEARCH_STARTER_PROMPTS,
   DEEP_RESEARCH_WORKFLOW_STEPS,
-  QUICK_CHAT_MODES,
   buildDeepResearchSystemPromptFragment,
   buildDeepResearchImplementationPrompt,
   isDeepResearchSession,
-  isQuickChatMode,
-  normalizeQuickChatMode,
 } from './explore-agent.js';
 
 // expert-team.ts — expert-team session labels.

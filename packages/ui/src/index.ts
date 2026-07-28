@@ -48,6 +48,7 @@ export * from './utils.js';
 // consumers can `import { Alert, Empty, ... } from '@maka/ui'`.
 export * from './bot-brand.js';
 export * from './bot-brand-logo.js';
+export * from './maka-wordmark.js';
 export * from './primitives/alert.js';
 export * from './primitives/card.js';
 // `markerVariants` / `toolVariants` are deliberately NOT re-exported here:
@@ -82,6 +83,7 @@ export * from './primitives/segmented.js';
 export * from './primitives/settings-select.js';
 export * from './primitives/settings-switch.js';
 export * from './primitives/input.js';
+export * from './primitives/time-picker.js';
 export * from './primitives/textarea.js';
 export * from './primitives/input-group.js';
 export * from './primitives/toolbar.js';

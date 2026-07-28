@@ -1,7 +1,17 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { closeSync, fstatSync, openSync } from 'node:fs';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { zodSchema } from 'ai';
@@ -17,6 +27,7 @@ import { assertAdditionalPermissionProposal } from '../additional-permissions.js
 import { SandboxManager } from '../sandbox/sandbox-manager.js';
 import { LinuxBubblewrapBackend } from '../sandbox/linux-sandbox.js';
 import { MacosSeatbeltBackend } from '../sandbox/macos-seatbelt.js';
+import { SandboxCommandError } from '../sandbox/errors.js';
 import { sandboxEscalationCommandHash } from '../sandbox-escalation.js';
 import type { ShellRunLauncher } from '../shell-tools.js';
 import {
@@ -78,6 +89,18 @@ describe('builtin tool activity kinds', () => {
     expect(kinds.Bash).toBe('command');
     expect(kinds.StopBackgroundTask).toBe('command');
     expect(kinds.WriteStdin).toBe('command');
+  });
+
+  test('can omit Edit from a host surface that has no filesystem worker', () => {
+    const tools = buildBuiltinTools({ includeEdit: false } as Parameters<
+      typeof buildBuiltinTools
+    >[0]);
+
+    assert.equal(
+      tools.some((tool) => tool.name === 'Edit'),
+      false,
+    );
+    assert.ok(tools.some((tool) => tool.name === 'Write'));
   });
 });
 
@@ -195,19 +218,38 @@ describe('builtin Bash description declares the executing shell', () => {
 });
 
 describe('builtin Bash streaming output', () => {
-  test('requires a sandbox manager before enabling Bash additional permissions', () => {
+  test('requires a sandbox manager and supports Linux Bash one-shot permissions', () => {
     assert.throws(
       () => buildBuiltinTools({ enableBashAdditionalPermissions: true }),
       /require a sandbox manager/,
     );
+
+    const linuxBash = buildBuiltinTools({
+      sandboxManager: availableLinuxManager(),
+      sandboxPlatform: 'linux',
+      enableBashAdditionalPermissions: true,
+    }).find((tool) => tool.name === 'Bash');
+    assert.ok(linuxBash?.planAdditionalPermissions);
+    assert.ok(linuxBash.planSandboxEscalation);
+    assert.equal(
+      (linuxBash.parameters as z.ZodTypeAny).safeParse({
+        command: 'echo unsafe',
+        sandbox_permissions: {
+          mode: 'require_escalated',
+          justification: 'The sandbox cannot perform this action.',
+        },
+      }).success,
+      true,
+    );
+
     assert.throws(
       () =>
         buildBuiltinTools({
           sandboxManager: availableLinuxManager(),
-          sandboxPlatform: 'linux',
+          sandboxPlatform: 'win32',
           enableBashAdditionalPermissions: true,
         }),
-      /supported only on macOS/,
+      /supported only on macOS and Linux/,
     );
   });
 
@@ -399,6 +441,188 @@ describe('builtin Bash streaming output', () => {
         args: { command: 'node --version' },
       }),
     ).toEqual({ platformSandboxAvailable: true });
+  });
+
+  test('pins a missing exact-write target and removes an untouched successful placeholder', async () => {
+    const fixture = await linuxMissingExactWriteFixture();
+    let launchInput: any;
+    const bash = fixture.buildBash({
+      async runForegroundBash(input: any) {
+        launchInput = input;
+        assert.equal(await pathExists(fixture.target), true);
+        input.onCompletion?.({ successful: true });
+        return terminalResult(input, 'completed', 0);
+      },
+      async runBackgroundBash() {
+        throw new Error('not used');
+      },
+    });
+
+    try {
+      await bash.impl(fixture.args, fixture.context);
+
+      const pinned = launchInput.fdInputs.find(
+        (input: { sourceFd?: number }) => input.sourceFd !== undefined,
+      );
+      assert.ok(pinned);
+      assert.ok(Number.isInteger(pinned.sourceFd));
+      assert.equal(typeof pinned.releaseSource, 'function');
+      assert.ok(
+        hasArgTriple(launchInput.argv, '--bind', `/proc/self/fd/${pinned.fd}`, fixture.target),
+      );
+      assert.equal(await pathExists(fixture.target), false);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test('removes missing exact-write placeholders after launch rejection and failed completion', async () => {
+    for (const outcome of ['launch_rejected', 'failed', 'cancelled', 'timed_out'] as const) {
+      const fixture = await linuxMissingExactWriteFixture();
+      const bash = fixture.buildBash({
+        async runForegroundBash(input: any) {
+          if (outcome === 'launch_rejected') throw new Error('spawn failed');
+          input.onCompletion?.({ successful: false });
+          return terminalResult(input, outcome, outcome === 'failed' ? 7 : 130);
+        },
+        async runBackgroundBash() {
+          throw new Error('not used');
+        },
+      });
+
+      try {
+        if (outcome === 'launch_rejected') {
+          await assert.rejects(
+            () => Promise.resolve(bash.impl(fixture.args, fixture.context)),
+            /spawn failed/,
+          );
+        } else {
+          await bash.impl(fixture.args, fixture.context);
+        }
+        assert.equal(await pathExists(fixture.target), false, outcome);
+      } finally {
+        await fixture.cleanup();
+      }
+    }
+  });
+
+  test('preserves an intentionally written empty exact-write target after success', async () => {
+    const fixture = await linuxMissingExactWriteFixture();
+    const bash = fixture.buildBash({
+      async runForegroundBash(input: any) {
+        assert.ok(input.onCompletion);
+        await writeFile(fixture.target, '');
+        input.onCompletion({ successful: true });
+        return terminalResult(input, 'completed', 0);
+      },
+      async runBackgroundBash() {
+        throw new Error('not used');
+      },
+    });
+
+    try {
+      await bash.impl(fixture.args, fixture.context);
+      assert.equal(await pathExists(fixture.target), true);
+      assert.equal(await readFile(fixture.target, 'utf8'), '');
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  test('preserves an intentionally written empty exact-write target after failure', async () => {
+    for (const outcome of ['failed', 'cancelled', 'timed_out'] as const) {
+      const fixture = await linuxMissingExactWriteFixture();
+      const bash = fixture.buildBash({
+        async runForegroundBash(input: any) {
+          await writeFile(fixture.target, '');
+          input.onCompletion?.({ successful: false });
+          return terminalResult(input, outcome, outcome === 'failed' ? 7 : 130);
+        },
+        async runBackgroundBash() {
+          throw new Error('not used');
+        },
+      });
+
+      try {
+        await bash.impl(fixture.args, fixture.context);
+        assert.equal(await pathExists(fixture.target), true, outcome);
+      } finally {
+        await fixture.cleanup();
+      }
+    }
+  });
+
+  test('completion cannot close a descriptor number reused after spawn handoff', async () => {
+    const fixture = await linuxMissingExactWriteFixture();
+    let reusedFd: number | undefined;
+    const openedFds: number[] = [];
+    const bash = fixture.buildBash({
+      async runForegroundBash(input: any) {
+        const pinned = input.fdInputs.find(
+          (candidate: { sourceFd?: number }) => candidate.sourceFd !== undefined,
+        );
+        assert.ok(pinned);
+        assert.equal(typeof pinned.releaseSource, 'function');
+        pinned.releaseSource();
+        for (let attempt = 0; attempt <= pinned.sourceFd + 16; attempt += 1) {
+          const fd = openSync(join(dirname(fixture.target), `reused-${attempt}.txt`), 'w');
+          openedFds.push(fd);
+          if (fd === pinned.sourceFd) {
+            reusedFd = fd;
+            break;
+          }
+        }
+        assert.equal(reusedFd, pinned.sourceFd, 'test could not force fd-number reuse');
+        input.onCompletion?.({ successful: false });
+        return terminalResult(input, 'failed', 7);
+      },
+      async runBackgroundBash() {
+        throw new Error('not used');
+      },
+    });
+
+    try {
+      await bash.impl(fixture.args, fixture.context);
+      assert.ok(reusedFd !== undefined);
+      assert.doesNotThrow(() => fstatSync(reusedFd!));
+    } finally {
+      for (const fd of openedFds.reverse()) closeSync(fd);
+      await fixture.cleanup();
+    }
+  });
+
+  test('keeps a background placeholder owned until the shell run completes', async () => {
+    const fixture = await linuxMissingExactWriteFixture();
+    let onCompletion: ((outcome: { successful: boolean }) => void) | undefined;
+    const bash = fixture.buildBash({
+      async runForegroundBash() {
+        throw new Error('not used');
+      },
+      async runBackgroundBash(input: any) {
+        onCompletion = input.onCompletion;
+        return {
+          kind: 'shell_run',
+          ref: 'maka://runtime/background-tasks/shell-run-1',
+          mode: 'pipes',
+          status: 'running',
+          cwd: input.cwd,
+          cmd: input.command,
+          startedAt: 1,
+          updatedAt: 1,
+          revision: 1,
+        } as const;
+      },
+    });
+
+    try {
+      await bash.impl({ ...fixture.args, run_in_background: true }, fixture.context);
+      assert.equal(await pathExists(fixture.target), true);
+      assert.ok(onCompletion);
+      onCompletion({ successful: true });
+      assert.equal(await pathExists(fixture.target), false);
+    } finally {
+      await fixture.cleanup();
+    }
   });
 
   test('fails closed for sandbox-required PTY Bash unless exact host execution was approved', async () => {
@@ -1279,6 +1503,53 @@ describe('builtin Bash streaming output', () => {
   });
 });
 
+describe('builtin Bash sandbox denial classification', () => {
+  test('throws SandboxCommandError when a sandboxed command emits a denial message', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'maka-bash-sandbox-denial-'));
+    try {
+      const executor = fakeExecutor({
+        exec: async () => ({
+          exitCode: 1,
+          stdout: '',
+          stderr: 'Operation not permitted',
+          timedOut: false,
+          aborted: false,
+        }),
+      });
+      const bash = buildBuiltinTools({
+        executor,
+        permissionProfile: createWorkspaceWritePermissionProfile(),
+        sandboxManager: new SandboxManager([new MacosSeatbeltBackend()]),
+        sandboxPlatform: 'darwin',
+      }).find((candidate) => candidate.name === 'Bash');
+      if (!bash) throw new Error('Bash tool missing');
+
+      let err: unknown = null;
+      try {
+        await bash.impl(
+          { command: 'rm -rf /', timeout_ms: 5_000 },
+          {
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            cwd,
+            toolCallId: 'tool-1',
+            abortSignal: new AbortController().signal,
+            emitOutput: () => {},
+          },
+        );
+      } catch (e: unknown) {
+        err = e;
+      }
+
+      assert.ok(err instanceof SandboxCommandError, 'expected a SandboxCommandError');
+      assert.equal((err as SandboxCommandError).reason, 'sandbox_denial');
+      assert.equal((err as SandboxCommandError).recoverable, true);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('builtin read tools path containment', () => {
   test('Read snapshots the complete image returned by the workspace executor', async () => {
     const root = await mkdtemp(join(tmpdir(), 'maka-read-image-'));
@@ -1832,6 +2103,122 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('timed out waiting for predicate');
+}
+
+async function linuxMissingExactWriteFixture() {
+  const root = await mkdtemp(join(tmpdir(), 'maka-linux-exact-write-'));
+  const workspace = join(root, 'workspace');
+  const outside = join(root, 'outside');
+  await Promise.all([mkdir(workspace), mkdir(outside)]);
+  const canonicalWorkspace = await realpath(workspace);
+  const target = join(await realpath(outside), 'new.txt');
+  const args = {
+    command: 'true',
+    sandbox_permissions: {
+      mode: 'with_additional_permissions' as const,
+      file_system: {
+        entries: [{ path: target, access: 'write' as const, scope: 'exact' as const }],
+      },
+      justification: 'Write the selected output.',
+    },
+  };
+  const context = {
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    toolCallId: 'tool-1',
+    cwd: canonicalWorkspace,
+    permissionMode: 'execute' as const,
+    abortSignal: new AbortController().signal,
+    emitOutput: () => {},
+    permissionContext: {
+      additionalGrant: {
+        grantId: 'grant-1',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        toolUseId: 'tool-1',
+        toolName: 'Bash',
+        intentHash: 'intent',
+        permissionsHash: 'permissions',
+        profile: {
+          fileSystem: {
+            entries: [{ path: target, access: 'write' as const, scope: 'exact' as const }],
+          },
+        },
+        normalizedPaths: [
+          {
+            displayPath: target,
+            enforcementPath: target,
+            access: 'write' as const,
+            scope: 'exact' as const,
+            targetType: 'missing' as const,
+          },
+        ],
+        risk: { outsideWorkspace: true, protectedMetadata: false, networkEnabled: false },
+        issuedAt: 1,
+        expiresAt: 2,
+      },
+    },
+  };
+
+  return {
+    target,
+    args,
+    context,
+    buildBash(shellRuns: ShellRunLauncher) {
+      const bash = buildBuiltinTools({
+        shellRuns,
+        permissionProfile: createWorkspaceWritePermissionProfile(),
+        sandboxManager: availableLinuxManager(),
+        sandboxPlatform: 'linux',
+        enableBashAdditionalPermissions: true,
+      }).find((candidate) => candidate.name === 'Bash');
+      if (!bash) throw new Error('Bash tool missing');
+      return bash;
+    },
+    cleanup: () => rm(root, { recursive: true, force: true }),
+  };
+}
+
+function terminalResult(
+  input: { cwd: string; command: string },
+  status: 'completed' | 'failed' | 'cancelled' | 'timed_out',
+  exitCode: number,
+) {
+  return {
+    kind: 'terminal',
+    cwd: input.cwd,
+    cmd: input.command,
+    status,
+    exitCode,
+    output: {
+      mode: 'pipes',
+      stdout: '',
+      stderr: '',
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      redacted: false,
+    },
+  } as const;
+}
+
+function hasArgTriple(
+  argv: readonly string[],
+  option: string,
+  source: string,
+  target: string,
+): boolean {
+  return argv.some(
+    (value, index) => value === option && argv[index + 1] === source && argv[index + 2] === target,
+  );
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function expectRejects(promise: Promise<unknown>, pattern: RegExp): Promise<void> {

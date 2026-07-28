@@ -9,7 +9,7 @@ describe('AgentRun startup recovery', () => {
       runId: 'run-1',
       sessionId: 'session-1',
       turnId: 'turn-1',
-      status: 'waiting_permission',
+      status: 'waiting_for_user',
       backendKind: 'fake',
       llmConnectionSlug: 'fake',
       modelId: 'fake-model',
@@ -24,6 +24,6 @@ describe('AgentRun startup recovery', () => {
     const decision = classifyAgentRunRecovery(header, []);
     assert.equal(decision?.status, 'failed');
     assert.equal(decision?.failureClass, 'app_restarted');
-    assert.equal(decision?.diagnostic?.recoveryReason, 'stale_permission_wait');
+    assert.equal(decision?.diagnostic?.recoveryReason, 'stale_user_wait');
   });
 });

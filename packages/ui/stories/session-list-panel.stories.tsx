@@ -5,6 +5,9 @@ import { SessionListPanel } from '../src/session-list-panel.js';
 
 const NOW = Date.now();
 
+// Fidelity convention (#1433): every story below names the real app path
+// that reaches it. See apps/desktop/stories/FIDELITY.md.
+
 const meta = {
   title: 'Product/Sidebar Session List',
   parameters: {
@@ -64,7 +67,6 @@ function panelProps(input: {
   activeId?: string;
   streamingSessionIds?: Set<string>;
   staleSessionIds?: Set<string>;
-  sidebarCollapsed?: boolean;
 }): SessionListPanelProps {
   return {
     selection: { section: 'sessions', filter: 'chats' },
@@ -72,7 +74,6 @@ function panelProps(input: {
     ...(input.activeId ? { activeId: input.activeId } : {}),
     ...(input.streamingSessionIds ? { streamingSessionIds: input.streamingSessionIds } : {}),
     ...(input.staleSessionIds ? { staleSessionIds: input.staleSessionIds } : {}),
-    ...(input.sidebarCollapsed ? { sidebarCollapsed: input.sidebarCollapsed } : {}),
     onSelectSession: noop,
     onSelect: noop,
     onOpenSettings: noop,
@@ -240,6 +241,8 @@ const longTitleSessions = [
   }),
 ];
 
+// Real path: a fresh workspace with no conversations yet — the sidebar list before
+// anything is created.
 export const Empty: Story = {
   render: () => (
     <StoryFrame>
@@ -248,6 +251,7 @@ export const Empty: Story = {
   ),
 };
 
+// Real path: a workspace with enough history that the conversation list scrolls.
 export const LongList: Story = {
   render: () => (
     <StoryFrame>
@@ -259,6 +263,8 @@ export const LongList: Story = {
   ),
 };
 
+// Real path: the same list once its rows carry lifecycle state (running / waiting /
+// failed), which the row shows as an indicator rather than a bucket (#1459).
 export const ConversationStates: Story = {
   render: () => (
     <StoryFrame>
@@ -272,6 +278,8 @@ export const ConversationStates: Story = {
   ),
 };
 
+// Real path: sidebar → 扩展 — the list keeps the conversation heading and view switch
+// while a non-conversation module is selected (#1458).
 export const ExtensionSelected: Story = {
   render: () => (
     <StoryFrame>
@@ -290,6 +298,7 @@ export const ExtensionSelected: Story = {
   ),
 };
 
+// Real path: hover a conversation row → its inline actions appear.
 export const RowActions: Story = {
   render: () => (
     <StoryFrame focusActiveRow>
@@ -303,6 +312,7 @@ export const RowActions: Story = {
   ),
 };
 
+// Real path: hover a conversation row → ⋯ → the row menu is open.
 export const RowMenuOpen: Story = {
   render: () => (
     <StoryFrame openActiveRowMenu>
@@ -316,6 +326,8 @@ export const RowMenuOpen: Story = {
   ),
 };
 
+// Real path: a workspace with long conversation titles, with the sidebar dragged to its
+// narrow end.
 export const LongTitlesAndNarrow: Story = {
   render: () => (
     <StoryFrame width={176}>
@@ -325,20 +337,5 @@ export const LongTitlesAndNarrow: Story = {
         staleSessionIds: new Set(['long-title-stale']),
       })} />
     </StoryFrame>
-  ),
-};
-
-export const Collapsed: Story = {
-  render: () => (
-    <>
-      <style>{`.agents-sidebar[data-collapsed="true"] { width: 100% !important }`}</style>
-      <StoryFrame width={72}>
-        <SessionListPanel {...panelProps({
-          sessions: coreSessions,
-          activeId: 'session-running',
-          sidebarCollapsed: true,
-        })} />
-      </StoryFrame>
-    </>
   ),
 };

@@ -15,6 +15,7 @@ import {
   BackendRegistry,
   RuntimeRunner,
   SessionManager,
+  AGENT_TOOL_NAMES,
   buildChildAgentTools,
   type AgentRunActiveSession,
   type InvocationResult,
@@ -64,11 +65,9 @@ import {
   validateRealBackendIsolation,
 } from './isolation.js';
 import {
-  commandResourceScope,
-  hashNormalizedArgs,
-  matchPermissionGrant,
-  permissionPreview,
-} from './permission-grants.js';
+  DEFAULT_INTERVENTION_POLICY,
+  handlePermissionIntervention,
+} from './permission-intervention.js';
 import {
   resolveHeadlessSystemPrompt,
   type ResolvedHeadlessSystemPrompt,
@@ -81,7 +80,6 @@ import {
 } from './sandbox.js';
 import { defaultFinalScorer } from './scorer.js';
 import { createHeadlessSessionCapabilityBridge } from './session-capabilities.js';
-import { approvalRequestInboxItem } from './task-inbox.js';
 import { normalizeVerifier, runVerifier, verifierProtectedPaths } from './verifier.js';
 import {
   backendNeedsIsolation,
@@ -92,13 +90,11 @@ import {
   taxonomyFromResultRecord,
   type AutonomousResultTaxonomy,
   type FeedbackObservation,
-  type PermissionResourceScope,
   type ScoreResult,
   type TaskAttemptStatus,
   type TaskEvent,
   type TaskInterventionPolicy,
   type TaskPermissionGrant,
-  type TaskPermissionRequest,
   type TaskRunError,
   type TaskRunResult,
   type VerifierResult,
@@ -306,6 +302,7 @@ export async function runTaskOnceWithStorage(
         toolNames: toolNamesForIdentity(
           Boolean(deps.realBackendIsolation?.toolExecutor),
           heavyTaskMode.enabled,
+          effectiveConfig.agentTools === true,
         ),
       }),
     });
@@ -338,7 +335,7 @@ export async function runTaskOnceWithStorage(
       runStore: agentRunStore,
       runtimeEventStore,
       backends,
-      ...(deps.realBackendIsolation?.toolExecutor
+      ...(config.agentTools && deps.realBackendIsolation?.toolExecutor
         ? {
             childTools: buildChildAgentTools(
               buildIsolatedHeadlessTools(deps.realBackendIsolation.toolExecutor),
@@ -375,7 +372,13 @@ export async function runTaskOnceWithStorage(
     });
     sessionCapabilities.bind(sessionCapabilityManager, graphCoordinator);
     const turnId = newId();
-    const active = createSingleRunActiveSession(backends, sessionStore, now, newId);
+    const active = createSingleRunActiveSession(
+      backends,
+      sessionStore,
+      runtimeEventStore,
+      now,
+      newId,
+    );
     parentActive = active;
     const run = new AgentRun({
       sessionId: header.id,
@@ -526,7 +529,13 @@ export async function runTaskOnceWithStorage(
       });
 
       if (gateDecision.action === 'repair_prompt') {
-        const repairActive = createSingleRunActiveSession(backends, sessionStore, now, newId);
+        const repairActive = createSingleRunActiveSession(
+          backends,
+          sessionStore,
+          runtimeEventStore,
+          now,
+          newId,
+        );
         parentActive = repairActive;
         const repairRun = new AgentRun({
           sessionId: header.id,
@@ -664,8 +673,10 @@ export async function runTaskOnceWithStorage(
       startedAt: now(),
     });
     const runnerCompleted = invocation.status === 'completed';
+    const submittedSnapshotRoot = deps.realBackendIsolation?.submittedSnapshotRoot;
     const frozen = await freezeSubmittedWorkspace({
-      workspaceDir: workspace.dir,
+      workspaceDir: submittedSnapshotRoot ? agentWorkspaceDir : workspace.dir,
+      ...(submittedSnapshotRoot ? { snapshotRoot: submittedSnapshotRoot } : {}),
       artifactRefs: runtimeSummary.artifactRefs,
       now,
       newId,
@@ -922,9 +933,6 @@ async function appendHeavyTaskSelfCheckEvidenceLinks(input: {
   }
 }
 
-const DEFAULT_INTERVENTION_POLICY: TaskInterventionPolicy = { mode: 'fail_closed' };
-const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
-
 function withOptionalStatePrompts(
   instruction: string,
   prompts: readonly (string | undefined)[],
@@ -939,8 +947,13 @@ function withOptionalStatePrompts(
   return next;
 }
 
-function toolNamesForIdentity(hasIsolatedExecutor: boolean, heavyTaskEnabled: boolean): string[] {
+function toolNamesForIdentity(
+  hasIsolatedExecutor: boolean,
+  heavyTaskEnabled: boolean,
+  agentTools: boolean,
+): string[] {
   const names = hasIsolatedExecutor ? [...ISOLATED_HEADLESS_TOOL_NAMES] : ['registered_backend'];
+  if (agentTools && hasIsolatedExecutor) names.push(...AGENT_TOOL_NAMES);
   if (heavyTaskEnabled && hasIsolatedExecutor)
     names.push(...HEAVY_TASK_PROGRESS_TOOL_NAMES, ...HEAVY_TASK_SELF_CHECK_TOOL_NAMES);
   return names;
@@ -1009,220 +1022,6 @@ async function appendTaskAttemptExecutionLink(input: {
       provenance: link.provenance,
     });
   }
-}
-
-interface PermissionInterventionInput {
-  invocation: InvocationResult;
-  store: TaskRunWriter;
-  taskRunId: string;
-  attemptId: string;
-  now: () => number;
-  newId: () => string;
-  policy: TaskInterventionPolicy;
-  config: Config;
-  task: Task;
-  sessionId: string;
-  startedAt: number;
-  closeTaskRun: boolean;
-  systemPrompt: Pick<ResolvedHeadlessSystemPrompt, 'mode' | 'systemPromptHash'>;
-}
-
-type PermissionInterventionResult =
-  | { parked: false; invocation: InvocationResult }
-  | { parked: true; invocation: InvocationResult; resultRecord: ResultRecord };
-
-async function handlePermissionIntervention(
-  input: PermissionInterventionInput,
-): Promise<PermissionInterventionResult> {
-  const permissionRequestEvent = input.invocation.events.find(
-    (event) => event.actions?.permissionRequest,
-  );
-  const rawRequest = permissionRequestEvent?.actions?.permissionRequest;
-  if (!rawRequest) {
-    return { parked: false, invocation: input.invocation };
-  }
-
-  const requestedAt = input.now();
-  const request = permissionRequestFromRuntime({
-    rawRequest,
-    taskRunId: input.taskRunId,
-    attemptId: input.attemptId,
-    requestedAt,
-    expiresAt: requestedAt + (input.policy.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS),
-  });
-  await appendTaskEvent(input.store, input.taskRunId, {
-    type: 'permission_request_recorded',
-    id: input.newId(),
-    taskRunId: input.taskRunId,
-    ts: requestedAt,
-    request,
-  });
-
-  const projection = await input.store.project(input.taskRunId);
-  const postHocGrant = matchPermissionGrant(request, projection.permissionGrants, requestedAt);
-  const failClosedDenyReason = postHocGrant
-    ? 'matching permission grant was observed only after runtime emitted a permission handoff; headless cannot safely resume post-hoc permission requests'
-    : 'headless fail-closed policy denied interactive permission request';
-
-  const inboxItem = approvalRequestInboxItem({
-    inboxItemId: input.newId(),
-    request,
-    createdAt: requestedAt,
-  });
-  await appendTaskEvent(input.store, input.taskRunId, {
-    type: 'task_inbox_item_recorded',
-    id: input.newId(),
-    taskRunId: input.taskRunId,
-    ts: requestedAt,
-    item: inboxItem,
-  });
-
-  if (input.policy.mode === 'park') {
-    await appendTaskEvent(input.store, input.taskRunId, {
-      type: 'task_attempt_completed',
-      id: input.newId(),
-      taskRunId: input.taskRunId,
-      ts: requestedAt,
-      attemptId: input.attemptId,
-      finishedAt: requestedAt,
-      status: 'needs_approval',
-      error: {
-        message: `task run needs approval for ${request.toolName}`,
-        class: 'needs_approval',
-      },
-    });
-    if (input.closeTaskRun) {
-      await appendTaskEvent(input.store, input.taskRunId, {
-        type: 'task_run_needs_approval',
-        id: input.newId(),
-        taskRunId: input.taskRunId,
-        ts: requestedAt,
-        attemptId: input.attemptId,
-        reason: 'approval',
-        inboxItemId: inboxItem.inboxItemId,
-      });
-    }
-    return {
-      parked: true,
-      invocation: input.invocation,
-      resultRecord: syntheticPermissionResultRecord({
-        config: input.config,
-        task: input.task,
-        sessionId: input.sessionId,
-        runId: input.invocation.runId,
-        startedAt: input.startedAt,
-        finishedAt: requestedAt,
-        steps: countRuntimeSteps(input.invocation.events),
-        errorClass: 'needs_approval',
-        error: `task run needs approval for ${request.toolName}`,
-        systemPrompt: input.systemPrompt,
-      }),
-    };
-  }
-
-  await appendTaskEvent(input.store, input.taskRunId, {
-    type: 'permission_decision_recorded',
-    id: input.newId(),
-    taskRunId: input.taskRunId,
-    ts: requestedAt,
-    requestId: request.requestId,
-    decision: 'deny',
-    source: 'ci_policy',
-    decidedAt: requestedAt,
-    reason: failClosedDenyReason,
-  });
-  await appendTaskEvent(input.store, input.taskRunId, {
-    type: 'task_inbox_item_resolved',
-    id: input.newId(),
-    taskRunId: input.taskRunId,
-    ts: requestedAt,
-    inboxItemId: inboxItem.inboxItemId,
-    status: 'resolved',
-    resolution: {
-      decision: 'deny',
-      actorId: 'ci_policy',
-      resolvedAt: requestedAt,
-      reason: failClosedDenyReason,
-    },
-  });
-
-  return { parked: false, invocation: normalizeHeadlessInvocation(input.invocation) };
-}
-
-function permissionRequestFromRuntime(input: {
-  rawRequest: {
-    requestId?: string;
-    toolUseId?: string;
-    toolName?: string;
-    reason?: string;
-    category?: string;
-    args?: unknown;
-  };
-  taskRunId: string;
-  attemptId: string;
-  requestedAt: number;
-  expiresAt: number;
-}): TaskPermissionRequest {
-  const args = input.rawRequest.args;
-  const toolName = input.rawRequest.toolName ?? 'unknown_tool';
-  const toolCallId =
-    input.rawRequest.toolUseId ?? input.rawRequest.requestId ?? 'unknown_tool_call';
-  return {
-    schemaVersion: 1,
-    requestId: input.rawRequest.requestId ?? `${input.taskRunId}:${input.attemptId}:${toolCallId}`,
-    taskRunId: input.taskRunId,
-    attemptId: input.attemptId,
-    toolCallId,
-    toolName,
-    normalizedArgsHash: hashNormalizedArgs(args),
-    resourceScope: permissionScope(toolName, args),
-    reason: input.rawRequest.reason ?? input.rawRequest.category ?? 'permission required',
-    preview: permissionPreview(args),
-    requestedAt: input.requestedAt,
-    expiresAt: input.expiresAt,
-  };
-}
-
-function permissionScope(toolName: string, args: unknown): PermissionResourceScope {
-  if (toolName.toLowerCase() === 'bash' && isRecord(args) && typeof args.command === 'string') {
-    return commandResourceScope(args.command);
-  }
-  return { kind: 'tool', value: toolName, mode: 'execute' };
-}
-
-function syntheticPermissionResultRecord(input: {
-  config: Config;
-  task: Task;
-  sessionId: string;
-  runId: string;
-  startedAt: number;
-  finishedAt: number;
-  steps: number;
-  errorClass: string;
-  error: string;
-  systemPrompt: Pick<ResolvedHeadlessSystemPrompt, 'mode' | 'systemPromptHash'>;
-}): ResultRecord {
-  return {
-    taskId: input.task.id,
-    configId: input.config.id,
-    sessionId: input.sessionId,
-    runId: input.runId,
-    systemPromptMode: input.systemPrompt.mode,
-    systemPromptHash: input.systemPrompt.systemPromptHash,
-    status: 'failed',
-    runnerCompleted: false,
-    passed: false,
-    scored: false,
-    eligible: false,
-    excludedReason: input.error,
-    exitCode: null,
-    steps: input.steps,
-    durationMs: input.finishedAt - input.startedAt,
-    startedAt: input.startedAt,
-    finishedAt: input.finishedAt,
-    error: input.error,
-    errorClass: input.errorClass,
-  };
 }
 
 interface RunRuntimeAttemptInput {
@@ -1334,6 +1133,7 @@ type AgentRunHooks = ConstructorParameters<typeof AgentRun>[0]['hooks'];
 function createSingleRunActiveSession(
   backends: BackendRegistry,
   store: SessionStore,
+  runtimeEventStore: RuntimeEventStore | undefined,
   now: () => number,
   newId: () => string,
 ): {
@@ -1368,40 +1168,53 @@ function createSingleRunActiveSession(
       return true;
     },
     hooks: {
-      ensureActive: async (sessionId, header) => {
-        if (active) {
-          active.cachedHeader = header;
-          return active;
+      reserveRun: async (sessionId, header, run) => {
+        let targetActive = active;
+        if (targetActive) {
+          targetActive.cachedHeader = header;
+        } else {
+          const backend = await backends.build(header.backend, {
+            sessionId,
+            workspaceRoot: header.workspaceRoot,
+            header,
+            store,
+            recordRunTrace: (event) => boundRun?.recordRunTrace(event),
+            recordProviderRequestCapture: (capture) => {
+              if (!boundRun) {
+                return Promise.reject(new Error('No active AgentRun for provider request capture'));
+              }
+              return boundRun.recordProviderRequestCapture(capture);
+            },
+            recordProviderRequestAttempt: (attempt) =>
+              boundRun?.recordProviderRequestAttempt(attempt),
+            ...(runtimeEventStore
+              ? {
+                  loadTurnRuntimeEvents: (turnId: string) => {
+                    if (!boundRun || boundRun.turnId !== turnId) {
+                      return Promise.reject(
+                        new Error('No active AgentRun for turn runtime events'),
+                      );
+                    }
+                    return boundRun.loadTurnRuntimeEvents();
+                  },
+                }
+              : {}),
+            allowMidTurnHistoryCompaction: Boolean(runtimeEventStore),
+            recordActiveFullCompactBlock: (block) => boundRun?.recordActiveFullCompactBlock(block),
+            recordSemanticCompactBlock: (block) => boundRun?.recordSemanticCompactBlock(block),
+          });
+          targetActive = {
+            sessionId,
+            backend,
+            cachedHeader: header,
+            activeRuns: new Map(),
+            turnToRunId: new Map(),
+          };
+          active = targetActive;
         }
-        const backend = await backends.build(header.backend, {
-          sessionId,
-          workspaceRoot: header.workspaceRoot,
-          header,
-          store,
-          recordRunTrace: (event) => boundRun?.recordRunTrace(event),
-          recordProviderRequestCapture: (capture) => {
-            if (!boundRun) {
-              return Promise.reject(new Error('No active AgentRun for provider request capture'));
-            }
-            return boundRun.recordProviderRequestCapture(capture);
-          },
-          recordProviderRequestAttempt: (attempt) =>
-            boundRun?.recordProviderRequestAttempt(attempt),
-          recordActiveFullCompactBlock: (block) => boundRun?.recordActiveFullCompactBlock(block),
-          recordSemanticCompactBlock: (block) => boundRun?.recordSemanticCompactBlock(block),
-        });
-        active = {
-          sessionId,
-          backend,
-          cachedHeader: header,
-          activeRuns: new Map(),
-          turnToRunId: new Map(),
-        };
-        return active;
-      },
-      registerRun: (targetActive, run) => {
         targetActive.activeRuns.set(run.runId, run);
         targetActive.turnToRunId.set(run.turnId, run.runId);
+        return targetActive;
       },
       unregisterRun: (targetActive, run) => {
         targetActive.activeRuns.delete(run.runId);
@@ -1603,25 +1416,6 @@ function resultRecordFromInvocation(input: {
               'run did not complete',
           }
         : {}),
-  };
-}
-
-function normalizeHeadlessInvocation(invocation: InvocationResult): InvocationResult {
-  const permissionRequestEvent = invocation.events.find(
-    (event) => event.actions?.permissionRequest,
-  );
-  if (!permissionRequestEvent) return invocation;
-
-  const request = permissionRequestEvent.actions?.permissionRequest;
-  return {
-    ...invocation,
-    status: 'failed',
-    failure: {
-      class: 'policy_denied',
-      message: request?.requestId
-        ? `headless task run cannot satisfy permission request ${request.requestId}`
-        : 'headless task run cannot satisfy an interactive permission request',
-    },
   };
 }
 

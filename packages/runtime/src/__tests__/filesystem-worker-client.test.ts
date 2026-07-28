@@ -18,6 +18,7 @@ import {
 import {
   FilesystemWorkerClient,
   FilesystemWorkerClientError,
+  filesystemWorkerRuntimeWritableRoots,
 } from '../filesystem-worker/client.js';
 import {
   FILESYSTEM_WORKER_MAX_RESPONSE_BYTES,
@@ -26,6 +27,7 @@ import {
 import {
   FILESYSTEM_WORKER_PROTOCOL_VERSION,
   FilesystemWorkerRequestSchema,
+  type FilesystemWorkerErrorCode,
   type FilesystemWorkerRequest,
   type FilesystemWorkerResult,
 } from '../filesystem-worker/protocol.js';
@@ -230,9 +232,65 @@ describe('filesystem worker operation-scoped Seatbelt profile', () => {
       ['.git', '.agents', '.codex'],
     );
   });
+
+  test('preserves sandbox context on worker operation failures', async () => {
+    const workspace = await temporaryDirectory('maka-worker-client-denial-context-');
+    const target = join(workspace, 'file.ts');
+    await writeFile(target, 'const value = 1;', 'utf8');
+    const { client } = fakeClient({ operationErrorCode: 'filesystem_denied' });
+
+    await assert.rejects(
+      client.execute({
+        operation: grepOperation(target),
+        cwd: workspace,
+        mode: 'ask',
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof FilesystemWorkerClientError);
+        assert.equal(error.reason, 'filesystem_denied');
+        assert.equal(error.stage, 'operation');
+        assert.equal(error.backend, 'macos-seatbelt');
+        assert.equal(error.profileName, 'workspace-write');
+        return true;
+      },
+    );
+  });
 });
 
-function fakeClient(): {
+describe('filesystem worker Linux path context', () => {
+  test('requests a trusted parent mount only for a missing write target', () => {
+    const target = join(tmpdir(), 'maka-linux-worker-parent', 'new.txt');
+    assert.deepEqual(
+      filesystemWorkerRuntimeWritableRoots({
+        platform: 'linux',
+        access: 'write',
+        enforcementPath: target,
+        targetType: 'missing',
+      }),
+      [join(tmpdir(), 'maka-linux-worker-parent')],
+    );
+    assert.equal(
+      filesystemWorkerRuntimeWritableRoots({
+        platform: 'darwin',
+        access: 'write',
+        enforcementPath: target,
+        targetType: 'missing',
+      }),
+      undefined,
+    );
+    assert.equal(
+      filesystemWorkerRuntimeWritableRoots({
+        platform: 'linux',
+        access: 'read',
+        enforcementPath: target,
+        targetType: 'missing',
+      }),
+      undefined,
+    );
+  });
+});
+
+function fakeClient(options: { operationErrorCode?: FilesystemWorkerErrorCode } = {}): {
   client: FilesystemWorkerClient;
   requests: FilesystemWorkerRequest[];
   transforms: SandboxTransformRequest[];
@@ -267,12 +325,24 @@ function fakeClient(): {
       requests.push(request);
       return {
         exitCode: 0,
-        stdout: JSON.stringify({
-          version: FILESYSTEM_WORKER_PROTOCOL_VERSION,
-          requestId: request.requestId,
-          ok: true,
-          result: fakeResult(request),
-        }),
+        stdout: JSON.stringify(
+          options.operationErrorCode
+            ? {
+                version: FILESYSTEM_WORKER_PROTOCOL_VERSION,
+                requestId: request.requestId,
+                ok: false,
+                error: {
+                  code: options.operationErrorCode,
+                  message: 'Sandbox denied the filesystem operation.',
+                },
+              }
+            : {
+                version: FILESYSTEM_WORKER_PROTOCOL_VERSION,
+                requestId: request.requestId,
+                ok: true,
+                result: fakeResult(request),
+              },
+        ),
         stderrTail: '',
         timedOut: false,
         aborted: false,

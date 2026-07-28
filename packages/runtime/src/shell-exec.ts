@@ -25,7 +25,12 @@ import {
   terminateChildProcessTree,
 } from './process-tree-terminator.js';
 import { OUTPUT_RECOVERY_HINT } from './tool-output.js';
-import { buildSpawnStdio, writeChildFdInputs, type ChildFdInput } from './child-fd-input.js';
+import {
+  buildSpawnStdio,
+  closeChildFdSources,
+  writeChildFdInputs,
+  type ChildFdInput,
+} from './child-fd-input.js';
 
 // Per-stream cap on the output RETAINED for the result (~1MB). This only bounds
 // what is kept to return. The tool layer (truncateToolOutput) trims this further
@@ -136,17 +141,22 @@ function runSpawnedProcessWithBoundedTail(
   const liveCap = options.maxLiveEmitChars ?? BASH_MAX_LIVE_EMIT_CHARS;
   const graceMs = options.killGraceMs ?? DEFAULT_PROCESS_TERMINATION_GRACE_MS;
   return new Promise<BoundedShellResult>((resolvePromise, reject) => {
-    const child = spawn(program, [...args], {
-      cwd: options.cwd,
-      env: options.env,
-      shell: useShellOption,
-      stdio: buildSpawnStdio(options.fdInputs),
-      // POSIX: make the shell its own process-group leader (setsid). Termination
-      // signals the group and removes descendants visible outside it at each
-      // process-table snapshot.
-      // Windows has no process groups; taskkill /T owns the equivalent cleanup.
-      detached: process.platform !== 'win32',
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(program, [...args], {
+        cwd: options.cwd,
+        env: options.env,
+        shell: useShellOption,
+        stdio: buildSpawnStdio(options.fdInputs),
+        // POSIX: make the shell its own process-group leader (setsid). Termination
+        // signals the group and removes descendants visible outside it at each
+        // process-table snapshot.
+        // Windows has no process groups; taskkill /T owns the equivalent cleanup.
+        detached: process.platform !== 'win32',
+      });
+    } finally {
+      closeChildFdSources(options.fdInputs);
+    }
     const stdoutBuf = new BashTailBuffer(cap);
     const stderrBuf = new BashTailBuffer(cap);
     let stdoutChars = 0;

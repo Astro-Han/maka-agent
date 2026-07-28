@@ -5,13 +5,13 @@ async function createStarterSkill(page: Page): Promise<void> {
   const result = await page.evaluate(() => window.maka.skills.createStarter());
   expect(result.ok).toBe(true);
   await page.reload();
-  await expect(page.locator('.maka-onboarding-quickchat-input')).toBeVisible();
+  await expect(page.locator('.maka-composer-textarea')).toBeVisible();
 }
 
 async function seedEditableTurn(page: Page): Promise<void> {
-  const quickChat = page.locator('.maka-onboarding-quickchat-input');
-  await quickChat.fill('original message');
-  await quickChat.press('Enter');
+  const firstSend = page.locator('.maka-composer-textarea');
+  await firstSend.fill('original message');
+  await firstSend.press('Enter');
   await expect(page.getByText(/Fake backend received: original message/)).toBeVisible();
 }
 

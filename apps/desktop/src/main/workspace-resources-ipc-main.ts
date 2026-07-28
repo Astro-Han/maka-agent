@@ -3,10 +3,8 @@ import { copyFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   isCollaborationMode,
-  isQuickChatMode,
   type ArtifactSaveResult,
   type CollaborationMode,
-  type QuickChatMode,
 } from '@maka/core';
 import type {
   HostCapabilities,
@@ -43,7 +41,6 @@ export interface NewSessionSkillContext {
   llmConnectionSlug?: string;
   model?: string;
   collaborationMode?: CollaborationMode;
-  mode?: QuickChatMode;
 }
 
 interface WorkspaceResourcesIpcDeps {
@@ -236,8 +233,13 @@ export function registerWorkspaceResourcesIpc(deps: WorkspaceResourcesIpcDeps): 
     if (!result.ok) return result;
     return { ok: true as const, created: result.created, skill: toSkillEntry(result.skill), filePath: result.filePath };
   });
-  ipcMain.handle('skills:delete', async (_event, id: string) => {
-    return deleteSkill(deps.workspaceRoot, id);
+  ipcMain.handle('skills:delete', async (_event, idOrRef: string) => {
+    // Same cwd plumbing as skills:open — a scope-aware ref only resolves if the
+    // delete scans the same project-level discovery dirs the list did.
+    const cwd = await deps.getCurrentProjectRoot?.();
+    const result = await deleteSkill(deps.workspaceRoot, idOrRef, cwd ? { cwd } : {});
+    if (result.ok && cwd) deps.invalidateSkillSelectionReport?.(cwd);
+    return result;
   });
   ipcMain.handle('skills:open', async (_event, id: string, target: 'file' | 'directory' = 'file') => {
     const cwd = await deps.getCurrentProjectRoot?.();
@@ -262,13 +264,11 @@ function normalizeNewSessionSkillContext(input: unknown): NewSessionSkillContext
   const collaborationMode = isCollaborationMode(record.collaborationMode)
     ? record.collaborationMode
     : undefined;
-  const mode = isQuickChatMode(record.mode) ? record.mode : undefined;
-  if (!llmConnectionSlug && !model && !collaborationMode && !mode) return undefined;
+  if (!llmConnectionSlug && !model && !collaborationMode) return undefined;
   return {
     ...(llmConnectionSlug ? { llmConnectionSlug } : {}),
     ...(model ? { model } : {}),
     ...(collaborationMode ? { collaborationMode } : {}),
-    ...(mode ? { mode } : {}),
   };
 }
 

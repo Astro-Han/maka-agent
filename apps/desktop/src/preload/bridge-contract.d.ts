@@ -80,7 +80,7 @@ import type {
 } from '@maka/core/usage-stats/types';
 import type { TestProxyInput } from '@maka/core/settings/network-settings';
 import type { Result } from '@maka/core/result';
-import type { CreateSessionInput } from '@maka/core';
+import type { CreateSessionRequestInput } from '@maka/core';
 import type {
   McpConfigFile,
   McpServerConfig,
@@ -93,7 +93,6 @@ import type {
   AgentGraphClientSnapshotOptions,
   AgentGraphOperatorInspection,
   BotStatus,
-  SkillInvocationResult,
   WechatBridgeQrCodeResult,
 } from '@maka/runtime';
 import type { BundledSkillCatalogEntry, ManagedSkillSourceEntry, ManagedSkillUpdatePreview, SkillEntry, SkillGovernanceDetails } from '@maka/ui';
@@ -102,15 +101,8 @@ import type {
   OnboardingMilestone,
   OnboardingMilestoneId,
   OnboardingState,
-  QuickChatMode,
 } from '@maka/core';
 
-// PR110b: shared union used by `quickChat:start`. Renderer pattern-
-// matches on `ok` + `reason` to route to the correct UI surface.
-//
-// @xuan PR110b review: success branch is `{ ok: true; sessionId }`
-// only. No turn / message anchor — PR110c will add `firstTurnId` if
-// needed.
 export interface ExpertTeamMemberSummary {
   id: string;
   name: string;
@@ -128,13 +120,6 @@ export type ExpertTeamStartResult =
   | { ok: false; reason: 'unknown_team'; teamId: string }
   | { ok: false; reason: 'setup_required'; state: OnboardingState }
   | { ok: false; reason: 'workspace_unavailable' }
-  | { ok: false; reason: 'send_failed'; message: string };
-
-export type QuickChatResult =
-  | { ok: true; sessionId: string; skillInvocation?: SkillInvocationResult }
-  | { ok: false; reason: 'setup_required'; state: OnboardingState }
-  | { ok: false; reason: 'workspace_unavailable' }
-  | { ok: false; reason: 'skill_invocation_failed'; skillInvocation: SkillInvocationResult }
   | { ok: false; reason: 'send_failed'; message: string };
 
 export interface OnboardingSnapshot {
@@ -182,6 +167,46 @@ export type PermissionActionResult =
       message?: string;
     };
 
+export type PermissionOverlayStartResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'invalid_id' | 'unsupported_platform' | 'already_open' | 'open_settings_failed';
+      message?: string;
+    };
+
+export type AppUpdateStatus =
+  | { state: 'idle'; currentVersion: string }
+  | { state: 'checking'; currentVersion: string }
+  | { state: 'not-available'; currentVersion: string; latestVersion?: string }
+  | {
+      state: 'available';
+      currentVersion: string;
+      latestVersion: string;
+      releaseName?: string;
+      releaseUrl?: string;
+      publishedAt?: string;
+    }
+  | {
+      state: 'downloading';
+      currentVersion: string;
+      latestVersion: string;
+      progress: {
+        percent: number;
+        bytesPerSecond?: number;
+        transferred?: number;
+        total?: number;
+      };
+    }
+  | {
+      state: 'downloaded';
+      currentVersion: string;
+      latestVersion: string;
+      releaseName?: string;
+      downloadedFile?: string;
+    }
+  | { state: 'error'; currentVersion: string; message: string; latestVersion?: string };
+
 export interface MakaBridge {
 
   tasks: {
@@ -209,7 +234,7 @@ export interface MakaBridge {
   };
   sessions: {
     list(filter?: SessionListFilter): Promise<SessionSummary[]>;
-    create(input?: Partial<CreateSessionInput>): Promise<SessionSummary>;
+    create(input?: CreateSessionRequestInput): Promise<SessionSummary>;
     send(
       sessionId: string,
       command:
@@ -360,9 +385,6 @@ export interface MakaBridge {
     ): Promise<OnboardingSnapshot>;
     clearMilestone(id: OnboardingMilestoneId): Promise<OnboardingSnapshot>;
   };
-  quickChat: {
-    start(input?: { prompt?: string; mode?: QuickChatMode; skillIds?: string[] }): Promise<QuickChatResult>;
-  };
   expertTeam: {
     list(): Promise<{ teams: ExpertTeamSummary[] }>;
     start(input: { teamId: string; prompt?: string }): Promise<ExpertTeamStartResult>;
@@ -371,6 +393,13 @@ export interface MakaBridge {
     getSnapshot(): Promise<PermissionSnapshot>;
     openSystemSettings(permId: string): Promise<PermissionActionResult>;
     requestAccess(permId: string): Promise<PermissionActionResult>;
+    /**
+     * macOS drag-to-grant onboarding: opens the right Privacy pane and
+     * floats a card the user can drag the app bundle out of. Only
+     * `accessibility` and `screen_recording` — the two permissions with
+     * no programmatic consent dialog.
+     */
+    startDragOnboarding(permId: string): Promise<PermissionOverlayStartResult>;
   };
   capabilities: {
     getSnapshot(): Promise<CapabilitySnapshotCollection>;
@@ -456,6 +485,25 @@ export interface MakaBridge {
       email?: string;
       plan?: string;
       picture?: string;
+      errorMessage?: string;
+    }>;
+    refreshTokens(): Promise<SubscriptionActionResult>;
+    logout(): Promise<SubscriptionActionResult>;
+  };
+  xaiOAuth: {
+    getAuthUrl(): Promise<AuthorizationUrlPayload | SubscriptionActionResult>;
+    openAuthUrl(authRequestId: string): Promise<SubscriptionActionResult>;
+    completeAuthorization(authRequestId: string): Promise<SubscriptionActionResult>;
+    cancelAuthorization(authRequestId?: string): Promise<{ ok: true }>;
+    getAccountState(): Promise<{
+      provider: 'xai-oauth';
+      runtimeState:
+        | 'not_logged_in'
+        | 'authorizing'
+        | 'authenticated'
+        | 'refreshing'
+        | 'refresh_failed'
+        | 'storage_failed';
       errorMessage?: string;
     }>;
     refreshTokens(): Promise<SubscriptionActionResult>;
@@ -614,6 +662,12 @@ export interface MakaBridge {
       buildMode: 'dev' | 'packaged';
       buildCommit: string | null;
     }>;
+    subscribeUpdateStatus(handler: (status: AppUpdateStatus) => void): () => void;
+    updateStatus(): Promise<AppUpdateStatus>;
+    checkForUpdates(): Promise<AppUpdateStatus>;
+    downloadUpdate(): Promise<AppUpdateStatus>;
+    installUpdate(): Promise<{ ok: true } | { ok: false; reason: 'not_downloaded' | 'install_failed' }>;
+    openUpdateDownload(): Promise<{ ok: true } | { ok: false; reason: 'not_available' | 'open_failed' }>;
     sessionProjectInfo(sessionId: string): Promise<{
       projectPath: string;
       projectGit: { isGitRepo: boolean; branch?: string };
@@ -702,7 +756,6 @@ export interface MakaBridge {
         llmConnectionSlug?: string;
         model?: string;
         collaborationMode?: 'agent' | 'plan';
-        mode?: QuickChatMode;
       },
     ): Promise<import('@maka/runtime').InvocableSkillEntry[]>;
     catalog: {
@@ -747,9 +800,9 @@ export interface MakaBridge {
       | { ok: true; created: boolean; skill: SkillEntry; filePath: string }
       | { ok: false; reason: 'blocked_path' | 'already_exists' | 'write_failed' }
     >;
-    delete(id: string): Promise<
+    delete(idOrRef: string): Promise<
       | { ok: true }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'delete_failed' }
+      | { ok: false; reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed' }
     >;
     open(id: string, target?: 'file' | 'directory'): Promise<
       | { ok: true; target: 'file' | 'directory' }

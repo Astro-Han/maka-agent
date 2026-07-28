@@ -1,6 +1,8 @@
 import { requireExactRecord, requireId, requireRecord, requireString } from './codec.js';
 import { invalidProtocolFrame } from './errors.js';
 import { HOST_STATUS_OPERATION_SPECS } from './host-status.js';
+import { INTERACTION_OPERATION_SPECS } from './interaction.js';
+import { MESSAGE_OPERATION_SPECS } from './message.js';
 import {
   composeOperationSpecMaps,
   type HostOperationError,
@@ -8,10 +10,31 @@ import {
   type OperationSpec,
 } from './operation-spec.js';
 import { RUNTIME_POLICY_OPERATION_SPECS } from './runtime-policy.js';
+import { SESSION_CONTINUITY_OPERATION_SPECS } from './session-continuity.js';
+import { TASK_LEDGER_OPERATION_SPECS } from './task-ledger.js';
 import { TURN_OPERATION_SPECS } from './turn.js';
 
 export type { HostLifecycleState, HostStatusInput, HostStatusResult } from './host-status.js';
 export type { HostOperationError, HostOperationErrorCode } from './operation-spec.js';
+export {
+  TURN_MESSAGE_CONTENT_MAX_BYTES,
+  TURN_MESSAGE_TEXT_MAX_BYTES,
+} from './turn.js';
+export type {
+  InFlightMessageSnapshot,
+  MessagePlacement,
+  MessageQueueEntrySnapshot,
+  QueueRetractInput,
+  QueueRetractResult,
+  QueuedMessageSnapshot,
+  RetractedMessageSnapshot,
+  SessionMessageQueueProjection,
+  SteeringMessageSnapshot,
+  TurnInterruptInput,
+  TurnInterruptResult,
+  TurnMessageSubmitInput,
+  TurnMessageSubmitResult,
+} from './message.js';
 export type {
   TurnQueryInput,
   TurnRunStatus,
@@ -21,9 +44,34 @@ export type {
 } from './turn.js';
 export * from './runtime-policy.js';
 
-export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
-  composeOperationSpecMaps(HOST_STATUS_OPERATION_SPECS, TURN_OPERATION_SPECS),
+const HOST_AND_TURN_OPERATION_SPECS = composeOperationSpecMaps(
+  HOST_STATUS_OPERATION_SPECS,
+  TURN_OPERATION_SPECS,
+);
+
+const CORE_OPERATION_SPECS = composeOperationSpecMaps(
+  HOST_AND_TURN_OPERATION_SPECS,
   RUNTIME_POLICY_OPERATION_SPECS,
+);
+
+const CORE_AND_MESSAGE_OPERATION_SPECS = composeOperationSpecMaps(
+  CORE_OPERATION_SPECS,
+  MESSAGE_OPERATION_SPECS,
+);
+
+const CORE_MESSAGE_AND_TASK_LEDGER_OPERATION_SPECS = composeOperationSpecMaps(
+  CORE_AND_MESSAGE_OPERATION_SPECS,
+  TASK_LEDGER_OPERATION_SPECS,
+);
+
+const CORE_MESSAGE_TASK_LEDGER_AND_INTERACTION_OPERATION_SPECS = composeOperationSpecMaps(
+  CORE_MESSAGE_AND_TASK_LEDGER_OPERATION_SPECS,
+  INTERACTION_OPERATION_SPECS,
+);
+
+export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
+  CORE_MESSAGE_TASK_LEDGER_AND_INTERACTION_OPERATION_SPECS,
+  SESSION_CONTINUITY_OPERATION_SPECS,
 );
 
 export type OperationSpecMap = typeof HOST_OPERATION_SPECS;

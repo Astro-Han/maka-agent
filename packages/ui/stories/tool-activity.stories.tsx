@@ -12,6 +12,9 @@ import {
   terminalAndLiveOutputItems,
 } from './tool-activity.fixtures.js';
 
+// Fidelity convention (#1433): every story below names the real app path
+// that reaches it. See apps/desktop/stories/FIDELITY.md.
+
 const meta = {
   title: 'Product/Tool Activity',
   component: ToolActivity,
@@ -101,41 +104,54 @@ function ToolActivityBoard(props: {
   );
 }
 
+// Real path: any turn where the agent calls tools — this is the row's status set
+// (running / done / failed), collected side by side for review.
 export const StatusOverview: Story = {
   args: { items: statusOverviewItems },
   render: (args) => <ToolActivityBoard items={args.items} width={860} />,
 };
 
+// Real path: the agent runs a shell command → the terminal row streams its output live.
 export const TerminalAndLiveOutput: Story = {
   args: { items: terminalAndLiveOutputItems },
   render: (args) => <ToolActivityBoard items={args.items} expandAll />,
 };
 
+// Real path: the agent edits a file or searches the web → the diff and search-result
+// rows.
 export const FileDiffAndWebSearch: Story = {
   args: { items: fileDiffAndWebSearchItems },
   render: (args) => <ToolActivityBoard items={args.items} expandAll />,
 };
 
+// Real path: the agent dispatches a subagent or an explore task → the nested activity
+// rows.
 export const SubagentAndExplore: Story = {
   args: { items: subagentAndExploreItems },
   render: (args) => <ToolActivityBoard items={args.items} expandAll />,
 };
 
+// Real path: the agent reads an office document → the document preview row.
 export const OfficeDocument: Story = {
   args: { items: officeDocumentItems },
   render: (args) => <ToolActivityBoard items={args.items} width={860} expandAll />,
 };
 
+// Real path: a tool call fails, or the user denies it in the permission prompt → the
+// failed and denied rows.
 export const ErrorsAndPermissionDenied: Story = {
   args: { items: errorsAndPermissionDeniedItems },
   render: (args) => <ToolActivityBoard items={args.items} width={860} />,
 };
 
+// Real path: click copy on a tool row → the transient copied state.
 export const CopyFeedback: Story = {
   args: { items: errorsAndPermissionDeniedItems },
   render: (args) => <ToolActivityBoard items={args.items} width={860} autoCopyLabel="复制" />,
 };
 
+// Real path: a turn that mixes many tool kinds — the density case reviewers compare
+// spacing against.
 export const DenseMixedResults: Story = {
   args: { items: denseMixedResultItems },
   render: (args) => <ToolActivityBoard items={args.items} expandAll />,

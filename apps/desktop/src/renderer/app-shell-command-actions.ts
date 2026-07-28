@@ -3,7 +3,7 @@ import type {
   DailyReviewSummary,
   LlmConnection,
   PermissionMode,
-  QuickChatMode,
+  SessionStartMode,
   SessionSummary,
   SettingsSection,
   StoredMessage,
@@ -55,7 +55,7 @@ export interface AppShellCommandListOptions {
   closePalette: () => void;
   composerRef: RefBox<ComposerAppendHandle | null>;
   createSession: () => void;
-  handleQuickChatSubmit: (prompt: string, mode?: QuickChatMode) => Promise<boolean>;
+  startModeSession: (mode: SessionStartMode) => Promise<boolean>;
   isComposerImportOwnerActive: (owner: ComposerImportOwner) => boolean;
   openHelp: () => void;
   openPlanReminderForm: () => void;
@@ -93,8 +93,8 @@ export function buildAppShellCommandList(
     defaultSlug: options.defaultConnection,
     onNewChat: () => optionsRef.current.createSession(),
     onStartDeepResearch: async () => {
-      const { handleQuickChatSubmit } = optionsRef.current;
-      await handleQuickChatSubmit('', 'deep_research');
+      const { startModeSession } = optionsRef.current;
+      await startModeSession('deep_research');
     },
     onStartPlanReminder: () => optionsRef.current.openPlanReminderForm(),
     onOpenSettings: () => optionsRef.current.openSettings(),

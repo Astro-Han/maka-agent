@@ -3,8 +3,8 @@
  * the provider settings source files
  * (PR-MODEL-OAUTH-ALL-0).
  *
- * Pins the user-visible OAuth login surface: three runnable cards
- * (Claude / Codex / GitHub Copilot), each marked
+ * Pins the user-visible OAuth login surface: four runnable cards
+ * (Claude / Codex / GitHub Copilot / xAI), each marked
  * `status: 'available'`, and each click wires through to its
  * matching `window.maka.<provider>Subscription` bridge namespace.
  *
@@ -475,7 +475,7 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     const ids = [...body.matchAll(/id:\s*'([a-z-]+)'/g)].map((m) => m[1]);
     assert.deepEqual(
       ids.sort(),
-      ['claude', 'codex', 'github-copilot'],
+      ['claude', 'codex', 'github-copilot', 'xai'],
       'the catalog must hide account logins that cannot create a runnable model connection',
     );
 
@@ -568,7 +568,7 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     assert.ok(match, 'modelOAuthCards locale-aware factory must exist');
     const body = match[1]!;
     const statuses = [...body.matchAll(/status:\s*'([a-z_]+)'/g)].map((m) => m[1]);
-    assert.equal(statuses.length, 3, 'each visible runnable card must declare a status');
+    assert.equal(statuses.length, 4, 'each visible runnable card must declare a status');
     for (const s of statuses) {
       assert.equal(s, 'available', `card status must be 'available', got '${s}'`);
     }
@@ -962,8 +962,8 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     // catches enabled-model refresh failures.
     assert.match(
       src,
-      /async function refreshAfterModalClose\(\)[\s\S]*?await refreshAllCards\(\)[\s\S]*?await props\.onConnectionsChanged\(\)/,
-      'modal onClose must call refreshAllCards so the card updates after login',
+      /async function refreshAfterOAuthChange\(\)[\s\S]*?await refreshAllCards\(\)[\s\S]*?await props\.onConnectionsChanged\(\)/,
+      'OAuth changes must refresh both the account card and connection list',
     );
     assert.match(
       src,
@@ -972,8 +972,13 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     );
     assert.match(
       src,
-      /onClose=\{\(\)\s*=>\s*\{[\s\S]*?void refreshAfterModalClose\(\)/,
+      /onClose=\{\(\)\s*=>\s*\{[\s\S]*?void refreshAfterOAuthChange\(\)/,
       'modal onClose must call the fail-soft refresh helper',
+    );
+    assert.match(
+      src,
+      /<SubscriptionLoginModal[\s\S]*onLoginSuccess=\{refreshAfterOAuthChange\}/,
+      'successful Codex OAuth must refresh immediately without waiting for modal close',
     );
     // 5. Card render shows "已登录" badge when authenticated.
     assert.match(
@@ -997,7 +1002,7 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     const sectionMatch = src.match(/function ModelOAuthSection[\s\S]*?function ClaudeSubscriptionModal/);
     assert.ok(sectionMatch, 'ModelOAuthSection must exist');
     const section = sectionMatch[0]!;
-    const refreshMatch = section.match(/async function refreshAllCards\(\)[\s\S]*?async function refreshAfterModalClose/);
+    const refreshMatch = section.match(/async function refreshAllCards\(\)[\s\S]*?async function refreshAfterOAuthChange/);
     assert.ok(refreshMatch, 'refreshAllCards must exist inside ModelOAuthSection');
     const refresh = refreshMatch[0]!;
 
@@ -1053,7 +1058,7 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     );
     assert.match(
       section,
-      /async function refreshAfterModalClose\(\) \{[\s\S]*const refreshed = await refreshAllCards\(\);[\s\S]*if \(!modelOAuthMountedRef\.current \|\| !refreshed\) return;[\s\S]*await props\.onConnectionsChanged\(\);/,
+      /async function refreshAfterOAuthChange\(\) \{[\s\S]*const refreshed = await refreshAllCards\(\);[\s\S]*if \(!modelOAuthMountedRef\.current \|\| !refreshed\) return;[\s\S]*await props\.onConnectionsChanged\(\);/,
       'modal close continuation must not refresh enabled providers after a stale OAuth card refresh',
     );
     assert.match(
@@ -1098,10 +1103,17 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     );
   });
 
-  it('SubscriptionLoginModal keeps only the runnable Codex catalog bridge', async () => {
+  it('SubscriptionLoginModal routes the runnable Codex and xAI browser flows through one seam', async () => {
     const src = await readProviderSettingsCombinedSource();
     const modal = src.match(/function SubscriptionLoginModal[\s\S]*?function ClaudeSubscriptionCard/)?.[0] ?? '';
     assert.match(modal, /window\.maka\.openAiCodex/);
+    assert.match(modal, /window\.maka\.xaiOAuth/);
+    assert.match(modal, /service: 'codex' \| 'xai'/);
+    assert.match(
+      modal,
+      /\{isXai \? copy\.deviceCode : copy\.stateHint\}/,
+      'xAI must identify the RFC 8628 user code instead of presenting it as a loopback state hint',
+    );
     assert.doesNotMatch(modal, /pickSubscriptionBridge|cursorSubscription|antigravitySubscription/, 'hidden non-runnable catalog services must not retain unreachable modal branches');
   });
 

@@ -10,13 +10,19 @@ import type {
   ToolResultContent,
   ToolResultEvent,
   ToolStartEvent,
+  UserQuestionRequestEvent,
 } from '@maka/core/events';
 import type {
   PermissionDecisionMessage,
   ToolCallMessage,
   ToolResultMessage,
 } from '@maka/core/session';
-import type { PermissionDecision } from '@maka/core/backend-types';
+import type {
+  HostedInteractionBridge,
+  HostedUserQuestionAnswer,
+  HostedUserQuestionSettlement,
+  PermissionDecision,
+} from '@maka/core/backend-types';
 import type { AgentSpec } from '@maka/core/runtime-inputs';
 import type {
   PermissionMode,
@@ -39,7 +45,6 @@ import { redactSecrets } from '@maka/core/redaction';
 import { TOOL_BOUNDARY_PROTOCOL_V1, type RuntimeEvent } from '@maka/core';
 
 import type { PermissionEngine } from './permission-engine.js';
-import type { AsyncEventQueue } from './async-queue.js';
 import { recordToolArtifactsSafely, type ToolArtifactRecorder } from './tool-artifacts.js';
 import { createToolOutputDeltaEmitter } from './tool-output-delta.js';
 import { truncateToolOutput } from './tool-output.js';
@@ -72,6 +77,14 @@ import { ChildAgentRunLimiter } from './child-agent-run-limiter.js';
 import type { AgentProfile } from './agent-catalog.js';
 import type { SubagentExecutionRef } from './subagent-execution.js';
 import { serializeSandboxError } from './sandbox/errors.js';
+import {
+  RuntimeInteractionAdmissionRejectedError,
+  RuntimeInteractionClosedError,
+  RuntimeInteractionFailStopError,
+  RuntimeInteractionInvariantError,
+  type RuntimeInteractionClosureReason,
+  type RuntimeUserQuestionClosureReason,
+} from './interaction-authority.js';
 
 export interface ResolvedMakaToolCall {
   tool: MakaTool;
@@ -81,7 +94,12 @@ export interface ResolvedMakaToolCall {
   input: unknown;
   providerOptions?: Record<string, unknown>;
   abortSignal: AbortSignal;
-  eventSink: AsyncEventQueue<SessionEvent> | { push(event: SessionEvent): void };
+  eventSink: DurableSessionEventSink;
+}
+
+export interface DurableSessionEventSink {
+  push(event: SessionEvent): void;
+  pushAndWaitUntilConsumed(event: SessionEvent): Promise<void>;
 }
 
 export interface ToolSettlement {
@@ -432,8 +450,10 @@ class RuntimeCommitBoundaryError extends Error {
 export class ToolRuntime {
   private readonly userQuestions = new TurnScopedAwaitRegistry<
     UserQuestionResponse,
-    { toolUseId: string; questions: UserQuestion[] }
+    { toolUseId: string; questions: UserQuestion[]; hosted: boolean }
   >();
+  private readonly hostedInteractions = new Map<string, HostedInteractionBridge>();
+  private readonly deferredQuestionTurnClosures = new Set<string>();
   private activeSubagentToolCount = 0;
   private childAgentRunLimiter = new ChildAgentRunLimiter(MAX_ACTIVE_CHILD_AGENT_RUNS_PER_TURN);
   /**
@@ -465,17 +485,38 @@ export class ToolRuntime {
     this.approvalCoordinator = input.approvalCoordinator ?? new ApprovalCoordinator({});
   }
 
-  beginTurn(turnId: string): void {
+  beginTurn(turnId: string, hostedInteraction?: HostedInteractionBridge): void {
+    if (
+      hostedInteraction &&
+      (hostedInteraction.sessionId !== this.input.sessionId || hostedInteraction.turnId !== turnId)
+    ) {
+      throw new RuntimeInteractionInvariantError(
+        `ToolRuntime received a mismatched hosted Interaction Run for turn ${turnId}`,
+      );
+    }
+    if (hostedInteraction) this.hostedInteractions.set(turnId, hostedInteraction);
+    else this.hostedInteractions.delete(turnId);
     this.resetTurnState();
     this.userQuestions.beginTurn(turnId);
   }
 
   endTurn(turnId: string, reason: 'completed' | 'aborted' = 'completed'): void {
+    const hasHostedPending = this.userQuestions
+      .entries(turnId)
+      .some(([, question]) => question.hosted);
+    this.hostedInteractions.delete(turnId);
+    if (hasHostedPending) {
+      this.deferredQuestionTurnClosures.add(turnId);
+      this.finishDeferredQuestionTurnClosure(turnId);
+      this.resetTurnState();
+      return;
+    }
     this.userQuestions.endTurn(
       turnId,
       (requestId) =>
         new Error(`Turn ${turnId} ${reason} before user question ${requestId} was answered`),
     );
+    this.deferredQuestionTurnClosures.delete(turnId);
     this.resetTurnState();
   }
 
@@ -487,6 +528,19 @@ export class ToolRuntime {
       .entries(turnId)
       .find(([requestId]) => requestId === response.requestId)?.[1];
     if (!pending) return false;
+    if (pending.hosted) {
+      throw new RuntimeInteractionInvariantError(
+        `Hosted question ${response.requestId} must settle through its captured continuation`,
+      );
+    }
+    return this.settleUserQuestionAnswer(turnId, response, pending);
+  }
+
+  private settleUserQuestionAnswer(
+    turnId: string,
+    response: UserQuestionResponse,
+    pending: { toolUseId: string; questions: UserQuestion[]; hosted: boolean },
+  ): boolean {
     if (
       response.answers.length !== pending.questions.length ||
       response.answers.some(
@@ -495,7 +549,24 @@ export class ToolRuntime {
     ) {
       throw new Error('Invalid user question response');
     }
-    return this.userQuestions.resolve(turnId, response.requestId, response) !== null;
+    const resolved = this.userQuestions.resolve(turnId, response.requestId, response) !== null;
+    this.finishDeferredQuestionTurnClosure(turnId);
+    return resolved;
+  }
+
+  closeUserQuestion(
+    turnId: string,
+    requestId: string,
+    reason: RuntimeInteractionClosureReason,
+  ): boolean {
+    const closed =
+      this.userQuestions.reject(
+        turnId,
+        requestId,
+        new RuntimeInteractionClosedError(requestId, reason),
+      ) !== null;
+    this.finishDeferredQuestionTurnClosure(turnId);
+    return closed;
   }
 
   pendingUserQuestionCount(turnId: string): number {
@@ -593,9 +664,12 @@ export class ToolRuntime {
     toolUseId: string,
     turnId: string,
     text: string,
-    queue: AsyncEventQueue<SessionEvent> | { push(event: SessionEvent): void },
+    queue: DurableSessionEventSink,
   ): Promise<void> {
-    const content: ToolResultContent = { kind: 'text', text: formatSyntheticToolErrorText(text) };
+    const content: ToolResultContent = {
+      kind: 'text',
+      text: formatSyntheticToolErrorText(text),
+    };
     const durableAttempt = this.durableToolAttempts.get(durableAttemptKey(turnId, toolUseId));
     const durableOutcome = await durableAttempt?.commitOutcome(content, true);
     const msg: ToolResultMessage = {
@@ -623,7 +697,7 @@ export class ToolRuntime {
   private async executeTool(
     tool: MakaTool,
     turnId: string,
-    queue: AsyncEventQueue<SessionEvent> | { push(event: SessionEvent): void },
+    queue: DurableSessionEventSink,
     args: unknown,
     ctx: {
       toolCallId: string;
@@ -835,7 +909,9 @@ export class ToolRuntime {
       return this.errorReturn(reason);
     }
 
-    let additionalPlan: AdditionalPermissionPlanResult = { kind: 'not_required' };
+    let additionalPlan: AdditionalPermissionPlanResult = {
+      kind: 'not_required',
+    };
     if (tool.planAdditionalPermissions) {
       try {
         const plannerContext: AdditionalPermissionPlannerContext = Object.freeze({
@@ -982,9 +1058,13 @@ export class ToolRuntime {
       additionalPlan.kind === 'request' ||
       escalationPlan.kind === 'request'
     ) {
+      const hostedInteraction = this.interactionRun(turnId);
+      const currentRunId = hostedInteraction?.runId ?? this.input.getCurrentRunId?.();
       const verdict = this.input.permissionEngine.evaluate({
         sessionId: this.input.sessionId,
         turnId,
+        ...(currentRunId ? { runId: currentRunId } : {}),
+        ...(hostedInteraction ? { hostedInteraction } : {}),
         toolUseId,
         toolName: tool.name,
         args: structuredClone(additionalPlan.kind === 'request' ? executionArgs : permissionArgs),
@@ -1029,7 +1109,7 @@ export class ToolRuntime {
             toolName: tool.name,
             decision: 'deny',
           });
-          queue.push(verdict.decisionEvent);
+          if (!hostedInteraction) queue.push(verdict.decisionEvent);
         }
         trace?.emit('permission', 'permission_failed', 'Permission blocked tool execution', {
           toolUseId,
@@ -1049,6 +1129,7 @@ export class ToolRuntime {
       }
 
       if (verdict.kind === 'prompt') {
+        const hostedRun = this.interactionRun(turnId);
         const reviewContext: AutoApprovalReviewContext = {
           sessionId: this.input.sessionId,
           turnId,
@@ -1058,38 +1139,82 @@ export class ToolRuntime {
           ...this.input.getAutoApprovalReviewContext?.(),
         };
         const isEscalation = verdict.event.kind === 'sandbox_escalation';
-        trace?.emit('permission', 'approval_routed', 'Permission request routed to reviewer', {
-          requestId: verdict.event.requestId,
-          toolUseId,
-          toolName: tool.name,
-          reviewer: this.input.header.permissionMode === 'execute' ? 'auto_review' : 'user',
-          requestKind: verdict.event.kind,
-        });
-        trace?.emit(
-          'permission',
-          isEscalation ? 'sandbox_escalation_requested' : 'permission_requested',
-          'Permission requested',
-          {
+        let admissionState: 'pending' | 'settled' | undefined;
+        if (hostedRun) {
+          void verdict.parked.catch(() => undefined);
+          const settlement = verdict.settlement;
+          if (!settlement) {
+            throw new RuntimeInteractionInvariantError(
+              `Hosted permission ${verdict.event.requestId} has no PermissionEngine settlement`,
+            );
+          }
+          try {
+            const admission = await hostedRun.admitPermissionRequest({
+              request: verdict.event,
+              ...(verdict.rememberScopeId ? { rememberScopeId: verdict.rememberScopeId } : {}),
+              settlement,
+            });
+            admissionState = admission.state;
+          } catch (error) {
+            this.input.permissionEngine.rejectRequest(
+              turnId,
+              verdict.event.requestId,
+              error instanceof Error
+                ? error
+                : new RuntimeInteractionFailStopError(
+                    `Could not confirm admission for permission ${verdict.event.requestId}`,
+                    error,
+                  ),
+            );
+            await verdict.parked.catch(() => undefined);
+            throw interactionAuthorityError(
+              `Could not confirm admission for permission ${verdict.event.requestId}`,
+              error,
+            );
+          }
+        }
+        if (admissionState !== 'settled') {
+          trace?.emit('permission', 'approval_routed', 'Permission request routed to reviewer', {
             requestId: verdict.event.requestId,
             toolUseId,
             toolName: tool.name,
-            category: verdict.event.category,
+            reviewer: this.input.header.permissionMode === 'execute' ? 'auto_review' : 'user',
             requestKind: verdict.event.kind,
-          },
-        );
+          });
+          trace?.emit(
+            'permission',
+            isEscalation ? 'sandbox_escalation_requested' : 'permission_requested',
+            'Permission requested',
+            {
+              requestId: verdict.event.requestId,
+              toolUseId,
+              toolName: tool.name,
+              category: verdict.event.category,
+              requestKind: verdict.event.kind,
+            },
+          );
+        }
         let response: PermissionDecision;
         try {
-          response = await this.awaitPermissionDecision(verdict, turnId, () =>
-            this.approvalCoordinator.resolve({
-              mode: this.input.header.permissionMode,
-              verdict,
-              permissionEngine: this.input.permissionEngine,
-              context: reviewContext,
-              emitUserRequest: (event) => queue.push(event),
-              abortSignal: ctx.abortSignal,
-            }),
-          );
+          response =
+            admissionState === 'settled'
+              ? await verdict.parked
+              : await this.awaitPermissionDecision(
+                  verdict,
+                  turnId,
+                  () =>
+                    this.approvalCoordinator.resolve({
+                      mode: this.input.header.permissionMode,
+                      verdict,
+                      permissionEngine: this.input.permissionEngine,
+                      context: reviewContext,
+                      emitUserRequest: (event) => queue.push(event),
+                      abortSignal: ctx.abortSignal,
+                    }),
+                  hostedRun ? { run: hostedRun, eventSink: queue } : undefined,
+                );
         } catch (err) {
+          if (isInteractionControlError(err)) throw err;
           if (autoReviewEscalationKey) {
             this.autoReviewEscalationAttempts.set(autoReviewEscalationKey, 'denied');
           }
@@ -1131,49 +1256,66 @@ export class ToolRuntime {
           return this.errorReturn(reason);
         }
 
-        const decisionMsg: PermissionDecisionMessage = {
-          type: 'permission_decision',
-          id: response.requestId,
-          turnId,
-          ts: this.input.now(),
-          toolUseId,
-          toolName: tool.name,
-          decision: response.decision,
-          ...(response.rememberForTurn !== undefined
-            ? { rememberForTurn: response.rememberForTurn }
-            : {}),
-          ...(response.reviewer !== undefined ? { reviewer: response.reviewer } : {}),
-          ...(response.rationale !== undefined ? { rationale: response.rationale } : {}),
-          ...(response.riskLevel !== undefined ? { riskLevel: response.riskLevel } : {}),
-        };
-        await this.input.appendMessage(decisionMsg);
-        queue.push({
-          type: 'permission_decision_ack',
-          id: this.input.newId(),
-          turnId,
-          ts: this.input.now(),
-          requestId: response.requestId,
-          toolUseId,
-          decision: response.decision,
-          ...(response.rememberForTurn !== undefined
-            ? { rememberForTurn: response.rememberForTurn }
-            : {}),
-          ...(response.reviewer !== undefined ? { reviewer: response.reviewer } : {}),
-          ...(response.rationale !== undefined ? { rationale: response.rationale } : {}),
-          ...(response.riskLevel !== undefined ? { riskLevel: response.riskLevel } : {}),
-        });
-        trace?.emit('permission', 'permission_decided', 'Permission decision recorded', {
-          requestId: response.requestId,
-          toolUseId,
-          toolName: tool.name,
-          decision: response.decision,
-          requestKind: verdict.event.kind ?? 'tool_permission',
-          ...(response.rememberForTurn !== undefined
-            ? { rememberForTurn: response.rememberForTurn }
-            : {}),
-          ...(response.reviewer !== undefined ? { reviewer: response.reviewer } : {}),
-          ...(response.riskLevel !== undefined ? { riskLevel: response.riskLevel } : {}),
-        });
+        if (hostedRun) {
+          await this.publishHostedSettlementAck(queue, {
+            type: 'permission_answer_ack',
+            id: this.input.newId(),
+            turnId,
+            ts: this.input.now(),
+            requestId: response.requestId,
+            toolUseId,
+          });
+          trace?.emit('permission', 'permission_decided', 'Permission answer accepted', {
+            requestId: response.requestId,
+            toolUseId,
+            toolName: tool.name,
+            accepted: true,
+          });
+        } else {
+          const decisionMsg: PermissionDecisionMessage = {
+            type: 'permission_decision',
+            id: response.requestId,
+            turnId,
+            ts: this.input.now(),
+            toolUseId,
+            toolName: tool.name,
+            decision: response.decision,
+            ...(response.rememberForTurn !== undefined
+              ? { rememberForTurn: response.rememberForTurn }
+              : {}),
+            ...(response.reviewer !== undefined ? { reviewer: response.reviewer } : {}),
+            ...(response.rationale !== undefined ? { rationale: response.rationale } : {}),
+            ...(response.riskLevel !== undefined ? { riskLevel: response.riskLevel } : {}),
+          };
+          await this.input.appendMessage(decisionMsg);
+          queue.push({
+            type: 'permission_decision_ack',
+            id: this.input.newId(),
+            turnId,
+            ts: this.input.now(),
+            requestId: response.requestId,
+            toolUseId,
+            decision: response.decision,
+            ...(response.rememberForTurn !== undefined
+              ? { rememberForTurn: response.rememberForTurn }
+              : {}),
+            ...(response.reviewer !== undefined ? { reviewer: response.reviewer } : {}),
+            ...(response.rationale !== undefined ? { rationale: response.rationale } : {}),
+            ...(response.riskLevel !== undefined ? { riskLevel: response.riskLevel } : {}),
+          });
+          trace?.emit('permission', 'permission_decided', 'Permission decision recorded', {
+            requestId: response.requestId,
+            toolUseId,
+            toolName: tool.name,
+            decision: response.decision,
+            requestKind: verdict.event.kind ?? 'tool_permission',
+            ...(response.rememberForTurn !== undefined
+              ? { rememberForTurn: response.rememberForTurn }
+              : {}),
+            ...(response.reviewer !== undefined ? { reviewer: response.reviewer } : {}),
+            ...(response.riskLevel !== undefined ? { riskLevel: response.riskLevel } : {}),
+          });
+        }
 
         if (response.decision === 'deny') {
           if (autoReviewEscalationKey && response.reviewer === 'auto_review') {
@@ -1183,7 +1325,7 @@ export class ToolRuntime {
             response.reviewer === 'auto_review'
               ? `自动审批已拒绝权限请求${response.rationale ? `：${response.rationale}` : ''}`
               : '用户已拒绝权限请求';
-          if (isEscalation) {
+          if (isEscalation && !hostedRun) {
             trace?.emit('permission', 'sandbox_escalation_denied', 'Sandbox escalation denied', {
               requestId: response.requestId,
               toolUseId,
@@ -1204,7 +1346,7 @@ export class ToolRuntime {
         if (autoReviewEscalationKey) {
           this.autoReviewEscalationAttempts.delete(autoReviewEscalationKey);
         }
-        if (isEscalation) {
+        if (isEscalation && !hostedRun) {
           trace?.emit('permission', 'sandbox_escalation_granted', 'Sandbox escalation granted', {
             requestId: response.requestId,
             toolUseId,
@@ -1233,6 +1375,8 @@ export class ToolRuntime {
       }
     }
 
+    this.assertCapturedRunOwner(tool.name, runId);
+
     const reservedSubagentSlot = this.reserveSubagentSlot(tool);
     if (!reservedSubagentSlot) {
       trace?.emit('tool', 'tool_failed', 'Tool execution rejected by runtime limit', {
@@ -1253,6 +1397,7 @@ export class ToolRuntime {
           proposal: additionalPlan.proposal,
           cwd: this.input.header.cwd,
         });
+        this.assertCapturedRunOwner(tool.name, runId);
         const additionalGrant = this.input.permissionEngine.consumeAdditionalPermissionGrant({
           sessionId: this.input.sessionId,
           turnId,
@@ -1269,6 +1414,12 @@ export class ToolRuntime {
         }
         permissionContext = Object.freeze({ additionalGrant });
       } catch (error) {
+        try {
+          this.assertCapturedRunOwner(tool.name, runId);
+        } catch (ownerError) {
+          if (reservedSubagentSlot) this.releaseSubagentSlot(tool);
+          throw ownerError;
+        }
         const reason = formatSyntheticToolErrorText(error);
         trace?.emit(
           'permission',
@@ -1336,13 +1487,21 @@ export class ToolRuntime {
         return this.errorReturn(reason);
       }
     }
-    const durableAttempt = await this.prepareDurableToolAttempt({
-      tool,
-      startEvent: startEv,
-      persistedArgs,
-      ...(invocationId ? { invocationId } : {}),
-      ...(runId ? { runId } : {}),
-    });
+    let durableAttempt: DurableToolAttempt | undefined;
+    try {
+      this.assertCapturedRunOwner(tool.name, runId);
+      durableAttempt = await this.prepareDurableToolAttempt({
+        tool,
+        startEvent: startEv,
+        persistedArgs,
+        abortSignal: ctx.abortSignal,
+        ...(invocationId ? { invocationId } : {}),
+        ...(runId ? { runId } : {}),
+      });
+    } catch (error) {
+      if (reservedSubagentSlot) this.releaseSubagentSlot(tool);
+      throw error;
+    }
     if (durableAttempt) {
       this.durableToolAttempts.set(durableAttemptKey(turnId, toolUseId), durableAttempt);
     }
@@ -1530,6 +1689,7 @@ export class ToolRuntime {
       }
     } catch (err) {
       if (err instanceof RuntimeCommitBoundaryError) throw err;
+      if (isInteractionControlError(err)) throw err;
       output.flush();
       const sandboxError = serializeSandboxError(err);
       const terminalFailure = coerceTerminalFailure(
@@ -1652,6 +1812,7 @@ export class ToolRuntime {
     tool: MakaTool;
     startEvent: ToolStartEvent;
     persistedArgs: unknown;
+    abortSignal: AbortSignal;
     invocationId?: string;
     runId?: string;
   }): Promise<DurableToolAttempt | undefined> {
@@ -1731,6 +1892,8 @@ export class ToolRuntime {
       refs: { operationId, toolCallId: input.startEvent.toolUseId },
     };
     try {
+      this.assertCapturedRunOwner(input.tool.name, runId);
+      this.assertDurableDispatchNotAborted(input.tool.name, input.abortSignal);
       const prepared = await sink.commitToolPrepared({
         operationId,
         journalEventId: `${operationId}_prepared`,
@@ -1787,7 +1950,11 @@ export class ToolRuntime {
         } catch (error) {
           throw new RuntimeCommitBoundaryError('T2', error);
         }
-        committedOutcome = { id: responseEvent.id, operationId, ts: responseEvent.ts };
+        committedOutcome = {
+          id: responseEvent.id,
+          operationId,
+          ts: responseEvent.ts,
+        };
         this.durableToolAttempts.delete(
           durableAttemptKey(input.startEvent.turnId, input.startEvent.toolUseId),
         );
@@ -1825,28 +1992,102 @@ export class ToolRuntime {
     verdict: Extract<ReturnType<PermissionEngine['evaluate']>, { kind: 'prompt' }>,
     turnId: string,
     resolve: () => Promise<PermissionDecision> = () => verdict.parked,
+    hosted?: {
+      run: HostedInteractionBridge;
+      eventSink: DurableSessionEventSink;
+    },
   ): Promise<PermissionDecision> {
     const timeoutMs = this.input.permissionTimeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS;
     const pauseTarget = this.input.getPermissionPauseTarget();
     pauseTarget?.pause();
     try {
       if (timeoutMs <= 0) return await resolve();
+      const timeoutSentinel = Symbol('permission_timeout');
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_resolve, reject) => {
+      const timeout = new Promise<typeof timeoutSentinel>((resolveTimeout) => {
         timer = setTimeout(() => {
-          const reason = `Permission request ${verdict.event.requestId} timed out after ${timeoutMs}ms`;
-          this.input.permissionEngine.expireRequest(turnId, verdict.event.requestId, reason);
-          reject(new Error(reason));
+          resolveTimeout(timeoutSentinel);
         }, timeoutMs);
       });
       try {
-        return await Promise.race([resolve(), timeout]);
+        const winner = await Promise.race([resolve(), timeout]);
+        if (winner !== timeoutSentinel) return winner;
+        return await this.resolvePermissionTimeout(verdict, turnId, timeoutMs, hosted);
       } finally {
         if (timer !== undefined) clearTimeout(timer);
       }
     } finally {
       pauseTarget?.resume();
     }
+  }
+
+  private async resolvePermissionTimeout(
+    verdict: Extract<ReturnType<PermissionEngine['evaluate']>, { kind: 'prompt' }>,
+    turnId: string,
+    timeoutMs: number,
+    hosted:
+      | {
+          run: HostedInteractionBridge;
+          eventSink: DurableSessionEventSink;
+        }
+      | undefined,
+  ): Promise<PermissionDecision> {
+    const requestId = verdict.event.requestId;
+    const reason = `Permission request ${requestId} timed out after ${timeoutMs}ms`;
+    if (!hosted) {
+      this.input.permissionEngine.expireRequest(turnId, requestId, reason);
+      return await verdict.parked;
+    }
+    let outcome;
+    try {
+      outcome = await hosted.run.commitPermissionTimeout({ requestId });
+    } catch (error) {
+      throw interactionAuthorityError(
+        `Could not confirm the timeout winner for permission ${requestId}`,
+        error,
+      );
+    }
+    if (outcome.kind === 'permission_answer') {
+      return {
+        requestId,
+        ...outcome.answer,
+      };
+    }
+
+    let closureError: unknown;
+    try {
+      await verdict.parked;
+      closureError = new RuntimeInteractionInvariantError(
+        `Hosted permission closure ${requestId} left the local request resolved`,
+      );
+    } catch (error) {
+      closureError = error;
+    }
+    if (outcome.reason === 'timed_out') {
+      await this.publishHostedSettlementAck(hosted.eventSink, {
+        type: 'permission_closure_ack',
+        id: this.input.newId(),
+        turnId,
+        ts: this.input.now(),
+        requestId,
+        toolUseId: verdict.event.toolUseId,
+        reason: 'timed_out',
+      });
+    }
+    throw closureError;
+  }
+
+  private assertCapturedRunOwner(toolName: string, expectedRunId: string | undefined): void {
+    if (expectedRunId && this.input.getCurrentRunId?.() !== expectedRunId) {
+      throw new Error(`Tool ${toolName} lost Run ownership before durable dispatch`);
+    }
+  }
+
+  private assertDurableDispatchNotAborted(toolName: string, abortSignal: AbortSignal): void {
+    if (!abortSignal.aborted) return;
+    throw abortSignal.reason instanceof Error
+      ? abortSignal.reason
+      : new Error(`Tool ${toolName} was cancelled before durable dispatch`);
   }
 
   private reserveSubagentSlot(tool: MakaTool): boolean {
@@ -2020,7 +2261,9 @@ export class ToolRuntime {
           }
         : {}),
       ...(prepareChildAgentResume
-        ? { prepareChildAgentResume: (sourceRunId) => prepareChildAgentResume(sourceRunId) }
+        ? {
+            prepareChildAgentResume: (sourceRunId) => prepareChildAgentResume(sourceRunId),
+          }
         : {}),
       ...(resumeChildAgent
         ? {
@@ -2075,11 +2318,17 @@ export class ToolRuntime {
     turnId: string,
     toolUseId: string,
     questions: UserQuestion[],
-    queue: AsyncEventQueue<SessionEvent> | { push(event: SessionEvent): void },
+    queue: DurableSessionEventSink,
   ): Promise<UserQuestionResult> {
+    const hostedRun = this.interactionRun(turnId);
     const requestId = this.input.newId();
-    const parked = this.userQuestions.park(turnId, requestId, { toolUseId, questions });
-    queue.push({
+    const parked = this.userQuestions.park(turnId, requestId, {
+      toolUseId,
+      questions,
+      hosted: hostedRun !== undefined,
+    });
+    if (hostedRun) void parked.catch(() => undefined);
+    const request: UserQuestionRequestEvent = {
       type: 'user_question_request',
       id: this.input.newId(),
       turnId,
@@ -2087,8 +2336,45 @@ export class ToolRuntime {
       requestId,
       toolUseId,
       questions,
-    });
+    };
+    if (hostedRun) {
+      const settlement = this.createUserQuestionSettlement(turnId, requestId);
+      try {
+        await hostedRun.admitUserQuestionRequest({
+          request,
+          settlement,
+        });
+      } catch (error) {
+        this.userQuestions.reject(
+          turnId,
+          requestId,
+          error instanceof Error
+            ? error
+            : new RuntimeInteractionFailStopError(
+                `Could not confirm admission for question ${requestId}`,
+                error,
+              ),
+        );
+        this.finishDeferredQuestionTurnClosure(turnId);
+        await parked.catch(() => undefined);
+        throw interactionAuthorityError(
+          `Could not confirm admission for question ${requestId}`,
+          error,
+        );
+      }
+    }
+    queue.push(request);
     const response = await parked;
+    const answerAck = {
+      type: 'user_question_answer_ack',
+      id: this.input.newId(),
+      turnId,
+      ts: this.input.now(),
+      requestId,
+      toolUseId,
+    } as const;
+    if (hostedRun) await this.publishHostedSettlementAck(queue, answerAck);
+    else queue.push(answerAck);
     return {
       answers: questions.map((question, index) => ({
         question: question.question,
@@ -2096,6 +2382,93 @@ export class ToolRuntime {
       })),
     };
   }
+
+  private interactionRun(turnId: string): HostedInteractionBridge | undefined {
+    return this.hostedInteractions.get(turnId);
+  }
+
+  private async publishHostedSettlementAck(
+    queue: DurableSessionEventSink,
+    event: SessionEvent,
+  ): Promise<void> {
+    try {
+      await queue.pushAndWaitUntilConsumed(event);
+    } catch (error) {
+      throw new RuntimeInteractionFailStopError(
+        `Could not durably acknowledge hosted ${event.type}`,
+        error,
+      );
+    }
+  }
+
+  private finishDeferredQuestionTurnClosure(turnId: string): void {
+    if (
+      !this.deferredQuestionTurnClosures.has(turnId) ||
+      this.userQuestions.pendingCount(turnId) !== 0
+    ) {
+      return;
+    }
+    this.deferredQuestionTurnClosures.delete(turnId);
+    this.userQuestions.endTurn(
+      turnId,
+      (requestId) =>
+        new RuntimeInteractionInvariantError(
+          `Hosted question ${requestId} escaped exact Run closure`,
+        ),
+    );
+  }
+
+  private createUserQuestionSettlement(
+    turnId: string,
+    requestId: string,
+  ): HostedUserQuestionSettlement {
+    return Object.freeze({
+      applyAnswer: async (answer: HostedUserQuestionAnswer): Promise<void> => {
+        if (Object.hasOwn(answer, 'requestId')) {
+          throw new RuntimeInteractionInvariantError(
+            `Question settlement ${requestId} received a routed answer`,
+          );
+        }
+        const pending = this.userQuestions
+          .entries(turnId)
+          .find(([candidateId]) => candidateId === requestId)?.[1];
+        if (
+          !pending ||
+          !this.settleUserQuestionAnswer(
+            turnId,
+            { requestId, answers: [...answer.answers] },
+            pending,
+          )
+        ) {
+          throw new RuntimeInteractionInvariantError(
+            `Question settlement did not take ${requestId} from turn ${turnId}`,
+          );
+        }
+      },
+      applyClosure: async (reason: RuntimeUserQuestionClosureReason): Promise<void> => {
+        if (!this.closeUserQuestion(turnId, requestId, reason)) {
+          throw new RuntimeInteractionInvariantError(
+            `Question closure did not take ${requestId} from turn ${turnId}`,
+          );
+        }
+      },
+    });
+  }
+}
+
+function isInteractionControlError(error: unknown): boolean {
+  return (
+    error instanceof RuntimeInteractionAdmissionRejectedError ||
+    error instanceof RuntimeInteractionClosedError ||
+    error instanceof RuntimeInteractionInvariantError ||
+    error instanceof RuntimeInteractionFailStopError
+  );
+}
+
+function interactionAuthorityError(message: string, error: unknown): Error {
+  return isInteractionControlError(error)
+    ? (error as Error)
+    : new RuntimeInteractionFailStopError(message, error);
 }
 
 /**
@@ -2282,7 +2655,11 @@ function buildTerminalFailureMessage(
 ): string {
   const parts = [`命令退出码 ${code}`];
   const view = (text: string) =>
-    truncateToolOutput(text, { maxLines: 40, maxBytes: 1500, direction: 'tail' }).content.trim();
+    truncateToolOutput(text, {
+      maxLines: 40,
+      maxBytes: 1500,
+      direction: 'tail',
+    }).content.trim();
   const stderrView = view(stderr);
   if (stderrView) parts.push(`--- stderr ---\n${stderrView}`);
   const stdoutView = view(stdout);
@@ -2385,7 +2762,10 @@ function summarizeToolResultForTelemetry(
     };
   }
   if (content.kind === 'rive_workflow') {
-    return { kind: content.kind, status: content.state ?? (content.ok ? 'completed' : 'failed') };
+    return {
+      kind: content.kind,
+      status: content.state ?? (content.ok ? 'completed' : 'failed'),
+    };
   }
   return { kind: content.kind };
 }
@@ -2400,7 +2780,7 @@ function isAmbiguousComputerFailure(raw: unknown): boolean {
 }
 
 function durableAttemptKey(turnId: string, toolUseId: string): string {
-  return `${turnId}\0${toolUseId}`;
+  return JSON.stringify([turnId, toolUseId]);
 }
 
 function providerToolErrorMessage(output: unknown): string | undefined {

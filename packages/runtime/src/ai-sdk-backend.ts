@@ -82,6 +82,7 @@ import type {
   ModelFailureKind,
   ToolCallPart,
   ToolResultOutput,
+  UserContent,
 } from './model-protocol.js';
 import { z } from 'zod';
 
@@ -132,6 +133,7 @@ import {
 } from './ai-sdk-compaction.js';
 import type { AiSdkCompactionCapabilities } from './ai-sdk-compaction-contract.js';
 import type { ToolArtifactRecorder } from './tool-artifacts.js';
+import { kimiReasoningFieldFromProviderOptions } from './kimi-openai-transport.js';
 import { RunTrace, type RunTraceRecorder } from './run-trace.js';
 import {
   toSandboxRunTraceProjection,
@@ -689,7 +691,7 @@ export class AiSdkBackend implements AgentBackend {
       resolveEffectiveOrchestration(this.input.header.orchestrationMode, undefined);
     this.currentUserIntent = input.text;
     this.input.permissionEngine.beginTurn(turnId);
-    this.toolRuntime.beginTurn(turnId);
+    this.toolRuntime.beginTurn(turnId, input.hostedInteraction);
     const turnAbortController = new AbortController();
     this.abortController = turnAbortController;
     this.imageRequestBudget = { used: 0, decisions: new Map() };
@@ -707,6 +709,8 @@ export class AiSdkBackend implements AgentBackend {
     let currentStepMessageId = this.newId();
     let stepText = '';
     let stepThinking = '';
+    let sawStepThinking = false;
+    let stepThinkingProviderOptions: NonNullable<ModelMessage['providerOptions']> | undefined;
     let stepSignature: string | undefined;
     const startedAt = this.now();
 
@@ -720,7 +724,7 @@ export class AiSdkBackend implements AgentBackend {
     // this step's assistant row. Hoisted to send() scope so both the streaming
     // path and the abort/error handler can flush a partial step.
     const flushStep = async (): Promise<void> => {
-      const hasThinking = stepThinking.length > 0 || stepSignature !== undefined;
+      const hasThinking = sawStepThinking || stepSignature !== undefined;
       if (stepText.length === 0 && !hasThinking) return;
       const stepId = currentStepMessageId;
       const msg: AssistantMessage = {
@@ -735,6 +739,9 @@ export class AiSdkBackend implements AgentBackend {
               thinking: {
                 text: stepThinking,
                 ...(stepSignature !== undefined ? { signature: stepSignature } : {}),
+                ...(stepThinkingProviderOptions !== undefined
+                  ? { providerOptions: stepThinkingProviderOptions }
+                  : {}),
               },
             }
           : {}),
@@ -749,6 +756,9 @@ export class AiSdkBackend implements AgentBackend {
           messageId: stepId,
           text: stepThinking,
           ...(stepSignature !== undefined ? { signature: stepSignature } : {}),
+          ...(stepThinkingProviderOptions !== undefined
+            ? { providerOptions: stepThinkingProviderOptions }
+            : {}),
         } satisfies ThinkingCompleteEvent);
       }
       queue.push({
@@ -761,6 +771,8 @@ export class AiSdkBackend implements AgentBackend {
       } satisfies TextCompleteEvent);
       stepText = '';
       stepThinking = '';
+      sawStepThinking = false;
+      stepThinkingProviderOptions = undefined;
       stepSignature = undefined;
     };
     let tokenUsage: NormalizedAiSdkUsage | undefined;
@@ -977,21 +989,12 @@ export class AiSdkBackend implements AgentBackend {
                 } as ModelMessage,
               ];
         const settledModelOutputs = new Map<string, ToolResultOutput>();
-        const waitForDurableQueueBoundary = async (): Promise<void> => {
-          const pushedThrough = queue.pushedCount;
-          while (queue.consumedCount < pushedThrough) {
-            if (queue.consumerDetached) {
-              throw new Error('event consumer detached before the durable projection boundary');
-            }
-            await queue.waitForProgress();
-          }
-        };
         const loadDurableTurnEvents = async (): Promise<RuntimeEvent[]> => {
           const loadTurnRuntimeEvents = this.input.loadTurnRuntimeEvents;
           if (!loadTurnRuntimeEvents) {
             throw new Error('durable current-run reader is required for tool continuation');
           }
-          await waitForDurableQueueBoundary();
+          await queue.waitUntilConsumedThroughCurrent();
           return (await loadTurnRuntimeEvents(turnId)).filter((event) => event.turnId === turnId);
         };
         const loadDurableTurnProjection = async (): Promise<ModelMessage[]> => {
@@ -1365,7 +1368,11 @@ export class AiSdkBackend implements AgentBackend {
                     text: event.text,
                   } satisfies TextDeltaEvent);
                 } else if (event.kind === 'thinking') {
+                  sawStepThinking = true;
                   stepThinking += event.text;
+                  if (event.providerOptions !== undefined) {
+                    stepThinkingProviderOptions = event.providerOptions;
+                  }
                   queue.push({
                     type: 'thinking_delta',
                     id: this.newId(),
@@ -1517,7 +1524,7 @@ export class AiSdkBackend implements AgentBackend {
 
           finishReason = (await result.finishReason.catch(() => 'stop')) ?? 'stop';
           rawFinishReason = rawFinishReason ?? finishReason;
-          await waitForDurableQueueBoundary();
+          await queue.waitUntilConsumedThroughCurrent();
 
           if (returnedToolCalls.length > 0) {
             const continuationBudgetRemains =
@@ -1574,7 +1581,7 @@ export class AiSdkBackend implements AgentBackend {
                 this.handlePlanToolResult(settlement.result, turnId, queue);
               }
             }
-            await waitForDurableQueueBoundary();
+            await queue.waitUntilConsumedThroughCurrent();
             for (let index = 0; index < returnedToolCalls.length; index += 1) {
               const toolCall = returnedToolCalls[index];
               const settlement = settlements[index];
@@ -2345,7 +2352,7 @@ export class AiSdkBackend implements AgentBackend {
     for (const item of plan.items) {
       if (item.kind === 'tool_call' && !support.toolCalls) return false;
       if (item.kind === 'tool_result' && !support.toolResults) return false;
-      if (item.kind === 'thinking' && (!support.signedThinking || !item.signature)) return false;
+      if (item.kind === 'thinking' && item.signature && !support.signedThinking) return false;
     }
     return true;
   }
@@ -2378,11 +2385,28 @@ export class AiSdkBackend implements AgentBackend {
     const reasoningByStep = new Map<string, ThinkingItem>();
     const textByStep = new Map<string, string>();
 
-    const reasoningPart = (item: ThinkingItem) => ({
-      type: 'reasoning' as const,
-      text: item.text,
-      providerOptions: { anthropic: { signature: item.signature } },
-    });
+    const replaySupport = this.modelAdapter.runtimeEventReplaySupport();
+    const reasoningReplay = (item: ThinkingItem) => {
+      if (item.signature) {
+        return replaySupport.signedThinking
+          ? {
+              part: {
+                type: 'reasoning' as const,
+                text: item.text,
+                providerOptions: { anthropic: { signature: item.signature } },
+              },
+            }
+          : undefined;
+      }
+      if (!replaySupport.unsignedThinking) return undefined;
+      const kimiReasoningField = kimiReasoningFieldFromProviderOptions(item.providerOptions);
+      if (!kimiReasoningField) return undefined;
+      return {
+        providerOptions: {
+          openaiCompatible: { [kimiReasoningField]: item.text },
+        } as NonNullable<ModelMessage['providerOptions']>,
+      };
+    };
     // Tool results are emitted only when their tool_call claims them here. A
     // result whose call never appears in the plan (sliced-away call, corrupt
     // ledger) is INTENTIONALLY dropped at the end: a standalone tool message
@@ -2423,7 +2447,8 @@ export class AiSdkBackend implements AgentBackend {
       calls: readonly ToolCallItem[],
     ) => {
       const content: unknown[] = [];
-      if (reasoning) content.push(reasoningPart(reasoning));
+      const replayReasoning = reasoning ? reasoningReplay(reasoning) : undefined;
+      if (replayReasoning?.part) content.push(replayReasoning.part);
       if (text.length > 0) content.push({ type: 'text', text });
       for (const call of calls) {
         content.push({
@@ -2434,7 +2459,15 @@ export class AiSdkBackend implements AgentBackend {
           ...(call.providerOptions !== undefined ? { providerOptions: call.providerOptions } : {}),
         });
       }
-      if (content.length > 0) out.push({ role: 'assistant', content } as ModelMessage);
+      if (content.length > 0 || replayReasoning?.providerOptions) {
+        out.push({
+          role: 'assistant',
+          content,
+          ...(replayReasoning?.providerOptions
+            ? { providerOptions: replayReasoning.providerOptions }
+            : {}),
+        } as ModelMessage);
+      }
       await pushToolResults(calls);
     };
     // Emit tool calls no assistant text closed: a thinking + tool step with no
@@ -2470,6 +2503,19 @@ export class AiSdkBackend implements AgentBackend {
       bufferedCalls = [];
       await emitGroupedCalls(calls);
     };
+    const flushPendingSteps = async () => {
+      await flushLooseCalls();
+      for (const [stepId, text] of textByStep) {
+        textByStep.delete(stepId);
+        const reasoning = reasoningByStep.get(stepId);
+        reasoningByStep.delete(stepId);
+        await emitStep(reasoning, text, []);
+      }
+      for (const [stepId, reasoning] of reasoningByStep) {
+        reasoningByStep.delete(stepId);
+        await emitStep(reasoning, '', []);
+      }
+    };
 
     for (const item of plan.items) {
       switch (item.kind) {
@@ -2484,13 +2530,22 @@ export class AiSdkBackend implements AgentBackend {
             reasoningByStep.set(item.stepId, item);
           } else {
             // Legacy standalone reasoning (pure-reasoning turn): emit on its own.
-            await flushLooseCalls();
-            out.push({ role: 'assistant', content: [reasoningPart(item)] } as ModelMessage);
+            await flushPendingSteps();
+            const replayReasoning = reasoningReplay(item);
+            if (replayReasoning) {
+              out.push({
+                role: 'assistant',
+                content: replayReasoning.part ? [replayReasoning.part] : [],
+                ...(replayReasoning.providerOptions
+                  ? { providerOptions: replayReasoning.providerOptions }
+                  : {}),
+              } as ModelMessage);
+            }
           }
           break;
         case 'text':
           if (item.role !== 'assistant') {
-            await flushLooseCalls();
+            await flushPendingSteps();
             out.push(await this.materializeRuntimeReplayItem(item));
             break;
           }
@@ -2513,21 +2568,13 @@ export class AiSdkBackend implements AgentBackend {
             }
           } else {
             // Legacy per-turn assistant text: standalone after any tool block.
-            await flushLooseCalls();
+            await flushPendingSteps();
             out.push({ role: 'assistant', content: item.content });
           }
           break;
       }
     }
-    await flushLooseCalls();
-    for (const [stepId, text] of textByStep) {
-      await emitStep(reasoningByStep.get(stepId), text, []);
-      reasoningByStep.delete(stepId);
-    }
-    // Any reasoning whose closing text never arrived (defensive): emit standalone.
-    for (const reasoning of reasoningByStep.values()) {
-      out.push({ role: 'assistant', content: [reasoningPart(reasoning)] } as ModelMessage);
-    }
+    await flushPendingSteps();
     return out;
   }
 
@@ -2579,7 +2626,16 @@ export class AiSdkBackend implements AgentBackend {
         // still presents steering exactly once, in its one provider form.
         const sidecar = steeringSidecar?.get(m.id);
         if (sidecar) {
-          out.push(steeringModelMessage(sidecar.eventId, formatTextWithInlineRefs(m.text, m)));
+          out.push(
+            steeringModelMessage(
+              sidecar.eventId,
+              await this.appendImageParts(
+                buildSteeringEnvelope(formatTextWithInlineRefs(m.text, m)),
+                m.attachments,
+                `steering:${sidecar.eventId}`,
+              ),
+            ),
+          );
           continue;
         }
         out.push({
@@ -2637,7 +2693,7 @@ export class AiSdkBackend implements AgentBackend {
     textContent: string,
     attachments?: AttachmentRef[],
     decisionKeyPrefix?: string,
-  ): Promise<ModelMessage['content']> {
+  ): Promise<UserContent> {
     const images = attachments?.filter((a) => a.kind === 'image') ?? [];
     if (images.length === 0) {
       return textContent;
@@ -2680,7 +2736,7 @@ export class AiSdkBackend implements AgentBackend {
         text: `[${omittedByBudget} image attachment(s) omitted: the per-request image budget was exceeded. Earlier images were sent; ask the user to send fewer or smaller images.]`,
       });
     }
-    return parts as ModelMessage['content'];
+    return parts;
   }
 
   private async materializeToolResultOutput(
@@ -2729,7 +2785,7 @@ export class AiSdkBackend implements AgentBackend {
     attachments?: AttachmentRef[],
     quotes?: QuoteRef[],
     runtimeEventId?: string,
-  ): Promise<ModelMessage['content']> {
+  ): Promise<UserContent> {
     return this.appendImageParts(
       formatTextWithInlineRefs(text, {
         ...(attachments !== undefined ? { attachments } : {}),
@@ -2853,26 +2909,33 @@ export class AiSdkBackend implements AgentBackend {
         if (queue.consumerDetached) {
           throw new Error('steering message was not durably consumed: event consumer detached');
         }
+        // Materialize provider content before publishing the durable event.
+        // After consumption there must be no fallible gap before ack/injection.
         const eventId = this.newId();
-        queue.push({
+        const providerContent = await this.appendImageParts(
+          buildSteeringEnvelope(formatTextWithInlineRefs(lease.content.text, lease.content)),
+          lease.content.attachments,
+          `steering:${eventId}`,
+        );
+        if (this.aborted || abortSignal?.aborted) {
+          throw Object.assign(new Error('aborted before steering was pushed'), {
+            name: 'AbortError',
+          });
+        }
+        if (queue.consumerDetached) {
+          throw new Error('steering message was not durably consumed: event consumer detached');
+        }
+        await queue.pushAndWaitUntilConsumed({
           type: 'steering_message',
           id: eventId,
           turnId,
           ts: this.now(),
-          messageId: this.newId(),
-          text: lease.text,
+          messageId: lease.messageId,
+          content: lease.content,
         } satisfies SessionEvent);
-        const pushedThrough = queue.pushedCount;
-        for (;;) {
-          if (queue.consumedCount >= pushedThrough) break;
-          if (queue.consumerDetached) {
-            throw new Error('steering message was not durably consumed: event consumer detached');
-          }
-          await queue.waitForProgress();
-        }
         // The mapped RuntimeEvent inherits this session event's id, so the
         // injected message and its future ledger replay share one identity.
-        this.injectedSteeringMessages.push(steeringModelMessage(eventId, lease.text));
+        this.injectedSteeringMessages.push(steeringModelMessage(eventId, providerContent));
         input.ackSteering?.([lease.id]);
         undelivered.shift();
         if (this.aborted || abortSignal?.aborted) {

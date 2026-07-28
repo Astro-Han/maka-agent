@@ -153,8 +153,8 @@ type ShellCopy = {
     responseFailedTitle: string;
     responseFailedFallback: string;
     refreshFailedTitle: string;
-    quickChatFailedTitle: string;
-    quickChatFailedFallback: string;
+    sessionStartFailedTitle: string;
+    sessionStartFailedFallback: string;
     expertTeamFailedTitle: string;
     expertTeamFailedFallback: string;
     expertTeamNotFound: string;
@@ -300,7 +300,7 @@ type ShellCopy = {
       'not_managed' | 'source_missing' | 'metadata_error' | 'blocked_path' | 'read_failed',
       string
     >;
-    deleteFailures: Record<'not_found' | 'blocked_path' | 'delete_failed', string>;
+    deleteFailures: Record<'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed', string>;
     runtimeFailures: Record<'not_found' | 'blocked_path' | 'state_error' | 'write_failed', string>;
   };
   sessionSettingsActions: {
@@ -406,6 +406,12 @@ type ShellCopy = {
     resizeConversationList: string;
     skipErrorTitle: string;
     tryAgainLater: string;
+    updateInstallFailedTitle: string;
+    updateInstallFailedFallback: string;
+    updateInstallManualFallback: string;
+    updateDownloadFailedTitle: string;
+    updateOpenFailedTitle: string;
+    updateOpenManualFallback: string;
     loading: string;
     goToModels: string;
     permissionModeChanging: string;
@@ -695,8 +701,8 @@ const SHELL_COPY_BY_LOCALE = {
       responseFailedTitle: '响应失败',
       responseFailedFallback: '会话操作失败，请稍后重试。',
       refreshFailedTitle: '刷新对话失败',
-      quickChatFailedTitle: '开始对话失败',
-      quickChatFailedFallback: '对话暂时无法开始，请稍后重试。',
+      sessionStartFailedTitle: '开始对话失败',
+      sessionStartFailedFallback: '对话暂时无法开始，请稍后重试。',
       expertTeamFailedTitle: '开始专家团失败',
       expertTeamFailedFallback: '专家团暂时无法开始，请稍后重试。',
       expertTeamNotFound: '找不到该专家团。',
@@ -841,7 +847,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailedTitle: '无法删除 Skill',
       deleteFallback: '无法删除 Skill，请稍后重试。',
       deletedTitle: '已删除 Skill',
-      deletedDescription: (id: string) => `${id} 已从当前工作区移除。`,
+      deletedDescription: (id: string) => `${id} 已移除。`,
       openFailedTitle: '无法打开 Skill',
       openFallback: '无法打开 Skill，请稍后重试。',
       createFailures: {
@@ -888,6 +894,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailures: {
         not_found: '当前工作区找不到这个 Skill。',
         blocked_path: 'Skill 路径不允许删除。',
+        blocked_scope: '项目内的 Skill 由仓库管理，请直接在项目里删除。',
         delete_failed: '删除 Skill 失败，请检查文件权限。',
       },
       runtimeFailures: {
@@ -1086,6 +1093,12 @@ const SHELL_COPY_BY_LOCALE = {
       resizeConversationList: '调整对话列表宽度',
       skipErrorTitle: '跳过失败',
       tryAgainLater: '请稍后重试。',
+      updateInstallFailedTitle: '无法安装更新',
+      updateInstallFailedFallback: '请稍后重试。',
+      updateInstallManualFallback: '请稍后重试，或手动下载最新版本。',
+      updateDownloadFailedTitle: '无法下载更新',
+      updateOpenFailedTitle: '无法打开更新',
+      updateOpenManualFallback: '请稍后重试，或前往 GitHub Releases 下载最新版本。',
       loading: '加载中',
       goToModels: '去模型',
       permissionModeChanging: '权限模式正在切换，完成后再继续操作。',
@@ -1162,8 +1175,8 @@ const SHELL_COPY_BY_LOCALE = {
       responseFailedTitle: 'Response failed',
       responseFailedFallback: 'The conversation action failed. Try again later.',
       refreshFailedTitle: 'Could not refresh conversation',
-      quickChatFailedTitle: 'Could not start conversation',
-      quickChatFailedFallback: 'The conversation could not be started. Try again later.',
+      sessionStartFailedTitle: 'Could not start conversation',
+      sessionStartFailedFallback: 'The conversation could not be started. Try again later.',
       expertTeamFailedTitle: 'Could not start expert team',
       expertTeamFailedFallback: 'The expert team could not be started. Try again later.',
       expertTeamNotFound: 'That expert team could not be found.',
@@ -1310,7 +1323,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailedTitle: 'Could not delete Skill',
       deleteFallback: 'The Skill could not be deleted. Try again later.',
       deletedTitle: 'Skill deleted',
-      deletedDescription: (id: string) => `${id} was removed from the current workspace.`,
+      deletedDescription: (id: string) => `${id} was removed.`,
       openFailedTitle: 'Could not open Skill',
       openFallback: 'The Skill could not be opened. Try again later.',
       createFailures: {
@@ -1358,6 +1371,7 @@ const SHELL_COPY_BY_LOCALE = {
       deleteFailures: {
         not_found: 'This Skill was not found in the current workspace.',
         blocked_path: 'The Skill path cannot be deleted.',
+        blocked_scope: 'Project Skills are managed by the repository. Delete it from the project instead.',
         delete_failed: 'The Skill could not be deleted. Check file permissions.',
       },
       runtimeFailures: {
@@ -1595,6 +1609,12 @@ const SHELL_COPY_BY_LOCALE = {
       resizeConversationList: 'Resize conversation list',
       skipErrorTitle: 'Could not skip onboarding',
       tryAgainLater: 'Try again later.',
+      updateInstallFailedTitle: 'Could not install update',
+      updateInstallFailedFallback: 'Try again later.',
+      updateInstallManualFallback: 'Try again later, or download the latest version manually.',
+      updateDownloadFailedTitle: 'Could not download update',
+      updateOpenFailedTitle: 'Could not open update',
+      updateOpenManualFallback: 'Try again later, or download the latest version from GitHub Releases.',
       loading: 'Loading',
       goToModels: 'Go to Models',
       permissionModeChanging: 'The permission mode is changing. Wait for it to finish before continuing.',

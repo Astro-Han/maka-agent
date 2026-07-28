@@ -40,6 +40,11 @@ const fakeConfig: Config = {
   llmConnectionSlug: 'fake',
   model: 'fake-model',
 };
+const agentToolsConfig: Config = {
+  ...fakeConfig,
+  backend: 'ai-sdk',
+  agentTools: true,
+};
 
 const registerFakeBackend = (registry: BackendRegistry): void => {
   registry.register(
@@ -77,6 +82,15 @@ class ReportingBackend implements AgentBackend {
       modelId: this.ctx.header.model,
     });
     yield { type: 'text_complete', id: 'report-text', turnId, ts, messageId, text: 'done' };
+    yield {
+      type: 'tool_start',
+      id: 'report-tool-start',
+      turnId,
+      ts,
+      toolUseId: 'tool-1',
+      toolName: 'bash',
+      args: { command: 'printf artifact' },
+    };
     yield {
       type: 'tool_result',
       id: 'report-artifact',
@@ -214,6 +228,58 @@ class ChildCapabilityBackend implements AgentBackend {
     yield {
       type: 'complete',
       id: 'capability-parent-complete',
+      turnId: input.turnId,
+      ts: Date.now(),
+      stopReason: 'end_turn',
+    };
+  }
+
+  async stop(): Promise<void> {}
+  async respondToPermission(_decision: PermissionDecision): Promise<void> {}
+  async dispose(): Promise<void> {}
+}
+
+class ChildAdmissionProbeBackend implements AgentBackend {
+  readonly kind: BackendKind = 'ai-sdk';
+  readonly sessionId: string;
+
+  constructor(
+    sessionId: string,
+    private readonly context: HeadlessBackendContext,
+    private readonly observed: { spawned?: boolean; error?: string },
+  ) {
+    this.sessionId = sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    assert.ok(this.context.spawnChildSession);
+    assert.ok(input.runId);
+    try {
+      await this.context.spawnChildSession(this.sessionId, {
+        spawnedBy: {
+          parentRunId: input.runId,
+          parentTurnId: input.turnId,
+          toolCallId: 'child-admission-probe',
+        },
+        agentProfile: 'local_read',
+        prompt: 'inspect the task workspace',
+      });
+      this.observed.spawned = true;
+    } catch (error) {
+      this.observed.spawned = false;
+      this.observed.error = error instanceof Error ? error.message : String(error);
+    }
+    yield {
+      type: 'text_complete',
+      id: 'child-admission-probe-text',
+      turnId: input.turnId,
+      ts: Date.now(),
+      messageId: 'child-admission-probe-message',
+      text: 'child admission checked',
+    };
+    yield {
+      type: 'complete',
+      id: 'child-admission-probe-complete',
       turnId: input.turnId,
       ts: Date.now(),
       stopReason: 'end_turn',
@@ -1156,6 +1222,96 @@ async function readAgentRunHeader(
 }
 
 describe('runTaskOnce', () => {
+  test('gives task-run backends the authoritative current-run event reader', async () => {
+    await withDirs(async (fixtureDir, storageRoot) => {
+      let loadTurnRuntimeEvents: ((turnId: string) => Promise<RuntimeEvent[]>) | undefined;
+      const task: Task = {
+        id: 'runtime-event-reader-task',
+        instruction: 'do the thing',
+        workspaceDir: fixtureDir,
+        verification: { command: 'true', protectedPaths: [] },
+      };
+
+      const result = await runTaskOnce({ ...fakeConfig, backend: 'ai-sdk' }, task, {
+        storageRoot,
+        registerBackends: (registry) => {
+          registry.register('ai-sdk', (ctx) => {
+            loadTurnRuntimeEvents = ctx.loadTurnRuntimeEvents;
+            return new ReportingBackend({
+              sessionId: ctx.sessionId,
+              header: ctx.header,
+              store: ctx.store,
+            });
+          });
+        },
+        realBackendIsolation: { kind: 'external', label: 'unit isolation' },
+      });
+
+      assert.ok(loadTurnRuntimeEvents);
+      const events = await loadTurnRuntimeEvents(latestInvocation(result).turnId);
+      assert.ok(
+        events.some(
+          (event) =>
+            event.role === 'user' &&
+            event.content?.kind === 'text' &&
+            event.content.text === task.instruction,
+        ),
+      );
+      assert.ok(events.some((event) => event.status === 'completed'));
+    });
+  });
+
+  test('does not provision child tools when Agent tools are disabled by default', async () => {
+    await withDirs(async (fixtureDir, storageRoot) => {
+      const observed: { spawned?: boolean; error?: string } = {};
+      let buildCount = 0;
+      const task: Task = {
+        id: 'disabled-child-capability-task',
+        instruction: 'do the thing',
+        workspaceDir: fixtureDir,
+        verification: { command: 'true', protectedPaths: [] },
+      };
+
+      const result = await runTaskOnce({ ...fakeConfig, backend: 'ai-sdk' }, task, {
+        storageRoot,
+        registerBackends: (registry, context) => {
+          registry.register('ai-sdk', (ctx) => {
+            buildCount += 1;
+            if (buildCount === 1) {
+              return new ChildAdmissionProbeBackend(ctx.sessionId, context, observed);
+            }
+            return new FakeBackend({
+              sessionId: ctx.sessionId,
+              header: ctx.header,
+              store: ctx.store,
+            });
+          });
+        },
+        realBackendIsolation: {
+          kind: 'external',
+          label: 'unit isolated executor',
+          toolExecutor: {
+            async exec() {
+              return { exitCode: 0, stdout: '', stderr: '' };
+            },
+          },
+        },
+      });
+
+      assert.equal(observed.spawned, false);
+      assert.match(observed.error ?? '', /missing tools/i);
+      assert.equal(buildCount, 1);
+      assert.ok(
+        !result.projection.toolExecutors[0]?.toolNames.some((name) => name.startsWith('agent_')),
+      );
+      assert.equal(
+        result.resultRecord.status,
+        'completed',
+        JSON.stringify(result.resultRecord, null, 2),
+      );
+    });
+  });
+
   test('lets a task-run backend spawn, list, and read a linked child session', async () => {
     await withDirs(async (fixtureDir, storageRoot) => {
       const observed: {
@@ -1173,7 +1329,7 @@ describe('runTaskOnce', () => {
         verification: { command: 'true', protectedPaths: [] },
       };
 
-      const result = await runTaskOnce({ ...fakeConfig, backend: 'ai-sdk' }, task, {
+      const result = await runTaskOnce(agentToolsConfig, task, {
         storageRoot,
         registerBackends: (registry, context) => {
           registry.register('ai-sdk', (ctx) => {
@@ -1210,6 +1366,9 @@ describe('runTaskOnce', () => {
       assert.ok(observed.childSessionId);
       assert.deepEqual(observed.listedSessionIds, [observed.childSessionId]);
       assert.equal(observed.outputSessionId, observed.childSessionId);
+      for (const toolName of ['agent_spawn', 'agent_swarm', 'agent_list', 'agent_output']) {
+        assert.ok(result.projection.toolExecutors[0]?.toolNames.includes(toolName));
+      }
     });
   });
 
@@ -1230,7 +1389,7 @@ describe('runTaskOnce', () => {
         verification: { command: 'true', protectedPaths: [] },
       };
 
-      const result = await runTaskOnce({ ...fakeConfig, backend: 'ai-sdk' }, task, {
+      const result = await runTaskOnce(agentToolsConfig, task, {
         storageRoot,
         registerBackends: (registry, context) => {
           registry.register('ai-sdk', (ctx) => {
@@ -1299,7 +1458,7 @@ describe('runTaskOnce', () => {
         verification: { command: 'true', protectedPaths: [] },
       };
 
-      const run = runTaskOnce({ ...fakeConfig, backend: 'ai-sdk' }, task, {
+      const run = runTaskOnce(agentToolsConfig, task, {
         storageRoot,
         registerBackends: (registry, context) => {
           registry.register('ai-sdk', (ctx) => {
@@ -1338,7 +1497,7 @@ describe('runTaskOnce', () => {
           assert.equal(error, cleanupError);
           return true;
         });
-        assert.equal(childBackend?.stopCalls, 2);
+        assert.equal(childBackend?.stopCalls, 1);
       } finally {
         childBackend?.finishForTest();
         await childPromise;
@@ -1366,7 +1525,7 @@ describe('runTaskOnce', () => {
         verification: { command: 'true', protectedPaths: [] },
       };
 
-      const run = runTaskOnce({ ...fakeConfig, backend: 'ai-sdk' }, task, {
+      const run = runTaskOnce(agentToolsConfig, task, {
         storageRoot,
         registerBackends: (registry, context) => {
           registry.register('ai-sdk', (ctx) => {
@@ -1447,7 +1606,7 @@ describe('runTaskOnce', () => {
         verification: { command: 'true', protectedPaths: [] },
       };
 
-      const run = runTaskOnce({ ...fakeConfig, backend: 'ai-sdk' }, task, {
+      const run = runTaskOnce(agentToolsConfig, task, {
         storageRoot,
         registerBackends: (registry, context) => {
           registry.register('ai-sdk', (ctx) => {
@@ -1576,7 +1735,7 @@ describe('runTaskOnce', () => {
         },
         now: () => 0,
         deadlineAtMs: 100,
-      }).runOnce({ ...fakeConfig, backend: 'ai-sdk' }, task);
+      }).runOnce(agentToolsConfig, task);
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       try {
         await childStarted;
@@ -1598,7 +1757,7 @@ describe('runTaskOnce', () => {
             return true;
           },
         );
-        assert.equal(childBackend?.stopCalls, 2);
+        assert.equal(childBackend?.stopCalls, 1);
       } finally {
         if (watchdog) realClearTimeout(watchdog);
         childBackend?.finishForTest();
@@ -2377,6 +2536,43 @@ describe('runTaskOnce', () => {
         | { snapshotPath?: string }
         | undefined;
       assert.ok(snapshot?.snapshotPath, 'expected submitted snapshot metadata in score details');
+      assert.equal(
+        await readFile(join(snapshot.snapshotPath, 'check.mjs'), 'utf8'),
+        'process.exit(0);\n',
+      );
+    });
+  });
+
+  test('persists the submitted snapshot from an explicitly owned external workspace', async () => {
+    await withDirs(async (fixtureDir, storageRoot) => {
+      const externalWorkspaceDir = await mkdtemp(join(storageRoot, 'external-workspace-'));
+      const submittedSnapshotRoot = join(storageRoot, 'submitted-snapshots');
+      await writeFile(join(fixtureDir, 'check.mjs'), 'fixture copy\n', 'utf8');
+      await writeFile(join(externalWorkspaceDir, 'check.mjs'), 'external copy\n', 'utf8');
+      const task: Task = {
+        id: 'external-workspace-snapshot',
+        instruction: 'modify the external workspace',
+        workspaceDir: fixtureDir,
+        verification: { command: 'true', protectedPaths: [] },
+      };
+
+      const result = await runTaskOnce(fakeConfig, task, {
+        storageRoot,
+        registerBackends: registerProtectedTamperBackend,
+        realBackendIsolation: {
+          kind: 'external',
+          label: 'locally accessible task container',
+          workspaceDir: externalWorkspaceDir,
+          submittedSnapshotRoot,
+        },
+      });
+
+      const snapshot = result.projection.latestScoreResult?.details?.submittedSnapshot as
+        | { snapshotPath?: string; workspaceRoot?: string }
+        | undefined;
+      assert.ok(snapshot?.snapshotPath, 'expected persisted external submitted snapshot');
+      assert.equal(snapshot.workspaceRoot, externalWorkspaceDir);
+      assert.match(snapshot.snapshotPath, new RegExp(`^${submittedSnapshotRoot}`));
       assert.equal(
         await readFile(join(snapshot.snapshotPath, 'check.mjs'), 'utf8'),
         'process.exit(0);\n',

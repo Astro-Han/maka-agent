@@ -25,17 +25,31 @@ const allowedHostExternalImports = new Set([
 const allowedServerExternalImports = new Set([
   ...allowedHostExternalImports,
   '@maka/core/agent-run',
+  '@maka/core/backend-types',
+  '@maka/core/events',
+  '@maka/core/interaction',
   '@maka/core/runtime-policy',
   '@maka/core/runtime-event',
   '@maka/core/session',
+  '@maka/core/task-ledger',
   '@maka/runtime',
   '@maka/storage/agent-graph-control-store',
   '@maka/storage/execution-stores',
+  '@maka/storage/interaction-store',
   '@maka/storage/runtime-policy-stores',
+  '@maka/storage/task-ledger-authority',
+  'node:async_hooks',
 ]);
 const allowedExternalImports = {
   client: allowedHostExternalImports,
-  protocol: new Set(['@maka/core/runtime-policy', 'node:util']),
+  protocol: new Set([
+    '@maka/core/attachments',
+    '@maka/core/events',
+    '@maka/core/interaction',
+    '@maka/core/runtime-policy',
+    '@maka/core/task-ledger',
+    'node:util',
+  ]),
 } as const;
 
 async function dependencyScannerFixture(target: string): Promise<void> {
@@ -126,6 +140,8 @@ test('the production Candidate dependency graph remains non-serving', () => {
     'server/execution-composition.ts',
     'server/root-turn-coordinator.ts',
     'server/runtime-policy-coordinator.ts',
+    'server/session-continuity-coordinator.ts',
+    'server/task-ledger-coordinator.ts',
   ]);
   const violations: string[] = [];
   for (const path of reached) {
@@ -135,7 +151,8 @@ test('the production Candidate dependency graph remains non-serving', () => {
       if (
         specifier === '@maka/runtime' ||
         specifier === '@maka/storage/execution-stores' ||
-        specifier === '@maka/storage/runtime-policy-stores'
+        specifier === '@maka/storage/runtime-policy-stores' ||
+        specifier === '@maka/storage/task-ledger-authority'
       ) {
         violations.push(`${localPath}: ${specifier}`);
       }
@@ -152,6 +169,7 @@ test('the public server entrypoint does not expose the test execution compositio
     'server/execution-candidate.ts',
     'server/execution-composition.ts',
     'server/root-turn-coordinator.ts',
+    'server/session-continuity-coordinator.ts',
   ]);
   assert.deepEqual(
     reachableModules(serverEntrypoint, publicEntrypoints)

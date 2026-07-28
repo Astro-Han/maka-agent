@@ -8,13 +8,8 @@ import { AppShellTopbarActions, AppShellWorkspaceTopActions } from '../src/rende
 
 const NOW = Date.UTC(2026, 6, 1, 9, 30, 0);
 
-// FIDELITY CONVENTION — every story in this file must map to an app state a
-// real user can reach, with the path noted above the story. A story that
-// composes an unreachable state (or a state that requires different app
-// data than shown) lies about the product, and every visual comparison or
-// review built on it is wrong. If the app changes so a story no longer
-// matches a reachable state, fix the story or delete it — do not keep both
-// "the app" and "the story version" of a surface alive.
+// Fidelity convention (#1433): every story below names the real app path
+// that reaches it. See apps/desktop/stories/FIDELITY.md.
 
 const meta = {
   title: 'Product/Shell Child Composition',
@@ -149,10 +144,10 @@ const baseComposerProps: ComposerProps = {
 	  },
 };
 
-function ShellFrame(props: { children: ReactNode }) {
+function ShellFrame(props: { children: ReactNode; motionEnabled?: boolean }) {
   return (
     <div
-      data-maka-e2e-fixture="true"
+      data-maka-e2e-fixture={props.motionEnabled ? undefined : 'true'}
       style={{ background: 'var(--surface-canvas)', height: '100%', minHeight: 640 }}
     >
       {props.children}
@@ -182,10 +177,11 @@ function ComposedShell(props: {
   chat?: Partial<ChatViewProps>;
   composer?: Partial<ComposerProps>;
   detailChildren?: ReactNode;
+  motionEnabled?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(props.sidebarCollapsed ?? false);
   const [viewMode, setViewMode] = useState<SessionViewMode>('conversation');
-  const sidebarWidth = collapsed ? 0 : 260;
+  const sidebarWidth = 260;
   const sessions = sidebarSessions.map((s) =>
     s.id === activeSession.id && (props.session?.status || props.session?.blockedReason)
       ? { ...s, status: props.session.status ?? s.status, blockedReason: props.session.blockedReason ?? s.blockedReason }
@@ -200,12 +196,12 @@ function ComposedShell(props: {
   ];
 
   return (
-    <ShellFrame>
+    <ShellFrame motionEnabled={props.motionEnabled}>
       <div
         className="app maka-shell-2col agents-layout-body"
         data-sidebar-state={collapsed ? 'collapsed' : 'expanded'}
         style={{
-          ['--maka-session-list-width' as string]: `${sidebarWidth}px`,
+          ['--maka-session-list-expanded-width' as string]: `${sidebarWidth}px`,
           ['--maka-resize-handle-width' as string]: '0px',
           height: '100%',
         }}
@@ -222,23 +218,25 @@ function ComposedShell(props: {
             column. When collapsed, keep the sidebar mounted (production
             hides it via the data-sidebar-state CSS) so auto-placement
             stays aligned. */}
-        <div className="maka-panel maka-panel-list maka-floating-panel">
-          {!collapsed && (
-            <SessionListPanel
-              selection={{ section: 'sessions', filter: 'chats' }}
-              sessions={sessions}
-              activeId={active.id}
-              groups={viewMode === 'project' ? projectGroups : undefined}
-              streamingSessionIds={streamingIds}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
-              onSelect={noop}
-              onSelectSession={noop}
-              onOpenSettings={noop}
-              onNew={noop}
-              rowActions={sidebarRowActions}
-            />
-          )}
+        <div
+          className="maka-panel maka-panel-list maka-floating-panel"
+          aria-hidden={collapsed ? 'true' : undefined}
+          inert={collapsed ? true : undefined}
+        >
+          <SessionListPanel
+            selection={{ section: 'sessions', filter: 'chats' }}
+            sessions={sessions}
+            activeId={active.id}
+            groups={viewMode === 'project' ? projectGroups : undefined}
+            streamingSessionIds={streamingIds}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            onSelect={noop}
+            onSelectSession={noop}
+            onOpenSettings={noop}
+            onNew={noop}
+            rowActions={sidebarRowActions}
+          />
         </div>
         <div className="maka-resize-handle" aria-hidden="true" />
         <div
@@ -285,6 +283,13 @@ export const DefaultLayout: Story = {
 // (topbar toggle).
 export const CollapsedSidebar: Story = {
   render: () => <ComposedShell sidebarCollapsed />,
+};
+
+// Real path: returning user opens any session → toggle the topbar sidebar
+// control. This interaction-only companion keeps real transition durations
+// without weakening deterministic screenshot states elsewhere.
+export const SidebarMotion: Story = {
+  render: () => <ComposedShell motionEnabled />,
 };
 
 // Real path: send a message → the turn is streaming (composer shows the
@@ -337,12 +342,21 @@ export const SwarmModeActive: Story = {
   render: () => <ComposedShell composer={{ swarmModeActive: true }} />,
 };
 
-// Real path: returning user with session history → start a new chat (or
-// open a session with no messages yet). This is the DAILY empty home:
-// ChatView falls back to its built-in EmptyChatHero (greeting + composer). Do NOT render OnboardingHero here —
-// app-shell only shows it when sessions.length === 0 (first run), and those
-// states are covered by Product/Onboarding. Presenting the first-run hero as
-// the daily home makes every visual comparison against this story wrong.
+// Real path: any user with onboarding finished → start a new chat, or open a
+// session with no messages yet. This is the ONLY empty home: ChatView falls
+// back to its built-in EmptyChatHero (greeting + composer). Do NOT render
+// OnboardingHero here — #1433 narrowed the hero's gate to unfinished setup, so
+// a configured user with zero sessions now lands on this same empty chat, not
+// on a first-run screen. The setup states are covered by Product/Onboarding;
+// presenting one of them as the empty home makes every comparison against this
+// story wrong.
+//
+// Scope: the chat surface, not the whole shell. ComposedShell always projects
+// one active session across the sidebar, header and composer so those three
+// cannot disagree, so what this story shows is the empty chat WITH history
+// present. The zero-session shell differs only in the sidebar; a story for it
+// would mean making the active session optional throughout ComposedShell, and
+// nothing renders differently in the detail pane.
 export const EmptyHome: Story = {
   render: () => <ComposedShell chat={{ messages: [] }} />,
 };

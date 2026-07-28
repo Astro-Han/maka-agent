@@ -30,9 +30,10 @@ import {
   formatSyntheticToolErrorText,
   normalizeAiSdkUsage,
   repairMakaToolCall,
+  type AiSdkBackendInput,
   type RunTraceEvent,
 } from '../ai-sdk-backend.js';
-import type { MakaTool, ToolRuntime } from '../tool-runtime.js';
+import type { DurableSessionEventSink, MakaTool, ToolRuntime } from '../tool-runtime.js';
 import { LOAD_TOOLS_NAME } from '../tool-availability.js';
 import { PermissionEngine } from '../permission-engine.js';
 import {
@@ -66,6 +67,10 @@ import type { AutoApprovalReviewContext } from '../approval-reviewer.js';
 import type { SandboxDiagnosticsSnapshot } from '../sandbox/diagnostics.js';
 import { SandboxCommandError } from '../sandbox/errors.js';
 import { RunTrace } from '../run-trace.js';
+import {
+  bindRuntimeInteractionRun,
+  type RuntimeInteractionRunOwner,
+} from '../interaction-authority.js';
 import type {
   ProviderRequestAttemptRecord,
   ProviderRequestCaptureRecord,
@@ -149,6 +154,166 @@ describe('AiSdkBackend model history', () => {
       commandSandboxSelectionReason: 'platform_sandbox_selected',
       filesystemSandboxSelectionReason: 'platform_sandbox_selected',
     });
+  });
+
+  test('does not start hosted automatic review before durable admission', async () => {
+    const admissionStarted = makeGate();
+    const allowAdmission = makeGate();
+    const durable = durableTurnHarness('turn-1', 'write');
+    let reviewStarted = false;
+    const binding = await hostedInteractionBinding({
+      acceptPermissionRequest: async () => {
+        admissionStarted.release();
+        await allowAdmission.promise;
+        return { state: 'pending' };
+      },
+    });
+    const events: SessionEvent[] = [];
+    const messages: StoredMessage[] = [];
+    const model = singlePermissionToolModel();
+    let implementationSawDurableAnswer = false;
+    const backend = new AiSdkBackend({
+      sessionId: 'session-1',
+      header: header('execute'),
+      appendMessage: async (message) => {
+        messages.push(message);
+      },
+      connection: connection(),
+      apiKey: 'sk-test',
+      modelId: 'mock-model-id',
+      permissionEngine: new PermissionEngine({ newId: idGenerator(), now: () => 1 }),
+      autoApprovalReviewer: {
+        review: async () => {
+          reviewStarted = true;
+          return { outcome: 'allow', riskLevel: 'low', rationale: 'admitted' };
+        },
+      },
+      modelFactory: () => model,
+      tools: [
+        permissionTool(() => {
+          implementationSawDurableAnswer = durable.ledger.some(
+            (event) => event.actions?.permissionAnswerAccepted !== undefined,
+          );
+        }),
+      ],
+      loadTurnRuntimeEvents: durable.loadTurnRuntimeEvents,
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    const running = collectEvents(
+      backend.send(
+        durable.input({
+          runId: 'run-1',
+          hostedInteraction: binding,
+        }),
+      ),
+      events,
+      durable.record,
+    );
+    await admissionStarted.promise;
+    await Promise.resolve();
+    assert.equal(reviewStarted, false);
+    assert.equal(
+      events.some((event) => event.type === 'permission_request'),
+      false,
+    );
+
+    allowAdmission.release();
+    await running;
+    assert.equal(reviewStarted, true);
+    assert.equal(implementationSawDurableAnswer, true);
+    const ack = events.find((event) => event.type === 'permission_answer_ack');
+    assert.ok(ack);
+    assert.equal(JSON.stringify(ack).includes('decision'), false);
+    assert.equal(
+      messages.some((message) => message.type === 'permission_decision'),
+      false,
+    );
+    const accepted = durable.ledger.find(
+      (event) => event.actions?.permissionAnswerAccepted?.requestId === ack.requestId,
+    );
+    assert.ok(accepted);
+    assert.equal(JSON.stringify(accepted).includes('decision'), false);
+
+    await binding.close('turn_terminal');
+    await binding.settleLocalClosures();
+    binding.release();
+  });
+
+  test('does not arm hosted permission timeout before durable admission', async () => {
+    const admissionStarted = makeGate();
+    const allowAdmission = makeGate();
+    const durable = durableTurnHarness('turn-1', 'write');
+    let timeoutCommits = 0;
+    const binding = await hostedInteractionBinding({
+      acceptPermissionRequest: async () => {
+        admissionStarted.release();
+        await allowAdmission.promise;
+        return { state: 'pending' };
+      },
+      commitPermissionTimeout: async ({ continuation }) => {
+        timeoutCommits += 1;
+        await continuation.applyClosure('timed_out');
+        return { kind: 'closure', reason: 'timed_out' };
+      },
+    });
+    const events: SessionEvent[] = [];
+    const model = singlePermissionToolModel();
+    const backend = new AiSdkBackend({
+      sessionId: 'session-1',
+      header: header('ask'),
+      appendMessage: async () => {},
+      connection: connection(),
+      apiKey: 'sk-test',
+      modelId: 'mock-model-id',
+      permissionEngine: new PermissionEngine({ newId: idGenerator(), now: () => 1 }),
+      modelFactory: () => model,
+      tools: [permissionTool()],
+      permissionTimeoutMs: 5,
+      loadTurnRuntimeEvents: durable.loadTurnRuntimeEvents,
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    const running = collectEvents(
+      backend.send(
+        durable.input({
+          runId: 'run-1',
+          hostedInteraction: binding,
+        }),
+      ),
+      events,
+      durable.record,
+    );
+    await admissionStarted.promise;
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    assert.equal(timeoutCommits, 0);
+    assert.equal(
+      events.some((event) => event.type === 'permission_request'),
+      false,
+    );
+
+    allowAdmission.release();
+    await running;
+    assert.equal(timeoutCommits, 1);
+    const request = events.find((event) => event.type === 'permission_request');
+    if (request?.type !== 'permission_request') assert.fail('expected admitted timeout request');
+    const closureAck = events.find((event) => event.type === 'permission_closure_ack');
+    if (closureAck?.type !== 'permission_closure_ack') {
+      assert.fail('expected a durable permission timeout acknowledgement');
+    }
+    assert.ok(
+      durable.ledger.some(
+        (event) =>
+          event.actions?.permissionClosureAccepted?.requestId === request.requestId &&
+          event.actions.permissionClosureAccepted.reason === 'timed_out',
+      ),
+    );
+
+    await binding.close('turn_terminal');
+    await binding.settleLocalClosures();
+    binding.release();
   });
 
   test('records structured sandbox failure metadata on tool failure traces', async () => {
@@ -493,6 +658,63 @@ describe('AiSdkBackend model history', () => {
       { role: 'user', content: [{ type: 'text', text: 'runtime user' }] },
       { role: 'assistant', content: [{ type: 'text', text: 'runtime assistant' }] },
       { role: 'user', content: [{ type: 'text', text: 'current user' }] },
+    ]);
+  });
+
+  test('keeps backfilled text-only assistant messages in conversation order', async () => {
+    const model = completionModel();
+    const backend = new AiSdkBackend({
+      sessionId: 'session-1',
+      header: header(),
+      appendMessage: async () => {},
+      connection: connection(),
+      apiKey: 'sk-test',
+      modelId: 'mock-model-id',
+      permissionEngine: new PermissionEngine({ newId: () => 'permission-id', now: () => 1 }),
+      modelFactory: () => model,
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+    const recoveredAssistant = runtimeTextEvent({
+      id: 'rt-a',
+      turnId: 'turn-a',
+      role: 'model',
+      author: 'agent',
+      text: 'assistant A',
+    });
+    recoveredAssistant.refs = { storedMessageId: 'stored-a' };
+
+    await drain(
+      backend.send({
+        turnId: 'turn-current',
+        text: 'current user',
+        context: [],
+        runtimeContext: [
+          runtimeTextEvent({
+            id: 'rt-u-a',
+            turnId: 'turn-a',
+            role: 'user',
+            author: 'user',
+            text: 'user A',
+          }),
+          recoveredAssistant,
+          runtimeTextEvent({
+            id: 'rt-u-b',
+            turnId: 'turn-b',
+            role: 'user',
+            author: 'user',
+            text: 'user B',
+          }),
+        ],
+      }),
+    );
+
+    assert.deepEqual(promptTextSequence(model), [
+      { role: 'user', text: 'user A' },
+      { role: 'assistant', text: 'assistant A' },
+      { role: 'user', text: 'user B' },
+      { role: 'user', text: 'current user' },
     ]);
   });
 
@@ -6149,6 +6371,221 @@ describe('AiSdkBackend model history', () => {
     ]);
     assert.equal(promptJson.includes('private chain of thought'), false);
   });
+
+  test('skips unsupported unsigned thinking without dropping native tool replay', async () => {
+    const model = completionModel();
+    const backend = new AiSdkBackend({
+      sessionId: 'session-1',
+      header: header(),
+      appendMessage: async () => {},
+      connection: { ...connection(), providerType: 'openai' },
+      apiKey: 'sk-test',
+      modelId: 'mock-model-id',
+      permissionEngine: new PermissionEngine({ newId: () => 'permission-id', now: () => 1 }),
+      modelFactory: () => model,
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    await drain(
+      backend.send({
+        turnId: 'turn-current',
+        text: 'current user',
+        context: [],
+        runtimeContext: [
+          runtimeTextEvent({
+            id: 'rt-u',
+            turnId: 'turn-prev',
+            role: 'user',
+            author: 'user',
+            text: 'read the file',
+          }),
+          runtimeEvent({
+            id: 'rt-thinking',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: { kind: 'thinking', text: 'private unsigned thought' },
+          }),
+          runtimeEvent({
+            id: 'rt-call',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: {
+              kind: 'function_call',
+              id: 'tool-1',
+              name: 'Read',
+              args: { path: 'package.json' },
+            },
+          }),
+          runtimeEvent({
+            id: 'rt-result',
+            turnId: 'turn-prev',
+            role: 'tool',
+            author: 'tool',
+            content: {
+              kind: 'function_response',
+              id: 'tool-1',
+              name: 'Read',
+              result: 'file contents',
+              isError: false,
+            },
+          }),
+        ],
+      }),
+    );
+
+    const promptJson = JSON.stringify(compactPrompt(model));
+    assert.match(promptJson, /"toolCallId":"tool-1"/);
+    assert.match(promptJson, /file contents/);
+    assert.equal(promptJson.includes('private unsigned thought'), false);
+  });
+
+  test('skips unmarked unsigned thinking when replaying Kimi OpenAI tool history', async () => {
+    const model = completionModel();
+    const backend = new AiSdkBackend({
+      sessionId: 'session-1',
+      header: header(),
+      appendMessage: async () => {},
+      connection: {
+        ...connection(),
+        slug: 'kimi-main',
+        providerType: 'kimi-coding-plan',
+        defaultModel: 'k3',
+        models: [{ id: 'k3', apiProtocol: 'openai-chat' }],
+      },
+      apiKey: 'sk-test',
+      modelId: 'k3',
+      permissionEngine: new PermissionEngine({ newId: () => 'permission-id', now: () => 1 }),
+      modelFactory: () => model,
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    await drain(
+      backend.send({
+        turnId: 'turn-current',
+        text: 'current user',
+        context: [],
+        runtimeContext: [
+          runtimeTextEvent({
+            id: 'rt-u',
+            turnId: 'turn-prev',
+            role: 'user',
+            author: 'user',
+            text: 'read the file',
+          }),
+          runtimeEvent({
+            id: 'rt-thinking',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: { kind: 'thinking', text: 'private thinking from another provider' },
+          }),
+          runtimeEvent({
+            id: 'rt-call',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: {
+              kind: 'function_call',
+              id: 'tool-1',
+              name: 'Read',
+              args: { path: 'package.json' },
+            },
+          }),
+          runtimeEvent({
+            id: 'rt-result',
+            turnId: 'turn-prev',
+            role: 'tool',
+            author: 'tool',
+            content: {
+              kind: 'function_response',
+              id: 'tool-1',
+              name: 'Read',
+              result: 'file contents',
+              isError: false,
+            },
+          }),
+        ],
+      }),
+    );
+
+    const promptJson = JSON.stringify(compactPrompt(model));
+    assert.equal(promptJson.includes('private thinking from another provider'), false);
+    assert.match(promptJson, /"toolCallId":"tool-1"/);
+    assert.match(promptJson, /file contents/);
+  });
+
+  test('rejects signed thinking from provider-native replay when the target cannot replay it', async () => {
+    const trace: RunTraceEvent[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new Error('provider failed');
+      },
+    });
+    const backend = new AiSdkBackend({
+      sessionId: 'session-1',
+      header: header(),
+      appendMessage: async () => {},
+      connection: { ...connection(), providerType: 'openai' },
+      apiKey: 'sk-test',
+      modelId: 'mock-model-id',
+      permissionEngine: new PermissionEngine({ newId: () => 'permission-id', now: () => 1 }),
+      modelFactory: () => model,
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+      recordRunTrace: (event) => trace.push(event),
+    });
+
+    await drain(
+      backend.send({
+        turnId: 'turn-current',
+        text: 'current user',
+        context: [
+          { type: 'user', id: 'projection-u', turnId: 'turn-prev', ts: 1, text: 'prior user' },
+          {
+            type: 'assistant',
+            id: 'projection-a',
+            turnId: 'turn-prev',
+            ts: 2,
+            text: 'prior answer',
+            modelId: 'm',
+          },
+        ],
+        runtimeContext: [
+          runtimeTextEvent({
+            id: 'rt-u',
+            turnId: 'turn-prev',
+            role: 'user',
+            author: 'user',
+            text: 'prior user',
+          }),
+          runtimeEvent({
+            id: 'rt-thinking',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: { kind: 'thinking', text: 'signed thought', signature: 'sig-1' },
+          }),
+          runtimeTextEvent({
+            id: 'rt-a',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            text: 'prior answer',
+          }),
+        ],
+      }),
+    );
+
+    const failure = trace.find((event) => event.type === 'model_stream_failed');
+    assert.equal(failure?.data?.priorReplayGate, 'runtime_replay_unsupported_semantics');
+  });
 });
 
 describe('AiSdkBackend error surfaces', () => {
@@ -6322,7 +6759,14 @@ describe('AiSdkBackend error surfaces', () => {
       'tool-1',
       'turn-1',
       'failed with api_key=sk-live-secret-token-value',
-      { push: (event) => events.push(event) },
+      {
+        push: (event) => {
+          events.push(event);
+        },
+        pushAndWaitUntilConsumed: async (event) => {
+          events.push(event);
+        },
+      },
     );
 
     assert.equal(JSON.stringify(messages).includes('sk-live-secret-token-value'), false);
@@ -9475,6 +9919,60 @@ describe('AiSdkBackend tool permission category hints', () => {
     assert.equal(decision?.decision, 'deny');
   });
 
+  test('a hosted deny rule returns the synthetic denied result without a legacy answer ack', async () => {
+    const messages: unknown[] = [];
+    const events: SessionEvent[] = [];
+    let implCalled = false;
+    const backend = new AiSdkBackend({
+      sessionId: 'session-1',
+      header: header('bypass'),
+      appendMessage: async (message) => {
+        messages.push(message);
+      },
+      connection: connection(),
+      apiKey: 'sk-test',
+      modelId: 'claude-sonnet-4-5-20250929',
+      permissionEngine: new PermissionEngine({ newId: idGenerator(), now: () => 1 }),
+      permissionRules: [{ effect: 'deny', kind: 'category', category: 'read' }],
+      modelFactory: () => ({}),
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+    const runtime = (backend as unknown as { toolRuntime: ToolRuntime }).toolRuntime;
+    const binding = await hostedInteractionBinding({
+      acceptPermissionRequest: async () => {
+        assert.fail('a hosted deny rule must not establish a continuation');
+      },
+    });
+    runtime.beginTurn('turn-1', binding);
+    const tool: MakaTool = {
+      name: 'Read',
+      description: 'read file',
+      parameters: {},
+      permissionRequired: false,
+      impl: async () => {
+        implCalled = true;
+        return { kind: 'text', text: 'should not run' };
+      },
+    };
+
+    const result = await runtimeExecute(backend, tool, 'turn-1', {
+      push: (event) => events.push(event),
+    })({ path: 'notes.md' }, { toolCallId: 'tool-1', abortSignal: new AbortController().signal });
+
+    assert.equal(implCalled, false);
+    assert.match(JSON.stringify(result), /denied/i);
+    assert.deepEqual(
+      messages.map((message) => (message as { type?: string }).type),
+      ['tool_call', 'permission_decision', 'tool_result'],
+    );
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ['tool_start', 'tool_result'],
+    );
+  });
+
   test('permission prompt timeout expires one request, resumes watchdog, and writes an error result', async () => {
     const messages: unknown[] = [];
     const events: SessionEvent[] = [];
@@ -11539,7 +12037,10 @@ function archiveGatedTurnEvents(suffix: 'a' | 'b', path: string, result: unknown
 }
 
 describe('AiSdkBackend steering durability and identity', () => {
-  const steeringBackend = (model: MockLanguageModelV4): AiSdkBackend =>
+  const steeringBackend = (
+    model: MockLanguageModelV4,
+    options: Partial<Pick<AiSdkBackendInput, 'supportsVision' | 'readAttachmentBytes'>> = {},
+  ): AiSdkBackend =>
     new AiSdkBackend({
       sessionId: 'session-1',
       header: header(),
@@ -11552,14 +12053,17 @@ describe('AiSdkBackend steering durability and identity', () => {
       tools: [],
       newId: idGenerator(),
       now: monotonicClock(),
+      ...options,
     });
 
-  const pullOnce = (text: string): (() => Array<{ id: string; text: string }>) => {
+  const pullOnce = (
+    text: string,
+  ): (() => Array<{ id: string; messageId: string; content: { text: string } }>) => {
     let pulled = false;
     return () => {
       if (pulled) return [];
       pulled = true;
-      return [{ id: `lease-${text}`, text }];
+      return [{ id: `lease-${text}`, messageId: `message-${text}`, content: { text } }];
     };
   };
 
@@ -11608,6 +12112,82 @@ describe('AiSdkBackend steering durability and identity', () => {
       events.some((event) => event.type === 'complete' && event.stopReason === 'end_turn'),
       true,
     );
+  });
+
+  test('persists canonical steering content and materializes attachments for the model', async () => {
+    const model = textCompletionModel('done');
+    const pngBytes = new Uint8Array([137, 80, 78, 71]);
+    const image = {
+      kind: 'image' as const,
+      name: 'first.png',
+      mimeType: 'image/png',
+      bytes: pngBytes.length,
+      ref: { kind: 'session_file' as const, sessionId: 'session-1', relativePath: 'first.png' },
+    };
+    const document = {
+      kind: 'pdf' as const,
+      name: 'second.pdf',
+      mimeType: 'application/pdf',
+      bytes: 12,
+      ref: { kind: 'session_file' as const, sessionId: 'session-1', relativePath: 'second.pdf' },
+    };
+    const backend = steeringBackend(model, {
+      supportsVision: true,
+      readAttachmentBytes: async (ref) => {
+        assert.deepEqual(ref, image.ref);
+        return { ok: true, bytes: pngBytes };
+      },
+    });
+    const content = {
+      text: 'inspect the authoritative inputs',
+      displayText: 'human-only command',
+      attachments: [image, document],
+    };
+    let pulled = false;
+    const acked: string[] = [];
+    const iterator = backend
+      .send({
+        turnId: 'turn-1',
+        text: 'start',
+        context: [],
+        pullSteering: () => {
+          if (pulled) return [];
+          pulled = true;
+          return [{ id: 'lease-content', messageId: 'message-content', content }];
+        },
+        ackSteering: (leaseIds) => acked.push(...leaseIds),
+      })
+      [Symbol.asyncIterator]();
+
+    const steeringEvent = await nextSteeringEvent(iterator);
+    assert.equal(steeringEvent.type, 'steering_message');
+    if (steeringEvent.type !== 'steering_message') assert.fail('expected steering event');
+    assert.deepEqual(steeringEvent.content, content);
+    assert.equal(model.doStreamCalls.length, 0);
+    assert.deepEqual(acked, []);
+    for (let next = await iterator.next(); next.done !== true; next = await iterator.next()) {}
+    assert.deepEqual(acked, ['lease-content']);
+
+    const prompt = compactPrompt(model) as Array<{ role: string; content: unknown }>;
+    const parts = prompt.at(-1)?.content as Array<{
+      type: string;
+      text?: string;
+      mediaType?: string;
+      data?: unknown;
+    }>;
+    assert.deepEqual(
+      parts.map((part) => part.type),
+      ['text', 'file'],
+    );
+    assert.equal(
+      parts[0]?.text,
+      buildSteeringEnvelope(
+        'inspect the authoritative inputs\n\n[attachment: first.png (image/png)] [attachment: second.pdf (application/pdf)]',
+      ),
+    );
+    assert.equal(parts[1]?.mediaType, 'image/png');
+    assert.notEqual(parts[1]?.data, undefined);
+    assert.equal(JSON.stringify(prompt).includes('human-only command'), false);
   });
 
   test('a steering message never reaches the provider when the consumer detaches before the ack', async () => {
@@ -11895,8 +12475,8 @@ describe('AiSdkBackend steering durability and identity', () => {
           if (pulled) return [];
           pulled = true;
           return [
-            { id: 'lease-1', text: 'do it' },
-            { id: 'lease-2', text: 'do it' },
+            { id: 'lease-1', messageId: 'message-1', content: { text: 'do it' } },
+            { id: 'lease-2', messageId: 'message-2', content: { text: 'do it' } },
           ];
         },
       }),
@@ -12242,6 +12822,18 @@ function compactPrompt(model: MockLanguageModelV4): unknown {
   }));
 }
 
+function promptTextSequence(model: MockLanguageModelV4): Array<{
+  role: string;
+  text: string | undefined;
+}> {
+  return (model.doStreamCalls[0]?.prompt ?? []).map((message) => ({
+    role: message.role,
+    text: Array.isArray(message.content)
+      ? message.content.find((part) => part.type === 'text')?.text
+      : undefined,
+  }));
+}
+
 function activeFullCompactBlockFixture(): ActiveFullCompactBlock {
   return {
     kind: 'maka.active_full_compact_block',
@@ -12355,6 +12947,94 @@ function testTool(name: string, parameters: unknown): MakaTool {
     permissionRequired: false,
     impl: async () => ({ ok: true }),
   };
+}
+
+function permissionTool(onExecute?: () => void): MakaTool {
+  return {
+    name: 'Bash',
+    description: 'shell',
+    parameters: z.object({ command: z.string() }),
+    permissionRequired: true,
+    impl: async () => {
+      onExecute?.();
+      return { ok: true };
+    },
+  };
+}
+
+function singlePermissionToolModel(): MockLanguageModelV4 {
+  let calls = 0;
+  return new MockLanguageModelV4({
+    doStream: async () => {
+      calls += 1;
+      const chunks: LanguageModelV4StreamPart[] =
+        calls === 1
+          ? [
+              { type: 'stream-start', warnings: [] },
+              {
+                type: 'tool-call',
+                toolCallId: 'tool-1',
+                toolName: 'Bash',
+                input: JSON.stringify({ command: 'rm local-file' }),
+              },
+              {
+                type: 'finish',
+                finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+                usage: emptyUsage(),
+              },
+            ]
+          : [
+              { type: 'stream-start', warnings: [] },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: 'stop' },
+                usage: emptyUsage(),
+              },
+            ];
+      return {
+        stream: simulateReadableStream({
+          chunks,
+          initialDelayInMs: null,
+          chunkDelayInMs: null,
+        }),
+      };
+    },
+  });
+}
+
+async function hostedInteractionBinding(overrides: Partial<RuntimeInteractionRunOwner>) {
+  return await bindRuntimeInteractionRun(
+    {
+      bindRun: (identity) => ({
+        ...identity,
+        acceptPermissionRequest: async () => ({ state: 'pending' }),
+        commitPermissionAnswer: async ({ continuation, answer }) => {
+          await continuation.applyAnswer(answer);
+          return { kind: 'permission_answer', answer };
+        },
+        commitPermissionTimeout: async ({ continuation }) => {
+          await continuation.applyClosure('timed_out');
+          return { kind: 'closure', reason: 'timed_out' };
+        },
+        acceptUserQuestionRequest: async () => {},
+        close: async () => {},
+        release: () => {},
+        ...overrides,
+      }),
+    },
+    { sessionId: 'session-1', turnId: 'turn-1', runId: 'run-1' },
+  );
+}
+
+async function collectEvents(
+  iterable: AsyncIterable<SessionEvent>,
+  events: SessionEvent[],
+  record?: (event: SessionEvent) => void,
+): Promise<void> {
+  for await (const event of iterable) {
+    record?.(event);
+    events.push(event);
+  }
 }
 
 async function drain(iterable: AsyncIterable<unknown>): Promise<void> {
@@ -12525,6 +13205,10 @@ function runtimeExecute(
   eventSink: { push(event: SessionEvent): void },
 ) {
   const runtime = (backend as unknown as { toolRuntime: ToolRuntime }).toolRuntime;
+  const durableEventSink: DurableSessionEventSink = {
+    push: (event) => eventSink.push(event),
+    pushAndWaitUntilConsumed: async (event) => eventSink.push(event),
+  };
   return async (
     input: unknown,
     context: { toolCallId: string; abortSignal: AbortSignal },
@@ -12536,7 +13220,7 @@ function runtimeExecute(
         toolCallId: context.toolCallId,
         input,
         abortSignal: context.abortSignal,
-        eventSink,
+        eventSink: durableEventSink,
       })
     ).result;
 }

@@ -457,7 +457,7 @@ describe('permission response IPC boundary', () => {
 
   it('keeps newly created sessions selected across immediate refreshSessions() calls', async () => {
     const renderer = await readRendererShellSources([
-      'app-shell-quick-chat-actions.ts',
+      'app-shell-session-start-actions.ts',
       'app-shell.tsx',
       'app-shell-effects.ts',
       'use-app-shell-session-list.ts',
@@ -510,67 +510,61 @@ describe('permission response IPC boundary', () => {
       /use(?:Layout)?Effect\(\(\) => \{[\s\S]{0,120}?void refreshSessions\(\)/,
       'initial mount should call bootstrapSessions(), not raw refreshSessions(), for boot-only selection',
     );
-    const quickChatHandler = renderer.match(
-      /async function handleQuickChatSubmit\([\s\S]*?\): Promise<boolean> \{[\s\S]*?\n  async function handleExpertTeamStart/,
+    const modeSessionHandler = renderer.match(
+      /async function startModeSession\([\s\S]*?\): Promise<boolean> \{[\s\S]*?\n  async function handleExpertTeamStart/,
     );
-    assert.ok(quickChatHandler, 'handleQuickChatSubmit() must exist');
+    assert.ok(modeSessionHandler, 'startModeSession() must exist');
     assert.match(
       renderer,
-      /const quickChatPendingRef = useRef\(false\)/,
-      'quick chat must use a ref-backed pending gate so same-frame double submit cannot start two sessions',
+      /const sessionStartPendingRef = useRef\(false\)/,
+      'starting a mode session must use a ref-backed pending gate so same-frame double submit cannot start two sessions',
     );
     assert.match(
-      quickChatHandler[0],
-      /if \(quickChatPendingRef\.current\) return false;[\s\S]*?quickChatPendingRef\.current = true/,
-      'quick chat submit must synchronously reject while another start call is in flight',
+      modeSessionHandler[0],
+      /if \(sessionStartPendingRef\.current\) return false;[\s\S]*?sessionStartPendingRef\.current = true/,
+      'starting a mode session must synchronously reject while another start call is in flight',
     );
     assert.match(
-      quickChatHandler[0],
-      /const owner = captureComposerImportOwner\(\);[\s\S]*quickChatPendingRef\.current = true/,
-      'quick chat must capture the current shell surface before async session creation',
+      modeSessionHandler[0],
+      /const owner = captureComposerImportOwner\(\);[\s\S]*sessionStartPendingRef\.current = true/,
+      'the launching shell surface must be captured before async session creation',
     );
-    const quickChat = quickChatHandler[0].match(/if \(result\.ok\) \{[\s\S]*?if \(!prompt\.trim\(\) && activeIdRef\.current === result\.sessionId\) \{/);
-    assert.ok(quickChat, 'quick chat success branch must exist');
     assert.match(
-      quickChat[0],
-      /if \(isShellSurfaceOwnerActive\(owner\)\) \{[\s\S]*openSessionInChat\(result\.sessionId\);[\s\S]*\}[\s\S]*await refreshSessions\(\)/,
-      'quick chat must only open the new session if the launching shell surface is still active',
+      modeSessionHandler[0],
+      /if \(isShellSurfaceOwnerActive\(owner\)\) \{[\s\S]*openSessionInChat\(session\.id\);[\s\S]*\}[\s\S]*await refreshSessions\(\)/,
+      'the new session must only be opened if the launching shell surface is still active',
     );
     assert.doesNotMatch(
-      quickChat[0],
-      /await refreshSessions\(\)[\s\S]*?setActiveId\(result\.sessionId\)/,
-      'refreshing before selecting the quick-chat session can briefly select an older session',
+      modeSessionHandler[0],
+      /await refreshSessions\(\)[\s\S]*?setActiveId\(session\.id\)/,
+      'refreshing before selecting the new session can briefly select an older session',
     );
     assert.doesNotMatch(
-      quickChat[0],
-      /setActiveId\(result\.sessionId\)/,
-      'quick chat can be launched from non-chat modules, so raw setActiveId would leave the new session hidden',
+      modeSessionHandler[0],
+      /setActiveId\(session\.id\)/,
+      'a mode session can be launched from non-chat modules, so raw setActiveId would leave the new session hidden',
     );
     assert.match(
-      quickChatHandler[0],
+      modeSessionHandler[0],
       /return true;/,
-      'quick chat must report success so the first-run composer can clear its draft only after a session is created',
+      'a successful start must report success so the caller knows the session exists',
     );
+    // #1433: how the catch CLASSIFIES the error (workspace / readiness /
+    // unclassified) is asserted behaviorally in
+    // app-shell-session-start-actions.test.ts, which rejects with each of
+    // the three and checks what actually happens. A source regex cannot
+    // tell them apart — `[\s\S]*` does not express nesting, so it would
+    // pass with the branches swapped.
     assert.match(
-      quickChatHandler[0],
-      /result\.reason === 'setup_required'[\s\S]*?return false;/,
-      'setup failures must return false so the first-run composer keeps the user draft',
+      modeSessionHandler[0],
+      /if \(isShellSurfaceOwnerActive\(owner\)\) \{[\s\S]*toastApi\.error\([\s\S]*copy\.sessionStartFailedTitle,[\s\S]*localizedShellErrorMessage\(error, copy\.sessionStartFailedFallback, uiLocale\),[\s\S]*\);[\s\S]*\}[\s\S]*?return false;/,
+      'thrown failures should use the locale-aware generalized fallback only while the launching surface is still active',
     );
+    assert.doesNotMatch(modeSessionHandler[0], /toastApi\.error\('开始对话失败'/);
     assert.match(
-      quickChatHandler[0],
-      /if \(isShellSurfaceOwnerActive\(owner\)\) \{[\s\S]*toastApi\.error\([\s\S]*copy\.quickChatFailedTitle,[\s\S]*uiLocale === 'zh' \? result\.message : copy\.quickChatFailedFallback,[\s\S]*\);[\s\S]*\}[\s\S]*?return false;/,
-      'send failures must return false and localize the toast while the launching surface is still active',
-    );
-    assert.match(
-      quickChatHandler[0],
-      /if \(isShellSurfaceOwnerActive\(owner\)\) \{[\s\S]*toastApi\.error\([\s\S]*copy\.quickChatFailedTitle,[\s\S]*localizedShellErrorMessage\(error, copy\.quickChatFailedFallback, uiLocale\),[\s\S]*\);[\s\S]*\}[\s\S]*?return false;/,
-      'quick chat thrown failures should use the locale-aware generalized fallback only while the launching surface is still active',
-    );
-    assert.doesNotMatch(quickChatHandler[0], /toastApi\.error\('开始对话失败'/);
-    assert.match(
-      quickChatHandler[0],
-      /quickChatPendingRef\.current = false;[\s\S]*?setQuickChatPending\(false\)/,
-      'quick chat pending ref must be cleared with the visible pending state',
+      modeSessionHandler[0],
+      /finally \{\s*sessionStartPendingRef\.current = false;\s*\}/,
+      'the pending ref must be cleared in finally — nothing else mirrors it, so a leaked lock would wedge the entry point',
     );
   });
 

@@ -1,6 +1,7 @@
 # Maka
 
 [![CI](https://github.com/Maka-Agent/maka-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Maka-Agent/maka-agent/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![docs](https://img.shields.io/badge/docs-English-blue?logo=googletranslate&logoColor=white)](./README.md)
 
 ![Maka——你的工作，你的 Agent。](./.github/assets/maka-hero.zh-CN.png)
@@ -10,7 +11,7 @@
 Maka 不只回答问题。它可以在受控权限下阅读项目、执行工具、生成产物，并把模型消息、工具调用和长程任务进度保存为可恢复的运行事实。你可以从桌面应用、终端 TUI、非交互 CLI 或 Headless runner 使用同一套 Runtime。
 
 > [!IMPORTANT]
-> Maka 仍在活跃开发中，当前主要面向从源码运行和参与开发的用户。数据格式、CLI 和实验能力仍可能变化。
+> Maka 仍在活跃开发中。macOS Apple Silicon 桌面版是首个早期公开版本，数据格式、CLI 和实验能力仍可能变化。
 
 ## 为什么是 Maka
 
@@ -54,6 +55,17 @@ Maka 不只回答问题。它可以在受控权限下阅读项目、执行工具
 - AHE target protocol 与 evidence export；完整自动自迭代仍属于外部/实验流程。
 
 ## 快速开始
+
+### 下载 macOS 桌面版
+
+已签名并完成 Apple 公证的桌面应用可从 [GitHub Releases](https://github.com/Maka-Agent/maka-agent/releases/latest) 下载，目前仅支持 Apple Silicon Mac（`arm64`）。
+
+1. 下载 `Maka-<version>-mac-arm64.dmg`；
+2. 打开 DMG，将 Maka 拖入“应用程序”；
+3. 执行 `brew install ripgrep`，启用 Runtime 的 `Grep` 工具；
+4. 启动 Maka，在`设置 → 模型`中配置自己的模型连接。
+
+首个公开版本不包含 Computer Use，暂不支持 Intel Mac、Windows 和 Linux 安装包。
 
 ### 环境要求
 
@@ -225,3 +237,8 @@ npm --workspace @maka/desktop run smoke:real-window
 - [后端架构总览](./ARCHITECTURE.zh-CN.md)
 - [产品设计](./DESIGN.md)
 - [安全政策](./SECURITY.md)
+
+## 开源协议
+
+Maka 使用 [Apache License 2.0](./LICENSE) 开源，归属信息见
+[NOTICE](./NOTICE)。第三方组件仍分别适用其自身的许可证与声明。

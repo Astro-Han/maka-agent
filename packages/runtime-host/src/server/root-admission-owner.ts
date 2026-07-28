@@ -1,11 +1,27 @@
+import { isDeepStrictEqual } from 'node:util';
+import {
+  messageContentsEqual,
+  normalizeMessageContent,
+  type MessageContent,
+} from '@maka/core/events';
 import type {
   AdmitRootTurnInput,
   AdmitRootTurnResult,
   RootTurnAdmission,
   RootTurnAdmissionStore,
+  RootTurnSourceMessage,
 } from '@maka/storage/execution-stores';
 
 type OwnedAdmitRootTurnInput = Omit<AdmitRootTurnInput, 'previousRootTurnId'>;
+type Immutable<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends readonly (infer Item)[]
+    ? readonly Immutable<Item>[]
+    : T extends object
+      ? { readonly [Key in keyof T]: Immutable<T[Key]> }
+      : T;
+
+export type ValidatedRootTurnAdmission = Immutable<RootTurnAdmission>;
 
 export class RootAdmissionOwner {
   readonly #admissionsBySession = new Map<string, Map<string, RootTurnAdmission>>();
@@ -13,6 +29,10 @@ export class RootAdmissionOwner {
   readonly #poisonedSessions = new Set<string>();
 
   constructor(private readonly store: RootTurnAdmissionStore) {}
+
+  latestAdmission(sessionId: string): ValidatedRootTurnAdmission | undefined {
+    return this.#tips.get(sessionId);
+  }
 
   assertKnownAdmission(admission: RootTurnAdmission): void {
     const known = this.#admissionsBySession.get(admission.sessionId)?.get(admission.turnId);
@@ -26,7 +46,7 @@ export class RootAdmissionOwner {
       throw new Error(`Root Turn recovery chain was already installed for Session ${sessionId}`);
     }
     const admissions = await this.store.listRootTurnAdmissionsForRecovery(sessionId);
-    const snapshots = admissions.map(snapshotAdmission);
+    const snapshots = Object.freeze(admissions.map(snapshotAdmission));
     const byTurnId = new Map<string, RootTurnAdmission>();
     for (const admission of snapshots) byTurnId.set(admission.turnId, admission);
     this.#admissionsBySession.set(sessionId, byTurnId);
@@ -63,7 +83,7 @@ export class RootAdmissionOwner {
       byTurnId.set(admission.turnId, snapshot);
       this.#admissionsBySession.set(input.sessionId, byTurnId);
       this.#tips.set(input.sessionId, snapshot);
-      return result;
+      return Object.freeze({ ...result, admission: snapshot });
     } catch (error) {
       this.#poisonedSessions.add(input.sessionId);
       throw error;
@@ -78,15 +98,48 @@ function sameRootAdmission(left: RootTurnAdmission, right: RootTurnAdmission): b
     left.turnId === right.turnId &&
     left.runId === right.runId &&
     left.userMessageId === right.userMessageId &&
+    isDeepStrictEqual(left.execution, right.execution) &&
     left.previousRootTurnId === right.previousRootTurnId &&
-    left.normalizedInput.text === right.normalizedInput.text &&
+    messageContentsEqual(left.normalizedInput, right.normalizedInput) &&
+    left.sourceMessages.length === right.sourceMessages.length &&
+    left.sourceMessages.every((source, index) => {
+      const other = right.sourceMessages[index];
+      return (
+        other !== undefined &&
+        source.messageId === other.messageId &&
+        source.placement === other.placement &&
+        source.disposition === other.disposition &&
+        messageContentsEqual(source.content, other.content)
+      );
+    }) &&
     left.admittedAt === right.admittedAt
   );
 }
 
 function snapshotAdmission(admission: RootTurnAdmission): RootTurnAdmission {
+  const sourceMessages = admission.sourceMessages.map(
+    (source): RootTurnSourceMessage =>
+      Object.freeze({
+        ...source,
+        content: snapshotMessageContent(source.content),
+      }),
+  );
   return Object.freeze({
     ...admission,
-    normalizedInput: Object.freeze({ ...admission.normalizedInput }),
+    execution: Object.freeze({ ...admission.execution }),
+    normalizedInput: snapshotMessageContent(admission.normalizedInput),
+    sourceMessages: Object.freeze(sourceMessages),
   });
+}
+
+function snapshotMessageContent(content: MessageContent): MessageContent {
+  const snapshot = normalizeMessageContent(content);
+  for (const attachment of snapshot.attachments ?? []) {
+    Object.freeze(attachment.ref);
+    Object.freeze(attachment);
+  }
+  if (snapshot.attachments) Object.freeze(snapshot.attachments);
+  for (const quote of snapshot.quotes ?? []) Object.freeze(quote);
+  if (snapshot.quotes) Object.freeze(snapshot.quotes);
+  return Object.freeze(snapshot);
 }

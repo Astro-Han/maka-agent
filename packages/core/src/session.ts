@@ -7,9 +7,9 @@
  */
 
 import {
+  decodeMessageContent,
   TOOL_ACTIVITY_KINDS,
-  type AttachmentRef,
-  type QuoteRef,
+  type MessageContent,
   type ToolActivityKind,
   type ToolResultContent,
 } from './events.js';
@@ -35,12 +35,15 @@ import {
   isOptionalString,
   isRecord,
 } from './record-schema.js';
-import { isAttachmentRef, isPermissionDecisionFields } from './interaction-record-schema.js';
+import { isPermissionDecisionFields } from './interaction-record-schema.js';
 import { isTokenUsageFields } from './usage-record-schema.js';
 import {
-  decodeCanonicalToolResultContent,
+  decodePersistedToolResultContentForRecovery,
   normalizeToolResultContentForRead,
 } from './tool-result-record-schema.js';
+
+export { isDeepResearchSession } from './explore-agent.js';
+export { isExpertTeamSession } from './expert-team.js';
 
 export const SESSION_STATUSES = [
   'active',
@@ -576,28 +579,13 @@ export type StoredMessage =
   | TurnStateMessage
   | SystemNoteMessage;
 
-export interface UserMessage {
+export interface UserMessage extends MessageContent {
   type: 'user';
   id: string;
   turnId: string;
   ts: number;
-  /**
-   * Model-facing turn text (and the default human-facing text). May be a
-   * composed envelope when the client injected content such as explicit
-   * skill instructions; see `displayText`.
-   */
-  text: string;
-  /**
-   * Human-facing text when it differs from `text`. Presentation layers
-   * (transcript, rewind, previews, search) should prefer this. Absent on
-   * legacy rows and on turns where the model text is what the user typed.
-   */
-  displayText?: string;
-  attachments?: AttachmentRef[];
-  /** Inline quoted excerpts carried into this message; rendered as chips. */
-  quotes?: QuoteRef[];
   /** Non-user trigger source. Lets the chat mark turns the user did not
-   *  hand-type. Mirrors TurnOrigin in runtime-inputs. */
+   * hand-type. Mirrors TurnOrigin in runtime-inputs. */
   origin?:
     | { kind: 'automation'; automationId: string }
     | { kind: 'agent_graph'; graphId: string; wakeId: string; attemptId: string };
@@ -618,6 +606,8 @@ export interface AssistantMessage {
     text: string;
     /** Anthropic signed thinking for replay. */
     signature?: string;
+    /** Provider-owned replay metadata that must survive missing-ledger recovery. */
+    providerOptions?: Record<string, unknown>;
   };
   /**
    * First-observed order of visible content inside this assistant step.
@@ -834,7 +824,10 @@ const SYSTEM_NOTE_MESSAGE_SHAPE = defineObjectShape<SystemNoteMessage>()(
   ['turnId', 'data'],
 );
 type AssistantThinking = NonNullable<AssistantMessage['thinking']>;
-const ASSISTANT_THINKING_SHAPE = defineObjectShape<AssistantThinking>()(['text'], ['signature']);
+const ASSISTANT_THINKING_SHAPE = defineObjectShape<AssistantThinking>()(
+  ['text'],
+  ['signature', 'providerOptions'],
+);
 type MessageOrigin = NonNullable<UserMessage['origin']>;
 type AutomationOrigin = Extract<MessageOrigin, { kind: 'automation' }>;
 type AgentGraphOrigin = Extract<MessageOrigin, { kind: 'agent_graph' }>;
@@ -861,7 +854,7 @@ export function decodeStoredMessageForRead(value: unknown): StoredMessage {
 }
 
 export function decodeStoredMessageForRecovery(value: unknown): StoredMessage {
-  return decodeStoredMessage(value, decodeCanonicalToolResultContent);
+  return decodeStoredMessage(value, decodePersistedToolResultContentForRecovery);
 }
 
 function decodeStoredMessage(
@@ -875,13 +868,19 @@ function decodeStoredMessage(
       if (
         hasExactShape(message, USER_MESSAGE_SHAPE) &&
         hasMessageEnvelope(message, true) &&
-        typeof message.text === 'string' &&
-        isOptionalString(message.displayText) &&
-        (message.attachments === undefined ||
-          (Array.isArray(message.attachments) && message.attachments.every(isAttachmentRef))) &&
         (message.origin === undefined || isMessageOrigin(message.origin))
-      )
-        return message as unknown as UserMessage;
+      ) {
+        const { displayText, attachments, quotes, origin, ...envelope } = message;
+        try {
+          return {
+            ...envelope,
+            ...decodeMessageContent({ text: message.text, displayText, attachments, quotes }),
+            ...(origin !== undefined ? { origin } : {}),
+          } as unknown as UserMessage;
+        } catch {
+          break;
+        }
+      }
       break;
     case 'assistant':
       if (
@@ -996,7 +995,8 @@ function isAssistantThinking(value: unknown): value is AssistantThinking {
     isRecord(value) &&
     hasExactShape(value, ASSISTANT_THINKING_SHAPE) &&
     typeof value.text === 'string' &&
-    isOptionalString(value.signature)
+    isOptionalString(value.signature) &&
+    (value.providerOptions === undefined || isRecord(value.providerOptions))
   );
 }
 
