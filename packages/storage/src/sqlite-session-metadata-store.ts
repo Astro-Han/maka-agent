@@ -22,6 +22,7 @@ import {
   type AgentGraphScheduleUpdateResult,
   type AgentGraphIntentAdmissionState,
   type AgentGraphIntentAdmissionTransition,
+  type AgentGraphIntentAdmissionSnapshot,
   type AgentGraphIntentClaim,
   type AgentGraphIntentClaimRequest,
   type AgentGraphIntentClaimResult,
@@ -36,6 +37,7 @@ import {
   AGENT_GRAPH_SUPERVISOR_WAKE_SCHEMA_VERSION,
   type AgentGraphSupervisorWakeAttemptRecord,
   type AgentGraphSupervisorWakeRecord,
+  type AgentGraphTimelineMetadataSnapshot,
   type BeginAgentGraphSupervisorWakeAttemptRequest,
   type ClaimAgentGraphSupervisorWakeRequest,
   type CompleteAgentGraphSupervisorWakeAttemptRequest,
@@ -931,6 +933,134 @@ export class SqliteSessionMetadataStore {
     return rows.map((row) =>
       decodeAgentGraphOperatorProvision(JSON.parse(row.payloadJson) as unknown),
     );
+  }
+
+  async readAgentGraphTimelineMetadata(
+    graphId: string,
+  ): Promise<AgentGraphTimelineMetadataSnapshot> {
+    this.assertOpen();
+    assertGraphLookupIdentity(graphId, 'graph id');
+    return this.readTransaction(() => {
+      const scheduleUpdates = (
+        this.db
+          .prepare(`
+            SELECT payload_json AS payloadJson
+            FROM agent_graph_schedule_updates
+            WHERE graph_id = ?
+            ORDER BY revision ASC
+          `)
+          .all(graphId) as unknown as AgentGraphScheduleUpdateRow[]
+      ).map(decodeAgentGraphScheduleUpdateRow);
+      const operatorProvisions = (
+        this.db
+          .prepare(`
+            SELECT payload_json AS payloadJson
+            FROM agent_graph_operator_provisions
+            WHERE graph_id = ?
+            ORDER BY provisioned_at ASC, operator_id ASC
+          `)
+          .all(graphId) as unknown as AgentGraphOperatorProvisionRow[]
+      ).map((row) => decodeAgentGraphOperatorProvision(JSON.parse(row.payloadJson) as unknown));
+      const intentClaims = (
+        this.db
+          .prepare(`
+            SELECT
+              schema_version AS schemaVersion,
+              claim_id AS claimId,
+              graph_id AS graphId,
+              intent_id AS intentId,
+              intent_fingerprint AS intentFingerprint,
+              readiness_context_fingerprint AS readinessContextFingerprint,
+              target_operator_id AS targetOperatorId,
+              target_session_id AS targetSessionId,
+              target_turn_id AS targetTurnId,
+              target_run_id AS targetRunId,
+              claimed_at AS claimedAt
+            FROM agent_graph_intent_claims
+            WHERE graph_id = ?
+            ORDER BY claimed_at ASC, intent_id ASC
+          `)
+          .all(graphId) as unknown as AgentGraphIntentClaim[]
+      ).map(decodeAgentGraphIntentClaim);
+      const intentAdmissions = (
+        this.db
+          .prepare(`
+            SELECT
+              graph_id AS graphId,
+              intent_id AS intentId,
+              admission_status AS state,
+              admission_updated_at AS updatedAt,
+              cancellation_reason AS cancellationReason
+            FROM agent_graph_intent_claims
+            WHERE graph_id = ?
+            ORDER BY claimed_at ASC, intent_id ASC
+          `)
+          .all(graphId) as unknown as AgentGraphIntentAdmissionSnapshotRow[]
+      ).map(decodeAgentGraphIntentAdmissionSnapshotRow);
+      const wakeRows = this.db
+        .prepare(`
+          SELECT
+            schema_version AS schemaVersion,
+            graph_id AS graphId,
+            wake_id AS wakeId,
+            snapshot_version AS snapshotVersion,
+            root_session_id AS rootSessionId,
+            status,
+            attempt_count AS attemptCount,
+            current_attempt_id AS currentAttemptId,
+            current_turn_id AS currentTurnId,
+            failure_reason AS failureReason,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+          FROM agent_graph_supervisor_wakes
+          WHERE graph_id = ?
+          ORDER BY created_at ASC, wake_id ASC
+        `)
+        .all(graphId) as unknown as AgentGraphSupervisorWakeRow[];
+      const attemptRows = this.db
+        .prepare(`
+          SELECT
+            graph_id AS graphId,
+            wake_id AS wakeId,
+            attempt_id AS attemptId,
+            turn_id AS turnId,
+            status,
+            failure_reason AS failureReason,
+            started_at AS startedAt,
+            completed_at AS completedAt
+          FROM agent_graph_supervisor_wake_attempts
+          WHERE graph_id = ?
+          ORDER BY started_at ASC, attempt_id ASC
+        `)
+        .all(graphId) as unknown as AgentGraphSupervisorWakeAttemptRow[];
+      const attemptsByWake = new Map<string, AgentGraphSupervisorWakeAttemptRecord[]>();
+      for (const row of attemptRows) {
+        const attempt = decodeAgentGraphSupervisorWakeAttemptRow(row);
+        const attempts = attemptsByWake.get(attempt.wakeId) ?? [];
+        attempts.push(attempt);
+        attemptsByWake.set(attempt.wakeId, attempts);
+      }
+      const supervisorWakes = wakeRows.map((row) => {
+        const wake = decodeAgentGraphSupervisorWakeRow(row);
+        const attempts = attemptsByWake.get(wake.wakeId) ?? [];
+        attemptsByWake.delete(wake.wakeId);
+        return {
+          wake,
+          attempts,
+        };
+      });
+      if (attemptsByWake.size > 0) {
+        throw new Error(`Agent graph ${graphId} has orphan supervisor wake attempts`);
+      }
+      return {
+        graphId,
+        scheduleUpdates,
+        operatorProvisions,
+        intentClaims,
+        intentAdmissions,
+        supervisorWakes,
+      };
+    });
   }
 
   async commitAgentGraphClientProjection(
@@ -1999,6 +2129,22 @@ export class SqliteSessionMetadataStore {
     }
   }
 
+  private readTransaction<T>(operation: () => T): T {
+    this.db.exec('BEGIN');
+    try {
+      const result = operation();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Preserve the original storage or protocol failure.
+      }
+      throw error;
+    }
+  }
+
   private assertOpen(): void {
     if (this.closed) throw new Error('SQLite session metadata store is closed');
   }
@@ -2040,6 +2186,14 @@ interface AgentGraphScheduleUpdateRow {
 
 interface AgentGraphOperatorProvisionRow {
   payloadJson: string;
+}
+
+interface AgentGraphIntentAdmissionSnapshotRow {
+  graphId: string;
+  intentId: string;
+  state: string;
+  updatedAt: number;
+  cancellationReason: string | null;
 }
 
 interface AgentGraphClientProjectionRow {
@@ -2112,6 +2266,26 @@ interface AgentGraphClientTerminalActivityRowWithIdentity
   extends AgentGraphClientTerminalActivityRow {
   graphId: string;
   recordId: string;
+}
+
+function decodeAgentGraphIntentAdmissionSnapshotRow(
+  row: AgentGraphIntentAdmissionSnapshotRow,
+): AgentGraphIntentAdmissionSnapshot {
+  assertGraphLookupIdentity(row.graphId, 'graph id');
+  assertGraphIntentId(row.intentId);
+  if (row.state !== 'claimed' && row.state !== 'executing' && row.state !== 'cancelled') {
+    throw new Error(`Invalid agent graph admission state for ${row.intentId}`);
+  }
+  if (!Number.isSafeInteger(row.updatedAt) || row.updatedAt < 0) {
+    throw new Error(`Invalid agent graph admission timestamp for ${row.intentId}`);
+  }
+  return {
+    graphId: row.graphId,
+    intentId: row.intentId,
+    state: row.state,
+    updatedAt: row.updatedAt,
+    ...(row.cancellationReason ? { cancellationReason: row.cancellationReason } : {}),
+  };
 }
 
 function decodeAgentGraphScheduleUpdateRow(

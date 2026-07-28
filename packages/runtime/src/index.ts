@@ -66,6 +66,25 @@ export type {
   ReadCommittedAgentGraphProjectionInput,
 } from './stream-graph-projection.js';
 export {
+  AGENT_GRAPH_TIMELINE_DEFAULT_PAGE_SIZE,
+  AGENT_GRAPH_TIMELINE_MAX_PAGE_SIZE,
+  AGENT_GRAPH_TIMELINE_SCHEMA_VERSION,
+  buildAgentGraphTimeline,
+  decodeAgentGraphTimelineCursor,
+  encodeAgentGraphTimelineCursor,
+  paginateAgentGraphTimeline,
+  readAgentGraphTimelinePage,
+} from './agent-graph-timeline.js';
+export type {
+  AgentGraphTimelineCoverageLimitation,
+  AgentGraphTimelineEvent,
+  AgentGraphTimelinePage,
+  AgentGraphTimelinePageOptions,
+  AgentGraphTimelineRunRef,
+  BuildAgentGraphTimelineInput,
+  ReadAgentGraphTimelinePageInput,
+} from './agent-graph-timeline.js';
+export {
   AGENT_GRAPH_TRACE_SCHEMA_VERSION,
   buildAgentGraphTraceSnapshot,
 } from './stream-graph-trace.js';
