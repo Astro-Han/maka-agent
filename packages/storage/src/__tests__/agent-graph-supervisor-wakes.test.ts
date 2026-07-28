@@ -168,9 +168,7 @@ describe('SQLite Agent Graph supervisor wakes', () => {
 
       const v11 = new DatabaseSync(path);
       v11
-        .prepare(
-          `UPDATE session_metadata_schema SET version = 11 WHERE scope = 'session_metadata'`,
-        )
+        .prepare(`UPDATE session_metadata_schema SET version = 11 WHERE scope = 'session_metadata'`)
         .run();
       v11.close();
 

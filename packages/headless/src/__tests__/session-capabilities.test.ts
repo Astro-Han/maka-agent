@@ -133,16 +133,16 @@ test('exposes graph supervisor tools only after the coordinator is bound', async
     /coordinator is unavailable/,
   );
   const graphTools = [{ name: 'view_agent_graph' }] as MakaTool[];
-  bridge.bind({} as SessionManager, {
-    toolsForSession: async (sessionId: string) => {
-      assert.equal(sessionId, 'root-session');
-      return graphTools;
-    },
-  } as AgentGraphCoordinator);
-  assert.equal(
-    await bridge.capabilities.getAgentGraphSupervisorTools('root-session'),
-    graphTools,
+  bridge.bind(
+    {} as SessionManager,
+    {
+      toolsForSession: async (sessionId: string) => {
+        assert.equal(sessionId, 'root-session');
+        return graphTools;
+      },
+    } as AgentGraphCoordinator,
   );
+  assert.equal(await bridge.capabilities.getAgentGraphSupervisorTools('root-session'), graphTools);
 });
 
 test('settles the scoped graph before stopping the root Session', async () => {

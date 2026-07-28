@@ -125,9 +125,7 @@ export async function runExperimentWithStorage(
 
   const workspace = await prepareWorkspace(task.workspaceDir);
   let graphCoordinator: AgentGraphCoordinator | undefined;
-  let graphControlStore:
-    | ReturnType<typeof createAgentGraphControlStore>
-    | undefined;
+  let graphControlStore: ReturnType<typeof createAgentGraphControlStore> | undefined;
   try {
     const agentWorkspaceDir = deps.realBackendIsolation?.workspaceDir ?? workspace.dir;
     const verifier = normalizeVerifier(task);

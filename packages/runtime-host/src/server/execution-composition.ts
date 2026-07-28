@@ -140,9 +140,7 @@ export async function createExecutionRuntimeHostComposition(
       interactionAuthority: interactions,
       canonicalPermissionOutcomes,
     });
-    const graphControlStore = createAgentGraphControlStore(
-      context.owner.capability.canonicalPath,
-    );
+    const graphControlStore = createAgentGraphControlStore(context.owner.capability.canonicalPath);
     const graphCoordinator = new AgentGraphCoordinator({
       sessionStore: stores.sessionStore,
       runStore: stores.agentRunStore,

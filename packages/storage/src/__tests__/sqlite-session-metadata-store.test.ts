@@ -850,19 +850,16 @@ describe('SQLite agent graph client projections', () => {
         snapshotVersion: 'snapshot-2',
         snapshot: { version: 2 },
         replaceOperators: false,
-        operators: [
-          { operatorId: 'operator-1', payload: { status: 'completed' } },
-        ],
+        operators: [{ operatorId: 'operator-1', payload: { status: 'completed' } }],
         terminalActivities: [],
         activityRecords: [{ recordId: 'record-1', eventTime: 10 }],
         incrementalRecordId: 'record-1',
       });
 
-      const materialized =
-        await store.readAgentGraphClientProjectionWithOperator(
-          'graph-atomic-read',
-          'operator-2',
-        );
+      const materialized = await store.readAgentGraphClientProjectionWithOperator(
+        'graph-atomic-read',
+        'operator-2',
+      );
       assert.equal(materialized?.projection.snapshotVersion, 'snapshot-2');
       assert.equal(materialized?.operator?.snapshotVersion, 'snapshot-1');
       assert.deepEqual(materialized?.operator?.payload, { status: 'waiting' });

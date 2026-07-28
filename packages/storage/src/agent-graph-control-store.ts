@@ -10,9 +10,7 @@ import {
  * coordinator. Session JSONL remains the transcript authority; graph
  * schedule/topology/claim relationships are queried from SQLite.
  */
-export function createAgentGraphControlStore(
-  workspaceRoot: string,
-): SqliteSessionMetadataStore {
+export function createAgentGraphControlStore(workspaceRoot: string): SqliteSessionMetadataStore {
   return createSqliteSessionMetadataStore(
     join(workspaceRoot, SQLITE_SESSION_METADATA_DATABASE_NAME),
   );
