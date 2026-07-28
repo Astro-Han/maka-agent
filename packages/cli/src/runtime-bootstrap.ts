@@ -283,9 +283,11 @@ export async function createMakaCliRuntimeContext(
         }
       : {}),
   });
-  // Child sessions get fresh file-only tools. In particular, their Read tool
-  // cannot inspect parent runtime resources and no write/shell/agent tool is
-  // present for the catalog allowlist to select.
+  // Child sessions get fresh catalog tools. Their Read tool cannot inspect
+  // parent runtime resources, and the SessionManager narrows this union to the
+  // selected profile after checking host capabilities (for example, a
+  // worktree executor for implementation children). Agent tools are excluded
+  // so children cannot recursively spawn from this surface.
   const childAgentTools =
     input.surface === 'tui'
       ? buildChildAgentTools(

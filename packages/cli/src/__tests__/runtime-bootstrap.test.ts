@@ -22,6 +22,7 @@ import {
   GOAL_RESUME_TOOL_NAME,
   GOAL_SET_TOOL_NAME,
   GOAL_STATUS_TOOL_NAME,
+  IMPLEMENTATION_AGENT_ID,
   type AiSdkBackendInput,
   type MakaTool,
   type SessionStore,
@@ -344,7 +345,7 @@ describe('Maka CLI runtime bootstrap', () => {
     });
   });
 
-  test('wires TUI subagent capabilities and a child-safe tool surface', async () => {
+  test('wires TUI subagent capabilities and a profile-filtered child tool surface', async () => {
     await withWorkspace(async (workspaceRoot) => {
       const connectionStore = createConnectionStore(workspaceRoot);
       await connectionStore.create({
@@ -400,15 +401,30 @@ describe('Maka CLI runtime bootstrap', () => {
         });
         assert.deepEqual(
           runtimeDeps.childTools?.map((tool) => tool.name),
-          ['Read', 'Glob', 'Grep'],
+          ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'],
         );
         assert.equal(
           runtimeDeps.childTools?.some((tool) =>
-            ['Bash', 'Write', 'Edit', AGENT_SPAWN_TOOL_NAME, AGENT_SWARM_TOOL_NAME].includes(
-              tool.name,
-            ),
+            [AGENT_SPAWN_TOOL_NAME, AGENT_SWARM_TOOL_NAME].includes(tool.name),
           ),
           false,
+        );
+        const childAgents = (await backendInput.listChildAgents?.()) as {
+          definitions: Array<{
+            id: string;
+            availability: { status: string; reason?: string };
+          }>;
+        };
+        assert.deepEqual(
+          childAgents.definitions.find(
+            (definition) => definition.id === IMPLEMENTATION_AGENT_ID,
+          )?.availability,
+          {
+            status: 'unavailable',
+            reason: 'workspace_isolation_unavailable',
+            workspace: 'worktree',
+            requiredRuntime: 'worktree_child_executor',
+          },
         );
         assert.equal(context.skills.host.toolNames.has(AGENT_SPAWN_TOOL_NAME), true);
         assert.equal(context.skills.host.toolNames.has(AGENT_SWARM_TOOL_NAME), true);
