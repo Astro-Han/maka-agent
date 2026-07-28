@@ -90,6 +90,13 @@ import {
   type RuntimeUserQuestionContinuation,
 } from '../interaction-authority.js';
 
+test('session summaries preserve an explicit no-project association', async () => {
+  const store = new MemorySessionStore();
+  const header = await store.create(makeInput({ projectId: null }));
+
+  expect(headerToSummary(header).projectId).toBe(null);
+});
+
 describe('SessionManager child-session read model', () => {
   test('lists typed child sessions without treating branches as children', async () => {
     const store = new MemorySessionStore();
@@ -792,6 +799,7 @@ describe('SessionManager child-session runtime primitive', () => {
     const parent = await manager.createSession(
       makeInput({
         cwd: '/tmp/project',
+        projectId: 'project-1',
         llmConnectionSlug: 'connection-1',
         model: 'model-1',
         thinkingLevel: 'medium',
@@ -817,6 +825,7 @@ describe('SessionManager child-session runtime primitive', () => {
 
     const childHeader = await store.readHeader(result.childSessionId);
     expect(childHeader.cwd).toBe('/tmp/project');
+    expect(childHeader.projectId).toBe('project-1');
     expect(childHeader.workspaceRoot).toBe((await store.readHeader(parent.id)).workspaceRoot);
     expect(childHeader.backend).toBe('fake');
     expect(childHeader.llmConnectionSlug).toBe('connection-1');
@@ -926,6 +935,48 @@ describe('SessionManager child-session runtime primitive', () => {
       /could not find the requested child session/,
     );
 
+    parentGate.release();
+    while (!(await parentTurn.next()).done) {}
+  });
+
+  test('child sessions preserve an explicit no-project association', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    const parentGate = makeGate();
+    backends.register(
+      'fake',
+      (ctx) => new TestBackend(ctx, ctx.header.subagentRuntime ? undefined : parentGate),
+    );
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(200),
+      runtimeSource: 'test',
+    });
+    const parent = await manager.createSession(makeInput({ projectId: null }));
+    const parentTurn = manager
+      .sendMessage(parent.id, { turnId: 'parent-turn', text: 'keep the parent active' })
+      [Symbol.asyncIterator]();
+    await parentTurn.next();
+    const [parentRun] = await runStore.listSessionRuns(parent.id);
+    if (!parentRun) throw new Error('parent run was not recorded');
+
+    const child = await manager.spawnChildSession(parent.id, {
+      spawnedBy: {
+        parentRunId: parentRun.runId,
+        parentTurnId: parentRun.turnId,
+        toolCallId: 'tool-call-no-project',
+      },
+      agentProfile: LOCAL_READ_AGENT_PROFILE,
+      prompt: 'inspect without a project',
+    });
+
+    expect((await store.readHeader(child.childSessionId)).projectId).toBe(null);
     parentGate.release();
     while (!(await parentTurn.next()).done) {}
   });
@@ -14283,7 +14334,9 @@ describe('SessionManager permission mode updates', () => {
       newId: nextId(),
       now: nextNow(15_000),
     });
-    const session = await manager.createSession(makeInput({ name: 'Parent' }));
+    const session = await manager.createSession(
+      makeInput({ name: 'Parent', projectId: 'project-1' }),
+    );
     await drain(manager.sendMessage(session.id, { turnId: 'source', text: 'context' }));
     await drain(manager.sendMessage(session.id, { turnId: 'after', text: 'do not copy' }));
 
@@ -14294,6 +14347,7 @@ describe('SessionManager permission mode updates', () => {
 
     expect(child.parentSessionId).toBe(session.id);
     expect(child.branchOfTurnId).toBe('source');
+    expect(child.projectId).toBe('project-1');
     const childMessages = await store.readMessages(child.id);
     expect(
       childMessages.some((message) => (message as { turnId?: string }).turnId === 'source'),
@@ -14302,6 +14356,31 @@ describe('SessionManager permission mode updates', () => {
       childMessages.some((message) => (message as { turnId?: string }).turnId === 'after'),
     ).toBe(false);
     expect(childMessages.some((message) => message.type === 'turn_state')).toBe(false);
+  });
+
+  test('branchFromTurn preserves an explicit no-project association', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register(
+      'fake',
+      (ctx) => new EventBackend(ctx, [{ type: 'complete', stopReason: 'end_turn' }]),
+    );
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(15_100),
+    });
+    const session = await manager.createSession(makeInput({ projectId: null }));
+    await drain(manager.sendMessage(session.id, { turnId: 'source', text: 'context' }));
+
+    const child = await manager.branchFromTurn(session.id, { sourceTurnId: 'source' });
+
+    expect(child.projectId).toBe(null);
+    expect((await store.readHeader(child.id)).projectId).toBe(null);
   });
 
   test('hydrates an inherited running ShellRun with its source-session owner', async () => {
@@ -14648,6 +14727,7 @@ describe('SessionManager permission mode updates', () => {
     const session = await manager.createSession(
       makeInput({
         name: 'Conversation',
+        projectId: 'project-1',
         collaborationMode: 'plan',
         orchestrationMode: 'swarm',
       }),
@@ -14659,6 +14739,7 @@ describe('SessionManager permission mode updates', () => {
     const version2 = await manager.reviseBeforeTurn(session.id, { sourceTurnId: 'second' });
 
     expect(version2.name).toBe('Conversation');
+    expect(version2.projectId).toBe('project-1');
     expect(version2.isFlagged).toBe(true);
     expect(version2.collaborationMode).toBe('plan');
     expect(version2.orchestrationMode).toBe('swarm');
@@ -14692,11 +14773,37 @@ describe('SessionManager permission mode updates', () => {
     );
 
     const version3 = await manager.reviseBeforeTurn(version2.id, { sourceTurnId: 'first' });
+    expect(version3.projectId).toBe('project-1');
     expect(version3.revisionRootSessionId).toBe(session.id);
     expect(version3.revisionParentSessionId).toBe(version2.id);
     expect(version3.revisionIndex).toBe(3);
     expect(version3.revisionState).toBe('preparing');
     expect(version3.parentSessionId).toBeUndefined();
+  });
+
+  test('reviseBeforeTurn preserves an explicit no-project association', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register(
+      'fake',
+      (ctx) => new EventBackend(ctx, [{ type: 'complete', stopReason: 'end_turn' }]),
+    );
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(16_800),
+    });
+    const session = await manager.createSession(makeInput({ projectId: null }));
+    await drain(manager.sendMessage(session.id, { turnId: 'source', text: 'context' }));
+
+    const revision = await manager.reviseBeforeTurn(session.id, { sourceTurnId: 'source' });
+
+    expect(revision.projectId).toBe(null);
+    expect((await store.readHeader(revision.id)).projectId).toBe(null);
   });
 
   test('startup recovery removes empty preparing revisions and commits admitted edits', async () => {
@@ -17916,6 +18023,7 @@ class MemorySessionStore implements SessionStore {
       id: `session-${this.headers.size + 1}`,
       workspaceRoot: '/tmp/workspace',
       cwd: input.cwd,
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       createdAt: 1,
       lastUsedAt: 1,
       name: input.name ?? 'New Chat',

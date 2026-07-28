@@ -6,9 +6,10 @@ import {
 } from '@maka/runtime';
 import type { SessionManager } from '@maka/runtime';
 import { expertTeamLabel } from '@maka/core';
-import type { CreateSessionInput, OnboardingState, SessionEvent } from '@maka/core';
+import type { OnboardingState, SessionEvent } from '@maka/core';
 import { handleExpertTeamStart as runExpertTeamStart } from './expert-team-start.js';
 import type { requireReadyConnection } from './chat-readiness.js';
+import type { DesktopCreateSessionInput } from './new-session-project.js';
 
 export interface SessionEntryIpcDeps {
   runtime: SessionManager;
@@ -16,11 +17,10 @@ export interface SessionEntryIpcDeps {
     slug: string | null | undefined,
     model?: string,
   ) => ReturnType<typeof requireReadyConnection>;
-  getCurrentProjectRoot: () => Promise<string>;
   getOnboardingState: () => Promise<OnboardingState>;
   emitSessionsChanged: (reason: 'created', sessionId: string) => void;
   ensureSessionCanSend: (sessionId: string) => Promise<void>;
-  createSession: (input: CreateSessionInput) => ReturnType<SessionManager['createSession']>;
+  createSession: (input: DesktopCreateSessionInput) => ReturnType<SessionManager['createSession']>;
   streamEvents: (
     sessionId: string,
     iterator: AsyncIterable<SessionEvent>,
@@ -50,6 +50,10 @@ export function registerSessionEntryIpc(deps: SessionEntryIpcDeps): void {
     })),
   }));
   ipcMain.handle('expertTeam:start', async (_event, input: unknown) => {
+    const projectId =
+      input && typeof input === 'object' && 'projectId' in input
+        ? (input as { projectId?: unknown }).projectId
+        : undefined;
     return runExpertTeamStart(input, {
       isKnownTeam: (teamId) => getExpertTeam(teamId) !== undefined,
       getOnboardingState: () => deps.getOnboardingState(),
@@ -57,7 +61,6 @@ export function registerSessionEntryIpc(deps: SessionEntryIpcDeps): void {
         const ready = await deps.getReadyConnection(defaultConnectionSlug, defaultModel);
         const team = getExpertTeam(teamId);
         return deps.createSession({
-          cwd: await deps.getCurrentProjectRoot(),
           backend: 'ai-sdk',
           llmConnectionSlug: ready.connection.slug,
           model: ready.model,
@@ -66,6 +69,7 @@ export function registerSessionEntryIpc(deps: SessionEntryIpcDeps): void {
           permissionMode: 'explore',
           name: team ? team.name : 'Expert Team',
           labels: [expertTeamLabel(teamId)],
+          ...(typeof projectId === 'string' || projectId === null ? { projectId } : {}),
         });
       },
       emitCreated: (sessionId) => deps.emitSessionsChanged('created', sessionId),

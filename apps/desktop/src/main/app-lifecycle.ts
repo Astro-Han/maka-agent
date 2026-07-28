@@ -12,6 +12,7 @@ import type {
 import type { McpClientManager } from '@maka/mcp';
 import type {
   createConnectionStore,
+  createProjectCatalog,
   createSessionStore,
   createSettingsStore,
   createTelemetryRepo,
@@ -34,6 +35,7 @@ import type { createMainWindowController } from './main-window.js';
 import type { assembleDesktopTools } from './tool-assembly.js';
 import type { StreamEvents } from './session-stream.js';
 import type { SettingsIpcHandle } from './settings-ipc-main.js';
+import { runProjectStartupMigration } from './project-startup-migration.js';
 
 type AssembledTools = ReturnType<typeof assembleDesktopTools>;
 type PricingLookup = ReturnType<typeof buildPricingLookup>;
@@ -43,6 +45,7 @@ export interface AppLifecycleDeps {
   e2eFixture: ReturnType<typeof resolveE2eFixture>;
   workspaceRoot: string;
   sessionStore: ReturnType<typeof createSessionStore>;
+  projectCatalog: ReturnType<typeof createProjectCatalog>;
   credentialStore: ReturnType<typeof createFileCredentialStore>;
   connectionStore: ReturnType<typeof createConnectionStore>;
   settingsStore: ReturnType<typeof createSettingsStore>;
@@ -69,6 +72,7 @@ export interface AppLifecycleDeps {
    *  controller and is registered here on `second-instance` / `activate`. */
   focusOrCreateMainWindow: () => void;
   emitConnectionListChanged: () => void;
+  emitSessionsChanged: (reason: 'migrated') => void;
   handleExternalSettingsChange: () => Promise<void>;
   /** Accessor for the settings IPC handle, which is assigned inside
    *  main.ts's `registerIpc()`; teardown disposes it if present. */
@@ -96,6 +100,7 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
     e2eFixture,
     workspaceRoot,
     sessionStore,
+    projectCatalog,
     credentialStore,
     connectionStore,
     settingsStore,
@@ -120,6 +125,7 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
     streamEvents,
     focusOrCreateMainWindow,
     emitConnectionListChanged,
+    emitSessionsChanged,
     handleExternalSettingsChange,
     getSettingsIpc,
     setLookupPricing,
@@ -146,6 +152,15 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
       // Best-effort: startup should still reach the renderer so users can inspect
       // and repair any remaining local session state.
     }
+  }
+
+  async function migrateSessionProjectsOnStartup(): Promise<void> {
+    await runProjectStartupMigration({
+      sessions: sessionStore,
+      catalog: projectCatalog,
+      emitSessionsChanged,
+      logError: console.error,
+    });
   }
 
   async function ensureBootstrapConnection(): Promise<void> {
@@ -288,6 +303,7 @@ export function wireAppLifecycle(deps: AppLifecycleDeps): void {
     keepSystemAwake.apply(settings.system.keepSystemAwake);
     await telemetryRepo.load();
     setLookupPricing(buildPricingLookup(telemetryRepo.listPricingOverrides()));
+    await migrateSessionProjectsOnStartup();
     await recoverInterruptedSessionsOnStartup();
     await botRegistry.applySettings(settings.botChat);
     await openGateway.sync(settings.openGateway);

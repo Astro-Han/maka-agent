@@ -11,7 +11,6 @@ import {
 import type {
   BotProvider,
   ConnectionEvent,
-  CreateSessionInput,
   SessionChangedEvent,
   SessionChangedReason,
   SessionEvent,
@@ -67,6 +66,7 @@ import {
   createConnectionStore,
   createPlanReminderStore,
   createPlanStore,
+  createProjectCatalog,
   openRuntimeEventPersistence,
   createSessionStore,
   createSettingsStore,
@@ -147,6 +147,12 @@ import {
   sessionLifecycleErrorFromReadFailure,
 } from './session-lifecycle.js';
 import { createProjectRootController } from './project-root-controller.js';
+import { createProjectManagementService } from './project-management-service.js';
+import {
+  type DesktopCreateSessionInput,
+  resolveDesktopSessionSelection,
+  resolveNewSessionProjectInput,
+} from './new-session-project.js';
 import {
   assertSessionWorkspaceAvailable,
   isSessionWorkspaceUnavailableError,
@@ -259,6 +265,7 @@ async function confirmDesktopStorageRootRepair(): Promise<boolean> {
 const keepSystemAwake = createKeepSystemAwakeController(powerSaveBlocker);
 const store = createSessionStore(workspaceRoot);
 const agentGraphControlStore = createAgentGraphControlStore(workspaceRoot);
+const projectCatalog = createProjectCatalog(workspaceRoot);
 const planStore = createPlanStore(workspaceRoot);
 const runStore = createAgentRunStore(workspaceRoot);
 const runtimePersistence = await openRuntimeEventPersistence({
@@ -425,9 +432,7 @@ const automationWiring = createMainAutomationWiring({
   async createFreshRun(prompt: string, automationId: string) {
     const slug = await connectionStore.getDefault();
     const { connection, model } = await getReadyConnection(slug, undefined);
-    const cwd = await resolveCurrentProjectRoot();
     const session = await createDesktopSession({
-      cwd,
       backend: 'ai-sdk',
       llmConnectionSlug: connection.slug,
       model,
@@ -720,6 +725,18 @@ const projectRootController = createProjectRootController({
   lastProjectPathFile: join(workspaceRoot, 'last-project-path.json'),
   fallbackRoots: () => [process.cwd(), app.getAppPath()],
 });
+const projectManagement = createProjectManagementService({
+  catalog: projectCatalog,
+  sessions: store,
+  chooseDirectory: async () => {
+    const result = await mainWindowController.showOpenDialog({
+      title: '添加项目',
+      properties: ['openDirectory'],
+    });
+    return result.canceled ? undefined : result.filePaths[0];
+  },
+  selection: projectRootController,
+});
 const resolveCurrentProjectRoot: () => Promise<string> = () => projectRootController.current();
 const resolveProjectRootForContext = (sessionId: unknown): Promise<string> =>
   resolveProjectContextRoot(sessionId, {
@@ -964,7 +981,6 @@ botIncoming = createBotIncomingMainService({
   runtime,
   createSession: createDesktopSession,
   botRegistry,
-  getCurrentProjectRoot: () => resolveCurrentProjectRoot(),
   getDefaultConnectionSlug: () => connectionStore.getDefault(),
   getReadyConnection,
   readSessionHeader: async (sessionId) => {
@@ -1021,6 +1037,7 @@ function registerIpc(): void {
     workspaceRoot,
     buildInfo,
     e2eFixture,
+    projectManagement,
   });
   registerMemoryIpc({ localMemory });
   registerConfigIpc({ connectionStore, settingsStore, credentialStore, workspaceRoot });
@@ -1074,7 +1091,6 @@ function registerIpc(): void {
     createSession: createDesktopSession,
     getReadyConnection,
     streamEvents,
-    getCurrentProjectRoot: currentProjectRoot,
     getWorkspacePrivacyContext,
     canCreateFakeSession: canCreateFakeSessionFromRenderer,
   });
@@ -1109,7 +1125,6 @@ function registerIpc(): void {
   registerSessionEntryIpc({
     runtime,
     getReadyConnection,
-    getCurrentProjectRoot: currentProjectRoot,
     getOnboardingState: async () => (await onboardingService.getSnapshot()).state,
     emitSessionsChanged,
     ensureSessionCanSend,
@@ -1247,9 +1262,10 @@ async function ensureSessionWorkspaceAvailable(sessionId: string): Promise<void>
   await readAvailableSessionHeader(sessionId);
 }
 
-async function createDesktopSession(input: CreateSessionInput) {
-  await assertSessionWorkspaceAvailable(input.cwd);
-  return runtime.createSession(input);
+async function createDesktopSession(input: DesktopCreateSessionInput) {
+  const selected = await resolveDesktopSessionSelection(input, projectManagement);
+  await assertSessionWorkspaceAvailable(selected.cwd);
+  return runtime.createSession(await resolveNewSessionProjectInput(selected, projectCatalog));
 }
 
 const readyConnectionDeps = {
@@ -1359,6 +1375,7 @@ wireAppLifecycle({
   e2eFixture,
   workspaceRoot,
   sessionStore: store,
+  projectCatalog,
   credentialStore,
   connectionStore,
   settingsStore,
@@ -1383,6 +1400,7 @@ wireAppLifecycle({
   streamEvents,
   focusOrCreateMainWindow,
   emitConnectionListChanged,
+  emitSessionsChanged,
   handleExternalSettingsChange,
   getSettingsIpc: () => settingsIpc,
   setLookupPricing: (value) => {

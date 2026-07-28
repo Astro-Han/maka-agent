@@ -21,6 +21,7 @@ export * from './agent-graph-supervisor-wake.js';
 export * from './agent-graph-timeline.js';
 export * from './runtime-policy.js';
 export * from './interaction.js';
+export * from './project.js';
 
 // events.ts
 export type {

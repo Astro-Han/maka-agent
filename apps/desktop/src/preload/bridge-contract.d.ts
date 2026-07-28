@@ -52,6 +52,7 @@ import type {
   SubscriptionAccountState,
   SubscriptionActionResult,
   PlanReminder,
+  ProjectRecord,
   PlanReminderDeliveryTarget,
   PlanReminderRecurrence,
   DailyReviewArchive,
@@ -310,6 +311,21 @@ export interface MakaBridge {
     setThinkingLevel(sessionId: string, level: ThinkingLevel | undefined | null): Promise<SessionSummary>;
     remove(sessionId: string, options?: { revisionFamily?: boolean }): Promise<void>;
   };
+  projects: {
+    list(): Promise<ProjectRecord[]>;
+    add(): Promise<
+      { ok: true; project: ProjectRecord; path: string } | { ok: false; reason: 'cancelled' }
+    >;
+    select(
+      projectId: string | null,
+    ): Promise<{ project: ProjectRecord | null; path: string }>;
+    relink(
+      projectId: string,
+    ): Promise<{ ok: true; project: ProjectRecord } | { ok: false; reason: 'cancelled' }>;
+    rename(projectId: string, name: string): Promise<ProjectRecord>;
+    archive(projectId: string): Promise<ProjectRecord>;
+    restore(projectId: string): Promise<ProjectRecord>;
+  };
   shellRuns: {
     list(sessionId: string): Promise<ShellRunUpdate[]>;
     subscribeUpdates(handler: (update: ShellRunUpdate) => void): () => void;
@@ -387,7 +403,7 @@ export interface MakaBridge {
   };
   expertTeam: {
     list(): Promise<{ teams: ExpertTeamSummary[] }>;
-    start(input: { teamId: string; prompt?: string }): Promise<ExpertTeamStartResult>;
+    start(input: { teamId: string; prompt?: string; projectId?: string | null }): Promise<ExpertTeamStartResult>;
   };
   permissions: {
     getSnapshot(): Promise<PermissionSnapshot>;
@@ -657,6 +673,7 @@ export interface MakaBridge {
       arch: string;
       osRelease: string;
       workspacePath: string;
+      projectId?: string | null;
       projectPath: string;
       projectGit: { isGitRepo: boolean; branch?: string };
       buildMode: 'dev' | 'packaged';
@@ -686,14 +703,6 @@ export interface MakaBridge {
             | 'not-a-directory'
             | 'open-failed';
         }
-    >;
-    selectProjectDirectory(): Promise<
-      | { ok: true; projectPath: string; projectGit: { isGitRepo: boolean; branch?: string } }
-      | { ok: false; reason: 'cancelled' | 'missing-selection' }
-    >;
-    selectProjectRoot(projectPath: string): Promise<
-      | { ok: true; projectPath: string; projectGit: { isGitRepo: boolean; branch?: string } }
-      | { ok: false; reason: 'invalid-path' | 'not-found' }
     >;
     resolveProjectGitInfo(projectPath: string): Promise<
       | { ok: true; projectPath: string; projectGit: { isGitRepo: boolean; branch?: string } }

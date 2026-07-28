@@ -71,6 +71,8 @@ export interface SessionStore {
     expectedRevision: number,
   ): Promise<{ header: SessionHeader } & AgentGraphOperatorProvisionResult>;
   list(filter?: SessionListFilter): Promise<SessionSummary[]>;
+  /** Enumerate durable metadata without reading transcript bodies. */
+  listHeaders(): Promise<SessionHeader[]>;
   listForRecovery(): Promise<SessionHeader[]>;
   /** Read only the durable header without triggering connection-lock self-healing. */
   readHeaderSnapshot(sessionId: string): Promise<SessionHeader>;
@@ -218,14 +220,18 @@ class SqliteSessionStore implements SessionStore {
   }
 
   async listForRecovery(): Promise<SessionHeader[]> {
-    await this.ensureReady();
-    const headers = (await this.metadata.list())
-      .map((record) => record.header)
-      .sort((a, b) => a.id.localeCompare(b.id));
+    const headers = await this.listHeaders();
     for (const header of headers) {
       await this.files.readTranscriptMessagesForRecovery(header.id, header);
     }
     return headers;
+  }
+
+  async listHeaders(): Promise<SessionHeader[]> {
+    await this.ensureReady();
+    return (await this.metadata.list())
+      .map((record) => record.header)
+      .sort((a, b) => a.id.localeCompare(b.id));
   }
 
   async readHeaderSnapshot(sessionId: string): Promise<SessionHeader> {
@@ -415,6 +421,13 @@ class FileSessionStore implements SessionStore {
     input: CreateSessionInput,
     initialRecord: 'legacy-header' | 'transcript-marker',
   ): Promise<SessionHeader> {
+    if (
+      input.projectId !== undefined &&
+      input.projectId !== null &&
+      (typeof input.projectId !== 'string' || input.projectId.length === 0)
+    ) {
+      throw new Error('Invalid project id');
+    }
     const now = Date.now();
     const id = randomUUID();
     // PR-UI-IPC-2 (@kenji msg 0474c3fe + @xuan msg 88d96a87):
@@ -439,6 +452,7 @@ class FileSessionStore implements SessionStore {
       id,
       workspaceRoot: this.workspaceRoot,
       cwd: input.cwd,
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       createdAt: now,
       lastUsedAt: now,
       name: resolvedName,
@@ -565,6 +579,10 @@ class FileSessionStore implements SessionStore {
   }
 
   async listForRecovery(): Promise<SessionHeader[]> {
+    return this.listHeaders();
+  }
+
+  async listHeaders(): Promise<SessionHeader[]> {
     let entries;
     try {
       entries = await readdir(this.sessionsRoot, { withFileTypes: true });
@@ -1167,6 +1185,9 @@ export function normalizeSessionHeader(
     header.id === sessionId &&
     typeof header.workspaceRoot === 'string' &&
     typeof header.cwd === 'string' &&
+    (header.projectId === undefined ||
+      header.projectId === null ||
+      (typeof header.projectId === 'string' && header.projectId.length > 0)) &&
     isFiniteNumber(header.createdAt) &&
     isFiniteNumber(header.lastUsedAt) &&
     (header.lastMessageAt === undefined || isFiniteNumber(header.lastMessageAt)) &&
@@ -1280,6 +1301,7 @@ function toSummary(header: SessionHeader, messages: StoredMessage[] = []): Sessi
   return {
     id: header.id,
     cwd: header.cwd,
+    ...(header.projectId !== undefined ? { projectId: header.projectId } : {}),
     name: normalizeSessionName(header.name),
     isFlagged: header.isFlagged,
     isArchived: header.isArchived,

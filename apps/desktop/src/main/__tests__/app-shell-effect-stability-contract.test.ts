@@ -3,12 +3,19 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
-import type { ConnectionEvent, PlanReminder, SessionEvent, StoredMessage } from '@maka/core';
+import type {
+  ConnectionEvent,
+  PlanReminder,
+  ProjectRecord,
+  SessionEvent,
+  StoredMessage,
+} from '@maka/core';
 import { build } from 'esbuild';
 import { act, createElement, type ReactElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type * as AppShellEffects from '../../renderer/app-shell-effects.js';
 import type * as KeepSystemAwake from '../../renderer/use-keep-system-awake.js';
+import type * as ProjectContext from '../../renderer/use-project-context.js';
 import { readRendererShellSource } from './renderer-shell-source-helpers.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
@@ -20,6 +27,7 @@ type AppShellEffectsModule = Pick<
   'useActiveSessionEvents' | 'useAppShellBootstrapSubscriptions'
 >;
 type KeepSystemAwakeModule = Pick<typeof KeepSystemAwake, 'useKeepSystemAwake'>;
+type ProjectContextModule = Pick<typeof ProjectContext, 'useAppShellProjectContext'>;
 type CapturedSubscriptions = {
   activeSessionEvent?: (event: SessionEvent) => void;
   activeSessionSubscribeCount: number;
@@ -27,10 +35,22 @@ type CapturedSubscriptions = {
   connectionSubscribeCount: number;
   planDue?: (reminder: PlanReminder) => void;
   planDueSubscribeCount: number;
+  sessionChange?: (event: { reason: string; sessionId?: string; ts: number }) => void;
   settingsExternalChanged?: () => void;
   settingsGet?(): Promise<{ system: { keepSystemAwake: boolean } }>;
 };
 type RendererMakaStub = {
+  app: {
+    info(): Promise<{
+      projectId: string | null | undefined;
+      projectPath: string;
+      projectGit: { isGitRepo: boolean };
+    }>;
+    sessionProjectInfo(sessionId: string): Promise<{
+      projectPath: string;
+      projectGit: { isGitRepo: boolean };
+    }>;
+  };
   appWindow: {
     subscribeOpenSettings(callback: () => void): () => void;
   };
@@ -40,6 +60,9 @@ type RendererMakaStub = {
   plans: {
     subscribeChanges(callback: () => void): () => void;
     subscribeDue(callback: (reminder: never) => void): () => void;
+  };
+  projects: {
+    list(): Promise<ProjectRecord[]>;
   };
   sessions: {
     readMessages(sessionId: string): Promise<StoredMessage[]>;
@@ -64,6 +87,60 @@ afterEach(() => {
 });
 
 describe('AppShell effect stability contract', () => {
+  it('refreshes the project catalog when a background session creates a project', async () => {
+    const effects = await importAppShellEffects();
+    const refs = createBootstrapRefs();
+    const captured = createCapturedSubscriptions();
+    const root = installReactRenderer(captured);
+    let projectRefreshes = 0;
+
+    await render(
+      root,
+      createElement(BootstrapSubscriptionProbe, {
+        effects,
+        onConnectionEvent: () => {},
+        onProjectRefresh: () => {
+          projectRefreshes += 1;
+        },
+        refs,
+      }),
+    );
+
+    await act(async () => {
+      captured.sessionChange?.({ reason: 'created', sessionId: 'background-session', ts: 1 });
+      await Promise.resolve();
+    });
+
+    assert.equal(projectRefreshes, 1);
+  });
+
+  it('refreshes the project catalog after startup migration changes session associations', async () => {
+    const effects = await importAppShellEffects();
+    const refs = createBootstrapRefs();
+    const captured = createCapturedSubscriptions();
+    const root = installReactRenderer(captured);
+    let projectRefreshes = 0;
+
+    await render(
+      root,
+      createElement(BootstrapSubscriptionProbe, {
+        effects,
+        onConnectionEvent: () => {},
+        onProjectRefresh: () => {
+          projectRefreshes += 1;
+        },
+        refs,
+      }),
+    );
+
+    await act(async () => {
+      captured.sessionChange?.({ reason: 'migrated', ts: 1 });
+      await Promise.resolve();
+    });
+
+    assert.equal(projectRefreshes, 1);
+  });
+
   it('keeps bootstrap subscriptions stable while invoking the latest connection handler', async () => {
     const effects = await importAppShellEffects();
     const refs = createBootstrapRefs();
@@ -251,11 +328,100 @@ describe('AppShell effect stability contract', () => {
 
     assert.equal(snapshots.at(-1), false);
   });
+
+  it('does not claim an archived project when main has no resolved selection', async () => {
+    const context = await importProjectContext();
+    const captured = createCapturedSubscriptions();
+    const root = installReactRenderer(captured);
+    const archived = makeProject('archived-project', '/workspace/archived', 2);
+    window.maka.projects.list = async () => [archived];
+    const snapshots: Array<string | null | undefined> = [];
+
+    await render(
+      root,
+      createElement(ProjectContextProbe, {
+        context,
+        onSelectedProjectId: (projectId) => snapshots.push(projectId),
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.equal(snapshots.at(-1), undefined);
+  });
+
+  it('hydrates project selection from main instead of legacy composer defaults', async () => {
+    const context = await importProjectContext();
+    const captured = createCapturedSubscriptions();
+    const root = installReactRenderer(captured);
+    const project = makeProject('available-project', '/workspace/available');
+    window.maka.projects.list = async () => [project];
+    window.maka.app.info = async () => ({
+      appVersion: 'test',
+      electronVersion: 'test',
+      nodeVersion: 'test',
+      chromeVersion: 'test',
+      platform: 'darwin',
+      arch: 'arm64',
+      osRelease: 'test',
+      workspacePath: '/workspace',
+      projectId: project.id,
+      projectPath: '/workspace/available',
+      projectGit: { isGitRepo: false },
+      buildMode: 'dev',
+      buildCommit: null,
+    });
+    const snapshots: Array<string | null | undefined> = [];
+
+    await render(
+      root,
+      createElement(ProjectContextProbe, {
+        context,
+        onSelectedProjectId: (projectId) => snapshots.push(projectId),
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.equal(snapshots.at(-1), project.id);
+  });
+
+  it('resolves a session project alias to the surviving active project', async () => {
+    const context = await importProjectContext();
+    const captured = createCapturedSubscriptions();
+    const root = installReactRenderer(captured);
+    const project = {
+      ...makeProject('surviving-project', '/workspace/relocated'),
+      aliases: ['merged-project'],
+    };
+    window.maka.projects.list = async () => [project];
+    const snapshots: Array<string | undefined> = [];
+
+    await render(
+      root,
+      createElement(ProjectContextProbe, {
+        context,
+        sessionId: 'session-1',
+        sessionCwd: '/workspace/relocated',
+        sessionProjectId: 'merged-project',
+        onSelectedProjectId: () => {},
+        onCurrentProjectId: (projectId) => snapshots.push(projectId),
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    assert.equal(snapshots.at(-1), project.id);
+  });
 });
 
 function BootstrapSubscriptionProbe(props: {
   effects: AppShellEffectsModule;
   onConnectionEvent(event: ConnectionEvent): void;
+  onProjectRefresh?(): void;
   onNavSelection?(selection: { section: string }): void;
   onToastAction?(onClick: (() => void) | undefined): void;
   refs: ReturnType<typeof createBootstrapRefs>;
@@ -281,6 +447,10 @@ function BootstrapSubscriptionProbe(props: {
     refreshMemoryActive: async () => {},
     refreshMessages: async () => true,
     refreshPlanReminders: async () => {},
+    refreshProjects: async () => {
+      props.onProjectRefresh?.();
+      return [];
+    },
     refreshShellSettings: async () => {},
     refreshSkills: async () => {},
     refreshManagedSkillSources: async () => {},
@@ -337,6 +507,35 @@ function KeepSystemAwakeProbe(props: {
   return null;
 }
 
+function ProjectContextProbe(props: {
+  context: ProjectContextModule;
+  sessionId?: string;
+  sessionCwd?: string;
+  sessionProjectId?: string | null;
+  onSelectedProjectId(projectId: string | null | undefined): void;
+  onCurrentProjectId?(projectId: string | undefined): void;
+}) {
+  const state = props.context.useAppShellProjectContext({
+    uiLocale: 'zh',
+    rendererMountedRef: { current: true },
+    sessionId: props.sessionId,
+    sessionCwd: props.sessionCwd,
+    sessionProjectId: props.sessionProjectId,
+    onProjectSelected: () => {},
+    toastApi: {
+      success: () => {},
+      error: () => {},
+    },
+  });
+  useEffect(() => {
+    props.onSelectedProjectId(state.selectedProjectId);
+  }, [props, state.selectedProjectId]);
+  useEffect(() => {
+    props.onCurrentProjectId?.(state.currentProject?.id);
+  }, [props, state.currentProject]);
+  return null;
+}
+
 async function importAppShellEffects(): Promise<AppShellEffectsModule> {
   const outdir = await mkdtemp(resolve(REPO_ROOT, 'apps/desktop/dist/main/__tests__/app-shell-effects-'));
   const outfile = resolve(outdir, 'app-shell-effects.mjs');
@@ -372,6 +571,23 @@ async function importKeepSystemAwake(): Promise<KeepSystemAwakeModule> {
     logLevel: 'silent',
   });
   return (await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`)) as KeepSystemAwakeModule;
+}
+
+async function importProjectContext(): Promise<ProjectContextModule> {
+  const outdir = await mkdtemp(resolve(REPO_ROOT, 'apps/desktop/dist/main/__tests__/project-context-'));
+  const outfile = resolve(outdir, 'use-project-context.mjs');
+  await mkdir(dirname(outfile), { recursive: true });
+  await build({
+    entryPoints: [resolve(REPO_ROOT, 'apps/desktop/src/renderer/use-project-context.ts')],
+    outfile,
+    bundle: true,
+    external: ['react'],
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    logLevel: 'silent',
+  });
+  return (await import(`${pathToFileURL(outfile).href}?t=${Date.now()}`)) as ProjectContextModule;
 }
 
 function createCapturedSubscriptions(
@@ -437,6 +653,17 @@ async function render(root: Root, element: ReactElement): Promise<void> {
 
 function installFakeMaka(captured: CapturedSubscriptions): void {
   window.maka = {
+    app: {
+      info: async () => ({
+        projectId: undefined,
+        projectPath: '/workspace/relocated',
+        projectGit: { isGitRepo: false },
+      }),
+      sessionProjectInfo: async () => ({
+        projectPath: '/workspace/relocated',
+        projectGit: { isGitRepo: false },
+      }),
+    },
     appWindow: {
       subscribeOpenSettings: () => noop,
     },
@@ -455,9 +682,15 @@ function installFakeMaka(captured: CapturedSubscriptions): void {
         return noop;
       },
     },
+    projects: {
+      list: async () => [],
+    },
     sessions: {
       readMessages: async () => [],
-      subscribeChanges: () => noop,
+      subscribeChanges(callback: (event: { reason: string; sessionId?: string; ts: number }) => void) {
+        captured.sessionChange = callback;
+        return noop;
+      },
       subscribeEvents(_sessionId: string, callback: (event: SessionEvent) => void) {
         captured.activeSessionSubscribeCount += 1;
         captured.activeSessionEvent = callback;
@@ -475,6 +708,17 @@ function installFakeMaka(captured: CapturedSubscriptions): void {
       }),
     },
   } as unknown as RendererWindow['maka'];
+}
+
+function makeProject(id: string, path: string, archivedAt?: number): ProjectRecord {
+  return {
+    id,
+    name: id,
+    locations: [{ path, isWorktree: false }],
+    ...(archivedAt !== undefined ? { archivedAt } : {}),
+    available: true,
+    preferredPath: path,
+  };
 }
 
 function installFakeDom(): void {

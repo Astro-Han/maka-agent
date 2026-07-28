@@ -12,7 +12,6 @@ import {
   thinkingVariantsForModel,
 } from '@maka/core';
 import type {
-  CreateSessionInput,
   CreateSessionRequestInput,
   SessionEvent,
   SessionChangedEvent,
@@ -49,6 +48,7 @@ import type { createMainWindowController } from './main-window.js';
 import { handleBranchFromTurn } from './session-branch.js';
 import { handleReviseBeforeTurn } from './session-revision.js';
 import { prepareSessionSendSkillPlan } from './session-send-skill-plan.js';
+import type { DesktopCreateSessionInput } from './new-session-project.js';
 
 type SessionStore = ReturnType<typeof createSessionStore>;
 type ArtifactStore = ReturnType<typeof createArtifactStore>;
@@ -94,7 +94,7 @@ export interface SessionsIpcDeps {
   stopAgentGraph?: (sessionId: string) => Promise<void>;
   notifyAgentGraphPermissionResponse?: (sessionId: string) => void;
   ensureSessionWorkspaceAvailable: (sessionId: string) => Promise<void>;
-  createSession: (input: CreateSessionInput) => ReturnType<SessionManager['createSession']>;
+  createSession: (input: DesktopCreateSessionInput) => ReturnType<SessionManager['createSession']>;
   getReadyConnection: (
     slug: string | null | undefined,
     model?: string,
@@ -107,7 +107,6 @@ export interface SessionsIpcDeps {
       goalBoundary: 'external' | 'none';
     },
   ) => Promise<{ turnId: string; ok: boolean; error?: string }>;
-  getCurrentProjectRoot: () => Promise<string>;
   getWorkspacePrivacyContext: () => Promise<WorkspacePrivacyContext>;
   canCreateFakeSession: () => boolean;
 }
@@ -201,8 +200,6 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
     getWorkspacePrivacyContext,
     canCreateFakeSession,
   } = deps;
-  const currentProjectRoot = deps.getCurrentProjectRoot;
-
   ipcMain.handle('shell-runs:list', (_event, sessionId: string) => runtime.listShellRunUpdates(sessionId));
   ipcMain.handle('tasks:list', async (_event, sessionId: string) => {
     const tasks = await taskLedgerStore.list(sessionId, {
@@ -215,7 +212,6 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
   });
   ipcMain.handle('sessions:list', (_event, filter?: SessionListFilter) => runtime.listSessions(filter));
   ipcMain.handle('sessions:create', async (_event, input?: CreateSessionRequestInput) => {
-    const cwd = input?.cwd ?? (await currentProjectRoot());
     // #1433: `mode` is a product intent, not a session field. What it implies,
     // what the renderer may ask for directly, and what the configured default
     // fills in are all resolved in one pure place (create-session-input.ts),
@@ -227,7 +223,8 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
         throw new Error('FakeBackend sessions are only available in development.');
       }
       const session = await createSession({
-        cwd,
+        ...(input?.cwd ? { cwd: input.cwd } : {}),
+        projectId: input?.projectId,
         backend: 'fake',
         llmConnectionSlug: input.llmConnectionSlug ?? 'fake',
         model: input.model ?? 'fake-model',
@@ -246,7 +243,8 @@ export function registerSessionsIpc(deps: SessionsIpcDeps): void {
     const thinkingLevel = normalizeSupportedSessionThinkingLevel(input?.thinkingLevel, connection.providerType, model);
 
     const session = await createSession({
-      cwd,
+      ...(input?.cwd ? { cwd: input.cwd } : {}),
+      projectId: input?.projectId,
       backend: 'ai-sdk',
       llmConnectionSlug: connection.slug,
       model,
