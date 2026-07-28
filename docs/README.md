@@ -29,6 +29,7 @@ This page is the authority map for Maka documentation. Code and contract tests r
 - [AHE target protocol and evidence export](./ahe-target-protocol.md)
 - [Skill catalog policy](./skill-catalog-policy.md)
 - [Agent Swarm](./agent-swarm.md)
+- [Agent Graph stream scheduling](./architecture/agent-graph-stream-scheduling-draft.md) ([中文](./architecture/agent-graph-stream-scheduling-draft.zh-CN.md))
 - [Expert teams runtime](./expert-team-runtime.md)
 - [IM 扫码接入 runtime architecture](./architecture/bot-onboarding-runtime.zh-CN.md)
 - [Backend architecture chapters](./architecture/)
