@@ -9,6 +9,7 @@ const scenario = process.env.MAKA_RUN_FIXTURE_SCENARIO ?? 'completed';
 let observer: CreateMakaCliRuntimeContextInput['runtimeInvocationObserver'];
 let permissionDenied = false;
 let releaseStop: (() => void) | undefined;
+let graphActivityReleased = false;
 
 const target = {
   connection: {
@@ -59,6 +60,18 @@ const runtime: MakaRunRuntime = {
       throw new Error(`unexpected sessionId ${sessionId}`);
     }
     if (scenario === 'runtime-error') throw new Error('provider failed after startup');
+    if (process.env.MAKA_RUN_EXPECT_GRAPH === '1') {
+      if (
+        input.turnOrchestration?.mode !== 'graph' ||
+        input.turnOrchestration.source !== 'host_api'
+      ) {
+        throw new Error(
+          `unexpected graph orchestration ${JSON.stringify(input.turnOrchestration)}`,
+        );
+      }
+      await notify(completedResult('initial graph supervisor output'));
+      return;
+    }
     if (scenario === 'permission') {
       yield {
         type: 'permission_request',
@@ -151,6 +164,25 @@ async function createContext(input: CreateMakaCliRuntimeContextInput): Promise<M
     }
   }
   observer = input.runtimeInvocationObserver;
+  if (process.env.MAKA_RUN_EXPECT_GRAPH === '1') {
+    if (!input.enableAgentGraph) throw new Error('Graph host was not enabled');
+    return {
+      runtime,
+      target,
+      agentGraph: {
+        reserveActivity: () => ({
+          release: () => {
+            graphActivityReleased = true;
+          },
+        }),
+        waitForCompletion: async () => {
+          if (!graphActivityReleased) throw new Error('Graph activity was not released');
+          await notify(completedResult('graph completed'));
+        },
+      },
+      close: async () => {},
+    };
+  }
   return { runtime, target, close: async () => {} };
 }
 

@@ -4647,6 +4647,46 @@ describe('Maka Pi TUI runner', () => {
     await run;
   });
 
+  test('shows, enables, disables, and runs Graph Mode from the CLI', async () => {
+    const terminal = new FakeTerminal();
+    const driver = new SlashCommandDriver();
+    const run = runMakaPiTui({
+      title: 'Maka',
+      driver,
+      cwd: '/repo',
+      model: 'deepseek-v4-flash',
+      connectionSlug: 'deepseek',
+      permissionMode: 'ask',
+      terminal,
+    });
+
+    terminal.input('/graph');
+    terminal.input('\r');
+    await waitFor(() => terminal.output().includes('Graph Mode is off'));
+
+    terminal.input('/graph on');
+    terminal.input('\r');
+    await waitFor(() => driver.orchestrationModes.length === 1);
+    await waitFor(() => terminal.output().includes('Graph Mode enabled'));
+
+    terminal.input('/graph off');
+    terminal.input('\r');
+    await waitFor(() => driver.orchestrationModes.length === 2);
+    await waitFor(() => terminal.output().includes('Graph Mode disabled'));
+
+    terminal.input('/graph implement A, then integrate B');
+    terminal.input('\r');
+    await waitFor(() => driver.prompts.length === 1);
+    await waitFor(() => terminal.output().includes('Using Graph Mode for this turn only'));
+
+    assert.deepEqual(driver.orchestrationModes, ['graph', 'default']);
+    assert.deepEqual(driver.displayPrompts, ['implement A, then integrate B']);
+    assert.deepEqual(driver.turnOrchestrations, [{ mode: 'graph', source: 'slash_command' }]);
+
+    exitMaka(terminal);
+    await run;
+  });
+
   test('rejects Swarm commands during a running turn instead of steering them', async () => {
     const terminal = new FakeTerminal();
     const driver = new SteeringTurnDriver();

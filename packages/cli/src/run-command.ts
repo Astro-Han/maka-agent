@@ -35,6 +35,7 @@ export interface MakaRunOptions {
   permissionRules?: ToolPermissionRule[];
   resumeId?: string;
   continueLatest?: boolean;
+  graph?: true;
   thinkingDefaultExplicit?: boolean;
 }
 
@@ -56,6 +57,10 @@ export interface MakaRunRuntime {
 export interface MakaRunContext {
   runtime: MakaRunRuntime;
   target: ReadySessionTarget;
+  agentGraph?: {
+    reserveActivity(sessionId: string): { release(): void };
+    waitForCompletion(sessionId: string): Promise<void>;
+  };
   close(): Promise<void>;
 }
 
@@ -88,7 +93,7 @@ const VALUE_FLAGS = new Set([
 ]);
 
 const REPEATABLE_VALUE_FLAGS = new Set(['allow', 'deny']);
-const BOOLEAN_FLAGS = new Set(['continue']);
+const BOOLEAN_FLAGS = new Set(['continue', 'graph']);
 
 export function parseMakaRunArgs(argv: readonly string[]): ParseMakaRunArgsResult {
   const positional: string[] = [];
@@ -142,6 +147,7 @@ export function parseMakaRunArgs(argv: readonly string[]): ParseMakaRunArgsResul
   const permissionMode = flags.get('permission-mode');
   const resumeId = flags.get('resume');
   const continueLatest = booleanFlags.has('continue');
+  const graph = booleanFlags.has('graph');
   if (resumeId !== undefined && continueLatest) {
     return { kind: 'error', message: '--resume and --continue cannot be used together' };
   }
@@ -189,6 +195,7 @@ export function parseMakaRunArgs(argv: readonly string[]): ParseMakaRunArgsResul
       ...(permissionRules.length > 0 ? { permissionRules } : {}),
       ...(resumeId !== undefined ? { resumeId } : {}),
       ...(continueLatest ? { continueLatest: true } : {}),
+      ...(graph ? { graph: true as const } : {}),
       ...(thinking === 'default' ? { thinkingDefaultExplicit: true } : {}),
     },
   };
@@ -273,6 +280,7 @@ export async function runMakaTextCli(
       ...(parsed.options.permissionRules !== undefined
         ? { permissionRules: parsed.options.permissionRules }
         : {}),
+      ...(parsed.options.graph ? { enableAgentGraph: true } : {}),
       runtimeInvocationObserver: (result) => {
         invocation = result;
       },
@@ -324,11 +332,20 @@ export async function runMakaTextCli(
           timedOut = true;
           stop();
         }, parsed.options.timeoutMs);
+  const graphActivity = parsed.options.graph
+    ? context.agentGraph?.reserveActivity(session.id)
+    : undefined;
 
   try {
+    if (parsed.options.graph && !context.agentGraph) {
+      throw new Error('Graph Mode is unavailable in this CLI runtime');
+    }
     for await (const event of context.runtime.sendMessage(session.id, {
       turnId: deps.newId(),
       text: prompt,
+      ...(parsed.options.graph
+        ? { turnOrchestration: { mode: 'graph' as const, source: 'host_api' as const } }
+        : {}),
     })) {
       if (event.type === 'permission_request') {
         deps.writeStderr(`maka run: denied permission request for ${event.toolName}\n`);
@@ -338,9 +355,12 @@ export async function runMakaTextCli(
         });
       }
     }
+    graphActivity?.release();
+    if (parsed.options.graph) await context.agentGraph!.waitForCompletion(session.id);
     await stopPromise;
   } catch (error) {
     streamFailed = true;
+    graphActivity?.release();
     await stopPromise?.catch(() => undefined);
     if (!interrupted && !timedOut) {
       deps.writeStderr(`maka run: ${errorMessage(error)}\n`);
@@ -408,6 +428,7 @@ function makaRunHelpText(): string {
     '  --deny <rule>             Repeatable category:<name>, tool:<name>, or Bash(<exact command>)',
     '  --resume <session-id>     Continue an explicit compatible session',
     '  --continue                Continue the latest compatible session for cwd',
+    '  --graph                   Run this turn in Graph Mode and wait for graph completion',
     '  -h, --help                Show help',
   ].join('\n');
 }

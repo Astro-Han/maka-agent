@@ -350,6 +350,56 @@ describe('Maka CLI runtime bootstrap', () => {
     });
   });
 
+  test('composes Graph controls and worktree execution for non-interactive Graph runs', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const connectionStore = createConnectionStore(workspaceRoot);
+      await connectionStore.create({
+        slug: 'local',
+        name: 'Local Ollama',
+        providerType: 'ollama',
+        defaultModel: 'llama3.2',
+      });
+
+      const context = await createMakaCliRuntimeContext({
+        workspaceRoot,
+        cwd: '/repo',
+        surface: 'run',
+        enableAgentGraph: true,
+      });
+      try {
+        assert.ok(context.agentGraph);
+        const runtimeDeps = (context.runtime as unknown as RuntimeWithPrivateDeps).deps;
+        assert.ok(runtimeDeps.worktreeChildExecutor);
+        assert.ok(runtimeDeps.childTools?.length);
+
+        const session = await context.runtime.createSession({
+          cwd: context.cwd,
+          backend: 'ai-sdk',
+          llmConnectionSlug: context.target.connection.slug,
+          model: context.target.model,
+          permissionMode: 'execute',
+          name: 'cli-graph',
+        });
+        const header = await runtimeDeps.store.readHeader(session.id);
+        const backend = await runtimeDeps.backends.build('ai-sdk', {
+          sessionId: session.id,
+          workspaceRoot,
+          header,
+          store: runtimeDeps.store,
+        });
+        const names = (backend as unknown as { input: AiSdkBackendInput }).input.tools.map(
+          (tool) => tool.name,
+        );
+
+        assert.ok(names.includes('view_agent_graph'));
+        assert.ok(names.includes('update_agent_graph'));
+        assert.ok(names.includes(AGENT_OUTPUT_TOOL_NAME));
+      } finally {
+        await context.close();
+      }
+    });
+  });
+
   test('wires TUI subagent capabilities and a profile-filtered child tool surface', async () => {
     await withWorkspace(async (workspaceRoot) => {
       const connectionStore = createConnectionStore(workspaceRoot);
@@ -423,12 +473,7 @@ describe('Maka CLI runtime bootstrap', () => {
         assert.deepEqual(
           childAgents.definitions.find((definition) => definition.id === IMPLEMENTATION_AGENT_ID)
             ?.availability,
-          {
-            status: 'unavailable',
-            reason: 'workspace_isolation_unavailable',
-            workspace: 'worktree',
-            requiredRuntime: 'worktree_child_executor',
-          },
+          { status: 'available' },
         );
         assert.equal(context.skills.host.toolNames.has(AGENT_SPAWN_TOOL_NAME), true);
         assert.equal(context.skills.host.toolNames.has(AGENT_SWARM_TOOL_NAME), true);
@@ -1044,6 +1089,7 @@ interface RuntimeWithPrivateDeps {
     runtimeInvocationObserver?: (result: unknown) => void | Promise<void>;
     onSessionTitleChanged?: (sessionId: string) => void;
     childTools?: readonly MakaTool[];
+    worktreeChildExecutor?: unknown;
   };
 }
 

@@ -52,6 +52,18 @@ describe('maka run argument parsing', () => {
     assert.equal(parseMakaRunArgs(['x', '--max-steps', '1.5']).kind, 'error');
   });
 
+  test('parses Graph Mode as an explicit non-interactive turn', () => {
+    assert.deepEqual(parseMakaRunArgs(['implement the graph', '--graph']), {
+      kind: 'run',
+      options: {
+        prompt: 'implement the graph',
+        stdinPrompt: false,
+        graph: true,
+      },
+    });
+    assert.equal(parseMakaRunArgs(['x', '--graph', '--graph']).kind, 'error');
+  });
+
   test('parses a non-interactive permission mode and repeatable exact rules', () => {
     assert.deepEqual(
       parseMakaRunArgs([
@@ -123,6 +135,16 @@ describe('maka run process contract', () => {
     const result = await runFixture(['hello'], { input: '' });
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, 'prompt=hello\n');
+    assert.equal(result.stderr, '');
+  });
+
+  test('waits for the complete Graph before printing the final supervisor output', async () => {
+    const result = await runFixture(['implement it', '--graph'], {
+      input: '',
+      env: { MAKA_RUN_EXPECT_GRAPH: '1' },
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, 'graph completed\n');
     assert.equal(result.stderr, '');
   });
 

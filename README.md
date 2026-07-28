@@ -119,8 +119,14 @@ Then start the TUI or run one Turn:
 ```sh
 npm --workspace maka-agent exec -- maka
 npm --workspace maka-agent exec -- maka run "Summarize this repository and identify its most important risk"
+npm --workspace maka-agent exec -- maka run --graph "Implement two independent slices, integrate them, then review the result"
 npm --workspace maka-agent exec -- maka --help
 ```
+
+The TUI also accepts `/graph on`, `/graph off`, and `/graph <task>`. Non-interactive
+`--graph` runs wait for the durable Graph to finish before printing the final
+supervisor output. Graph implementation operators use isolated Git worktrees, so
+the source project must be a clean Git worktree.
 
 The CLI reads the same model connections and workspace configuration written by Desktop. See [`packages/headless/README.md`](./packages/headless/README.md) for Headless commands and its trust posture.
 

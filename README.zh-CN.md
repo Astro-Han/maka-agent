@@ -119,8 +119,14 @@ npm run build
 ```sh
 npm --workspace maka-agent exec -- maka
 npm --workspace maka-agent exec -- maka run "总结当前仓库并指出最重要的风险"
+npm --workspace maka-agent exec -- maka run --graph "并行实现两个切片，完成集成，然后独立审查"
 npm --workspace maka-agent exec -- maka --help
 ```
+
+TUI 同时支持 `/graph on`、`/graph off` 和 `/graph <任务>`。非交互
+`--graph` 会等待持久化 Graph 真正结束，再输出 supervisor 的最终结果。
+Graph 的 implementation operator 使用隔离的 Git worktree，因此源项目必须是干净的
+Git worktree。
 
 CLI 读取 Desktop 写入的同一份模型连接和 workspace 配置。Headless 的完整命令与 trust posture 见 [`packages/headless/README.md`](./packages/headless/README.md)。
 

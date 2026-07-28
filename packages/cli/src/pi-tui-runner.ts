@@ -49,7 +49,12 @@ import {
 } from '@maka/runtime';
 import { MakaSkillHighlightEditor } from './skill-highlight-editor.js';
 import { parseSkillInvocationTokens } from './skill-token.js';
-import { parseSwarmCommand, type ParsedSwarmCommand } from '@maka/core';
+import {
+  parseGraphCommand,
+  parseSwarmCommand,
+  type ParsedGraphCommand,
+  type ParsedSwarmCommand,
+} from '@maka/core';
 import type { CliGoalTurnHost } from './cli-goal-continuation.js';
 import {
   inspectSessionResumeAvailability,
@@ -875,6 +880,21 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
             kind: 'notice',
             level: 'error',
             text: 'Cannot change or start Swarm Mode while a turn is running.',
+          });
+          requestRender();
+        }
+        return;
+      }
+      const graphCommand = parseGraphCommand(prompt);
+      if (graphCommand) {
+        editor.addToHistory(prompt);
+        if (graphCommand.kind === 'status') {
+          showGraphStatus();
+        } else {
+          state.entries.push({
+            kind: 'notice',
+            level: 'error',
+            text: 'Cannot change or start Graph Mode while a turn is running.',
           });
           requestRender();
         }
@@ -1979,6 +1999,59 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     });
   };
 
+  const showGraphStatus = () => {
+    state.entries.push({
+      kind: 'notice',
+      level: 'info',
+      text:
+        orchestrationMode === 'graph' ? 'Graph Mode is on for this session.' : 'Graph Mode is off.',
+    });
+    requestRender();
+  };
+
+  const setGraphMode = async (mode: OrchestrationMode) => {
+    if (!input.driver.setOrchestrationMode) {
+      throw new Error('Graph Mode is unavailable on this session driver.');
+    }
+    await input.driver.setOrchestrationMode(mode);
+    orchestrationMode = mode;
+    state.entries.push({
+      kind: 'notice',
+      level: 'info',
+      text: mode === 'graph' ? 'Graph Mode enabled for this session.' : 'Graph Mode disabled.',
+    });
+    requestRender();
+  };
+
+  const runGraphCommand = (command: ParsedGraphCommand, idleMs: number) => {
+    if (command.kind === 'status') {
+      showGraphStatus();
+      return;
+    }
+    if (command.kind === 'set_mode') {
+      void runControl(() => setGraphMode(command.mode));
+      return;
+    }
+    if (input.firstRun) {
+      void showSetupWizard();
+      return;
+    }
+    lastActivityAt = Date.now();
+    promptSeq += 1;
+    maybeTriggerAutoRecap(idleMs);
+    state.entries.push({
+      kind: 'notice',
+      level: 'info',
+      text: 'Using Graph Mode for this turn only.',
+    });
+    void runAgentTurn({
+      kind: 'external',
+      prompt: command.task,
+      sessionId: input.driver.getSessionId(),
+      turnOrchestration: { mode: 'graph', source: 'slash_command' },
+    });
+  };
+
   const moveSession = async (targetCwd: string): Promise<void> => {
     if (!input.driver.moveSession) {
       state.entries.push({
@@ -2297,6 +2370,14 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       },
     },
     {
+      name: 'graph',
+      description: 'Show, enable, disable, or run one Graph turn',
+      run: (_parts: string[], rawTail: string | undefined, context: { idleMs: number }) => {
+        const parsed = parseGraphCommand(`/graph${rawTail ? ` ${rawTail}` : ''}`);
+        if (parsed) runGraphCommand(parsed, context.idleMs);
+      },
+    },
+    {
       name: 'swarm',
       description: 'Show, enable, disable, or run one Swarm turn',
       run: (_parts: string[], rawTail: string | undefined, context: { idleMs: number }) => {
@@ -2540,7 +2621,7 @@ const BOTTOM_PICKER_MARGIN_ROWS = 4;
 // The editor's autocomplete window height. Keep it at least as large as the
 // full slash-command menu, so a bare `/` shows every command rather than
 // silently clipping the last command.
-const EDITOR_AUTOCOMPLETE_MAX_VISIBLE = 16;
+const EDITOR_AUTOCOMPLETE_MAX_VISIBLE = 24;
 
 function flattenLinkedSessionTree(
   roots: readonly SessionSummary[],
