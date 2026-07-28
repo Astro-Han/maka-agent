@@ -422,7 +422,7 @@ Graph can also reconstruct a single reference-only timeline across its control a
 - root Session AgentRuns that authored schedule decisions or delivered wake turns;
 - the committed child RuntimeEvent projection for every provisioned operator.
 
-The resulting event stream covers supervisor-turn start and termination, schedule commit and finish, operator provision, intent claim, current admission state, activation start, committed record, activation terminal, wake claim, wake attempt, wake settlement, and current wake state.
+The pageable event stream covers supervisor-turn start and termination, schedule commit and finish, operator provision, intent claim, activation start, committed record, activation terminal, wake claim, wake attempt, and wake settlement. The response returns current admission and wake state separately in page-level `currentState`; these mutable snapshots are not cursor-bearing historical events.
 
 Timeline events deliberately omit schedule instructions, finish reasons, child message content, and tool payloads. They retain the IDs, facets, source RuntimeEvent reference, and Run coordinates needed to answer questions such as:
 

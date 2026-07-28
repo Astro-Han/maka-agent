@@ -422,7 +422,7 @@ Graph 还可以跨 control plane 与 data plane 重建一条统一的 reference-
 - 创建 schedule decision 或执行 wake turn 的 root Session AgentRuns；
 - 每个 provisioned operator 的 committed child RuntimeEvent projection。
 
-最终 event stream 覆盖 supervisor-turn start/termination、schedule commit/finish、operator provision、intent claim、current admission state、activation start、committed record、activation terminal、wake claim、wake attempt、wake settlement 和 current wake state。
+可分页 event stream 覆盖 supervisor-turn start/termination、schedule commit/finish、operator provision、intent claim、activation start、committed record、activation terminal、wake claim、wake attempt 和 wake settlement。Response 会在 page-level `currentState` 中单独返回 current admission 与 wake state；这些 mutable snapshot 不是携带 cursor 的 historical event。
 
 Timeline event 有意不暴露 schedule instruction、finish reason、child message content 或 tool payload，只保留回答以下问题所需的 ID、facet、source RuntimeEvent reference 与 Run coordinate：
 
