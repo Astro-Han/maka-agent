@@ -5,7 +5,6 @@ import {
   type TaskLedgerStore,
   type ToolResultContent,
 } from '@maka/core';
-import type { SessionEvent } from '@maka/core/events';
 import type { MakaTool, MakaToolContext } from './tool-runtime.js';
 import {
   AGENT_WORKSPACE_SAME_WORKSPACE,
@@ -19,6 +18,7 @@ import {
 } from './agent-catalog.js';
 import { AGENT_TEAM_CHILD_TOOL_NAMES } from './agent-team-tool-names.js';
 import { AGENT_SWARM_TOOL_NAME, buildAgentSwarmTool } from './agent-swarm-tools.js';
+import { ChildAgentProgressProjector } from './child-agent-progress.js';
 
 export const AGENT_SPAWN_TOOL_NAME = 'agent_spawn';
 export const AGENT_LIST_TOOL_NAME = 'agent_list';
@@ -43,8 +43,6 @@ const AGENT_SPAWN_ISOLATION_MODES = [
   AGENT_WORKSPACE_SAME_WORKSPACE,
   AGENT_WORKSPACE_WORKTREE,
 ] as const;
-const CHILD_PROGRESS_MAX_EVENTS = 64;
-const CHILD_PROGRESS_MAX_CHARS = 8_192;
 const CHILD_PROGRESS_ERROR_MAX_CHARS = 1_000;
 
 type SubagentToolResult = Extract<ToolResultContent, { kind: 'subagent' }>;
@@ -267,41 +265,6 @@ export function buildSubagentSpawnTool(deps: { taskLedger?: TaskLedgerStore } = 
       } satisfies SubagentToolResult;
     },
   };
-}
-
-class ChildAgentProgressProjector {
-  private readonly tools = new Map<string, string>();
-  private projectedEvents = 0;
-  private projectedChars = 0;
-
-  constructor(private readonly ctx: Pick<MakaToolContext, 'emitOutput'>) {}
-
-  observe(event: SessionEvent): void {
-    if (this.projectedEvents >= CHILD_PROGRESS_MAX_EVENTS) return;
-    if (event.type === 'tool_start') {
-      const name = event.displayName ?? event.toolName;
-      this.tools.set(event.toolUseId, name);
-      this.emit('stdout', `Child tool started: ${name}\n`);
-      return;
-    }
-    if (event.type === 'tool_result') {
-      const name = this.tools.get(event.toolUseId) ?? 'tool';
-      this.tools.delete(event.toolUseId);
-      this.emit(
-        event.isError ? 'stderr' : 'stdout',
-        `Child tool ${event.isError ? 'failed' : 'finished'}: ${name}\n`,
-      );
-    }
-  }
-
-  private emit(stream: 'stdout' | 'stderr', chunk: string): void {
-    const remaining = CHILD_PROGRESS_MAX_CHARS - this.projectedChars;
-    if (remaining <= 0) return;
-    const bounded = chunk.slice(0, remaining);
-    this.projectedEvents += 1;
-    this.projectedChars += bounded.length;
-    this.ctx.emitOutput(stream, bounded);
-  }
 }
 
 function boundedChildError(error: unknown): string {
