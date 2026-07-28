@@ -70,6 +70,7 @@ export {
   AGENT_GRAPH_TIMELINE_MAX_PAGE_SIZE,
   AGENT_GRAPH_TIMELINE_SCHEMA_VERSION,
   buildAgentGraphTimeline,
+  buildAgentGraphTimelineCurrentState,
   decodeAgentGraphTimelineCursor,
   encodeAgentGraphTimelineCursor,
   paginateAgentGraphTimeline,
@@ -77,6 +78,9 @@ export {
 } from './agent-graph-timeline.js';
 export type {
   AgentGraphTimelineCoverageLimitation,
+  AgentGraphTimelineCurrentAdmission,
+  AgentGraphTimelineCurrentState,
+  AgentGraphTimelineCurrentSupervisorWake,
   AgentGraphTimelineEvent,
   AgentGraphTimelinePage,
   AgentGraphTimelinePageOptions,

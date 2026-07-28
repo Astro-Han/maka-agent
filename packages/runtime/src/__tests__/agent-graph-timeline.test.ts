@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import type { AgentGraphTimelineMetadataSnapshot, AgentRunHeader, RuntimeEvent } from '@maka/core';
 import {
   buildAgentGraphTimeline,
+  buildAgentGraphTimelineCurrentState,
   paginateAgentGraphTimeline,
   readAgentGraphTimelinePage,
 } from '../agent-graph-timeline.js';
@@ -12,6 +13,11 @@ describe('agent graph replay timeline', () => {
   test('reconstructs control, child records, parent completion, and supervisor wake chronologically', async () => {
     const fixture = await timelineFixture();
     const events = buildAgentGraphTimeline(fixture);
+    const currentState = buildAgentGraphTimelineCurrentState(
+      fixture.metadata,
+      fixture.rootSessionId,
+      fixture.graphId,
+    );
 
     assert.deepEqual(
       events.map((event) => event.sequence),
@@ -50,18 +56,27 @@ describe('agent graph replay timeline', () => {
       attemptId: 'attempt-1',
     });
 
-    const admission = requireEvent(events, 'intent_admission_snapshot');
-    assert.equal(admission.kind, 'intent_admission_snapshot');
-    assert.equal(admission.state, 'executing');
-    assert.equal(admission.transitionHistory, 'current_only');
+    assert.deepEqual(currentState.admissions, [
+      {
+        intentId: `graph_intent_${'f'.repeat(32)}`,
+        state: 'executing',
+        updatedAt: 103,
+      },
+    ]);
     assert.equal(childTerminal.kind, 'activation_terminal');
     assert.equal(childTerminal.status, 'completed');
-    const wakeState = requireEvent(events, 'supervisor_wake_state_snapshot');
-    assert.equal(wakeState.kind, 'supervisor_wake_state_snapshot');
-    assert.equal(wakeState.status, 'delivered');
-    assert.equal(wakeState.transitionHistory, 'current_only');
+    assert.deepEqual(currentState.supervisorWakes, [
+      {
+        wakeId: 'wake-1',
+        status: 'delivered',
+        attemptCount: 1,
+        updatedAt: 130,
+        currentAttemptId: 'attempt-1',
+        currentTurnId: 'root-turn-2',
+      },
+    ]);
 
-    const serialized = JSON.stringify(events);
+    const serialized = JSON.stringify({ events, currentState });
     assert.doesNotMatch(serialized, /SECRET_(INSTRUCTION|FINISH_REASON|CHILD_OUTPUT|TOOL_ARG)/);
     assert.match(serialized, /child-tool-result/);
   });
@@ -69,11 +84,16 @@ describe('agent graph replay timeline', () => {
   test('paginates with a validated stable cursor and reports bounded omissions', async () => {
     const fixture = await timelineFixture();
     const events = buildAgentGraphTimeline(fixture);
+    const currentState = buildAgentGraphTimelineCurrentState(
+      fixture.metadata,
+      fixture.rootSessionId,
+      fixture.graphId,
+    );
     const seen: string[] = [];
     let cursor: string | undefined;
     let pageNumber = 0;
     do {
-      const page = paginateAgentGraphTimeline(events, 'root-session', 'graph-1', {
+      const page = paginateAgentGraphTimeline(events, 'root-session', 'graph-1', currentState, {
         ...(cursor ? { cursor } : {}),
         limit: 3,
       });
@@ -93,16 +113,18 @@ describe('agent graph replay timeline', () => {
       events.map((event) => event.eventId),
     );
 
-    const first = paginateAgentGraphTimeline(events, 'root-session', 'graph-1', { limit: 1 });
+    const first = paginateAgentGraphTimeline(events, 'root-session', 'graph-1', currentState, {
+      limit: 1,
+    });
     await assert.rejects(
       async () =>
-        paginateAgentGraphTimeline(events, 'root-session', 'another-graph', {
+        paginateAgentGraphTimeline(events, 'root-session', 'another-graph', currentState, {
           cursor: first.nextCursor,
         }),
       /another graph/,
     );
 
-    const cursorPage = paginateAgentGraphTimeline(events, 'root-session', 'graph-1', {
+    const cursorPage = paginateAgentGraphTimeline(events, 'root-session', 'graph-1', currentState, {
       limit: 2,
     });
     const withEarlierEvent = events.map((event) => ({
@@ -115,12 +137,64 @@ describe('agent graph replay timeline', () => {
       eventTime: Math.max(0, events[0]!.eventTime - 1),
       sequence: 1,
     });
-    const resumed = paginateAgentGraphTimeline(withEarlierEvent, 'root-session', 'graph-1', {
-      cursor: cursorPage.nextCursor,
-      limit: 1,
-    });
+    const resumed = paginateAgentGraphTimeline(
+      withEarlierEvent,
+      'root-session',
+      'graph-1',
+      currentState,
+      {
+        cursor: cursorPage.nextCursor,
+        limit: 1,
+      },
+    );
     assert.equal(resumed.events[0]?.eventId, events[2]?.eventId);
     assert.equal(resumed.omittedBefore, 3);
+  });
+
+  test('keeps historical pagination cursors valid when mutable control snapshots change', async () => {
+    const fixture = await timelineFixture();
+    const claimedMetadata = structuredClone(fixture.metadata);
+    claimedMetadata.intentAdmissions[0] = {
+      ...claimedMetadata.intentAdmissions[0]!,
+      state: 'claimed',
+      updatedAt: 102,
+    };
+    const claimedEvents = buildAgentGraphTimeline({
+      ...fixture,
+      metadata: claimedMetadata,
+    });
+    const claimedState = buildAgentGraphTimelineCurrentState(
+      claimedMetadata,
+      fixture.rootSessionId,
+      fixture.graphId,
+    );
+    const firstPage = paginateAgentGraphTimeline(
+      claimedEvents,
+      fixture.rootSessionId,
+      fixture.graphId,
+      claimedState,
+      { limit: 4 },
+    );
+
+    const executingEvents = buildAgentGraphTimeline(fixture);
+    const executingState = buildAgentGraphTimelineCurrentState(
+      fixture.metadata,
+      fixture.rootSessionId,
+      fixture.graphId,
+    );
+    assert.deepEqual(
+      executingEvents.map((event) => [event.eventId, event.eventTime]),
+      claimedEvents.map((event) => [event.eventId, event.eventTime]),
+    );
+    const secondPage = paginateAgentGraphTimeline(
+      executingEvents,
+      fixture.rootSessionId,
+      fixture.graphId,
+      executingState,
+      { cursor: firstPage.nextCursor, limit: 4 },
+    );
+    assert.equal(secondPage.currentState.admissions[0]?.state, 'executing');
+    assert.equal(secondPage.omittedBefore, 4);
   });
 
   test('joins a transactionally read SQLite metadata snapshot with immutable run ledgers', async () => {
@@ -158,6 +232,52 @@ describe('agent graph replay timeline', () => {
     assert.equal(page.totalEvents, page.events.length);
     assert.ok(page.events.some((event) => event.kind === 'schedule_finished'));
     assert.ok(page.events.some((event) => event.kind === 'record_committed'));
+    assert.equal(page.currentState.admissions[0]?.state, 'executing');
+  });
+
+  test('emits activation_started from a durable claimed AgentRun before its first RuntimeEvent', async () => {
+    const fixture = await timelineFixture();
+    const page = await readAgentGraphTimelinePage({
+      rootSessionId: fixture.rootSessionId,
+      graphId: fixture.graphId,
+      controlStore: {
+        async readAgentGraphTimelineMetadata() {
+          return fixture.metadata;
+        },
+      },
+      runStore: {
+        async listSessionRuns(sessionId) {
+          if (sessionId === fixture.rootSessionId) return [...fixture.rootRuns];
+          if (sessionId === fixture.childRun.sessionId) {
+            return [{ ...fixture.childRun, status: 'running', completedAt: undefined }];
+          }
+          return [];
+        },
+      },
+      runtimeEventStore: {
+        async readImmutableRuntimeEvents() {
+          return [];
+        },
+      },
+      options: { limit: 256 },
+    });
+
+    const activation = requireEvent(page.events, 'activation_started');
+    assert.equal(activation.kind, 'activation_started');
+    assert.equal(activation.eventTime, fixture.childRun.createdAt);
+    assert.deepEqual(activation.activation, {
+      sessionId: 'child-session',
+      runId: 'child-run',
+      turnId: 'child-turn',
+    });
+    assert.equal(
+      page.events.some((event) => event.kind === 'record_committed'),
+      false,
+    );
+    assert.equal(
+      page.events.some((event) => event.kind === 'activation_terminal'),
+      false,
+    );
   });
 });
 
@@ -368,6 +488,7 @@ async function timelineFixture() {
     graphId: 'graph-1',
     metadata,
     rootRuns: [rootRun1, rootRun2],
+    childRuns: [childRun],
     projection,
     childRun,
     childEvents,

@@ -11,7 +11,7 @@ import type {
 } from '@maka/core';
 import { stableHash } from './request-shape.js';
 import {
-  readCommittedAgentGraphProjection,
+  readCommittedAgentGraphProjectionWithRuns,
   type AgentGraphActivationStatus,
   type AgentGraphOperatorBinding,
   type AgentGraphProjection,
@@ -90,12 +90,6 @@ export type AgentGraphTimelineEvent =
       activation: AgentGraphTimelineRunRef;
     })
   | (AgentGraphTimelineEventBase & {
-      kind: 'intent_admission_snapshot';
-      intentId: string;
-      state: AgentGraphIntentAdmissionState;
-      transitionHistory: 'current_only';
-    })
-  | (AgentGraphTimelineEventBase & {
       kind: 'activation_started';
       operatorId: string;
       activation: AgentGraphTimelineRunRef;
@@ -133,13 +127,33 @@ export type AgentGraphTimelineEvent =
       attemptId: string;
       turnId: string;
       status: 'delivered' | 'retryable_failed';
-    })
-  | (AgentGraphTimelineEventBase & {
-      kind: 'supervisor_wake_state_snapshot';
-      wakeId: string;
-      status: AgentGraphSupervisorWakeStatus;
-      transitionHistory: 'current_only';
     });
+
+export interface AgentGraphTimelineCurrentAdmission {
+  intentId: string;
+  state: AgentGraphIntentAdmissionState;
+  updatedAt: number;
+}
+
+export interface AgentGraphTimelineCurrentSupervisorWake {
+  wakeId: string;
+  status: AgentGraphSupervisorWakeStatus;
+  attemptCount: number;
+  updatedAt: number;
+  currentAttemptId?: string;
+  currentTurnId?: string;
+}
+
+/**
+ * Mutable control-plane state observed while reconstructing this page.
+ *
+ * It intentionally lives outside the pageable immutable event stream so a
+ * state transition cannot invalidate an already-issued historical cursor.
+ */
+export interface AgentGraphTimelineCurrentState {
+  admissions: AgentGraphTimelineCurrentAdmission[];
+  supervisorWakes: AgentGraphTimelineCurrentSupervisorWake[];
+}
 
 export interface AgentGraphTimelinePage {
   schemaVersion: typeof AGENT_GRAPH_TIMELINE_SCHEMA_VERSION;
@@ -150,6 +164,7 @@ export interface AgentGraphTimelinePage {
   omittedBefore: number;
   omittedAfter: number;
   nextCursor?: string;
+  currentState: AgentGraphTimelineCurrentState;
   coverage: {
     runtimeRecords: 'complete';
     limitations: AgentGraphTimelineCoverageLimitation[];
@@ -175,6 +190,7 @@ export interface BuildAgentGraphTimelineInput {
   graphId: string;
   metadata: AgentGraphTimelineMetadataSnapshot;
   rootRuns: readonly AgentRunHeader[];
+  childRuns: readonly AgentRunHeader[];
   projection: AgentGraphProjection;
 }
 
@@ -193,7 +209,6 @@ const EVENT_RANK = {
   schedule_finished: 21,
   operator_provisioned: 30,
   intent_claimed: 40,
-  intent_admission_snapshot: 41,
   activation_started: 50,
   record_committed: 60,
   activation_terminal: 61,
@@ -201,7 +216,6 @@ const EVENT_RANK = {
   supervisor_wake_claimed: 80,
   supervisor_wake_attempted: 81,
   supervisor_wake_settled: 82,
-  supervisor_wake_state_snapshot: 83,
 } as const satisfies Record<AgentGraphTimelineEvent['kind'], number>;
 
 export async function readAgentGraphTimelinePage(
@@ -224,9 +238,9 @@ export async function readAgentGraphTimelinePage(
     operatorId: provision.operatorId,
     sessionId: provision.targetSessionId,
   }));
-  const [rootRuns, projection] = await Promise.all([
+  const [rootRuns, projected] = await Promise.all([
     input.runStore.listSessionRuns(input.rootSessionId),
-    readCommittedAgentGraphProjection({
+    readCommittedAgentGraphProjectionWithRuns({
       graphId: input.graphId,
       operators,
       runStore: input.runStore,
@@ -239,10 +253,12 @@ export async function readAgentGraphTimelinePage(
       graphId: input.graphId,
       metadata,
       rootRuns,
-      projection,
+      childRuns: projected.runs,
+      projection: projected.projection,
     }),
     input.rootSessionId,
     input.graphId,
+    buildAgentGraphTimelineCurrentState(metadata, input.rootSessionId, input.graphId),
     input.options,
   );
 }
@@ -366,13 +382,26 @@ export function buildAgentGraphTimeline(
     });
   }
 
-  const admissionByIntent = new Map(
-    input.metadata.intentAdmissions.map((admission) => [admission.intentId, admission]),
+  const operatorSessionById = new Map(
+    input.metadata.operatorProvisions.map((provision) => [
+      provision.operatorId,
+      provision.targetSessionId,
+    ]),
   );
+  const childRunByIdentity = new Map<string, AgentRunHeader>();
+  for (const run of input.childRuns) {
+    const key = `${run.sessionId}\0${run.runId}`;
+    if (childRunByIdentity.has(key)) {
+      throw new Error(`Agent graph timeline contains duplicate AgentRun ${run.runId}`);
+    }
+    childRunByIdentity.set(key, run);
+  }
   for (const claim of input.metadata.intentClaims) {
-    const admission = admissionByIntent.get(claim.intentId);
-    if (!admission || admission.graphId !== input.graphId) {
-      throw new Error(`Agent graph claim ${claim.intentId} has no admission snapshot`);
+    if (
+      claim.graphId !== input.graphId ||
+      operatorSessionById.get(claim.targetOperatorId) !== claim.targetSessionId
+    ) {
+      throw new Error(`Agent graph claim ${claim.intentId} has no matching operator binding`);
     }
     push({
       ...eventBase(input.graphId, 'intent_claimed', { claimId: claim.claimId }, claim.claimedAt),
@@ -386,21 +415,24 @@ export function buildAgentGraphTimeline(
         turnId: claim.targetTurnId,
       },
     });
+    const run = childRunByIdentity.get(`${claim.targetSessionId}\0${claim.targetRunId}`);
+    if (!run) continue;
+    if (run.turnId !== claim.targetTurnId) {
+      throw new Error(
+        `Agent graph activation ${claim.targetRunId} belongs to turn ${run.turnId}, expected ${claim.targetTurnId}`,
+      );
+    }
     push({
       ...eventBase(
         input.graphId,
-        'intent_admission_snapshot',
-        { intentId: claim.intentId, state: admission.state, updatedAt: admission.updatedAt },
-        admission.updatedAt,
+        'activation_started',
+        { operatorId: claim.targetOperatorId, runId: run.runId },
+        run.createdAt,
       ),
-      kind: 'intent_admission_snapshot',
-      intentId: claim.intentId,
-      state: admission.state,
-      transitionHistory: 'current_only',
+      kind: 'activation_started',
+      operatorId: claim.targetOperatorId,
+      activation: timelineRunRef(run),
     });
-  }
-  if (admissionByIntent.size !== input.metadata.intentClaims.length) {
-    throw new Error(`Agent graph ${input.graphId} has an orphan admission snapshot`);
   }
 
   const recordByRun = new Map<string, AgentGraphRecord[]>();
@@ -435,23 +467,6 @@ export function buildAgentGraphTimeline(
     if (!state) continue;
     for (const activation of Object.values(state.activations)) {
       const records = recordByRun.get(activation.agentRunId) ?? [];
-      const first = records[0];
-      if (!first) continue;
-      push({
-        ...eventBase(
-          input.graphId,
-          'activation_started',
-          { operatorId: operator.operatorId, runId: activation.agentRunId },
-          first.orderKey.runCreatedAt,
-        ),
-        kind: 'activation_started',
-        operatorId: operator.operatorId,
-        activation: {
-          sessionId: operator.sessionId,
-          runId: activation.agentRunId,
-          turnId: first.source.turnId,
-        },
-      });
       if (activation.terminalRecordId && isTerminalActivationStatus(activation.status)) {
         const terminal = records.find((record) => record.recordId === activation.terminalRecordId);
         if (!terminal) {
@@ -528,18 +543,6 @@ export function buildAgentGraphTimeline(
         });
       }
     }
-    push({
-      ...eventBase(
-        input.graphId,
-        'supervisor_wake_state_snapshot',
-        { wakeId: wake.wakeId, status: wake.status, updatedAt: wake.updatedAt },
-        wake.updatedAt,
-      ),
-      kind: 'supervisor_wake_state_snapshot',
-      wakeId: wake.wakeId,
-      status: wake.status,
-      transitionHistory: 'current_only',
-    });
   }
 
   pending.sort(
@@ -559,10 +562,59 @@ export function buildAgentGraphTimeline(
   });
 }
 
+export function buildAgentGraphTimelineCurrentState(
+  metadata: AgentGraphTimelineMetadataSnapshot,
+  rootSessionId: string,
+  graphId: string,
+): AgentGraphTimelineCurrentState {
+  if (metadata.graphId !== graphId) {
+    throw new Error(`Agent graph timeline metadata belongs to ${metadata.graphId}`);
+  }
+  const claimIntentIds = new Set(metadata.intentClaims.map((claim) => claim.intentId));
+  if (claimIntentIds.size !== metadata.intentClaims.length) {
+    throw new Error(`Agent graph ${graphId} has duplicate intent claims`);
+  }
+  const admissionIntentIds = new Set<string>();
+  const admissions = metadata.intentAdmissions.map((admission) => {
+    if (admission.graphId !== graphId || !claimIntentIds.has(admission.intentId)) {
+      throw new Error(`Agent graph admission ${admission.intentId} belongs to another graph`);
+    }
+    if (admissionIntentIds.has(admission.intentId)) {
+      throw new Error(`Agent graph ${graphId} has duplicate admission snapshots`);
+    }
+    admissionIntentIds.add(admission.intentId);
+    return {
+      intentId: admission.intentId,
+      state: admission.state,
+      updatedAt: admission.updatedAt,
+    };
+  });
+  if (admissionIntentIds.size !== claimIntentIds.size) {
+    throw new Error(`Agent graph ${graphId} has a missing or duplicate admission snapshot`);
+  }
+  const supervisorWakes = metadata.supervisorWakes.map(({ wake }) => {
+    if (wake.graphId !== graphId || wake.rootSessionId !== rootSessionId) {
+      throw new Error(`Agent graph supervisor wake ${wake.wakeId} belongs to another graph`);
+    }
+    return {
+      wakeId: wake.wakeId,
+      status: wake.status,
+      attemptCount: wake.attemptCount,
+      updatedAt: wake.updatedAt,
+      ...(wake.currentAttemptId ? { currentAttemptId: wake.currentAttemptId } : {}),
+      ...(wake.currentTurnId ? { currentTurnId: wake.currentTurnId } : {}),
+    };
+  });
+  admissions.sort((a, b) => a.intentId.localeCompare(b.intentId));
+  supervisorWakes.sort((a, b) => a.wakeId.localeCompare(b.wakeId));
+  return { admissions, supervisorWakes };
+}
+
 export function paginateAgentGraphTimeline(
   events: readonly AgentGraphTimelineEvent[],
   rootSessionId: string,
   graphId: string,
+  currentState: AgentGraphTimelineCurrentState,
   options: AgentGraphTimelinePageOptions = {},
 ): AgentGraphTimelinePage {
   const limit = options.limit ?? AGENT_GRAPH_TIMELINE_DEFAULT_PAGE_SIZE;
@@ -593,6 +645,7 @@ export function paginateAgentGraphTimeline(
     totalEvents: events.length,
     omittedBefore: start,
     omittedAfter,
+    currentState: cloneTimelineCurrentState(currentState),
     ...(omittedAfter > 0 && pageEvents.length > 0
       ? { nextCursor: encodeAgentGraphTimelineCursor(graphId, pageEvents.at(-1)!) }
       : {}),
@@ -708,6 +761,15 @@ function isTerminalActivationStatus(
 
 function cloneTimelineEvent(event: AgentGraphTimelineEvent): AgentGraphTimelineEvent {
   return structuredClone(event);
+}
+
+function cloneTimelineCurrentState(
+  currentState: AgentGraphTimelineCurrentState,
+): AgentGraphTimelineCurrentState {
+  return {
+    admissions: currentState.admissions.map((admission) => ({ ...admission })),
+    supervisorWakes: currentState.supervisorWakes.map((wake) => ({ ...wake })),
+  };
 }
 
 function assertIdentity(value: string, name: string): void {
