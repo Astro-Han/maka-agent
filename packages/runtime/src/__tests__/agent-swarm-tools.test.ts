@@ -269,6 +269,177 @@ describe('AgentSwarm adapter', () => {
     );
   });
 
+  test('projects item-scoped child tool and provider retry progress for spawned and resumed items', async () => {
+    const output: Array<{ stream: string; chunk: string }> = [];
+    const result = await buildAgentSwarmTool().impl(
+      {
+        resume_run_ids: { 'source-run': 'Continue the source review.' },
+        items: [swarmItem(0)],
+        max_concurrency: 2,
+      },
+      context({
+        emitOutput: (stream, chunk) => output.push({ stream, chunk }),
+        prepareChildAgentResume: async (sourceRunId) => preparedResume(sourceRunId),
+        resumeChildAgent: async (input) => {
+          input.onEvent?.(childToolStart('resume-tool', 'Read', 'resume-secret.txt'));
+          input.onEvent?.(childToolResult('resume-tool', false, 'resume secret body'));
+          return {
+            ...childResult(10),
+            runId: 'resumed-run',
+            resumedFromRunId: input.sourceRunId,
+          };
+        },
+        spawnChildSession: async (input) => {
+          input.onEvent?.(childProviderRetry('scheduled'));
+          input.onEvent?.(childProviderRetry('started'));
+          return childResult(0);
+        },
+      }),
+    );
+
+    assert.equal(result.status, 'completed');
+    assert.ok(
+      output.some(
+        ({ chunk }) => chunk === 'Agent swarm item resume-1 · child tool started: Read\n',
+      ),
+    );
+    assert.ok(
+      output.some(
+        ({ chunk }) => chunk === 'Agent swarm item resume-1 · child tool finished: Read\n',
+      ),
+    );
+    assert.ok(
+      output.some(
+        ({ chunk }) =>
+          chunk ===
+          'Agent swarm item item-0 · child provider retry scheduled: attempt 2/10 in 250ms (rate_limit)\n',
+      ),
+    );
+    assert.ok(
+      output.some(
+        ({ chunk }) =>
+          chunk ===
+          'Agent swarm item item-0 · child provider retry started: attempt 2/10 (rate_limit)\n',
+      ),
+    );
+    assert.doesNotMatch(JSON.stringify(output), /resume-secret\.txt|resume secret body/);
+  });
+
+  test('projects child progress from the adaptive retry execution path', async () => {
+    const output: Array<{ stream: string; chunk: string }> = [];
+    let retryObservedOnEvent = false;
+    const siblingGate = deferred<SpawnChildAgentResult>();
+    const pending = buildAgentSwarmTool({
+      adaptiveSwarmPolicy: {
+        initialLaunchLimit: 2,
+        initialLaunchIntervalMs: 1,
+        rateLimitRetryBaseMs: 1,
+        rateLimitRetryFactor: 2,
+        capacityShrinkIntervalMs: 1,
+        capacityRecoveryIntervalMs: 100,
+      },
+    }).impl(
+      { items: [swarmItem(0), swarmItem(1)], max_concurrency: 2 },
+      context({
+        emitOutput: (stream, chunk) => output.push({ stream, chunk }),
+        spawnChildSession: async (input) =>
+          input.prompt === 'task-1'
+            ? await siblingGate.promise
+            : {
+                ...childResult(0, 'failed'),
+                childSessionId: 'child-session-0',
+                failureClass: 'RateLimit',
+                summary: 'provider 429',
+              },
+        retryChildAgent: async (input) => {
+          retryObservedOnEvent = typeof input.onEvent === 'function';
+          input.onEvent?.(childToolStart('retry-tool', 'Search', 'retry-secret-query'));
+          return {
+            ...childResult(0),
+            childSessionId: 'child-session-0',
+            runId: 'run-0-retry',
+          };
+        },
+      }),
+    );
+
+    await waitFor(() => retryObservedOnEvent);
+    siblingGate.resolve(childResult(1));
+    const result = await pending;
+
+    assert.equal(result.status, 'completed');
+    assert.equal(retryObservedOnEvent, true);
+    assert.ok(
+      output.some(
+        ({ chunk }) => chunk === 'Agent swarm item item-0 · child tool started: Search\n',
+      ),
+    );
+    assert.doesNotMatch(JSON.stringify(output), /retry-secret-query/);
+  });
+
+  test('bounds projected child progress across the whole concurrent batch', async () => {
+    const output: Array<{ stream: string; chunk: string }> = [];
+    const result = await buildAgentSwarmTool().impl(
+      {
+        items: Array.from({ length: AGENT_SWARM_MAX_CONCURRENCY }, (_, index) => swarmItem(index)),
+        max_concurrency: AGENT_SWARM_MAX_CONCURRENCY,
+      },
+      context({
+        emitOutput: (stream, chunk) => output.push({ stream, chunk }),
+        spawnChildSession: async (input) => {
+          for (let index = 0; index < 300; index += 1) {
+            input.onEvent?.(
+              childToolStart(
+                `${input.prompt}-tool-${index}`,
+                'Read',
+                `batch-secret-${input.prompt}-${index}`,
+              ),
+            );
+          }
+          return childResultForPrompt(input.prompt);
+        },
+      }),
+    );
+
+    const projected = output.filter(({ chunk }) => chunk.includes('· child tool started:'));
+    assert.equal(result.status, 'completed');
+    assert.equal(projected.length, 128);
+    assert.ok(projected.reduce((total, { chunk }) => total + chunk.length, 0) <= 16_384);
+    assert.doesNotMatch(JSON.stringify(output), /batch-secret/);
+  });
+
+  test('bounds projected child progress characters across the whole batch', async () => {
+    const output: Array<{ stream: string; chunk: string }> = [];
+    const result = await buildAgentSwarmTool().impl(
+      {
+        items: [swarmItem(0), swarmItem(1), swarmItem(2)],
+        max_concurrency: 3,
+      },
+      context({
+        emitOutput: (stream, chunk) => output.push({ stream, chunk }),
+        spawnChildSession: async (input) => {
+          input.onEvent?.(
+            childToolStart(
+              `${input.prompt}-oversized-tool`,
+              'R'.repeat(20_000),
+              `char-budget-secret-${input.prompt}`,
+            ),
+          );
+          return childResultForPrompt(input.prompt);
+        },
+      }),
+    );
+
+    const projected = output.filter(({ chunk }) => chunk.includes('· child tool started:'));
+    assert.equal(result.status, 'completed');
+    assert.equal(projected.length, 2);
+    assert.equal(
+      projected.reduce((total, { chunk }) => total + chunk.length, 0),
+      16_384,
+    );
+    assert.doesNotMatch(JSON.stringify(output), /char-budget-secret/);
+  });
+
   test('accepts resume-only input and enforces the shared total item bound', () => {
     const schema = buildAgentSwarmTool().parameters as {
       safeParse(input: unknown): { success: boolean; data?: AgentSwarmToolInput };
@@ -1212,6 +1383,54 @@ function childResult(
 function childResultForPrompt(prompt: string): SpawnChildAgentResult {
   const index = prompt === 'single' ? 99 : Number(prompt.slice('task-'.length));
   return childResult(index);
+}
+
+function childToolStart(
+  toolUseId: string,
+  toolName: string,
+  secret: string,
+): Extract<SessionEvent, { type: 'tool_start' }> {
+  return {
+    type: 'tool_start',
+    id: `start-${toolUseId}`,
+    turnId: 'child-turn',
+    ts: 1,
+    toolUseId,
+    toolName,
+    args: { secret },
+  };
+}
+
+function childToolResult(
+  toolUseId: string,
+  isError: boolean,
+  secret: string,
+): Extract<SessionEvent, { type: 'tool_result' }> {
+  return {
+    type: 'tool_result',
+    id: `result-${toolUseId}`,
+    turnId: 'child-turn',
+    ts: 2,
+    toolUseId,
+    isError,
+    content: { kind: 'text', text: secret },
+  };
+}
+
+function childProviderRetry(
+  phase: 'scheduled' | 'started',
+): Extract<SessionEvent, { type: 'provider_retry' }> {
+  return {
+    type: 'provider_retry',
+    id: `provider-retry-${phase}`,
+    turnId: 'child-turn',
+    ts: 3,
+    phase,
+    attempt: 2,
+    maxAttempts: 10,
+    reason: 'rate_limit',
+    ...(phase === 'scheduled' ? { delayMs: 250 } : {}),
+  } as Extract<SessionEvent, { type: 'provider_retry' }>;
 }
 
 function preparedResume(sourceRunId: string) {

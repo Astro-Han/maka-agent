@@ -20,6 +20,12 @@ import {
   type AdaptiveSwarmPolicy,
   type AdaptiveSwarmItemResult,
 } from './adaptive-swarm.js';
+import {
+  CHILD_AGENT_PROGRESS_BATCH_MAX_CHARS,
+  CHILD_AGENT_PROGRESS_BATCH_MAX_EVENTS,
+  ChildAgentProgressProjector,
+  createChildAgentProgressBudget,
+} from './child-agent-progress.js';
 import type { SpawnChildAgentResult } from './session-manager.js';
 import type { SubagentExecutionRef } from './subagent-execution.js';
 import type { MakaTool, MakaToolContext } from './tool-runtime.js';
@@ -167,6 +173,17 @@ export function buildAgentSwarmTool(
         length: prepared.items.length,
       });
       const artifactIds = prepared.items.map(() => new Set<string>());
+      const progressBudget = createChildAgentProgressBudget(
+        CHILD_AGENT_PROGRESS_BATCH_MAX_EVENTS,
+        CHILD_AGENT_PROGRESS_BATCH_MAX_CHARS,
+      );
+      const progressProjectors = prepared.items.map(
+        (item) =>
+          new ChildAgentProgressProjector(ctx, {
+            prefix: `Agent swarm item ${item.itemId} · child`,
+            sharedBudget: progressBudget,
+          }),
+      );
       const rows = await runAdaptiveSwarm<
         PreparedAgentSwarmItem,
         ChildExecutionResult,
@@ -213,6 +230,7 @@ export function buildAgentSwarmTool(
                     ...(retry.execution ? { execution: retry.execution } : {}),
                     abortSignal: deadline.signal,
                     onReady,
+                    onEvent: (event) => progressProjectors[index]!.observe(event),
                   })) as SpawnChildAgentResult)
                 : (() => {
                     throw new Error('retryChildAgent capability is unavailable');
@@ -223,6 +241,7 @@ export function buildAgentSwarmTool(
                     prompt: item.task,
                     abortSignal: deadline.signal,
                     onReady,
+                    onEvent: (event) => progressProjectors[index]!.observe(event),
                   })) as SpawnChildAgentResult)
                 : ((await ctx.spawnChildSession!({
                     agentProfile: item.definition.profile,
@@ -233,6 +252,7 @@ export function buildAgentSwarmTool(
                     },
                     abortSignal: deadline.signal,
                     onReady,
+                    onEvent: (event) => progressProjectors[index]!.observe(event),
                   })) as ChildExecutionResult);
             const effectiveResult: ChildExecutionResult = deadline.timedOut()
               ? timedOutChildResult(result, itemTimeoutMs)

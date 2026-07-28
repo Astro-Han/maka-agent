@@ -8,6 +8,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./artifact-stores": "./dist/artifact-stores.js",
     "./execution-stores": "./dist/execution-stores.js",
     "./agent-graph-control-store": "./dist/agent-graph-control-store.js",
     "./interaction-store": "./dist/interaction-store.js",
