@@ -483,6 +483,10 @@ export class AgentRun {
     }
     await this.recordSessionEvent(sessionEvent, options);
     if (sessionEvent.type === 'provider_retry') return;
+    // ToolRuntime already persisted protocol-tagged tool calls/results through
+    // the atomic RuntimeCommitSink. Re-appending the mapped UI event through
+    // the generic lane would duplicate the fact and violate that boundary.
+    if (isAtomicToolBoundaryProjection(runtimeEvent, this.toolBoundaryProtocol)) return;
     if (!isNonTerminalErrorRuntimeEvent(runtimeEvent)) {
       // A steered user message is fail-CLOSED: the backend's delivery ack
       // waits on this consume, and the provider must never execute a
@@ -1491,4 +1495,14 @@ function isInteractionResumeAck(event: SessionEvent): boolean {
 
 function isNonTerminalErrorRuntimeEvent(event: RuntimeEvent): boolean {
   return event.content?.kind === 'error' && !isTerminalRuntimeEvent(event);
+}
+
+function isAtomicToolBoundaryProjection(
+  event: RuntimeEvent,
+  protocol: ToolBoundaryProtocol | undefined,
+): boolean {
+  if (!protocol || event.refs?.operationId === undefined) return false;
+  return (
+    event.content?.kind === 'function_call' || event.content?.kind === 'function_response'
+  );
 }

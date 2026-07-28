@@ -387,13 +387,13 @@ describe('Maka CLI runtime bootstrap', () => {
           header,
           store: runtimeDeps.store,
         });
-        const names = (backend as unknown as { input: AiSdkBackendInput }).input.tools.map(
-          (tool) => tool.name,
-        );
+        const backendInput = (backend as unknown as { input: AiSdkBackendInput }).input;
+        const names = backendInput.tools.map((tool) => tool.name);
 
         assert.ok(names.includes('view_agent_graph'));
         assert.ok(names.includes('update_agent_graph'));
         assert.ok(names.includes(AGENT_OUTPUT_TOOL_NAME));
+        assert.ok(backendInput.runtimeCommitSink);
       } finally {
         await context.close();
       }

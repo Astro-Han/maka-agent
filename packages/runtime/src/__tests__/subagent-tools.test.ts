@@ -1224,6 +1224,39 @@ describe('subagent tools', () => {
     expect(schema.safeParse({ child_session_id: '' }).success).toBe(false);
     expect(schema.safeParse({ run_id: '' }).success).toBe(false);
   });
+
+  test('agent_output uses an explicit locator when a provider fills unrelated fields', async () => {
+    const outputTool = buildSubagentOutputTool();
+    const output = await outputTool.impl(
+      {
+        locator: 'child_session_run',
+        child_session_id: 'child-session',
+        run_id: 'child-run',
+        turn_id: 'provider-placeholder',
+        max_events: 100,
+      },
+      {
+        sessionId: 'session-1',
+        turnId: 'parent-turn',
+        cwd: '/tmp/cwd',
+        toolCallId: 'tool-output-provider-filled',
+        abortSignal: new AbortController().signal,
+        emitOutput: () => {},
+        readChildAgentOutput: async (input) => ({ requested: input }),
+      },
+    );
+
+    expect(output).toEqual({
+      requested: {
+        execution: {
+          kind: 'child_session',
+          sessionId: 'child-session',
+          currentRunId: 'child-run',
+        },
+        maxEvents: 100,
+      },
+    });
+  });
 });
 
 function makeChildToolRuntime(cwd: string): ToolRuntime {

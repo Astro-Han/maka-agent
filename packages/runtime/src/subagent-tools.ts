@@ -284,6 +284,7 @@ export function buildSubagentListTool(): MakaTool<Record<string, never>, unknown
 
 export function buildSubagentOutputTool(): MakaTool<
   {
+    locator?: 'child_session_latest' | 'child_session_run' | 'legacy_run' | 'legacy_turn';
     child_session_id?: string;
     run_id?: string;
     turn_id?: string;
@@ -295,9 +296,15 @@ export function buildSubagentOutputTool(): MakaTool<
     name: AGENT_OUTPUT_TOOL_NAME,
     displayName: 'Agent Output',
     description:
-      'Inspect a linked child session (optionally at run_id) or a legacy child run by run_id/turn_id, including runtime events and artifacts.',
+      'Inspect child output. Always set locator: child_session_run for a graph childSessionId/currentRunId, child_session_latest for its latest run, or a legacy locator. Unrelated provider-filled optional fields are ignored.',
     parameters: z
       .object({
+        locator: z
+          .enum(['child_session_latest', 'child_session_run', 'legacy_run', 'legacy_turn'])
+          .optional()
+          .describe(
+            'Explicit locator discriminator. The runtime applies only fields selected by this value.',
+          ),
         child_session_id: z
           .string()
           .min(1)
@@ -308,6 +315,22 @@ export function buildSubagentOutputTool(): MakaTool<
         max_events: z.number().int().min(1).max(100).optional(),
       })
       .superRefine((input, ctx) => {
+        if (input.locator) {
+          const valid =
+            (input.locator === 'child_session_latest' && Boolean(input.child_session_id)) ||
+            (input.locator === 'child_session_run' &&
+              Boolean(input.child_session_id) &&
+              Boolean(input.run_id)) ||
+            (input.locator === 'legacy_run' && Boolean(input.run_id)) ||
+            (input.locator === 'legacy_turn' && Boolean(input.turn_id));
+          if (!valid) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `locator=${input.locator} requires its matching identity fields`,
+            });
+          }
+          return;
+        }
         if (input.child_session_id) {
           if (input.turn_id) {
             ctx.addIssue({
@@ -331,8 +354,36 @@ export function buildSubagentOutputTool(): MakaTool<
       if (!ctx.readChildAgentOutput) {
         throw new Error('readChildAgentOutput capability is unavailable in this runtime context');
       }
+      const explicitLocator =
+        input.locator === 'child_session_latest'
+          ? {
+              execution: {
+                kind: 'child_session' as const,
+                sessionId: input.child_session_id!,
+              },
+            }
+          : input.locator === 'child_session_run'
+            ? {
+                execution: {
+                  kind: 'child_session' as const,
+                  sessionId: input.child_session_id!,
+                  currentRunId: input.run_id!,
+                },
+              }
+            : input.locator === 'legacy_run'
+              ? {
+                  execution: {
+                    kind: 'legacy_child_run' as const,
+                    sessionId: ctx.sessionId,
+                    runId: input.run_id!,
+                  },
+                }
+              : input.locator === 'legacy_turn'
+                ? { turnId: input.turn_id! }
+                : undefined;
       return await ctx.readChildAgentOutput({
-        ...(input.child_session_id
+        ...(explicitLocator ??
+        (input.child_session_id
           ? {
               execution: {
                 kind: 'child_session' as const,
@@ -348,8 +399,8 @@ export function buildSubagentOutputTool(): MakaTool<
                   runId: input.run_id,
                 },
               }
-            : {}),
-        ...(input.turn_id ? { turnId: input.turn_id } : {}),
+            : {})),
+        ...(input.locator === undefined && input.turn_id ? { turnId: input.turn_id } : {}),
         ...(input.max_events !== undefined ? { maxEvents: input.max_events } : {}),
       });
     },

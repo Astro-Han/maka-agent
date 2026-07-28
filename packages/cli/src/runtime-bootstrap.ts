@@ -199,6 +199,7 @@ export async function createMakaCliRuntimeContext(
 ): Promise<MakaCliRuntimeContext> {
   const stateRoot = input.stateRoot ?? input.workspaceRoot;
   const configRoot = input.configRoot ?? input.workspaceRoot;
+  const agentGraphEnabled = input.surface === 'tui' || input.enableAgentGraph === true;
   if (input.stateRoot !== undefined || input.configRoot !== undefined) {
     await assertSessionBundleRootLayout({
       stateRoot,
@@ -211,12 +212,15 @@ export async function createMakaCliRuntimeContext(
   const runStore = createAgentRunStore(stateRoot);
   const runtimePersistence = await openRuntimeEventPersistence({
     workspaceRoot: stateRoot,
-    sqliteCanonical: process.env.MAKA_RUNTIME_SQLITE_CANONICAL === '1',
+    // Graph execution can dispatch durable tools from both the supervisor and
+    // child agents. Those tool facts must cross the SQLite atomic boundary;
+    // the legacy JSONL event store intentionally rejects them.
+    sqliteCanonical:
+      agentGraphEnabled || process.env.MAKA_RUNTIME_SQLITE_CANONICAL === '1',
   });
   const runtimeEventStore = runtimePersistence.runtimeEventStore;
   const shellRunStore = createShellRunStore(stateRoot);
   const artifactStore = createArtifactStore(stateRoot);
-  const agentGraphEnabled = input.surface === 'tui' || input.enableAgentGraph === true;
   const agentGraphControlStore = agentGraphEnabled
     ? createAgentGraphControlStore(stateRoot)
     : undefined;

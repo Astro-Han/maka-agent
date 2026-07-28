@@ -1586,6 +1586,8 @@ export class SessionManager {
       tools: this.deps.childTools ?? [],
       worktreeChildExecutorAvailable: this.deps.worktreeChildExecutor !== undefined,
     });
+    const childPermissionMode =
+      parentHeader.permissionMode === 'bypass' ? 'bypass' : definition.permissionMode;
 
     const initialTurnId = this.deps.newId();
     const initialRunId = this.deps.newId();
@@ -1607,7 +1609,7 @@ export class SessionManager {
         agentId: definition.id,
         profile: definition.profile,
         workspace: definition.contract.workspace,
-        permissionMode: definition.permissionMode,
+        permissionMode: childPermissionMode,
         toolNames: [...definition.tools],
         categoryPolicy: { ...definition.categoryPolicy },
         systemPrompt: definition.systemPrompt,
@@ -1643,7 +1645,7 @@ export class SessionManager {
         ...(parentHeader.thinkingLevel !== undefined
           ? { thinkingLevel: parentHeader.thinkingLevel }
           : {}),
-        permissionMode: definition.permissionMode,
+        permissionMode: childPermissionMode,
         collaborationMode: 'agent',
         orchestrationMode: 'default',
         subagentParent: {
