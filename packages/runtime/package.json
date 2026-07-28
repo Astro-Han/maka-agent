@@ -61,7 +61,8 @@
     "./stream-graph-schedule-reconcile": "./dist/stream-graph-schedule-reconcile.js",
     "./stream-graph-supervisor-tools": "./dist/stream-graph-supervisor-tools.js",
     "./stream-graph-read-model": "./dist/stream-graph-read-model.js",
-    "./stream-graph-coordinator": "./dist/stream-graph-coordinator.js"
+    "./stream-graph-coordinator": "./dist/stream-graph-coordinator.js",
+    "./agent-graph-timeline": "./dist/agent-graph-timeline.js"
   },
   "scripts": {
     "clean": "node ../../scripts/clean-paths.mjs dist tsconfig.tsbuildinfo",

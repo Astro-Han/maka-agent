@@ -185,6 +185,11 @@ export interface ReadCommittedAgentGraphProjectionInput {
   runtimeEventStore: Pick<RuntimeEventStore, 'readImmutableRuntimeEvents'>;
 }
 
+export interface AgentGraphProjectionWithRuns {
+  projection: AgentGraphProjection;
+  runs: AgentRunHeader[];
+}
+
 interface OrderedRuntimeEvent {
   operator: AgentGraphOperatorBinding;
   run: AgentRunHeader;
@@ -199,6 +204,12 @@ interface MutableAgentGraphOperatorState extends Omit<AgentGraphOperatorState, '
 export async function readCommittedAgentGraphProjection(
   input: ReadCommittedAgentGraphProjectionInput,
 ): Promise<AgentGraphProjection> {
+  return (await readCommittedAgentGraphProjectionWithRuns(input)).projection;
+}
+
+export async function readCommittedAgentGraphProjectionWithRuns(
+  input: ReadCommittedAgentGraphProjectionInput,
+): Promise<AgentGraphProjectionWithRuns> {
   assertGraphIdentity(input.graphId, input.operators);
   const readImmutableRuntimeEvents = input.runtimeEventStore.readImmutableRuntimeEvents;
   if (!readImmutableRuntimeEvents) {
@@ -240,12 +251,15 @@ export async function readCommittedAgentGraphProjection(
       ? replayAgentGraphRecords(projected.records)
       : { graphId: input.graphId, appliedRecordIds: [], operators: {} };
   return {
-    graphId: input.graphId,
-    operators: input.operators.map((operator) => ({ ...operator })),
-    ignoredPartialEvents: projected.ignoredPartialEvents,
-    records: projected.records,
-    supervisorMetaStream: projected.supervisorMetaStream,
-    state,
+    runs: streams.map((stream) => ({ ...stream.run })),
+    projection: {
+      graphId: input.graphId,
+      operators: input.operators.map((operator) => ({ ...operator })),
+      ignoredPartialEvents: projected.ignoredPartialEvents,
+      records: projected.records,
+      supervisorMetaStream: projected.supervisorMetaStream,
+      state,
+    },
   };
 }
 

@@ -2,6 +2,7 @@ import type {
   AgentGraphClientProjectionStore,
   AgentGraphIntentClaim,
   AgentGraphScheduleControlStore,
+  AgentGraphTimelineMetadataStore,
   AgentGraphScheduleUpdate,
   AgentGraphOperatorProvision,
   AgentRunStore,
@@ -50,6 +51,11 @@ import {
 import { buildAgentGraphSupervisorTools } from './stream-graph-supervisor-tools.js';
 import type { AgentGraphTraceTopology } from './stream-graph-trace.js';
 import { stableHash } from './request-shape.js';
+import {
+  readAgentGraphTimelinePage,
+  type AgentGraphTimelinePage,
+  type AgentGraphTimelinePageOptions,
+} from './agent-graph-timeline.js';
 
 const DEFAULT_MAX_NEW_ACTIVATIONS = 8;
 const MAX_CLIENT_PROJECTION_COMMIT_ATTEMPTS = 4;
@@ -69,7 +75,9 @@ export interface AgentGraphCoordinatorInput {
   sessionStore: AgentGraphCoordinatorSessionStore;
   runStore: Pick<AgentRunStore, 'listSessionRuns'>;
   runtimeEventStore: Pick<RuntimeEventStore, 'readImmutableRuntimeEvents'>;
-  controlStore: AgentGraphScheduleControlStore & AgentGraphClientProjectionStore;
+  controlStore: AgentGraphScheduleControlStore &
+    AgentGraphClientProjectionStore &
+    AgentGraphTimelineMetadataStore;
   runtime: AgentGraphCoordinatorRuntime;
   newId: () => string;
   /** Restrict an attempt-local coordinator to exactly one root Session graph. */
@@ -233,6 +241,28 @@ export class AgentGraphCoordinator {
       terminalPage.hasMore,
     );
     return snapshot;
+  }
+
+  /**
+   * Reconstruct one stable, reference-only control/data-plane timeline page.
+   *
+   * SQLite supplies one metadata snapshot; AgentRun and immutable RuntimeEvent
+   * ledgers supply root-turn and operator activity without exposing payloads.
+   */
+  async getTimeline(
+    rootSessionId: string,
+    options: AgentGraphTimelinePageOptions = {},
+  ): Promise<AgentGraphTimelinePage> {
+    await this.#assertRootGraphReader(rootSessionId);
+    const graphId = agentGraphIdForRootSession(rootSessionId);
+    return readAgentGraphTimelinePage({
+      rootSessionId,
+      graphId,
+      controlStore: this.#input.controlStore,
+      runStore: this.#input.runStore,
+      runtimeEventStore: this.#input.runtimeEventStore,
+      options,
+    });
   }
 
   /** Inspect one operator without requiring it to be present in the bounded snapshot page. */
