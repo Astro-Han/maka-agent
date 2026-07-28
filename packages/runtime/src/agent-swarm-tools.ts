@@ -730,12 +730,6 @@ function preflightAgentSwarmInput(input: AgentSwarmToolInput): {
         `Agent profile "${definition.profile}" requires isolation "${definition.contract.workspace}", not "${isolation}".`,
       );
     }
-    if (isolation !== AGENT_WORKSPACE_SAME_WORKSPACE) {
-      throw new Error(
-        `Agent profile "${definition.profile}" requires "${isolation}" workspace isolation, but this runtime does not provide a worktree child executor yet.`,
-      );
-    }
-
     return {
       index: resumes.length + index,
       itemId: item.item_id,

@@ -217,7 +217,7 @@ describe('subagent tools', () => {
     });
   });
 
-  test('built-in catalog exposes implementation as a worktree-only fail-closed contract', async () => {
+  test('built-in catalog exposes implementation only when a worktree executor is available', async () => {
     expect(IMPLEMENTATION_AGENT_DEFINITION.id).toBe(IMPLEMENTATION_AGENT_ID);
     expect(IMPLEMENTATION_AGENT_DEFINITION.profile).toBe(IMPLEMENTATION_AGENT_PROFILE);
     expect(IMPLEMENTATION_AGENT_DEFINITION.contract).toEqual({
@@ -275,6 +275,33 @@ describe('subagent tools', () => {
       ),
       /worktree child executor/,
     );
+
+    const runnableAvailability = listBuiltinAgentDefinitions({
+      parentPermissionMode: 'execute',
+      worktreeChildExecutorAvailable: true,
+      tools: [
+        testCatalogTool('Read', 'read'),
+        testCatalogTool('Glob', 'read'),
+        testCatalogTool('Grep', 'read'),
+        testCatalogTool('Write', 'file_write'),
+        testCatalogTool('Edit', 'file_write'),
+        testCatalogTool('Bash', 'shell_unsafe'),
+      ],
+    }).find((definition) => definition.id === IMPLEMENTATION_AGENT_ID)?.availability;
+    expect(runnableAvailability).toEqual({ status: 'available' });
+    assertAgentDefinitionRunnable({
+      parentPermissionMode: 'execute',
+      worktreeChildExecutorAvailable: true,
+      definition: IMPLEMENTATION_AGENT_DEFINITION,
+      tools: [
+        testCatalogTool('Read', 'read'),
+        testCatalogTool('Glob', 'read'),
+        testCatalogTool('Grep', 'read'),
+        testCatalogTool('Write', 'file_write'),
+        testCatalogTool('Edit', 'file_write'),
+        testCatalogTool('Bash', 'shell_unsafe'),
+      ],
+    });
   });
 
   test('agent definition availability reports missing tools and parent permission mismatches without running', () => {
@@ -394,11 +421,24 @@ describe('subagent tools', () => {
       },
     ]);
 
-    expect(tools.map((tool) => tool.name)).toEqual(['Read', 'Glob', 'Grep', 'WebSearch']);
-    expect([...CHILD_AGENT_TOOL_NAMES]).toEqual(['Read', 'Glob', 'Grep', 'WebSearch']);
-    expect(tools.some((tool) => tool.name === 'Bash')).toBe(false);
-    expect(tools.some((tool) => tool.name === 'Write')).toBe(false);
-    expect(tools.some((tool) => tool.name === 'Edit')).toBe(false);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'Read',
+      'Glob',
+      'Grep',
+      'WebSearch',
+      'Write',
+      'Edit',
+      'Bash',
+    ]);
+    expect([...CHILD_AGENT_TOOL_NAMES]).toEqual([
+      'Read',
+      'Glob',
+      'Grep',
+      'WebSearch',
+      'Write',
+      'Edit',
+      'Bash',
+    ]);
   });
 
   test('keeps host-provided ArchiveRead available for child recovery', () => {
@@ -429,7 +469,7 @@ describe('subagent tools', () => {
       await runTool(runtime, tools, 'Grep', { pattern: 'SUBAGENT_CHILD_TOOL_MARKER' }, events);
 
       expect(events.some((event) => event.type === 'permission_request')).toBe(false);
-      expect(tools.has('Bash')).toBe(false);
+      expect(tools.has('Bash')).toBe(true);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
@@ -961,7 +1001,7 @@ describe('subagent tools', () => {
     expect(spawned).toBe(false);
   });
 
-  test('agent_spawn validates profile contracts and rejects unavailable worktree agents before spawning', async () => {
+  test('agent_spawn validates profile contracts and delegates worktree availability to runtime', async () => {
     const tool = buildSubagentSpawnTool();
     const schema = tool.parameters as {
       safeParse(input: unknown): { success: boolean; data?: unknown };
@@ -1050,30 +1090,42 @@ describe('subagent tools', () => {
         .success,
     ).toBe(false);
 
-    await expectRejects(
-      Promise.resolve(
-        tool.impl(
-          {
-            profile: IMPLEMENTATION_AGENT_PROFILE,
-            task: 'Edit files.',
-            write_back: AGENT_WRITE_BACK_PATCH,
-            isolation: AGENT_WORKSPACE_WORKTREE,
-          },
-          {
-            sessionId: 'session-1',
-            turnId: 'parent-turn',
-            cwd: '/tmp/cwd',
-            toolCallId: 'tool-1',
-            abortSignal: new AbortController().signal,
-            emitOutput: () => {},
-            spawnChildSession: async () => {
-              throw new Error('spawn should not be called');
-            },
-          },
-        ),
-      ),
-      /worktree child executor/,
+    const calls: unknown[] = [];
+    await tool.impl(
+      {
+        profile: IMPLEMENTATION_AGENT_PROFILE,
+        task: 'Edit files.',
+        write_back: AGENT_WRITE_BACK_PATCH,
+        isolation: AGENT_WORKSPACE_WORKTREE,
+      },
+      {
+        sessionId: 'session-1',
+        turnId: 'parent-turn',
+        cwd: '/tmp/cwd',
+        toolCallId: 'tool-1',
+        abortSignal: new AbortController().signal,
+        emitOutput: () => {},
+        spawnChildSession: async (input) => {
+          calls.push(input);
+          return {
+            childSessionId: 'child-session',
+            agentId: IMPLEMENTATION_AGENT_ID,
+            agentName: 'Implementation',
+            turnId: 'child-turn',
+            runId: 'child-run',
+            status: 'completed',
+            permissionMode: 'execute',
+            summary: 'done',
+            artifactIds: [],
+          };
+        },
+      },
     );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      agentProfile: IMPLEMENTATION_AGENT_PROFILE,
+      prompt: 'Edit files.',
+    });
   });
 
   test('agent projection tools delegate through read-only context capabilities', async () => {

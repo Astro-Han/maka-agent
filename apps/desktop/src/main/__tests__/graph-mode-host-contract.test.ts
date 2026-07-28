@@ -54,4 +54,13 @@ describe('Desktop Graph Mode host contract', () => {
     assert.match(panel, /可见 \$\{settled\}\/\$\{total\} 已结束/);
     assert.match(panel, /\$\{settled\}\/\$\{total\} visible settled/);
   });
+
+  it('provides a host-owned Git worktree executor to linked child Sessions', async () => {
+    const main = await readFile(
+      fileURLToPath(new URL('../../../src/main/main.ts', import.meta.url)),
+      'utf8',
+    );
+    assert.match(main, /createGitWorktreeChildExecutor\(\{ storageRoot: workspaceRoot \}\)/);
+    assert.match(main, /new SessionManager\(\{[\s\S]*worktreeChildExecutor,/);
+  });
 });

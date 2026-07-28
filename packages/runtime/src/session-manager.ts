@@ -85,6 +85,8 @@ import type {
   RuntimeEvent,
   RuntimeEventStore,
   ToolBoundaryProtocol,
+  SubagentWorkspaceBinding,
+  SubagentWorktreeExecutor,
 } from '@maka/core';
 import { AGENT_GRAPH_OPERATOR_PROVISION_SCHEMA_VERSION } from '@maka/core';
 import { type RuntimeEventTerminalFact } from './runtime-event-read-model.js';
@@ -149,6 +151,7 @@ import {
   getBuiltinAgentDefinition,
   listBuiltinAgentDefinitions,
   requireBuiltinAgentDefinitionByProfile,
+  AGENT_WORKSPACE_WORKTREE,
   type AgentProfile,
   type AgentDefinition,
   type AgentDefinitionListItem,
@@ -530,6 +533,8 @@ interface SessionManagerBaseDeps {
   newId: () => string;
   now: () => number;
   childTools?: readonly MakaTool[];
+  /** Host-owned filesystem isolation for worktree-backed child Sessions. */
+  worktreeChildExecutor?: SubagentWorktreeExecutor;
   listArtifactsForTurn?: (sessionId: string, turnId: string) => Promise<ArtifactRecord[]>;
   runtimeSource?: InvocationSource;
   runtimeInvocationObserver?: (result: InvocationResult) => void | Promise<void>;
@@ -647,6 +652,47 @@ export class SessionManager {
   async listChildSessions(parentSessionId: string): Promise<SessionSummary[]> {
     const sessions = await this.deps.store.list({ subagentParentSessionId: parentSessionId });
     return childSessionsForParent(sessions, parentSessionId);
+  }
+
+  private async provisionChildWorkspace(
+    parent: SessionHeader,
+    definition: AgentDefinition,
+    requestFingerprint: string,
+  ): Promise<SubagentWorkspaceBinding | undefined> {
+    if (definition.contract.workspace !== AGENT_WORKSPACE_WORKTREE) return undefined;
+    const executor = this.deps.worktreeChildExecutor;
+    if (!executor) {
+      throw new Error(
+        `Agent "${definition.id}" is unavailable: "worktree" workspace isolation requires a worktree child executor.`,
+      );
+    }
+    const fingerprint = requestFingerprint.startsWith('sha256:')
+      ? requestFingerprint.slice('sha256:'.length)
+      : requestFingerprint;
+    if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+      throw new Error('Child workspace request fingerprint must be SHA-256');
+    }
+    return executor.provision({
+      leaseId: `subagent_worktree_${fingerprint.slice(0, 32)}`,
+      sourceSessionId: parent.id,
+      sourceCwd: parent.cwd,
+      ...(parent.projectId !== undefined ? { sourceProjectId: parent.projectId } : {}),
+    });
+  }
+
+  private async ensureChildWorkspace(header: SessionHeader): Promise<void> {
+    const binding = header.subagentWorkspace;
+    if (!binding) return;
+    const executor = this.deps.worktreeChildExecutor;
+    if (!executor) {
+      throw new Error(
+        `Child Session ${header.id} requires a worktree child executor for ${binding.worktreePath}`,
+      );
+    }
+    if (header.cwd !== binding.worktreePath) {
+      throw new Error(`Child Session ${header.id} workspace binding disagrees with its cwd`);
+    }
+    await executor.ensure(binding);
   }
 
   /** Invalidate backend snapshots now, or immediately after active turns settle. */
@@ -1416,6 +1462,7 @@ export class SessionManager {
   ): AsyncIterable<SessionEvent> {
     const execution = this.runtimeKernel.claimExecution(sessionId);
     try {
+      await this.ensureChildWorkspace(await this.deps.store.readHeader(sessionId));
       yield* this.runtimeKernel.startChildTurn(sessionId, input, execution);
     } finally {
       execution.release();
@@ -1511,6 +1558,7 @@ export class SessionManager {
       parentPermissionMode: parentHeader.permissionMode,
       definition,
       tools: this.deps.childTools ?? [],
+      worktreeChildExecutorAvailable: this.deps.worktreeChildExecutor !== undefined,
     });
 
     const initialTurnId = this.deps.newId();
@@ -1532,6 +1580,7 @@ export class SessionManager {
         definitionVersion: definition.definitionVersion,
         agentId: definition.id,
         profile: definition.profile,
+        workspace: definition.contract.workspace,
         permissionMode: definition.permissionMode,
         toolNames: [...definition.tools],
         categoryPolicy: { ...definition.categoryPolicy },
@@ -1539,6 +1588,11 @@ export class SessionManager {
       },
       parentPermissionCeiling: parentHeader.permissionMode,
     });
+    const workspace = await this.provisionChildWorkspace(
+      parentHeader,
+      definition,
+      provisionFingerprint,
+    );
     const request: AgentGraphOperatorProvisionRequest = {
       schemaVersion: AGENT_GRAPH_OPERATOR_PROVISION_SCHEMA_VERSION,
       provisionId: `graph_provision_${identityHash}`,
@@ -1554,7 +1608,8 @@ export class SessionManager {
     const result = await create.call(
       this.deps.store,
       {
-        cwd: parentHeader.cwd,
+        cwd: workspace?.worktreePath ?? parentHeader.cwd,
+        ...(parentHeader.projectId !== undefined ? { projectId: parentHeader.projectId } : {}),
         name: definition.name,
         backend: parentHeader.backend,
         llmConnectionSlug: parentHeader.llmConnectionSlug,
@@ -1597,6 +1652,7 @@ export class SessionManager {
           initialTurnId,
           initialRunId,
         },
+        ...(workspace ? { subagentWorkspace: workspace } : {}),
       },
       request,
       input.expectedScheduleRevision,
@@ -1606,7 +1662,8 @@ export class SessionManager {
       relation?.graphId !== input.graphId ||
       relation.workId !== input.workId ||
       relation.operatorId !== result.provision.operatorId ||
-      result.header.id !== result.provision.targetSessionId
+      result.header.id !== result.provision.targetSessionId ||
+      !sameSubagentWorkspace(result.header.subagentWorkspace, workspace)
     ) {
       throw new Error('Stored graph operator provision returned mismatched Session metadata');
     }
@@ -1710,6 +1767,7 @@ export class SessionManager {
 
     const { claim } = input;
     const child = await this.deps.store.readHeader(claim.targetSessionId);
+    await this.ensureChildWorkspace(child);
     const snapshot = child.subagentRuntime;
     if (
       child.id !== claim.targetSessionId ||
@@ -1919,12 +1977,18 @@ export class SessionManager {
       parentPermissionMode: parentHeader.permissionMode,
       definition,
       tools: availableChildTools,
+      worktreeChildExecutorAvailable: this.deps.worktreeChildExecutor !== undefined,
     });
 
     const proposedTurnId = input.turnId ?? this.deps.newId();
     const proposedRunId = input.runId ?? this.deps.newId();
+    const workspace = await this.provisionChildWorkspace(
+      parentHeader,
+      definition,
+      requestFingerprint,
+    );
     const creation = await this.deps.store.createSubagent({
-      cwd: parentHeader.cwd,
+      cwd: workspace?.worktreePath ?? parentHeader.cwd,
       ...(parentHeader.projectId !== undefined ? { projectId: parentHeader.projectId } : {}),
       name: input.name ?? definition.name,
       backend: parentHeader.backend,
@@ -1960,11 +2024,17 @@ export class SessionManager {
         initialTurnId: proposedTurnId,
         initialRunId: proposedRunId,
       },
+      ...(workspace ? { subagentWorkspace: workspace } : {}),
     });
     const child = creation.header;
     const snapshot = child.subagentRuntime;
     const spawn = child.subagentSpawn;
-    if (!snapshot || !spawn || !child.subagentParent) {
+    if (
+      !snapshot ||
+      !spawn ||
+      !child.subagentParent ||
+      !sameSubagentWorkspace(child.subagentWorkspace, workspace)
+    ) {
       throw new Error('Stored child session is missing its durable runtime or spawn identity');
     }
     try {
@@ -2234,10 +2304,12 @@ export class SessionManager {
     }
 
     const sessionHeader = await this.deps.store.readHeader(sessionId);
+    await this.ensureChildWorkspace(sessionHeader);
     assertAgentDefinitionRunnable({
       parentPermissionMode: sessionHeader.permissionMode,
       definition,
       tools: this.deps.childTools ?? [],
+      worktreeChildExecutorAvailable: this.deps.worktreeChildExecutor !== undefined,
     });
     const visited = new Set<string>();
     let cursor: AgentRunHeader | undefined = source;
@@ -3055,6 +3127,7 @@ export class SessionManager {
     const definitions = listBuiltinAgentDefinitions({
       parentPermissionMode: header.permissionMode,
       tools: this.deps.childTools ?? [],
+      worktreeChildExecutorAvailable: this.deps.worktreeChildExecutor !== undefined,
     });
     if (!this.deps.runStore) return { definitions, executions: [], runs: [] };
     const runs = await this.deps.runStore.listSessionRuns(sessionId);
@@ -4196,6 +4269,7 @@ export function headerToSummary(h: SessionHeader): SessionSummary {
     ...(h.subagentRuntime
       ? { subagentRuntime: subagentSessionRuntimeSummary(h.subagentRuntime) }
       : {}),
+    ...(h.subagentWorkspace ? { subagentWorkspace: h.subagentWorkspace } : {}),
     ...(h.revisionRootSessionId ? { revisionRootSessionId: h.revisionRootSessionId } : {}),
     ...(h.revisionParentSessionId ? { revisionParentSessionId: h.revisionParentSessionId } : {}),
     ...(h.revisionOfTurnId ? { revisionOfTurnId: h.revisionOfTurnId } : {}),
@@ -4218,6 +4292,22 @@ export function headerToSummary(h: SessionHeader): SessionSummary {
 
 function isNotFoundError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+function sameSubagentWorkspace(
+  left: SubagentWorkspaceBinding | undefined,
+  right: SubagentWorkspaceBinding | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.schemaVersion === right.schemaVersion &&
+    left.kind === right.kind &&
+    left.leaseId === right.leaseId &&
+    left.gitCommonDir === right.gitCommonDir &&
+    left.worktreePath === right.worktreePath &&
+    left.branch === right.branch &&
+    left.baseCommit === right.baseCommit
+  );
 }
 
 function childSessionSpawnKey(

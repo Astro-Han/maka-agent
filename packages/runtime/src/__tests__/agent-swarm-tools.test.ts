@@ -112,36 +112,35 @@ describe('AgentSwarm adapter', () => {
     );
   });
 
-  test('preflights the complete batch before starting any child', async () => {
+  test('delegates worktree availability checks to the child runtime', async () => {
     const tool = buildAgentSwarmTool();
     let starts = 0;
 
-    await assert.rejects(
-      Promise.resolve(
-        tool.impl(
+    const result = (await tool.impl(
+      {
+        items: [
+          swarmItem(0),
           {
-            items: [
-              swarmItem(0),
-              {
-                item_id: 'implementation',
-                profile: IMPLEMENTATION_AGENT_PROFILE,
-                task: 'Edit the repository.',
-                write_back: AGENT_WRITE_BACK_PATCH,
-                isolation: AGENT_WORKSPACE_WORKTREE,
-              },
-            ],
+            item_id: 'implementation',
+            profile: IMPLEMENTATION_AGENT_PROFILE,
+            task: 'Edit the repository.',
+            write_back: AGENT_WRITE_BACK_PATCH,
+            isolation: AGENT_WORKSPACE_WORKTREE,
           },
-          context({
-            spawnChildSession: async () => {
-              starts += 1;
-              return childResult(0);
-            },
-          }),
-        ),
-      ),
-      /worktree child executor/,
+        ],
+      },
+      context({
+        spawnChildSession: async () => {
+          starts += 1;
+          return childResult(starts);
+        },
+      }),
+    )) as AgentSwarmToolResult;
+    assert.equal(starts, 2);
+    assert.deepEqual(
+      result.items.map((item) => item.status),
+      ['completed', 'completed'],
     );
-    assert.equal(starts, 0);
   });
 
   test('accepts prompt_template with string items and rejects ambiguous template input', () => {

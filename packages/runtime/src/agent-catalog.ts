@@ -102,6 +102,7 @@ export interface AgentDefinitionListItem {
 export interface AgentDefinitionListOptions {
   parentPermissionMode?: PermissionMode;
   tools?: readonly MakaTool[];
+  worktreeChildExecutorAvailable?: boolean;
 }
 
 export const LOCAL_READ_AGENT_DEFINITION: AgentDefinition = {
@@ -217,6 +218,7 @@ export function listBuiltinAgentDefinitions(
             parentPermissionMode: options.parentPermissionMode,
             definition,
             tools: options.tools,
+            worktreeChildExecutorAvailable: options.worktreeChildExecutorAvailable,
           })
         : { status: 'unknown' },
     permissionMode: definition.permissionMode,
@@ -266,9 +268,13 @@ export function evaluateAgentDefinitionAvailability(input: {
   parentPermissionMode: PermissionMode;
   definition: AgentDefinition;
   tools: readonly MakaTool[];
+  worktreeChildExecutorAvailable?: boolean;
 }): AgentDefinitionAvailability {
   const { parentPermissionMode, definition, tools } = input;
-  if (definition.contract.workspace === AGENT_WORKSPACE_WORKTREE) {
+  if (
+    definition.contract.workspace === AGENT_WORKSPACE_WORKTREE &&
+    !input.worktreeChildExecutorAvailable
+  ) {
     return {
       status: 'unavailable',
       reason: 'workspace_isolation_unavailable',
@@ -328,12 +334,14 @@ export function assertAgentDefinitionRunnable(input: {
   parentPermissionMode: PermissionMode;
   definition: AgentDefinition;
   tools: readonly MakaTool[];
+  worktreeChildExecutorAvailable?: boolean;
 }): void {
   const { parentPermissionMode, definition, tools } = input;
   const availability = evaluateAgentDefinitionAvailability({
     parentPermissionMode,
     definition,
     tools,
+    worktreeChildExecutorAvailable: input.worktreeChildExecutorAvailable,
   });
   if (availability.status !== 'unavailable') return;
 

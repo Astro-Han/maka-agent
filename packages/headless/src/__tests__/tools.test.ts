@@ -261,10 +261,7 @@ describe('isolated headless tools', () => {
     assert.equal(names.filter((name) => name === 'Bash').length, 1);
     assert.deepEqual(
       buildChildAgentTools(tools).map((tool) => tool.name),
-      ['Read', 'Glob', 'Grep'],
-    );
-    assert.ok(
-      !buildChildAgentTools(tools).some((tool) => ['Bash', 'Write', 'Edit'].includes(tool.name)),
+      ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'],
     );
   });
 
@@ -1772,7 +1769,7 @@ describe('isolated headless tools', () => {
     assert.ok(loaded.includes('agent_output'));
   });
 
-  test('standard isolated tool availability does not reintroduce agent tools into local-read children', () => {
+  test('standard isolated child tool availability omits parent-facing agent tools', () => {
     const parentTools = buildIsolatedHeadlessTools(
       {
         async exec() {
@@ -1793,7 +1790,14 @@ describe('isolated headless tools', () => {
       },
     ).prepare([]);
 
-    assert.deepEqual([...plan.activeTools].sort(), ['Glob', 'Grep', 'Read']);
+    assert.deepEqual([...plan.activeTools].sort(), [
+      'Bash',
+      'Edit',
+      'Glob',
+      'Grep',
+      'Read',
+      'Write',
+    ]);
     assert.equal(plan.projectActiveTools, undefined);
     assert.ok(!plan.activeTools.includes(LOAD_TOOLS_NAME));
     assert.ok(!plan.activeTools.includes('agent_spawn'));

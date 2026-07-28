@@ -279,8 +279,8 @@ export function assembleDesktopTools(deps: DesktopToolAssemblyDeps) {
     economy: economyEnabled,
     groups: buildDeferredToolGroupsFromCatalog('desktop', desktopBoundToolNames),
   };
-  // Child agents stay file-only for local reads; parent runtime refs such as
-  // maka://runtime/background-tasks/<id> are not part of their tool surface.
+  // Build the union needed by catalog child profiles. SessionManager applies
+  // each profile's narrower allowlist; parent-facing runtime refs are omitted.
   const childAgentTools = buildChildAgentTools([
     ...buildDesktopBuiltinTools({
       archiveResources: { readArchivedToolResultResource },

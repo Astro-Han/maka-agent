@@ -52,5 +52,6 @@ export * from './runtime-event-transfer.js';
 export * from './mcp-config-store.js';
 export * from './workspace-identity.js';
 export * from './project-catalog.js';
+export * from './git-worktree-child-executor.js';
 export * from './project-session-migration.js';
 export * from './session-bundle-policy.js';

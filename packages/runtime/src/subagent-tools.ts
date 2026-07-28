@@ -32,11 +32,7 @@ export const AGENT_TOOL_NAMES = [
 ] as const;
 const CHILD_RECOVERY_TOOL_NAMES = ['ArchiveRead'] as const;
 export const CHILD_AGENT_TOOL_NAMES = [
-  ...new Set(
-    BUILTIN_AGENT_DEFINITIONS.filter(
-      (definition) => definition.contract.workspace === AGENT_WORKSPACE_SAME_WORKSPACE,
-    ).flatMap((definition) => definition.tools),
-  ),
+  ...new Set(BUILTIN_AGENT_DEFINITIONS.flatMap((definition) => definition.tools)),
 ] as readonly string[];
 const AGENT_SPAWN_WRITE_BACK_MODES = [AGENT_WRITE_BACK_SUMMARY, AGENT_WRITE_BACK_PATCH] as const;
 const AGENT_SPAWN_ISOLATION_MODES = [
@@ -51,7 +47,6 @@ export function buildChildAgentTools(tools: readonly MakaTool[]): MakaTool[] {
   const seen = new Set<string>();
   const out: MakaTool[] = [];
   for (const definition of BUILTIN_AGENT_DEFINITIONS) {
-    if (definition.contract.workspace !== AGENT_WORKSPACE_SAME_WORKSPACE) continue;
     for (const tool of buildToolsForAgentDefinition(tools, definition)) {
       if (seen.has(tool.name)) continue;
       seen.add(tool.name);
@@ -153,11 +148,6 @@ export function buildSubagentSpawnTool(deps: { taskLedger?: TaskLedgerStore } = 
       if (requestedIsolation !== definition.contract.workspace) {
         throw new Error(
           `Agent profile "${definition.profile}" requires isolation "${definition.contract.workspace}", not "${requestedIsolation}".`,
-        );
-      }
-      if (requestedIsolation !== AGENT_WORKSPACE_SAME_WORKSPACE) {
-        throw new Error(
-          `Agent profile "${definition.profile}" requires "${requestedIsolation}" workspace isolation, but this runtime does not provide a worktree child executor yet.`,
         );
       }
       if (!ctx.spawnChildSession) {

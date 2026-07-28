@@ -22,6 +22,7 @@ export * from './agent-graph-timeline.js';
 export * from './runtime-policy.js';
 export * from './interaction.js';
 export * from './project.js';
+export * from './subagent-workspace.js';
 
 // events.ts
 export type {

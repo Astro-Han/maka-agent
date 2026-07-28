@@ -30,6 +30,7 @@ import {
   isSubagentSessionParent,
   isSubagentSessionRuntime,
   isSubagentSessionSpawn,
+  isSubagentWorkspaceBinding,
   isSessionStatus,
   normalizeUserSessionName,
   subagentSessionRuntimeSummary,
@@ -468,6 +469,7 @@ class FileSessionStore implements SessionStore {
       ...(input.subagentParent ? { subagentParent: input.subagentParent } : {}),
       ...(input.subagentRuntime ? { subagentRuntime: input.subagentRuntime } : {}),
       ...(input.subagentSpawn ? { subagentSpawn: input.subagentSpawn } : {}),
+      ...(input.subagentWorkspace ? { subagentWorkspace: input.subagentWorkspace } : {}),
       ...(input.revisionRootSessionId
         ? { revisionRootSessionId: input.revisionRootSessionId }
         : {}),
@@ -684,6 +686,9 @@ class FileSessionStore implements SessionStore {
     }
     if (Object.prototype.hasOwnProperty.call(patch, 'subagentSpawn')) {
       throw new Error('Subagent session spawn identity is immutable');
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'subagentWorkspace')) {
+      throw new Error('Subagent session workspace binding is immutable');
     }
     let nextHeader: SessionHeader | undefined;
     await this.withQueue(sessionId, async () => {
@@ -1260,7 +1265,11 @@ function assertValidSessionLineage(header: SessionHeader): void {
 
 function isValidSubagentSessionLineage(header: SessionHeader): boolean {
   if (header.subagentParent === undefined) {
-    return header.subagentRuntime === undefined && header.subagentSpawn === undefined;
+    return (
+      header.subagentRuntime === undefined &&
+      header.subagentSpawn === undefined &&
+      header.subagentWorkspace === undefined
+    );
   }
   if (
     !isSubagentSessionParent(header.subagentParent) ||
@@ -1276,9 +1285,13 @@ function isValidSubagentSessionLineage(header: SessionHeader): boolean {
     return false;
   }
   return (
-    (header.subagentRuntime === undefined && header.subagentSpawn === undefined) ||
+    (header.subagentRuntime === undefined &&
+      header.subagentSpawn === undefined &&
+      header.subagentWorkspace === undefined) ||
     (isSubagentSessionRuntime(header.subagentRuntime) &&
       isSubagentSessionSpawn(header.subagentSpawn) &&
+      (header.subagentWorkspace === undefined ||
+        isSubagentWorkspaceBinding(header.subagentWorkspace)) &&
       isPermissionModeWithinCeiling(
         header.permissionMode,
         header.subagentRuntime.permissionCeiling,
@@ -1318,6 +1331,7 @@ function toSummary(header: SessionHeader, messages: StoredMessage[] = []): Sessi
     ...(header.subagentRuntime
       ? { subagentRuntime: subagentSessionRuntimeSummary(header.subagentRuntime) }
       : {}),
+    ...(header.subagentWorkspace ? { subagentWorkspace: header.subagentWorkspace } : {}),
     ...(header.revisionRootSessionId
       ? { revisionRootSessionId: header.revisionRootSessionId }
       : {}),

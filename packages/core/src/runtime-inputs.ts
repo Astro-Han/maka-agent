@@ -16,6 +16,7 @@ import type { ThinkingLevel } from './model-thinking.js';
 import type { CollaborationMode } from './collaboration.js';
 import type { OrchestrationMode, TurnOrchestration } from './orchestration.js';
 import type { SessionStartMode } from './explore-agent.js';
+import type { SubagentWorkspaceBinding } from './subagent-workspace.js';
 
 export type { TurnOrchestration } from './orchestration.js';
 
@@ -47,6 +48,7 @@ export interface CreateSessionInput {
   subagentParent?: SubagentSessionParent;
   subagentRuntime?: SubagentSessionRuntime;
   subagentSpawn?: SubagentSessionSpawn;
+  subagentWorkspace?: SubagentWorkspaceBinding;
   revisionRootSessionId?: string;
   revisionParentSessionId?: string;
   revisionOfTurnId?: string;

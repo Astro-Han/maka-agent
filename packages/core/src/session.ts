@@ -41,6 +41,7 @@ import {
   decodePersistedToolResultContentForRecovery,
   normalizeToolResultContentForRead,
 } from './tool-result-record-schema.js';
+import type { SubagentWorkspaceBinding } from './subagent-workspace.js';
 
 export { isDeepResearchSession } from './explore-agent.js';
 export { isExpertTeamSession } from './expert-team.js';
@@ -196,6 +197,8 @@ export interface SessionHeader {
   subagentRuntime?: SubagentSessionRuntime;
   /** Immutable idempotency and initial-run identity for child creation. */
   subagentSpawn?: SubagentSessionSpawn;
+  /** Immutable host-managed filesystem isolation for this child Session. */
+  subagentWorkspace?: SubagentWorkspaceBinding;
   /** Stable root id for an edit-and-resend version family. */
   revisionRootSessionId?: string;
   /** Immediate previous version in the same conversation slot. */
@@ -250,6 +253,7 @@ export interface SessionSummary {
   branchOfTurnId?: string;
   subagentParent?: SubagentSessionParent;
   subagentRuntime?: SubagentSessionRuntimeSummary;
+  subagentWorkspace?: SubagentWorkspaceBinding;
   revisionRootSessionId?: string;
   revisionParentSessionId?: string;
   revisionOfTurnId?: string;

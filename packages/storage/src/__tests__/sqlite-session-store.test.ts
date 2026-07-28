@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
-import type { CreateSessionInput, SessionHeader } from '@maka/core';
+import {
+  SUBAGENT_WORKSPACE_BINDING_SCHEMA_VERSION,
+  type CreateSessionInput,
+  type SessionHeader,
+  type SubagentWorkspaceBinding,
+} from '@maka/core';
 import {
   createLegacyFileSessionStore,
   createSessionStore,
@@ -228,6 +233,83 @@ describe('default SQLite session metadata store', () => {
     }
   });
 
+  test('persists an immutable child worktree binding across summaries and reopen', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-default-session-worktree-'));
+    const store = createSessionStore(root);
+    const workspace = makeSubagentWorkspace();
+    let childId = '';
+    try {
+      const parent = await store.create(
+        makeInput({ name: 'Parent', cwd: '/workspace/repository', projectId: 'project-1' }),
+      );
+      const { header: child } = await store.createSubagent(
+        makeInput({
+          name: 'Implementation child',
+          cwd: workspace.worktreePath,
+          projectId: 'project-1',
+          permissionMode: 'execute',
+          subagentParent: {
+            kind: 'subagent',
+            parentSessionId: parent.id,
+            spawnedBy: {
+              parentRunId: 'parent-run',
+              parentTurnId: 'parent-turn',
+              toolCallId: 'tool-call',
+            },
+            lifecycle: 'foreground',
+          },
+          subagentRuntime: {
+            schemaVersion: 1,
+            definitionVersion: 1,
+            agentId: 'implementation',
+            agentName: 'Implementation',
+            profile: 'implementation',
+            systemPrompt: 'Implement the assigned task.',
+            toolNames: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'],
+            categoryPolicy: {
+              read: 'allow',
+              file_write: 'allow',
+              shell_safe: 'allow',
+              shell_unsafe: 'allow',
+            },
+            permissionCeiling: 'execute',
+          },
+          subagentSpawn: {
+            schemaVersion: 1,
+            requestFingerprint: 'c'.repeat(64),
+            initialTurnId: 'child-turn',
+            initialRunId: 'child-run',
+          },
+          subagentWorkspace: workspace,
+        }),
+      );
+      childId = child.id;
+
+      assert.deepEqual(child.subagentWorkspace, workspace);
+      assert.deepEqual(
+        (await store.list()).find((session) => session.id === child.id)?.subagentWorkspace,
+        workspace,
+      );
+      await assert.rejects(
+        () =>
+          store.updateHeader(child.id, {
+            subagentWorkspace: { ...workspace, branch: 'maka/subagent/rebound' },
+          }),
+        /workspace binding is immutable/,
+      );
+    } finally {
+      await store.close?.();
+    }
+
+    const reopened = createSessionStore(root);
+    try {
+      assert.deepEqual((await reopened.readHeaderSnapshot(childId)).subagentWorkspace, workspace);
+    } finally {
+      await reopened.close?.();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('imports an existing JSONL catalog once and preserves later SQLite-only updates', async () => {
     const root = await mkdtemp(join(tmpdir(), 'maka-default-session-migration-'));
     const legacy = createLegacyFileSessionStore(root);
@@ -402,5 +484,17 @@ function makeInput(overrides: Partial<CreateSessionInput> = {}): CreateSessionIn
     name: 'Session',
     labels: [],
     ...overrides,
+  };
+}
+
+function makeSubagentWorkspace(): SubagentWorkspaceBinding {
+  return {
+    schemaVersion: SUBAGENT_WORKSPACE_BINDING_SCHEMA_VERSION,
+    kind: 'git_worktree',
+    leaseId: `subagent_worktree_${'c'.repeat(32)}`,
+    gitCommonDir: '/workspace/repository/.git',
+    worktreePath: `/workspace/state/subagent-worktrees/${'c'.repeat(32)}`,
+    branch: `maka/subagent/${'c'.repeat(32)}`,
+    baseCommit: 'd'.repeat(40),
   };
 }

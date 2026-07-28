@@ -64,6 +64,7 @@ import {
   createDeepResearchStore,
   createReadImageSnapshotter,
   createConnectionStore,
+  createGitWorktreeChildExecutor,
   createPlanReminderStore,
   createPlanStore,
   createProjectCatalog,
@@ -266,6 +267,7 @@ const keepSystemAwake = createKeepSystemAwakeController(powerSaveBlocker);
 const store = createSessionStore(workspaceRoot);
 const agentGraphControlStore = createAgentGraphControlStore(workspaceRoot);
 const projectCatalog = createProjectCatalog(workspaceRoot);
+const worktreeChildExecutor = createGitWorktreeChildExecutor({ storageRoot: workspaceRoot });
 const planStore = createPlanStore(workspaceRoot);
 const runStore = createAgentRunStore(workspaceRoot);
 const runtimePersistence = await openRuntimeEventPersistence({
@@ -848,6 +850,7 @@ const runtime = new SessionManager({
   shellRuns,
   backends,
   childTools: childAgentTools,
+  worktreeChildExecutor,
   safeBoundaryResumeEnabled: process.env.MAKA_RUNTIME_SAFE_BOUNDARY_RESUME === '1',
   onContinuationLifecycleEvent: (event) => {
     console.info('[runtime-resume]', JSON.stringify(event));

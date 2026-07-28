@@ -1437,6 +1437,9 @@ export class SqliteSessionMetadataStore {
     if (Object.prototype.hasOwnProperty.call(patch, 'subagentSpawn')) {
       throw new Error('Subagent session spawn identity is immutable');
     }
+    if (Object.prototype.hasOwnProperty.call(patch, 'subagentWorkspace')) {
+      throw new Error('Subagent session workspace binding is immutable');
+    }
     return this.transaction(() => {
       const current = this.readRecordSync(sessionId);
       if (!current) throw new SessionNotFoundError(sessionId);

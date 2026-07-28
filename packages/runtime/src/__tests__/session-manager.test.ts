@@ -200,6 +200,81 @@ describe('SessionManager graph operator provisioning', () => {
     expect(result.provision.initialRunId).toBe(result.header.subagentSpawn?.initialRunId);
     expect(await runStore.listSessionRuns(result.header.id)).toEqual([]);
   });
+
+  test('binds implementation operators to a durable project worktree', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const provisioned: unknown[] = [];
+    const binding = {
+      schemaVersion: 1 as const,
+      kind: 'git_worktree' as const,
+      leaseId: `subagent_worktree_${'a'.repeat(32)}`,
+      gitCommonDir: '/tmp/project/.git',
+      worktreePath: '/tmp/worktrees/implementation-a',
+      branch: `maka/subagent/${'a'.repeat(32)}`,
+      baseCommit: 'b'.repeat(40),
+    };
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends: new BackendRegistry(),
+      childTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'].map(testTool),
+      worktreeChildExecutor: {
+        provision: async (input) => {
+          provisioned.push(input);
+          return {
+            ...binding,
+            leaseId: input.leaseId,
+            worktreePath: `/tmp/worktrees/${input.leaseId}`,
+            branch: `maka/subagent/${input.leaseId.slice('subagent_worktree_'.length)}`,
+          };
+        },
+        ensure: async () => {},
+      },
+      newId: nextId(),
+      now: nextNow(40),
+    });
+    const parent = await manager.createSession(
+      makeInput({
+        cwd: '/tmp/project',
+        projectId: 'project-1',
+        permissionMode: 'execute',
+      }),
+    );
+    await runStore.createRun(
+      makeRunHeader({
+        sessionId: parent.id,
+        runId: 'supervisor-run',
+        turnId: 'supervisor-turn',
+        cwd: '/tmp/project',
+      }),
+    );
+
+    const result = await manager.provisionAgentGraphOperator({
+      graphId: 'graph-worktree',
+      workId: `graph_work_${'4'.repeat(32)}`,
+      agentId: IMPLEMENTATION_AGENT_ID,
+      operatorId: `graph_operator_${'5'.repeat(32)}`,
+      source: {
+        sessionId: parent.id,
+        runId: 'supervisor-run',
+        turnId: 'supervisor-turn',
+        toolCallId: 'schedule-tool',
+      },
+      edges: [],
+      expectedScheduleRevision: 1,
+    });
+
+    expect(provisioned).toHaveLength(1);
+    expect(result.header.projectId).toBe('project-1');
+    expect(result.header.cwd).toBe(result.header.subagentWorkspace?.worktreePath);
+    expect(result.header.subagentWorkspace?.kind).toBe('git_worktree');
+    expect(result.header.subagentWorkspace?.branch).toMatch(/^maka\/subagent\//);
+    expect(headerToSummary(result.header).subagentWorkspace).toEqual(
+      result.header.subagentWorkspace,
+    );
+  });
 });
 
 describe('SessionManager claimed graph intent execution', () => {
@@ -18039,6 +18114,7 @@ class MemorySessionStore implements SessionStore {
       ...(input.subagentParent ? { subagentParent: input.subagentParent } : {}),
       ...(input.subagentRuntime ? { subagentRuntime: input.subagentRuntime } : {}),
       ...(input.subagentSpawn ? { subagentSpawn: input.subagentSpawn } : {}),
+      ...(input.subagentWorkspace ? { subagentWorkspace: input.subagentWorkspace } : {}),
       ...(input.revisionRootSessionId
         ? { revisionRootSessionId: input.revisionRootSessionId }
         : {}),
