@@ -383,23 +383,23 @@ export function buildSubagentOutputTool(): MakaTool<
                 : undefined;
       return await ctx.readChildAgentOutput({
         ...(explicitLocator ??
-        (input.child_session_id
-          ? {
-              execution: {
-                kind: 'child_session' as const,
-                sessionId: input.child_session_id,
-                ...(input.run_id ? { currentRunId: input.run_id } : {}),
-              },
-            }
-          : input.run_id
+          (input.child_session_id
             ? {
                 execution: {
-                  kind: 'legacy_child_run' as const,
-                  sessionId: ctx.sessionId,
-                  runId: input.run_id,
+                  kind: 'child_session' as const,
+                  sessionId: input.child_session_id,
+                  ...(input.run_id ? { currentRunId: input.run_id } : {}),
                 },
               }
-            : {})),
+            : input.run_id
+              ? {
+                  execution: {
+                    kind: 'legacy_child_run' as const,
+                    sessionId: ctx.sessionId,
+                    runId: input.run_id,
+                  },
+                }
+              : {})),
         ...(input.locator === undefined && input.turn_id ? { turnId: input.turn_id } : {}),
         ...(input.max_events !== undefined ? { maxEvents: input.max_events } : {}),
       });

@@ -1502,7 +1502,5 @@ function isAtomicToolBoundaryProjection(
   protocol: ToolBoundaryProtocol | undefined,
 ): boolean {
   if (!protocol || event.refs?.operationId === undefined) return false;
-  return (
-    event.content?.kind === 'function_call' || event.content?.kind === 'function_response'
-  );
+  return event.content?.kind === 'function_call' || event.content?.kind === 'function_response';
 }

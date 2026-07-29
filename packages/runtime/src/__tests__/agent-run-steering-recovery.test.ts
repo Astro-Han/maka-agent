@@ -82,10 +82,7 @@ test('does not re-append atomically committed tool facts through the generic eve
 
     await run.acceptMappedEvent(sessionEvent, runtimeEvent);
 
-    await assert.rejects(
-      access(join(root, 'sessions', session.id, 'runs', runId)),
-      /ENOENT/,
-    );
+    await assert.rejects(access(join(root, 'sessions', session.id, 'runs', runId)), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

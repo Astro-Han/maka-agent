@@ -442,7 +442,9 @@ export function compileAgentGraphScheduleUpdate(input: {
     toolCallId: requireIdentity(input.context.toolCallId, 'source tool call id'),
   };
   const addWorkInput =
-    parsed.operation === undefined || parsed.operation === 'add_work' ? (parsed.add_work ?? []) : [];
+    parsed.operation === undefined || parsed.operation === 'add_work'
+      ? (parsed.add_work ?? [])
+      : [];
   const stopInput =
     parsed.operation === undefined || parsed.operation === 'stop' ? (parsed.stop ?? []) : [];
   const updateHash = stableHash({
@@ -487,15 +489,15 @@ export function compileAgentGraphScheduleUpdate(input: {
   );
   const finish =
     parsed.finish && (parsed.operation === undefined || parsed.operation === 'finish')
-    ? {
-        resultIds: normalizeUniqueIdentities(parsed.finish.result_ids, 'finish result id'),
-        reason: requireText(
-          parsed.finish.reason,
-          AGENT_GRAPH_SCHEDULE_MAX_REASON_CHARS,
-          'finish reason',
-        ),
-      }
-    : undefined;
+      ? {
+          resultIds: normalizeUniqueIdentities(parsed.finish.result_ids, 'finish result id'),
+          reason: requireText(
+            parsed.finish.reason,
+            AGENT_GRAPH_SCHEDULE_MAX_REASON_CHARS,
+            'finish reason',
+          ),
+        }
+      : undefined;
   const semantic = {
     schemaVersion: AGENT_GRAPH_SCHEDULE_UPDATE_SCHEMA_VERSION,
     updateId,
