@@ -7,7 +7,6 @@ import type { SessionHeader } from '@maka/core';
 import {
   buildPricingLookup,
   createSandboxDiagnosticsProvider,
-  PermissionEngine,
   type BackendFactoryContext,
 } from '@maka/runtime';
 import {
@@ -66,7 +65,6 @@ test('the first Desktop backend waits for raw telemetry readiness', async () => 
         buildTurnTailPrompt: () => undefined,
       },
       mcpManager: {},
-      permissionEngine: new PermissionEngine({ newId: () => 'permission-1', now: () => 1 }),
       taskLedgerStore: {},
       telemetryRepo,
       ensureUsageReady,
