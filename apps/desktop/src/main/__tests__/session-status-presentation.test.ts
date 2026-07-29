@@ -11,7 +11,11 @@ import { strict as assert } from 'node:assert';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { SESSION_BLOCKED_REASONS, SESSION_STATUSES } from '@maka/core';
+import {
+  SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS,
+  SESSION_BLOCKED_REASONS,
+  SESSION_STATUSES,
+} from '@maka/core';
 import { readRendererShellCombinedSource } from './renderer-shell-source-helpers.js';
 import { renderSessionListPanel } from './session-list-render-helpers.js';
 import {
@@ -370,6 +374,20 @@ describe('describeTurnErrorClass (PR109e-d @kenji gate #3)', () => {
     assert.equal(describeTurnErrorClass('app_restarted'), '本地应用重启，上一轮没有完成');
   });
 
+  it('explains a sandbox boundary request the host restart closed (#1612)', () => {
+    // The prompt the user never answered must read as a named closure, not as
+    // a bare restart and not as the generic "等待权限确认" catch-all.
+    const text = describeTurnErrorClass(SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS);
+    assert.equal(text, '本地应用重启，等待确认的沙箱边界请求已按拒绝关闭');
+    assert.notEqual(text, describeTurnErrorClass('app_restarted'));
+    assert.notEqual(text, describeTurnErrorClass('permission_required'));
+    assert.doesNotMatch(text, new RegExp(SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS));
+    assert.equal(
+      describeTurnErrorClass(SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS.toUpperCase()),
+      text,
+    );
+  });
+
   it('falls back to "未知错误" for unrecognized classes', () => {
     for (const cls of [undefined, 'xyz', 'something_new', '']) {
       assert.match(describeTurnErrorClass(cls), /未知/, `${JSON.stringify(cls)} should fall back to 未知错误`);
@@ -402,6 +420,18 @@ describe('deriveFailedTurnRecovery (PawWork run-incident lite)', () => {
 
     assert.equal(result.action, 'continue');
     assert.match(result.label, /安全恢复/);
+  });
+
+  it('offers retry, not resume, for a boundary request closed by the restart (#1612)', () => {
+    const result = deriveFailedTurnRecovery({
+      errorClass: SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS,
+      partialOutputRetained: false,
+      toolActivityCount: 0,
+      erroredToolCount: 0,
+    });
+
+    assert.equal(result.action, 'retry');
+    assert.match(result.label, /重试本轮/);
   });
 
   it('asks the user to inspect tool output when a tool failed', () => {
