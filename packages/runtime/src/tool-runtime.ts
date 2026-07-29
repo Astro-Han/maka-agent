@@ -1799,9 +1799,15 @@ export class ToolRuntime {
       throw new Error('Sandbox boundary justification must not be empty');
     }
     const requestId = this.input.newId();
+    // Provenance travels with the row, not with the RuntimeEvent published
+    // below: the event append is fail-open, so a crash between the two would
+    // otherwise leave the request unattributable to the work it blocked.
+    const runId = this.input.getCurrentRunId?.();
     const creation = this.input.createSandboxBoundaryRequest({
       sessionId: this.input.sessionId,
       requestId,
+      turnId,
+      ...(runId ? { runId } : {}),
       expansion: normalized,
       justification,
     });

@@ -1,5 +1,8 @@
-import { SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS } from '@maka/core';
-import type { AgentRunEvent, AgentRunHeader, RuntimeEvent } from '@maka/core';
+import {
+  SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS,
+  isSandboxBoundaryRestartClosure,
+} from '@maka/core';
+import type { AgentRunEvent, AgentRunHeader, SandboxBoundaryRequest } from '@maka/core';
 import type { UserMessageInput } from '@maka/core/runtime-inputs';
 
 export interface AgentRunRecoveryDecision {
@@ -86,45 +89,41 @@ export function classifyAgentRunRecovery(
 }
 
 /**
- * Re-attribute a recovered failure to the sandbox boundary request the host
- * restart just closed. `closedRequestIds` are the ids recovery settled with
- * `closureReason: 'host_restarted'`; the run's RuntimeEvent ledger is the only
- * durable place that maps a request id back to its run and turn, so an id must
- * appear in BOTH to claim the attribution. Anything else keeps its original
- * class — a stalled child run or an ordinary interrupted turn is not a closed
- * prompt, and saying so would be worse than the generic restart message.
+ * Re-attribute a recovered failure to the sandbox boundary requests a host
+ * restart closed against this run.
+ *
+ * `closures` come straight from the durable request rows, which carry their own
+ * turn and run provenance. That is the whole point: the row is written before
+ * the matching RuntimeEvent (whose append is fail-open), and it stays readable
+ * across any number of interrupted recovery attempts, so neither a lost ledger
+ * event nor a recovery that died mid-way can break the link.
+ *
+ * A closure claims a run by `runId` when it has one — a turn can own several
+ * runs — and falls back to `turnId` only for rows created before run identity
+ * was recorded. A closure with no provenance at all attributes nothing.
  */
 export function attributeSandboxBoundaryRestartClosure(
   decision: AgentRunRecoveryDecision,
-  runtimeEvents: readonly RuntimeEvent[],
-  closedRequestIds: ReadonlySet<string>,
+  closures: readonly SandboxBoundaryRequest[],
 ): AgentRunRecoveryDecision {
-  if (decision.status !== 'failed' || closedRequestIds.size === 0) return decision;
-  const closed = [
-    ...new Set(
-      runtimeEvents.flatMap((event) => {
-        const requestId = sandboxBoundaryRequestId(event);
-        return requestId !== undefined && closedRequestIds.has(requestId) ? [requestId] : [];
-      }),
-    ),
-  ];
-  if (closed.length === 0) return decision;
+  if (decision.status !== 'failed') return decision;
+  const matched = closures.filter(
+    (closure) =>
+      isSandboxBoundaryRestartClosure(closure) &&
+      (closure.runId !== undefined
+        ? closure.runId === decision.runId
+        : closure.turnId !== undefined && closure.turnId === decision.turnId),
+  );
+  if (matched.length === 0) return decision;
   return {
     ...decision,
     failureClass: SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS,
     diagnostic: {
       ...decision.diagnostic,
       sandboxBoundaryClosureReason: 'host_restarted',
-      sandboxBoundaryRequestIds: closed,
+      sandboxBoundaryRequestIds: matched.map((closure) => closure.requestId),
     },
   };
-}
-
-function sandboxBoundaryRequestId(event: RuntimeEvent): string | undefined {
-  const request = event.actions?.stateDelta?.sandboxBoundaryRequest;
-  if (typeof request !== 'object' || request === null) return undefined;
-  const requestId = (request as { requestId?: unknown }).requestId;
-  return typeof requestId === 'string' ? requestId : undefined;
 }
 
 function failedDecision(

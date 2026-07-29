@@ -478,6 +478,7 @@ export interface SessionStore {
     input: CreateSandboxBoundaryRequest,
   ): Promise<SandboxBoundaryRequest>;
   listPendingSandboxBoundaryRequests?(sessionId: string): Promise<SandboxBoundaryRequest[]>;
+  listSandboxBoundaryRestartClosures?(sessionId: string): Promise<SandboxBoundaryRequest[]>;
   settleSandboxBoundaryRequest?(
     input: SettleSandboxBoundaryRequest,
   ): Promise<SandboxBoundarySettlement>;
@@ -901,11 +902,10 @@ export class SessionManager {
     const recovered = new Set<string>();
     for (const session of interrupted) {
       if (this.runtimeKernel.hasActiveRuns(session.id)) continue;
-      // Fail-closed first: a request whose live owner died can never be
-      // answered, so it settles as `deny`. The ids are kept so the run
-      // recovery below can name the closure on the turn it interrupted
-      // instead of leaving the user with an unexplained failure (#1612).
-      const closedSandboxBoundaryRequestIds = new Set<string>();
+      // Fail-closed: a request whose live owner died can never be answered, so
+      // it settles as `deny` with a durable `host_restarted` reason. The run
+      // recovery below reads those settled rows back — it never depends on what
+      // this pass happened to close (#1612).
       if (
         this.deps.store.listPendingSandboxBoundaryRequests &&
         this.deps.store.settleSandboxBoundaryRequest
@@ -916,20 +916,17 @@ export class SessionManager {
           [],
         );
         for (const request of pendingBoundaryRequests) {
-          const settled = await recoverOr(
+          await recoverOr(
             policy,
-            async () => {
-              await this.deps.store.settleSandboxBoundaryRequest!({
+            () =>
+              this.deps.store.settleSandboxBoundaryRequest!({
                 sessionId: session.id,
                 requestId: request.requestId,
                 decision: 'deny',
                 closureReason: 'host_restarted',
-              });
-              return true;
-            },
-            false,
+              }),
+            undefined,
           );
-          if (settled) closedSandboxBoundaryRequestIds.add(request.requestId);
         }
       }
       if (this.deps.planStore) {
@@ -973,8 +970,7 @@ export class SessionManager {
       if (this.deps.runStore) {
         const runRecovery = await recoverOr(
           policy,
-          () =>
-            this.recoverAgentRunsFromLedger(session.id, policy, closedSandboxBoundaryRequestIds),
+          () => this.recoverAgentRunsFromLedger(session.id, policy),
           undefined,
         );
         if (runRecovery?.hasLedger) {
@@ -4525,7 +4521,6 @@ export class SessionManager {
   private async recoverAgentRunsFromLedger(
     sessionId: string,
     policy: RecoveryPolicy = { kind: 'best_effort' },
-    closedSandboxBoundaryRequestIds: ReadonlySet<string> = new Set(),
   ): Promise<{ hasLedger: boolean; recovered: boolean }> {
     if (!this.deps.runStore || !this.deps.runtimeEventStore)
       return { hasLedger: false, recovered: false };
@@ -4534,6 +4529,22 @@ export class SessionManager {
         ? await policy.stores.agentRunStore.listSessionRunsForRecovery(sessionId)
         : await this.deps.runStore.listSessionRuns(sessionId);
     if (runs.length === 0) return { hasLedger: false, recovered: false };
+
+    // Read once per recovered session, and only when a failure actually needs
+    // attributing, so healthy sessions pay nothing for the query.
+    let boundaryClosures: readonly SandboxBoundaryRequest[] | undefined;
+    const readBoundaryClosures = async (): Promise<readonly SandboxBoundaryRequest[]> => {
+      if (!boundaryClosures) {
+        boundaryClosures = this.deps.store.listSandboxBoundaryRestartClosures
+          ? await recoverOr(
+              policy,
+              () => this.deps.store.listSandboxBoundaryRestartClosures!(sessionId),
+              [],
+            )
+          : [];
+      }
+      return boundaryClosures;
+    };
 
     let recovered = false;
     for (const run of runs) {
@@ -4580,11 +4591,10 @@ export class SessionManager {
       const runtimeDecision = this.classifyRuntimeEventRecovery(inspected);
       const classified = runtimeDecision ?? classifyAgentRunRecovery(run, inspected.events);
       if (!classified) continue;
-      const decision = attributeSandboxBoundaryRestartClosure(
-        classified,
-        inspected.runtimeEvents,
-        closedSandboxBoundaryRequestIds,
-      );
+      const decision =
+        classified.status === 'failed'
+          ? attributeSandboxBoundaryRestartClosure(classified, await readBoundaryClosures())
+          : classified;
       if (await this.applyAgentRunRecovery(sessionId, decision, inspected, policy)) {
         recovered = true;
       }
