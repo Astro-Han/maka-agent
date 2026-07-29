@@ -21,9 +21,10 @@ export interface PermissionModeMeta {
 }
 
 /**
- * Internal sessions still use `explore` and legacy records may contain
- * `execute`, so metadata remains complete for the persisted PermissionMode
- * union. User-facing pickers expose only Auto (`ask`) and Bypass.
+ * Sessions may run under a read-only (`explore`) boundary and legacy records
+ * may contain `execute`, so metadata remains complete for the persisted
+ * PermissionMode union. User-facing pickers offer only Auto (`ask`) and full
+ * access (`bypass`), but any mode can be the state being displayed.
  *
  * This module is the one home for the mode table and shared picker: both the
  * composer and Settings render from it so labels, hints, and markup cannot
@@ -56,8 +57,8 @@ export const PERMISSION_MODE_ORDER: readonly ChatDefaultPermissionMode[] = CHAT_
  * hint in the popup so the user never has to select a mode to learn what
  * it does; the selected option carries the standard Select check indicator.
  *
- * Internal `explore` and legacy `execute` sessions collapse to Auto for
- * display because neither is a user-selectable boundary mode.
+ * Legacy `execute` sessions collapse to Auto for display because that mode
+ * no longer maps to a boundary of its own.
  */
 export function PermissionModeSelect(props: {
   activeMode: PermissionMode;
@@ -72,8 +73,13 @@ export function PermissionModeSelect(props: {
   const locale = useUiLocale();
   const permissionCopy = getConversationCopy(locale).permissions;
   const modeMeta = getPermissionModeMeta(locale);
+  // #1611: only legacy `execute` collapses to Auto. `explore` is a real
+  // read-only boundary the user is running under, so it shows its own label
+  // and hint instead of borrowing Auto's. Neither option renders as selected
+  // then — which is honest: the current state is neither of them, and both
+  // remain selectable.
   const displayMode: PermissionMode =
-    props.activeMode === 'bypass' ? 'bypass' : 'ask';
+    props.activeMode === 'execute' ? 'ask' : props.activeMode;
   const meta = modeMeta[displayMode];
   return (
     <SelectRoot

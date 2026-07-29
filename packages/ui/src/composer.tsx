@@ -907,12 +907,10 @@ export const Composer = forwardRef<
             {/* PR-MOVE-PERMISSION-MODE: the static "通用" role chip
                 was replaced by the permission-mode dropdown — that
                 spot is where the reference Settings expects users to
-                pick "Ask permissions" / "Auto mode" / "Bypass
-                permissions". Maka exposes the user-facing modes
-                `ask` / `execute` / `bypass`; `explore` collapses to `ask` in the
-                display because Deep Research sessions use it
-                internally but it's not a useful runtime toggle for
-                normal chat. */}
+                pick a permission mode. Maka offers Auto (`ask`) and
+                full access (`bypass`); a session running under a
+                read-only boundary displays as such (#1611) without
+                becoming a third option. */}
             {props.onPermissionModeChange ? (
               <PermissionModeSelect
                 appearance="quiet"

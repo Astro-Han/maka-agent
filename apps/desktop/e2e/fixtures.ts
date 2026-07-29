@@ -255,6 +255,7 @@ export const test = base.extend<{
   chatChromeWin32Window: Page;
   sidebarLongSessionsWindow: Page;
   sandboxBoundaryWindow: Page;
+  readOnlyBoundaryWindow: Page;
   staleSessionsWindow: Page;
   sessionWorkbarWindow: Page;
   botSettingsWindow: Page;
@@ -326,6 +327,17 @@ export const test = base.extend<{
   sandboxBoundaryWindow: async ({}, use) => {
     await withE2eWindow(
       { seed: false, readinessSelector: '.maka-sandbox-boundary-prompt', e2eFixtureScenario: 'sandbox-boundary', locale: 'zh' },
+      use,
+    );
+  },
+  // Read-only boundary (#1611): the Deep Research fixture session is seeded
+  // with `permissionMode: 'explore'`, so the metadata store derives a genesis
+  // managed read-only boundary for it. That makes this the only window where
+  // the composer's permission label is driven by a real read-only profile
+  // travelling main → IPC → renderer.
+  readOnlyBoundaryWindow: async ({}, use) => {
+    await withE2eWindow(
+      { seed: false, readinessSelector: '.maka-composer-textarea', e2eFixtureScenario: 'deep-research-progress', locale: 'zh' },
       use,
     );
   },

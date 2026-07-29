@@ -533,6 +533,7 @@ export {
   createWorkspaceWritePermissionProfile,
   isDeniedPath,
   isProtectedMetadataPath,
+  isReadOnlyPermissionProfile,
 } from './permission-profile.js';
 
 // sandbox-boundary.ts
