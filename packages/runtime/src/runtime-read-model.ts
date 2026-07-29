@@ -14,6 +14,7 @@ import type {
 import {
   classifyRuntimeEventTerminalFact,
   compareRuntimeReadModelMessages,
+  isHardRuntimeEventReadModelDiagnostic,
   projectRuntimeEventsToStoredMessages,
   type RuntimeEventReadModelDiagnostic,
   type RuntimeEventTerminalFact,
@@ -447,12 +448,10 @@ function messageTurnId(message: StoredMessage): string | undefined {
 function hasHardProjectionDiagnostic(
   diagnostics: readonly RuntimeEventReadModelDiagnostic[],
 ): boolean {
-  return diagnostics.some(
-    (diagnostic) =>
-      diagnostic.code === 'incomplete_event' ||
-      diagnostic.code === 'unsupported_event' ||
-      diagnostic.code === 'tool_use_id_mismatch',
-  );
+  // The projection owns the hard/soft line: a diagnostic is hard only when a
+  // user-visible row may be missing. Restating the codes here would let the two
+  // drift apart and put half the policy in the caller.
+  return diagnostics.some(isHardRuntimeEventReadModelDiagnostic);
 }
 
 function readModelDiagnostic(

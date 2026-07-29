@@ -40,6 +40,36 @@ export type RuntimeEventReadModelDiagnosticCode =
   | 'missing_legacy_message'
   | 'unexpected_projected_message';
 
+/**
+ * Whether a diagnostic means the projection may have lost user-visible content.
+ *
+ * `hard` — a row a reader would have seen may be missing, so the projection is
+ * not a faithful view of the session and must not be served in place of one.
+ * `soft` — every message survived; the fact is reported, not fatal.
+ *
+ * The table is keyed by code so a new diagnostic cannot exist without deciding
+ * which side of that line it falls on.
+ */
+const RUNTIME_EVENT_READ_MODEL_DIAGNOSTIC_SEVERITY: Record<
+  RuntimeEventReadModelDiagnosticCode,
+  'hard' | 'soft'
+> = {
+  partial_skipped: 'soft',
+  unsupported_event: 'hard',
+  incomplete_event: 'hard',
+  archived_tool_result_placeholder: 'soft',
+  generated_id: 'soft',
+  tool_use_id_mismatch: 'hard',
+  missing_legacy_message: 'soft',
+  unexpected_projected_message: 'soft',
+};
+
+export function isHardRuntimeEventReadModelDiagnostic(diagnostic: {
+  code: RuntimeEventReadModelDiagnosticCode;
+}): boolean {
+  return RUNTIME_EVENT_READ_MODEL_DIAGNOSTIC_SEVERITY[diagnostic.code] === 'hard';
+}
+
 export interface RuntimeEventReadModelDiagnostic {
   code: RuntimeEventReadModelDiagnosticCode;
   eventId?: string;
