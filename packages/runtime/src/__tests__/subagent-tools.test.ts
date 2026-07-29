@@ -1234,6 +1234,8 @@ describe('subagent tools', () => {
         run_id: 'child-run',
         turn_id: 'provider-placeholder',
         max_events: 100,
+        max_bytes: 32_768,
+        view: 'runtime_events',
       },
       {
         sessionId: 'session-1',
@@ -1254,6 +1256,8 @@ describe('subagent tools', () => {
           currentRunId: 'child-run',
         },
         maxEvents: 100,
+        maxBytes: 32_768,
+        view: 'runtime_events',
       },
     });
   });

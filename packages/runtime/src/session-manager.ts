@@ -394,7 +394,11 @@ export interface AgentOutputInput {
   runId?: string;
   turnId?: string;
   maxEvents?: number;
+  maxBytes?: number;
+  view?: AgentOutputView;
 }
+
+export type AgentOutputView = 'events' | 'runtime_events' | 'all';
 
 export interface AgentOutputResult {
   execution: SubagentExecutionRef;
@@ -408,6 +412,13 @@ export interface AgentOutputResult {
     events: boolean;
     runtimeEvents: boolean;
     diagnostics: boolean;
+    artifacts: boolean;
+    bytes: boolean;
+  };
+  budget: {
+    view: AgentOutputView;
+    maxBytes: number;
+    projectedBytes: number;
   };
 }
 
@@ -3424,18 +3435,46 @@ export class SessionManager {
       ? await this.deps.listArtifactsForTurn(header.sessionId, header.turnId)
       : [];
     const maxEvents = normalizeAgentOutputMaxEvents(input.maxEvents);
+    const maxBytes = normalizeAgentOutputMaxBytes(input.maxBytes);
+    const view = input.view ?? 'runtime_events';
+    const bounded = boundAgentOutputCollections(
+      {
+        events: view === 'runtime_events' ? [] : tail(inspected.events, maxEvents),
+        runtimeEvents: view === 'events' ? [] : tail(inspected.runtimeEvents, maxEvents),
+        diagnostics: tail(inspected.diagnostics, maxEvents),
+        artifacts: tail(artifacts, maxEvents),
+      },
+      maxBytes,
+    );
     return {
       execution: located.execution,
       header: inspected.header,
-      events: tail(inspected.events, maxEvents),
-      runtimeEvents: tail(inspected.runtimeEvents, maxEvents),
+      events: bounded.events,
+      runtimeEvents: bounded.runtimeEvents,
       sourceHealth: inspected.sourceHealth,
-      diagnostics: tail(inspected.diagnostics, maxEvents),
-      artifacts,
+      diagnostics: bounded.diagnostics,
+      artifacts: bounded.artifacts,
       truncated: {
-        events: inspected.events.length > maxEvents,
-        runtimeEvents: inspected.runtimeEvents.length > maxEvents,
-        diagnostics: inspected.diagnostics.length > maxEvents,
+        events:
+          view === 'runtime_events' ||
+          inspected.events.length > maxEvents ||
+          bounded.events.length < Math.min(inspected.events.length, maxEvents),
+        runtimeEvents:
+          view === 'events' ||
+          inspected.runtimeEvents.length > maxEvents ||
+          bounded.runtimeEvents.length < Math.min(inspected.runtimeEvents.length, maxEvents),
+        diagnostics:
+          inspected.diagnostics.length > maxEvents ||
+          bounded.diagnostics.length < Math.min(inspected.diagnostics.length, maxEvents),
+        artifacts:
+          artifacts.length > maxEvents ||
+          bounded.artifacts.length < Math.min(artifacts.length, maxEvents),
+        bytes: bounded.truncated,
+      },
+      budget: {
+        view,
+        maxBytes,
+        projectedBytes: bounded.projectedBytes,
       },
     };
   }
@@ -4930,6 +4969,63 @@ function headerLineage(header: AgentRunHeader): AgentRunRecoveryDecision['lineag
 function normalizeAgentOutputMaxEvents(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 20;
   return Math.min(100, Math.max(1, Math.floor(value)));
+}
+
+const DEFAULT_AGENT_OUTPUT_MAX_BYTES = 32 * 1024;
+const MAX_AGENT_OUTPUT_MAX_BYTES = 128 * 1024;
+
+function normalizeAgentOutputMaxBytes(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_AGENT_OUTPUT_MAX_BYTES;
+  }
+  return Math.min(MAX_AGENT_OUTPUT_MAX_BYTES, Math.max(1024, Math.floor(value)));
+}
+
+function boundAgentOutputCollections(
+  input: {
+    events: AgentRunEvent[];
+    runtimeEvents: RuntimeEvent[];
+    diagnostics: AgentRunInspectModel['diagnostics'];
+    artifacts: ArtifactRecord[];
+  },
+  maxBytes: number,
+): {
+  events: AgentRunEvent[];
+  runtimeEvents: RuntimeEvent[];
+  diagnostics: AgentRunInspectModel['diagnostics'];
+  artifacts: ArtifactRecord[];
+  projectedBytes: number;
+  truncated: boolean;
+} {
+  let remaining = maxBytes;
+  let projectedBytes = 0;
+  let truncated = false;
+
+  const takeBoundedTail = <T>(items: readonly T[]): T[] => {
+    const selected: T[] = [];
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index]!;
+      const bytes = Buffer.byteLength(JSON.stringify(item), 'utf8');
+      if (bytes > remaining) {
+        truncated = true;
+        break;
+      }
+      selected.push(item);
+      projectedBytes += bytes;
+      remaining -= bytes;
+    }
+    selected.reverse();
+    return selected;
+  };
+
+  // RuntimeEvents are the semantic child transcript and therefore receive the
+  // budget first. AgentRun events and diagnostics remain available through
+  // explicit views without duplicating an unbounded second event stream.
+  const runtimeEvents = takeBoundedTail(input.runtimeEvents);
+  const events = takeBoundedTail(input.events);
+  const diagnostics = takeBoundedTail(input.diagnostics);
+  const artifacts = takeBoundedTail(input.artifacts);
+  return { events, runtimeEvents, diagnostics, artifacts, projectedBytes, truncated };
 }
 
 function tail<T>(items: readonly T[], max: number): T[] {

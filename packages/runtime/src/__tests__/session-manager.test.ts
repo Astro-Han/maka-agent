@@ -12156,6 +12156,7 @@ describe('SessionManager permission mode updates', () => {
     const output = await manager.readChildAgentOutput(session.id, {
       runId: 'child-run',
       maxEvents: 5,
+      view: 'all',
     });
 
     expect(output.header.runId).toBe('child-run');
@@ -12175,8 +12176,87 @@ describe('SessionManager permission mode updates', () => {
     ]);
     expect(output.truncated.events).toBe(true);
     expect(output.truncated.runtimeEvents).toBe(true);
+    expect(output.budget.view).toBe('all');
+    expect(output.budget.projectedBytes <= output.budget.maxBytes).toBe(true);
     expect('modelReplay' in output).toBe(false);
     expect('projection' in output).toBe(false);
+  });
+
+  test('agent output bounds oversized runtime events by serialized bytes', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new TestBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(6_849),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+    await runStore.createRun(
+      makeRunHeader({
+        sessionId: session.id,
+        runId: 'child-run',
+        turnId: 'child-turn',
+        status: 'completed',
+        createdAt: 120,
+        updatedAt: 200,
+        completedAt: 200,
+        parentRunId: 'parent-run',
+        agentId: LOCAL_READ_AGENT_ID,
+        agentName: 'Researcher',
+        permissionMode: 'explore',
+      }),
+    );
+    await runStore.appendRuntimeEvent(
+      session.id,
+      'child-run',
+      runtimeEvent({
+        id: 'oversized',
+        sessionId: session.id,
+        runId: 'child-run',
+        turnId: 'child-turn',
+        ts: 130,
+        role: 'model',
+        author: 'agent',
+        content: { kind: 'text', text: 'x'.repeat(64 * 1024) },
+      }),
+    );
+    await runStore.appendRuntimeEvent(
+      session.id,
+      'child-run',
+      runtimeEvent({
+        id: 'final',
+        sessionId: session.id,
+        runId: 'child-run',
+        turnId: 'child-turn',
+        ts: 140,
+        role: 'model',
+        author: 'agent',
+        content: { kind: 'text', text: 'bounded final result' },
+      }),
+    );
+
+    const output = await manager.readChildAgentOutput(session.id, {
+      runId: 'child-run',
+      maxEvents: 20,
+      maxBytes: 1024,
+    });
+
+    expect(output.events).toEqual([]);
+    expect(output.runtimeEvents.map((event) => event.id)).toEqual(['final']);
+    expect(output.truncated.events).toBe(true);
+    expect(output.truncated.runtimeEvents).toBe(true);
+    expect(output.truncated.bytes).toBe(true);
+    expect(output.budget).toMatchObject({
+      view: 'runtime_events',
+      maxBytes: 1024,
+    });
+    expect(output.budget.projectedBytes <= output.budget.maxBytes).toBe(true);
   });
 
   test('agent output rejects ambiguous child run locators', async () => {
