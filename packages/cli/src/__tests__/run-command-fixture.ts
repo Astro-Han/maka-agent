@@ -9,6 +9,7 @@ const scenario = process.env.MAKA_RUN_FIXTURE_SCENARIO ?? 'completed';
 let observer: CreateMakaCliRuntimeContextInput['runtimeInvocationObserver'];
 let permissionDenied = false;
 let releaseStop: (() => void) | undefined;
+let releaseGraphWait: (() => void) | undefined;
 let graphActivityReleased = false;
 
 const target = {
@@ -60,6 +61,20 @@ const runtime: MakaRunRuntime = {
       throw new Error(`unexpected sessionId ${sessionId}`);
     }
     if (scenario === 'runtime-error') throw new Error('provider failed after startup');
+    if (scenario === 'graph-runtime-error') {
+      if (input.turnOrchestration?.mode !== 'graph') {
+        throw new Error('expected graph orchestration');
+      }
+      await notify(failedResult('provider_unavailable', 'provider failed before graph creation'));
+      return;
+    }
+    if (scenario === 'graph-wait') {
+      if (input.turnOrchestration?.mode !== 'graph') {
+        throw new Error('expected graph orchestration');
+      }
+      await notify(completedResult('initial graph supervisor output'));
+      return;
+    }
     if (process.env.MAKA_RUN_EXPECT_GRAPH === '1') {
       if (
         input.turnOrchestration?.mode !== 'graph' ||
@@ -164,7 +179,11 @@ async function createContext(input: CreateMakaCliRuntimeContextInput): Promise<M
     }
   }
   observer = input.runtimeInvocationObserver;
-  if (process.env.MAKA_RUN_EXPECT_GRAPH === '1') {
+  if (
+    process.env.MAKA_RUN_EXPECT_GRAPH === '1' ||
+    scenario === 'graph-runtime-error' ||
+    scenario === 'graph-wait'
+  ) {
     if (!input.enableAgentGraph) throw new Error('Graph host was not enabled');
     return {
       runtime,
@@ -177,10 +196,25 @@ async function createContext(input: CreateMakaCliRuntimeContextInput): Promise<M
         }),
         waitForCompletion: async () => {
           if (!graphActivityReleased) throw new Error('Graph activity was not released');
+          if (scenario === 'graph-runtime-error') {
+            process.stderr.write('graph-wait-called\n');
+            throw new Error('unexpected graph wait after failed invocation');
+          }
+          if (scenario === 'graph-wait') {
+            process.stderr.write('fixture-ready\n');
+            const keepAlive = setInterval(() => {}, 1_000);
+            await new Promise<void>((resolve) => {
+              releaseGraphWait = resolve;
+            });
+            clearInterval(keepAlive);
+            return;
+          }
           await notify(completedResult('graph completed'));
         },
       },
-      close: async () => {},
+      close: async () => {
+        releaseGraphWait?.();
+      },
     };
   }
   return { runtime, target, close: async () => {} };

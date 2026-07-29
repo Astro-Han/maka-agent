@@ -148,6 +148,18 @@ describe('maka run process contract', () => {
     assert.equal(result.stderr, '');
   });
 
+  test('does not wait for Graph completion after the root invocation fails', async () => {
+    const result = await runFixture(['implement it', '--graph'], {
+      scenario: 'graph-runtime-error',
+      input: '',
+    });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /provider failed before graph creation/);
+    assert.doesNotMatch(result.stderr, /graph-wait-called/);
+  });
+
   test('uses stdin as the complete prompt for run -', async () => {
     const result = await runFixture(['-'], { input: 'from stdin\nsecond line' });
     assert.equal(result.code, 0, result.stderr);
@@ -368,6 +380,44 @@ describe('maka run process contract', () => {
 
     assert.equal(signal, null);
     assert.equal(code, 130, stderr);
+    assert.equal(stdout, '');
+  });
+
+  test('returns exit 130 when SIGINT interrupts Graph completion wait', async () => {
+    const child = spawn(process.execPath, [fixturePath, 'implement it', '--graph'], {
+      env: { ...process.env, MAKA_RUN_FIXTURE_SCENARIO: 'graph-wait' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.stdin.end();
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    const ready = new Promise<void>((resolve) => {
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8');
+        if (stderr.includes('fixture-ready')) resolve();
+      });
+    });
+    await ready;
+    child.kill('SIGINT');
+
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const exited = once(child, 'exit') as Promise<[number | null, NodeJS.Signals | null]>;
+    const result = await Promise.race([
+      exited.then(([code, signal]) => ({ code, signal })),
+      new Promise<{ code: null; signal: 'SIGKILL' }>((resolve) => {
+        killTimer = setTimeout(() => {
+          child.kill('SIGKILL');
+          resolve({ code: null, signal: 'SIGKILL' });
+        }, 500);
+      }),
+    ]);
+    if (killTimer !== undefined) clearTimeout(killTimer);
+
+    assert.equal(result.signal, null);
+    assert.equal(result.code, 130, stderr);
     assert.equal(stdout, '');
   });
 });

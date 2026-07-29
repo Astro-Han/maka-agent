@@ -316,7 +316,13 @@ export async function runMakaTextCli(
   let timedOut = false;
   let streamFailed = false;
   let stopPromise: Promise<void> | undefined;
+  let resolveStopSignal: (() => void) | undefined;
+  const stopSignal = new Promise<void>((resolve) => {
+    resolveStopSignal = resolve;
+  });
   const stop = (): void => {
+    resolveStopSignal?.();
+    resolveStopSignal = undefined;
     if (stopPromise) return;
     stopPromise = context.runtime.stopSession(session.id, { source: 'stop_button' });
     void stopPromise.catch(() => {});
@@ -356,7 +362,9 @@ export async function runMakaTextCli(
       }
     }
     graphActivity?.release();
-    if (parsed.options.graph) await context.agentGraph!.waitForCompletion(session.id);
+    if (parsed.options.graph && invocation?.status === 'completed') {
+      await Promise.race([context.agentGraph!.waitForCompletion(session.id), stopSignal]);
+    }
     await stopPromise;
   } catch (error) {
     streamFailed = true;
