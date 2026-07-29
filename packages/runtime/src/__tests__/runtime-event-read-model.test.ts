@@ -13,6 +13,7 @@ import { deriveTurnRecords } from '@maka/core';
 import { expect } from '../test-helpers.js';
 import {
   compareRuntimeReadModelMessages,
+  isHardRuntimeEventReadModelDiagnostic,
   projectRuntimeEventsToStoredMessages,
   projectRuntimeEventsToStoredMessagesWithArchiveStatuses,
 } from '../runtime-event-read-model.js';
@@ -1151,11 +1152,17 @@ describe('projectRuntimeEventsToStoredMessages', () => {
   ];
 
   for (const [name, makeEvent] of malformedBoundaryCases) {
-    test(`a sandbox boundary ${name} stays an unsupported event`, () => {
+    // The claim stays exact: a malformed shape is never admitted as a canonical
+    // boundary fact. Its severity is a separate question, and a control fact
+    // owns no chat row, so a broken one costs a reader nothing the session view
+    // would otherwise show.
+    test(`a sandbox boundary ${name} stays unclaimed`, () => {
       const out = projectRuntimeEventsToStoredMessages([makeEvent()], { runHeaders: [header] });
 
       expect(out.messages).toEqual([]);
-      expect(out.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(['unsupported_event']);
+      expect(out.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+        'unclaimed_control_fact',
+      ]);
     });
   }
 
@@ -1310,13 +1317,64 @@ describe('projectRuntimeEventsToStoredMessages', () => {
     );
 
     expect(out.messages).toEqual([]);
+    // The orphaned permission decision carries no content, so its catch-all is
+    // the soft code — but the projector that tried to build its row and failed
+    // still reports `incomplete_event`, which stays hard. Downgrading the
+    // catch-all never downgrades a projector that attempted a message.
     expect(out.diagnostics.map((diag) => diag.code)).toEqual([
       'incomplete_event',
-      'unsupported_event',
+      'unclaimed_control_fact',
       'incomplete_event',
       'unsupported_event',
       'unsupported_event',
     ]);
+  });
+
+  // Where the projection draws the line between a view it can still serve and
+  // one it must refuse: an unclaimed event that carries no content owns no chat
+  // row, so nothing a reader would have seen is missing.
+  test('an unclaimed control-only event is soft and leaves every message intact', () => {
+    const out = projectRuntimeEventsToStoredMessages(
+      [
+        ev({ id: 'evt-user', role: 'user', author: 'user', content: { kind: 'text', text: 'hi' } }),
+        ev({
+          id: 'evt-control',
+          actions: { stateDelta: { somethingTheProjectionWasNeverTaught: true } },
+        }),
+        ev({
+          id: 'evt-assistant',
+          role: 'model',
+          author: 'agent',
+          content: { kind: 'text', text: 'hello' },
+        }),
+      ],
+      { runHeaders: [header] },
+    );
+
+    expect(out.messages.map((message) => message.id)).toEqual(['evt-user', 'evt-assistant']);
+    expect(out.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      'unclaimed_control_fact',
+    ]);
+    expect(out.diagnostics.map((diagnostic) => diagnostic.eventId)).toEqual(['evt-control']);
+    expect(out.diagnostics.some(isHardRuntimeEventReadModelDiagnostic)).toBe(false);
+  });
+
+  test('an unclaimed event that carries content stays hard', () => {
+    const out = projectRuntimeEventsToStoredMessages(
+      [
+        ev({
+          id: 'evt-future-content',
+          role: 'model',
+          author: 'agent',
+          content: { kind: 'not_yet_projected', text: 'a reader would have seen this' } as never,
+        }),
+      ],
+      { runHeaders: [header] },
+    );
+
+    expect(out.messages).toEqual([]);
+    expect(out.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(['unsupported_event']);
+    expect(out.diagnostics.every(isHardRuntimeEventReadModelDiagnostic)).toBe(true);
   });
 
   test('failed terminal RuntimeEvent maps to failed turn state when run header carries failure class', () => {

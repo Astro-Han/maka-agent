@@ -33,6 +33,7 @@ import { isArchivedToolResultPlaceholder } from './tool-result-archive.js';
 export type RuntimeEventReadModelDiagnosticCode =
   | 'partial_skipped'
   | 'unsupported_event'
+  | 'unclaimed_control_fact'
   | 'incomplete_event'
   | 'archived_tool_result_placeholder'
   | 'generated_id'
@@ -56,6 +57,7 @@ const RUNTIME_EVENT_READ_MODEL_DIAGNOSTIC_SEVERITY: Record<
 > = {
   partial_skipped: 'soft',
   unsupported_event: 'hard',
+  unclaimed_control_fact: 'soft',
   incomplete_event: 'hard',
   archived_tool_result_placeholder: 'soft',
   generated_id: 'soft',
@@ -68,6 +70,24 @@ export function isHardRuntimeEventReadModelDiagnostic(diagnostic: {
   code: RuntimeEventReadModelDiagnosticCode;
 }): boolean {
   return RUNTIME_EVENT_READ_MODEL_DIAGNOSTIC_SEVERITY[diagnostic.code] === 'hard';
+}
+
+/**
+ * Codes that mean the projection did not claim an event, at either severity.
+ *
+ * Severity decides whether a session still opens; this decides whether the
+ * projection has a coverage gap. The projection-coverage contract asserts on
+ * this set, so softening an event's severity never softens the contract.
+ */
+const UNCLAIMED_RUNTIME_EVENT_DIAGNOSTIC_CODES: readonly RuntimeEventReadModelDiagnosticCode[] = [
+  'unsupported_event',
+  'unclaimed_control_fact',
+];
+
+export function isUnclaimedRuntimeEventDiagnostic(diagnostic: {
+  code: RuntimeEventReadModelDiagnosticCode;
+}): boolean {
+  return UNCLAIMED_RUNTIME_EVENT_DIAGNOSTIC_CODES.includes(diagnostic.code);
 }
 
 export interface RuntimeEventReadModelDiagnostic {
@@ -286,12 +306,29 @@ export function projectRuntimeEventsToStoredMessages(
     }
 
     if (!projected) {
-      diagnostic(
-        state,
-        event,
-        'unsupported_event',
-        'RuntimeEvent shape is not supported by the legacy read-model projection',
-      );
+      // Where the line sits between degrading a view and refusing to serve one:
+      // `content` is the RuntimeEvent's message payload, `actions` its control
+      // intent. Every row this projection emits from an unclaimed shape would
+      // have come from content, so an unclaimed content-bearing event may have
+      // cost a reader a message and the view is no longer faithful. A
+      // control-only fact has no row to lose — report it and keep the session
+      // readable, since discarding the projection would cost every intact
+      // message in it instead.
+      if (event.content === undefined) {
+        diagnostic(
+          state,
+          event,
+          'unclaimed_control_fact',
+          'control-only RuntimeEvent is not claimed by the legacy read-model projection',
+        );
+      } else {
+        diagnostic(
+          state,
+          event,
+          'unsupported_event',
+          'RuntimeEvent shape is not supported by the legacy read-model projection',
+        );
+      }
     }
   }
 

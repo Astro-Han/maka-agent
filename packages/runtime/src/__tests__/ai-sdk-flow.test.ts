@@ -23,7 +23,10 @@ import { flowSupportsControl } from '../agent-flow.js';
 import type { AgentBackend } from '@maka/core/backend-types';
 import { RuntimeRunner } from '../runtime-runner.js';
 import type { InvocationContext } from '../invocation-context.js';
-import { projectRuntimeEventsToStoredMessages } from '../runtime-event-read-model.js';
+import {
+  isUnclaimedRuntimeEventDiagnostic,
+  projectRuntimeEventsToStoredMessages,
+} from '../runtime-event-read-model.js';
 import { isNonTerminalErrorRuntimeEvent } from '../agent-run.js';
 import { backfillRuntimeEventsFromStoredMessages } from '../runtime-event-backfill.js';
 
@@ -1276,13 +1279,13 @@ const projectionRunHeader: AgentRunHeader = {
 };
 
 describe('SessionEvent projection coverage', () => {
-  // RuntimeReadModel rejects a whole completed-session projection when it sees
-  // an `unsupported_event`, so a variant the projection does not claim makes
-  // every session that contains it permanently unreadable. The contract is
-  // therefore over what a reader can actually meet: every mapped event AgentRun
-  // admits to the ledger has to project.
+  // The contract is over what a reader can actually meet: every mapped event
+  // AgentRun admits to the ledger has to project. It asserts on the unclaimed
+  // codes at either severity, not on the hard one alone — a control fact whose
+  // gap only degrades the view is still a gap, and must be found here rather
+  // than by a user opening the session.
   for (const [type, sample] of Object.entries(PROJECTION_SAMPLES)) {
-    test(`${type} projects without an unsupported_event diagnostic`, () => {
+    test(`${type} projects without an unclaimed-event diagnostic`, () => {
       let seq = 0;
       const memory = createSessionEventMapMemory();
       const runtimeEvents = [...(sample.before ?? []), sample.subject, ...(sample.after ?? [])]
@@ -1305,10 +1308,33 @@ describe('SessionEvent projection coverage', () => {
         runHeaders: [projectionRunHeader],
       });
 
-      assert.deepEqual(
-        projected.diagnostics.filter((diagnostic) => diagnostic.code === 'unsupported_event'),
-        [],
-      );
+      assert.deepEqual(projected.diagnostics.filter(isUnclaimedRuntimeEventDiagnostic), []);
     });
   }
+
+  // The guard's fallback is what a variant added without a claim actually
+  // becomes. It has to stay on the degradable side of the line: control-only,
+  // so the session it lands in still opens, and still reported so the gap the
+  // coverage contract would have caught is not invisible at runtime.
+  test('an unmapped SessionEvent maps to a reported control-only fact', () => {
+    const unmapped = { type: 'not_yet_mapped', id: 'e', turnId: 'turn-1', ts: 1 };
+    const memory = createSessionEventMapMemory();
+    const runtimeEvent = mapSessionEventToRuntimeEvent(
+      unmapped as unknown as SessionEvent,
+      ctx,
+      memory,
+    );
+
+    assert.equal(runtimeEvent.content, undefined);
+    assert.equal(runtimeEvent.actions?.stateDelta?.unmappedSessionEventType, 'not_yet_mapped');
+
+    const projected = projectRuntimeEventsToStoredMessages([runtimeEvent], {
+      runHeaders: [projectionRunHeader],
+    });
+    assert.deepEqual(projected.messages, []);
+    assert.deepEqual(
+      projected.diagnostics.map((diagnostic) => diagnostic.code),
+      ['unclaimed_control_fact'],
+    );
+  });
 });

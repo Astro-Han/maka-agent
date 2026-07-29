@@ -13217,6 +13217,49 @@ describe('SessionManager permission mode updates', () => {
     });
   }
 
+  // The next unclaimed control fact must not repeat #1607. A complete ledger
+  // with one event the projection was never taught still reads back — messages,
+  // turns and every turn-scoped action — and the unclaimed event is reported as
+  // a diagnostic rather than costing the session that contains it.
+  test('reads a completed session back with an unclaimed control fact in its ledger', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new UnmappedSessionEventBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(9_600),
+    });
+    const session = await manager.createSession(makeInput());
+
+    for await (const _event of manager.sendMessage(session.id, {
+      turnId: 'turn-1',
+      text: 'hello',
+    })) {
+      // drain
+    }
+
+    const messages = await manager.getMessages(session.id);
+    expect(messages.filter((message) => message.type === 'user').length).toBe(1);
+    expect(
+      messages.some((message) => message.type === 'assistant' && message.text === 'hi back'),
+    ).toBe(true);
+    const turns = await manager.listTurns(session.id);
+    expect(turns.find((turn) => turn.turnId === 'turn-1')?.status).toBe('completed');
+
+    const view = await new RuntimeReadModel({
+      runStore,
+      runtimeEventStore: runStore,
+    }).getSessionView(session.id);
+    expect(
+      view.diagnostics.filter((diagnostic) => diagnostic.code === 'unclaimed_control_fact').length,
+    ).toBe(1);
+  });
+
   test('marks backend errors as blocked with a generalized reason', async () => {
     const store = new MemorySessionStore();
     const backends = new BackendRegistry();
@@ -18390,6 +18433,51 @@ class SandboxBoundaryWaitBackend implements AgentBackend {
     this.responses.push(response);
     this.responseGate.release();
   }
+
+  async dispose(): Promise<void> {}
+}
+
+/**
+ * Emits a SessionEvent variant the mapping has never been taught, wrapped in a
+ * turn that produces a real assistant message. That is what a future variant
+ * looks like from the read model's side: AiSdkFlow's exhaustiveness guard turns
+ * it into a control-only RuntimeEvent, and the ledger keeps it.
+ */
+class UnmappedSessionEventBackend implements AgentBackend {
+  readonly kind = 'fake' as const;
+  readonly sessionId: string;
+
+  constructor(ctx: BackendFactoryContext) {
+    this.sessionId = ctx.sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    yield {
+      type: 'text_complete',
+      id: `${input.turnId}-text`,
+      turnId: input.turnId,
+      ts: 1,
+      messageId: `${input.turnId}-message`,
+      text: 'hi back',
+    };
+    yield {
+      type: 'not_yet_mapped',
+      id: `${input.turnId}-unmapped`,
+      turnId: input.turnId,
+      ts: 2,
+    } as unknown as SessionEvent;
+    yield {
+      type: 'complete',
+      id: `${input.turnId}-complete`,
+      turnId: input.turnId,
+      ts: 3,
+      stopReason: 'end_turn',
+    };
+  }
+
+  async stop(): Promise<void> {}
+
+  async respondToSandboxBoundary(): Promise<void> {}
 
   async dispose(): Promise<void> {}
 }
