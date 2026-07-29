@@ -643,6 +643,10 @@ async function applyFixtureSandboxBoundaryExpansion(
   const created = await store.createSandboxBoundaryRequest?.({
     sessionId,
     requestId: randomUUID(),
+    // Provenance is required so a real producer cannot drop it (#1612). This
+    // request has no turn to point at, so it names itself rather than
+    // borrowing an id that restart recovery could later attribute a closure to.
+    turnId: 'e2e-fixture-expansion',
     expansion,
     justification: 'e2e fixture expansion',
   });
