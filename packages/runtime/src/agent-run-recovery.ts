@@ -1,4 +1,5 @@
-import type { AgentRunEvent, AgentRunHeader } from '@maka/core';
+import { SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS } from '@maka/core';
+import type { AgentRunEvent, AgentRunHeader, RuntimeEvent } from '@maka/core';
 import type { UserMessageInput } from '@maka/core/runtime-inputs';
 
 export interface AgentRunRecoveryDecision {
@@ -82,6 +83,48 @@ export function classifyAgentRunRecovery(
     'app_restarted',
     diagnostic('non_terminal_run_recovered', lastEventType, hasCorruptEvent),
   );
+}
+
+/**
+ * Re-attribute a recovered failure to the sandbox boundary request the host
+ * restart just closed. `closedRequestIds` are the ids recovery settled with
+ * `closureReason: 'host_restarted'`; the run's RuntimeEvent ledger is the only
+ * durable place that maps a request id back to its run and turn, so an id must
+ * appear in BOTH to claim the attribution. Anything else keeps its original
+ * class — a stalled child run or an ordinary interrupted turn is not a closed
+ * prompt, and saying so would be worse than the generic restart message.
+ */
+export function attributeSandboxBoundaryRestartClosure(
+  decision: AgentRunRecoveryDecision,
+  runtimeEvents: readonly RuntimeEvent[],
+  closedRequestIds: ReadonlySet<string>,
+): AgentRunRecoveryDecision {
+  if (decision.status !== 'failed' || closedRequestIds.size === 0) return decision;
+  const closed = [
+    ...new Set(
+      runtimeEvents.flatMap((event) => {
+        const requestId = sandboxBoundaryRequestId(event);
+        return requestId !== undefined && closedRequestIds.has(requestId) ? [requestId] : [];
+      }),
+    ),
+  ];
+  if (closed.length === 0) return decision;
+  return {
+    ...decision,
+    failureClass: SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS,
+    diagnostic: {
+      ...decision.diagnostic,
+      sandboxBoundaryClosureReason: 'host_restarted',
+      sandboxBoundaryRequestIds: closed,
+    },
+  };
+}
+
+function sandboxBoundaryRequestId(event: RuntimeEvent): string | undefined {
+  const request = event.actions?.stateDelta?.sandboxBoundaryRequest;
+  if (typeof request !== 'object' || request === null) return undefined;
+  const requestId = (request as { requestId?: unknown }).requestId;
+  return typeof requestId === 'string' ? requestId : undefined;
 }
 
 function failedDecision(

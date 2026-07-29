@@ -125,7 +125,11 @@ import type { ActiveFullCompactBlock } from './active-full-compact.js';
 import type { SemanticCompactBlock } from './semantic-compact.js';
 import type { HistoryCompactCheckpoint } from './history-compact-checkpoint.js';
 import type { AgentRunLineage, RuntimeContinuationFailpoint } from './agent-run.js';
-import { classifyAgentRunRecovery, type AgentRunRecoveryDecision } from './agent-run-recovery.js';
+import {
+  attributeSandboxBoundaryRestartClosure,
+  classifyAgentRunRecovery,
+  type AgentRunRecoveryDecision,
+} from './agent-run-recovery.js';
 import type { InvocationResult, InvocationSource } from './invocation-context.js';
 import {
   isRuntimeHostedRootAuthority,
@@ -897,6 +901,11 @@ export class SessionManager {
     const recovered = new Set<string>();
     for (const session of interrupted) {
       if (this.runtimeKernel.hasActiveRuns(session.id)) continue;
+      // Fail-closed first: a request whose live owner died can never be
+      // answered, so it settles as `deny`. The ids are kept so the run
+      // recovery below can name the closure on the turn it interrupted
+      // instead of leaving the user with an unexplained failure (#1612).
+      const closedSandboxBoundaryRequestIds = new Set<string>();
       if (
         this.deps.store.listPendingSandboxBoundaryRequests &&
         this.deps.store.settleSandboxBoundaryRequest
@@ -907,17 +916,20 @@ export class SessionManager {
           [],
         );
         for (const request of pendingBoundaryRequests) {
-          await recoverOr(
+          const settled = await recoverOr(
             policy,
-            () =>
-              this.deps.store.settleSandboxBoundaryRequest!({
+            async () => {
+              await this.deps.store.settleSandboxBoundaryRequest!({
                 sessionId: session.id,
                 requestId: request.requestId,
                 decision: 'deny',
                 closureReason: 'host_restarted',
-              }),
-            undefined,
+              });
+              return true;
+            },
+            false,
           );
+          if (settled) closedSandboxBoundaryRequestIds.add(request.requestId);
         }
       }
       if (this.deps.planStore) {
@@ -961,7 +973,8 @@ export class SessionManager {
       if (this.deps.runStore) {
         const runRecovery = await recoverOr(
           policy,
-          () => this.recoverAgentRunsFromLedger(session.id, policy),
+          () =>
+            this.recoverAgentRunsFromLedger(session.id, policy, closedSandboxBoundaryRequestIds),
           undefined,
         );
         if (runRecovery?.hasLedger) {
@@ -4512,6 +4525,7 @@ export class SessionManager {
   private async recoverAgentRunsFromLedger(
     sessionId: string,
     policy: RecoveryPolicy = { kind: 'best_effort' },
+    closedSandboxBoundaryRequestIds: ReadonlySet<string> = new Set(),
   ): Promise<{ hasLedger: boolean; recovered: boolean }> {
     if (!this.deps.runStore || !this.deps.runtimeEventStore)
       return { hasLedger: false, recovered: false };
@@ -4564,8 +4578,13 @@ export class SessionManager {
         continue;
       }
       const runtimeDecision = this.classifyRuntimeEventRecovery(inspected);
-      const decision = runtimeDecision ?? classifyAgentRunRecovery(run, inspected.events);
-      if (!decision) continue;
+      const classified = runtimeDecision ?? classifyAgentRunRecovery(run, inspected.events);
+      if (!classified) continue;
+      const decision = attributeSandboxBoundaryRestartClosure(
+        classified,
+        inspected.runtimeEvents,
+        closedSandboxBoundaryRequestIds,
+      );
       if (await this.applyAgentRunRecovery(sessionId, decision, inspected, policy)) {
         recovered = true;
       }

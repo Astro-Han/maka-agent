@@ -80,6 +80,14 @@ export interface SettleSandboxBoundaryRequest {
   readonly closureReason?: 'host_restarted';
 }
 
+/**
+ * Turn/run failure class for the `host_restarted` closure above. The settlement
+ * is durable in the request row, but only the turn carries it to a surface, so
+ * this is the one string runtime writes and every surface reads to explain a
+ * boundary prompt the user never got to answer.
+ */
+export const SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS = 'sandbox_boundary_closed_by_restart';
+
 export interface SandboxBoundarySettlement {
   readonly request: SandboxBoundaryRequest;
   readonly boundary: ExecutionBoundary;

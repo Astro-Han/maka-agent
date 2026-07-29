@@ -134,7 +134,7 @@ export class RuntimeReadModel {
             ),
           ]);
         }
-        const overlayEvents = activeRunContext?.events.flatMap(activePermissionOverlayEvent) ?? [];
+        const overlayEvents = activeRunContext?.events.flatMap(activeInteractionOverlayEvent) ?? [];
         for (let eventIndex = 0; eventIndex < overlayEvents.length; eventIndex += 1) {
           ordered.push({ event: overlayEvents[eventIndex]!, runIndex, eventIndex });
         }
@@ -407,18 +407,41 @@ export class RuntimeReadModel {
   }
 }
 
-function activePermissionOverlayEvent(event: RuntimeEvent): RuntimeEvent[] {
+/**
+ * The interaction facts an active run must keep even while its messages come
+ * from the in-flight projection cache. Permission prompts were always carried
+ * here; sandbox boundary requests and decisions belong for the same reason
+ * (#1612): they are the only durable record that a prompt was raised and how
+ * it settled, so dropping them makes a pending request invisible to anything
+ * reading the view instead of the live backend.
+ */
+function activeInteractionOverlayEvent(event: RuntimeEvent): RuntimeEvent[] {
   const permissionRequest = event.actions?.permissionRequest;
   const permissionAnswerAccepted = event.actions?.permissionAnswerAccepted;
   const permissionClosureAccepted = event.actions?.permissionClosureAccepted;
-  if (!permissionRequest && !permissionAnswerAccepted && !permissionClosureAccepted) return [];
+  const sandboxBoundaryRequest = event.actions?.stateDelta?.sandboxBoundaryRequest;
+  const sandboxBoundaryDecision = event.actions?.stateDelta?.sandboxBoundaryDecision;
+  if (
+    !permissionRequest &&
+    !permissionAnswerAccepted &&
+    !permissionClosureAccepted &&
+    sandboxBoundaryRequest === undefined &&
+    sandboxBoundaryDecision === undefined
+  ) {
+    return [];
+  }
   const overlay = { ...event };
   delete overlay.content;
   delete overlay.status;
+  const stateDelta = {
+    ...(sandboxBoundaryRequest !== undefined ? { sandboxBoundaryRequest } : {}),
+    ...(sandboxBoundaryDecision !== undefined ? { sandboxBoundaryDecision } : {}),
+  };
   overlay.actions = {
     ...(permissionRequest ? { permissionRequest } : {}),
     ...(permissionAnswerAccepted ? { permissionAnswerAccepted } : {}),
     ...(permissionClosureAccepted ? { permissionClosureAccepted } : {}),
+    ...(Object.keys(stateDelta).length > 0 ? { stateDelta } : {}),
   };
   return [overlay];
 }

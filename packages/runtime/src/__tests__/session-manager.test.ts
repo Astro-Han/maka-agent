@@ -9228,6 +9228,68 @@ describe('SessionManager permission mode updates', () => {
     });
   });
 
+  test('the in-flight overlay keeps a pending sandbox boundary request visible in the view', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const session = await store.create(makeInput());
+    const header = makeRunHeader({
+      sessionId: session.id,
+      runId: 'active-run',
+      turnId: 'active-turn',
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 125,
+    });
+    await runStore.createRun(header);
+    await store.appendMessages(session.id, [
+      { type: 'user', id: 'active-user', turnId: header.turnId, ts: 100, text: 'build it' },
+      {
+        type: 'turn_state',
+        id: 'active-state',
+        turnId: header.turnId,
+        ts: 101,
+        status: 'running',
+        partialOutputRetained: false,
+      },
+    ]);
+    await runStore.appendRuntimeEvent(
+      session.id,
+      header.runId,
+      runtimeEvent({
+        id: 'active-boundary-request',
+        sessionId: session.id,
+        runId: header.runId,
+        turnId: header.turnId,
+        ts: 110,
+        actions: {
+          stateDelta: {
+            sandboxBoundaryRequest: {
+              requestId: 'boundary-pending',
+              toolUseId: 'tool-boundary',
+              justification: 'Write outside the workspace.',
+              expansion: { network: { enabled: true } },
+            },
+          },
+        },
+        refs: { toolCallId: 'tool-boundary' },
+      }),
+    );
+
+    const view = await new RuntimeReadModel({
+      runStore,
+      runtimeEventStore: runStore,
+      projectionCache: store,
+    }).getSessionView(session.id);
+
+    const boundaryRequestIds = view.events.flatMap((event) => {
+      const request = event.actions?.stateDelta?.sandboxBoundaryRequest;
+      return request !== null && typeof request === 'object' && 'requestId' in request
+        ? [(request as { requestId: string }).requestId]
+        : [];
+    });
+    expect(boundaryRequestIds).toEqual(['boundary-pending']);
+  });
+
   test('active RuntimeEvent ledger without a projection cache produces an explicit read-model error', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
@@ -15555,6 +15617,148 @@ describe('SessionManager permission mode updates', () => {
     expect(run?.status).toBe('failed');
     expect(run?.failureClass).toBe('app_restarted');
     expect(await store.listPendingSandboxBoundaryRequests(session.id)).toEqual([]);
+  });
+
+  test('startup recovery attributes an unanswered sandbox boundary closure to its turn', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new TestBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(12_870),
+    });
+    const session = await manager.createSession(makeInput({ status: 'waiting_for_user' }));
+    await store.createSandboxBoundaryRequest({
+      sessionId: session.id,
+      requestId: 'boundary-unanswered',
+      expansion: { network: { enabled: true } },
+      justification: 'Fetch a dependency.',
+    });
+    await seedRunningTurn(store, session.id, 'turn-1');
+    await seedRun(
+      runStore,
+      makeRunHeader({
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        status: 'waiting_for_user',
+      }),
+      [
+        makeRunEvent({
+          sessionId: session.id,
+          runId: 'run-1',
+          turnId: 'turn-1',
+          type: 'run_started',
+          ts: 11,
+        }),
+      ],
+    );
+    await runStore.appendRuntimeEvent(
+      session.id,
+      'run-1',
+      runtimeEvent({
+        id: 'rt-boundary-request',
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        ts: 12,
+        actions: {
+          stateDelta: {
+            sandboxBoundaryRequest: {
+              requestId: 'boundary-unanswered',
+              toolUseId: 'tool-1',
+              justification: 'Fetch a dependency.',
+              expansion: { network: { enabled: true } },
+            },
+          },
+        },
+        refs: { toolCallId: 'tool-1' },
+      }),
+    );
+
+    await manager.recoverInterruptedSessions();
+
+    // Fail-closed settlement is unchanged; what changes is that the closure is
+    // now named on the turn instead of reading as a bare restart failure.
+    expect(await store.listPendingSandboxBoundaryRequests(session.id)).toEqual([]);
+    const [turn] = await store.listTurns(session.id);
+    expect(turn?.status).toBe('failed');
+    expect(turn?.errorClass).toBe('sandbox_boundary_closed_by_restart');
+    const [run] = await runStore.listSessionRuns(session.id);
+    expect(run?.status).toBe('failed');
+    expect(run?.failureClass).toBe('sandbox_boundary_closed_by_restart');
+    const terminalEvent = (await runStore.readRuntimeEvents(session.id, 'run-1')).find(
+      (event) => event.actions?.endInvocation === true,
+    );
+    expect(terminalEvent?.actions?.stateDelta?.sandboxBoundaryClosureReason).toBe('host_restarted');
+    expect(terminalEvent?.actions?.stateDelta?.sandboxBoundaryRequestIds).toEqual([
+      'boundary-unanswered',
+    ]);
+  });
+
+  test('startup recovery keeps the generic restart class for turns with no closed boundary request', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new TestBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(12_880),
+    });
+    const session = await manager.createSession(makeInput({ status: 'waiting_for_user' }));
+    await store.createSandboxBoundaryRequest({
+      sessionId: session.id,
+      requestId: 'boundary-other-turn',
+      expansion: { network: { enabled: true } },
+      justification: 'Fetch a dependency.',
+    });
+    await seedRunningTurn(store, session.id, 'turn-1');
+    await seedRun(
+      runStore,
+      makeRunHeader({
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        status: 'waiting_for_user',
+      }),
+      [
+        makeRunEvent({
+          sessionId: session.id,
+          runId: 'run-1',
+          turnId: 'turn-1',
+          type: 'run_started',
+          ts: 11,
+        }),
+      ],
+    );
+    await runStore.appendRuntimeEvent(
+      session.id,
+      'run-1',
+      runtimeEvent({
+        id: 'rt-plain',
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        ts: 12,
+        role: 'model',
+        author: 'agent',
+        content: { kind: 'text', text: 'working' },
+      }),
+    );
+
+    await manager.recoverInterruptedSessions();
+
+    const [turn] = await store.listTurns(session.id);
+    expect(turn?.errorClass).toBe('app_restarted');
   });
 
   test('startup recovery repairs stale completed model tails without leaving running runs', async () => {
