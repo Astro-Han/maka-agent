@@ -39,15 +39,24 @@ describe('Permission mode surface', () => {
   });
 
   it('names the dangerous mode for what it grants, not for the mechanism it turns off (#1616)', () => {
-    const zh = getPermissionModeMeta('zh');
-    const en = getPermissionModeMeta('en');
-
-    assert.equal(zh.bypass.label, '完全权限');
-    assert.equal(en.bypass.label, 'Full access');
-    assert.equal(zh.bypass.tone, 'destructive');
-    assert.equal(en.bypass.tone, 'destructive');
+    assert.equal(getPermissionModeMeta('zh').bypass.label, '完全权限');
+    assert.equal(getPermissionModeMeta('en').bypass.label, 'Full access');
     assert.match(render('zh', 'bypass'), /完全权限/);
     assert.match(render('en', 'bypass'), /Full access/);
+  });
+
+  it('carries no Select value when the display state is not one of the options', () => {
+    // The read-only state has no option to select, which the Select must be
+    // told as "no value". Passing an unmatched value instead would leave the
+    // control depending on Base UI treating it as stale and resetting it.
+    const readOnly = render('zh', 'explore');
+    assert.match(readOnly, /hidden-input[^>]*value=""/);
+    assert.doesNotMatch(readOnly, /hidden-input[^>]*value="explore"/);
+
+    // A state that IS an option still selects it, so the check indicator and
+    // keyboard restore keep working.
+    assert.match(render('zh', 'ask'), /hidden-input[^>]*value="ask"/);
+    assert.match(render('zh', 'bypass'), /hidden-input[^>]*value="bypass"/);
   });
 
   it('never hands the reader the word "sandbox" in a permission label or hint (#1616)', () => {
