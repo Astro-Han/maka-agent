@@ -319,6 +319,127 @@ describe('SessionManager graph operator provisioning', () => {
     expect(output.budget.projectedBytes <= output.budget.maxBytes).toBe(true);
   });
 
+  test('keeps four large graph branches and a replacement off the supervisor data plane', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends: new BackendRegistry(),
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(90),
+    });
+    const parent = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    await runStore.createRun(
+      makeRunHeader({
+        sessionId: parent.id,
+        runId: 'large-supervisor-run',
+        turnId: 'large-supervisor-turn',
+      }),
+    );
+
+    const rawPayloadBytes = 500 * 1024;
+    const oversizedPayload = 'x'.repeat(rawPayloadBytes);
+    const outputs = [];
+    for (let index = 0; index < 5; index += 1) {
+      const identity = String(index + 1).repeat(32);
+      const provisioned = await manager.provisionAgentGraphOperator({
+        graphId: 'graph-large-output',
+        workId: `graph_work_${identity}`,
+        agentId: LOCAL_READ_AGENT_ID,
+        operatorId: `graph_operator_${identity}`,
+        source: {
+          sessionId: parent.id,
+          runId: 'large-supervisor-run',
+          turnId: 'large-supervisor-turn',
+          toolCallId: `schedule-large-${index}`,
+        },
+        edges: [],
+        expectedScheduleRevision: index + 1,
+      });
+      const failed = index === 2;
+      const run = makeRunHeader({
+        sessionId: provisioned.header.id,
+        runId: provisioned.provision.initialRunId,
+        turnId: provisioned.provision.initialTurnId,
+        status: failed ? 'failed' : 'completed',
+        createdAt: 100 + index * 10,
+        updatedAt: 109 + index * 10,
+        completedAt: 109 + index * 10,
+        ...(failed ? { failureClass: 'branch_failed' } : {}),
+      });
+      await seedRuntimeRun(runStore, run, [
+        runtimeEvent({
+          id: `large-tool-result-${index}`,
+          sessionId: run.sessionId,
+          runId: run.runId,
+          turnId: run.turnId,
+          ts: 105 + index * 10,
+          role: 'tool',
+          author: 'tool',
+          content: {
+            kind: 'function_response',
+            id: `large-tool-${index}`,
+            name: 'Read',
+            result: oversizedPayload,
+            isError: false,
+          },
+        }),
+        runtimeEvent({
+          id: `large-final-${index}`,
+          sessionId: run.sessionId,
+          runId: run.runId,
+          turnId: run.turnId,
+          ts: 108 + index * 10,
+          role: 'model',
+          author: 'agent',
+          content: {
+            kind: 'text',
+            text: failed
+              ? 'Branch failed after collecting evidence.'
+              : index === 4
+                ? 'Replacement branch completed with a verified answer.'
+                : `Branch ${index + 1} completed with a verified answer.`,
+          },
+        }),
+        runtimeEvent({
+          id: `large-terminal-${index}`,
+          sessionId: run.sessionId,
+          runId: run.runId,
+          turnId: run.turnId,
+          ts: 109 + index * 10,
+          role: 'system',
+          author: 'system',
+          status: failed ? 'failed' : 'completed',
+          actions: { endInvocation: true },
+        }),
+      ]);
+      outputs.push(
+        await manager.readChildAgentOutput(parent.id, {
+          execution: {
+            kind: 'child_session',
+            sessionId: run.sessionId,
+            currentRunId: run.runId,
+          },
+          view: 'result',
+          maxBytes: 32 * 1024,
+        }),
+      );
+    }
+
+    const serializedOutputs = JSON.stringify(outputs);
+    expect(Buffer.byteLength(oversizedPayload, 'utf8') * outputs.length >= 2_500 * 1024).toBe(true);
+    expect(Buffer.byteLength(serializedOutputs, 'utf8') < 64 * 1024).toBe(true);
+    expect(serializedOutputs.includes(oversizedPayload.slice(0, 1024))).toBe(false);
+    expect(outputs.every((output) => output.runtimeEvents.length === 0)).toBe(true);
+    expect(outputs.every((output) => output.budget.projectedBytes <= 32 * 1024)).toBe(true);
+    expect(outputs[2]?.result?.status).toBe('failed');
+    expect(outputs[2]?.result?.failureClass).toBe('branch_failed');
+    expect(outputs[4]?.result?.text).toBe('Replacement branch completed with a verified answer.');
+  });
+
   test('binds implementation operators to a durable project worktree', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();

@@ -377,6 +377,11 @@ pending → running → delivered
 
 “Prompt 已持久化”不等于“wake 已 delivered”。只有 host 观察到 root AgentRun completed，delivery 才完成。Permission suspension 会被显式 parked。重启后，wake coordinator 会对比 stored attempt 与 AgentRun fact，把被中断 attempt 标记为 retryable，只恢复安全的 delivery。
 
+Context overflow 与普通 transient failure 分开处理。Host 会记录 overflow diagnostic，
+最多执行一次 aggressive compaction，并在可用时报告压缩前后 token 估算与 dropped event
+数量。若第二次仍 overflow，会立即返回有界的 durable partial result；不会带着完全相同的
+超长 context 再做第三次重试。
+
 Session activity registry 会把这个 host-created turn 与其它 root Session activity 串行化。多个 client 可以观察同一个持久 Session 与 Graph state，但不会成为 scheduler owner。
 
 ## Persistence 与 authority

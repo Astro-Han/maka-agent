@@ -892,14 +892,43 @@ export async function createMakaCliRuntimeContext(
       },
       recoverContextOverflow: async (rootSessionId, { abortSignal }) => {
         abortSignal.throwIfAborted();
-        for await (const _event of runtime.compactSession(rootSessionId, {
+        let recovery:
+          | {
+              estimatedTokensBefore?: number;
+              estimatedTokensAfter?: number;
+              droppedTurns?: number;
+              droppedEvents?: number;
+              historyCompactedEvents?: number;
+              historyCompactBlocksWritten?: number;
+            }
+          | undefined;
+        for await (const event of runtime.compactSession(rootSessionId, {
           turnId: randomUUID(),
           minRecentTurns: 0,
         })) {
           abortSignal.throwIfAborted();
+          if (event.type === 'token_usage' && event.contextBudget) {
+            const diagnostic = event.contextBudget;
+            recovery = {
+              estimatedTokensBefore: diagnostic.estimatedTokensBefore,
+              estimatedTokensAfter: diagnostic.estimatedTokensAfter,
+              droppedTurns: diagnostic.droppedTurns,
+              droppedEvents: diagnostic.droppedEvents,
+              ...(diagnostic.historyCompactedEvents !== undefined
+                ? { historyCompactedEvents: diagnostic.historyCompactedEvents }
+                : {}),
+              ...(diagnostic.historyCompactBlocksWritten !== undefined
+                ? { historyCompactBlocksWritten: diagnostic.historyCompactBlocksWritten }
+                : {}),
+            };
+          }
         }
+        return recovery;
       },
       newId: randomUUID,
+      onDiagnostic: (diagnostic) => {
+        console.warn('[agent-graph-supervisor-wake]', JSON.stringify(diagnostic));
+      },
       onError: (rootSessionId, error) => {
         agentGraphErrors.set(rootSessionId, error);
       },

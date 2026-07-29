@@ -137,7 +137,9 @@ export {
   AgentGraphSupervisorWakeCoordinator,
 } from './agent-graph-supervisor-wake.js';
 export type {
+  AgentGraphSupervisorContextRecoveryDiagnostic,
   AgentGraphSupervisorPartialResult,
+  AgentGraphSupervisorWakeDiagnostic,
   AgentGraphSupervisorWakeInput,
 } from './agent-graph-supervisor-wake.js';
 export {

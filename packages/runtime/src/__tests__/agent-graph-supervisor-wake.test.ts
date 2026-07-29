@@ -4,6 +4,7 @@ import { createSqliteSessionMetadataStore } from '@maka/storage';
 import {
   AgentGraphSupervisorContextOverflowError,
   AgentGraphSupervisorWakeCoordinator,
+  type AgentGraphSupervisorWakeDiagnostic,
 } from '../agent-graph-supervisor-wake.js';
 import { SessionActivityRegistry, type GoalTurnOutcome } from '../goal-turn-lifecycle.js';
 import type { AgentGraphClientSnapshot } from '../stream-graph-read-model.js';
@@ -53,6 +54,7 @@ describe('Agent Graph supervisor wake delivery', () => {
     const store = createSqliteSessionMetadataStore(':memory:');
     let turns = 0;
     const recoveries: string[] = [];
+    const diagnostics: AgentGraphSupervisorWakeDiagnostic[] = [];
     const coordinator = new AgentGraphSupervisorWakeCoordinator({
       activityRegistry: new SessionActivityRegistry(),
       wakeStore: store,
@@ -66,8 +68,18 @@ describe('Agent Graph supervisor wake delivery', () => {
       inspectAttempt: async () => 'missing',
       recoverContextOverflow: async (_rootSessionId, input) => {
         recoveries.push(input.attemptId);
+        return {
+          estimatedTokensBefore: 700_000,
+          estimatedTokensAfter: 12_000,
+          droppedEvents: 80,
+          historyCompactedEvents: 75,
+          historyCompactBlocksWritten: 1,
+        };
       },
       newId: sequentialIds(),
+      onDiagnostic: (diagnostic) => {
+        diagnostics.push(diagnostic);
+      },
     });
     try {
       coordinator.notify('root-session', reconciliation());
@@ -77,6 +89,23 @@ describe('Agent Graph supervisor wake delivery', () => {
       assert.equal(wake?.status, 'delivered');
       assert.equal(wake?.attemptCount, 2);
       assert.equal(recoveries.length, 1);
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => diagnostic.event),
+        ['context_overflow_detected', 'context_overflow_recovery_completed'],
+      );
+      assert.deepEqual(diagnostics[1], {
+        event: 'context_overflow_recovery_completed',
+        graphId: 'graph-1',
+        wakeId: 'graph-1:snapshot-1',
+        attemptId: recoveries[0],
+        recovery: {
+          estimatedTokensBefore: 700_000,
+          estimatedTokensAfter: 12_000,
+          droppedEvents: 80,
+          historyCompactedEvents: 75,
+          historyCompactBlocksWritten: 1,
+        },
+      });
     } finally {
       await coordinator.close();
       store.close();
@@ -88,6 +117,7 @@ describe('Agent Graph supervisor wake delivery', () => {
     let turns = 0;
     let recoveries = 0;
     let reportedError: unknown;
+    const diagnostics: AgentGraphSupervisorWakeDiagnostic[] = [];
     const coordinator = new AgentGraphSupervisorWakeCoordinator({
       activityRegistry: new SessionActivityRegistry(),
       wakeStore: store,
@@ -118,6 +148,9 @@ describe('Agent Graph supervisor wake delivery', () => {
       onError: (_rootSessionId, error) => {
         reportedError = error;
       },
+      onDiagnostic: (diagnostic) => {
+        diagnostics.push(diagnostic);
+      },
     });
     try {
       coordinator.notify('root-session', reconciliation());
@@ -139,6 +172,28 @@ describe('Agent Graph supervisor wake delivery', () => {
         (await store.readAgentGraphSupervisorWake('graph-1', 'graph-1:snapshot-1'))?.attemptCount,
         2,
       );
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => diagnostic.event),
+        [
+          'context_overflow_detected',
+          'context_overflow_recovery_completed',
+          'context_overflow_detected',
+          'context_overflow_exhausted',
+        ],
+      );
+      assert.deepEqual(diagnostics.at(-1), {
+        event: 'context_overflow_exhausted',
+        graphId: 'graph-1',
+        wakeId: 'graph-1:snapshot-1',
+        recoveryAttempted: true,
+        partial: {
+          status: 'waiting',
+          workItems: 1,
+          terminalRecordIds: 0,
+          omittedWorkItems: 0,
+          omittedTerminalRecordIds: 0,
+        },
+      });
     } finally {
       await coordinator.close();
       store.close();

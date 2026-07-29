@@ -66,6 +66,54 @@ export class AgentGraphSupervisorContextOverflowError extends Error {
   }
 }
 
+export interface AgentGraphSupervisorContextRecoveryDiagnostic {
+  estimatedTokensBefore?: number;
+  estimatedTokensAfter?: number;
+  droppedTurns?: number;
+  droppedEvents?: number;
+  historyCompactedEvents?: number;
+  historyCompactBlocksWritten?: number;
+}
+
+export type AgentGraphSupervisorWakeDiagnostic =
+  | {
+      event: 'context_overflow_detected';
+      graphId: string;
+      wakeId: string;
+      attemptId: string;
+      attempt: number;
+      maxAttempts: number;
+      recoveryAvailable: boolean;
+      recoveryAlreadyAttempted: boolean;
+    }
+  | {
+      event: 'context_overflow_recovery_completed';
+      graphId: string;
+      wakeId: string;
+      attemptId: string;
+      recovery?: AgentGraphSupervisorContextRecoveryDiagnostic;
+    }
+  | {
+      event: 'context_overflow_recovery_failed';
+      graphId: string;
+      wakeId: string;
+      attemptId: string;
+      failureReason: string;
+    }
+  | {
+      event: 'context_overflow_exhausted';
+      graphId: string;
+      wakeId: string;
+      recoveryAttempted: boolean;
+      partial: {
+        status: AgentGraphSupervisorPartialResult['status'];
+        workItems: number;
+        terminalRecordIds: number;
+        omittedWorkItems: number;
+        omittedTerminalRecordIds: number;
+      };
+    };
+
 export interface AgentGraphSupervisorWakeInput {
   activityRegistry: SessionActivityRegistry;
   wakeStore: AgentGraphSupervisorWakeStore;
@@ -91,9 +139,10 @@ export interface AgentGraphSupervisorWakeInput {
       failureReason: string;
       abortSignal: AbortSignal;
     },
-  ): Promise<void>;
+  ): Promise<AgentGraphSupervisorContextRecoveryDiagnostic | void>;
   newId(): string;
   maxDeliveryAttempts?: number;
+  onDiagnostic?(diagnostic: AgentGraphSupervisorWakeDiagnostic): void | Promise<void>;
   onError?(rootSessionId: string, error: unknown): void | Promise<void>;
 }
 
@@ -314,25 +363,60 @@ export class AgentGraphSupervisorWakeCoordinator {
           !overflowRecoveryAttempted &&
           index + 1 < this.#maxDeliveryAttempts &&
           this.#input.recoverContextOverflow !== undefined;
+        await emitWakeDiagnostic(this.#input.onDiagnostic, {
+          event: 'context_overflow_detected',
+          graphId: wake.graphId,
+          wakeId: wake.wakeId,
+          attemptId: overflowAttempt.attemptId,
+          attempt: index + 1,
+          maxAttempts: this.#maxDeliveryAttempts,
+          recoveryAvailable: this.#input.recoverContextOverflow !== undefined,
+          recoveryAlreadyAttempted: overflowRecoveryAttempted,
+        });
         if (!canRecover) {
-          throw await this.#contextOverflowError(wake.rootSessionId, snapshot, {
+          const overflowError = await this.#contextOverflowError(wake.rootSessionId, snapshot, {
             recoveryAttempted: overflowRecoveryAttempted,
           });
+          await emitWakeDiagnostic(
+            this.#input.onDiagnostic,
+            exhaustedDiagnostic(wake, overflowError),
+          );
+          throw overflowError;
         }
         overflowRecoveryAttempted = true;
         try {
-          await this.#input.recoverContextOverflow!(wake.rootSessionId, {
+          const recovery = await this.#input.recoverContextOverflow!(wake.rootSessionId, {
             graphId: wake.graphId,
             wakeId: wake.wakeId,
             ...overflowAttempt,
             abortSignal: this.#abortController.signal,
           });
+          await emitWakeDiagnostic(this.#input.onDiagnostic, {
+            event: 'context_overflow_recovery_completed',
+            graphId: wake.graphId,
+            wakeId: wake.wakeId,
+            attemptId: overflowAttempt.attemptId,
+            ...(recovery ? { recovery } : {}),
+          });
         } catch (error) {
           if (this.#closed || isAbortError(error)) return;
-          throw await this.#contextOverflowError(wake.rootSessionId, snapshot, {
-            recoveryAttempted: true,
-            recoveryFailure: errorMessage(error),
+          const failureReason = errorMessage(error);
+          await emitWakeDiagnostic(this.#input.onDiagnostic, {
+            event: 'context_overflow_recovery_failed',
+            graphId: wake.graphId,
+            wakeId: wake.wakeId,
+            attemptId: overflowAttempt.attemptId,
+            failureReason: failureReason.slice(0, 1_000),
           });
+          const overflowError = await this.#contextOverflowError(wake.rootSessionId, snapshot, {
+            recoveryAttempted: true,
+            recoveryFailure: failureReason,
+          });
+          await emitWakeDiagnostic(
+            this.#input.onDiagnostic,
+            exhaustedDiagnostic(wake, overflowError),
+          );
+          throw overflowError;
         }
       }
       if (this.#closed) return;
@@ -540,5 +624,35 @@ async function notifyError(
     await observer?.(rootSessionId, error);
   } catch {
     // Wake diagnostics must not become graph data-path failures.
+  }
+}
+
+function exhaustedDiagnostic(
+  wake: AgentGraphSupervisorWakeRecord,
+  error: AgentGraphSupervisorContextOverflowError,
+): AgentGraphSupervisorWakeDiagnostic {
+  return {
+    event: 'context_overflow_exhausted',
+    graphId: wake.graphId,
+    wakeId: wake.wakeId,
+    recoveryAttempted: error.recoveryAttempted,
+    partial: {
+      status: error.partialResult.status,
+      workItems: error.partialResult.work.length,
+      terminalRecordIds: error.partialResult.terminalRecordIds.length,
+      omittedWorkItems: error.partialResult.omitted.work,
+      omittedTerminalRecordIds: error.partialResult.omitted.terminalRecordIds,
+    },
+  };
+}
+
+async function emitWakeDiagnostic(
+  observer: AgentGraphSupervisorWakeInput['onDiagnostic'],
+  diagnostic: AgentGraphSupervisorWakeDiagnostic,
+): Promise<void> {
+  try {
+    await observer?.(diagnostic);
+  } catch {
+    // Wake diagnostics must never alter delivery or recovery correctness.
   }
 }
