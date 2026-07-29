@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 13;
+export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 14;
 
 const MIGRATIONS: ReadonlyMap<number, string> = new Map([
   [
@@ -453,6 +453,17 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
 
     CREATE INDEX sandbox_boundary_log_pending_requests
       ON sandbox_boundary_log(session_id, status, created_at, entry_id);
+  `,
+  ],
+  [
+    14,
+    `
+    ALTER TABLE sandbox_boundary_log ADD COLUMN turn_id TEXT;
+    ALTER TABLE sandbox_boundary_log ADD COLUMN run_id TEXT;
+
+    CREATE INDEX sandbox_boundary_log_settled_closures
+      ON sandbox_boundary_log(session_id, outcome_reason, created_at, entry_id)
+      WHERE outcome_reason IS NOT NULL;
   `,
   ],
 ]);

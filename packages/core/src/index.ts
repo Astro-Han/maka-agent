@@ -561,6 +561,7 @@ export {
   MAX_SANDBOX_BOUNDARY_PATH_CHARS,
   MAX_SANDBOX_BOUNDARY_SERIALIZED_BYTES,
   SANDBOX_BOUNDARY_ACCESS_MODES,
+  SANDBOX_BOUNDARY_HOST_RESTART_CLOSURE_REASON,
   SANDBOX_BOUNDARY_REQUEST_STATUSES,
   SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS,
   SANDBOX_BOUNDARY_SCOPES,
@@ -574,6 +575,7 @@ export {
   createManagedExecutionBoundary,
   decodeExecutionBoundary,
   executionBoundaryContains,
+  isSandboxBoundaryRestartClosure,
   sandboxBoundaryExpansionAllowsPath,
   validateSandboxBoundaryExpansion,
 } from './sandbox-boundary.js';

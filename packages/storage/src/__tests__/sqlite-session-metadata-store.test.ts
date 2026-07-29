@@ -31,7 +31,7 @@ describe('SqliteSessionMetadataStore', () => {
     try {
       const store = createSqliteSessionMetadataStore(path, { now: () => 100 });
       const header = fullHeader();
-      assert.equal(store.schemaVersion(), 13);
+      assert.equal(store.schemaVersion(), 14);
       assert.equal(store.journalMode(), 'wal');
       assert.deepEqual(await store.create(header), {
         header,
@@ -42,7 +42,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const reopened = createSqliteSessionMetadataStore(path, { now: () => 200 });
       try {
-        assert.equal(reopened.schemaVersion(), 13);
+        assert.equal(reopened.schemaVersion(), 14);
         assert.deepEqual(await reopened.read(header.id), {
           header,
           metadataVersion: 1,
@@ -76,7 +76,7 @@ describe('SqliteSessionMetadataStore', () => {
     const metadata = createSqliteSessionMetadataStore(path);
     try {
       assert.equal(runtime.schemaVersion(), SQLITE_RUNTIME_SCHEMA_VERSION);
-      assert.equal(metadata.schemaVersion(), 13);
+      assert.equal(metadata.schemaVersion(), 14);
       await metadata.create(fullHeader());
       await runtime.appendRuntimeEvent('session-1', 'run-1', {
         id: 'event-1',
@@ -192,6 +192,7 @@ describe('SqliteSessionMetadataStore', () => {
       const request = await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'boundary-request-1',
+        turnId: 'turn-1',
         expansion: {
           filesystem: {
             entries: [
@@ -215,6 +216,7 @@ describe('SqliteSessionMetadataStore', () => {
         },
         justification: 'Read the requested source tree.',
         createdAt: 50,
+        turnId: 'turn-1',
       });
       assert.equal((await store.readExecutionBoundary('session-1')).revision, 0);
     } finally {
@@ -233,6 +235,7 @@ describe('SqliteSessionMetadataStore', () => {
         await store.createSandboxBoundaryRequest({
           sessionId: 'session-1',
           requestId,
+          turnId: 'turn-1',
           expansion: {
             filesystem: { entries: [{ path, access: 'read', scope: 'subtree' }] },
           },
@@ -284,6 +287,7 @@ describe('SqliteSessionMetadataStore', () => {
         await store.createSandboxBoundaryRequest({
           sessionId: 'session-1',
           requestId,
+          turnId: 'turn-1',
           expansion: {
             filesystem: {
               entries: Array.from({ length: 32 }, (_, entry) => ({
@@ -333,6 +337,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'request-tmp',
+        turnId: 'turn-1',
         expansion: {
           filesystem: {
             entries: [{ path: join(tmpdir(), 'maka-output'), access: 'write', scope: 'exact' }],
@@ -368,6 +373,7 @@ describe('SqliteSessionMetadataStore', () => {
         await setup.createSandboxBoundaryRequest({
           sessionId: 'session-1',
           requestId,
+          turnId: 'turn-1',
           expansion: {
             filesystem: {
               entries: [{ path: outsidePath, access: 'read', scope: 'subtree' }],
@@ -426,6 +432,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'approved-before-bypass',
+        turnId: 'turn-1',
         expansion: {
           filesystem: {
             entries: [{ path: '/outside/kept', access: 'write', scope: 'subtree' }],
@@ -441,6 +448,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'stale-after-bypass',
+        turnId: 'turn-1',
         expansion: { network: { enabled: true } },
         justification: 'Fetch a dependency.',
       });
@@ -555,6 +563,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'approved-before-explore',
+        turnId: 'turn-1',
         expansion: {
           filesystem: {
             entries: [{ path: '/outside/kept', access: 'write', scope: 'subtree' }],
@@ -668,6 +677,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'atomic-request',
+        turnId: 'turn-1',
         expansion: { network: { enabled: true } },
         justification: 'Fetch a dependency.',
       });
@@ -704,6 +714,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'denied-request',
+        turnId: 'turn-1',
         expansion: { network: { enabled: true } },
         justification: 'Fetch a dependency.',
       });
@@ -718,6 +729,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'already-contained',
+        turnId: 'turn-1',
         expansion: {
           filesystem: {
             entries: [{ path: '/workspace/repo/file.txt', access: 'read', scope: 'exact' }],
@@ -746,6 +758,7 @@ describe('SqliteSessionMetadataStore', () => {
       await store.createSandboxBoundaryRequest({
         sessionId: 'session-1',
         requestId: 'restart-request',
+        turnId: 'turn-1',
         expansion: { network: { enabled: true } },
         justification: 'Fetch a dependency.',
       });
@@ -761,8 +774,154 @@ describe('SqliteSessionMetadataStore', () => {
       assert.equal(recovered.request.outcomeReason, 'host_restarted');
       assert.equal(recovered.boundary.revision, 0);
       assert.deepEqual(await store.listPendingSandboxBoundaryRequests('session-1'), []);
+      // The closure stays re-readable after it stops being pending; that is
+      // what lets an interrupted recovery finish the job on its next attempt.
+      assert.deepEqual(
+        (await store.listSandboxBoundaryRestartClosures('session-1')).map((closure) => [
+          closure.requestId,
+          closure.turnId,
+        ]),
+        [['restart-request', 'turn-1']],
+      );
     } finally {
       store.close();
+    }
+  });
+
+  test('lists only host-restart closures, never other settlements', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', { now: nextNow(720) });
+    try {
+      await store.create(fullHeader());
+      for (const requestId of ['restart-closed', 'plain-denied', 'approved', 'still-pending']) {
+        await store.createSandboxBoundaryRequest({
+          sessionId: 'session-1',
+          requestId,
+          turnId: 'turn-1',
+          runId: 'run-1',
+          expansion: { network: { enabled: true } },
+          justification: `Request ${requestId}.`,
+        });
+      }
+      await store.settleSandboxBoundaryRequest({
+        sessionId: 'session-1',
+        requestId: 'restart-closed',
+        decision: 'deny',
+        closureReason: 'host_restarted',
+      });
+      await store.settleSandboxBoundaryRequest({
+        sessionId: 'session-1',
+        requestId: 'plain-denied',
+        decision: 'deny',
+      });
+      await store.settleSandboxBoundaryRequest({
+        sessionId: 'session-1',
+        requestId: 'approved',
+        decision: 'allow',
+      });
+
+      const closures = await store.listSandboxBoundaryRestartClosures('session-1');
+      assert.deepEqual(
+        closures.map((closure) => closure.requestId),
+        ['restart-closed'],
+      );
+      assert.equal(closures[0]?.runId, 'run-1');
+    } finally {
+      store.close();
+    }
+  });
+
+  test('keeps request provenance durable and rejects a reuse that changes it', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:', { now: nextNow(740) });
+    try {
+      await store.create(fullHeader());
+      const created = await store.createSandboxBoundaryRequest({
+        sessionId: 'session-1',
+        requestId: 'request-1',
+        turnId: 'turn-7',
+        runId: 'run-9',
+        expansion: { network: { enabled: true } },
+        justification: 'Fetch a dependency.',
+      });
+      assert.equal(created.turnId, 'turn-7');
+      assert.equal(created.runId, 'run-9');
+
+      // Same id, same content: idempotent re-create returns the same row.
+      const again = await store.createSandboxBoundaryRequest({
+        sessionId: 'session-1',
+        requestId: 'request-1',
+        turnId: 'turn-7',
+        runId: 'run-9',
+        expansion: { network: { enabled: true } },
+        justification: 'Fetch a dependency.',
+      });
+      assert.deepEqual(again, created);
+
+      await assert.rejects(
+        store.createSandboxBoundaryRequest({
+          sessionId: 'session-1',
+          requestId: 'request-1',
+          turnId: 'turn-8',
+          runId: 'run-9',
+          expansion: { network: { enabled: true } },
+          justification: 'Fetch a dependency.',
+        }),
+        /identity was reused/,
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test('migrates a v13 database and leaves legacy rows without provenance', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-boundary-v13-'));
+    const path = join(root, 'sessions.sqlite');
+    try {
+      const initial = createSqliteSessionMetadataStore(path);
+      await initial.create(fullHeader());
+      initial.close();
+
+      // Rewind to the pre-provenance shape a shipped database would have.
+      const v13 = new DatabaseSync(path);
+      v13.exec(`
+        ALTER TABLE sandbox_boundary_log DROP COLUMN turn_id;
+        ALTER TABLE sandbox_boundary_log DROP COLUMN run_id;
+        DROP INDEX sandbox_boundary_log_settled_closures;
+        INSERT INTO sandbox_boundary_log(
+          session_id, entry_id, entry_kind, request_id, status, base_revision,
+          expansion_json, justification, outcome_reason, created_at, settled_at
+        ) VALUES (
+          'session-1', 'request:legacy-request', 'expansion_request', 'legacy-request',
+          'denied', 0, '{"network":{"enabled":true}}', 'Legacy request.',
+          'host_restarted', 10, 11
+        );
+        UPDATE session_metadata_schema SET version = 13 WHERE scope = 'session_metadata';
+      `);
+      v13.close();
+
+      const migrated = createSqliteSessionMetadataStore(path);
+      try {
+        const [legacy] = await migrated.listSandboxBoundaryRestartClosures('session-1');
+        assert.equal(legacy?.requestId, 'legacy-request');
+        assert.equal(legacy?.turnId, undefined);
+        assert.equal(legacy?.runId, undefined);
+
+        // New rows on the upgraded database carry provenance normally.
+        await migrated.createSandboxBoundaryRequest({
+          sessionId: 'session-1',
+          requestId: 'fresh-request',
+          turnId: 'turn-1',
+          runId: 'run-1',
+          expansion: { network: { enabled: true } },
+          justification: 'Fetch a dependency.',
+        });
+        const [fresh] = await migrated.listPendingSandboxBoundaryRequests('session-1');
+        assert.equal(fresh?.turnId, 'turn-1');
+        assert.equal(fresh?.runId, 'run-1');
+      } finally {
+        migrated.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -774,6 +933,7 @@ describe('SqliteSessionMetadataStore', () => {
         await store.createSandboxBoundaryRequest({
           sessionId: 'session-1',
           requestId,
+          turnId: 'turn-1',
           expansion: { network: { enabled: true } },
           justification: `Request ${requestId}.`,
         });
@@ -880,7 +1040,7 @@ describe('SqliteSessionMetadataStore', () => {
 
     const store = createSqliteSessionMetadataStore(path);
     try {
-      assert.equal(store.schemaVersion(), 13);
+      assert.equal(store.schemaVersion(), 14);
       assert.deepEqual(
         (
           await store.list({
@@ -1243,7 +1403,7 @@ describe('SqliteSessionMetadataStore', () => {
 
       const migrated = createSqliteSessionMetadataStore(path);
       try {
-        assert.equal(migrated.schemaVersion(), 13);
+        assert.equal(migrated.schemaVersion(), 14);
         assert.equal(await migrated.remove(child.id), true);
         await assert.rejects(
           () => migrated.createSubagent({ ...child, id: 'retry-after-migration' }),

@@ -238,6 +238,7 @@ test('restores the accumulated managed boundary from a session bundle', async ()
     await sessions.createSandboxBoundaryRequest({
       sessionId: selected.id,
       requestId: 'request-1',
+      turnId: 'turn-1',
       expansion: {
         filesystem: {
           entries: [{ path: '/outside/selected.txt', access: 'write', scope: 'exact' }],
@@ -282,6 +283,7 @@ test('round-trips a cumulative boundary larger than one expansion payload', asyn
       await sessions.createSandboxBoundaryRequest({
         sessionId: selected.id,
         requestId,
+        turnId: 'turn-1',
         expansion: {
           filesystem: {
             entries: Array.from({ length: 32 }, (_, entry) => ({
