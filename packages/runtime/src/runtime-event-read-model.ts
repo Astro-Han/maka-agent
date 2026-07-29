@@ -46,7 +46,8 @@ export type RuntimeEventReadModelDiagnosticCode =
  *
  * `hard` — a row a reader would have seen may be missing, so the projection is
  * not a faithful view of the session and must not be served in place of one.
- * `soft` — every message survived; the fact is reported, not fatal.
+ * `soft` — the fact is reported without withholding the view; it does not by
+ * itself mean a row is missing.
  *
  * The table is keyed by code so a new diagnostic cannot exist without deciding
  * which side of that line it falls on.
@@ -274,6 +275,24 @@ export function projectRuntimeEventsToStoredMessages(
       projected = true;
     }
 
+    if (event.actions?.artifactDelta) {
+      // Artifact counters are storage bookkeeping. The tool result that owns the
+      // artifact owns its row; this delta has none of its own.
+      projected = true;
+    }
+
+    if (event.actions?.transferToAgent !== undefined) {
+      // A hand-off is control routing. The receiving agent's own events own
+      // every provider-visible row the transfer leads to.
+      projected = true;
+    }
+
+    if (event.actions?.runtimeProtocol) {
+      // The protocol marker records which runtime contracts were live from a
+      // run's first event. RecoveryResolver reads it; it has no chat row.
+      projected = true;
+    }
+
     if (event.actions?.stateDelta?.continuationStart === true) {
       // Continuation start is a canonical lineage/recovery fact with no
       // legacy chat row. Its following model events own the visible output.
@@ -306,14 +325,12 @@ export function projectRuntimeEventsToStoredMessages(
     }
 
     if (!projected) {
-      // Where the line sits between degrading a view and refusing to serve one:
-      // `content` is the RuntimeEvent's message payload, `actions` its control
-      // intent. Every row this projection emits from an unclaimed shape would
-      // have come from content, so an unclaimed content-bearing event may have
-      // cost a reader a message and the view is no longer faithful. A
-      // control-only fact has no row to lose — report it and keep the session
-      // readable, since discarding the projection would cost every intact
-      // message in it instead.
+      // Content is the only payload an unclaimed shape could still have owed a
+      // row, so its absence is what makes degrading safe here — not a promise
+      // that actions never produce rows (permissionDecision, tokenUsage and the
+      // terminal fact all do). What holds that up is claim coverage: every
+      // action field a reader can meet is claimed above, proven by the
+      // projection-coverage contract, so nothing with a row reaches this branch.
       if (event.content === undefined) {
         diagnostic(
           state,

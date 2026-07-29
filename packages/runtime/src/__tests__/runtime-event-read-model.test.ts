@@ -3,6 +3,7 @@ import type {
   AgentRunHeader,
   CreateSessionInput,
   RuntimeEvent,
+  RuntimeEventActions,
   SessionHeader,
   SessionListFilter,
   SessionSummary,
@@ -14,6 +15,7 @@ import { expect } from '../test-helpers.js';
 import {
   compareRuntimeReadModelMessages,
   isHardRuntimeEventReadModelDiagnostic,
+  isUnclaimedRuntimeEventDiagnostic,
   projectRuntimeEventsToStoredMessages,
   projectRuntimeEventsToStoredMessagesWithArchiveStatuses,
 } from '../runtime-event-read-model.js';
@@ -1548,6 +1550,122 @@ describe('projectRuntimeEventsToStoredMessages', () => {
       activityKind: 'command',
     });
   });
+});
+
+/**
+ * One reachable event per `RuntimeEventActions` field, each entry typed to its
+ * own key so it cannot drift onto another field or be filled with a placeholder.
+ *
+ * This is the premise the read model's soft path rests on. An unclaimed
+ * content-free event degrades the view instead of withholding it, which is only
+ * safe while every action a reader can meet is claimed — several of them
+ * (`permissionDecision`, `tokenUsage`, the terminal fact) do produce rows, and
+ * `runtime-event-backfill.ts` already writes a content-free event that becomes a
+ * visible `permission_decision`. The SessionEvent contract in ai-sdk-flow.test.ts
+ * only covers events built by `mapSessionEventToRuntimeEvent`; tool-runtime,
+ * terminal-run-commit and the backfill write RuntimeEvents directly. Keying this
+ * table on the action surface itself covers those paths too.
+ */
+type ActionCoverageSamples = {
+  [K in keyof Required<RuntimeEventActions>]: {
+    /** The action value under test, typed to its own key. */
+    action: Required<RuntimeEventActions>[K];
+    /** The rest of the event, as the field's real emitter writes it. */
+    event?: Partial<RuntimeEvent>;
+  };
+};
+
+const ACTION_COVERAGE_SAMPLES: ActionCoverageSamples = {
+  // `stateDelta` is an open record, so only named shapes are claimed and this
+  // entry covers the field, not its contents. A new key inside a state delta is
+  // out of reach of any contract keyed on the action surface.
+  stateDelta: { action: { continuationStart: true } },
+  artifactDelta: { action: { 'artifact-1': 42 } },
+  permissionRequest: {
+    action: {
+      kind: 'tool_permission',
+      requestId: 'coverage-request',
+      toolUseId: 'coverage-tool',
+      toolName: 'Read',
+      category: 'read',
+      reason: 'custom',
+      args: { path: '/tmp/a.txt' },
+      rememberForTurnAllowed: true,
+    },
+    event: { refs: { toolCallId: 'coverage-tool' } },
+  },
+  permissionDecision: {
+    action: { requestId: 'coverage-request', decision: 'allow', toolName: 'Read' },
+    event: { refs: { toolCallId: 'coverage-tool' } },
+  },
+  // The canonical outcome lives in InteractionStore, so a standalone acceptance
+  // reports an `incomplete_event`. That is a completeness diagnostic, not a
+  // coverage gap: the projection still claims the field.
+  permissionAnswerAccepted: {
+    action: { requestId: 'coverage-request' },
+    event: { author: 'user', refs: { toolCallId: 'coverage-tool' } },
+  },
+  permissionClosureAccepted: {
+    action: { requestId: 'coverage-request', reason: 'timed_out' },
+  },
+  userQuestionRequest: {
+    action: {
+      requestId: 'coverage-question',
+      toolUseId: 'coverage-question-tool',
+      questions: [{ question: 'Choose', options: [{ label: 'Extend' }] }],
+    },
+    event: { refs: { toolCallId: 'coverage-question-tool' } },
+  },
+  userQuestionAnswerAccepted: {
+    action: { requestId: 'coverage-question' },
+    event: { author: 'user', refs: { toolCallId: 'coverage-question-tool' } },
+  },
+  transferToAgent: { action: 'agent-b' },
+  // The terminal fact is one of the actions that does own a row.
+  endInvocation: { action: true },
+  tokenUsage: { action: { input: 10, output: 5 } },
+  toolDispatch: {
+    action: {
+      protocol: 't1_after_preflight_v1',
+      operationId: 'coverage-op',
+      providerToolCallId: 'coverage-tool',
+      toolName: 'Bash',
+      canonicalArgsHash: 'sha256:args',
+      recoveryMode: 'reconcile',
+    },
+    event: { refs: { toolCallId: 'coverage-tool', operationId: 'coverage-op' } },
+  },
+  toolRecovery: {
+    action: {
+      kind: 'maka.tool.reconcile_result',
+      version: 1,
+      payload: {
+        protocol: 'tool_reconcile_v1',
+        operationId: 'coverage-op',
+        observation: 'unreadable',
+        observationSchema: 'state_identity_v1',
+        observationDigest:
+          'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
+    },
+    event: { refs: { toolCallId: 'coverage-tool', operationId: 'coverage-op' } },
+  },
+  runtimeProtocol: { action: { toolBoundary: 't1_after_preflight_v1' } },
+};
+
+describe('RuntimeEventActions projection coverage', () => {
+  for (const [field, sample] of Object.entries(ACTION_COVERAGE_SAMPLES)) {
+    test(`actions.${field} projects without an unclaimed-event diagnostic`, () => {
+      const actions = { [field]: sample.action } as RuntimeEventActions;
+      // Guards an entry that names a field but leaves it absent at runtime.
+      expect(field in actions).toBe(true);
+      const out = projectRuntimeEventsToStoredMessages([ev({ ...sample.event, actions })], {
+        runHeaders: [header],
+      });
+
+      expect(out.diagnostics.filter(isUnclaimedRuntimeEventDiagnostic)).toEqual([]);
+    });
+  }
 });
 
 describe('compareRuntimeReadModelMessages', () => {

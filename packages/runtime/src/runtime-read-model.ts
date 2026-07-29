@@ -293,7 +293,7 @@ export class RuntimeReadModel {
     if (canonicalPermissionRead.diagnostics.length > 0) {
       throw new RuntimeReadModelError('Canonical permission outcome read failed', diagnostics);
     }
-    if (hasHardProjectionDiagnostic(projected.diagnostics)) {
+    if (projected.diagnostics.some(isHardRuntimeEventReadModelDiagnostic)) {
       throw new RuntimeReadModelError('RuntimeEvent read projection is incomplete', diagnostics);
     }
 
@@ -443,15 +443,6 @@ function mergeInFlightProjectionCache(
 
 function messageTurnId(message: StoredMessage): string | undefined {
   return 'turnId' in message && typeof message.turnId === 'string' ? message.turnId : undefined;
-}
-
-function hasHardProjectionDiagnostic(
-  diagnostics: readonly RuntimeEventReadModelDiagnostic[],
-): boolean {
-  // The projection owns the hard/soft line: a diagnostic is hard only when a
-  // user-visible row may be missing. Restating the codes here would let the two
-  // drift apart and put half the policy in the caller.
-  return diagnostics.some(isHardRuntimeEventReadModelDiagnostic);
 }
 
 function readModelDiagnostic(
