@@ -179,6 +179,12 @@ export interface StopSessionInput {
 
 export interface CompactSessionInput {
   turnId?: string;
+  /**
+   * Override the configured recent-turn tail. Supervisor overflow recovery
+   * uses zero because the failed wake turn itself can contain the oversized
+   * tool result that must be folded.
+   */
+  minRecentTurns?: number;
 }
 
 export type PlanSafeBoundaryContinuationInput = Omit<RuntimeContinuationPlannerInput, 'sessionId'>;

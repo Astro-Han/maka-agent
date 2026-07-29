@@ -137,7 +137,11 @@ export interface HistoryCompactPolicy {
   targetRatio?: number;
   /** Legacy V1 explicit tail budget. Ignored by the V2 checkpoint protocol. */
   tailEstimatedTokens?: number;
-  /** Legacy V1 recent-turn request. V2 keeps exactly the latest complete turn at turn boundaries. */
+  /**
+   * Recent-turn request. V2 normally keeps exactly the latest complete turn
+   * at turn boundaries; an explicit zero permits a recovery compaction to
+   * fold the failed latest turn as well.
+   */
   minRecentTurns?: number;
   /** Legacy V1 deterministic-summary estimate. Defaults to 768. */
   maxSummaryEstimatedTokens?: number;
@@ -343,7 +347,7 @@ export function applyRuntimeEventHistoryCompact(
   }
 
   const turnGroups = groupEventsByTurn(compactableEvents, charsPerTokenResolved);
-  if (turnGroups.length <= 1) {
+  if (turnGroups.length <= 1 && compactPolicy.minRecentTurns !== 0) {
     increment(skippedReasonCounts, 'insufficient_turns');
     return {
       events: [...events],
@@ -359,13 +363,16 @@ export function applyRuntimeEventHistoryCompact(
 
   const usesCheckpointV2Seam =
     options.historyCompactProtocol === 'checkpoint_v2' || compactPolicy.checkpoint !== undefined;
-  const tailSelection = usesCheckpointV2Seam
-    ? selectLatestCompleteTurnEvents(turnGroups)
-    : selectLegacyHistoryCompactTailEvents(turnGroups, {
-        tailBudget:
-          finitePositive(compactPolicy.tailEstimatedTokens) ??
-          Math.max(1, Math.floor(maxTokens * finiteRatio(compactPolicy.targetRatio, 0.5))),
-      });
+  const tailSelection =
+    compactPolicy.minRecentTurns === 0
+      ? { eventIds: new Set<string>(), turnIds: new Set<string>() }
+      : usesCheckpointV2Seam
+        ? selectLatestCompleteTurnEvents(turnGroups)
+        : selectLegacyHistoryCompactTailEvents(turnGroups, {
+            tailBudget:
+              finitePositive(compactPolicy.tailEstimatedTokens) ??
+              Math.max(1, Math.floor(maxTokens * finiteRatio(compactPolicy.targetRatio, 0.5))),
+          });
   const retainedEventIds = tailSelection.eventIds;
   const tailTurnIds = tailSelection.turnIds;
   const foldedEvents = compactableEvents.filter((event) => !retainedEventIds.has(event.id));

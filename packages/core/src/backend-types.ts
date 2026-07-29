@@ -162,6 +162,8 @@ export type PermissionDecision = PermissionResponse;
 export interface BackendCompactHistoryInput {
   turnId: string;
   runtimeContext: readonly RuntimeEvent[];
+  /** Override the configured recent-turn tail for an explicit recovery compaction. */
+  minRecentTurns?: number;
 }
 
 export interface BackendCompactHistoryResult {

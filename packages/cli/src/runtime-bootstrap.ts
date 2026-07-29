@@ -889,6 +889,15 @@ export async function createMakaCliRuntimeContext(
         }
         return runs[0]?.status ?? 'missing';
       },
+      recoverContextOverflow: async (rootSessionId, { abortSignal }) => {
+        abortSignal.throwIfAborted();
+        for await (const _event of runtime.compactSession(rootSessionId, {
+          turnId: randomUUID(),
+          minRecentTurns: 0,
+        })) {
+          abortSignal.throwIfAborted();
+        }
+      },
       newId: randomUUID,
       onError: (rootSessionId, error) => {
         agentGraphErrors.set(rootSessionId, error);

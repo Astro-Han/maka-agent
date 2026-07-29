@@ -729,6 +729,12 @@ export class RuntimeKernel implements RuntimeKernelLike {
     input: CompactSessionInput,
     execution: PendingExecutionClaim,
   ): AsyncIterable<SessionEvent> {
+    if (
+      input.minRecentTurns !== undefined &&
+      (!Number.isSafeInteger(input.minRecentTurns) || input.minRecentTurns < 0)
+    ) {
+      throw new Error('Runtime compaction minRecentTurns must be a non-negative safe integer');
+    }
     if (!this.deps.runStore || !this.deps.runtimeEventStore) {
       throw new Error('Runtime compaction requires AgentRunStore and RuntimeEventStore');
     }
@@ -793,6 +799,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
       const result = await begin.backend.compactHistory({
         turnId: run.turnId,
         runtimeContext: begin.runtimeContext,
+        ...(input.minRecentTurns !== undefined ? { minRecentTurns: input.minRecentTurns } : {}),
       });
       if (run.isStopped()) return;
       const tokenUsageEvent: TokenUsageEvent = {

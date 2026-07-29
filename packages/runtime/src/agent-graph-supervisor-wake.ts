@@ -10,10 +10,61 @@ import type {
   SessionActivityLease,
   SessionActivityRegistry,
 } from './goal-turn-lifecycle.js';
+import { isContextOverflowErrorText } from './provider-error-classification.js';
 import type { AgentGraphClientSnapshot } from './stream-graph-read-model.js';
 import type { AgentGraphScheduleReconciliationResult } from './stream-graph-schedule-reconcile.js';
 
 const DEFAULT_MAX_DELIVERY_ATTEMPTS = 3;
+const MAX_PARTIAL_WORK_ITEMS = 32;
+const MAX_PARTIAL_RECORD_IDS = 32;
+
+export interface AgentGraphSupervisorPartialResult {
+  schemaVersion: 1;
+  graphId: string;
+  snapshotVersion: string;
+  status: AgentGraphClientSnapshot['status'];
+  closed: boolean;
+  scheduleRevision: number;
+  work: Array<{
+    workId: string;
+    status: AgentGraphClientSnapshot['work'][number]['status'];
+    target: AgentGraphClientSnapshot['work'][number]['target'];
+    replaces?: string;
+  }>;
+  terminalRecordIds: string[];
+  omitted: {
+    work: number;
+    terminalRecordIds: number;
+  };
+}
+
+export class AgentGraphSupervisorContextOverflowError extends Error {
+  readonly code = 'agent_graph_supervisor_context_overflow';
+  readonly partialResult: AgentGraphSupervisorPartialResult;
+  readonly recoveryAttempted: boolean;
+  readonly recoveryFailure?: string;
+
+  constructor(input: {
+    partialResult: AgentGraphSupervisorPartialResult;
+    recoveryAttempted: boolean;
+    recoveryFailure?: string;
+  }) {
+    const recovery = input.recoveryFailure
+      ? ` Recovery failed: ${input.recoveryFailure}.`
+      : input.recoveryAttempted
+        ? ' Aggressive history compaction did not restore capacity.'
+        : ' No overflow recovery was available.';
+    super(
+      `Agent graph supervisor context overflow; graph remains durable and recoverable.${recovery} Partial result: ${JSON.stringify(
+        input.partialResult,
+      )}`,
+    );
+    this.name = 'AgentGraphSupervisorContextOverflowError';
+    this.partialResult = input.partialResult;
+    this.recoveryAttempted = input.recoveryAttempted;
+    if (input.recoveryFailure !== undefined) this.recoveryFailure = input.recoveryFailure;
+  }
+}
 
 export interface AgentGraphSupervisorWakeInput {
   activityRegistry: SessionActivityRegistry;
@@ -30,6 +81,17 @@ export interface AgentGraphSupervisorWakeInput {
     attemptId: string,
     turnId: string,
   ): Promise<AgentRunHeader['status'] | 'missing'>;
+  recoverContextOverflow?(
+    rootSessionId: string,
+    input: {
+      graphId: string;
+      wakeId: string;
+      attemptId: string;
+      turnId: string;
+      failureReason: string;
+      abortSignal: AbortSignal;
+    },
+  ): Promise<void>;
   newId(): string;
   maxDeliveryAttempts?: number;
   onError?(rootSessionId: string, error: unknown): void | Promise<void>;
@@ -172,7 +234,9 @@ export class AgentGraphSupervisorWakeCoordinator {
     result?: AgentGraphScheduleReconciliationResult,
   ): Promise<void> {
     let lastFailure: string | undefined;
+    let overflowRecoveryAttempted = false;
     for (let index = 0; index < this.#maxDeliveryAttempts; index += 1) {
+      let overflowAttempt: { attemptId: string; turnId: string; failureReason: string } | undefined;
       const activity = await this.#input.activityRegistry.acquire(
         wake.rootSessionId,
         this.#abortController.signal,
@@ -231,12 +295,45 @@ export class AgentGraphSupervisorWakeCoordinator {
           }
           lastFailure = wakeOutcomeFailure(outcome);
           await this.#markRetryable(wake.graphId, wake.wakeId, attemptId, lastFailure);
+          if (isSupervisorContextOverflow(lastFailure)) {
+            overflowAttempt = { attemptId, turnId, failureReason: lastFailure };
+          }
         } catch (error) {
           lastFailure = errorMessage(error);
           await this.#markRetryable(wake.graphId, wake.wakeId, attemptId, lastFailure);
+          if (isSupervisorContextOverflow(lastFailure)) {
+            overflowAttempt = { attemptId, turnId, failureReason: lastFailure };
+          }
         }
       } finally {
         activity.release();
+      }
+      if (this.#closed) return;
+      if (overflowAttempt) {
+        const canRecover =
+          !overflowRecoveryAttempted &&
+          index + 1 < this.#maxDeliveryAttempts &&
+          this.#input.recoverContextOverflow !== undefined;
+        if (!canRecover) {
+          throw await this.#contextOverflowError(wake.rootSessionId, snapshot, {
+            recoveryAttempted: overflowRecoveryAttempted,
+          });
+        }
+        overflowRecoveryAttempted = true;
+        try {
+          await this.#input.recoverContextOverflow!(wake.rootSessionId, {
+            graphId: wake.graphId,
+            wakeId: wake.wakeId,
+            ...overflowAttempt,
+            abortSignal: this.#abortController.signal,
+          });
+        } catch (error) {
+          if (this.#closed || isAbortError(error)) return;
+          throw await this.#contextOverflowError(wake.rootSessionId, snapshot, {
+            recoveryAttempted: true,
+            recoveryFailure: errorMessage(error),
+          });
+        }
       }
       if (this.#closed) return;
     }
@@ -245,6 +342,23 @@ export class AgentGraphSupervisorWakeCoordinator {
         lastFailure ?? 'unknown failure'
       }`,
     );
+  }
+
+  async #contextOverflowError(
+    rootSessionId: string,
+    fallbackSnapshot: AgentGraphClientSnapshot,
+    input: { recoveryAttempted: boolean; recoveryFailure?: string },
+  ): Promise<AgentGraphSupervisorContextOverflowError> {
+    let currentSnapshot = fallbackSnapshot;
+    try {
+      currentSnapshot = await this.#input.readSnapshot(rootSessionId);
+    } catch {
+      // The checkpoint snapshot is already durable and sufficient for a bounded fallback.
+    }
+    return new AgentGraphSupervisorContextOverflowError({
+      partialResult: projectAgentGraphSupervisorPartialResult(currentSnapshot),
+      ...input,
+    });
   }
 
   async #markRetryable(
@@ -352,6 +466,46 @@ function wakeOutcomeFailure(outcome: Exclude<GoalTurnOutcome, { kind: 'completed
     return `${outcome.kind}: ${outcome.reason}`;
   }
   return 'aborted';
+}
+
+function isSupervisorContextOverflow(failureReason: string): boolean {
+  const normalized = failureReason.toLowerCase();
+  return (
+    normalized.includes('context_overflow') ||
+    normalized.includes('context window exceeded') ||
+    normalized.includes('context budget exhausted') ||
+    isContextOverflowErrorText(failureReason)
+  );
+}
+
+function projectAgentGraphSupervisorPartialResult(
+  snapshot: AgentGraphClientSnapshot,
+): AgentGraphSupervisorPartialResult {
+  const work = snapshot.work.slice(0, MAX_PARTIAL_WORK_ITEMS).map((item) => ({
+    workId: item.workId,
+    status: item.status,
+    target: item.target,
+    ...(item.replaces !== undefined ? { replaces: item.replaces } : {}),
+  }));
+  const allTerminalRecordIds = [
+    ...(snapshot.finish?.resultIds ?? []),
+    ...snapshot.terminalHistory.records.map((record) => record.recordId),
+  ].filter((recordId, index, recordIds) => recordIds.indexOf(recordId) === index);
+  const terminalRecordIds = allTerminalRecordIds.slice(0, MAX_PARTIAL_RECORD_IDS);
+  return {
+    schemaVersion: 1,
+    graphId: snapshot.graphId,
+    snapshotVersion: snapshot.snapshotVersion,
+    status: snapshot.status,
+    closed: snapshot.closed,
+    scheduleRevision: snapshot.scheduleRevision,
+    work,
+    terminalRecordIds,
+    omitted: {
+      work: snapshot.omitted.work + Math.max(0, snapshot.work.length - work.length),
+      terminalRecordIds: Math.max(0, allTerminalRecordIds.length - terminalRecordIds.length),
+    },
+  };
 }
 
 function renderAgentGraphSupervisorWakePrompt(

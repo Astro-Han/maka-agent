@@ -4198,18 +4198,17 @@ describe('AiSdkBackend model history', () => {
       },
     });
 
+    const recentEvent = runtimeTextEvent({
+      id: 'manual-compact-recent',
+      turnId: 'turn-recent',
+      role: 'user',
+      author: 'user',
+      text: 'manual recent retained context',
+    });
+    const runtimeContext = [...oldEvents, recentEvent];
     const result = await backend.compactHistory({
       turnId: 'turn-compact',
-      runtimeContext: [
-        ...oldEvents,
-        runtimeTextEvent({
-          id: 'manual-compact-recent',
-          turnId: 'turn-recent',
-          role: 'user',
-          author: 'user',
-          text: 'manual recent retained context',
-        }),
-      ],
+      runtimeContext,
     });
 
     assert.deepEqual(writeInputs, [
@@ -4222,6 +4221,16 @@ describe('AiSdkBackend model history', () => {
     assert.equal(result.contextBudget?.historyCompactBlocksWritten, 1);
     assert.equal(result.contextBudget?.compactionDecisions?.[0]?.decision, 'replaced');
     assert.equal(result.contextBudget?.compactionDecisions?.[0]?.boundaryKind, 'historyCompact');
+
+    await backend.compactHistory({
+      turnId: 'turn-overflow-recovery',
+      runtimeContext,
+      minRecentTurns: 0,
+    });
+    assert.deepEqual(writeInputs[1], {
+      turnId: 'turn-overflow-recovery',
+      foldedIds: ['manual-compact-old-1', 'manual-compact-old-2', 'manual-compact-recent'],
+    });
   });
 
   test('manual compactHistory still folds small histories with the default automatic compact policy', async () => {

@@ -719,7 +719,7 @@ export class AiSdkCompaction {
     this.historyCompactAbortController = historyCompactAbortController;
     try {
       const runtimeContext = input.runtimeContext.filter((event) => event.turnId !== input.turnId);
-      const policy = this.buildManualHistoryCompactPolicy(runtimeContext);
+      const policy = this.buildManualHistoryCompactPolicy(runtimeContext, input.minRecentTurns);
       if (!policy) return {};
 
       const contextBudget = policy;
@@ -805,6 +805,7 @@ export class AiSdkCompaction {
 
   private buildManualHistoryCompactPolicy(
     runtimeContext: readonly RuntimeEvent[],
+    minRecentTurnsOverride?: number,
   ): ContextBudgetPolicy | undefined {
     if (runtimeContext.length === 0 || !this.input.contextBudget || !this.hasHistoryCompactWriter())
       return undefined;
@@ -821,7 +822,7 @@ export class AiSdkCompaction {
       name: base.name ?? 'manual-history-compact',
       ...(base.charsPerToken !== undefined ? { charsPerToken: base.charsPerToken } : {}),
       maxHistoryEstimatedTokens,
-      minRecentTurns: current?.minRecentTurns ?? base.minRecentTurns ?? 1,
+      minRecentTurns: minRecentTurnsOverride ?? current?.minRecentTurns ?? base.minRecentTurns ?? 1,
       historyCompact: {
         ...currentWithoutBlocks,
         enabled: true,
@@ -829,7 +830,8 @@ export class AiSdkCompaction {
         highWaterRatio: 0.000001,
         targetRatio: current?.targetRatio ?? 0.2,
         tailEstimatedTokens: 1,
-        minRecentTurns: current?.minRecentTurns ?? base.minRecentTurns ?? 1,
+        minRecentTurns:
+          minRecentTurnsOverride ?? current?.minRecentTurns ?? base.minRecentTurns ?? 1,
         maxBlocks: current?.maxBlocks ?? 1,
         maxEstimatedTokens: current?.maxEstimatedTokens ?? 2048,
         maxBlockEstimatedTokens:
