@@ -11,7 +11,6 @@ import {
   type SetStateAction,
 } from 'react';
 import type {
-  ExecutionBoundary,
   PlanReminder,
   QuoteRef,
   SessionSummary,
@@ -80,6 +79,7 @@ import { readNavigationState, selectNavigation } from './nav-selection';
 import { sessionMatchesNavSelection } from './session-nav-filter';
 import { deriveSessionRevisionNavigation } from './session-revisions';
 import { deriveDesktopExecutionBoundarySurface } from './desktop-execution-boundary-surface';
+import { useActiveExecutionBoundary } from './use-active-execution-boundary';
 import {
   SESSION_LIST_EXPANDED_MAX_WIDTH,
   SESSION_LIST_EXPANDED_MIN_WIDTH,
@@ -999,26 +999,8 @@ function AppShellContent({
     permissionMode: defaultPermissionMode,
         }
       : undefined);
-  const [activeExecutionBoundary, setActiveExecutionBoundary] = useState<
-    ExecutionBoundary | undefined
-  >();
-  useEffect(() => {
-    if (!activeId) {
-      setActiveExecutionBoundary(undefined);
-      return;
-    }
-    let cancelled = false;
-    setActiveExecutionBoundary(undefined);
-    void window.maka.sessions
-      .readExecutionBoundary(activeId)
-      .then((boundary) => {
-        if (!cancelled) setActiveExecutionBoundary(boundary);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeId, activeSessionForView?.permissionMode]);
+  const { boundary: activeExecutionBoundary, reload: reloadActiveExecutionBoundary } =
+    useActiveExecutionBoundary(activeId, activeSessionForView?.permissionMode);
   useEffect(() => {
     if (!activeId) return;
     let cancelled = false;
@@ -1345,6 +1327,7 @@ function AppShellContent({
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged: markSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged: reloadActiveExecutionBoundary,
     showModelSetupToast,
     toastApi,
     upsertSessionSummary,
@@ -1555,6 +1538,7 @@ function AppShellContent({
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged: markSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged: reloadActiveExecutionBoundary,
     showModelSetupToast,
     toastApi,
     notifyRunEnded: ({ kind, sessionId, body }) => {
