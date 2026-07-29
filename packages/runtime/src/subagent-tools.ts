@@ -315,7 +315,12 @@ export function buildSubagentOutputTool(): MakaTool<
         run_id: z.string().min(1).optional(),
         turn_id: z.string().min(1).optional(),
         max_events: z.number().int().min(1).max(100).optional(),
-        max_bytes: z.number().int().min(1024).max(128 * 1024).optional(),
+        max_bytes: z
+          .number()
+          .int()
+          .min(1024)
+          .max(128 * 1024)
+          .optional(),
         view: z.enum(['events', 'runtime_events', 'all']).optional(),
       })
       .superRefine((input, ctx) => {
