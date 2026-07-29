@@ -664,7 +664,7 @@ export function applyMakaSessionEventToTranscript(
           state.entries.push({
             kind: 'notice',
             level: 'info',
-            text: `Sandbox boundary ${event.decision === 'allow' ? 'expanded' : 'unchanged'}`,
+            text: `Access ${event.decision === 'allow' ? 'expanded' : 'unchanged'}`,
           });
         }
       }
@@ -1229,7 +1229,7 @@ export function renderMakaPiStatusLine(metadata: MakaPiTranscriptMetadata, width
   const sep = ansi.dim(' · ');
   const parts: string[] = [
     ansi.bold(metadata.title),
-    ansi.dim(metadata.permissionMode === 'bypass' ? 'Bypass' : 'Auto'),
+    ansi.dim(metadata.permissionMode === 'bypass' ? 'Full access' : 'Auto'),
     ansi.dim(metadata.model),
   ];
   // #1064: omit thinking:default — it is noise before the user explicitly
@@ -1613,7 +1613,7 @@ function renderSandboxBoundaryPrompt(
   width: number,
 ): string[] {
   const lines = [
-    fitLine(ansi.yellow('Sandbox boundary expansion'), width),
+    fitLine(ansi.yellow('Allow access outside the workspace?'), width),
     ...renderIndented(request.justification, width, 2),
   ];
   for (const entry of request.expansion.filesystem?.entries ?? []) {

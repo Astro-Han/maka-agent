@@ -911,18 +911,18 @@ const SHELL_COPY_BY_LOCALE = {
     sessionSettingsActions: {
       permissionLabels: {
         ask: '自动',
-        bypass: '绕过沙箱',
+        bypass: '完全权限',
       },
       permissionDescriptions: {
-        explore: '兼容模式：使用只读托管边界。',
-        ask: '自动：工作区内可写，网络受限；需要更大范围时询问。',
-        execute: '兼容模式：映射到自动沙箱边界。',
-        bypass: '绕过 Maka 管理的本地沙箱边界。',
+        explore: '只读：可以读取和搜索工作区文件，写入和网络访问会先来问你。',
+        ask: '自动：工作区内可写，网络受限；需要更大范围时会先来问你。',
+        execute: '兼容模式：等同于自动。',
+        bypass: '本地工具直接访问你的文件和网络，不经 Maka 的保护层。',
       },
-      bypassConfirmTitle: '切换到绕过模式？',
+      bypassConfirmTitle: '切换到完全权限？',
       bypassConfirmDescription:
-        '本地工具将直接访问宿主机文件系统和网络。仅对你完全信任且已由外部环境隔离的任务使用。',
-      bypassConfirmLabel: '进入绕过模式',
+        '本地工具将直接读写你的文件并访问网络，不经 Maka 的保护层。仅用于你完全信任、或已在外部隔离环境中运行的任务。',
+      bypassConfirmLabel: '开启完全权限',
       bypassCancelLabel: '保持自动',
       permissionSwitched: (label: string) => `已切到 ${label}`,
       permissionFailedTitle: '切换权限模式失败',
@@ -981,15 +981,15 @@ const SHELL_COPY_BY_LOCALE = {
       commands: ZH_STATIC_COMMANDS,
       settingsSections: ZH_SETTINGS_SECTIONS,
       permissionModes: {
-        explore: { label: '权限 · 只读', hint: '读取和搜索直通，写入仍确认' },
-        ask: { label: '权限 · 自动', hint: '在会话沙箱内运行；扩大文件或网络边界时再询问' },
+        explore: { label: '权限 · 只读', hint: '读取和搜索直通，写入和网络仍需确认' },
+        ask: { label: '权限 · 自动', hint: '在受保护的环境中运行；需要访问工作区以外的内容时再询问' },
         execute: {
           label: '权限 · 自动执行',
           hint: '常见工具直通，破坏性操作仍确认',
         },
         bypass: {
-          label: '权限 · Bypass',
-          hint: '关闭 Maka 沙箱，开放宿主机文件系统和网络',
+          label: '权限 · 完全权限',
+          hint: '不经 Maka 的保护层，直接访问你的文件和网络',
         },
       },
       settingsCommand: (section: string) => `设置 · ${section}`,
@@ -1392,18 +1392,18 @@ const SHELL_COPY_BY_LOCALE = {
     sessionSettingsActions: {
       permissionLabels: {
         ask: 'Auto',
-        bypass: 'Bypass sandbox',
+        bypass: 'Full access',
       },
       permissionDescriptions: {
-        explore: 'Compatibility mode: use a managed read-only boundary.',
-        ask: 'Auto: write within the workspace, restrict network access, and ask before expanding.',
-        execute: 'Compatibility mode: map to the automatic sandbox boundary.',
-        bypass: 'Bypass the Maka-managed local sandbox boundary.',
+        explore: 'Read only: read and search workspace files; writes and network access ask you first.',
+        ask: 'Auto: write within the workspace, restrict network access, and ask before going further.',
+        execute: 'Compatibility mode: same as Auto.',
+        bypass: "Local tools reach your files and your network directly, outside Maka's protection layer.",
       },
-      bypassConfirmTitle: 'Switch to Bypass?',
+      bypassConfirmTitle: 'Switch to full access?',
       bypassConfirmDescription:
-        'Local tools will access the host filesystem and network directly. Use only for trusted tasks that are isolated externally.',
-      bypassConfirmLabel: 'Enter Bypass',
+        "Local tools will read and write your files and reach the network directly, outside Maka's protection layer. Use only for tasks you fully trust, or ones already isolated by their environment.",
+      bypassConfirmLabel: 'Turn on full access',
       bypassCancelLabel: 'Keep Auto',
       permissionSwitched: (label: string) => `Switched to ${label}`,
       permissionFailedTitle: 'Could not change permission mode',
@@ -1464,19 +1464,19 @@ const SHELL_COPY_BY_LOCALE = {
       permissionModes: {
         explore: {
           label: 'Permissions · Read only',
-          hint: 'Read and search directly; confirm writes',
+          hint: 'Read and search directly; confirm writes and network access',
         },
         ask: {
           label: 'Permissions · Auto',
-          hint: 'Run inside the session sandbox; ask only to expand filesystem or network access',
+          hint: 'Run inside a protected environment; ask before reaching outside the workspace',
         },
         execute: {
           label: 'Permissions · Auto execute',
           hint: 'Run common tools; confirm destructive actions',
         },
         bypass: {
-          label: 'Permissions · Bypass',
-          hint: 'Disable the Maka sandbox and expose host filesystem and network access',
+          label: 'Permissions · Full access',
+          hint: "Reach your files and your network directly, outside Maka's protection layer",
         },
       },
       settingsCommand: (section: string) => `Settings · ${section}`,

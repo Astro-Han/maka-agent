@@ -332,15 +332,15 @@ const CONVERSATION_COPY = {
     },
     permissions: {
       mode: {
-        explore: { label: '只读模式', hint: '读取、列表和搜索直接执行；写入或网络操作仍需明确确认。Deep Research 默认使用此模式。' },
-        ask: { label: '自动', hint: '在会话沙箱内自动执行；需要扩大文件或网络边界时再询问。' },
+        explore: { label: '只读', hint: '本会话只能读取和搜索工作区里的文件；写入文件或访问网络前会先来问你。' },
+        ask: { label: '自动', hint: '在受保护的环境中自动执行；需要访问工作区以外的文件或网络时再来问你。' },
         execute: { label: '自动执行', hint: '常见工具直接执行；破坏性、特权和浏览器操作仍会请求确认。' },
-        bypass: { label: '绕过沙箱', hint: '本会话中的本地工具不受沙箱限制。仅在完全信任任务时使用。' },
+        bypass: { label: '完全权限', hint: '本地工具直接访问你的文件和网络，不经 Maka 的保护层。仅用于你完全信任的任务。' },
       },
       modeAriaLabel: (label) => `权限模式：${label}`,
     },
     sandboxBoundary: {
-      title: '扩大本会话的沙箱边界？',
+      title: '允许访问工作区以外的内容？',
       access: { read: '读取', write: '写入' },
       scope: { exact: '仅此路径', subtree: '目录及子目录' },
       network: '网络访问',
@@ -468,15 +468,15 @@ const CONVERSATION_COPY = {
     },
     permissions: {
       mode: {
-        explore: { label: 'Read only', hint: 'Read, list, and search run directly; writes and network access still require confirmation. Deep Research uses this mode by default.' },
-        ask: { label: 'Auto', hint: 'Run automatically inside the session sandbox; ask only when file or network boundaries must expand.' },
+        explore: { label: 'Read only', hint: 'This conversation can read and search files in the workspace; it asks you before writing a file or reaching the network.' },
+        ask: { label: 'Auto', hint: 'Runs automatically inside a protected environment; asks you before reaching files outside the workspace or the network.' },
         execute: { label: 'Auto execute', hint: 'Common tools run directly; destructive, privileged, and browser actions still require confirmation.' },
-        bypass: { label: 'Bypass sandbox', hint: 'Local tools in this session run without sandbox restrictions. Use only for tasks you fully trust.' },
+        bypass: { label: 'Full access', hint: "Local tools reach your files and your network directly, outside Maka's protection layer. Use only for tasks you fully trust." },
       },
       modeAriaLabel: (label) => `Permission mode: ${label}`,
     },
     sandboxBoundary: {
-      title: "Expand this session's sandbox boundary?",
+      title: 'Allow access outside the workspace?',
       access: { read: 'Read', write: 'Write' },
       scope: { exact: 'Exact path', subtree: 'Directory subtree' },
       network: 'Network access',

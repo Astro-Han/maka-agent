@@ -1934,7 +1934,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     state.entries.push({
       kind: 'notice',
       level: 'info',
-      text: `Sandbox boundary: ${mode === 'bypass' ? 'Bypass' : 'Auto'}`,
+      text: `Permissions: ${mode === 'bypass' ? 'Full access' : 'Auto'}`,
     });
     requestRender();
   };
@@ -1948,17 +1948,17 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       {
         value: 'keep',
         label: 'Keep Auto',
-        description: 'Stay within the session sandbox boundary',
+        description: 'Stay inside the protected environment',
       },
       {
         value: 'bypass',
-        label: 'Enter Bypass',
+        label: 'Turn on full access',
         description:
-          'Expose the host filesystem and network; use only for trusted, externally isolated tasks',
+          'Reach your files and your network directly; use only for trusted or externally isolated tasks',
       },
     ];
     showSelectPicker(
-      'Switch to Bypass?',
+      'Switch to full access?',
       'keep',
       confirmation,
       (choice) => {
@@ -2143,7 +2143,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     const items = permissionModePickerItems(permissionMode);
     const displayedMode = permissionMode === 'bypass' ? 'bypass' : 'auto';
     showSelectPicker(
-      'Sandbox Boundary',
+      'Permissions',
       displayedMode,
       items,
       (item) => {
@@ -2304,7 +2304,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     },
     {
       name: 'permissions',
-      description: 'Set session sandbox boundary',
+      description: 'Set session permissions',
       run: (parts: string[]) => {
         if (parts.length === 1) {
           showPermissionModeList();

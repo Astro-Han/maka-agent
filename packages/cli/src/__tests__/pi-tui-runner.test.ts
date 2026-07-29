@@ -4583,7 +4583,7 @@ describe('Maka Pi TUI runner', () => {
 
     terminal.input('/permissions bypass');
     terminal.input('\r');
-    await waitFor(() => terminal.output().includes('Switch to Bypass?'));
+    await waitFor(() => terminal.output().includes('Switch to full access?'));
     assert.deepEqual(driver.permissionModes, []);
 
     terminal.input('\r');
@@ -4612,7 +4612,7 @@ describe('Maka Pi TUI runner', () => {
     await waitFor(() => driver.permissionModes.length === 1);
 
     assert.deepEqual(driver.permissionModes, ['ask']);
-    assert.doesNotMatch(terminal.output(), /Switch to Bypass/);
+    assert.doesNotMatch(terminal.output(), /Switch to full access/);
 
     exitMaka(terminal);
     await run;
@@ -4966,20 +4966,20 @@ describe('Maka Pi TUI runner', () => {
     terminal.input('/permissions');
     terminal.input('\r');
 
-    await waitFor(() => terminal.output().includes('Sandbox Boundary'));
+    await waitFor(() => terminal.output().includes('Permissions'));
     assertBottomPickerPlacement(
       terminal,
-      'Sandbox Boundary',
+      'Permissions',
       'Maka · Auto · claude-sonnet-4-5 · claude-subscription · /repo',
     );
     terminal.input('\x1b[B');
     terminal.input('\r');
-    await waitFor(() => terminal.output().includes('Switch to Bypass?'));
+    await waitFor(() => terminal.output().includes('Switch to full access?'));
     assert.deepEqual(driver.permissionModes, []);
     terminal.input('\x1b[B');
     terminal.input('\r');
     await waitFor(() => driver.permissionModes.length === 1);
-    await waitFor(() => terminal.output().includes('Sandbox boundary: Bypass'));
+    await waitFor(() => terminal.output().includes('Permissions: Full access'));
 
     assert.deepEqual(driver.permissionModes, ['bypass']);
     assert.deepEqual(driver.prompts, []);
@@ -6820,14 +6820,16 @@ describe('Maka Pi TUI runner', () => {
 
     terminal.input('run');
     terminal.input('\r');
-    await waitFor(() => terminal.output().includes('Sandbox boundary expansion'));
+    await waitFor(() => terminal.output().includes('Allow access outside the workspace?'));
 
     terminal.input('y');
     await waitFor(() => driver.responses.length === 1);
     await delay(20);
 
     // Response rejected: error shows, but the boundary prompt stays and can be retried.
-    assert.ok(plainTerminalOutput(terminal.output()).includes('Sandbox boundary expansion'));
+    assert.ok(
+      plainTerminalOutput(terminal.output()).includes('Allow access outside the workspace?'),
+    );
 
     terminal.input('n');
     await waitFor(() => driver.responses.length === 2);
@@ -7614,13 +7616,13 @@ describe('Maka Pi TUI runner', () => {
 
     terminal.input('run');
     terminal.input('\r');
-    await waitFor(() => terminal.output().includes('Sandbox boundary expansion'));
+    await waitFor(() => terminal.output().includes('Allow access outside the workspace?'));
     driver.continueToError();
     await waitFor(() => terminal.output().includes('turn failed'));
 
     // The turn errored: the boundary prompt must be gone from the screen.
     assert.equal(
-      plainTerminalOutput(terminal.screenOutput()).includes('Sandbox boundary expansion'),
+      plainTerminalOutput(terminal.screenOutput()).includes('Allow access outside the workspace?'),
       false,
     );
 

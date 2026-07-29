@@ -1291,7 +1291,7 @@ describe('Maka Pi TUI transcript', () => {
     ).map(stripAnsi);
 
     assert.equal(state.pendingInteraction?.requestId, 'boundary-1');
-    assert.ok(visibleLines.some((line) => line.includes('Sandbox boundary expansion')));
+    assert.ok(visibleLines.some((line) => line.includes('Allow access outside the workspace?')));
     assert.ok(visibleLines.some((line) => line.includes('Read the user-selected file.')));
     assert.ok(visibleLines.some((line) => line.includes('read exact /outside/file.txt')));
     assert.ok(visibleLines.some((line) => line.includes('network enabled')));
@@ -5420,7 +5420,7 @@ describe('transcript entry render memoization', () => {
 });
 
 describe('Maka Pi TUI status line', () => {
-  test('renders managed compatibility modes as Auto and bypass as Bypass', () => {
+  test('renders managed compatibility modes as Auto and bypass as Full access', () => {
     for (const permissionMode of ['ask', 'execute', 'explore']) {
       const line = stripAnsi(renderMakaPiStatusLine({ ...meta(), permissionMode }, 100));
       assert.match(line, /Maka · Auto ·/);
@@ -5428,7 +5428,7 @@ describe('Maka Pi TUI status line', () => {
     }
     assert.match(
       stripAnsi(renderMakaPiStatusLine({ ...meta(), permissionMode: 'bypass' }, 100)),
-      /Maka · Bypass ·/,
+      /Maka · Full access ·/,
     );
   });
 

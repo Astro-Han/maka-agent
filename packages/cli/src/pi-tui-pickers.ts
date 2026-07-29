@@ -690,12 +690,15 @@ export function permissionModePickerItems(currentMode: PermissionMode): SelectIt
     {
       value: 'auto',
       label: 'Auto',
-      description: current === 'ask' ? 'current · sandboxed' : 'sandboxed',
+      description: current === 'ask' ? 'current · protected' : 'protected',
     },
     {
       value: 'bypass',
-      label: 'Bypass',
-      description: current === 'bypass' ? 'current · unrestricted' : 'unrestricted',
+      label: 'Full access',
+      description:
+        current === 'bypass'
+          ? 'current · your files and network, unprotected'
+          : 'your files and network, unprotected',
     },
   ];
 }
