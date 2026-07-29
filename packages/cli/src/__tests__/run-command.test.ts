@@ -281,6 +281,15 @@ describe('maka run process contract', () => {
     assert.equal(result.stdout, 'prompt=continue this\n');
   });
 
+  test('names the mode the same way the desktop and TUI do (#1616)', async () => {
+    const help = await runFixture(['--help'], { input: '' });
+
+    assert.equal(help.code, 0, help.stderr);
+    assert.match(help.stdout, /--yolo\s+Give this session full access to your files and network/);
+    assert.doesNotMatch(help.stdout, /sandbox/i);
+    assert.doesNotMatch(help.stdout, /bypass/i);
+  });
+
   test('fails closed when resuming a bypass session without --yolo', async () => {
     const cwd = await realpath(process.cwd());
     const resumed = fixtureSession({
@@ -298,7 +307,10 @@ describe('maka run process contract', () => {
     });
 
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /requires --yolo/i);
+    // The session id in this fixture is literally `resume-bypass`, so only the
+    // sentence itself is checked for the old name.
+    assert.match(result.stderr, /resuming a full-access session .* requires --yolo/i);
+    assert.doesNotMatch(result.stderr, /Bypass session/i);
     assert.equal(result.stdout, '');
   });
 

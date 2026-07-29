@@ -332,8 +332,8 @@ const CONVERSATION_COPY = {
     },
     permissions: {
       mode: {
-        explore: { label: '只读', hint: '本会话只能读取和搜索工作区里的文件；写入文件或访问网络前会先来问你。' },
-        ask: { label: '自动', hint: '在受保护的环境中自动执行；需要访问工作区以外的文件或网络时再来问你。' },
+        explore: { label: '只读', hint: '只读取和搜索，不写入文件、不访问网络；需要这些权限时会先来问你。' },
+        ask: { label: '自动', hint: '在 Maka 的保护层内自动执行；需要超出当前权限范围时会先来问你。' },
         execute: { label: '自动执行', hint: '常见工具直接执行；破坏性、特权和浏览器操作仍会请求确认。' },
         bypass: { label: '完全权限', hint: '本地工具直接访问你的文件和网络，不经 Maka 的保护层。仅用于你完全信任的任务。' },
       },
@@ -468,8 +468,8 @@ const CONVERSATION_COPY = {
     },
     permissions: {
       mode: {
-        explore: { label: 'Read only', hint: 'This conversation can read and search files in the workspace; it asks you before writing a file or reaching the network.' },
-        ask: { label: 'Auto', hint: 'Runs automatically inside a protected environment; asks you before reaching files outside the workspace or the network.' },
+        explore: { label: 'Read only', hint: 'Reads and searches only — no writing files, no network. Asks you first when it needs either.' },
+        ask: { label: 'Auto', hint: "Runs automatically inside Maka's protection layer; asks you first when something needs to go beyond the current permissions." },
         execute: { label: 'Auto execute', hint: 'Common tools run directly; destructive, privileged, and browser actions still require confirmation.' },
         bypass: { label: 'Full access', hint: "Local tools reach your files and your network directly, outside Maka's protection layer. Use only for tasks you fully trust." },
       },

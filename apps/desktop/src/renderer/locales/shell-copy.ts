@@ -914,8 +914,8 @@ const SHELL_COPY_BY_LOCALE = {
         bypass: '完全权限',
       },
       permissionDescriptions: {
-        explore: '只读：可以读取和搜索工作区文件，写入和网络访问会先来问你。',
-        ask: '自动：工作区内可写，网络受限；需要更大范围时会先来问你。',
+        explore: '只读：只读取和搜索，写入文件和访问网络会先来问你。',
+        ask: '自动：在 Maka 的保护层内执行；需要超出当前权限范围时会先来问你。',
         execute: '兼容模式：等同于自动。',
         bypass: '本地工具直接访问你的文件和网络，不经 Maka 的保护层。',
       },
@@ -982,7 +982,7 @@ const SHELL_COPY_BY_LOCALE = {
       settingsSections: ZH_SETTINGS_SECTIONS,
       permissionModes: {
         explore: { label: '权限 · 只读', hint: '读取和搜索直通，写入和网络仍需确认' },
-        ask: { label: '权限 · 自动', hint: '在受保护的环境中运行；需要访问工作区以外的内容时再询问' },
+        ask: { label: '权限 · 自动', hint: '在 Maka 的保护层内运行；需要超出当前权限范围时再询问' },
         execute: {
           label: '权限 · 自动执行',
           hint: '常见工具直通，破坏性操作仍确认',
@@ -1395,8 +1395,8 @@ const SHELL_COPY_BY_LOCALE = {
         bypass: 'Full access',
       },
       permissionDescriptions: {
-        explore: 'Read only: read and search workspace files; writes and network access ask you first.',
-        ask: 'Auto: write within the workspace, restrict network access, and ask before going further.',
+        explore: 'Read only: reads and searches only; writing files and network access ask you first.',
+        ask: "Auto: runs inside Maka's protection layer and asks before anything goes beyond the current permissions.",
         execute: 'Compatibility mode: same as Auto.',
         bypass: "Local tools reach your files and your network directly, outside Maka's protection layer.",
       },
@@ -1468,7 +1468,7 @@ const SHELL_COPY_BY_LOCALE = {
         },
         ask: {
           label: 'Permissions · Auto',
-          hint: 'Run inside a protected environment; ask before reaching outside the workspace',
+          hint: "Run inside Maka's protection layer; ask before going beyond the current permissions",
         },
         execute: {
           label: 'Permissions · Auto execute',
