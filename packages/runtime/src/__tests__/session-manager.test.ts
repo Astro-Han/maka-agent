@@ -13260,6 +13260,55 @@ describe('SessionManager permission mode updates', () => {
     ).toBe(1);
   });
 
+  // The counterpart of the soft case, at the caller that enforces the policy:
+  // an unclaimed event that carries content may have cost a reader a row, so
+  // getSessionView must still refuse the view rather than serve a lossy one.
+  test('refuses a session view when an unclaimed event carries content', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new UnmappedSessionEventBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(9_700),
+    });
+    const session = await manager.createSession(makeInput());
+
+    for await (const _event of manager.sendMessage(session.id, {
+      turnId: 'turn-1',
+      text: 'hello',
+    })) {
+      // drain
+    }
+
+    const [run] = await runStore.listSessionRuns(session.id);
+    await runStore.appendRuntimeEvent(
+      session.id,
+      run!.runId,
+      runtimeEvent({
+        id: 'unclaimed-content',
+        sessionId: session.id,
+        runId: run!.runId,
+        turnId: 'turn-1',
+        ts: 4,
+        role: 'model',
+        author: 'agent',
+        content: { kind: 'not_yet_projected', text: 'a reader would have seen this' } as never,
+      }),
+    );
+
+    await assert.rejects(
+      new RuntimeReadModel({ runStore, runtimeEventStore: runStore }).getSessionView(session.id),
+      (error: unknown) =>
+        error instanceof RuntimeReadModelError &&
+        error.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported_event'),
+    );
+  });
+
   test('marks backend errors as blocked with a generalized reason', async () => {
     const store = new MemorySessionStore();
     const backends = new BackendRegistry();

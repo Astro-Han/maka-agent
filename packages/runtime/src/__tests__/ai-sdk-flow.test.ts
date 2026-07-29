@@ -1332,9 +1332,13 @@ describe('SessionEvent projection coverage', () => {
       runHeaders: [projectionRunHeader],
     });
     assert.deepEqual(projected.messages, []);
+    // Filtered through the predicate the contract above uses, not just compared
+    // to the code string: dropping the soft code from the predicate would
+    // otherwise loosen the contract to `unsupported_event` only, silently.
     assert.deepEqual(
-      projected.diagnostics.map((diagnostic) => diagnostic.code),
+      projected.diagnostics.filter(isUnclaimedRuntimeEventDiagnostic).map((d) => d.code),
       ['unclaimed_control_fact'],
     );
+    assert.equal(projected.diagnostics.length, 1);
   });
 });
