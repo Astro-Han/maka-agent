@@ -516,7 +516,7 @@ function renderAgentGraphSupervisorWakePrompt(
     '<agent-graph-supervisor-checkpoint>',
     `Graph ${snapshot.graphId} reached a durable supervisor checkpoint.`,
     `Reconciliation status: ${result?.status ?? 'recovered'}. Snapshot: ${snapshot.snapshotVersion}.`,
-    'Inspect the graph with view_agent_graph. Use agent_output for child results when needed.',
+    'Inspect the graph with view_agent_graph. Read child results with agent_output view=result; use raw event views only for narrow diagnostics.',
     'Then either schedule the next work with update_agent_graph or finish the graph with the selected result record IDs.',
     'Report the useful outcome to the user when the graph is complete.',
     '</agent-graph-supervisor-checkpoint>',

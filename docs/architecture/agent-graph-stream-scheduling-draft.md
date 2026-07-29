@@ -189,7 +189,12 @@ This separation matters:
 - access control and archival stay on the original resource;
 - a read model cannot silently become a competing event store.
 
-When the main Agent needs the actual answer behind a candidate record, it uses `agent_output` with the operator's `childSessionId` and `currentRunId`.
+When the main Agent needs the actual answer behind a candidate record, it uses
+`agent_output` with the operator's `childSessionId`, `currentRunId`, and
+`view=result`. That projection returns only the final committed model text,
+its Graph result/terminal record IDs, and bounded artifact references. Raw
+Runtime events remain an explicit diagnostic view rather than the normal
+supervisor data path.
 
 ### Commit is the stream boundary
 

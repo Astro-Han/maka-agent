@@ -214,6 +214,111 @@ describe('SessionManager graph operator provisioning', () => {
     expect(await runStore.listSessionRuns(result.header.id)).toEqual([]);
   });
 
+  test('reads a graph activation through the committed-result data plane', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends: new BackendRegistry(),
+      childTools: [testTool('Read'), testTool('Glob'), testTool('Grep')],
+      newId: nextId(),
+      now: nextNow(60),
+    });
+    const parent = await manager.createSession(makeInput({ permissionMode: 'ask' }));
+    await runStore.createRun(
+      makeRunHeader({
+        sessionId: parent.id,
+        runId: 'supervisor-run',
+        turnId: 'supervisor-turn',
+      }),
+    );
+    const provisioned = await manager.provisionAgentGraphOperator({
+      graphId: 'graph-result',
+      workId: `graph_work_${'6'.repeat(32)}`,
+      agentId: LOCAL_READ_AGENT_ID,
+      operatorId: `graph_operator_${'7'.repeat(32)}`,
+      source: {
+        sessionId: parent.id,
+        runId: 'supervisor-run',
+        turnId: 'supervisor-turn',
+        toolCallId: 'schedule-tool',
+      },
+      edges: [],
+      expectedScheduleRevision: 1,
+    });
+    const run = makeRunHeader({
+      sessionId: provisioned.header.id,
+      runId: provisioned.provision.initialRunId,
+      turnId: provisioned.provision.initialTurnId,
+      status: 'completed',
+      createdAt: 70,
+      updatedAt: 80,
+      completedAt: 80,
+    });
+    const committedText = 'committed child answer '.repeat(200);
+    await seedRuntimeRun(runStore, run, [
+      runtimeEvent({
+        id: 'graph-child-answer',
+        sessionId: run.sessionId,
+        runId: run.runId,
+        turnId: run.turnId,
+        ts: 75,
+        role: 'model',
+        author: 'agent',
+        content: { kind: 'text', text: committedText },
+      }),
+      runtimeEvent({
+        id: 'graph-child-complete',
+        sessionId: run.sessionId,
+        runId: run.runId,
+        turnId: run.turnId,
+        ts: 80,
+        role: 'system',
+        author: 'system',
+        status: 'completed',
+        actions: { endInvocation: true },
+      }),
+    ]);
+
+    const output = await manager.readChildAgentOutput(parent.id, {
+      execution: {
+        kind: 'child_session',
+        sessionId: provisioned.header.id,
+        currentRunId: run.runId,
+      },
+      view: 'result',
+      maxBytes: 1024,
+    });
+
+    expect(output.events).toEqual([]);
+    expect(output.runtimeEvents).toEqual([]);
+    expect(output.artifacts).toEqual([]);
+    expect(output.result).toMatchObject({
+      schemaVersion: 1,
+      status: 'completed',
+      graph: {
+        graphId: 'graph-result',
+        workId: `graph_work_${'6'.repeat(32)}`,
+        operatorId: `graph_operator_${'7'.repeat(32)}`,
+      },
+      sourceRuntimeEventId: 'graph-child-answer',
+      terminalRuntimeEventId: 'graph-child-complete',
+      textTruncated: true,
+    });
+    expect(output.result?.text?.startsWith('committed child answer')).toBe(true);
+    expect((output.result?.text?.length ?? 0) < committedText.length).toBe(true);
+    expect(output.result?.resultRecordId).toMatch(/^graph_record_/);
+    expect(output.result?.terminalRecordId).toMatch(/^graph_record_/);
+    expect(output.result?.resultRecordId === output.result?.terminalRecordId).toBe(false);
+    expect(output.budget).toMatchObject({
+      view: 'result',
+      maxBytes: 1024,
+    });
+    expect(output.budget.projectedBytes <= output.budget.maxBytes).toBe(true);
+  });
+
   test('binds implementation operators to a durable project worktree', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();

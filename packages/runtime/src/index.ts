@@ -35,6 +35,7 @@ export type {
   AgentListItem,
   AgentListResult,
   SubagentExecutionListItem,
+  AgentOutputCommittedResult,
   AgentOutputInput,
   AgentOutputResult,
   StopSessionInput,

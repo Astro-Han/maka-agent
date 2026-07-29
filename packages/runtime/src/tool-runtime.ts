@@ -226,7 +226,7 @@ export interface MakaToolContext {
     turnId?: string;
     maxEvents?: number;
     maxBytes?: number;
-    view?: 'events' | 'runtime_events' | 'all';
+    view?: 'result' | 'events' | 'runtime_events' | 'all';
   }) => Promise<unknown>;
   askUserQuestion?: (questions: UserQuestion[]) => Promise<UserQuestionResult>;
   requestSandboxBoundary?: (
@@ -385,7 +385,7 @@ export interface ToolRuntimeInput {
     turnId?: string;
     maxEvents?: number;
     maxBytes?: number;
-    view?: 'events' | 'runtime_events' | 'all';
+    view?: 'result' | 'events' | 'runtime_events' | 'all';
   }) => Promise<unknown>;
   getRunTrace?: () => RunTraceLike | null;
   recordToolInvocation?: ToolTelemetryRecorder;

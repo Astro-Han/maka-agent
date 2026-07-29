@@ -1098,6 +1098,7 @@ describe('subagent tools', () => {
     const schema = outputTool.parameters as { safeParse(input: unknown): { success: boolean } };
 
     expect(schema.safeParse({ run_id: 'child-run' }).success).toBe(true);
+    expect(schema.safeParse({ run_id: 'child-run', view: 'result' }).success).toBe(true);
     expect(schema.safeParse({ turn_id: 'child-turn' }).success).toBe(true);
     expect(schema.safeParse({ child_session_id: 'child-session' }).success).toBe(true);
     expect(

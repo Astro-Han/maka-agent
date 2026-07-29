@@ -288,7 +288,7 @@ export function buildSubagentOutputTool(): MakaTool<
     turn_id?: string;
     max_events?: number;
     max_bytes?: number;
-    view?: 'events' | 'runtime_events' | 'all';
+    view?: 'result' | 'events' | 'runtime_events' | 'all';
   },
   unknown
 > {
@@ -296,7 +296,7 @@ export function buildSubagentOutputTool(): MakaTool<
     name: AGENT_OUTPUT_TOOL_NAME,
     displayName: 'Agent Output',
     description:
-      'Inspect bounded child output. Defaults to the semantic runtime_events view with a 32 KiB payload budget. Always set locator: child_session_run for a graph childSessionId/currentRunId, child_session_latest for its latest run, or a legacy locator. Use view=all only for targeted diagnostics.',
+      'Inspect bounded child output. Use view=result for the final committed model text plus its Graph result record id; runtime_events is the default compatibility view. Always set locator: child_session_run for a graph childSessionId/currentRunId, child_session_latest for its latest run, or a legacy locator. Use view=all only for targeted diagnostics.',
     parameters: z
       .object({
         locator: z
@@ -319,7 +319,7 @@ export function buildSubagentOutputTool(): MakaTool<
           .min(1024)
           .max(128 * 1024)
           .optional(),
-        view: z.enum(['events', 'runtime_events', 'all']).optional(),
+        view: z.enum(['result', 'events', 'runtime_events', 'all']).optional(),
       })
       .superRefine((input, ctx) => {
         if (input.locator) {

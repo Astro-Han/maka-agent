@@ -189,7 +189,10 @@ Parent 不需要维护可变 child ID 数组。反向查询与 Graph topology �
 - access control 与 archive 继续附着在原始 resource 上；
 - read model 不会悄悄变成竞争性的 event store。
 
-主 Agent 需要读取某个 candidate record 背后的真实答案时，使用 operator 的 `childSessionId` 和 `currentRunId` 调用 `agent_output`。
+主 Agent 需要读取某个 candidate record 背后的真实答案时，使用 operator 的
+`childSessionId`、`currentRunId` 和 `view=result` 调用 `agent_output`。这个投影只返回
+最终已提交的模型文本、对应的 Graph result/terminal record ID，以及有界的 artifact
+引用。原始 Runtime events 仍可用于显式诊断，但不再属于 supervisor 的正常数据路径。
 
 ### Commit 是 stream boundary
 

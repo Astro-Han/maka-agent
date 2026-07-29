@@ -14,8 +14,9 @@ describe('Graph Mode shared prompt', () => {
     assert.match(prompt, /committed record ids/);
     assert.match(prompt, /agent_output/);
     assert.match(prompt, /child_session_run.*childSessionId.*currentRunId/);
-    assert.match(prompt, /runtime_events.*max_events.*20.*max_bytes.*32768/);
-    assert.match(prompt, /view=all only for a narrow diagnostic question/);
+    assert.match(prompt, /view.*result.*max_bytes.*32768/);
+    assert.match(prompt, /result\.resultRecordId/);
+    assert.match(prompt, /runtime_events or view=all only for a narrow diagnostic question/);
     assert.match(prompt, /Stay available to the user/);
   });
 });

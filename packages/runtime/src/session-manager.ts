@@ -150,6 +150,7 @@ import { fallbackSessionTitle, sessionTitleSource } from './session-title.js';
 import type { HistoryCompactCleanupRequest } from './runtime-kernel.js';
 import { fingerprintAgentGraphRunnableIntent } from './stream-graph-admission.js';
 import type { AgentGraphRunnableIntent } from './stream-graph-readiness.js';
+import { projectAgentGraphRecords } from './stream-graph-projection.js';
 import {
   buildStatusPatch,
   buildTurnStateMessage,
@@ -411,11 +412,32 @@ export interface AgentOutputInput {
   view?: AgentOutputView;
 }
 
-export type AgentOutputView = 'events' | 'runtime_events' | 'all';
+export type AgentOutputView = 'result' | 'events' | 'runtime_events' | 'all';
+
+export interface AgentOutputCommittedResult {
+  schemaVersion: 1;
+  status: AgentRunHeader['status'];
+  graph?: {
+    graphId: string;
+    workId: string;
+    operatorId: string;
+  };
+  /** Committed Graph record containing the final non-partial model text, or the terminal record. */
+  resultRecordId?: string;
+  terminalRecordId?: string;
+  sourceRuntimeEventId?: string;
+  terminalRuntimeEventId?: string;
+  text?: string;
+  textTruncated: boolean;
+  artifactIds: string[];
+  omittedArtifactIds: number;
+  failureClass?: string;
+}
 
 export interface AgentOutputResult {
   execution: SubagentExecutionRef;
   header: AgentRunHeader;
+  result?: AgentOutputCommittedResult;
   events: AgentRunEvent[];
   runtimeEvents: RuntimeEvent[];
   sourceHealth: AgentRunInspectModel['sourceHealth'];
@@ -3627,6 +3649,38 @@ export class SessionManager {
     const maxEvents = normalizeAgentOutputMaxEvents(input.maxEvents);
     const maxBytes = normalizeAgentOutputMaxBytes(input.maxBytes);
     const view = input.view ?? 'runtime_events';
+    if (view === 'result') {
+      const boundedResult = buildAgentOutputCommittedResult({
+        header: inspected.header,
+        runtimeEvents: inspected.runtimeEvents,
+        artifacts,
+        maxArtifacts: maxEvents,
+        maxBytes,
+        ...(located.graph ? { graph: located.graph } : {}),
+      });
+      return {
+        execution: located.execution,
+        header: inspected.header,
+        result: boundedResult.result,
+        events: [],
+        runtimeEvents: [],
+        sourceHealth: inspected.sourceHealth,
+        diagnostics: [],
+        artifacts: [],
+        truncated: {
+          events: inspected.events.length > 0,
+          runtimeEvents: inspected.runtimeEvents.length > 0,
+          diagnostics: inspected.diagnostics.length > 0,
+          artifacts: artifacts.length > 0,
+          bytes: boundedResult.truncated,
+        },
+        budget: {
+          view,
+          maxBytes,
+          projectedBytes: boundedResult.projectedBytes,
+        },
+      };
+    }
     const bounded = boundAgentOutputCollections(
       {
         events: view === 'runtime_events' ? [] : tail(inspected.events, maxEvents),
@@ -4171,7 +4225,11 @@ export class SessionManager {
   private async findChildRunForOutput(
     sessionId: string,
     input: AgentOutputInput,
-  ): Promise<{ header: AgentRunHeader; execution: SubagentExecutionRef }> {
+  ): Promise<{
+    header: AgentRunHeader;
+    execution: SubagentExecutionRef;
+    graph?: NonNullable<SubagentSessionParent['graph']>;
+  }> {
     if (Number(!!input.execution) + Number(!!input.runId) + Number(!!input.turnId) !== 1) {
       throw new Error('agent_output requires exactly one execution, runId, or turnId locator');
     }
@@ -4210,6 +4268,7 @@ export class SessionManager {
           sessionId: child.id,
           currentRunId: header.runId,
         },
+        ...(child.subagentParent.graph ? { graph: child.subagentParent.graph } : {}),
       };
     }
 
@@ -5197,6 +5256,131 @@ function normalizeAgentOutputMaxBytes(value: number | undefined): number {
   return Math.min(MAX_AGENT_OUTPUT_MAX_BYTES, Math.max(1024, Math.floor(value)));
 }
 
+function buildAgentOutputCommittedResult(input: {
+  header: AgentRunHeader;
+  runtimeEvents: readonly RuntimeEvent[];
+  artifacts: readonly ArtifactRecord[];
+  maxArtifacts: number;
+  maxBytes: number;
+  graph?: NonNullable<SubagentSessionParent['graph']>;
+}): {
+  result: AgentOutputCommittedResult;
+  projectedBytes: number;
+  truncated: boolean;
+} {
+  const finalTextEvent = findLastMatching(
+    input.runtimeEvents,
+    (event) =>
+      event.role === 'model' &&
+      event.partial !== true &&
+      event.content?.kind === 'text' &&
+      event.content.text.trim().length > 0,
+  );
+  const graphRecords =
+    input.graph && input.runtimeEvents.length > 0
+      ? projectAgentGraphRecords({
+          graphId: input.graph.graphId,
+          streams: [
+            {
+              operator: {
+                operatorId: input.graph.operatorId,
+                sessionId: input.header.sessionId,
+              },
+              run: input.header,
+              events: input.runtimeEvents,
+            },
+          ],
+        }).records
+      : [];
+  const graphRecordByRuntimeEventId = new Map(
+    graphRecords.map((record) => [record.source.runtimeEventId, record]),
+  );
+  const terminalRecord = findLastMatching(graphRecords, (record) =>
+    record.supervisorSignals.some((signal) => signal.kind === 'terminal'),
+  );
+  const outputRecord = finalTextEvent
+    ? graphRecordByRuntimeEventId.get(finalTextEvent.id)
+    : undefined;
+  let artifactIds = tail(
+    input.artifacts.map((artifact) => artifact.id),
+    input.maxArtifacts,
+  );
+  const base = (): AgentOutputCommittedResult => ({
+    schemaVersion: 1,
+    status: input.header.status,
+    ...(input.graph ? { graph: { ...input.graph } } : {}),
+    ...(outputRecord || terminalRecord
+      ? { resultRecordId: (outputRecord ?? terminalRecord)!.recordId }
+      : {}),
+    ...(terminalRecord ? { terminalRecordId: terminalRecord.recordId } : {}),
+    ...(finalTextEvent ? { sourceRuntimeEventId: finalTextEvent.id } : {}),
+    ...(terminalRecord ? { terminalRuntimeEventId: terminalRecord.source.runtimeEventId } : {}),
+    textTruncated: false,
+    artifactIds,
+    omittedArtifactIds: Math.max(0, input.artifacts.length - artifactIds.length),
+    ...(input.header.failureClass ? { failureClass: input.header.failureClass } : {}),
+  });
+
+  while (artifactIds.length > 0 && serializedBytes(base()) > input.maxBytes) {
+    artifactIds = artifactIds.slice(1);
+  }
+
+  const text = finalTextEvent?.content?.kind === 'text' ? finalTextEvent.content.text : undefined;
+  const withoutText = base();
+  if (text === undefined) {
+    return {
+      result: withoutText,
+      projectedBytes: serializedBytes(withoutText),
+      truncated: withoutText.omittedArtifactIds > 0,
+    };
+  }
+  const fullResult = { ...withoutText, text };
+  const fullBytes = serializedBytes(fullResult);
+  if (fullBytes <= input.maxBytes) {
+    return {
+      result: fullResult,
+      projectedBytes: fullBytes,
+      truncated: withoutText.omittedArtifactIds > 0,
+    };
+  }
+
+  const codePoints = Array.from(text);
+  let low = 0;
+  let high = codePoints.length;
+  let best: AgentOutputCommittedResult = { ...withoutText, textTruncated: true };
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate: AgentOutputCommittedResult = {
+      ...withoutText,
+      text: `${codePoints.slice(0, middle).join('')}…`,
+      textTruncated: true,
+    };
+    if (serializedBytes(candidate) <= input.maxBytes) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return {
+    result: best,
+    projectedBytes: serializedBytes(best),
+    truncated: true,
+  };
+}
+
+function serializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function findLastMatching<T>(items: readonly T[], predicate: (item: T) => boolean): T | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (predicate(item)) return item;
+  }
+  return undefined;
+}
+
 function boundAgentOutputCollections(
   input: {
     events: AgentRunEvent[];
@@ -5221,7 +5405,7 @@ function boundAgentOutputCollections(
     const selected: T[] = [];
     for (let index = items.length - 1; index >= 0; index -= 1) {
       const item = items[index]!;
-      const bytes = Buffer.byteLength(JSON.stringify(item), 'utf8');
+      const bytes = serializedBytes(item);
       if (bytes > remaining) {
         truncated = true;
         break;
