@@ -70,6 +70,7 @@ import {
   activeUserQuestionRequest,
   completePendingInteraction,
   applyShellRunViewUpdateToTranscript,
+  permissionModeLabel,
   replaceTranscriptWithStoredMessages,
   submitCompactToTranscript,
   toggleAllThinkingExpansion,
@@ -1147,7 +1148,10 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
     ) {
       modelContextWindow = undefined;
     }
-    permissionMode = summary.permissionMode;
+    // #1611: the driver derives this from the resumed session's execution
+    // boundary; `summary.permissionMode` is only what the header was last set
+    // to and goes stale as soon as an approved expansion widens the boundary.
+    permissionMode = input.driver.getPermissionMode?.() ?? summary.permissionMode;
     orchestrationMode = summary.orchestrationMode ?? 'default';
     thinkingLevel = summary.thinkingLevel;
     thinkingLevels = providerType ? thinkingVariantsForModel(providerType, summary.model) : [];
@@ -1771,6 +1775,9 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
 
   const newSession = () => {
     input.driver.startNewSession();
+    // A fresh session is not bound by the previous one's boundary; re-read the
+    // mode the next session will actually be created with.
+    permissionMode = input.driver.getPermissionMode?.() ?? permissionMode;
     attention.setBaseTitle(input.title);
     shellRunHydration.reset();
     // Fresh transcript for the fresh session; the next prompt creates it on disk.
@@ -1930,11 +1937,12 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
 
   const setPermissionMode = async (mode: PermissionMode) => {
     await input.driver.setPermissionMode(mode);
-    permissionMode = mode;
+    // Report the boundary that resulted, not the one that was requested.
+    permissionMode = input.driver.getPermissionMode?.() ?? mode;
     state.entries.push({
       kind: 'notice',
       level: 'info',
-      text: `Permissions: ${mode === 'bypass' ? 'Full access' : 'Auto'}`,
+      text: `Permissions: ${permissionModeLabel(permissionMode)}`,
     });
     requestRender();
   };
@@ -2141,10 +2149,14 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
 
   const showPermissionModeList = () => {
     const items = permissionModePickerItems(permissionMode);
-    const displayedMode = permissionMode === 'bypass' ? 'bypass' : 'auto';
+    // Where the cursor opens. It is NOT a claim about the current state —
+    // `permissionModePickerItems` marks `current` only on an option that is
+    // genuinely in force, so a read-only session marks neither and choosing
+    // Auto reads as the permission change it is.
+    const cursorValue = permissionMode === 'bypass' ? 'bypass' : 'auto';
     showSelectPicker(
       'Permissions',
-      displayedMode,
+      permissionModeLabel(permissionMode),
       items,
       (item) => {
         if (item.value === 'auto' || item.value === 'bypass') {
@@ -2154,7 +2166,7 @@ export async function runMakaPiTui(input: MakaPiTuiInput): Promise<void> {
       {
         minPrimaryColumnWidth: 16,
         maxPrimaryColumnWidth: 24,
-        selectedIndex: items.findIndex((item) => item.value === displayedMode),
+        selectedIndex: items.findIndex((item) => item.value === cursorValue),
       },
     );
   };

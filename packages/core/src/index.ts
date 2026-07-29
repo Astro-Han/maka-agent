@@ -576,6 +576,7 @@ export {
   createManagedExecutionBoundary,
   decodeExecutionBoundary,
   executionBoundaryContains,
+  executionBoundaryDisplayMode,
   isSandboxBoundaryRestartClosure,
   sandboxBoundaryExpansionAllowsPath,
   validateSandboxBoundaryExpansion,

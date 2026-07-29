@@ -80,6 +80,14 @@ describe('Desktop execution boundary surface', () => {
         localInteractionAvailable: true,
       },
     );
+    // An intentional collapse, NOT a claim about this profile: the picker
+    // offers two modes and the product does not hand out `danger-full-access`,
+    // so no third label is invented for it. This is honest only because Auto's
+    // copy never names a specific boundary — it says the session runs inside
+    // Maka's protection layer and asks before going beyond its current
+    // permissions, which is true here too. If Auto's hint ever describes a
+    // concrete boundary again, this mapping turns into a false statement and
+    // has to be revisited.
     assert.deepEqual(
       deriveDesktopExecutionBoundarySurface(
         'danger-full-access',

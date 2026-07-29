@@ -7,14 +7,67 @@ import {
   createGenesisExecutionBoundary,
   decodeExecutionBoundary,
   executionBoundaryContains,
+  executionBoundaryDisplayMode,
   validateSandboxBoundaryExpansion,
 } from '../sandbox-boundary.js';
 import {
   canReadPath,
   canWritePath,
+  createDangerFullAccessPermissionProfile,
+  createReadOnlyPermissionProfile,
   createWorkspaceWritePermissionProfile,
   type PermissionProfileManaged,
 } from '../permission-profile.js';
+
+describe('executionBoundaryDisplayMode', () => {
+  test('keeps the read-only/writable distinction the boundary carries (#1611)', () => {
+    expect(
+      executionBoundaryDisplayMode({
+        kind: 'managed',
+        profile: createReadOnlyPermissionProfile(),
+        revision: 0,
+      }),
+    ).toBe('explore');
+    expect(
+      executionBoundaryDisplayMode({
+        kind: 'managed',
+        profile: createWorkspaceWritePermissionProfile(),
+        revision: 0,
+      }),
+    ).toBe('ask');
+    expect(executionBoundaryDisplayMode({ kind: 'bypass', revision: 1 })).toBe('bypass');
+  });
+
+  test('an approved expansion that grants a write stops reading as read-only', () => {
+    const widened = applySandboxBoundaryExpansion(createReadOnlyPermissionProfile(), {
+      filesystem: { entries: [{ path: '/outside/dist', access: 'write', scope: 'subtree' }] },
+    });
+
+    expect(executionBoundaryDisplayMode({ kind: 'managed', profile: widened, revision: 1 })).toBe(
+      'ask',
+    );
+  });
+
+  test('under-states danger-full-access as Auto rather than naming a mode for it', () => {
+    // A deliberate collapse, NOT a description of this profile: the picker
+    // offers two modes and no third one is being invented for a profile the
+    // product does not hand out. Auto's copy is written to stay true here —
+    // it never claims a specific boundary — so this under-states rather than
+    // misstates. If Auto's hint ever names a boundary again, this mapping
+    // becomes a lie and has to change with it.
+    expect(
+      executionBoundaryDisplayMode({
+        kind: 'managed',
+        profile: createDangerFullAccessPermissionProfile(),
+        revision: 0,
+      }),
+    ).toBe('ask');
+  });
+
+  test('an externally isolated boundary has no locally controllable mode', () => {
+    expect(executionBoundaryDisplayMode({ kind: 'external', revision: 0 })).toBe(undefined);
+  });
+});
 
 describe('SandboxBoundaryExpansion', () => {
   test('accepts and canonicalizes only additive filesystem and network authority', () => {

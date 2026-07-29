@@ -5420,12 +5420,19 @@ describe('transcript entry render memoization', () => {
 });
 
 describe('Maka Pi TUI status line', () => {
-  test('renders managed compatibility modes as Auto and bypass as Full access', () => {
-    for (const permissionMode of ['ask', 'execute', 'explore']) {
+  test('names the boundary the session is in: Read only, Auto, or Full access', () => {
+    // Legacy `execute` has no boundary of its own, so it really does read as
+    // Auto. `explore` is a boundary a resumed session can be in and must be
+    // named — showing it as Auto is the #1611 defect.
+    for (const permissionMode of ['ask', 'execute']) {
       const line = stripAnsi(renderMakaPiStatusLine({ ...meta(), permissionMode }, 100));
       assert.match(line, /Maka · Auto ·/);
       assert.doesNotMatch(line, new RegExp(`· ${permissionMode} ·`));
     }
+    assert.match(
+      stripAnsi(renderMakaPiStatusLine({ ...meta(), permissionMode: 'explore' }, 100)),
+      /Maka · Read only ·/,
+    );
     assert.match(
       stripAnsi(renderMakaPiStatusLine({ ...meta(), permissionMode: 'bypass' }, 100)),
       /Maka · Full access ·/,

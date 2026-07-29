@@ -4993,6 +4993,56 @@ describe('Maka Pi TUI runner', () => {
     ]);
   });
 
+  test('resumes a read-only session as Read only, and never marks Auto as current', async () => {
+    // #1611 in the TUI: the resumed boundary is read-only, so the status line
+    // must name it and the picker must not present Auto as "the option you are
+    // already on" — selecting it replaces a read-only boundary with a writable
+    // one, which is a permission change, not a confirmation.
+    const terminal = new FakeTerminal();
+    const driver = new SlashCommandDriver(
+      [fakeSessionSummary('session-2', '/repo')],
+      new Map(),
+      new Map([['session-2', 'explore' as PermissionMode]]),
+    );
+    const run = runMakaPiTui({
+      title: 'Maka',
+      driver,
+      cwd: '/repo',
+      model: 'claude-sonnet-4-5',
+      connectionSlug: 'claude-subscription',
+      permissionMode: 'ask',
+      terminal,
+      resumeSessionId: 'session-2',
+    });
+
+    await waitFor(() => driver.sessionIds.length === 1);
+    await waitFor(() =>
+      plainTerminalOutput(terminal.screenOutput()).includes('Maka · Read only ·'),
+    );
+
+    terminal.input('/permissions');
+    terminal.input('\r');
+    await waitFor(() => terminal.output().includes('Permissions'));
+    const picker = plainTerminalOutput(terminal.screenOutput());
+    assert.ok(picker.includes('Read only'), 'picker header names the boundary in force');
+    assert.doesNotMatch(picker, /current ·/);
+
+    // Selecting Auto is applied as the permission change it is.
+    terminal.input('\r');
+    await waitFor(() => driver.permissionModes.length === 1);
+    assert.deepEqual(driver.permissionModes, ['ask']);
+    await waitFor(() => terminal.output().includes('Permissions: Auto'));
+    await waitFor(() => plainTerminalOutput(terminal.screenOutput()).includes('Maka · Auto ·'));
+
+    exitMaka(terminal);
+    await Promise.race([
+      run,
+      delay(50).then(() => {
+        throw new Error('TUI did not close during test cleanup');
+      }),
+    ]);
+  });
+
   test('handles /model without sending a prompt', async () => {
     const terminal = new FakeTerminal();
     const driver = new SlashCommandDriver();
@@ -9923,10 +9973,17 @@ class SlashCommandDriver implements MakaSessionDriver {
   resumeCalls = 0;
   protected sessionId = 'session-1';
   protected orchestrationMode: OrchestrationMode = 'default';
+  /**
+   * What the ACTIVE session's boundary says, as the real driver derives it
+   * (#1611). Undefined until a session is resumed, matching a driver that has
+   * no boundary to read yet.
+   */
+  protected activeBoundaryDisplayMode: PermissionMode | undefined;
 
   constructor(
     private readonly sessions: SessionSummary[] = [fakeSessionSummary('session-2', '/repo')],
     private readonly sessionMessages: ReadonlyMap<string, readonly StoredMessage[]> = new Map(),
+    private readonly boundaryDisplayModeBySession: ReadonlyMap<string, PermissionMode> = new Map(),
   ) {}
 
   async listSessions(): Promise<SessionSummary[]> {
@@ -10015,6 +10072,7 @@ class SlashCommandDriver implements MakaSessionDriver {
   }
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.permissionModes.push(mode);
+    this.activeBoundaryDisplayMode = mode;
   }
   async setThinkingLevel(level: ThinkingLevel | undefined): Promise<void> {
     this.thinkingLevelUpdates.push(level);
@@ -10029,6 +10087,7 @@ class SlashCommandDriver implements MakaSessionDriver {
     const summary = this.sessions.find((session) => session.id === sessionId);
     const nextSummary = summary ?? fakeSessionSummary(sessionId);
     this.orchestrationMode = nextSummary.orchestrationMode ?? 'default';
+    this.activeBoundaryDisplayMode = this.boundaryDisplayModeBySession.get(nextSummary.id);
     return switchResult(nextSummary, [...(this.sessionMessages.get(nextSummary.id) ?? [])]);
   }
   async listRewindTargets(): Promise<RewindTarget[]> {
@@ -10040,12 +10099,16 @@ class SlashCommandDriver implements MakaSessionDriver {
   startNewSession(): void {
     this.startNewSessionCalls += 1;
     this.sessionId = 'session-new';
+    this.activeBoundaryDisplayMode = undefined;
   }
   getSessionId(): string | null {
     return this.sessionId;
   }
   getOrchestrationMode(): OrchestrationMode {
     return this.orchestrationMode;
+  }
+  getPermissionMode(): PermissionMode {
+    return this.activeBoundaryDisplayMode ?? 'ask';
   }
 }
 

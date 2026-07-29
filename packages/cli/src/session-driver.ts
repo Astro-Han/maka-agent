@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import type { QueueEnqueueOutcome, SessionEvent } from '@maka/core/events';
 import type { PermissionMode } from '@maka/core/permission';
 import type { ExecutionBoundary, SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
+import { executionBoundaryDisplayMode } from '@maka/core/sandbox-boundary';
 import type { UserQuestionResponse } from '@maka/core/user-question';
 import type {
   BranchFromTurnInput,
@@ -170,6 +171,13 @@ export interface MakaSessionDriver {
   stop(): Promise<void>;
   getSessionId(): string | null;
   getOrchestrationMode?(): OrchestrationMode;
+  /**
+   * The permission mode the ACTIVE session should be presented as, derived
+   * from its authoritative execution boundary (#1611). Available on
+   * Runtime-backed drivers; hosts without a boundary to read fall back to the
+   * summary they already hand the caller.
+   */
+  getPermissionMode?(): PermissionMode;
 }
 
 export type SessionResumeAvailability = { available: true } | { available: false; reason: string };
@@ -205,7 +213,16 @@ class RuntimeMakaSessionDriver implements MakaSessionDriver {
   // /model switch can rebind it; new sessions are created on this connection.
   private llmConnectionSlug: string;
   private thinkingLevel: ThinkingLevel | undefined;
+  /** The mode the NEXT created session is given. */
   private permissionMode: PermissionMode;
+  /**
+   * How the ACTIVE session must be presented (#1611): derived from its
+   * execution boundary, which is the authority on what it may actually do.
+   * Kept apart from `permissionMode` on purpose — a resumed read-only session
+   * must read as read-only without making read-only the default for the next
+   * session started with `/new`.
+   */
+  private activeBoundaryDisplayMode: PermissionMode | undefined;
   private orchestrationMode: OrchestrationMode;
   private readonly newId: () => string;
 
@@ -349,6 +366,11 @@ class RuntimeMakaSessionDriver implements MakaSessionDriver {
     if (this.sessionId) {
       const summary = await this.input.runtime.setPermissionMode(this.sessionId, mode);
       this.permissionMode = summary.permissionMode;
+      // An explicit switch replaces the boundary, so re-derive rather than
+      // assume the requested mode landed exactly as asked.
+      this.activeBoundaryDisplayMode = executionBoundaryDisplayMode(
+        await this.input.runtime.readExecutionBoundary(this.sessionId),
+      );
       return;
     }
     this.permissionMode = mode;
@@ -399,19 +421,24 @@ class RuntimeMakaSessionDriver implements MakaSessionDriver {
         `Cannot resume externally isolated session ${summary.id} outside its owning harness.`,
       );
     }
-    const effectiveSummary: SessionSummary = {
-      ...summary,
-      permissionMode: boundary.kind === 'bypass' ? 'bypass' : 'ask',
-    };
-    const messages = await this.input.runtime.getMessages(effectiveSummary.id);
-    this.sessionId = effectiveSummary.id;
+    // #1611: the boundary — not the stored header mode — decides how this
+    // session is presented, and the summary is left exactly as the runtime
+    // returned it. Overwriting `summary.permissionMode` here used to label a
+    // read-only session "Auto", which the picker then marked as the current
+    // option; choosing that "current" option silently replaced the read-only
+    // boundary with a writable one.
+    const displayMode = executionBoundaryDisplayMode(boundary);
+    const messages = await this.input.runtime.getMessages(summary.id);
+    this.sessionId = summary.id;
     this.cwd = sessionCwd;
-    this.model = effectiveSummary.model;
-    this.llmConnectionSlug = effectiveSummary.llmConnectionSlug;
-    this.thinkingLevel = effectiveSummary.thinkingLevel;
-    this.permissionMode = effectiveSummary.permissionMode;
-    this.orchestrationMode = effectiveSummary.orchestrationMode ?? 'default';
-    return { summary: effectiveSummary, messages };
+    this.model = summary.model;
+    this.llmConnectionSlug = summary.llmConnectionSlug;
+    this.thinkingLevel = summary.thinkingLevel;
+    this.activeBoundaryDisplayMode = displayMode;
+    // New sessions started after this one still default to a normal mode.
+    this.permissionMode = boundary.kind === 'bypass' ? 'bypass' : 'ask';
+    this.orchestrationMode = summary.orchestrationMode ?? 'default';
+    return { summary, messages };
   }
 
   async listRewindTargets(): Promise<RewindTarget[]> {
@@ -463,6 +490,8 @@ class RuntimeMakaSessionDriver implements MakaSessionDriver {
     // stay put, so the next prompt lazily creates a fresh session that inherits
     // them (via ensureSession). The old session is left intact on disk.
     this.sessionId = null;
+    // The previous session's boundary says nothing about the next one.
+    this.activeBoundaryDisplayMode = undefined;
   }
 
   getSessionId(): string | null {
@@ -471,6 +500,10 @@ class RuntimeMakaSessionDriver implements MakaSessionDriver {
 
   getOrchestrationMode(): OrchestrationMode {
     return this.orchestrationMode;
+  }
+
+  getPermissionMode(): PermissionMode {
+    return this.activeBoundaryDisplayMode ?? this.permissionMode;
   }
 
   private async ensureSession(): Promise<string> {

@@ -1224,12 +1224,25 @@ function transcriptEntrySignature(entry: MakaPiTranscriptEntry, width: number): 
   }
 }
 
+/**
+ * The one CLI label for a permission mode, shared by the status line, the
+ * picker header, and the mode-change notice (#1611). `explore` is a real
+ * boundary a resumed session can be in, so it must be nameable here; legacy
+ * `execute` has no boundary of its own and reads as Auto, as does anything
+ * else this metadata ever carries.
+ */
+export function permissionModeLabel(mode: string): string {
+  if (mode === 'bypass') return 'Full access';
+  if (mode === 'explore') return 'Read only';
+  return 'Auto';
+}
+
 export function renderMakaPiStatusLine(metadata: MakaPiTranscriptMetadata, width: number): string {
   const safeWidth = Math.max(1, width);
   const sep = ansi.dim(' · ');
   const parts: string[] = [
     ansi.bold(metadata.title),
-    ansi.dim(metadata.permissionMode === 'bypass' ? 'Full access' : 'Auto'),
+    ansi.dim(permissionModeLabel(metadata.permissionMode)),
     ansi.dim(metadata.model),
   ];
   // #1064: omit thinking:default — it is noise before the user explicitly

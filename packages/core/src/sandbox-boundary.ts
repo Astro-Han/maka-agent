@@ -1,3 +1,4 @@
+import type { PermissionMode } from './permission.js';
 import {
   FILE_SYSTEM_ACCESS_MODES,
   FILE_SYSTEM_PATH_MATCHES,
@@ -5,6 +6,7 @@ import {
   createReadOnlyPermissionProfile,
   createWorkspaceWritePermissionProfile,
   isProtectedMetadataPath,
+  isReadOnlyPermissionProfile,
   type FileSystemPathMatch,
   type FileSystemSandboxEntry,
   type PermissionProfileManaged,
@@ -141,6 +143,33 @@ export type ExecutionBoundary =
     };
 
 export type LegacyPermissionMode = 'ask' | 'execute' | 'explore' | 'bypass';
+
+/**
+ * The permission mode a boundary should be *presented* as (#1611).
+ *
+ * The boundary is the authority on what a session may do; a session header's
+ * stored `permissionMode` is only what it was last set to and goes stale the
+ * moment an approved expansion widens the boundary. Every surface that shows
+ * the user which permissions are in force derives them here, so Desktop and
+ * the TUI cannot drift — and so the read-only/writable distinction the
+ * boundary carries survives all the way to the label.
+ *
+ * `undefined` means the session is not locally controllable at all (an
+ * externally isolated boundary), which each surface fails closed on.
+ *
+ * Everything managed that is not read-only maps to `ask`. That is a
+ * deliberate under-statement, not a description: a workspace-write profile,
+ * a profile widened by approved expansions, and `danger-full-access` all
+ * present as Auto. Auto's copy is therefore written to stay true for any of
+ * them — it never claims a specific boundary.
+ */
+export function executionBoundaryDisplayMode(
+  boundary: ExecutionBoundary,
+): PermissionMode | undefined {
+  if (boundary.kind === 'external') return undefined;
+  if (boundary.kind === 'bypass') return 'bypass';
+  return isReadOnlyPermissionProfile(boundary.profile) ? 'explore' : 'ask';
+}
 
 export function createGenesisExecutionBoundary(mode: LegacyPermissionMode): ExecutionBoundary {
   if (mode === 'bypass') return { kind: 'bypass', revision: 0 };
