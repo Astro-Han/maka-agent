@@ -132,6 +132,21 @@ export interface MakaCliRuntimeContext {
   onboarding: MakaOnboardingSurface;
 }
 
+export function resolveCliStreamConnectTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  const raw = env.MAKA_STREAM_CONNECT_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return undefined;
+  if (!/^[1-9]\d*$/.test(raw)) {
+    throw new Error('MAKA_STREAM_CONNECT_TIMEOUT_MS must be a positive integer');
+  }
+  const timeoutMs = Number(raw);
+  if (!Number.isSafeInteger(timeoutMs)) {
+    throw new Error('MAKA_STREAM_CONNECT_TIMEOUT_MS must be a positive safe integer');
+  }
+  return timeoutMs;
+}
+
 /**
  * Generates a one-sentence recap of a session so far, using a tool-free model
  * call whose exchange is never written to the session's own history. Never
@@ -634,6 +649,7 @@ export async function createMakaCliRuntimeContext(
       mode: header.permissionMode,
       cwd: header.cwd,
     });
+    const streamConnectTimeoutMs = resolveCliStreamConnectTimeoutMs();
     const agentGraphSupervisorTools =
       !ctx.tools && agentGraphEnabled
         ? await agentGraphCoordinator!.toolsForSession(ctx.sessionId)
@@ -693,6 +709,7 @@ export async function createMakaCliRuntimeContext(
           }
         : {}),
       providerOptions: buildProviderOptions(ready.connection, ready.model, header.thinkingLevel),
+      ...(streamConnectTimeoutMs !== undefined ? { streamConnectTimeoutMs } : {}),
       contextBudget: buildDefaultContextBudgetPolicy(ready.connection, {
         name: 'cli-default-history-budget',
         modelId: ready.model,

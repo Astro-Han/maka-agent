@@ -32,9 +32,26 @@ import {
   createMakaCliRuntimeContext,
   getOrCreateCliClaudeDeviceId,
   isMakaClaudeSubscriptionCloakEnabled,
+  resolveCliStreamConnectTimeoutMs,
 } from '../runtime-bootstrap.js';
 
 describe('Maka CLI runtime bootstrap', () => {
+  test('parses the CLI stream connect timeout override', () => {
+    assert.equal(resolveCliStreamConnectTimeoutMs({}), undefined);
+    assert.equal(
+      resolveCliStreamConnectTimeoutMs({ MAKA_STREAM_CONNECT_TIMEOUT_MS: '120000' }),
+      120_000,
+    );
+    assert.throws(
+      () => resolveCliStreamConnectTimeoutMs({ MAKA_STREAM_CONNECT_TIMEOUT_MS: '0' }),
+      /positive integer/,
+    );
+    assert.throws(
+      () => resolveCliStreamConnectTimeoutMs({ MAKA_STREAM_CONNECT_TIMEOUT_MS: 'later' }),
+      /positive integer/,
+    );
+  });
+
   test('forwards generated title notifications to the TUI host', async () => {
     await withWorkspace(async (workspaceRoot) => {
       const connectionStore = createConnectionStore(workspaceRoot);
