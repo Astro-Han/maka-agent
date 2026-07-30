@@ -1,6 +1,7 @@
 import {
   PROVIDER_DEFAULTS,
   connectionEnabledModelIds,
+  effectiveBaseUrl,
   type ConnectionTestErrorClass,
   type ConnectionTestResult,
   type LlmConnection,
@@ -128,6 +129,12 @@ async function testConnectionStrict(
 
   if (!testModel) {
     return { ok: false, errorMessage: 'No model to test' };
+  }
+  // Copilot's account catalog is itself the connection probe: it proves both
+  // model availability and the per-model request protocol without guessing a
+  // wire or spending inference quota.
+  if (connection.providerType === 'github-copilot') {
+    return await probeGitHubCopilot(effectiveBaseUrl(connection), secret, testModel, t0, fetchFn);
   }
   const { adapter, baseUrl, apiProtocol } = resolveModelRuntime(connection, testModel);
 
