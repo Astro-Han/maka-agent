@@ -141,7 +141,7 @@ describe('ModelCatalogEntry', () => {
     assert.equal(entries[0]?.source, 'static_catalog');
     assert.equal(entries[0]?.provenance.modelSource, 'fallback');
     assert.equal(entries[0]?.contextWindow, 1_000_000);
-    assert.equal(entries[0]?.maxOutputTokens, 131_072);
+    assert.equal(entries[0]?.maxOutputTokens, 65_536);
     assert.deepEqual(entries[0]?.capabilities, {
       reasoning: true,
       functionCalling: true,
