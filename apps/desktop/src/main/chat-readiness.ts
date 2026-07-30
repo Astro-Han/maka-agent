@@ -117,8 +117,6 @@ function messageForReason(
       return `模型连接 "${connection.name}" 等待填写 API key。请到 设置 · 模型 补齐密钥后再聊天。`;
     case 'missing_model':
       return `模型连接 "${connection.name}" 没有可用模型。请到 设置 · 模型 选择一个默认模型。`;
-    case 'empty_model_list':
-      return `模型连接 "${connection.name}" 没有启用任何模型。请到 设置 · 模型 先添加模型。`;
     case 'model_not_enabled': {
       const model = requestedModel || connection.defaultModel;
       return `模型 "${model}" 不在连接 "${connection.name}" 的启用模型列表中。请到 设置 · 模型 重新选择。`;

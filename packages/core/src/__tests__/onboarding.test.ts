@@ -217,7 +217,7 @@ describe('deriveOnboardingState — 15-case matrix (@kenji + @xuan PR110a)', () 
     );
   });
 
-  it('case 12: 1 real, has key, defaultModel not_enabled → needs_default_model', () => {
+  it('case 12: an exact default absent from the observed catalog stays ready', () => {
     const conn = realConnection({
       slug: 'anthropic-live',
       defaultModel: 'stale-model-id',
@@ -229,11 +229,15 @@ describe('deriveOnboardingState — 15-case matrix (@kenji + @xuan PR110a)', () 
         defaultSlug: 'anthropic-live',
         secrets: { 'anthropic-live': true },
       }),
-      { kind: 'needs_default_model', connectionSlug: 'anthropic-live' },
+      {
+        kind: 'ready_empty',
+        defaultConnectionSlug: 'anthropic-live',
+        defaultModel: 'stale-model-id',
+      },
     );
   });
 
-  it('case 13: 1 real, has key, empty_model_list → needs_default_model', () => {
+  it('case 13: an empty observed catalog does not disable the selected model', () => {
     const conn = realConnection({ slug: 'anthropic-live', defaultModel: 'something', models: [] });
     assert.deepEqual(
       derive({
@@ -241,7 +245,11 @@ describe('deriveOnboardingState — 15-case matrix (@kenji + @xuan PR110a)', () 
         defaultSlug: 'anthropic-live',
         secrets: { 'anthropic-live': true },
       }),
-      { kind: 'needs_default_model', connectionSlug: 'anthropic-live' },
+      {
+        kind: 'ready_empty',
+        defaultConnectionSlug: 'anthropic-live',
+        defaultModel: 'something',
+      },
     );
   });
 
@@ -320,30 +328,18 @@ describe('deriveOnboardingState — 15-case matrix (@kenji + @xuan PR110a)', () 
     );
   });
 
-  // @kenji PR110a review gate: the slug carried by needs_connection_credentials
-  // (and needs_default_model) MUST be the current default's slug. The UI
-  // uses it to focus a setup panel; pointing it at an alt would route the
-  // user to a provider they did not choose.
-  it('case 18: default missing_api_key + alt empty_model_list → needs_connection_credentials { CURRENT default slug, not alt }', () => {
+  it('case 18: a default missing credentials can switch to an enabled exact model on another connection', () => {
     const a = realConnection({ slug: 'conn-default' });
-    const b = realConnection({ slug: 'conn-alt', models: [] }); // empty_model_list
+    const b = realConnection({ slug: 'conn-alt', models: [] });
     const result = derive({
       connections: [a, b],
       defaultSlug: 'conn-default',
-      secrets: { 'conn-alt': true }, // alt has key; default doesn't
+      secrets: { 'conn-alt': true },
     });
-    assert.deepEqual(result, {
-      kind: 'needs_connection_credentials',
-      connectionSlug: 'conn-default',
-    });
-    // The alt is also broken (empty_model_list); we MUST NOT route the
-    // user to fix that one. The default's missing_api_key wins.
-    if (result.kind === 'needs_connection_credentials') {
-      assert.notEqual(result.connectionSlug, 'conn-alt');
-    }
+    assert.deepEqual(result, { kind: 'needs_default_connection' });
   });
 
-  it('case 19: needs_default_model slug is the CURRENT default, not an alt with the same issue', () => {
+  it('case 19: observed catalogs do not invalidate exact defaults on any connection', () => {
     const a = realConnection({
       slug: 'conn-default',
       defaultModel: 'stale',
@@ -359,7 +355,11 @@ describe('deriveOnboardingState — 15-case matrix (@kenji + @xuan PR110a)', () 
       defaultSlug: 'conn-default',
       secrets: { 'conn-default': true, 'conn-alt': true },
     });
-    assert.deepEqual(result, { kind: 'needs_default_model', connectionSlug: 'conn-default' });
+    assert.deepEqual(result, {
+      kind: 'ready_empty',
+      defaultConnectionSlug: 'conn-default',
+      defaultModel: 'stale',
+    });
   });
 });
 

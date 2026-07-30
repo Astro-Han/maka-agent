@@ -67,6 +67,14 @@ describe('xAI OAuth model connection synchronization', () => {
     assert.equal(synchronized?.defaultModel, 'grok-4.5');
     assert.equal(synchronized?.lastTestStatus, 'verified');
 
+    discoveryStatus = 404;
+    const failedDiscovery = await service.syncXaiOAuthConnection();
+    assert.deepEqual(failedDiscovery?.models, [
+      { id: 'grok-4.5', apiProtocol: 'openai-responses' },
+    ]);
+    assert.equal(failedDiscovery?.modelSource, 'fetched');
+    assert.equal(failedDiscovery?.lastTestStatus, 'error');
+
     discoveryStatus = 401;
     const rejected = await service.syncXaiOAuthConnection();
     assert.equal(rejected?.enabled, false);

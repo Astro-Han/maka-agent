@@ -165,7 +165,6 @@ export function deriveOnboardingState(input: DeriveOnboardingStateInput): Onboar
       case 'missing_api_key':
         return { kind: 'needs_connection_credentials', connectionSlug: defaultConn.slug };
       case 'missing_model':
-      case 'empty_model_list':
       case 'model_not_enabled':
       case 'model_not_chat_capable':
         return { kind: 'needs_default_model', connectionSlug: defaultConn.slug };

@@ -40,9 +40,6 @@ export async function discoverConnectionModels(
   }
   const fetchedAt = (deps.now ?? Date.now)();
   const models = await (deps.fetchModels ?? fetchProviderModels)(connection, apiKey ?? '');
-  if (models.length === 0) {
-    throw new Error('Provider returned no usable models');
-  }
   await deps.connectionStore.update(slug, {
     models,
     modelSource: 'fetched',

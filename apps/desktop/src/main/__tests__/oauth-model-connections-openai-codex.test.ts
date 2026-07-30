@@ -315,6 +315,28 @@ describe('syncOpenAiCodexConnection live discovery behavior', () => {
     assert.equal(saved.lastTestStatus, 'needs_reauth');
   });
 
+  it('preserves the observed cache when /models fails with another 4xx', async () => {
+    const { sync, getSaved } = makeService({
+      existing: makeExisting({
+        models: [{ id: 'gpt-5.6-sol' }],
+        modelSource: 'fetched',
+        modelsFetchedAt: 42,
+      }),
+      token: 'tok',
+      fetchModels: async () => {
+        throw new OpenAiCodexDiscoveryError(404);
+      },
+    });
+
+    await sync();
+
+    const saved = getSaved()!;
+    assert.deepEqual(saved.models, [{ id: 'gpt-5.6-sol' }]);
+    assert.equal(saved.modelSource, 'fetched');
+    assert.equal(saved.modelsFetchedAt, 42);
+    assert.equal(saved.lastTestStatus, 'error');
+  });
+
   it('disables with error when all discovered models are filtered as unsupported', async () => {
     const { sync, getSaved } = makeService({
       existing: makeExisting(),
@@ -398,5 +420,42 @@ describe('OAuth model connection user settings', () => {
     await service.syncGitHubCopilotConnection();
 
     assert.deepEqual(saved!.enabledModelIds, ['gpt-5.4', 'claude-sonnet-4.6']);
+  });
+
+  it('records a valid empty GitHub Copilot discovery without changing user selection', async () => {
+    let saved: LlmConnection | null = makeExisting({
+      slug: 'github-copilot',
+      providerType: 'github-copilot',
+      defaultModel: 'gpt-5.4',
+      enabledModelIds: ['gpt-5.4'],
+      models: [{ id: 'gpt-5.4' }],
+      modelSource: 'fetched',
+      modelsFetchedAt: 1,
+    });
+    const service = createOAuthModelConnectionsMainService({
+      connectionStore: {
+        get: async () => saved,
+        update: async (_slug: string, patch: Partial<LlmConnection>) => {
+          saved = { ...saved!, ...patch };
+          return saved;
+        },
+      },
+      githubCopilotSubscription: {
+        getAccountState: async () => ({ runtimeState: 'authenticated' }),
+        getTokensInternal: async () => ({
+          access_token: 'tok',
+          base_url: 'https://api.githubcopilot.com',
+        }),
+      },
+      fetchModels: async () => [],
+    } as never);
+
+    const result = await service.syncGitHubCopilotConnection();
+
+    assert.deepEqual(result?.models, []);
+    assert.equal(result?.modelSource, 'fetched');
+    assert.ok((result?.modelsFetchedAt ?? 0) > 1);
+    assert.equal(result?.defaultModel, 'gpt-5.4');
+    assert.deepEqual(result?.enabledModelIds, ['gpt-5.4']);
   });
 });

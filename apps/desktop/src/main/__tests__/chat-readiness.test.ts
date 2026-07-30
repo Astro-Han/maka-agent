@@ -305,7 +305,7 @@ describe('chat readiness guard', () => {
   });
 
   test('classifies stale sessions that can be rebound to the current default model', () => {
-    for (const reason of ['fake_backend', 'connection_missing', 'missing_model', 'empty_model_list', 'model_not_enabled', 'model_not_chat_capable']) {
+    for (const reason of ['fake_backend', 'connection_missing', 'missing_model', 'model_not_enabled', 'model_not_chat_capable']) {
       assert.equal(shouldRebindSessionToDefault(reason), true, reason);
     }
 

@@ -561,6 +561,32 @@ describe('runtime policy stores', () => {
     });
   });
 
+  test('commits a valid empty observed catalog without changing enabled models', async () => {
+    await withInteractiveOwner(async ({ stores }) => {
+      const connection = await createConnection(
+        stores,
+        0,
+        connectionDraft('effects-empty', 'ollama', 'Effects empty'),
+      );
+
+      const prepared = await stores.operations.beginModelFetch(connection.connectionId);
+      assert.equal(prepared.kind, 'ready');
+      if (prepared.kind !== 'ready') return;
+      const completed = await stores.operations.completeModelFetch(prepared.ticket, {
+        models: [],
+        source: 'fetched',
+        fetchedAt: 44,
+      });
+
+      assert.equal(completed.kind, 'committed');
+      if (completed.kind !== 'committed') return;
+      assert.deepEqual(completed.snapshot.connections[0]?.models, []);
+      assert.deepEqual(completed.snapshot.connections[0]?.enabledModelIds, ['gpt-5']);
+      assert.equal(completed.snapshot.connections[0]?.modelSource, 'fetched');
+      assert.equal(completed.snapshot.connections[0]?.modelsFetchedAt, 44);
+    });
+  });
+
   test('admits only explicitly enabled connection test models', async () => {
     await withInteractiveOwner(async ({ stores }) => {
       const connection = await createConnection(

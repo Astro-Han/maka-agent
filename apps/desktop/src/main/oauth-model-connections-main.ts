@@ -267,9 +267,6 @@ export function createOAuthModelConnectionsMainService(deps: OAuthModelConnectio
           if (!existing) return null;
           return deps.connectionStore.update(existing.slug, {
             enabled: false,
-            models: [],
-            modelSource: 'fetched',
-            modelsFetchedAt: now,
             lastTestStatus: 'error',
             lastTestAt: new Date(now).toISOString(),
             lastTestMessage: 'xAI 模型列表获取失败。',
@@ -351,7 +348,18 @@ export function createOAuthModelConnectionsMainService(deps: OAuthModelConnectio
         return failDiscovery();
       }
     }
-    if (models.length === 0) return failDiscovery();
+    if (models.length === 0) {
+      if (!existing) return null;
+      return deps.connectionStore.update(existing.slug, {
+        enabled: false,
+        models: [],
+        modelSource: 'fetched',
+        modelsFetchedAt: now,
+        lastTestStatus: 'error',
+        lastTestAt: new Date(now).toISOString(),
+        lastTestMessage: 'GitHub Copilot 当前账号没有可用模型。',
+      });
+    }
     const enabledIds = models.map((model) => model.id);
     const defaultModel = enabledIds.includes(existing?.defaultModel ?? '')
       ? existing!.defaultModel
@@ -474,9 +482,6 @@ export function createOAuthModelConnectionsMainService(deps: OAuthModelConnectio
           return deps.connectionStore.update(existing.slug, {
             enabled: false,
             lastTestStatus: 'error',
-            models: [],
-            modelSource: 'fetched',
-            modelsFetchedAt: now,
             lastTestAt: new Date(now).toISOString(),
             lastTestMessage: 'Codex 模型列表获取失败。',
           });

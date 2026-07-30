@@ -29,7 +29,7 @@ test('precondition failures are explicitly safe to preserve across IPC', async (
   );
 });
 
-test('an empty discovery result leaves the last successful catalog intact', async () => {
+test('a valid empty discovery result replaces the observed catalog without changing selection', async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), 'maka-model-discovery-'));
   try {
     const connectionStore = createConnectionStore(workspaceRoot);
@@ -46,23 +46,27 @@ test('an empty discovery result leaves the last successful catalog intact', asyn
     });
     await connectionStore.update(created.slug, { apiKey: 'rotated-secret' });
 
-    await assert.rejects(
-      discoverConnectionModels(
-        {
-          connectionStore,
-          resolveConnectionSecret: async () => 'rotated-secret',
-          fetchModels: async () => [],
-          now: () => 1_900_000_000_000,
-        },
-        created.slug,
-      ),
-      /no usable models/,
+    const result = await discoverConnectionModels(
+      {
+        connectionStore,
+        resolveConnectionSecret: async () => 'rotated-secret',
+        fetchModels: async () => [],
+        now: () => 1_900_000_000_000,
+      },
+      created.slug,
     );
 
+    assert.deepEqual(result, {
+      models: [],
+      source: 'fetched',
+      fetchedAt: 1_900_000_000_000,
+    });
     const persisted = await connectionStore.get(created.slug);
-    assert.deepEqual(persisted?.models, [{ id: 'glm-5' }]);
+    assert.deepEqual(persisted?.models, []);
     assert.equal(persisted?.modelSource, 'fetched');
-    assert.equal(persisted?.modelsFetchedAt, 1_800_000_000_000);
+    assert.equal(persisted?.modelsFetchedAt, 1_900_000_000_000);
+    assert.equal(persisted?.defaultModel, 'glm-5');
+    assert.deepEqual(persisted?.enabledModelIds, ['glm-5']);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

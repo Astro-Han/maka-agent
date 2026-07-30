@@ -153,7 +153,6 @@ export function shouldRebindSessionToDefault(reason: string | undefined): boolea
     reason === 'fake_backend' ||
     reason === 'connection_missing' ||
     reason === 'missing_model' ||
-    reason === 'empty_model_list' ||
     reason === 'model_not_enabled' ||
     reason === 'model_not_chat_capable'
   );

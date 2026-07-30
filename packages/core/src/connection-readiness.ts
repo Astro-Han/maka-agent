@@ -46,7 +46,6 @@ export type ChatConfigurationReason =
   | 'connection_disabled'
   | 'missing_api_key'
   | 'missing_model'
-  | 'empty_model_list'
   | 'model_not_enabled'
   | 'model_not_chat_capable'
   | 'oauth_subscription_not_wired'

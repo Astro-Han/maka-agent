@@ -240,9 +240,6 @@ export class ConnectionCatalogDocumentOwner {
     rawResult: ConnectionModelDiscoveryResult,
   ): Promise<ConnectionCatalogSnapshot> {
     const result = decodeConnectionInput(() => normalizeConnectionModelDiscoveryResult(rawResult));
-    if (result.models.length === 0) {
-      throw codecError('invalid_connection_input', 'Model discovery result must not be empty');
-    }
     const index = findConnectionIndex(current, expected);
     const previous = current.connections[index];
     if (!previous || previous.revision !== expected.revision) {

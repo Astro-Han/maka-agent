@@ -30,7 +30,6 @@ const REASON_FIX_COPY: Record<ChatConfigurationReason, string> = {
   connection_disabled: '当前模型连接已禁用。请到 设置 · 模型 启用或选择其他默认模型。',
   missing_api_key: '当前模型连接还没有可用凭据。请到 设置 · 模型 补齐 API key 或重新登录后再发送。',
   missing_model: '当前模型连接还没有可用模型。请到 设置 · 模型 选择默认模型后再发送。',
-  empty_model_list: '当前模型连接没有启用模型。请到 设置 · 模型 添加或启用模型后再发送。',
   model_not_enabled: '当前会话选择的模型未启用。请到 设置 · 模型 重新选择可用模型后再发送。',
   model_not_chat_capable:
     '当前会话选择的模型不能用于聊天。请到 设置 · 模型 重新选择支持聊天的模型后再发送。',
