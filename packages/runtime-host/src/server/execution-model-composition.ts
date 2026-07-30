@@ -431,10 +431,10 @@ async function resolveExecutionTarget(
 
   const model = header.model.trim();
   const modelInfo = resolved.connection.models.find((candidate) => candidate.id === model);
-  if (!model || !resolved.connection.enabledModelIds.includes(model) || !modelInfo) {
+  if (!model || !resolved.connection.enabledModelIds.includes(model)) {
     throw new Error('Runtime Host Session model is not enabled by its canonical connection');
   }
-  if (isModelExplicitlyUnsupportedForChat(modelInfo)) {
+  if (modelInfo && isModelExplicitlyUnsupportedForChat(modelInfo)) {
     throw new Error('Runtime Host Session model is not chat-capable');
   }
 

@@ -63,7 +63,7 @@ describe('chat readiness guard', () => {
     }
   });
 
-  test('blocks connections with no usable model or model outside enabled list', async () => {
+  test('blocks connections with no selected model or a model outside the enabled list', async () => {
     await assertRejectsReadiness(
       'blank default model',
       () => requireReadyConnection('custom', deps({
@@ -72,16 +72,6 @@ describe('chat readiness guard', () => {
       })),
       '没有可用模型',
       'missing_model',
-    );
-
-    await assertRejectsReadiness(
-      'empty model list',
-      () => requireReadyConnection('custom', deps({
-        connection: connection({ slug: 'custom', models: [] }),
-        apiKey: 'sk-test',
-      })),
-      '没有启用任何模型',
-      'empty_model_list',
     );
 
     await assertRejectsReadiness(

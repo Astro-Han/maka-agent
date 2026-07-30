@@ -130,7 +130,8 @@ test('a successful discovery atomically replaces the persisted catalog and prove
     assert.deepEqual(persisted?.models, [{ id: 'glm-new' }]);
     assert.equal(persisted?.modelSource, 'fetched');
     assert.equal(persisted?.modelsFetchedAt, 1_900_000_000_000);
-    assert.equal(persisted?.defaultModel, 'glm-new');
+    assert.equal(persisted?.defaultModel, 'glm-old');
+    assert.deepEqual(persisted?.enabledModelIds, ['glm-old']);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

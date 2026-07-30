@@ -79,7 +79,7 @@ describe('FileConnectionStore', () => {
       assert.deepEqual(updated.enabledModelIds, ['gpt-5', 'gpt-4o-mini']);
     });
   });
-  test('repairs a stale default after live models are stored (moonshot regression)', async () => {
+  test('preserves explicit Moonshot selection when live models are stored', async () => {
     await withConnectionStore(async (store) => {
       const created = await store.create({
         slug: 'moonshot-main',
@@ -95,8 +95,8 @@ describe('FileConnectionStore', () => {
         enabledModelIds: ['moonshot-v1-8k', 'kimi-k2.6'],
       });
 
-      assert.equal(updated.defaultModel, 'kimi-k2.6');
-      assert.deepEqual(updated.enabledModelIds, ['kimi-k2.6']);
+      assert.equal(updated.defaultModel, 'moonshot-v1-8k');
+      assert.deepEqual(updated.enabledModelIds, ['moonshot-v1-8k', 'kimi-k2.6']);
       assert.equal(updated.modelSource, 'fetched');
     });
   });
@@ -863,7 +863,7 @@ describe('FileConnectionStore', () => {
     });
   });
 
-  test('persists successful model discovery metadata', async () => {
+  test('persists successful model discovery metadata without rewriting user selection', async () => {
     await withConnectionStore(async (store) => {
       const created = await store.create({
         slug: 'zai-main',
@@ -880,10 +880,8 @@ describe('FileConnectionStore', () => {
 
       const next = await store.get(created.slug);
       assert.deepEqual(next?.models, [{ id: 'glm-5' }, { id: 'glm-5.1' }]);
-      // Stale default (not in the live inventory) is repaired so readiness
-      // does not fail with model_not_enabled after a successful fetch.
-      assert.equal(next?.defaultModel, 'glm-5');
-      assert.deepEqual(next?.enabledModelIds, ['glm-5']);
+      assert.equal(next?.defaultModel, 'glm-4.7');
+      assert.deepEqual(next?.enabledModelIds, ['glm-4.7']);
       assert.equal(next?.modelSource, 'fetched');
       assert.equal(next?.modelsFetchedAt, 1_800_000_000_000);
     });

@@ -689,11 +689,7 @@ function isCanonicalConnectionTestModel(
   connection: ConnectionCatalogEntry,
   modelId: string,
 ): boolean {
-  const basis = connectionTestModelBasis(connection);
-  const inCanonicalModels = basis.models.some((model) => model.id === modelId);
-  return basis.modelSource === 'fetched'
-    ? inCanonicalModels
-    : inCanonicalModels || basis.enabledModelIds.includes(modelId);
+  return connection.enabledModelIds.includes(modelId);
 }
 
 function canonicalEffectiveEndpoint(connection: ConnectionCatalogEntry): string {

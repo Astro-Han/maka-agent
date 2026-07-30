@@ -506,7 +506,7 @@ describe('runtime policy stores', () => {
       const afterDiscovery = discovered.snapshot.connections[0];
       assert.ok(afterDiscovery);
       assert.deepEqual(afterDiscovery.models, [{ id: 'gpt-5.1' }, { id: 'gpt-5.2' }]);
-      assert.deepEqual(afterDiscovery.enabledModelIds, ['gpt-5.1']);
+      assert.deepEqual(afterDiscovery.enabledModelIds, ['gpt-5']);
       assert.equal(afterDiscovery.modelSource, 'fetched');
       assert.equal(afterDiscovery.modelsFetchedAt, 42);
 
@@ -532,7 +532,7 @@ describe('runtime policy stores', () => {
     });
   });
 
-  test('repairs the canonical default target when discovery removes its model', async () => {
+  test('preserves the canonical default target when discovery omits its model', async () => {
     await withInteractiveOwner(async ({ stores }) => {
       const connection = await createConnection(
         stores,
@@ -555,13 +555,13 @@ describe('runtime policy stores', () => {
       });
       assert.equal(completed.kind, 'committed');
       if (completed.kind !== 'committed') return;
-      const expected = { connectionId: connection.connectionId, modelId: 'llama3.3' };
+      const expected = { connectionId: connection.connectionId, modelId: 'gpt-5' };
       assert.deepEqual(completed.snapshot.defaultTarget, expected);
       assert.deepEqual((await stores.connectionCatalog.getSnapshot()).defaultTarget, expected);
     });
   });
 
-  test('admits only canonical explicit connection test models', async () => {
+  test('admits only explicitly enabled connection test models', async () => {
     await withInteractiveOwner(async ({ stores }) => {
       const connection = await createConnection(
         stores,
@@ -601,18 +601,14 @@ describe('runtime policy stores', () => {
         ).kind,
         'committed',
       );
-      assert.equal(
-        (
-          await stores.operations.beginConnectionTest(
-            connection.connectionId,
-            'canonical-fetched-model',
-          )
-        ).kind,
-        'ready',
-      );
       await assert.rejects(
-        () => stores.operations.beginConnectionTest(connection.connectionId, 'gpt-5'),
+        () =>
+          stores.operations.beginConnectionTest(connection.connectionId, 'canonical-fetched-model'),
         isStoreError('invalid_connection_input'),
+      );
+      assert.equal(
+        (await stores.operations.beginConnectionTest(connection.connectionId, 'gpt-5')).kind,
+        'ready',
       );
       assert.equal(
         (await stores.operations.beginConnectionTest(connection.connectionId, null)).kind,

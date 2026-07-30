@@ -35,6 +35,7 @@ describe('isConnectionReady — model capability gate', () => {
     const verdict = isConnectionReady({
       connection: connection({
         defaultModel: 'gpt-4.1',
+        enabledModelIds: ['gpt-4.1', 'gpt-image-1'],
         models: [
           { id: 'gpt-4.1', capabilities: { chat: true, functionCalling: true } },
           { id: 'gpt-image-1', capabilities: { imageGeneration: true, chat: false } },
@@ -69,6 +70,18 @@ describe('isConnectionReady — model capability gate', () => {
     });
 
     assert.deepEqual(verdict, { ready: true, model: 'custom-chat' });
+  });
+
+  it('allows an explicitly enabled exact model id absent from the observed catalog', () => {
+    const verdict = isConnectionReady({
+      connection: connection({
+        enabledModelIds: ['gpt-4.1', 'provider-private-model'],
+      }),
+      hasSecret: true,
+      requestedModel: 'provider-private-model',
+    });
+
+    assert.deepEqual(verdict, { ready: true, model: 'provider-private-model' });
   });
 
   it('keeps optional-key LocalAI ready when no credential is stored', () => {
@@ -120,7 +133,7 @@ describe('isConnectionReady — model capability gate', () => {
     assert.deepEqual(verdict, { ready: true, model: 'grok-4.5' });
   });
 
-  it('treats an enumerated fallback model list as the local send gate', () => {
+  it('does not treat an observed fallback catalog as the local send gate', () => {
     const verdict = isConnectionReady({
       connection: connection({
         defaultModel: 'custom-chat',
@@ -130,7 +143,7 @@ describe('isConnectionReady — model capability gate', () => {
       hasSecret: true,
     });
 
-    assert.deepEqual(verdict, { ready: false, reason: 'model_not_enabled' });
+    assert.deepEqual(verdict, { ready: true, model: 'custom-chat' });
   });
 
   it('returns the normalized model id after validating a whitespace-padded model', () => {

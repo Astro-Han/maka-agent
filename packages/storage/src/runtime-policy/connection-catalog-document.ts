@@ -23,7 +23,6 @@ import {
   type SetDefaultConnectionTargetInput,
   type UpdateCatalogConnectionInput,
 } from '@maka/core/runtime-policy';
-import { reconcileConnectionAfterModelFetch } from '@maka/core/llm-connections';
 import { deepFreeze, nextRevision, record, revision, unique } from './codec.js';
 import {
   codecError,
@@ -249,30 +248,9 @@ export class ConnectionCatalogDocumentOwner {
     if (!previous || previous.revision !== expected.revision) {
       throw codecError('invalid_document', 'Coordinator admitted a stale model discovery result');
     }
-    const currentDefaultTarget =
-      current.defaultTarget?.connectionId === previous.connectionId
-        ? current.defaultTarget
-        : undefined;
-    const reconciled =
-      result.source === 'fetched'
-        ? reconcileConnectionAfterModelFetch(
-            {
-              defaultModel: currentDefaultTarget?.modelId ?? previous.enabledModelIds[0],
-              enabledModelIds: previous.enabledModelIds,
-            },
-            result.models,
-          )
-        : {
-            defaultModel: currentDefaultTarget?.modelId ?? previous.enabledModelIds[0] ?? '',
-            enabledModelIds: previous.enabledModelIds,
-          };
-    const defaultTarget = currentDefaultTarget
-      ? { connectionId: previous.connectionId, modelId: reconciled.defaultModel }
-      : current.defaultTarget;
     const discovered: ConnectionCatalogEntry = {
       ...previous,
       revision: nextRevision(previous.revision),
-      enabledModelIds: reconciled.enabledModelIds,
       models: result.models,
       modelSource: result.source,
       modelsFetchedAt: result.fetchedAt,
@@ -287,7 +265,7 @@ export class ConnectionCatalogDocumentOwner {
       current,
       index,
       testBasisChanged ? discoveredWithoutLastTest : discovered,
-      defaultTarget,
+      current.defaultTarget,
     );
   }
 

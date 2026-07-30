@@ -16,8 +16,7 @@
  *   - has usable secret OR provider's `authKind === 'none'`
  *   - effective model exists (caller's `requestedModel` if provided,
  *     otherwise `connection.defaultModel`)
- *   - effective model is in `connection.models` (when that list is
- *     enumerated)
+ *   - effective model is explicitly enabled by the user
  *
  * @kenji + @xuan PR110a review gate: send-path / onboarding / quick
  * chat must call this helper rather than reimplementing the criteria.
@@ -26,6 +25,7 @@
 import {
   CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS,
   PROVIDER_DEFAULTS,
+  connectionEnabledModelIds,
   isWiredOAuthProvider,
   providerAuthRequiresSecret,
   type LlmConnection,
@@ -91,9 +91,8 @@ export interface IsConnectionReadyInput {
  *   3. unsupported OAuth provider → `oauth_subscription_not_wired`
  *   4. `authKind !== 'none' && !hasSecret` → `missing_api_key`
  *   5. effective model is empty/missing → `missing_model`
- *   6. `connection.models` is enumerated but empty → `empty_model_list`
- *   7. effective model is not in `connection.models` → `model_not_enabled`
- *   8. effective model is explicitly not chat-capable → `model_not_chat_capable`
+ *   6. effective model is not enabled → `model_not_enabled`
+ *   7. effective model is explicitly not chat-capable → `model_not_chat_capable`
  *
  * "Effective model" = `requestedModel ?? connection.defaultModel`.
  */
@@ -117,22 +116,12 @@ export function isConnectionReady(input: IsConnectionReadyInput): IsConnectionRe
   if (!model) {
     return { ready: false, reason: 'missing_model' };
   }
-  if (connection.models) {
-    const enabled = new Map<string, (typeof connection.models)[number]>();
-    for (const entry of connection.models) {
-      const id = entry.id.trim();
-      if (id) enabled.set(id, entry);
-    }
-    if (enabled.size === 0) {
-      return { ready: false, reason: 'empty_model_list' };
-    }
-    const modelEntry = enabled.get(model);
-    if (!modelEntry) {
-      return { ready: false, reason: 'model_not_enabled' };
-    }
-    if (isModelExplicitlyUnsupportedForChat(modelEntry)) {
-      return { ready: false, reason: 'model_not_chat_capable' };
-    }
+  if (!connectionEnabledModelIds(connection).includes(model)) {
+    return { ready: false, reason: 'model_not_enabled' };
+  }
+  const modelEntry = connection.models?.find((entry) => entry.id.trim() === model);
+  if (modelEntry && isModelExplicitlyUnsupportedForChat(modelEntry)) {
+    return { ready: false, reason: 'model_not_chat_capable' };
   }
   return { ready: true, model };
 }

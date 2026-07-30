@@ -5,7 +5,6 @@ import {
   connectionEnabledModelIds,
   migrateConnectionV1ToV2,
   persistedBaseUrl,
-  reconcileConnectionAfterModelFetch,
   validateSlug,
   type CreateConnectionInput,
   type LlmConnection,
@@ -110,25 +109,11 @@ class FileConnectionStore implements ConnectionStore {
           patch.defaultModel !== undefined ||
           patch.models !== undefined);
       const models = updatesModelCache ? patch.models : current.models;
-      let defaultModel = patch.defaultModel ?? current.defaultModel;
-      let enabledModelIds = connectionEnabledModelIds({
+      const defaultModel = patch.defaultModel ?? current.defaultModel;
+      const enabledModelIds = connectionEnabledModelIds({
         defaultModel,
         enabledModelIds: patch.enabledModelIds ?? current.enabledModelIds,
       });
-      // Authoritative live inventory wins: a retired default (common after
-      // Moonshot renamed moonshot-v1-* → kimi-k2.*) must not strand the
-      // connection as model_not_enabled once models are fetched. Fallback
-      // catalogs and metadata-only updates do not own this selection.
-      const writesFetchedModels =
-        Object.prototype.hasOwnProperty.call(patch, 'models') && patch.modelSource === 'fetched';
-      if (writesFetchedModels && models && models.length > 0) {
-        const reconciled = reconcileConnectionAfterModelFetch(
-          { defaultModel, enabledModelIds },
-          models,
-        );
-        defaultModel = reconciled.defaultModel;
-        enabledModelIds = reconciled.enabledModelIds;
-      }
       const next: LlmConnection = {
         ...current,
         name: patch.name ?? current.name,

@@ -1249,7 +1249,6 @@ export {
   backendKindOf,
   connectionEnabledModelIds,
   isWiredOAuthProvider,
-  reconcileConnectionAfterModelFetch,
   effectiveBaseUrl,
   migrateConnectionV1ToV2,
   normalizeConnectionBaseUrl,

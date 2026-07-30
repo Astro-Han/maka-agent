@@ -73,6 +73,25 @@ test('backend creation aborts a stalled pricing snapshot read', async () => {
   });
 });
 
+test('backend creation accepts an enabled exact model absent from the observed catalog', async () => {
+  const ready = readyExecutionConnection();
+  const backend = await createHostAiSdkBackend(
+    backendCreationFixture({
+      abortSignal: new AbortController().signal,
+      resolveExecutionConnection: async () => ({
+        ...ready,
+        connection: {
+          ...ready.connection,
+          models: [],
+        },
+      }),
+      readPricing: async () => ({ revision: 0, overrides: [] }),
+    }),
+  );
+
+  assert.ok(backend);
+});
+
 test('production Host executes a canonical ai-sdk Session against a real provider wire', async () => {
   const base = await mkdtemp(join(tmpdir(), 'maka-host-real-model-'));
   const root = join(base, 'interactive');
@@ -563,6 +582,7 @@ function backendCreationFixture(input: {
         model: MODEL_ID,
       },
       abortSignal: input.abortSignal,
+      store: {},
     } as BackendFactoryContext,
     runtimePolicy: {
       operations: {
