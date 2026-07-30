@@ -967,8 +967,7 @@ describe('FileConnectionStore', () => {
         'utf8',
       );
 
-      // A rename does not own model discovery and therefore must not silently
-      // switch the selected model. The next discovery write will reconcile it.
+      // A rename does not own model selection and must not silently switch it.
       await store.update('moonshot-main', { name: 'Moonshot Primary' });
       const next = await store.get('moonshot-main');
       assert.equal(next?.defaultModel, 'moonshot-v1-8k');

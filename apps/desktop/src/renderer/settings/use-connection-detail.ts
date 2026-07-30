@@ -86,10 +86,6 @@ export function useConnectionDetail(props: ConnectionDetailProps) {
   const [baseUrl, setBaseUrl] = useState(connection.baseUrl ?? defaults.baseUrl ?? '');
   const [models, setModels] = useState<ModelInfo[]>(connection.models ?? []);
   const [enabledModelIds, setEnabledModelIds] = useState(() => connectionEnabledModelIds(connection));
-  // Backend persists the model-list source alongside the model cache, so a
-  // Settings restart no longer has to infer "fetched" from a non-empty array.
-  // Discovery rejects empty catalogs before persistence, while source remains
-  // explicit for compatibility with already-persisted connection records.
   const [modelSource, setModelSource] = useState<'fetched' | 'fallback'>(
     connection.modelSource ?? 'fallback',
   );

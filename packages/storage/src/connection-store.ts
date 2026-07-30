@@ -160,9 +160,6 @@ class FileConnectionStore implements ConnectionStore {
   }
 
   async save(connection: LlmConnection): Promise<LlmConnection> {
-    // save() is a full-snapshot boundary, so callers providing authoritative
-    // fetched models must already reconcile defaultModel/enabledModelIds.
-    // update() performs that reconciliation for partial fetched-model patches.
     let saved: LlmConnection | null = null;
     await this.withQueue(async () => {
       const file = await this.readUnlocked();
