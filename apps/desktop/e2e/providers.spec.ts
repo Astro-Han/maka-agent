@@ -108,6 +108,18 @@ test('adds a catalog provider through the canonical API-key dialog', async ({ wi
   await expect(defaultRow).toBeChecked();
   await expect(defaultRow).toBeDisabled();
 
+  // A model missing from discovery can still be enabled by its exact provider
+  // id. It joins enabledModelIds, surfaces in the same checkbox list, and does
+  // not replace the connection's default model.
+  const exactModelId = 'future-cerebras-model-preview';
+  const exactModelInput = detailDialog.getByLabel('精确模型 ID');
+  await exactModelInput.fill(exactModelId);
+  await detailDialog.getByRole('button', { name: '添加并启用' }).click();
+  await expect(exactModelInput).toHaveValue('');
+  const exactModelRow = modelList.getByRole('checkbox', { name: exactModelId });
+  await expect(exactModelRow).toBeChecked();
+  await expect(defaultRow).toBeChecked();
+
   const gemmaRow = modelList.getByRole('checkbox', { name: /Gemma/ }).first();
   await expect(gemmaRow).not.toBeChecked();
   // Dialog height stays fixed as the list is filtered to a subset.

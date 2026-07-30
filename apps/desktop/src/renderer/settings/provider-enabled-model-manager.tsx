@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { ModelCatalogEntry } from '@maka/core';
 import {
+  Button,
   Input,
   Item,
   ItemActions,
@@ -32,6 +33,7 @@ export function EnabledModelManager(props: {
 }) {
   const copy = getProviderSettingsCopy(useUiLocale()).detail;
   const [query, setQuery] = useState('');
+  const [exactModelId, setExactModelId] = useState('');
   // Roving tabindex (composite-widget keyboard pattern): the whole list is ONE
   // Tab stop. Without this every row button is a Tab stop, and a large catalog
   // (OpenRouter's fallback list is 260+ rows) walls off everything below the
@@ -78,6 +80,15 @@ export function EnabledModelManager(props: {
     props.onChange(next);
   }
 
+  function addExactModel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const id = exactModelId.trim();
+    if (!id || enabled.has(id)) return;
+    props.onChange([...props.enabledModelIds, id]);
+    setExactModelId('');
+    setQuery('');
+  }
+
   // The default-model row is disabled (natively unfocusable), so arrow-key
   // traversal skips it — consistent with Tab behavior.
   const focusableRows = visibleRows.filter((row) => row.id !== props.defaultModel);
@@ -120,6 +131,31 @@ export function EnabledModelManager(props: {
         <strong id="provider-enabled-models-title">{copy.enabledModelsTitle(props.enabledModelIds.length)}</strong>
         <span>{copy.enabledModelsHelp}</span>
       </div>
+      <form className="providerExactModelForm" onSubmit={addExactModel}>
+        <label htmlFor="provider-exact-model-id">{copy.exactModelId}</label>
+        <div className="providerExactModelControls">
+          <Input
+            id="provider-exact-model-id"
+            className="providerExactModelInput"
+            value={exactModelId}
+            onChange={(event) => setExactModelId(event.currentTarget.value)}
+            placeholder={copy.exactModelIdPlaceholder}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            disabled={props.disabled}
+            aria-describedby="provider-exact-model-help"
+          />
+          <Button
+            size="sm"
+            type="submit"
+            disabled={props.disabled || !exactModelId.trim() || enabled.has(exactModelId.trim())}
+          >
+            {copy.addExactModel}
+          </Button>
+        </div>
+        <span id="provider-exact-model-help">{copy.exactModelIdHelp}</span>
+      </form>
       <Input
         type="search"
         value={query}
@@ -171,7 +207,7 @@ export function EnabledModelManager(props: {
                     </ItemContent>
                     {isDefault && (
                       <ItemActions>
-                      <span className="providerEnabledModelMeta">{copy.defaultModel}</span>
+                        <span className="providerEnabledModelMeta">{copy.defaultModel}</span>
                       </ItemActions>
                     )}
                   </Item>
