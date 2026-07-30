@@ -60,7 +60,7 @@ A single unverified third-party report describes an unsuccessful attempt to repr
 
 Neither vendor figure is a comparison target for this A/B, and the decisive difference is the agent time budget.
 
-**Both vendor configurations are effectively untimed; this run is not.** No task in the suite declares a native agent timeout above 200 minutes, so the Terminus-2 footnote's `timeout=4h` is at or above every task's native limit and never binds — under that configuration the operative constraint is `max_episodes=500`, not the clock. The best-harness configuration removes wall-clock limits outright. This run instead applies each task's native timeout at ×1:
+**Neither vendor configuration is meaningfully time-limited; this run is.** No task in the suite declares a native agent timeout above 200 minutes, so the Terminus-2 footnote's `timeout=4h` sits at or above every task's native limit and never binds, leaving `max_episodes=500` as its only remaining agent-side budget. The best-harness configuration removes wall-clock limits outright. This run instead applies each task's native timeout at ×1:
 
 | | This run | Terminus-2 (81.0) |
 | --- | ---: | ---: |
