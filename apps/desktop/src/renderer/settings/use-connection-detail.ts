@@ -105,6 +105,7 @@ export function useConnectionDetail(props: ConnectionDetailProps) {
   >();
   const connectionDetailMountedRef = useMountedRef();
   const connectionDetailLifecycleRef = useRef(0);
+  const autoRefreshConnectionRef = useRef<string | null>(null);
   const toast = useToast();
   const supportsApiKey = providerAuthSupportsApiKey(connection.providerType);
   const needsOAuth = defaults.authKind === 'oauth_token';
@@ -236,6 +237,7 @@ export function useConnectionDetail(props: ConnectionDetailProps) {
       setApiKey('');
       const nextHasSecret = probesCredential ? await props.bridge.hasSecret(connection.slug) : true;
       if (!isConnectionDetailCurrent(lifecycle)) return;
+      if (nextHasSecret) autoRefreshConnectionRef.current = connection.slug;
       setHasSecret(nextHasSecret);
       await props.onChanged();
       if (!isConnectionDetailCurrent(lifecycle)) return;
@@ -340,9 +342,9 @@ export function useConnectionDetail(props: ConnectionDetailProps) {
     const lifecycle = connectionDetailLifecycleRef.current;
     setFetchingModels(true);
     try {
-      // Backend returns a `ModelDiscoveryResult` envelope and rejects empty or
-      // malformed catalogs before persistence. Trust its explicit source
-      // instead of reconstructing cache provenance in the renderer.
+      // Backend returns a `ModelDiscoveryResult` envelope and persists valid
+      // empty catalogs as authoritative observations. Trust its explicit
+      // source instead of reconstructing cache provenance in the renderer.
       const result = await props.bridge.fetchModels(connection.slug);
       if (!isConnectionDetailCurrent(lifecycle)) return;
       setModels(result.models);
@@ -360,15 +362,24 @@ export function useConnectionDetail(props: ConnectionDetailProps) {
       // 'fallback' if we have nothing fresh to show — the failed fetch
       // means whatever's on screen is not from the latest probe.
       if (models.length === 0) setModelSource('fallback');
-      toast.error(
-        copy.modelsFetchFailed(connection.name),
-        copy.modelsFetchFailedDetail(message, credentialTroubleshootingCopy),
-      );
+      if (!opts.silent) {
+        toast.error(
+          copy.modelsFetchFailed(connection.name),
+          copy.modelsFetchFailedDetail(message, credentialTroubleshootingCopy),
+        );
+      }
     } finally {
       releaseFetch();
       if (isConnectionDetailCurrent(lifecycle)) setFetchingModels(false);
     }
   }
+
+  useEffect(() => {
+    if (!supportsRemoteDiscovery || !hasUsableCredential) return;
+    if (autoRefreshConnectionRef.current === connection.slug) return;
+    autoRefreshConnectionRef.current = connection.slug;
+    void refreshModels({ silent: true });
+  }, [connection.slug, supportsRemoteDiscovery, hasUsableCredential]);
 
   async function setAsDefault() {
     const releaseSetDefault = connectionDetailActionGuard.beginExclusive('set-default');

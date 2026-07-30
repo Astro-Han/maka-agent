@@ -805,6 +805,28 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     assert.doesNotMatch(enabledModels, /copy\.saving|copy\.saveEndpoint/);
   });
 
+  it('refreshes a discoverable connection once when its detail sheet has a usable credential', async () => {
+    const src = await readProviderSettingsCombinedSource();
+    const detail = src.match(/function ConnectionDetail[\s\S]*?function modelIdListsEqual\(/)?.[0] ?? '';
+
+    assert.match(detail, /const autoRefreshConnectionRef = useRef<string \| null>\(null\)/);
+    assert.match(
+      detail,
+      /useEffect\(\(\) => \{[\s\S]*if \(!supportsRemoteDiscovery \|\| !hasUsableCredential\) return;[\s\S]*if \(autoRefreshConnectionRef\.current === connection\.slug\) return;[\s\S]*autoRefreshConnectionRef\.current = connection\.slug;[\s\S]*void refreshModels\(\{ silent: true \}\);[\s\S]*\}, \[connection\.slug, supportsRemoteDiscovery, hasUsableCredential\]\)/,
+      'opening a detail sheet should refresh live discovery once, after credential presence is known',
+    );
+    assert.match(
+      detail,
+      /if \(nextHasSecret\) autoRefreshConnectionRef\.current = connection\.slug;[\s\S]*setHasSecret\(nextHasSecret\)/,
+      'saving a new credential should leave the existing post-save refresh as the sole request',
+    );
+    assert.match(
+      detail,
+      /if \(!opts\.silent\) \{[\s\S]*toast\.error\([\s\S]*copy\.modelsFetchFailed/,
+      'a background refresh failure should preserve the existing list without blocking the sheet with a toast',
+    );
+  });
+
   it('allows an exact model id to be enabled without inventing a second persistence path', async () => {
     const src = await readProviderSettingsCombinedSource();
     const enabledModels = src.match(/function EnabledModelManager[\s\S]*?function modelDisplayLabel/)?.[0] ?? '';
