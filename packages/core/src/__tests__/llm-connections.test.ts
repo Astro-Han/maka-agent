@@ -410,7 +410,6 @@ describe('provider compatibility contract', () => {
       modelDiscovery: {
         kind: 'protocol',
         auth: 'oauth-bearer',
-        filter: 'fallback-models',
       },
       category: 'oauth',
       catalogBadge: 'Account',
@@ -489,7 +488,7 @@ describe('provider compatibility contract', () => {
     );
   });
 
-  it('owns ZenMux under the stable models.dev id with public snapshot-bounded discovery', () => {
+  it('owns ZenMux under the stable models.dev id with public live discovery', () => {
     const zenmux = (
       PROVIDER_REGISTRY as Partial<
         Record<string, (typeof PROVIDER_REGISTRY)[keyof typeof PROVIDER_REGISTRY]>
@@ -510,7 +509,6 @@ describe('provider compatibility contract', () => {
     assert.deepEqual(zenmux.modelDiscovery, {
       kind: 'protocol',
       auth: 'none',
-      filter: 'fallback-models',
     });
     assert.equal(zenmux.category, 'overseas');
     assert.equal(zenmux.catalogGroup, 'aggregators');
@@ -592,7 +590,6 @@ describe('provider compatibility contract', () => {
     assert.deepEqual(deepinfra.modelDiscovery, {
       kind: 'protocol',
       path: '/v1/models',
-      filter: 'fallback-models',
     });
     assert.equal(deepinfra.category, 'overseas');
     assert.equal(deepinfra.catalogGroup, 'api');
@@ -615,10 +612,7 @@ describe('provider compatibility contract', () => {
     assert.equal(groq.authKind, 'api_key');
     assert.equal(groq.protocol, 'openai');
     assert.deepEqual(groq.runtimeAdapter, { kind: 'openai-compatible', name: 'provider' });
-    assert.deepEqual(groq.modelDiscovery, {
-      kind: 'protocol',
-      filter: 'fallback-models',
-    });
+    assert.deepEqual(groq.modelDiscovery, { kind: 'protocol' });
     assert.equal(groq.category, 'overseas');
     assert.equal(groq.catalogGroup, 'api');
     assert.equal(groq.modelsDevId, 'groq');
@@ -647,10 +641,7 @@ describe('provider compatibility contract', () => {
     assert.equal(openrouter.authKind, 'api_key');
     assert.equal(openrouter.protocol, 'openai');
     assert.deepEqual(openrouter.runtimeAdapter, { kind: 'openai-compatible', name: 'provider' });
-    assert.deepEqual(openrouter.modelDiscovery, {
-      kind: 'protocol',
-      filter: 'fallback-models',
-    });
+    assert.deepEqual(openrouter.modelDiscovery, { kind: 'protocol' });
     assert.equal(openrouter.category, 'overseas');
     assert.equal(openrouter.catalogGroup, 'aggregators');
     assert.equal(openrouter.catalogBadge, '聚合');
@@ -849,7 +840,7 @@ describe('provider compatibility contract', () => {
     assert.equal(provider.status, 'ready');
     assert.equal(provider.protocol, 'openai');
     assert.deepEqual(provider.runtimeAdapter, { kind: 'openai-compatible', name: 'provider' });
-    assert.deepEqual(provider.modelDiscovery, { kind: 'protocol', filter: 'fallback-models' });
+    assert.deepEqual(provider.modelDiscovery, { kind: 'protocol' });
     assert.equal(provider.category, 'overseas');
     assert.equal(provider.catalogGroup, 'api');
     assert.equal(provider.catalogBadge, 'API');

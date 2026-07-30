@@ -1076,7 +1076,7 @@ describe('models.dev provider conformance', () => {
     };
 
     const models = await fetchProviderModels(connection, 'deepinfra-test-key');
-    assert.deepEqual(models, [{ id: modelId }]);
+    assert.deepEqual(models, [{ id: modelId }, { id: 'BAAI/bge-m3' }]);
 
     const result = await generateText({
       model: getAIModel({ connection, apiKey: 'deepinfra-test-key', modelId: models[0]!.id }),
@@ -1193,7 +1193,7 @@ describe('models.dev provider conformance', () => {
     };
 
     const models = await fetchProviderModels(connection, 'groq-test-key');
-    assert.deepEqual(models, [{ id: modelId }]);
+    assert.deepEqual(models, [{ id: modelId }, { id: 'whisper-large-v3' }]);
 
     const result = await generateText({
       model: getAIModel({ connection, apiKey: 'groq-test-key', modelId: models[0]!.id }),
@@ -1310,7 +1310,7 @@ describe('models.dev provider conformance', () => {
     };
 
     const models = await fetchProviderModels(connection, 'openrouter-test-key');
-    assert.deepEqual(models, [{ id: modelId }]);
+    assert.deepEqual(models, [{ id: modelId }, { id: 'openrouter-test/non-fallback' }]);
 
     const result = await generateText({
       model: getAIModel({ connection, apiKey: 'openrouter-test-key', modelId: models[0]!.id }),

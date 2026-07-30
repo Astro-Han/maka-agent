@@ -35,7 +35,7 @@ export type ProviderModelDiscovery =
       path?: string;
       query?: Readonly<Record<string, string>>;
       responseShape?: 'array-or-data';
-      filter?: 'fallback-models' | 'language-models' | 'tool-capable';
+      filter?: 'language-models' | 'tool-capable';
     }
   | {
       kind: 'fireworks';
@@ -934,7 +934,6 @@ const providerRegistry = {
     modelDiscovery: {
       kind: 'protocol',
       auth: 'oauth-bearer',
-      filter: 'fallback-models',
     },
     category: 'oauth',
     catalogBadge: 'Account',
@@ -1131,7 +1130,7 @@ const providerRegistry = {
       replayAssistantReasoningAs: 'reasoning',
       replayAssistantReasoningDetails: true,
     },
-    modelDiscovery: { kind: 'protocol', auth: 'none', filter: 'fallback-models' },
+    modelDiscovery: { kind: 'protocol', auth: 'none' },
     category: 'overseas',
     catalogGroup: 'aggregators',
     catalogBadge: 'Gateway',
@@ -1231,7 +1230,7 @@ const providerRegistry = {
     status: 'ready',
     protocol: 'openai',
     runtimeAdapter: { kind: 'openai-compatible', name: 'provider' },
-    modelDiscovery: { kind: 'protocol', filter: 'fallback-models' },
+    modelDiscovery: { kind: 'protocol' },
     category: 'overseas',
     catalogGroup: 'api',
     catalogBadge: 'API',
@@ -1367,7 +1366,7 @@ const providerRegistry = {
     status: 'ready',
     protocol: 'openai',
     runtimeAdapter: { kind: 'openai-compatible', name: 'provider' },
-    modelDiscovery: { kind: 'protocol', path: '/v1/models', filter: 'fallback-models' },
+    modelDiscovery: { kind: 'protocol', path: '/v1/models' },
     category: 'overseas',
     catalogGroup: 'api',
     catalogBadge: 'API',
@@ -1386,7 +1385,7 @@ const providerRegistry = {
     status: 'ready',
     protocol: 'openai',
     runtimeAdapter: { kind: 'openai-compatible', name: 'provider' },
-    modelDiscovery: { kind: 'protocol', filter: 'fallback-models' },
+    modelDiscovery: { kind: 'protocol' },
     category: 'overseas',
     catalogGroup: 'api',
     catalogBadge: 'API',
@@ -1405,7 +1404,7 @@ const providerRegistry = {
     status: 'ready',
     protocol: 'openai',
     runtimeAdapter: { kind: 'openai-compatible', name: 'provider' },
-    modelDiscovery: { kind: 'protocol', filter: 'fallback-models' },
+    modelDiscovery: { kind: 'protocol' },
     category: 'overseas',
     catalogGroup: 'aggregators',
     catalogBadge: '聚合',
@@ -1424,7 +1423,7 @@ const providerRegistry = {
     status: 'ready',
     protocol: 'openai',
     runtimeAdapter: { kind: 'openai-compatible', name: 'provider' },
-    modelDiscovery: { kind: 'protocol', filter: 'fallback-models' },
+    modelDiscovery: { kind: 'protocol' },
     category: 'overseas',
     catalogGroup: 'api',
     catalogBadge: 'API',

@@ -338,7 +338,7 @@ describe('fetchProviderModels', () => {
     ]);
   });
 
-  test('xAI OAuth discovers only supported Grok models with bearer auth', async () => {
+  test('xAI OAuth preserves exact account model ids with bearer auth', async () => {
     const server = await startJsonServer((request, response) => {
       assert.equal(request.method, 'GET');
       assert.equal(request.url, '/v1/models');
@@ -362,7 +362,7 @@ describe('fetchProviderModels', () => {
       'xai-oauth-token',
     );
 
-    assert.deepEqual(models, [{ id: 'grok-4.5' }]);
+    assert.deepEqual(models, [{ id: 'grok-4.5' }, { id: 'grok-imagine-image' }]);
   });
 
   test('xAI OAuth preserves discovery HTTP status for auth-failure classification', async () => {
@@ -386,6 +386,33 @@ describe('fetchProviderModels', () => {
       ),
       (error: unknown) => error instanceof ProviderModelDiscoveryHttpError && error.status === 401,
     );
+  });
+
+  test('successful live discovery preserves a model id absent from the fallback snapshot', async () => {
+    const server = await startJsonServer((request, response) => {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.url, '/openai/v1/models');
+      assert.equal(request.headers.authorization, 'Bearer groq-key');
+      respondJson(response, 200, {
+        data: [{ id: 'provider-new-chat-model' }],
+      });
+    });
+
+    const models = await fetchProviderModels(
+      {
+        slug: 'groq',
+        name: 'Groq',
+        providerType: 'groq',
+        baseUrl: `${server.url}/openai/v1`,
+        defaultModel: 'provider-new-chat-model',
+        enabled: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      'groq-key',
+    );
+
+    assert.deepEqual(models, [{ id: 'provider-new-chat-model' }]);
   });
 
   test('Vercel AI Gateway discovers the complete public language-model list without exposing its inference key', async () => {
@@ -441,7 +468,7 @@ describe('fetchProviderModels', () => {
     ]);
   });
 
-  test('ZenMux intersects its public directory with the tool-capable snapshot without exposing its inference key', async () => {
+  test('ZenMux preserves its public directory without exposing its inference key', async () => {
     const modelId = 'moonshotai/kimi-k2.5';
     const server = await startJsonServer((request, response) => {
       assert.equal(request.method, 'GET');
@@ -500,6 +527,18 @@ describe('fetchProviderModels', () => {
         id: modelId,
         displayName: 'Kimi K2.5',
         contextWindow: 262_000,
+        capabilities: { vision: true, reasoning: true },
+      },
+      {
+        id: 'new-provider/new-model',
+        displayName: 'Unreviewed Model',
+        contextWindow: 128_000,
+        capabilities: { reasoning: false },
+      },
+      {
+        id: 'anthropic/claude-sonnet-4.6',
+        displayName: 'Claude Sonnet 4.6',
+        contextWindow: 1_000_000,
         capabilities: { vision: true, reasoning: true },
       },
     ]);

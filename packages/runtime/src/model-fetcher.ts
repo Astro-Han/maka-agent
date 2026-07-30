@@ -219,7 +219,7 @@ async function fetchProviderModelsStrict(
       const models = providerObjectArray<RawProviderModel>(data.data, 'Anthropic models')
         .map(toModelInfo)
         .filter((model): model is ModelInfo => model !== null);
-      return filterDiscoveredModels(models, discovery.filter, definition.fallbackModels);
+      return filterDiscoveredModels(models, discovery.filter);
     }
     case 'openai': {
       const r = await fetchForConnectionEffect(
@@ -257,7 +257,7 @@ async function fetchProviderModelsStrict(
         .filter((model) => discovery.filter !== 'language-models' || model.type === 'language')
         .map(toModelInfo)
         .filter((model): model is ModelInfo => model !== null);
-      return filterDiscoveredModels(models, discovery.filter, definition.fallbackModels);
+      return filterDiscoveredModels(models, discovery.filter);
     }
     case 'google': {
       const r = await fetchForConnectionEffect(fetchFn, googleApiUrl(baseUrl, '/models', apiKey), {
@@ -615,15 +615,12 @@ async function fetchCohereModels(
 
 function filterDiscoveredModels(
   models: ModelInfo[],
-  filter: 'fallback-models' | 'language-models' | 'tool-capable' | undefined,
-  fallbackModels: readonly string[],
+  filter: 'language-models' | 'tool-capable' | undefined,
 ): ModelInfo[] {
   if (filter === 'tool-capable') {
     return models.filter((model) => model.capabilities?.functionCalling === true);
   }
-  if (filter !== 'fallback-models') return models;
-  const supported = new Set(fallbackModels);
-  return models.filter((model) => supported.has(model.id));
+  return models;
 }
 
 function modelListUrl(

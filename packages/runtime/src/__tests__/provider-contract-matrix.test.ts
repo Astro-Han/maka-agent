@@ -355,7 +355,8 @@ function discoveryPayload(
 ): unknown {
   if (protocol === 'anthropic') return { data: [{ id: sample }] };
   if (protocol === 'google') return { models: [{ name: `models/${sample}` }] };
-  // openai protocol — shape the survivor + a decoy the filter must drop.
+  // OpenAI protocol — shape the survivor + a decoy when the live response
+  // exposes a compatibility fact that the declared filter owns.
   if (filter === 'tool-capable') {
     return {
       object: 'list',
@@ -372,12 +373,6 @@ function discoveryPayload(
         { id: sample, type: 'language' },
         { id: 'contract-decoy-embedding', type: 'embedding' },
       ],
-    };
-  }
-  if (filter === 'fallback-models') {
-    return {
-      object: 'list',
-      data: [{ id: sample }, { id: 'contract-decoy-not-in-fallback' }],
     };
   }
   if (shape === 'bare-array') return [{ id: sample }];

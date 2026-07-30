@@ -73,7 +73,7 @@ export interface ProviderContractDiscoveryPlan {
   path?: string;
   query?: Readonly<Record<string, string>>;
   responseShape?: 'array-or-data';
-  filter?: 'fallback-models' | 'language-models' | 'tool-capable';
+  filter?: 'language-models' | 'tool-capable';
 }
 
 /** Derived expectation for a generated `reasoning-replay` cell. */
@@ -178,8 +178,8 @@ function wireForProtocol(protocol: ProviderDefaults['protocol']): ProviderContra
  *   - the native OpenAI adapter routes `gpt-5*` to the Responses API by id shape.
  *
  * The first fallback model that survives both filters is the most faithful
- * choice — a real, exact id that also sits in any `fallback-models` discovery
- * allowlist. Providers with no such model fall back to a synthetic id.
+ * choice — a real, exact id on the provider's declared default wire. Providers
+ * with no such model fall back to a synthetic id.
  */
 function sampleModelIdFor(providerType: ProviderType, def: ProviderDefaults): string {
   const usesDefaultWire = (id: string): boolean => {
