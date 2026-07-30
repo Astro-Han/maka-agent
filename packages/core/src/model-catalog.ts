@@ -11,7 +11,12 @@ import {
   providerSupportsModelDiscovery,
 } from './llm-connections.js';
 import type { PricingConfig } from './usage-stats/types.js';
-import { curatedCatalogFallbackModelsForProvider, lookupModelMetadata } from './model-metadata.js';
+import {
+  curatedCatalogFallbackModelsForProvider,
+  lookupModelMetadata,
+  resolveChatSupport,
+  resolveModelCapabilities,
+} from './model-metadata.js';
 
 export type ModelCapabilitySource = 'provider_api' | 'static_catalog' | 'user_override' | 'unknown';
 
@@ -277,7 +282,7 @@ function makeEntry(
   const recommendedRank = recommendedRanks.get(normalizedModel.id);
   const contextWindow = normalizedModel.contextWindow ?? metadata.contextWindow;
   const maxOutputTokens = normalizedModel.maxOutputTokens ?? metadata.maxOutputTokens;
-  const capabilities = mergeCapabilities(normalizedModel.capabilities, metadata.capabilities);
+  const capabilities = resolveModelCapabilities(input.providerType, normalizedModel);
   const unavailableReason = deriveModelUnavailableReason(input, {
     ...normalizedModel,
     capabilities,
@@ -316,21 +321,6 @@ function makeEntry(
         normalizedDefaultModel,
       ),
     },
-  };
-}
-
-function mergeCapabilities(
-  providerCapabilities: ModelInfo['capabilities'] | undefined,
-  metadataCapabilities: ModelInfo['capabilities'] | undefined,
-): ModelInfo['capabilities'] | undefined {
-  if (!providerCapabilities) return metadataCapabilities;
-  if (!metadataCapabilities) return providerCapabilities;
-  return {
-    chat: providerCapabilities.chat ?? metadataCapabilities.chat,
-    vision: providerCapabilities.vision ?? metadataCapabilities.vision,
-    reasoning: providerCapabilities.reasoning ?? metadataCapabilities.reasoning,
-    functionCalling: providerCapabilities.functionCalling ?? metadataCapabilities.functionCalling,
-    imageGeneration: providerCapabilities.imageGeneration ?? metadataCapabilities.imageGeneration,
   };
 }
 
@@ -504,7 +494,9 @@ function deriveModelUnavailableReason(
   if (providerRequiresDiscoveredModelProtocol(input.providerType) && !model.apiProtocol) {
     return 'not_in_live_list';
   }
-  if (isModelExplicitlyUnsupportedForChat(model)) return 'unsupported_for_chat';
+  if (resolveChatSupport(input.providerType, model) === 'unsupported') {
+    return 'unsupported_for_chat';
+  }
   if (isStale(input)) return 'stale';
   return 'none';
 }
@@ -525,7 +517,9 @@ function missingEntryUnavailableReason(
 ): ModelUnavailableReason {
   const providerOrAuthReason = providerOrAuthUnavailableReason(input);
   if (providerOrAuthReason) return providerOrAuthReason;
-  if (isModelExplicitlyUnsupportedForChat(model)) return 'unsupported_for_chat';
+  if (resolveChatSupport(input.providerType, model) === 'unsupported') {
+    return 'unsupported_for_chat';
+  }
   if (providerRequiresDiscoveredModelProtocol(input.providerType)) return 'not_in_live_list';
   if (explicitlyEnabled) return 'none';
   return modelSource === 'fetched' || input.models ? 'not_in_live_list' : 'none';
@@ -538,18 +532,6 @@ function isStale(
   const now = input.now ?? Date.now();
   const staleAfterMs = input.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
   return now - input.modelsFetchedAt > staleAfterMs;
-}
-
-export function isModelExplicitlyUnsupportedForChat(model: ModelInfo): boolean {
-  const caps = model.capabilities;
-  if (!caps) return false;
-  if (caps.chat === false) return true;
-  return (
-    caps.imageGeneration === true &&
-    caps.chat !== true &&
-    caps.reasoning !== true &&
-    caps.functionCalling !== true
-  );
 }
 
 function normalizeCapabilities(caps: ModelInfo['capabilities']): KnownModelCapabilities {

@@ -851,6 +851,30 @@ describe('default session target resolver', () => {
     );
   });
 
+  test('rejects a requested model known to be non-chat from a bare discovered id', async () => {
+    const connection = makeConnection({
+      slug: 'groq',
+      providerType: 'groq',
+      defaultModel: 'llama-3.3-70b-versatile',
+      enabledModelIds: ['llama-3.3-70b-versatile'],
+      models: [{ id: 'llama-3.3-70b-versatile' }, { id: 'whisper-large-v3' }],
+    });
+
+    await assert.rejects(
+      resolveDefaultSessionTarget({
+        connectionStore: {
+          getDefault: async () => 'groq',
+          get: async (slug) => (slug === 'groq' ? connection : null),
+        },
+        credentialStore: {
+          getSecret: async () => 'groq-test-key',
+        },
+        requestedModel: 'whisper-large-v3',
+      }),
+      /NO_REAL_CONNECTION:model_not_chat_capable/,
+    );
+  });
+
   test('uses a stored subscription access token for OAuth default connections', async () => {
     const connection = makeConnection({
       slug: 'openai-codex',

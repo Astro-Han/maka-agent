@@ -92,6 +92,31 @@ test('backend creation accepts an enabled exact model absent from the observed c
   assert.ok(backend);
 });
 
+test('backend creation rejects a known non-chat model reported with a bare id', async () => {
+  const model = 'whisper-large-v3';
+  const ready = readyExecutionConnection();
+
+  await assert.rejects(
+    createHostAiSdkBackend(
+      backendCreationFixture({
+        abortSignal: new AbortController().signal,
+        model,
+        resolveExecutionConnection: async () => ({
+          ...ready,
+          connection: {
+            ...ready.connection,
+            providerType: 'groq',
+            enabledModelIds: [model],
+            models: [{ id: model }],
+          },
+        }),
+        readPricing: async () => ({ revision: 0, overrides: [] }),
+      }),
+    ),
+    /not chat-capable/,
+  );
+});
+
 test('production Host executes a canonical ai-sdk Session against a real provider wire', async () => {
   const base = await mkdtemp(join(tmpdir(), 'maka-host-real-model-'));
   const root = join(base, 'interactive');
@@ -615,6 +640,7 @@ function isTerminal(snapshot: TurnSnapshot): boolean {
 
 function backendCreationFixture(input: {
   abortSignal: AbortSignal;
+  model?: string;
   resolveExecutionConnection: () => Promise<unknown>;
   readPricing: () => Promise<unknown>;
 }): HostAiSdkBackendInput {
@@ -624,7 +650,7 @@ function backendCreationFixture(input: {
       workspaceRoot: '/workspace',
       header: {
         llmConnectionSlug: 'backend-creation-connection',
-        model: MODEL_ID,
+        model: input.model ?? MODEL_ID,
       },
       abortSignal: input.abortSignal,
       store: {},

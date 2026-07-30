@@ -31,7 +31,7 @@ import {
   providerRequiresDiscoveredModelProtocol,
   type LlmConnection,
 } from './llm-connections.js';
-import { isModelExplicitlyUnsupportedForChat } from './model-catalog.js';
+import { resolveChatSupport } from './model-metadata.js';
 
 /**
  * Canonical reasons why an LlmConnection is not ready to send.
@@ -132,7 +132,7 @@ export function isConnectionReady(input: IsConnectionReadyInput): IsConnectionRe
   ) {
     return { ready: false, reason: 'model_not_chat_capable' };
   }
-  if (modelEntry && isModelExplicitlyUnsupportedForChat(modelEntry)) {
+  if (resolveChatSupport(connection.providerType, modelEntry ?? { id: model }) === 'unsupported') {
     return { ready: false, reason: 'model_not_chat_capable' };
   }
   return { ready: true, model };

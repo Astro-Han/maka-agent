@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PROVIDER_DEFAULTS, type RuntimeExecutionConnection } from '@maka/core/llm-connections';
-import { isModelExplicitlyUnsupportedForChat } from '@maka/core/model-catalog';
-import { resolveModelVisionSupport } from '@maka/core/model-metadata';
+import { resolveChatSupport, resolveModelVisionSupport } from '@maka/core/model-metadata';
 import type { RuntimePolicy } from '@maka/core/runtime-policy';
 import {
   filterModelVisibleTaskLedgerTasks,
@@ -434,7 +433,10 @@ async function resolveExecutionTarget(
   if (!model || !resolved.connection.enabledModelIds.includes(model)) {
     throw new Error('Runtime Host Session model is not enabled by its canonical connection');
   }
-  if (modelInfo && isModelExplicitlyUnsupportedForChat(modelInfo)) {
+  if (
+    resolveChatSupport(resolved.connection.providerType, modelInfo ?? { id: model }) ===
+    'unsupported'
+  ) {
     throw new Error('Runtime Host Session model is not chat-capable');
   }
 

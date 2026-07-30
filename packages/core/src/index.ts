@@ -1377,12 +1377,16 @@ export type {
 export {
   buildConnectionModelCatalogEntries,
   buildModelCatalogEntries,
-  isModelExplicitlyUnsupportedForChat,
   validateChatDefaultModel,
 } from './model-catalog.js';
 
 // model-metadata.ts
-export { resolveModelVisionSupport } from './model-metadata.js';
+export type { ChatSupport } from './model-metadata.js';
+export {
+  resolveChatSupport,
+  resolveModelCapabilities,
+  resolveModelVisionSupport,
+} from './model-metadata.js';
 
 // settings.ts
 export type {

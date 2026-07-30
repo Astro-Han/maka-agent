@@ -48,6 +48,21 @@ describe('isConnectionReady — model capability gate', () => {
     assert.deepEqual(verdict, { ready: false, reason: 'model_not_chat_capable' });
   });
 
+  it('rejects a known non-chat model when discovery only reports its id', () => {
+    const verdict = isConnectionReady({
+      connection: connection({
+        slug: 'groq',
+        providerType: 'groq',
+        defaultModel: 'whisper-large-v3',
+        enabledModelIds: ['whisper-large-v3'],
+        models: [{ id: 'whisper-large-v3' }],
+      }),
+      hasSecret: true,
+    });
+
+    assert.deepEqual(verdict, { ready: false, reason: 'model_not_chat_capable' });
+  });
+
   it('keeps explicit chat models send-ready even when they also support image generation', () => {
     const verdict = isConnectionReady({
       connection: connection({

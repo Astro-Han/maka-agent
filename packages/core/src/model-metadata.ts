@@ -19,6 +19,8 @@ export interface ModelMetadata {
   thinkingOptions?: ThinkingOptions;
 }
 
+export type ChatSupport = 'supported' | 'unsupported' | 'unknown';
+
 const generatedMetadata: Partial<Record<ProviderType, Record<string, ModelMetadata>>> =
   GENERATED_MODELS_DEV_METADATA;
 const generatedModelProviderOverrides: Partial<
@@ -46,6 +48,38 @@ export function lookupModelProviderOverride(
   modelId: string,
 ): { npm: string; api?: string } | undefined {
   return generatedModelProviderOverrides[providerType]?.[modelId.trim()];
+}
+
+export function resolveModelCapabilities(
+  providerType: ProviderType,
+  model: Pick<ModelInfo, 'id' | 'capabilities'>,
+): ModelInfo['capabilities'] | undefined {
+  const observed = model.capabilities;
+  const known = lookupModelMetadata(providerType, model.id).capabilities;
+  if (!observed) return known;
+  if (!known) return observed;
+  return {
+    chat: observed.chat ?? known.chat,
+    vision: observed.vision ?? known.vision,
+    reasoning: observed.reasoning ?? known.reasoning,
+    functionCalling: observed.functionCalling ?? known.functionCalling,
+    imageGeneration: observed.imageGeneration ?? known.imageGeneration,
+  };
+}
+
+export function resolveChatSupport(
+  providerType: ProviderType,
+  model: Pick<ModelInfo, 'id' | 'capabilities'>,
+): ChatSupport {
+  const capabilities = resolveModelCapabilities(providerType, model);
+  if (capabilities?.chat !== undefined) {
+    return capabilities.chat ? 'supported' : 'unsupported';
+  }
+  return capabilities?.imageGeneration === true &&
+    capabilities.reasoning !== true &&
+    capabilities.functionCalling !== true
+    ? 'unsupported'
+    : 'unknown';
 }
 
 /**
