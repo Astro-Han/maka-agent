@@ -1,6 +1,6 @@
 # Terminal-Bench 2.1 — Maka vs OpenCode with GLM-5.2 Max
 
-Paired harness A/B on the frozen 89-task Terminal-Bench 2.1 suite, with Z.ai Coding Plan `glm-5.2` at `max` reasoning effort on both arms. Three complete paired rounds, 534 adopted task-arm cells, one model attempt per cell. This report records the Pass@1 result, the task-level inference behind it, the throughput ceiling that bounds both arms from below, and the resource profile behind the outcome.
+Paired harness A/B on the frozen 89-task Terminal-Bench 2.1 suite, with Z.ai Coding Plan `glm-5.2` at `max` reasoning effort on both arms. Three complete paired rounds, 534 adopted task-arm cells, one model attempt per cell. This report records the Pass@1 result, the task-level inference behind it, how the agent timeout affects the comparison, and the resource profile behind the outcome.
 
 **Evidence:** three complete paired rounds, 267 task-round pairs
 **Metric:** Pass@1 by the task's Harbor verifier
@@ -10,11 +10,11 @@ Paired harness A/B on the frozen 89-task Terminal-Bench 2.1 suite, with Z.ai Cod
 ## TL;DR
 
 - **Maka wins on Pass@1: 162/267 (60.7%) versus OpenCode's 136/267 (50.9%), a +9.7 pp lead in Maka's favor.** Maka leads in all three rounds, by 8, 14, and 4 tasks. Best single round: Maka **66.3%** versus OpenCode **57.3%**.
-- **The lead is statistically established at the correct unit of analysis.** Treating each of the 89 tasks as the independent item, an exact paired permutation test gives `p = 0.0042` and the task-cluster bootstrap 95% CI on the difference is **[+3.4, +16.1] pp** — the interval excludes zero.
-- **Both arms are throughput-limited lower bounds, and Maka's lead nearly doubles once that ceiling is removed.** Among cells that finished inside their task-native deadline, Maka passes **82.6%** versus OpenCode's **65.1%**, a **+17.5 pp** gap. Cells killed at the deadline pass at 12.0% and 14.7% — indistinguishable between arms, so the ceiling is shared, not a Maka weakness.
-- **Maka is also faster to a pass:** median 4.3 minutes per passing cell versus OpenCode's 10.8 minutes, a 2.5× difference.
-- **Maka's quality gain is not paid for on the tasks it wins.** On the 116 cells both arms solve, Maka spends marginally *less* (50.05M versus 50.36M tokens). 24.6% of Maka's aggregate token excess buys its 46 exclusive wins (about 0.48M extra tokens per exclusive pass). **77.6% is spent on the 85 cells neither arm solves** — Maka works to the deadline where OpenCode gives up early. That is an addressable early-abandon gap, not a quality-for-cost tradeoff.
-- **Security and system administration drive the quality gain.** Security: 95.8% versus 54.2% (`p = 0.002`, survives Bonferroni across all 16 clusters). Software engineering, the largest cluster, is not distinguishable between arms.
+- **The lead is statistically established at the correct unit of analysis.** Treating each of the 89 tasks as the independent item, an exact paired permutation test gives `p = 0.00426` and the task-cluster bootstrap 95% CI on the difference is **[+3.4, +16.1] pp** — the interval excludes zero.
+- **The lead is not an artifact of the agent timeout, but its magnitude is partly contingent on it.** Among cells that finished inside their native timeout, Maka leads 79.8% to 73.6% (+6.2 pp). However, OpenCode is terminated at its deadline more often than Maka (119 versus 80 cells), and it hit the deadline in 35 of the 46 cells Maka won exclusively — so a longer agent timeout could narrow the headline gap.
+- **Maka reaches its passes faster,** median 4.3 minutes versus OpenCode's 10.8, measured over the 107 Maka and 136 OpenCode passing cells that carry a recorded duration. 55 of Maka's 162 passes have no recorded duration and are excluded; see the duration-completeness caveat.
+- **Maka's quality gain is not paid for on the tasks it wins.** On the 116 cells both arms solve, Maka spends marginally *less* (50.05M versus 50.36M tokens). 24.6% of Maka's aggregate token excess buys its 46 exclusive wins (about 0.48M extra tokens per exclusive pass). **77.6% is spent on the 85 cells neither arm solves**, where both arms run equally long and hit their deadlines at equal rates — the excess is iteration density, not persistence.
+- **Security and system administration show the largest gaps.** Security 95.8% versus 54.2%, system administration 63.0% versus 29.6%. At the task unit neither reaches significance after correcting for the 16 clusters examined; both are at the strongest signal their cluster size can produce.
 
 ## Results
 
@@ -37,7 +37,7 @@ The 89 tasks are frozen and repeat in every round, so the 267 task-round pairs a
 
 | Test | Unit | Statistic | Result |
 | --- | --- | --- | --- |
-| Paired permutation on per-task pass-count difference | 89 tasks | 2M sign-flips, seed 3 | **`p = 0.0042`** (39 non-tied tasks) |
+| Paired permutation on per-task pass-count difference | 89 tasks | exact enumeration over all 2^39 sign assignments | **`p = 0.00426`** (39 non-tied tasks) |
 | Task-cluster bootstrap on the Pass@1 rate difference | 89 tasks | 100k resamples | **95% CI [+3.4, +16.1] pp** |
 | Exact sign test on the direction only | 89 tasks | 28 Maka / 11 OpenCode / 50 ties | `p = 0.0095` |
 
@@ -47,50 +47,58 @@ Descriptive per-round and pooled McNemar values, retained for continuity with th
 
 ## Where these numbers sit against published results
 
-Z.ai reports **82.7** for `glm-5.2` on Terminal-Bench 2.1 under a "Best Reported Harness" label. Its footnote states the evaluation ran in **Claude Code 2.1.167** with `temperature=1.0, top_p=0.95, max_new_tokens=131072`, overriding the 64k CLI output cap to 128k through a transparent proxy, **removing wall-clock time limits** while preserving per-task CPU and memory constraints, and **averaging over 5 runs** ([model card](https://huggingface.co/zai-org/GLM-5.2/blob/main/README.md), accessed 2026-07-30). The GLM-5 repository quotes the same result as "81.0 vs. 62.0 on Terminal-Bench 2.1" against GLM-5.1 ([repository](https://github.com/zai-org/GLM-5), accessed 2026-07-30).
+Z.ai's model card reports two distinct Terminal-Bench 2.1 figures for `glm-5.2`, each with its own harness footnote ([model card](https://huggingface.co/zai-org/GLM-5.2/blob/main/README.md), accessed 2026-07-30):
 
-An independent reproduction attempt on the Terminus 2 harness — Harbor v0.16.1, GLM-5.2-FP8 served with sglang on H200, `reasoning_effort: max`, `agent_timeout_multiplier: 16.0`, `max_turns: 500` — reports "I can only get 62~64 score" ([zai-org/GLM-5#100](https://github.com/zai-org/GLM-5/issues/100), accessed 2026-07-30).
+| Vendor figure | Harness and conditions per the model card's footnote |
+| --- | --- |
+| **81.0** — "Terminal Bench 2.1 (Terminus-2)" | Terminus-2 framework, `parser=json`, **`timeout=4h`**, `temperature=1.0`, `top_p=1.0`, `max_new_tokens=48k`, `max_episodes=500`, 256K context, 4 CPUs / 8 GB RAM |
+| **82.7** — "Terminal Bench 2.1 (Best Reported Harness)" | Claude Code 2.1.167, `temperature=1.0, top_p=0.95, max_new_tokens=131072` via a transparent proxy bypassing the 64k CLI cap, **wall-clock time limits removed**, **scores averaged over 5 runs** |
 
-Two things follow, and neither is a like-for-like comparison with this A/B:
+The GLM-5 repository's "81.0 vs. 62.0 on Terminal-Bench 2.1" comparison against GLM-5.1 refers to the Terminus-2 figure, not the 82.7 best-harness figure ([repository](https://github.com/zai-org/GLM-5), accessed 2026-07-30).
 
-1. **Harness choice is a first-order factor for this model.** The same model at the same reasoning effort spans roughly 19 points between the vendor's Claude Code configuration and an independent Terminus 2 reproduction. That spread is the variable this report isolates, and the +9.7 pp Maka-over-OpenCode gap sits well inside it.
-2. **Maka lands in the independently reproduced band under a stricter timeout policy; OpenCode lands below it.** Maka's 60.7% pooled and 66.3% best round bracket the 62–64 third-party figure, while running at the task-native agent timeout ×1 rather than ×16, and without removing wall-clock limits or averaging over 5 runs. OpenCode's 50.9% falls clearly beneath that band.
+A single unverified third-party report describes an unsuccessful attempt to reproduce the Terminus-2 number — Harbor v0.16.1, GLM-5.2-FP8 served with sglang on H200, `reasoning_effort: max`, `agent_timeout_multiplier: 16.0`, `max_turns: 500` — stating "I can only get 62~64 score" ([zai-org/GLM-5#100](https://github.com/zai-org/GLM-5/issues/100), accessed 2026-07-30). It has no published ledger and remains an open help request, so it is context, not a validated reproduction, and this report does not position its own numbers against it.
 
-The vendor's 82.7 is not the comparison target for this report: it differs on harness, wall-clock limits, output-token cap, and run averaging. It is quoted because its own footnote identifies wall-clock limits as something worth removing, which is exactly the ceiling measured in the next section.
+Neither vendor figure is a comparison target for this A/B. Both differ from this run on harness, serving stack, sampling parameters, and run averaging, and — most relevant to the next section — on agent time budget: the Terminus-2 configuration allows `timeout=4h` per task and the best-harness configuration removes wall-clock limits entirely, whereas this run uses each task's native agent timeout at ×1, which for most of the suite is 15 to 30 minutes. Absolute scores here are therefore not comparable to published leaderboard figures in either direction.
 
-## Throughput ceiling and headroom
+## Agent timeout and its effect on the comparison
 
-Every Terminal-Bench 2.1 task carries a native time limit; observed values in this run range from 12 to 60 minutes. When the limit is reached the cell is terminated and scored as a failure regardless of progress. Both absolute scores in this report are therefore lower bounds, not the arms' ceilings.
+Every Terminal-Bench 2.1 task carries a native agent timeout, declared as `[agent] timeout_sec` in the task definition. Across the 89 tasks these span 10 to 200 minutes, with most of the suite at 15 or 30 minutes. This run applies them at ×1. A cell that reaches its timeout is terminated, but termination is **not** automatic failure: the verifier still runs against whatever state exists, and cells terminated at the deadline do sometimes pass.
+
+Classifying every cell against its own task's declared timeout — the ground truth, available for all 89 tasks — gives:
 
 | Cell group | Maka | OpenCode |
 | --- | ---: | ---: |
-| Finished inside the deadline | **152/184 (82.6%)** | **125/192 (65.1%)** |
-| Terminated at the deadline | 10/83 (12.0%) | 11/75 (14.7%) |
+| Finished inside its native timeout | 99/124 (79.8%) | 109/148 (73.6%) |
+| Terminated at its native timeout | 8/80 (10.0%) | 27/119 (22.7%) |
+| Duration not recorded | 63 cells (55 passes) | 0 cells |
 
-Conditioning on cells that reached a verifier decision inside their deadline widens the gap from +9.7 pp to **+17.5 pp**. Deadline-terminated cells pass at statistically indistinguishable rates on both arms, and the two arms' failure durations coincide closely (median 14.5 versus 15.0 minutes, p90 39.5 versus 40.0, max 59.5 versus 60.0). The ceiling is a property of the run configuration, shared by both arms.
+Three conclusions, one of which cuts against the headline:
 
-Maka also reaches its passes faster: **median 4.3 minutes per passing cell versus OpenCode's 10.8 minutes** (p90 14.5 versus 28.9).
+1. **The lead is not an artifact of differential timeouts.** Restricted to cells that finished inside their own timeout, Maka still leads, 79.8% to 73.6% (+6.2 pp). Note this is *smaller* than the headline +9.7 pp, not larger.
+2. **The timeout binds OpenCode harder than Maka.** OpenCode is terminated in 119 cells against Maka's 80, and it converts terminated cells into passes more often (22.7% versus 10.0%, Fisher exact `p = 0.023`).
+3. **Part of Maka's exclusive-win margin coincides with OpenCode running out of clock.** In 35 of the 46 cells Maka won exclusively, OpenCode was terminated at its deadline. A more generous agent timeout — the vendor's own Terminus-2 configuration uses `timeout=4h` — could therefore narrow the headline gap. This report cannot estimate by how much.
 
-Three limits apply to this section and none of them are resolved by the aggregate data:
+Two limits apply to everything in this section:
 
-- **The deadline classifier is a conservative proxy.** Maka's runtime records an explicit `benchmark.deadline` settlement (80 of its 267 cells); the OpenCode adapter has no equivalent field. Per-task deadline values are therefore recovered from Maka's explicit settlements on 37 of 89 tasks and applied symmetrically to both arms; the remaining 52 tasks contribute no deadline-terminated cells by construction. True deadline-limited counts can only be higher than 83 and 75, not lower.
-- **"Finished in time" is a post-treatment condition.** Grouping by whether a cell completed conditions on a variable the agent itself influences: an agent that abandons early would inflate its own conditional pass rate. Maka is the faster-to-finish arm, so this bias cannot be ruled out from aggregate data. These are descriptive observations, not causal estimates.
-- **The `errorClass` asymmetry is instrumentation, not capability.** Maka's 105 failures are labelled 72 `budget_exhausted`, 27 `verification_failed`, and 6 `max_tokens`; all 131 OpenCode failures are labelled `verification_failed` because that adapter does not surface budget exhaustion. Given the near-identical failure-duration distributions, this asymmetry must not be read as OpenCode failing for better reasons or Maka failing for more excusable ones.
+- **Duration completeness is one-sided.** 63 of Maka's 267 cells (23.6%) carry `durationMs = 0` and `steps = 0` placeholders — adopted cells whose timing metrics were never hydrated, 56 from primary runs and 7 from replacements, spread evenly across rounds (23 / 20 / 20). OpenCode has none. 55 of those 63 are passes, so **34% of Maka's passes are absent from every duration statistic in this report**, including the speed comparison above. Recovering them from the run artifacts would be required before treating any timing figure as complete.
+- **"Finished inside its timeout" is a post-treatment condition.** Grouping by whether a cell completed conditions on a variable each agent influences: an agent that stops early lands in the finished group and depresses its own conditional pass rate, while an agent that runs to the deadline moves its failures out of that group and raises it. The comparison is descriptive, not a causal or counterfactual estimate of behavior under a longer timeout.
+
+Separately, the `errorClass` asymmetry must not be read as a capability difference: Maka's 105 failures are labelled 72 `budget_exhausted`, 27 `verification_failed`, and 6 `max_tokens`, while all 131 OpenCode failures are labelled `verification_failed` because that adapter does not surface budget exhaustion at all.
 
 ## Where the difference appears
 
-Clusters with at least 8 tasks are shown individually; the 11 clusters holding 1–5 tasks each are pooled because per-cluster differences at that size are noise. No multiple-comparison correction is applied to the table; the Bonferroni column across all 16 clusters is given for the two clusters that reach nominal significance.
+Clusters with at least 8 tasks are shown individually; the 11 clusters holding 1–5 tasks each are pooled because per-cluster differences at that size are noise. The `p` column applies the same task-level exact sign-flip test used for the headline, on each cluster's per-task three-round pass-count differences. Pooling a cluster's three rounds into a task-round McNemar would repeat exactly the pseudo-replication the Inference section rejects, so it is not done here.
 
-| Task cluster | Tasks | Task-rounds | Maka | OpenCode | Difference | Exact McNemar | Bonferroni (16) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Security | 8 | 24 | 23/24 (95.8%) | 13/24 (54.2%) | **+41.7 pp** | `0.0020` | `0.031` |
-| System administration | 9 | 27 | 17/27 (63.0%) | 8/27 (29.6%) | +33.3 pp | `0.0117` | `0.188` |
-| Data science | 8 | 24 | 17/24 (70.8%) | 13/24 (54.2%) | +16.7 pp | `0.289` | — |
-| Scientific computing | 8 | 24 | 9/24 (37.5%) | 7/24 (29.2%) | +8.3 pp | `0.500` | — |
-| Software engineering | 26 | 78 | 39/78 (50.0%) | 43/78 (55.1%) | −5.1 pp | `0.388` | — |
-| Small clusters (11 clusters, 1–5 tasks each) | 30 | 90 | 57/90 (63.3%) | 52/90 (57.8%) | +5.6 pp | — | — |
+| Task cluster | Tasks | Maka | OpenCode | Difference | Task-level `p` | Smallest `p` this cluster could produce |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Security | 8 | 23/24 (95.8%) | 13/24 (54.2%) | **+41.7 pp** | `0.0625` | `0.0625` |
+| System administration | 9 | 17/27 (63.0%) | 8/27 (29.6%) | +33.3 pp | `0.0156` | `0.0156` |
+| Data science | 8 | 17/24 (70.8%) | 13/24 (54.2%) | +16.7 pp | `0.313` | `0.0625` |
+| Scientific computing | 8 | 9/24 (37.5%) | 7/24 (29.2%) | +8.3 pp | `1.00` | `1.00` |
+| Software engineering | 26 | 39/78 (50.0%) | 43/78 (55.1%) | −5.1 pp | `0.398` | `0.0039` |
+| Small clusters (11 clusters, 1–5 tasks each) | 30 | 57/90 (63.3%) | 52/90 (57.8%) | +5.6 pp | — | — |
 
-Security is the only cluster whose advantage survives correction for the number of clusters examined. Software engineering, the largest cluster at 26 tasks, is **not distinguishable between the arms** (`p = 0.388`); the −5.1 pp figure should not be read as an OpenCode advantage.
+**No cluster survives correction for the 16 clusters examined**, and none can: security and system administration are already at the smallest `p` their task counts allow, because every non-tied task in each favors Maka. The right reading is that both show the strongest directional signal their size permits while remaining underpowered, not that either is established. Software engineering, the largest cluster at 26 tasks, is **not distinguishable between the arms** (`p = 0.398`); the −5.1 pp figure should not be read as an OpenCode advantage.
 
 Across the 89 tasks, 25 are passed by both arms in all three rounds and 16 are passed by neither arm in any round. Maka's net gain is concentrated rather than universal: 28 tasks favor Maka by three-round pass count, 11 favor OpenCode, and 50 tie.
 
@@ -110,14 +118,17 @@ Maka records **211.60M** adopted tokens against OpenCode's **122.15M**, an exces
 
 - **On the tasks both arms solve, Maka is marginally cheaper.** The claim that Maka costs more does not hold on the shared-solvable set.
 - **Buying exclusive wins is the smaller and more defensible component.** 46 exclusive Maka passes cost about 0.48M extra tokens each.
-- **The dominant term is spend on tasks nobody solves.** 77.6% of the excess lands on 85 cells where neither arm passes, at about 0.82M extra tokens per cell. Combined with the 72 `budget_exhausted` failures and the deadline evidence above, the mechanism is that Maka keeps working to the deadline on unsolvable tasks while OpenCode abandons early. This is a missing early-abandon policy — an addressable engineering gap, not an intrinsic quality-for-cost tradeoff.
+- **The dominant term is spend on cells neither arm solves.** 77.6% of the excess lands on the 85 both-fail cells, at about 0.82M extra tokens per cell. The mechanism is *not* that Maka persists while OpenCode gives up: on those cells the two arms run for the same wall-clock time (median 14.5 versus 15.0 minutes) and are terminated at their native timeouts at the same rate (59 versus 57 cells). What differs is iteration density — Maka takes **3,383 steps against OpenCode's 1,548** (median 32 versus 18) at a similar cost per step (30.8K versus 27.7K tokens). Maka runs a denser loop in the same time budget rather than a longer one. Which policy produces that density, and whether a step or iteration budget would cut the waste without costing exclusive wins, requires trace-level ablation this report does not attempt.
+
+These 85 cells are also not "tasks nobody solves": only 48 of them come from the 16 tasks that never pass in any round, while the other 37 come from 25 tasks that do pass in at least one round.
 
 Per-cell distribution and price weighting:
 
 | Adopted usage | Maka | OpenCode | Maka / OpenCode |
 | --- | ---: | ---: | ---: |
 | All three rounds, raw total | 211.60M | 122.15M | 1.73× |
-| Cached-input share | 94.88% | 93.91% | — |
+| Cached share of input tokens | 94.88% | 93.91% | — |
+| Cached share of total tokens | 90.43% | 90.33% | — |
 | Per-cell p50 | 231K | 239K | 0.97× |
 | Per-cell p90 | 1.73M | 1.12M | 1.54× |
 | Per-cell p95 | 3.07M | 1.78M | 1.73× |
@@ -125,12 +136,12 @@ Per-cell distribution and price weighting:
 
 Two accounting caveats that both work against Maka, stated rather than left implicit:
 
-- **The raw 1.73× understates the economic gap.** About 95% of both arms' totals is cached input, which is typically priced near 10% of uncached input, while Maka's output-token ratio is 2.12×. Reweighting cache reads to 0.1× and output to 3–4× of uncached input — a price *shape* assumption, not Z.ai's published rates, hence a range — puts the ratio at **1.84×–1.88×** and the cost per accepted pass at +54% to +57% (raw per-pass is 1.31M versus 0.90M, or +45%).
+- **The raw 1.73× understates the economic gap.** About 90% of both arms' totals is cached input, which is typically priced near 10% of uncached input, while Maka's output-token ratio is 2.12×. Reweighting cache reads to 0.1× and output to 3–4× of uncached input — a price *shape* assumption, not Z.ai's published rates, hence a range — puts the ratio at **1.84×–1.88×** and the cost per accepted pass at +54% to +57% (raw per-pass is 1.31M versus 0.90M, or +45%).
 - **The pooled 1.73× is the most favorable framing available.** Per round the ratio worsens monotonically: **1.34× → 1.90× → 2.12×**. Pooling all three rounds dilutes the two immutable-subject rounds, where the ratio is 2.01×.
 
 The typical cell is not the problem: Maka's per-cell median is slightly *below* OpenCode's. The tail is, and it is concentrated in the both-fail quadrant. The five largest cells are `install-windows-3.11` round 2 (Maka 14.39M, OpenCode 0.35M, both fail), `install-windows-3.11` round 1 (12.34M vs 1.18M, both fail), `mteb-leaderboard` round 0 (10.72M vs 1.83M, both pass), `make-doom-for-mips` round 1 (9.32M vs 0.17M, both fail), and `mailman` round 2 (8.85M vs 1.39M, both fail).
 
-Maka's context-budget tool-result pruning was enabled in all rounds and its cached-input share slightly exceeds OpenCode's, so the data do not support a claim that pruning was absent or ineffective. Assigning the tail to a specific mechanism beyond the early-abandon gap above requires trace-level ablation, which this report does not attempt.
+Maka's context-budget tool-result pruning was enabled in all rounds and its cached share of input slightly exceeds OpenCode's, so the data do not support a claim that pruning was absent or ineffective. Attributing the tail to a specific internal policy requires trace-level ablation, which this report does not attempt.
 
 ## Setup
 
@@ -188,9 +199,11 @@ No HTTP 429 event was observed in the recorded round-0/round-1 network evidence 
 - The suite contains the same 89 tasks in every round. Task-round totals are operational observations; all inference uses the task as the unit, and the pooled McNemar value is descriptive only.
 - Three repetitions reduce single-run noise but do not estimate generalization beyond this frozen benchmark. Per-round differences range from +4 to +14 tasks.
 - Round 0 carries a two-cell subject-provenance caveat; both sensitivity checks leave the conclusion unchanged.
-- Both absolute scores are lower bounds under a task-native ×1 timeout. The conditional pass rates in the headroom section condition on a post-treatment variable and rest on a deadline proxy recovered from 37 of 89 tasks.
+- The run applies each task's native agent timeout at ×1. That timeout binds OpenCode more often than Maka, and OpenCode was terminated at its deadline in 35 of the 46 cells Maka won exclusively, so the headline margin is partly contingent on this policy. The timeout section's conditional pass rates additionally group on a post-treatment variable and are descriptive only.
+- 63 of Maka's 267 cells carry unhydrated `durationMs = 0` / `steps = 0` placeholders and OpenCode has none, so every duration statistic in this report omits 34% of Maka's passes. Timing figures should be treated as provisional until those metrics are recovered.
 - The comparison is a product-agent harness A/B, not an ablation of one internal policy. Cluster and token-attribution differences are descriptive, not causal attribution.
-- Published GLM-5.2 Terminal-Bench 2.1 figures differ from this run on harness, wall-clock limits, output-token cap, run averaging, and serving stack. They are context for harness sensitivity, not a like-for-like baseline.
+- No task cluster reaches significance at the task unit after correcting for the 16 clusters examined; the cluster table is a description of where the differences sit, not a set of established sub-results.
+- Published GLM-5.2 Terminal-Bench 2.1 figures differ from this run on harness, agent time budget, output-token cap, run averaging, and serving stack. They are context, not a like-for-like baseline, and this report does not position its absolute scores against them.
 - Replacement and reconciliation decisions are auditable but add operational complexity. The first-valid lock prevents score shopping; all later scored companions remain in the attempt ledgers.
 - Account-plan `$0` is not a spend estimate, and the 1.84×–1.88× weighted range rests on a price-shape assumption rather than Z.ai's published rates.
 - Raw traces, provider payloads, verifier output, and local analysis ledgers remain git-excluded. This report commits only aggregate prose and a redaction-minimal per-task CSV.
@@ -210,7 +223,7 @@ SHA-256 of the frozen local evidence and committed CSV:
 | Round 2 reconciliation ledger | `72331e08a1f1f7520766c45a933722cd3d116879b908f65b80f9e90772360fd0` |
 | Committed per-task CSV | `5db04fa7f9cb30d352822a2a524ba8861497f4b42f25fe4ddf52f7d73d428c18` |
 
-Every statistic in this report is recomputable from the three adopted-cells ledgers above. Definitions used: the permutation test sign-flips each task's three-round pass-count difference over 2,000,000 draws with seed 3 across the 39 non-tied tasks; the bootstrap resamples the 89 tasks 100,000 times with seed 11; a cell counts as deadline-terminated when its duration reaches 95% of the minimum duration among that task's cells carrying an explicit `benchmark.deadline` settlement.
+Every statistic in this report is recomputable from the three adopted-cells ledgers above, plus the frozen task definitions for timeouts and categories. Definitions used: the permutation test enumerates all 2^39 sign assignments of the 39 non-tied tasks' three-round pass-count differences, exactly rather than by sampling; the bootstrap resamples the 89 tasks 100,000 times with seed 11; a cell counts as terminated at its timeout when it has a recorded duration reaching 95% of its own task's `[agent] timeout_sec`; cells with `durationMs = 0` are excluded from every duration-based figure rather than assigned to a group; cluster `p` values use the same task-level exact sign-flip procedure as the headline.
 
 ## Artifact pointers
 
