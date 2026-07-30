@@ -216,9 +216,11 @@ async function fetchProviderModelsStrict(
         throw new ConnectionEffectHttpError(r.status);
       }
       const data = await readProviderJson<{ data?: unknown }>(r);
-      const models = providerObjectArray<RawProviderModel>(data.data, 'Anthropic models')
+      const rawModels = providerObjectArray<RawProviderModel>(data.data, 'Anthropic models', true);
+      const models = rawModels
         .map(toModelInfo)
         .filter((model): model is ModelInfo => model !== null);
+      assertValidModelEntries(rawModels, models, 'Anthropic models');
       return filterDiscoveredModels(models, discovery.filter);
     }
     case 'openai': {
@@ -248,15 +250,18 @@ async function fetchProviderModelsStrict(
       const rawModels =
         discovery.responseShape === 'array-or-data'
           ? Array.isArray(data)
-            ? providerObjectArray<RawProviderModel>(data, 'provider models')
-            : providerObjectArray<RawProviderModel>(data.data, 'provider models')
+            ? providerObjectArray<RawProviderModel>(data, 'provider models', true)
+            : providerObjectArray<RawProviderModel>(data.data, 'provider models', true)
           : Array.isArray(data)
-            ? []
-            : providerObjectArray<RawProviderModel>(data.data, 'provider models');
-      const models = rawModels
-        .filter((model) => discovery.filter !== 'language-models' || model.type === 'language')
+            ? invalidProviderModelArray()
+            : providerObjectArray<RawProviderModel>(data.data, 'provider models', true);
+      const compatibleModels = rawModels.filter(
+        (model) => discovery.filter !== 'language-models' || model.type === 'language',
+      );
+      const models = compatibleModels
         .map(toModelInfo)
         .filter((model): model is ModelInfo => model !== null);
+      assertValidModelEntries(compatibleModels, models, 'provider models');
       return filterDiscoveredModels(models, discovery.filter);
     }
     case 'google': {
@@ -837,6 +842,20 @@ function providerObjectArray<T extends object>(
     throw new ConnectionEffectInvalidResponseError(`Invalid ${label} response`);
   }
   return value as T[];
+}
+
+function invalidProviderModelArray(): never {
+  throw new ConnectionEffectInvalidResponseError('Invalid provider models response');
+}
+
+function assertValidModelEntries(
+  rawModels: readonly object[],
+  models: readonly ModelInfo[],
+  label: string,
+): void {
+  if (rawModels.length > 0 && models.length === 0) {
+    throw new ConnectionEffectInvalidResponseError(`Invalid ${label} response`);
+  }
 }
 
 function assertOptionalArray(

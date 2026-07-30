@@ -102,6 +102,22 @@ test('sync-model-metadata maps models.dev modalities into Maka metadata', async 
             limit: { context: 32_000, output: 4_000 },
             status: 'deprecated',
           },
+          'audio-model': {
+            id: 'audio-model',
+            name: 'Audio Model',
+            reasoning: false,
+            tool_call: false,
+            modalities: { input: ['audio'], output: ['text'] },
+            limit: { context: 0, output: 0 },
+          },
+          'image-model': {
+            id: 'image-model',
+            name: 'Image Model',
+            reasoning: false,
+            tool_call: false,
+            modalities: { input: ['text'], output: ['image'] },
+            limit: { context: 8_000, output: 0 },
+          },
           'unknown-modality-model': {
             id: 'unknown-modality-model',
             name: 'Unknown Modality Model',
@@ -123,8 +139,10 @@ test('sync-model-metadata maps models.dev modalities into Maka metadata', async 
   ]);
 
   const generated = await readFile(output, 'utf8');
-  assert.match(generated, /"vision":true,"reasoning":true,"functionCalling":true/);
-  assert.match(generated, /"text-model".*"lifecycle":"deprecated".*"vision":false/);
+  assert.match(generated, /"vision":true,"chat":true,"reasoning":true,"functionCalling":true/);
+  assert.match(generated, /"text-model".*"lifecycle":"deprecated".*"chat":true/);
+  assert.match(generated, /"audio-model".*"chat":false/);
+  assert.match(generated, /"image-model".*"chat":false,"imageGeneration":true/);
   assert.match(
     generated,
     /"unknown-modality-model".*"capabilities":\{"reasoning":false,"functionCalling":false\}/,

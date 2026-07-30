@@ -119,6 +119,7 @@ function toMetadata(providerId, modelId, provider, model) {
     typeof provider.doc !== 'string' ||
     typeof model?.name !== 'string' ||
     (model.modalities !== undefined && !Array.isArray(model.modalities?.input)) ||
+    (model.modalities !== undefined && !Array.isArray(model.modalities?.output)) ||
     typeof model.limit?.context !== 'number' ||
     typeof model.limit?.output !== 'number' ||
     typeof model.reasoning !== 'boolean' ||
@@ -133,7 +134,14 @@ function toMetadata(providerId, modelId, provider, model) {
     contextWindow: model.limit?.context,
     maxOutputTokens: model.limit?.output,
     capabilities: {
-      ...(model.modalities ? { vision: model.modalities.input.includes('image') } : {}),
+      ...(model.modalities
+        ? {
+            vision: model.modalities.input.includes('image'),
+            chat:
+              model.modalities.input.includes('text') && model.modalities.output.includes('text'),
+            ...(model.modalities.output.includes('image') ? { imageGeneration: true } : {}),
+          }
+        : {}),
       reasoning: model.reasoning === true,
       functionCalling: model.tool_call === true,
     },

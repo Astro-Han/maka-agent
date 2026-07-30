@@ -1022,7 +1022,9 @@ describe('fetchProviderModels', () => {
     const secret = 'raw-provider-secret';
     for (const body of [
       null,
+      {},
       { data: { id: 'not-an-array', secret } },
+      { data: [{}] },
       { data: [null, { id: secret }] },
       { data: [42, { id: secret }] },
     ]) {

@@ -478,6 +478,43 @@ describe('ModelCatalogEntry', () => {
     assert.ok(!entries.some((entry) => entry.id === 'whisper-large-v3'));
   });
 
+  it('keeps known non-chat live inventory visible but unavailable to Chat', () => {
+    for (const [providerType, modelId] of [
+      ['deepinfra', 'BAAI/bge-m3'],
+      ['groq', 'whisper-large-v3'],
+      ['nvidia', 'baai/bge-m3'],
+      ['nvidia', 'black-forest-labs/flux_1-schnell'],
+    ] as const) {
+      const [entry] = buildConnectionModelCatalogEntries({
+        connection: {
+          slug: providerType,
+          providerType,
+          defaultModel: modelId,
+          enabledModelIds: [modelId],
+          models: [{ id: modelId }],
+          modelSource: 'fetched',
+        },
+      });
+
+      assert.equal(entry?.id, modelId);
+      assert.equal(entry?.unavailableReason, 'unsupported_for_chat');
+      assert.equal(entry?.canUseAsChatDefault, false);
+    }
+
+    const [unknown] = buildConnectionModelCatalogEntries({
+      connection: {
+        slug: 'groq',
+        providerType: 'groq',
+        defaultModel: 'future-chat-model',
+        enabledModelIds: ['future-chat-model'],
+        models: [{ id: 'future-chat-model' }],
+        modelSource: 'fetched',
+      },
+    });
+    assert.equal(unknown?.unavailableReason, 'none');
+    assert.equal(unknown?.canUseAsChatDefault, true);
+  });
+
   it('uses the checked-in OpenRouter snapshot until live discovery succeeds', () => {
     const entries = buildConnectionModelCatalogEntries({
       connection: {
