@@ -58,11 +58,21 @@ The GLM-5 repository's "81.0 vs. 62.0 on Terminal-Bench 2.1" comparison against 
 
 A single unverified third-party report describes an unsuccessful attempt to reproduce the Terminus-2 number — Harbor v0.16.1, GLM-5.2-FP8 served with sglang on H200, `reasoning_effort: max`, `agent_timeout_multiplier: 16.0`, `max_turns: 500` — stating "I can only get 62~64 score" ([zai-org/GLM-5#100](https://github.com/zai-org/GLM-5/issues/100), accessed 2026-07-30). It has no published ledger and remains an open help request, so it is context, not a validated reproduction, and this report does not position its own numbers against it.
 
-Neither vendor figure is a comparison target for this A/B. Both differ from this run on harness, serving stack, sampling parameters, and run averaging, and — most relevant to the next section — on agent time budget: the Terminus-2 configuration allows `timeout=4h` per task and the best-harness configuration removes wall-clock limits entirely, whereas this run uses each task's native agent timeout at ×1, which for most of the suite is 15 to 30 minutes. Absolute scores here are therefore not comparable to published leaderboard figures in either direction.
+Neither vendor figure is a comparison target for this A/B, and the decisive difference is the agent time budget.
+
+**Both vendor configurations are effectively untimed; this run is not.** No task in the suite declares a native agent timeout above 200 minutes, so the Terminus-2 footnote's `timeout=4h` is at or above every task's native limit and never binds — under that configuration the operative constraint is `max_episodes=500`, not the clock. The best-harness configuration removes wall-clock limits outright. This run instead applies each task's native timeout at ×1:
+
+| | This run | Terminus-2 (81.0) |
+| --- | ---: | ---: |
+| Median task's agent time limit | **15 min** (48 of 89 tasks) | 4 h — **16×** |
+| Total agent time budget across the suite | 42.2 h | 356 h — **8.4×** |
+| Tasks whose limit the 4 h cap would bind | — | 0 of 89 |
+
+The consequence is measurable, not hypothetical: **44.6% of OpenCode's cells and 39.2% of Maka's cells with a recorded duration are terminated by the clock**, and for 27 and 25 of the 89 tasks respectively, *every* recorded cell of that arm hits the limit. Absolute Pass@1 here is therefore measured under a materially tighter budget than any published figure and is not comparable to one in either direction. This report makes no estimate of what either arm would score with a vendor-equivalent time budget; that would require rerunning the suite.
 
 ## Agent timeout and its effect on the comparison
 
-Every Terminal-Bench 2.1 task carries a native agent timeout, declared as `[agent] timeout_sec` in the task definition. Across the 89 tasks these span 10 to 200 minutes, with most of the suite at 15 or 30 minutes. This run applies them at ×1. A cell that reaches its timeout is terminated, but termination is **not** automatic failure: the verifier still runs against whatever state exists, and cells terminated at the deadline do sometimes pass.
+Every Terminal-Bench 2.1 task carries a native agent timeout, declared as `[agent] timeout_sec` in the task definition. Across the 89 tasks these span 10 to 200 minutes; 48 tasks sit at 15 minutes and 17 at 30. This run applies them at ×1, which as the previous section shows is roughly an eighth of the agent time the vendor's own published configuration allows. A cell that reaches its timeout is terminated, but termination is **not** automatic failure: the verifier still runs against whatever state exists, and terminated cells do sometimes pass.
 
 Classifying every cell against its own task's declared timeout — the ground truth, available for all 89 tasks — gives:
 
@@ -203,7 +213,7 @@ No HTTP 429 event was observed in the recorded round-0/round-1 network evidence 
 - 63 of Maka's 267 cells carry unhydrated `durationMs = 0` / `steps = 0` placeholders and OpenCode has none, so every duration statistic in this report omits 34% of Maka's passes. Timing figures should be treated as provisional until those metrics are recovered.
 - The comparison is a product-agent harness A/B, not an ablation of one internal policy. Cluster and token-attribution differences are descriptive, not causal attribution.
 - No task cluster reaches significance at the task unit after correcting for the 16 clusters examined; the cluster table is a description of where the differences sit, not a set of established sub-results.
-- Published GLM-5.2 Terminal-Bench 2.1 figures differ from this run on harness, agent time budget, output-token cap, run averaging, and serving stack. They are context, not a like-for-like baseline, and this report does not position its absolute scores against them.
+- Published GLM-5.2 Terminal-Bench 2.1 figures were produced under effectively untimed agent budgets — 4 h per task for Terminus-2, which never binds against a suite whose longest native limit is 200 minutes, and no wall-clock limit at all for the best-harness figure — against this run's ×1 native timeout, roughly an eighth of the aggregate budget. With 39–45% of cells here terminated by the clock, absolute scores are not comparable to published figures in either direction, and this report makes no estimate of what either arm would score under a vendor-equivalent budget.
 - Replacement and reconciliation decisions are auditable but add operational complexity. The first-valid lock prevents score shopping; all later scored companions remain in the attempt ledgers.
 - Account-plan `$0` is not a spend estimate, and the 1.84×–1.88× weighted range rests on a price-shape assumption rather than Z.ai's published rates.
 - Raw traces, provider payloads, verifier output, and local analysis ledgers remain git-excluded. This report commits only aggregate prose and a redaction-minimal per-task CSV.
