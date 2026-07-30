@@ -12,7 +12,7 @@
  *
  * The logic mirrors the send path exactly:
  *   1. The session's own connection must pass `isConnectionReady` with
- *      the sticky session model (after codex normalization).
+ *      the sticky session model.
  *   2. A locked session (has user messages) can never rebind — any
  *      failure of its own connection blocks the send.
  *   3. An unlocked session may silently rebind only for reasons in
@@ -25,12 +25,7 @@
  * notice's "send will fail" answer either.
  */
 
-import {
-  isConnectionReady,
-  normalizeOpenAiCodexConnection,
-  normalizeRequestedModelForReadiness,
-  type ChatConfigurationReason,
-} from './connection-readiness.js';
+import { isConnectionReady, type ChatConfigurationReason } from './connection-readiness.js';
 import type { LlmConnection } from './llm-connections.js';
 
 export interface SessionSendProjectionSession {
@@ -87,13 +82,12 @@ export function projectSessionSendOutcome(
     if (!slug || slug === 'fake') continue;
     const connection = connections.find((entry) => entry.slug === slug);
     if (!connection) continue;
-    const normalized = normalizeOpenAiCodexConnection(connection);
     const verdict = isConnectionReady({
-      connection: normalized,
-      hasSecret: hasSecret(normalized.slug),
+      connection,
+      hasSecret: hasSecret(connection.slug),
     });
     if (verdict.ready) {
-      return { kind: 'rebind', connectionSlug: normalized.slug, model: verdict.model };
+      return { kind: 'rebind', connectionSlug: connection.slug, model: verdict.model };
     }
   }
   return { kind: 'blocked', reason: ownReason, connectionLocked: false };
@@ -120,11 +114,10 @@ export function sessionOwnConnectionBlockReason(
   const slug = session.llmConnectionSlug;
   if (!slug || slug === 'fake') return 'missing_default_connection';
   if (!ownConnection) return 'connection_missing';
-  const normalized = normalizeOpenAiCodexConnection(ownConnection);
   const verdict = isConnectionReady({
-    connection: normalized,
-    hasSecret: hasSecret(normalized.slug),
-    requestedModel: normalizeRequestedModelForReadiness(ownConnection, session.model),
+    connection: ownConnection,
+    hasSecret: hasSecret(ownConnection.slug),
+    requestedModel: session.model,
   });
   return verdict.ready ? undefined : verdict.reason;
 }

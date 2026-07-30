@@ -84,6 +84,36 @@ describe('isConnectionReady — model capability gate', () => {
     assert.deepEqual(verdict, { ready: true, model: 'provider-private-model' });
   });
 
+  it('keeps an enabled Codex default absent from the observed catalog', () => {
+    const verdict = isConnectionReady({
+      connection: connection({
+        slug: 'openai-codex',
+        providerType: 'openai-codex',
+        defaultModel: 'gpt-future-preview',
+        enabledModelIds: ['gpt-future-preview'],
+        models: [{ id: 'gpt-5.6-sol' }],
+      }),
+      hasSecret: true,
+    });
+
+    assert.deepEqual(verdict, { ready: true, model: 'gpt-future-preview' });
+  });
+
+  it('blocks a model explicitly unsupported by the Codex subscription', () => {
+    const verdict = isConnectionReady({
+      connection: connection({
+        slug: 'openai-codex',
+        providerType: 'openai-codex',
+        defaultModel: 'gpt-5-codex',
+        enabledModelIds: ['gpt-5-codex'],
+        models: [{ id: 'gpt-5-codex' }],
+      }),
+      hasSecret: true,
+    });
+
+    assert.deepEqual(verdict, { ready: false, reason: 'model_not_chat_capable' });
+  });
+
   it('keeps optional-key LocalAI ready when no credential is stored', () => {
     const verdict = isConnectionReady({
       connection: connection({

@@ -1294,8 +1294,6 @@ export type {
 export {
   isConnectionReady,
   isRealConnection,
-  normalizeOpenAiCodexConnection,
-  normalizeRequestedModelForReadiness,
 } from './connection-readiness.js';
 
 // session-send-projection.ts (#1038) — single "will the next send

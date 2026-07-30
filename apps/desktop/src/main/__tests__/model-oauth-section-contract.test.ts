@@ -825,6 +825,14 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
       /if \(!opts\.silent\) \{[\s\S]*toast\.error\([\s\S]*copy\.modelsFetchFailed/,
       'a background refresh failure should preserve the existing list without blocking the sheet with a toast',
     );
+    const refreshCatch =
+      detail.match(/async function refreshModels[\s\S]*?catch \(error\) \{([\s\S]*?)\n    \} finally/)?.[1] ??
+      '';
+    assert.doesNotMatch(
+      refreshCatch,
+      /setModels|setModelSource/,
+      'a failed refresh must preserve both the displayed catalog and its last successful provenance',
+    );
   });
 
   it('allows an exact model id to be enabled without inventing a second persistence path', async () => {

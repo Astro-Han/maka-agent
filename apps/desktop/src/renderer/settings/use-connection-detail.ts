@@ -357,11 +357,6 @@ export function useConnectionDetail(props: ConnectionDetailProps) {
     } catch (error) {
       if (!isConnectionDetailCurrent(lifecycle)) return;
       const message = providerPanelActionErrorMessage(error, locale);
-      // Leave the previously-known source / models intact (so the dropdown
-      // doesn't suddenly empty out), but downgrade the source label back to
-      // 'fallback' if we have nothing fresh to show — the failed fetch
-      // means whatever's on screen is not from the latest probe.
-      if (models.length === 0) setModelSource('fallback');
       if (!opts.silent) {
         toast.error(
           copy.modelsFetchFailed(connection.name),

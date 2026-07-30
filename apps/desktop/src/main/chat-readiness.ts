@@ -1,7 +1,5 @@
 import {
   isConnectionReady,
-  normalizeOpenAiCodexConnection,
-  normalizeRequestedModelForReadiness,
   projectSessionSendOutcome,
   sessionOwnConnectionBlockReason,
   shouldRebindSessionToDefault,
@@ -77,23 +75,21 @@ export async function requireReadyConnection(
   // so onboarding and the send path share a single source of truth. The
   // desktop side only owns: (1) async secret lookup, (2) Chinese error
   // copy, (3) the throw-error API the rest of main.ts expects.
-  const normalizedConnection = normalizeOpenAiCodexConnection(connection);
-  const apiKey = await deps.getApiKey(normalizedConnection.slug);
-  const normalizedRequestedModel = normalizeRequestedModelForReadiness(connection, requestedModel);
+  const apiKey = await deps.getApiKey(connection.slug);
   const verdict = isConnectionReady({
-    connection: normalizedConnection,
+    connection,
     hasSecret: typeof apiKey === 'string' && apiKey.length > 0,
-    requestedModel: normalizedRequestedModel,
+    requestedModel,
   });
 
   if (verdict.ready === false) {
     throw chatConfigurationError(
-      messageForReason(verdict.reason, normalizedConnection, normalizedRequestedModel),
+      messageForReason(verdict.reason, connection, requestedModel),
       verdict.reason,
     );
   }
 
-  return { connection: normalizedConnection, apiKey: apiKey ?? '', model: verdict.model };
+  return { connection, apiKey: apiKey ?? '', model: verdict.model };
 }
 
 /**

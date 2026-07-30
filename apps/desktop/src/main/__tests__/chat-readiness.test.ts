@@ -158,23 +158,28 @@ describe('chat readiness guard', () => {
     assert.equal(ready.model, 'gpt-5.5');
   });
 
-  test('normalizes stale Codex OAuth session model away from unsupported ChatGPT-account model', async () => {
-    const ready = await requireReadyConnection(
-      'openai-codex',
-      deps({
-        connection: connection({
-          slug: 'openai-codex',
-          name: 'Codex Subscription',
-          providerType: 'openai-codex',
-          defaultModel: 'gpt-5.5',
-          models: [{ id: 'gpt-5.5' }, { id: 'gpt-5.4' }],
-        }),
-        apiKey: 'codex-oauth-secret',
-      }),
-      'gpt-5-codex',
+  test('blocks an unsupported Codex OAuth session model instead of replacing it', async () => {
+    await assertRejectsReadiness(
+      'unsupported Codex session model',
+      () =>
+        requireReadyConnection(
+          'openai-codex',
+          deps({
+            connection: connection({
+              slug: 'openai-codex',
+              name: 'Codex Subscription',
+              providerType: 'openai-codex',
+              defaultModel: 'gpt-5.5',
+              models: [{ id: 'gpt-5.5' }, { id: 'gpt-5-codex' }],
+              enabledModelIds: ['gpt-5.5', 'gpt-5-codex'],
+            }),
+            apiKey: 'codex-oauth-secret',
+          }),
+          'gpt-5-codex',
+        ),
+      '不能用于聊天',
+      'model_not_chat_capable',
     );
-    assert.equal(ready.connection.slug, 'openai-codex');
-    assert.equal(ready.model, 'gpt-5.5');
   });
 
   test('send path blocks explicit fake sessions and revalidates old ai sessions', async () => {

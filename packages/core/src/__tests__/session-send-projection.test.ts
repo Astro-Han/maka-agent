@@ -248,19 +248,17 @@ describe('projectSessionSendOutcome — silent rebind walk', () => {
   });
 });
 
-describe('projectSessionSendOutcome — codex normalization', () => {
+describe('projectSessionSendOutcome — Codex selection authority', () => {
   // 'gpt-5-codex' is the one entry in CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS.
   const codex = connection({
     slug: 'codex-sub',
     providerType: 'openai-codex',
     defaultModel: 'gpt-5.6-sol',
+    enabledModelIds: ['gpt-5.6-sol', 'gpt-5-codex'],
     models: [{ id: 'gpt-5.6-sol' }],
   });
 
-  it('a requested ChatGPT-unsupported session model falls back to the servable default', () => {
-    // Without normalization the sticky 'gpt-5-codex' is not in the
-    // enabled list → model_not_enabled. The send path drops it and
-    // validates the normalized default instead → ready.
+  it('blocks a sticky ChatGPT-unsupported session model instead of silently replacing it', () => {
     const outcome = projectSessionSendOutcome(
       input({
         session: {
@@ -273,10 +271,14 @@ describe('projectSessionSendOutcome — codex normalization', () => {
         defaultSlug: 'codex-sub',
       }),
     );
-    assert.deepEqual(outcome, { kind: 'ready' });
+    assert.deepEqual(outcome, {
+      kind: 'blocked',
+      reason: 'model_not_chat_capable',
+      connectionLocked: true,
+    });
   });
 
-  it('a codex connection with only unsupported models rebinds onto the fallback list', () => {
+  it('does not synthesize a fallback model for an unsupported Codex connection', () => {
     const outcome = projectSessionSendOutcome(
       input({
         session: {
@@ -296,12 +298,38 @@ describe('projectSessionSendOutcome — codex normalization', () => {
         defaultSlug: 'codex-sub',
       }),
     );
-    // Normalization swaps the unservable list for the provider fallback
-    // list, whose first entry becomes the rebind model.
+    assert.deepEqual(outcome, {
+      kind: 'blocked',
+      reason: 'fake_backend',
+      connectionLocked: false,
+    });
+  });
+
+  it('rebinds to an enabled Codex default absent from the observed catalog', () => {
+    const outcome = projectSessionSendOutcome(
+      input({
+        session: {
+          backend: 'fake',
+          llmConnectionSlug: 'fake',
+          model: 'fake-model',
+          connectionLocked: false,
+        },
+        connections: [
+          connection({
+            slug: 'codex-sub',
+            providerType: 'openai-codex',
+            defaultModel: 'gpt-future-preview',
+            enabledModelIds: ['gpt-future-preview'],
+            models: [{ id: 'gpt-5.6-sol' }],
+          }),
+        ],
+        defaultSlug: 'codex-sub',
+      }),
+    );
     assert.deepEqual(outcome, {
       kind: 'rebind',
       connectionSlug: 'codex-sub',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-future-preview',
     });
   });
 });

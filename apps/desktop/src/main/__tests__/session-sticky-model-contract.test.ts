@@ -40,10 +40,21 @@ describe('PR-SESSION-STICKY-MODEL-0 contract', () => {
 
     assert.match(readiness, /assertSessionCanSend\([\s\S]*header: Pick<SessionHeader, 'backend' \| 'llmConnectionSlug' \| 'model'>/);
     assert.match(readiness, /requireReadyConnection\(header\.llmConnectionSlug, deps, header\.model\)/);
-    // Codex normalization moved to @maka/core (#1038) so the send gate
-    // and the session send projection share one normalization.
-    assert.match(coreReadiness, /normalizeRequestedModelForReadiness\(\s*connection: LlmConnection,\s*requestedModel: string \| undefined,\s*\)/);
-    assert.match(coreReadiness, /CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS\.has\(requestedModel\)/);
+    assert.match(
+      coreReadiness,
+      /connection\.providerType === 'openai-codex'[\s\S]*CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS\.has\(model\)/,
+      'Codex capability policy must reject the selected model without rewriting it',
+    );
+    assert.doesNotMatch(
+      coreReadiness,
+      /normalizeOpenAiCodexConnection|normalizeRequestedModelForReadiness/,
+      'readiness must not synthesize a replacement for persisted user selection',
+    );
+    assert.match(
+      projection,
+      /requestedModel: session\.model/,
+      'the sticky session model must reach readiness unchanged',
+    );
     assert.match(
       main,
       /deps\.getReadyConnection\(\s*input\.header\.llmConnectionSlug,\s*input\.header\.model,\s*\)/,
