@@ -43,6 +43,7 @@ test('a valid empty discovery result replaces the observed catalog without chang
       models: [{ id: 'glm-5' }],
       modelSource: 'fetched',
       modelsFetchedAt: 1_800_000_000_000,
+      enabledModelIds: ['glm-5', 'glm-future-preview'],
     });
     await connectionStore.update(created.slug, { apiKey: 'rotated-secret' });
 
@@ -61,12 +62,13 @@ test('a valid empty discovery result replaces the observed catalog without chang
       source: 'fetched',
       fetchedAt: 1_900_000_000_000,
     });
-    const persisted = await connectionStore.get(created.slug);
+    const reopenedConnectionStore = createConnectionStore(workspaceRoot);
+    const persisted = await reopenedConnectionStore.get(created.slug);
     assert.deepEqual(persisted?.models, []);
     assert.equal(persisted?.modelSource, 'fetched');
     assert.equal(persisted?.modelsFetchedAt, 1_900_000_000_000);
     assert.equal(persisted?.defaultModel, 'glm-5');
-    assert.deepEqual(persisted?.enabledModelIds, ['glm-5']);
+    assert.deepEqual(persisted?.enabledModelIds, ['glm-5', 'glm-future-preview']);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

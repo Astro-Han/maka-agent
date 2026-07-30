@@ -332,6 +332,51 @@ test('production Host executes a canonical ai-sdk Session against a real provide
     }
     assert.equal(summaryCaptureFound, true);
 
+    const exactRefreshPreparation = await policy.operations.beginModelFetch(
+      connection.connectionId,
+    );
+    assert.equal(exactRefreshPreparation.kind, 'ready');
+    if (exactRefreshPreparation.kind !== 'ready') return;
+    const exactRefresh = await policy.operations.completeModelFetch(
+      exactRefreshPreparation.ticket,
+      {
+        models: [{ id: 'observed-other-model' }],
+        source: 'fetched',
+        fetchedAt: Date.now(),
+      },
+    );
+    assert.equal(exactRefresh.kind, 'committed');
+    const exactSession = await execution.sessionStore.create({
+      cwd: root,
+      backend: 'ai-sdk',
+      llmConnectionSlug: 'hosted-real-provider',
+      model: MODEL_ID,
+      permissionMode: 'ask',
+    });
+    const requestsBeforeExactTurn = provider.requests.length;
+    const exactTurnId = randomUUID();
+    const exactStarted = await startTurn(
+      composition,
+      exactSession.id,
+      exactTurnId,
+      'Send the explicitly enabled exact model id.',
+      connectionContext,
+    );
+    const exactTerminal = await waitForTerminal(
+      composition,
+      exactSession.id,
+      exactTurnId,
+      exactStarted,
+      connectionContext,
+    );
+    assert.equal(exactTerminal.status, 'completed');
+    assert.equal(provider.requests.length, requestsBeforeExactTurn + 1);
+    assert.equal(
+      provider.requests.at(-1)?.body.model,
+      MODEL_ID,
+      'the Host must preserve an enabled exact id even when live discovery does not list it',
+    );
+
     const requestsBeforeArtifactFailure = provider.requests.length;
     await rm(join(root, 'artifacts', 'metadata.jsonl'));
     await mkdir(join(root, 'artifacts', 'metadata.jsonl'));
