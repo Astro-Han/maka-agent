@@ -137,8 +137,10 @@ function toMetadata(providerId, modelId, provider, model) {
       ...(model.modalities
         ? {
             vision: model.modalities.input.includes('image'),
-            chat:
-              model.modalities.input.includes('text') && model.modalities.output.includes('text'),
+            ...(!model.modalities.input.includes('text') ||
+            !model.modalities.output.includes('text')
+              ? { chat: false }
+              : {}),
             ...(model.modalities.output.includes('image') ? { imageGeneration: true } : {}),
           }
         : {}),

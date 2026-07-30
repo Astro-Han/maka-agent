@@ -139,8 +139,8 @@ test('sync-model-metadata maps models.dev modalities into Maka metadata', async 
   ]);
 
   const generated = await readFile(output, 'utf8');
-  assert.match(generated, /"vision":true,"chat":true,"reasoning":true,"functionCalling":true/);
-  assert.match(generated, /"text-model".*"lifecycle":"deprecated".*"chat":true/);
+  assert.match(generated, /"vision":true,"reasoning":true,"functionCalling":true/);
+  assert.doesNotMatch(generated, /"text-model".*"lifecycle":"deprecated".*"chat":/);
   assert.match(generated, /"audio-model".*"chat":false/);
   assert.match(generated, /"image-model".*"chat":false,"imageGeneration":true/);
   assert.match(

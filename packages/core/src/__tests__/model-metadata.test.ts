@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   lookupModelMetadata,
   openAiAdapterApiProtocol,
+  resolveChatSupport,
   resolveModelVisionSupport,
 } from '../model-metadata.js';
 import { PROVIDER_DEFAULTS, type ModelInfo, type ProviderType } from '../llm-connections.js';
@@ -152,6 +153,22 @@ describe('resolveModelVisionSupport', () => {
       resolveModelVisionSupport('zai-coding-plan' as ProviderType, undefined, 'glm-5.2'),
       false,
     );
+  });
+});
+
+describe('resolveChatSupport', () => {
+  it('uses checked-in modality facts to reject an image-only model', () => {
+    assert.equal(resolveChatSupport('alibaba-token-plan', { id: 'qwen-image-2.0' }), 'unsupported');
+  });
+
+  it('keeps known NVIDIA embedding, rerank, and TTS models out of Chat', () => {
+    for (const modelId of [
+      'nvidia/nv-embed-v1',
+      'nvidia/llama-nemotron-rerank-vl-1b-v2',
+      'nvidia/magpie-tts-zeroshot',
+    ]) {
+      assert.equal(resolveChatSupport('nvidia', { id: modelId }), 'unsupported', modelId);
+    }
   });
 });
 

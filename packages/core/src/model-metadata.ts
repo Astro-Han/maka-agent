@@ -326,11 +326,6 @@ const STATIC_MODEL_METADATA: Partial<Record<ProviderType, Record<string, ModelMe
   xai: {
     // models.dev + xAI declare configurable reasoning_effort for Grok 4.5.
     'grok-4.5': { thinkingOptions: { efforts: ['low', 'medium', 'high'] } },
-    'grok-imagine-image': { capabilities: { chat: false, imageGeneration: true } },
-    'grok-imagine-image-quality': {
-      capabilities: { chat: false, imageGeneration: true },
-    },
-    'grok-imagine-video': { capabilities: { chat: false } },
   },
   'tencent-coding-plan': {
     'kimi-k2.5': { capabilities: { vision: false } },
@@ -369,28 +364,13 @@ const STATIC_MODEL_METADATA: Partial<Record<ProviderType, Record<string, ModelMe
     // and qwen/qwen3.6-27b accepts none/default but is not yet in the snapshot.
     // gpt-oss-safeguard-20b is a guardrail model Groq does not list as accepting
     // reasoning_effort, so it is deliberately omitted here.
-    'whisper-large-v3': { capabilities: { chat: false } },
-    'whisper-large-v3-turbo': { capabilities: { chat: false } },
     'openai/gpt-oss-120b': { thinkingOptions: { efforts: ['low', 'medium', 'high'] } },
     'openai/gpt-oss-20b': { thinkingOptions: { efforts: ['low', 'medium', 'high'] } },
   },
   nvidia: {
     'baai/bge-m3': { capabilities: { chat: false } },
-    'black-forest-labs/flux_1-kontext-dev': {
-      capabilities: { chat: false, imageGeneration: true },
-    },
-    'black-forest-labs/flux_1-schnell': {
-      capabilities: { chat: false, imageGeneration: true },
-    },
-    'black-forest-labs/flux_2-klein-4b': {
-      capabilities: { chat: false, imageGeneration: true },
-    },
-    'black-forest-labs/flux.1-dev': {
-      capabilities: { chat: false, imageGeneration: true },
-    },
-    'openai/whisper-large-v3': { capabilities: { chat: false } },
-    'qwen/qwen-image': { capabilities: { chat: false, imageGeneration: true } },
-    'qwen/qwen-image-edit': { capabilities: { chat: false, imageGeneration: true } },
+    'nvidia/llama-nemotron-rerank-vl-1b-v2': { capabilities: { chat: false } },
+    'nvidia/nv-embed-v1': { capabilities: { chat: false } },
   },
   openrouter: {
     'anthropic/claude-sonnet-5': {
