@@ -80,4 +80,46 @@ describe('xAI OAuth model connection synchronization', () => {
     assert.equal(rejected?.enabled, false);
     assert.equal(rejected?.lastTestStatus, 'needs_reauth');
   });
+
+  test('does not replace an explicit default that is absent from the latest discovery', async () => {
+    let saved: LlmConnection | null = {
+      slug: XAI_OAUTH_CONNECTION_SLUG,
+      name: 'xAI OAuth',
+      providerType: 'xai-oauth',
+      baseUrl: PROVIDER_DEFAULTS['xai-oauth'].baseUrl,
+      defaultModel: 'grok-future-preview',
+      enabled: true,
+      enabledModelIds: ['grok-future-preview'],
+      models: [{ id: 'grok-4.5' }],
+      modelSource: 'fetched',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const service = createOAuthModelConnectionsMainService({
+      connectionStore: {
+        get: async () => saved,
+        save: async (connection: LlmConnection) => {
+          saved = connection;
+          return connection;
+        },
+      },
+      credentialStore: { getSecret: async () => null },
+      claudeSubscription: {} as never,
+      openAiCodex: {} as never,
+      githubCopilotSubscription: {} as never,
+      xaiOAuth: {
+        getAccountState: async () => ({
+          provider: 'xai-oauth',
+          runtimeState: 'authenticated',
+        }),
+        getAccessTokenInternal: async () => 'xai-oauth-token',
+      },
+      fetchModels: async () => [{ id: 'grok-4.5', apiProtocol: 'openai-responses' }],
+    } as never);
+
+    const synchronized = await service.syncXaiOAuthConnection();
+
+    assert.equal(synchronized?.defaultModel, 'grok-future-preview');
+    assert.deepEqual(synchronized?.enabledModelIds, ['grok-future-preview']);
+  });
 });

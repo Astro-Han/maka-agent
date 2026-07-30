@@ -172,9 +172,7 @@ export function createOAuthModelConnectionsMainService(deps: OAuthModelConnectio
       name: existing?.name ?? 'xAI OAuth',
       providerType: 'xai-oauth',
       baseUrl: defaults.baseUrl,
-      defaultModel: enabledIds.includes(existing?.defaultModel ?? '')
-        ? existing!.defaultModel
-        : (enabledIds[0] ?? ''),
+      defaultModel: existing?.defaultModel || enabledIds[0] || '',
       enabled: true,
       enabledModelIds: existing?.enabledModelIds,
       models,
@@ -283,9 +281,7 @@ export function createOAuthModelConnectionsMainService(deps: OAuthModelConnectio
       name: existing?.name ?? 'xAI OAuth',
       providerType: 'xai-oauth',
       baseUrl: defaults.baseUrl,
-      defaultModel: enabledIds.includes(existing?.defaultModel ?? '')
-        ? existing!.defaultModel
-        : (enabledIds[0] ?? ''),
+      defaultModel: existing?.defaultModel || enabledIds[0] || '',
       enabled: true,
       enabledModelIds: existing?.enabledModelIds,
       models,
@@ -361,12 +357,9 @@ export function createOAuthModelConnectionsMainService(deps: OAuthModelConnectio
       });
     }
     const enabledIds = models.map((model) => model.id);
-    const defaultModel = enabledIds.includes(existing?.defaultModel ?? '')
-      ? existing!.defaultModel
-      : enabledIds[0] ?? '';
     return deps.connectionStore.save({
       ...discoveryConnection,
-      defaultModel,
+      defaultModel: existing?.defaultModel || enabledIds[0] || '',
       models,
       modelSource: 'fetched',
       modelsFetchedAt: now,
@@ -626,8 +619,7 @@ function normalizeOpenAiCodexDefaultModel(
 ): string {
   if (
     existingDefaultModel &&
-    !CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS.has(existingDefaultModel) &&
-    enabledModelIds.includes(existingDefaultModel)
+    !CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS.has(existingDefaultModel)
   ) {
     return existingDefaultModel;
   }

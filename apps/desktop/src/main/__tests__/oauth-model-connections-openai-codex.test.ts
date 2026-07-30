@@ -157,7 +157,8 @@ describe('syncOpenAiCodexConnection live discovery behavior', () => {
 
   it('preserves the user-enabled model allowlist during OAuth synchronization', async () => {
     const existing = makeExisting({
-      enabledModelIds: ['gpt-5.6-sol', 'gpt-5.5'],
+      defaultModel: 'gpt-future-preview',
+      enabledModelIds: ['gpt-future-preview', 'gpt-5.6-sol', 'gpt-5.5'],
       models: [{ id: 'gpt-5.6-sol' }, { id: 'gpt-5.5' }],
     });
     const { sync, getSaved } = makeService({
@@ -168,7 +169,12 @@ describe('syncOpenAiCodexConnection live discovery behavior', () => {
 
     await sync();
 
-    assert.deepEqual(getSaved()!.enabledModelIds, ['gpt-5.6-sol', 'gpt-5.5']);
+    assert.equal(getSaved()!.defaultModel, 'gpt-future-preview');
+    assert.deepEqual(getSaved()!.enabledModelIds, [
+      'gpt-future-preview',
+      'gpt-5.6-sol',
+      'gpt-5.5',
+    ]);
   });
 
   it('disables the connection with lastTestStatus=error when /models returns an empty list', async () => {
@@ -397,8 +403,8 @@ describe('OAuth model connection user settings', () => {
     const existing = makeExisting({
       slug: 'github-copilot',
       providerType: 'github-copilot',
-      defaultModel: 'gpt-5.4',
-      enabledModelIds: ['gpt-5.4', 'claude-sonnet-4.6'],
+      defaultModel: 'gpt-future-preview',
+      enabledModelIds: ['gpt-future-preview', 'gpt-5.4', 'claude-sonnet-4.6'],
       models: [{ id: 'gpt-5.4' }, { id: 'claude-sonnet-4.6' }],
     });
     let saved: LlmConnection | null = null;
@@ -419,7 +425,12 @@ describe('OAuth model connection user settings', () => {
 
     await service.syncGitHubCopilotConnection();
 
-    assert.deepEqual(saved!.enabledModelIds, ['gpt-5.4', 'claude-sonnet-4.6']);
+    assert.equal(saved!.defaultModel, 'gpt-future-preview');
+    assert.deepEqual(saved!.enabledModelIds, [
+      'gpt-future-preview',
+      'gpt-5.4',
+      'claude-sonnet-4.6',
+    ]);
   });
 
   it('records a valid empty GitHub Copilot discovery without changing user selection', async () => {
