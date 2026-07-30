@@ -28,6 +28,7 @@ import {
   connectionEnabledModelIds,
   isWiredOAuthProvider,
   providerAuthRequiresSecret,
+  providerRequiresDiscoveredModelProtocol,
   type LlmConnection,
 } from './llm-connections.js';
 import { isModelExplicitlyUnsupportedForChat } from './model-catalog.js';
@@ -118,13 +119,19 @@ export function isConnectionReady(input: IsConnectionReadyInput): IsConnectionRe
   if (!connectionEnabledModelIds(connection).includes(model)) {
     return { ready: false, reason: 'model_not_enabled' };
   }
+  const modelEntry = connection.models?.find((entry) => entry.id.trim() === model);
+  if (
+    providerRequiresDiscoveredModelProtocol(connection.providerType) &&
+    !modelEntry?.apiProtocol
+  ) {
+    return { ready: false, reason: 'model_not_enabled' };
+  }
   if (
     connection.providerType === 'openai-codex' &&
     CODEX_SUBSCRIPTION_UNSUPPORTED_CHATGPT_MODELS.has(model)
   ) {
     return { ready: false, reason: 'model_not_chat_capable' };
   }
-  const modelEntry = connection.models?.find((entry) => entry.id.trim() === model);
   if (modelEntry && isModelExplicitlyUnsupportedForChat(modelEntry)) {
     return { ready: false, reason: 'model_not_chat_capable' };
   }

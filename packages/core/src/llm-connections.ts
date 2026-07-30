@@ -154,6 +154,14 @@ export function providerSupportsModelDiscovery(providerType: ProviderType): bool
   return discovery !== undefined && discovery.kind !== 'fallback';
 }
 
+/**
+ * Whether the provider's request wire is an account-advertised per-model fact
+ * that cannot be derived from its registry adapter.
+ */
+export function providerRequiresDiscoveredModelProtocol(providerType: ProviderType): boolean {
+  return providerType === 'github-copilot';
+}
+
 export function backendKindOf(c: Pick<LlmConnection, 'providerType'>): BackendKind {
   // Unknown providerType (legacy seed, or a connection persisted on a branch
   // that registers a provider this build doesn't know) → treat as non-real,

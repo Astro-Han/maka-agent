@@ -1,6 +1,7 @@
 import {
   PROVIDER_DEFAULTS,
   effectiveBaseUrl,
+  providerRequiresDiscoveredModelProtocol,
   type ModelInfo,
   type ProviderRuntimeAdapter,
   type ProviderType,
@@ -35,6 +36,11 @@ export function resolveModelRuntime(
     );
   }
   const apiProtocol = connection.models?.find((model) => model.id === modelId)?.apiProtocol;
+  if (providerRequiresDiscoveredModelProtocol(connection.providerType) && !apiProtocol) {
+    throw new Error(
+      `GitHub Copilot model "${modelId}" is missing account-advertised protocol metadata`,
+    );
+  }
   if (
     connection.providerType === 'kimi-coding-plan' &&
     apiProtocol !== undefined &&

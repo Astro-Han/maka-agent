@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { PROVIDER_DEFAULTS } from '@maka/core';
+import { PROVIDER_DEFAULTS, providerRequiresDiscoveredModelProtocol } from '@maka/core';
 import {
   Alert,
   AlertAction,
@@ -220,6 +220,7 @@ function ConnectionDetailInner(props: ConnectionDetailProps) {
             enabledModelIds={enabledModelIds}
             defaultModel={connection.defaultModel}
             disabled={detailActionBusy}
+            allowUnobservedModelIds={!providerRequiresDiscoveredModelProtocol(connection.providerType)}
             onChange={(next) => void updateEnabledModels(next)}
           />
           <div className="providerEndpointSettings">

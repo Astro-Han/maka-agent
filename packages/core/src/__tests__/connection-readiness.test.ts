@@ -84,6 +84,44 @@ describe('isConnectionReady — model capability gate', () => {
     assert.deepEqual(verdict, { ready: true, model: 'provider-private-model' });
   });
 
+  it('requires Copilot account protocol metadata for the selected model', () => {
+    const withoutProtocol = connection({
+      slug: 'github-copilot',
+      providerType: 'github-copilot',
+      defaultModel: 'claude-sonnet',
+      enabledModelIds: ['claude-sonnet'],
+      models: [{ id: 'gpt-5.4', apiProtocol: 'openai-responses' }],
+    });
+    const withProtocol = {
+      ...withoutProtocol,
+      models: [{ id: 'claude-sonnet', apiProtocol: 'anthropic-messages' as const }],
+    };
+
+    assert.deepEqual(isConnectionReady({ connection: withoutProtocol, hasSecret: true }), {
+      ready: false,
+      reason: 'model_not_enabled',
+    });
+    assert.deepEqual(isConnectionReady({ connection: withProtocol, hasSecret: true }), {
+      ready: true,
+      model: 'claude-sonnet',
+    });
+  });
+
+  it('keeps Kimi on its registered Anthropic protocol when no per-model override exists', () => {
+    const verdict = isConnectionReady({
+      connection: connection({
+        slug: 'kimi-coding-plan',
+        providerType: 'kimi-coding-plan',
+        defaultModel: 'provider-private-model',
+        enabledModelIds: ['provider-private-model'],
+        models: [{ id: 'k3', apiProtocol: 'openai-chat' }],
+      }),
+      hasSecret: true,
+    });
+
+    assert.deepEqual(verdict, { ready: true, model: 'provider-private-model' });
+  });
+
   it('keeps an enabled Codex default absent from the observed catalog', () => {
     const verdict = isConnectionReady({
       connection: connection({

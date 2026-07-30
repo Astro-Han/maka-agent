@@ -7,6 +7,7 @@ import type {
 import {
   PROVIDER_DEFAULTS,
   connectionEnabledModelIds,
+  providerRequiresDiscoveredModelProtocol,
   providerSupportsModelDiscovery,
 } from './llm-connections.js';
 import type { PricingConfig } from './usage-stats/types.js';
@@ -488,12 +489,21 @@ function userChoiceSources(
 function deriveModelUnavailableReason(
   input: Pick<
     BuildModelCatalogInput,
-    'providerAvailable' | 'authOk' | 'modelSource' | 'modelsFetchedAt' | 'now' | 'staleAfterMs'
+    | 'providerType'
+    | 'providerAvailable'
+    | 'authOk'
+    | 'modelSource'
+    | 'modelsFetchedAt'
+    | 'now'
+    | 'staleAfterMs'
   >,
   model: ModelInfo,
 ): ModelUnavailableReason {
   const providerOrAuthReason = providerOrAuthUnavailableReason(input);
   if (providerOrAuthReason) return providerOrAuthReason;
+  if (providerRequiresDiscoveredModelProtocol(input.providerType) && !model.apiProtocol) {
+    return 'not_in_live_list';
+  }
   if (isModelExplicitlyUnsupportedForChat(model)) return 'unsupported_for_chat';
   if (isStale(input)) return 'stale';
   return 'none';
@@ -508,7 +518,7 @@ function providerOrAuthUnavailableReason(
 }
 
 function missingEntryUnavailableReason(
-  input: Pick<BuildModelCatalogInput, 'providerAvailable' | 'authOk' | 'models'>,
+  input: Pick<BuildModelCatalogInput, 'providerType' | 'providerAvailable' | 'authOk' | 'models'>,
   modelSource: ModelDiscoverySource,
   explicitlyEnabled: boolean,
   model: ModelInfo,
@@ -516,6 +526,7 @@ function missingEntryUnavailableReason(
   const providerOrAuthReason = providerOrAuthUnavailableReason(input);
   if (providerOrAuthReason) return providerOrAuthReason;
   if (isModelExplicitlyUnsupportedForChat(model)) return 'unsupported_for_chat';
+  if (providerRequiresDiscoveredModelProtocol(input.providerType)) return 'not_in_live_list';
   if (explicitlyEnabled) return 'none';
   return modelSource === 'fetched' || input.models ? 'not_in_live_list' : 'none';
 }

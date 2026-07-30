@@ -1064,6 +1064,38 @@ describe('ModelCatalogEntry', () => {
     assert.deepEqual(readiness, { ready: true, model: 'custom-default' });
   });
 
+  it('does not make a Copilot model selectable without account protocol metadata', () => {
+    const missing = buildConnectionModelCatalogEntries({
+      connection: {
+        slug: 'github-copilot',
+        providerType: 'github-copilot',
+        defaultModel: 'claude-sonnet',
+        enabledModelIds: ['claude-sonnet'],
+        models: [{ id: 'gpt-5.4', apiProtocol: 'openai-responses' }],
+        modelSource: 'fetched',
+      },
+    });
+    const observed = buildConnectionModelCatalogEntries({
+      connection: {
+        slug: 'github-copilot',
+        providerType: 'github-copilot',
+        defaultModel: 'claude-sonnet',
+        enabledModelIds: ['claude-sonnet'],
+        models: [{ id: 'claude-sonnet', apiProtocol: 'anthropic-messages' }],
+        modelSource: 'fetched',
+      },
+    });
+
+    const missingEntry = missing.find((entry) => entry.id === 'claude-sonnet');
+    assert.equal(missingEntry?.unavailableReason, 'not_in_live_list');
+    assert.equal(missingEntry?.availability, 'blocked');
+    assert.equal(missingEntry?.canUseAsChatDefault, false);
+    const observedEntry = observed.find((entry) => entry.id === 'claude-sonnet');
+    assert.equal(observedEntry?.unavailableReason, 'none');
+    assert.equal(observedEntry?.availability, 'available');
+    assert.equal(observedEntry?.canUseAsChatDefault, true);
+  });
+
   it('blocks explicitly image-only models from becoming a chat default', () => {
     const input = {
       providerType: 'openai' as const,

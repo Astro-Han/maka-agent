@@ -470,6 +470,19 @@ describe('getAIModel: models.dev registry providers', () => {
       assert.equal(model.modelId, modelId);
     }
   });
+
+  test('refuses to guess a GitHub Copilot wire for an unobserved model id', () => {
+    assert.throws(
+      () =>
+        getAIModel({
+          connection: conn('github-copilot'),
+          apiKey: 'github-account-token',
+          modelId: 'claude-future',
+          fetch: async () => Response.json({}),
+        }),
+      /GitHub Copilot model "claude-future" is missing account-advertised protocol metadata/,
+    );
+  });
 });
 
 describe('buildProviderOptions: openai-compatible namespace', () => {

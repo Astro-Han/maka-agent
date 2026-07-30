@@ -835,11 +835,14 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
     );
   });
 
-  it('allows an exact model id to be enabled without inventing a second persistence path', async () => {
+  it('allows exact ids only when the provider has a deterministic protocol', async () => {
     const src = await readProviderSettingsCombinedSource();
     const enabledModels = src.match(/function EnabledModelManager[\s\S]*?function modelDisplayLabel/)?.[0] ?? '';
 
-    assert.match(enabledModels, /<form className="providerExactModelForm" onSubmit=\{addExactModel\}>/);
+    assert.match(
+      enabledModels,
+      /\{props\.allowUnobservedModelIds && \([\s\S]*<form className="providerExactModelForm" onSubmit=\{addExactModel\}>/,
+    );
     assert.match(enabledModels, /<label htmlFor="provider-exact-model-id">/);
     assert.match(enabledModels, /value=\{exactModelId\}/);
     assert.match(enabledModels, /type="submit"/);
@@ -849,6 +852,11 @@ describe('Model OAuth catalog contract (PR-MODEL-OAUTH-ALL-0 + PR-CLAUDE-CARD-MO
       'an exact id should join the existing enabledModelIds authority without becoming a parallel custom-model store',
     );
     assert.doesNotMatch(enabledModels, /customModelIds|setDefaultModel/);
+    assert.match(
+      src,
+      /allowUnobservedModelIds=\{!providerRequiresDiscoveredModelProtocol\(connection\.providerType\)\}/,
+      'providers whose wire is declared per observed model must not offer an unsafe exact-id path',
+    );
   });
 
   it('surfaces provider detail save/delete failures instead of leaking rejected promises from actions', async () => {

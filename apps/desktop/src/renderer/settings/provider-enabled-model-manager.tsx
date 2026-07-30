@@ -29,6 +29,7 @@ export function EnabledModelManager(props: {
   enabledModelIds: string[];
   defaultModel: string;
   disabled: boolean;
+  allowUnobservedModelIds: boolean;
   onChange(ids: string[]): void;
 }) {
   const copy = getProviderSettingsCopy(useUiLocale()).detail;
@@ -131,31 +132,33 @@ export function EnabledModelManager(props: {
         <strong id="provider-enabled-models-title">{copy.enabledModelsTitle(props.enabledModelIds.length)}</strong>
         <span>{copy.enabledModelsHelp}</span>
       </div>
-      <form className="providerExactModelForm" onSubmit={addExactModel}>
-        <label htmlFor="provider-exact-model-id">{copy.exactModelId}</label>
-        <div className="providerExactModelControls">
-          <Input
-            id="provider-exact-model-id"
-            className="providerExactModelInput"
-            value={exactModelId}
-            onChange={(event) => setExactModelId(event.currentTarget.value)}
-            placeholder={copy.exactModelIdPlaceholder}
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            disabled={props.disabled}
-            aria-describedby="provider-exact-model-help"
-          />
-          <Button
-            size="sm"
-            type="submit"
-            disabled={props.disabled || !exactModelId.trim() || enabled.has(exactModelId.trim())}
-          >
-            {copy.addExactModel}
-          </Button>
-        </div>
-        <span id="provider-exact-model-help">{copy.exactModelIdHelp}</span>
-      </form>
+      {props.allowUnobservedModelIds && (
+        <form className="providerExactModelForm" onSubmit={addExactModel}>
+          <label htmlFor="provider-exact-model-id">{copy.exactModelId}</label>
+          <div className="providerExactModelControls">
+            <Input
+              id="provider-exact-model-id"
+              className="providerExactModelInput"
+              value={exactModelId}
+              onChange={(event) => setExactModelId(event.currentTarget.value)}
+              placeholder={copy.exactModelIdPlaceholder}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={props.disabled}
+              aria-describedby="provider-exact-model-help"
+            />
+            <Button
+              size="sm"
+              type="submit"
+              disabled={props.disabled || !exactModelId.trim() || enabled.has(exactModelId.trim())}
+            >
+              {copy.addExactModel}
+            </Button>
+          </div>
+          <span id="provider-exact-model-help">{copy.exactModelIdHelp}</span>
+        </form>
+      )}
       <Input
         type="search"
         value={query}
