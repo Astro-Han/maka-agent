@@ -994,12 +994,13 @@ describe('ModelCatalogEntry', () => {
     );
   });
 
-  it('does not allow fallback missing defaults that the local send gate will reject', () => {
+  it('allows an explicitly enabled exact default absent from the observed catalog', () => {
     const input = {
       providerType: 'openai-compatible' as const,
       defaultModel: 'custom-default',
       models: [{ id: 'relay-static-model' }],
       modelSource: 'fallback' as const,
+      savedModelIds: [{ id: 'custom-default', source: 'enabled_model' as const }],
     };
 
     const [missingDefault] = buildModelCatalogEntries(input);
@@ -1020,12 +1021,10 @@ describe('ModelCatalogEntry', () => {
     });
 
     assert.equal(missingDefault?.id, 'custom-default');
-    assert.equal(missingDefault?.canUseAsChatDefault, false);
-    assert.deepEqual(
-      validation.ok ? validation : { ok: validation.ok, reason: validation.reason },
-      { ok: false, reason: 'not_in_live_list' },
-    );
-    assert.deepEqual(readiness, { ready: false, reason: 'model_not_enabled' });
+    assert.equal(missingDefault?.unavailableReason, 'none');
+    assert.equal(missingDefault?.canUseAsChatDefault, true);
+    assert.equal(validation.ok, true);
+    assert.deepEqual(readiness, { ready: true, model: 'custom-default' });
   });
 
   it('blocks explicitly image-only models from becoming a chat default', () => {
@@ -1110,6 +1109,7 @@ describe('ModelCatalogEntry', () => {
       providerType: 'zai-coding-plan',
       defaultModel: 'glm-saved',
       enabled: true,
+      enabledModelIds: ['glm-saved', 'glm-exact'],
       models: [{ id: 'glm-4.7' }],
       modelSource: 'fetched',
       modelsFetchedAt: 1_800_000_000_000,
@@ -1130,17 +1130,21 @@ describe('ModelCatalogEntry', () => {
 
     assert.deepEqual(
       entries.map((entry) => entry.id),
-      ['glm-saved', 'glm-4.7', 'glm-session', 'glm-daily-review'],
+      ['glm-saved', 'glm-4.7', 'glm-exact', 'glm-session', 'glm-daily-review'],
     );
     assert.equal(entries[0]?.connectionSlug, 'zai-live');
-    assert.equal(entries[0]?.unavailableReason, 'not_in_live_list');
+    assert.equal(entries[0]?.unavailableReason, 'none');
     assert.equal(entries[0]?.isDefault, true);
     assert.equal(entries[1]?.source, 'provider_api');
     assert.equal(entries[2]?.source, 'unknown');
     assert.equal(entries[2]?.provenance.userChoice, true);
-    assert.deepEqual(entries[0]?.provenance.sources?.userChoice, ['connection_default']);
-    assert.deepEqual(entries[2]?.provenance.sources?.userChoice, ['session_model']);
-    assert.deepEqual(entries[3]?.provenance.sources?.userChoice, ['daily_review_model']);
+    assert.deepEqual(entries[0]?.provenance.sources?.userChoice, [
+      'connection_default',
+      'enabled_model',
+    ]);
+    assert.deepEqual(entries[2]?.provenance.sources?.userChoice, ['enabled_model']);
+    assert.deepEqual(entries[3]?.provenance.sources?.userChoice, ['session_model']);
+    assert.deepEqual(entries[4]?.provenance.sources?.userChoice, ['daily_review_model']);
   });
 
   it('uses curated catalog fallbacks for a connection without fetched models', () => {

@@ -26,7 +26,13 @@ export function buildCatalogRecommendedDefaultModel(providerType: ProviderType):
 
 export function pickCatalogDefaultChatModel(connection: Pick<
   LlmConnection,
-  'slug' | 'providerType' | 'defaultModel' | 'models' | 'modelSource' | 'modelsFetchedAt'
+  | 'slug'
+  | 'providerType'
+  | 'defaultModel'
+  | 'enabledModelIds'
+  | 'models'
+  | 'modelSource'
+  | 'modelsFetchedAt'
 >): { llmConnectionSlug: string; model: string } | undefined {
   const entry = selectableCatalogEntries(connection).find((choice) => choice.isDefault && choice.canUseAsChatDefault);
   return entry ? { llmConnectionSlug: connection.slug, model: entry.id } : undefined;
@@ -60,7 +66,13 @@ export function buildCatalogChatModelChoices(connections: readonly LlmConnection
 
 export function buildCatalogModelChoices(connection: Pick<
   LlmConnection,
-  'slug' | 'providerType' | 'defaultModel' | 'models' | 'modelSource' | 'modelsFetchedAt'
+  | 'slug'
+  | 'providerType'
+  | 'defaultModel'
+  | 'enabledModelIds'
+  | 'models'
+  | 'modelSource'
+  | 'modelsFetchedAt'
 >): ModelCatalogEntry[] {
   return buildConnectionModelCatalogEntries({ connection });
 }
@@ -138,7 +150,13 @@ function dailyReviewCatalogEntries(
 function selectableCatalogEntries(
   connection: Pick<
     LlmConnection,
-    'slug' | 'providerType' | 'defaultModel' | 'models' | 'modelSource' | 'modelsFetchedAt'
+    | 'slug'
+    | 'providerType'
+    | 'defaultModel'
+    | 'enabledModelIds'
+    | 'models'
+    | 'modelSource'
+    | 'modelsFetchedAt'
   >,
   savedModelIds?: Iterable<string | undefined | null>,
 ): ModelCatalogEntry[] {

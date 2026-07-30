@@ -93,6 +93,35 @@ describe('model catalog picker helpers', () => {
     );
   });
 
+  it('exposes an enabled exact model id absent from the observed catalog to Chat', async () => {
+    const { buildCatalogChatModelChoices, buildCatalogModelChoices } =
+      await importModelCatalogChoices();
+    const openrouter = connection({
+      slug: 'openrouter-main',
+      providerType: 'openrouter',
+      defaultModel: 'openrouter/auto',
+      enabledModelIds: ['openrouter/auto', 'vendor/future-preview'],
+      models: [{ id: 'openrouter/auto' }],
+      modelSource: 'fetched',
+    });
+
+    assert.deepEqual(
+      buildCatalogChatModelChoices([openrouter]).map((choice) => choice.model),
+      ['openrouter/auto', 'vendor/future-preview'],
+    );
+    assert.deepEqual(
+      buildCatalogModelChoices(openrouter).map((choice) => [
+        choice.id,
+        choice.availability,
+        choice.unavailableReason,
+      ]),
+      [
+        ['openrouter/auto', 'available', 'none'],
+        ['vendor/future-preview', 'available', 'none'],
+      ],
+    );
+  });
+
   it('limits Daily Review to enabled models while retaining its disabled current value', async () => {
     const { buildCatalogDailyReviewModelOptions } = await importModelCatalogChoices();
     const openrouter = connection({
@@ -460,7 +489,7 @@ describe('model catalog picker helpers', () => {
     );
   });
 
-  it('keeps Settings model choices as catalog entries with missing-default state', async () => {
+  it('keeps an authorized missing default available in Settings model choices', async () => {
     const { buildCatalogModelChoices } = await importModelCatalogChoices();
 
     const choices = buildCatalogModelChoices(connection({
@@ -489,8 +518,8 @@ describe('model catalog picker helpers', () => {
           recommendedRank: 5,
           lifecycle: 'active',
           docsUrl: 'https://platform.openai.com/docs/models',
-          availability: 'blocked',
-          unavailableReason: 'not_in_live_list',
+          availability: 'available',
+          unavailableReason: 'none',
           isDefault: true,
         },
         {

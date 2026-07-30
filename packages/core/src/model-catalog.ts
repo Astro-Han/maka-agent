@@ -4,7 +4,11 @@ import type {
   ModelInfo,
   ProviderType,
 } from './llm-connections.js';
-import { PROVIDER_DEFAULTS, providerSupportsModelDiscovery } from './llm-connections.js';
+import {
+  PROVIDER_DEFAULTS,
+  connectionEnabledModelIds,
+  providerSupportsModelDiscovery,
+} from './llm-connections.js';
 import type { PricingConfig } from './usage-stats/types.js';
 import { curatedCatalogFallbackModelsForProvider, lookupModelMetadata } from './model-metadata.js';
 
@@ -39,6 +43,7 @@ export interface ModelCatalogPricing {
 
 export type ModelCatalogUserChoiceSource =
   | 'connection_default'
+  | 'enabled_model'
   | 'saved_model'
   | 'session_model'
   | 'daily_review_model';
@@ -86,7 +91,13 @@ export interface ModelCatalogEntry {
 export interface BuildConnectionModelCatalogInput {
   connection: Pick<
     LlmConnection,
-    'slug' | 'providerType' | 'defaultModel' | 'models' | 'modelSource' | 'modelsFetchedAt'
+    | 'slug'
+    | 'providerType'
+    | 'defaultModel'
+    | 'enabledModelIds'
+    | 'models'
+    | 'modelSource'
+    | 'modelsFetchedAt'
   >;
   savedModelIds?: Iterable<SavedModelChoice | undefined | null>;
   fallbackModels?: string[];
@@ -214,7 +225,13 @@ export function buildConnectionModelCatalogEntries(
     authOk: input.authOk,
     pricing: input.pricing,
     pricingSource: input.pricingSource,
-    savedModelIds: input.savedModelIds,
+    savedModelIds: [
+      ...connectionEnabledModelIds(connection).map((id) => ({
+        id,
+        source: 'enabled_model' as const,
+      })),
+      ...(input.savedModelIds ?? []),
+    ],
   });
 }
 
@@ -324,8 +341,13 @@ function makeMissingDefaultEntry(
   normalizedDefaultModel: string | undefined,
   recommendedRanks: ReadonlyMap<string, number>,
 ): ModelCatalogEntry {
-  const unavailableReason = missingEntryUnavailableReason(input, modelSource);
   const metadata = lookupModelMetadata(input.providerType, id);
+  const unavailableReason = missingEntryUnavailableReason(
+    input,
+    modelSource,
+    savedChoiceSources.get(id)?.includes('enabled_model') === true,
+    { id, capabilities: metadata.capabilities },
+  );
   const recommendedRank = recommendedRanks.get(id);
   return {
     id,
@@ -362,8 +384,13 @@ function makeMissingUserChoiceEntry(
   normalizedDefaultModel: string | undefined,
   recommendedRanks: ReadonlyMap<string, number>,
 ): ModelCatalogEntry {
-  const unavailableReason = missingEntryUnavailableReason(input, modelSource);
   const metadata = lookupModelMetadata(input.providerType, id);
+  const unavailableReason = missingEntryUnavailableReason(
+    input,
+    modelSource,
+    savedChoiceSources.get(id)?.includes('enabled_model') === true,
+    { id, capabilities: metadata.capabilities },
+  );
   const recommendedRank = recommendedRanks.get(id);
   return {
     id,
@@ -483,9 +510,13 @@ function providerOrAuthUnavailableReason(
 function missingEntryUnavailableReason(
   input: Pick<BuildModelCatalogInput, 'providerAvailable' | 'authOk' | 'models'>,
   modelSource: ModelDiscoverySource,
+  explicitlyEnabled: boolean,
+  model: ModelInfo,
 ): ModelUnavailableReason {
   const providerOrAuthReason = providerOrAuthUnavailableReason(input);
   if (providerOrAuthReason) return providerOrAuthReason;
+  if (isModelExplicitlyUnsupportedForChat(model)) return 'unsupported_for_chat';
+  if (explicitlyEnabled) return 'none';
   return modelSource === 'fetched' || input.models ? 'not_in_live_list' : 'none';
 }
 
