@@ -1025,6 +1025,9 @@ describe('fetchProviderModels', () => {
       {},
       { data: { id: 'not-an-array', secret } },
       { data: [{}] },
+      { data: [{ id: '   ' }] },
+      { data: [{ id: 'bad\nmodel' }] },
+      { data: [{ id: 'x'.repeat(513) }] },
       { data: [null, { id: secret }] },
       { data: [42, { id: secret }] },
     ]) {

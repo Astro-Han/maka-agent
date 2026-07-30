@@ -347,16 +347,8 @@ function cloudflareModelsUrl(baseUrl: string, page: number): string {
 function normalizeDiscoveredModels(models: ModelInfo[]): ModelInfo[] {
   const unique = new Map<string, ModelInfo>();
   for (const model of models) {
-    if (typeof model?.id !== 'string') continue;
-    const id = model.id.trim();
-    if (
-      !id ||
-      id.length > CONNECTION_MODEL_ID_MAX_LENGTH ||
-      /[\u0000-\u001f\u007f]/.test(id) ||
-      unique.has(id)
-    ) {
-      continue;
-    }
+    const id = normalizeModelId(model?.id);
+    if (!id || unique.has(id)) continue;
     unique.set(id, { ...model, id });
     if (unique.size > CONNECTION_CATALOG_MAX_MODELS_PER_CONNECTION) {
       throw new ConnectionEffectInvalidResponseError('Provider returned too many models');
@@ -763,7 +755,8 @@ async function fetchFireworksModels(
 }
 
 function toModelInfo(model: RawProviderModel): ModelInfo | null {
-  if (typeof model.id !== 'string' || !model.id) return null;
+  const id = normalizeModelId(model.id);
+  if (!id) return null;
   assertOptionalArray(model.input_modalities, 'model input_modalities');
   assertOptionalArray(model.output_modalities, 'model output_modalities');
   assertOptionalArray(model.tags, 'model tags');
@@ -788,12 +781,20 @@ function toModelInfo(model: RawProviderModel): ModelInfo | null {
     );
   }
   return {
-    id: model.id,
+    id,
     ...(model.display_name || model.name ? { displayName: model.display_name ?? model.name } : {}),
     ...(typeof contextWindow === 'number' ? { contextWindow } : {}),
     ...(typeof model.max_tokens === 'number' ? { maxOutputTokens: model.max_tokens } : {}),
     ...(Object.keys(capabilities).length ? { capabilities } : {}),
   };
+}
+
+function normalizeModelId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const id = value.trim();
+  return id && id.length <= CONNECTION_MODEL_ID_MAX_LENGTH && !/[\u0000-\u001f\u007f]/.test(id)
+    ? id
+    : null;
 }
 
 function anthropicModelHeaders(
