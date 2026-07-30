@@ -59,6 +59,7 @@ export interface ProviderRequestAttemptRecord extends ProviderRequestUsage {
   captureArtifactId: string;
   providerId: string;
   modelId: string;
+  contextWindow?: number;
   requestHash: string;
   requestBytes: number;
   segments: PreparedRequestSegment[];
@@ -73,6 +74,7 @@ export interface ProviderRequestAttemptRecord extends ProviderRequestUsage {
 export interface ProviderRequestTrackerInput {
   traceId: string;
   turnId: string;
+  contextWindow?: number;
   now: () => number;
   newId: () => string;
   persistCapture: (
@@ -158,6 +160,7 @@ export class ProviderRequestTracker {
       if (abortListener) input.abortSignal?.removeEventListener('abort', abortListener);
       const completedAt = this.input.now();
       const usage = strictProviderRequestUsage(finish?.usage);
+      const contextWindow = positiveInteger(this.input.contextWindow);
       const record: ProviderRequestAttemptRecord = {
         traceId: this.input.traceId,
         attemptId,
@@ -168,6 +171,7 @@ export class ProviderRequestTracker {
         captureArtifactId: capture.ref.artifactId,
         providerId: input.providerId,
         modelId: input.modelId,
+        ...(contextWindow !== undefined ? { contextWindow } : {}),
         requestHash: capture.capture.requestHash,
         requestBytes: capture.capture.requestBytes,
         segments: capture.capture.segments,
@@ -513,4 +517,8 @@ function firstToken(...values: Array<number | undefined>): number | undefined {
 
 function finiteToken(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }

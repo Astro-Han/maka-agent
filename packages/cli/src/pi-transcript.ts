@@ -15,6 +15,7 @@ import {
 import type { ContextBudgetDiagnostic } from '@maka/core/usage-stats/types';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import {
+  isActiveShellRunStatus,
   mergeShellRunStateWithDiagnostics,
   projectToolActivityArgs,
   type ShellRunUpdate,
@@ -276,7 +277,7 @@ export function applyShellRunViewUpdateToTranscript(
     tool.toolName !== 'Bash' ||
     tool.result?.kind !== 'shell_run' ||
     tool.result.ref !== update.result.ref ||
-    tool.result.status !== 'running'
+    !isActiveShellRunStatus(tool.result.status)
   )
     return applied;
   const status =
@@ -664,7 +665,7 @@ export function applyMakaSessionEventToTranscript(
           state.entries.push({
             kind: 'notice',
             level: 'info',
-            text: `Sandbox boundary ${event.decision === 'allow' ? 'expanded' : 'unchanged'}`,
+            text: `Access ${event.decision === 'allow' ? 'expanded' : 'unchanged'}`,
           });
         }
       }
@@ -879,6 +880,7 @@ function shellRunTranscriptStatus(
   status: Extract<ToolResultContent, { kind: 'shell_run' }>['status'],
 ): MakaPiToolEntry['status'] {
   switch (status) {
+    case 'starting':
     case 'running':
       return 'running';
     case 'completed':
@@ -1224,12 +1226,25 @@ function transcriptEntrySignature(entry: MakaPiTranscriptEntry, width: number): 
   }
 }
 
+/**
+ * The one CLI label for a permission mode, shared by the status line, the
+ * picker header, and the mode-change notice (#1611). `explore` is a real
+ * boundary a resumed session can be in, so it must be nameable here; legacy
+ * `execute` has no boundary of its own and reads as Auto, as does anything
+ * else this metadata ever carries.
+ */
+export function permissionModeLabel(mode: string): string {
+  if (mode === 'bypass') return 'Full access';
+  if (mode === 'explore') return 'Read only';
+  return 'Auto';
+}
+
 export function renderMakaPiStatusLine(metadata: MakaPiTranscriptMetadata, width: number): string {
   const safeWidth = Math.max(1, width);
   const sep = ansi.dim(' · ');
   const parts: string[] = [
     ansi.bold(metadata.title),
-    ansi.dim(metadata.permissionMode === 'bypass' ? 'Bypass' : 'Auto'),
+    ansi.dim(permissionModeLabel(metadata.permissionMode)),
     ansi.dim(metadata.model),
   ];
   // #1064: omit thinking:default — it is noise before the user explicitly
@@ -1484,7 +1499,7 @@ function readArgsRef(args: unknown): string | undefined {
  * and because stored replay never routes through the notice path.
  */
 function isLiveShellRunCard(entry: MakaPiToolEntry | undefined): boolean {
-  return entry?.result?.kind === 'shell_run' && entry.result.status === 'running';
+  return entry?.result?.kind === 'shell_run' && isActiveShellRunStatus(entry.result.status);
 }
 
 /**
@@ -1504,7 +1519,7 @@ function applyLiveShellRunResultToParent(
 }
 
 function isSettledShellRunCard(entry: MakaPiToolEntry): boolean {
-  return entry.result?.kind === 'shell_run' && entry.result.status !== 'running';
+  return entry.result?.kind === 'shell_run' && !isActiveShellRunStatus(entry.result.status);
 }
 
 /**
@@ -1613,7 +1628,7 @@ function renderSandboxBoundaryPrompt(
   width: number,
 ): string[] {
   const lines = [
-    fitLine(ansi.yellow('Sandbox boundary expansion'), width),
+    fitLine(ansi.yellow('Allow access outside the workspace?'), width),
     ...renderIndented(request.justification, width, 2),
   ];
   for (const entry of request.expansion.filesystem?.entries ?? []) {

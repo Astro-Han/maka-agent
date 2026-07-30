@@ -84,6 +84,8 @@ export interface SessionStore {
     input: CreateSandboxBoundaryRequest,
   ): Promise<SandboxBoundaryRequest>;
   listPendingSandboxBoundaryRequests(sessionId: string): Promise<SandboxBoundaryRequest[]>;
+  /** Requests already closed against the user because the host restarted. */
+  listSandboxBoundaryRestartClosures(sessionId: string): Promise<SandboxBoundaryRequest[]>;
   settleSandboxBoundaryRequest(
     input: SettleSandboxBoundaryRequest,
   ): Promise<SandboxBoundarySettlement>;
@@ -225,6 +227,11 @@ class SqliteSessionStore implements SessionStore {
   async listPendingSandboxBoundaryRequests(sessionId: string): Promise<SandboxBoundaryRequest[]> {
     await this.ensureReady();
     return this.metadata.listPendingSandboxBoundaryRequests(sessionId);
+  }
+
+  async listSandboxBoundaryRestartClosures(sessionId: string): Promise<SandboxBoundaryRequest[]> {
+    await this.ensureReady();
+    return this.metadata.listSandboxBoundaryRestartClosures(sessionId);
   }
 
   async settleSandboxBoundaryRequest(
@@ -491,6 +498,10 @@ class FileSessionStore implements SessionStore {
   }
 
   async listPendingSandboxBoundaryRequests(_sessionId: string): Promise<SandboxBoundaryRequest[]> {
+    throw new Error('Sandbox boundary requests require the SQLite metadata control plane');
+  }
+
+  async listSandboxBoundaryRestartClosures(_sessionId: string): Promise<SandboxBoundaryRequest[]> {
     throw new Error('Sandbox boundary requests require the SQLite metadata control plane');
   }
 

@@ -34,6 +34,25 @@ describe('runtime event JSONL compatibility transfer', () => {
           ts: 3,
         }),
       );
+      await appendFile(
+        join(root, 'sessions', 'session-1', 'runs', 'run-1', 'runtime-events.jsonl'),
+        `${JSON.stringify(
+          runtimeEvent('event-4', {
+            ts: 4,
+            content: undefined,
+            actions: {
+              permissionRequest: {
+                requestId: 'pr-1',
+                toolUseId: 'tc-1',
+                toolName: 'Bash',
+                category: 'shell_unsafe',
+                reason: 'shell_dangerous',
+                args: { command: 'rm foo' },
+              },
+            } as never,
+          }),
+        )}\n`,
+      );
 
       const first = await importLegacyRuntimeEventJsonlTree({
         workspaceRoot: root,
@@ -46,8 +65,8 @@ describe('runtime event JSONL compatibility transfer', () => {
 
       assert.deepEqual(first, {
         filesScanned: 2,
-        eventsRead: 3,
-        eventsImported: 3,
+        eventsRead: 4,
+        eventsImported: 4,
         eventsExisting: 0,
       });
       assert.deepEqual(second, {
@@ -58,8 +77,12 @@ describe('runtime event JSONL compatibility transfer', () => {
       });
       assert.deepEqual(
         (await sqlite.readSessionRuntimeEvents('session-1')).map((event) => event.id),
-        ['event-1', 'event-2', 'event-3'],
+        ['event-1', 'event-2', 'event-3', 'event-4'],
       );
+      const importedRequest = (await sqlite.readRuntimeEvents('session-1', 'run-1')).at(-1)?.actions
+        ?.permissionRequest;
+      assert.equal(importedRequest?.kind, 'tool_permission');
+      assert.equal(importedRequest?.rememberForTurnAllowed, false);
     } finally {
       sqlite.close();
       await rm(root, { recursive: true, force: true });
@@ -84,13 +107,16 @@ describe('runtime event JSONL compatibility transfer', () => {
         'run-1',
         'runtime-events.jsonl',
       );
-      const legacyStreamPartial = runtimeEvent('partial-thinking', {
-        ts: 3,
-        partial: true,
-        role: 'model',
-        author: 'agent',
-        content: { kind: 'thinking', text: 'interrupted thought' },
-      });
+      const legacyStreamPartial = {
+        ...runtimeEvent('partial-thinking', {
+          ts: 3,
+          partial: true,
+          role: 'model',
+          author: 'agent',
+          content: { kind: 'thinking', text: 'interrupted thought' },
+        }),
+        unexpectedField: true,
+      };
       const partialRowWithStatus = runtimeEvent('partial-terminal', {
         ts: 4,
         partial: true,

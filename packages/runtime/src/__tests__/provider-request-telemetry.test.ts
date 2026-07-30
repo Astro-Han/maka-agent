@@ -264,6 +264,56 @@ describe('provider request capture commit', () => {
 });
 
 describe('provider request tracker', () => {
+  test('records the request model context window on completed attempts', async () => {
+    const attempts: telemetry.ProviderRequestAttemptRecord[] = [];
+    const tracker = new telemetry.ProviderRequestTracker({
+      traceId: 'trace-context',
+      turnId: 'turn-context',
+      contextWindow: 200_000,
+      now: () => Date.now(),
+      newId: () => 'id',
+      persistCapture: async () => ({ artifactId: 'artifact' }),
+      recordAttempt: async (attempt) => {
+        attempts.push(attempt);
+      },
+    });
+
+    const result = await tracker.trackStream({
+      providerId: 'anthropic',
+      modelId: 'claude-test',
+      params: preparedParams('hello'),
+      doStream: async () => ({ stream: streamOf([finishPart()]) }),
+    });
+    await drain(result.stream);
+
+    assert.equal(attempts[0]?.contextWindow, 200_000);
+  });
+
+  test('omits a non-positive request model context window', async () => {
+    const attempts: telemetry.ProviderRequestAttemptRecord[] = [];
+    const tracker = new telemetry.ProviderRequestTracker({
+      traceId: 'trace-context',
+      turnId: 'turn-context',
+      contextWindow: 0,
+      now: () => Date.now(),
+      newId: () => 'id',
+      persistCapture: async () => ({ artifactId: 'artifact' }),
+      recordAttempt: async (attempt) => {
+        attempts.push(attempt);
+      },
+    });
+
+    const result = await tracker.trackStream({
+      providerId: 'openai',
+      modelId: 'unknown-model',
+      params: preparedParams('hello'),
+      doStream: async () => ({ stream: streamOf([finishPart()]) }),
+    });
+    await drain(result.stream);
+
+    assert.equal(attempts[0]?.contextWindow, undefined);
+  });
+
   test('persists a logical capture before each physical attempt and reuses it for retries', async () => {
     const captures: Array<{
       captureId: string;

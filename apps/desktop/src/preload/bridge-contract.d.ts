@@ -316,6 +316,7 @@ export interface MakaBridge {
     setModel(sessionId: string, input: { llmConnectionSlug: string; model: string }): Promise<SessionSummary>;
     setThinkingLevel(sessionId: string, level: ThinkingLevel | undefined | null): Promise<SessionSummary>;
     remove(sessionId: string, options?: { revisionFamily?: boolean }): Promise<void>;
+    cleanupQuoteCompanion(sessionId: string): Promise<void>;
   };
   projects: {
     list(): Promise<ProjectRecord[]>;
@@ -432,8 +433,8 @@ export interface MakaBridge {
   memory: {
     getState(): Promise<LocalMemoryState>;
     listProposals(): Promise<ReadonlyArray<LocalMemoryEntryPreview>>;
-    propose(input: { title: string; content: string; scope?: 'workspace' | 'session' }): Promise<LocalMemoryMutationResult>;
-    remember(input: { title: string; content: string; scope?: 'workspace' | 'session' }): Promise<LocalMemoryMutationResult>;
+    propose(input: { title: string; content: string; scope?: 'workspace' | 'session'; sessionId?: string }): Promise<LocalMemoryMutationResult>;
+    remember(input: { title: string; content: string; scope?: 'workspace' | 'session'; sessionId?: string }): Promise<LocalMemoryMutationResult>;
     approveProposal(proposalId: string): Promise<LocalMemoryMutationResult>;
     rejectProposal(proposalId: string): Promise<LocalMemoryMutationResult>;
     archiveEntry(entryId: string, reason?: string): Promise<LocalMemoryMutationResult>;

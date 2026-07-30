@@ -255,6 +255,7 @@ export const test = base.extend<{
   chatChromeWin32Window: Page;
   sidebarLongSessionsWindow: Page;
   sandboxBoundaryWindow: Page;
+  readOnlyBoundaryWindow: Page;
   staleSessionsWindow: Page;
   sessionWorkbarWindow: Page;
   botSettingsWindow: Page;
@@ -281,12 +282,25 @@ export const test = base.extend<{
   // Long transcript: boots the e2e-fixture `long-transcript` fixture, which
   // seeds a 24-turn (~1300px each) session and opens it as the active
   // session. Fixture mode seeds its own connections, so no connection is
-  // pre-staged here. Readiness = turns on screen: the session is open and
-  // above-viewport turns sit at their content-visibility placeholder size.
-  // Used by the scroll-geometry spec.
+  // pre-staged here. Readiness = turns on screen and RENDERED BY THE REAL
+  // MARKDOWN PIPELINE: the session is open and above-viewport turns sit at
+  // their content-visibility placeholder size. Used by the scroll-geometry
+  // spec.
+  //
+  // `.maka-markdown-pending` is the Suspense fallback for the lazily imported
+  // markdown chunk, and the turn-size warm-up will not start while one is on
+  // screen. Handing the page over before that chunk lands charged the spec's
+  // settle budget for a module load: under 50x CPU throttling the fallback
+  // holds for ~9.6s of a ~19s cold start, most of the spec's 15s, for work
+  // that is boot rather than settling.
   longTranscriptWindow: async ({}, use) => {
     await withE2eWindow(
-      { seed: false, readinessSelector: '.maka-turn', e2eFixtureScenario: 'long-transcript', locale: 'zh' },
+      {
+        seed: false,
+        readinessSelector: '.maka-chatViewport:has(.maka-turn):not(:has(.maka-markdown-pending))',
+        e2eFixtureScenario: 'long-transcript',
+        locale: 'zh',
+      },
       use,
     );
   },
@@ -294,12 +308,26 @@ export const test = base.extend<{
   // fixture, which seeds 60 active sessions and opens the newest one
   // (`...-00`) with the sidebar expanded. Fixture mode seeds its own
   // connections, so no connection is pre-staged here. Readiness = a session
-  // row on screen: the panel grid has mounted, the session list has loaded
-  // from IPC, and the footer sits below the constrained list row. Used by the
-  // sidebar-geometry spec.
+  // row on screen INSIDE AN EXPANDED SIDEBAR: the panel grid has mounted, the
+  // session list has loaded from IPC, and the footer sits below the
+  // constrained list row. Used by the sidebar-geometry and sidebar-navigation
+  // specs.
+  //
+  // The `[data-sidebar-state="expanded"]` part is load-bearing. The shell
+  // boots collapsed (the localStorage default), and `sidebarCollapsed: false`
+  // only lands later, from `applyE2eFixture` — a rAF plus two IPC round trips
+  // after mount. A bare `.maka-list-row` does not gate on it: a collapsed
+  // sidebar keeps the whole list mounted at full width behind `opacity: 0` in
+  // a 0px grid column, which Playwright still reports as visible. Tests then
+  // started against a sidebar that was about to expand under them.
   sidebarLongSessionsWindow: async ({}, use) => {
     await withE2eWindow(
-      { seed: false, readinessSelector: '.maka-list-row', e2eFixtureScenario: 'sidebar-long-sessions', locale: 'zh' },
+      {
+        seed: false,
+        readinessSelector: '[data-sidebar-state="expanded"] .maka-list-row',
+        e2eFixtureScenario: 'sidebar-long-sessions',
+        locale: 'zh',
+      },
       use,
     );
   },
@@ -326,6 +354,17 @@ export const test = base.extend<{
   sandboxBoundaryWindow: async ({}, use) => {
     await withE2eWindow(
       { seed: false, readinessSelector: '.maka-sandbox-boundary-prompt', e2eFixtureScenario: 'sandbox-boundary', locale: 'zh' },
+      use,
+    );
+  },
+  // Read-only boundary (#1611): the Deep Research fixture session is seeded
+  // with `permissionMode: 'explore'`, so the metadata store derives a genesis
+  // managed read-only boundary for it. That makes this the only window where
+  // the composer's permission label is driven by a real read-only profile
+  // travelling main → IPC → renderer.
+  readOnlyBoundaryWindow: async ({}, use) => {
+    await withE2eWindow(
+      { seed: false, readinessSelector: '.maka-composer-textarea', e2eFixtureScenario: 'deep-research-progress', locale: 'zh' },
       use,
     );
   },

@@ -186,7 +186,7 @@ describe('SQLite agent graph intent claims', () => {
 
       const migrated = createSqliteSessionMetadataStore(path);
       try {
-        assert.equal(migrated.schemaVersion(), 13);
+        assert.equal(migrated.schemaVersion(), 14);
         assert.deepEqual(
           await migrated.beginAgentGraphIntentExecutionAtScheduleRevision(
             'graph-1',

@@ -776,6 +776,10 @@ export class AiSdkBackend implements AgentBackend {
       ? new ProviderRequestTracker({
           traceId: providerRequestTraceId,
           turnId,
+          contextWindow: resolveSelectedModelContextWindow(
+            this.input.connection,
+            this.input.modelId,
+          ),
           now: this.now,
           newId: this.newId,
           persistCapture: recordProviderRequestCapture!,

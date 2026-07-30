@@ -346,6 +346,9 @@ const makaBridge = {
     remove(sessionId: string, options?: { revisionFamily?: boolean }): Promise<void> {
       return ipcRenderer.invoke('sessions:remove', sessionId, options);
     },
+    cleanupQuoteCompanion(sessionId: string): Promise<void> {
+      return ipcRenderer.invoke('sessions:cleanupQuoteCompanion', sessionId);
+    },
   },
   projects: {
     list(): Promise<ProjectRecord[]> {
@@ -523,10 +526,10 @@ const makaBridge = {
     listProposals(): Promise<ReadonlyArray<LocalMemoryEntryPreview>> {
       return ipcRenderer.invoke('memory:listProposals');
     },
-    propose(input: { title: string; content: string; scope?: 'workspace' | 'session' }): Promise<LocalMemoryMutationResult> {
+    propose(input: { title: string; content: string; scope?: 'workspace' | 'session'; sessionId?: string }): Promise<LocalMemoryMutationResult> {
       return ipcRenderer.invoke('memory:propose', input);
     },
-    remember(input: { title: string; content: string; scope?: 'workspace' | 'session' }): Promise<LocalMemoryMutationResult> {
+    remember(input: { title: string; content: string; scope?: 'workspace' | 'session'; sessionId?: string }): Promise<LocalMemoryMutationResult> {
       return ipcRenderer.invoke('memory:remember', input);
     },
     approveProposal(proposalId: string): Promise<LocalMemoryMutationResult> {

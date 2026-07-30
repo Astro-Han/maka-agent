@@ -19,6 +19,7 @@ import {
   decodeAgentGraphIntentClaim,
   decodeExecutionBoundary,
   createGenesisExecutionBoundary,
+  SANDBOX_BOUNDARY_HOST_RESTART_CLOSURE_REASON,
   validateSandboxBoundaryExpansion,
   isSubagentSessionParent,
   isSubagentSessionRuntime,
@@ -240,6 +241,8 @@ export class SqliteSessionMetadataStore {
     this.assertOpen();
     assertSafeSessionId(input.sessionId);
     assertSafeBoundaryRequestId(input.requestId);
+    assertSandboxBoundaryProvenanceId(input.turnId, 'turn id');
+    if (input.runId !== undefined) assertSandboxBoundaryProvenanceId(input.runId, 'run id');
     const validated = validateSandboxBoundaryExpansion(input.expansion);
     if (!validated.ok) throw new Error(validated.message);
     const justification = input.justification.trim();
@@ -256,7 +259,9 @@ export class SqliteSessionMetadataStore {
       if (existing) {
         if (
           !isDeepStrictEqual(existing.expansion, validated.expansion) ||
-          existing.justification !== justification
+          existing.justification !== justification ||
+          existing.turnId !== input.turnId ||
+          existing.runId !== input.runId
         ) {
           throw new SessionMetadataConflictError(
             `Sandbox boundary request identity was reused with different content: ${input.requestId}`,
@@ -278,8 +283,10 @@ export class SqliteSessionMetadataStore {
             base_revision,
             expansion_json,
             justification,
-            created_at
-          ) VALUES (?, ?, 'expansion_request', ?, 'pending', ?, ?, ?, ?)
+            created_at,
+            turn_id,
+            run_id
+          ) VALUES (?, ?, 'expansion_request', ?, 'pending', ?, ?, ?, ?, ?, ?)
         `)
         .run(
           input.sessionId,
@@ -289,6 +296,8 @@ export class SqliteSessionMetadataStore {
           JSON.stringify(validated.expansion),
           justification,
           createdAt,
+          input.turnId,
+          input.runId ?? null,
         );
       this.options.failpoint?.('after_sandbox_boundary_write');
       return this.requireSandboxBoundaryRequestSync(input.sessionId, input.requestId);
@@ -304,22 +313,43 @@ export class SqliteSessionMetadataStore {
       this.ensureGenesisExecutionBoundary(record.header);
       const rows = this.db
         .prepare(`
-          SELECT
-            session_id AS sessionId,
-            request_id AS requestId,
-            status,
-            base_revision AS baseRevision,
-            applied_revision AS appliedRevision,
-            expansion_json AS expansionJson,
-            justification,
-            outcome_reason AS outcomeReason,
-            created_at AS createdAt,
-            settled_at AS settledAt
+          SELECT ${SANDBOX_BOUNDARY_REQUEST_COLUMNS}
           FROM sandbox_boundary_log
           WHERE session_id = ? AND status = 'pending'
           ORDER BY created_at, entry_id
         `)
         .all(sessionId) as unknown as SandboxBoundaryRequestRow[];
+      return rows.map(decodeSandboxBoundaryRequestRow);
+    });
+  }
+
+  /**
+   * Every request this session closed because the host restarted, settled or
+   * not consumed. Recovery re-reads this instead of remembering what it just
+   * denied: a recovery pass interrupted between the settlement and the run's
+   * terminal commit must still find the closure on its next attempt, and the
+   * pending query cannot serve that because the row is no longer pending.
+   */
+  async listSandboxBoundaryRestartClosures(sessionId: string): Promise<SandboxBoundaryRequest[]> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    return this.transaction(() => {
+      const record = this.readRecordSync(sessionId);
+      if (!record) throw new SessionNotFoundError(sessionId);
+      const rows = this.db
+        .prepare(`
+          SELECT ${SANDBOX_BOUNDARY_REQUEST_COLUMNS}
+          FROM sandbox_boundary_log
+          WHERE session_id = ?
+            AND entry_kind = 'expansion_request'
+            AND status = 'denied'
+            AND outcome_reason = ?
+          ORDER BY created_at, entry_id
+        `)
+        .all(
+          sessionId,
+          SANDBOX_BOUNDARY_HOST_RESTART_CLOSURE_REASON,
+        ) as unknown as SandboxBoundaryRequestRow[];
       return rows.map(decodeSandboxBoundaryRequestRow);
     });
   }
@@ -2103,17 +2133,7 @@ export class SqliteSessionMetadataStore {
   ): SandboxBoundaryRequest | undefined {
     const row = this.db
       .prepare(`
-        SELECT
-          session_id AS sessionId,
-          request_id AS requestId,
-          status,
-          base_revision AS baseRevision,
-          applied_revision AS appliedRevision,
-          expansion_json AS expansionJson,
-          justification,
-          outcome_reason AS outcomeReason,
-          created_at AS createdAt,
-          settled_at AS settledAt
+        SELECT ${SANDBOX_BOUNDARY_REQUEST_COLUMNS}
         FROM sandbox_boundary_log
         WHERE session_id = ? AND request_id = ?
       `)
@@ -2714,6 +2734,21 @@ interface SessionMetadataRow {
   committed_at: number;
 }
 
+const SANDBOX_BOUNDARY_REQUEST_COLUMNS = `
+  session_id AS sessionId,
+  request_id AS requestId,
+  status,
+  base_revision AS baseRevision,
+  applied_revision AS appliedRevision,
+  expansion_json AS expansionJson,
+  justification,
+  outcome_reason AS outcomeReason,
+  created_at AS createdAt,
+  settled_at AS settledAt,
+  turn_id AS turnId,
+  run_id AS runId
+`;
+
 interface SandboxBoundaryRequestRow {
   sessionId: string;
   requestId: string;
@@ -2725,6 +2760,8 @@ interface SandboxBoundaryRequestRow {
   outcomeReason: string | null;
   createdAt: number;
   settledAt: number | null;
+  turnId: string | null;
+  runId: string | null;
 }
 
 interface SubagentSpawnClaim {
@@ -2970,6 +3007,11 @@ function decodeSandboxBoundaryRequestRow(row: SandboxBoundaryRequestRow): Sandbo
   }
   assertSafeSessionId(row.sessionId);
   assertSafeBoundaryRequestId(row.requestId);
+  // Rows written before provenance existed read back as null. They are long
+  // settled, so an absent turn simply means "not attributable" rather than a
+  // corrupt row worth rejecting.
+  if (row.turnId !== null) assertSandboxBoundaryProvenanceId(row.turnId, 'turn id');
+  if (row.runId !== null) assertSandboxBoundaryProvenanceId(row.runId, 'run id');
   return {
     sessionId: row.sessionId,
     requestId: row.requestId,
@@ -2981,6 +3023,8 @@ function decodeSandboxBoundaryRequestRow(row: SandboxBoundaryRequestRow): Sandbo
     ...(row.settledAt === null ? {} : { settledAt: row.settledAt }),
     ...(row.appliedRevision === null ? {} : { appliedRevision: row.appliedRevision }),
     ...(row.outcomeReason === null ? {} : { outcomeReason: row.outcomeReason }),
+    ...(row.turnId === null ? {} : { turnId: row.turnId }),
+    ...(row.runId === null ? {} : { runId: row.runId }),
   };
 }
 
@@ -3020,6 +3064,18 @@ function assertGraphLookupIdentity(value: string, name: string): void {
 function assertSafeBoundaryRequestId(value: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
     throw new Error('Invalid sandbox boundary request id');
+  }
+}
+
+function assertSandboxBoundaryProvenanceId(value: string, name: string): void {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 256 ||
+    value.trim() !== value ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`Invalid sandbox boundary ${name}`);
   }
 }
 

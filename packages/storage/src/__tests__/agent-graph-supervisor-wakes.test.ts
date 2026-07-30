@@ -174,7 +174,7 @@ describe('SQLite Agent Graph supervisor wakes', () => {
       v11.close();
 
       const migrated = createSqliteSessionMetadataStore(path);
-      assert.equal(migrated.schemaVersion(), 13);
+      assert.equal(migrated.schemaVersion(), 14);
       assert.equal(
         (await migrated.readAgentGraphSupervisorWake('graph-1', 'wake-1'))?.status,
         'running',

@@ -9183,7 +9183,10 @@ describe('AiSdkBackend RunTrace', () => {
       sessionId: 'session-1',
       header: header(),
       appendMessage: async () => {},
-      connection: connection(),
+      connection: {
+        ...connection(),
+        models: [{ id: 'mock-model-id', contextWindow: 200_000 }],
+      },
       apiKey: 'sk-test',
       modelId: 'mock-model-id',
       modelFactory: () => model,
@@ -9209,6 +9212,7 @@ describe('AiSdkBackend RunTrace', () => {
     assert.equal(attempts[0]?.step, 0);
     assert.equal(attempts[0]?.attempt, 1);
     assert.equal(attempts[0]?.status, 'completed');
+    assert.equal(attempts[0]?.contextWindow, 200_000);
     assert.equal(attempts[0]?.captureId, captures[0]?.captureId);
     assert.equal(attempts[0]?.cacheMissInputSource, 'derived');
     assert.equal(

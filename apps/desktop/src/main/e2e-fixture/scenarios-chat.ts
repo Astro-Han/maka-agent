@@ -315,14 +315,21 @@ export function streamingMessages(now: number): StoredMessage[] {
 }
 
 export function permissionSession(now: number): SessionHeader {
-  return header({
-    id: PERMISSION_SESSION_ID,
-    name: '危险权限确认',
-    connection: 'zai-live',
-    model: 'glm-5.1',
-    now,
-    lastMessageAt: now - 4 * 60_000,
-  });
+  return {
+    ...header({
+      id: PERMISSION_SESSION_ID,
+      name: '危险权限确认',
+      connection: 'zai-live',
+      model: 'glm-5.1',
+      now,
+      lastMessageAt: now - 4 * 60_000,
+    }),
+    // A read-only session asking to write outside the workspace — the shape
+    // #1611 is about. Its genesis boundary is therefore read-only, so the
+    // permission label has something real to report both before the request is
+    // answered and after the expansion widens the boundary.
+    permissionMode: 'explore',
+  };
 }
 
 export function permissionMessages(now: number): StoredMessage[] {

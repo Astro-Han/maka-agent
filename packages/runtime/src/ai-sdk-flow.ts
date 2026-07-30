@@ -506,6 +506,13 @@ function mapBackendSessionEvent(
     default: {
       // Exhaustiveness guard: if SessionEvent grows a new variant, the
       // mapping falls through to a diagnostic event instead of dropping it.
+      //
+      // The fallback carries no `content` on purpose. That is what keeps
+      // "don't drop the event" from escalating into "lose the session": the
+      // read-model projection does not claim this shape, and an unclaimed
+      // event with no message payload degrades to a reported diagnostic
+      // instead of discarding the whole session view. Naming the type in the
+      // state delta is the only user-visible trace an unknown event has left.
       const _exhaustive: never = event;
       void _exhaustive;
       return {

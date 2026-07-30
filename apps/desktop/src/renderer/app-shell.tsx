@@ -11,7 +11,6 @@ import {
   type SetStateAction,
 } from 'react';
 import type {
-  ExecutionBoundary,
   PlanReminder,
   QuoteRef,
   SessionSummary,
@@ -56,6 +55,16 @@ import { AgentGraphPanel } from './agent-graph-panel';
 import { ChatComposerRegion } from './chat-composer-region';
 import { ChatWorkbar } from './chat-workbar';
 import {
+  consumeCompanionQuoteSnapshot,
+  removeStagedCompanionQuote,
+  stageCompanionQuote,
+  type QuoteCompanionPanelState,
+} from './quote-companion-panel-state';
+import {
+  applyCompanionForkVisibilityEvent,
+  reconcileCompanionForkVisibility,
+} from './quote-companion-visibility';
+import {
   PlanExecutionPanel,
   PlanProposalCard,
   usePlanModeState,
@@ -80,6 +89,7 @@ import { readNavigationState, selectNavigation } from './nav-selection';
 import { sessionMatchesNavSelection } from './session-nav-filter';
 import { deriveSessionRevisionNavigation } from './session-revisions';
 import { deriveDesktopExecutionBoundarySurface } from './desktop-execution-boundary-surface';
+import { useActiveExecutionBoundary } from './use-active-execution-boundary';
 import {
   SESSION_LIST_EXPANDED_MAX_WIDTH,
   SESSION_LIST_EXPANDED_MIN_WIDTH,
@@ -206,6 +216,7 @@ function AppShellContent({
   const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const {
     sessions,
+    authoritativeSessionIds,
     sessionsRef,
     setSessions,
     refreshSessions,
@@ -454,12 +465,26 @@ function AppShellContent({
   // `quotes` accumulates excerpts staged for the next follow-up — selecting more
   // text adds to the SAME panel rather than opening a new one; `sourceSessionId`
   // pins it to the main session the companion forks from.
-  const [quotePanel, setQuotePanel] = useState<
-    { sourceSessionId: string; quotes: QuoteRef[] } | null
-  >(null);
-  // The quote companion's ephemeral fork id, while its panel is open — hidden
-  // from the main session list (the fork is removed on panel dismiss).
-  const [companionForkId, setCompanionForkId] = useState<string | undefined>(undefined);
+  const [quotePanel, setQuotePanel] = useState<QuoteCompanionPanelState | null>(null);
+  // Created companion forks stay hidden until authoritative cleanup succeeds or
+  // a later authoritative session list confirms they are gone. A set preserves
+  // earlier failed cleanups when another companion opens.
+  const [hiddenCompanionForkIds, setHiddenCompanionForkIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const onCompanionForkVisibilityChange = useCallback(
+    (event: Parameters<typeof applyCompanionForkVisibilityEvent>[1]) =>
+      setHiddenCompanionForkIds((current) =>
+        applyCompanionForkVisibilityEvent(current, event),
+      ),
+    [],
+  );
+  useEffect(() => {
+    if (!authoritativeSessionIds) return;
+    setHiddenCompanionForkIds((current) =>
+      reconcileCompanionForkVisibility(current, authoritativeSessionIds),
+    );
+  }, [authoritativeSessionIds]);
   const [revisionDraft, setRevisionDraft] = useState<TurnRevisionDraft | null>(null);
   const revisionDraftRef = useRef<TurnRevisionDraft | null>(null);
   const commitRevisionDraft = useCallback((draft: TurnRevisionDraft | null) => {
@@ -515,9 +540,11 @@ function AppShellContent({
       // Exclude the quote companion's ephemeral fork so it stays hidden from the
       // main session list while its panel is open.
       filterLinkedSessionTree(sidebarSessionTree, (session) =>
-        session.id !== companionForkId ? sessionMatchesNavSelection(session, navSelection) : false,
+        !hiddenCompanionForkIds.has(session.id)
+          ? sessionMatchesNavSelection(session, navSelection)
+          : false,
       ),
-    [sidebarSessionTree, navSelection, companionForkId],
+    [sidebarSessionTree, navSelection, hiddenCompanionForkIds],
   );
   const visibleSessions = visibleSessionTree.roots;
   // PR-DAILY-REVIEW-MVP-0: bridge for the main Daily Review module.
@@ -999,26 +1026,12 @@ function AppShellContent({
     permissionMode: defaultPermissionMode,
         }
       : undefined);
-  const [activeExecutionBoundary, setActiveExecutionBoundary] = useState<
-    ExecutionBoundary | undefined
-  >();
-  useEffect(() => {
-    if (!activeId) {
-      setActiveExecutionBoundary(undefined);
-      return;
-    }
-    let cancelled = false;
-    setActiveExecutionBoundary(undefined);
-    void window.maka.sessions
-      .readExecutionBoundary(activeId)
-      .then((boundary) => {
-        if (!cancelled) setActiveExecutionBoundary(boundary);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeId, activeSessionForView?.permissionMode]);
+  const {
+    boundary: activeExecutionBoundary,
+    unreadable: activeExecutionBoundaryUnreadable,
+    reading: activeExecutionBoundaryReading,
+    reload: reloadActiveExecutionBoundary,
+  } = useActiveExecutionBoundary(activeId, activeSessionForView?.permissionMode);
   useEffect(() => {
     if (!activeId) return;
     let cancelled = false;
@@ -1139,6 +1152,21 @@ function AppShellContent({
     onboardingState.kind !== 'ready_with_history' &&
     onboardingState.kind !== 'ready_empty';
   const onboardingComposerHidden = isOnboardingLoading || (showOnboardingHero && onboardingState !== undefined);
+  // #1629: hiding the composer because the boundary is unknown is right, but
+  // hiding it silently and forever is not. Once the read has spent its retries
+  // the slot says so and hands the user another attempt; while it is still
+  // reading, or while onboarding owns the surface, there is nothing to say.
+  const boundaryUnreadableNotice =
+    activeId && activeExecutionBoundaryUnreadable && !onboardingComposerHidden
+      ? {
+          title: shellCopy.boundaryUnreadableTitle,
+          detail: shellCopy.boundaryUnreadableDetail,
+          retryLabel: shellCopy.boundaryUnreadableRetry,
+          retryPendingLabel: shellCopy.boundaryUnreadableRetrying,
+          retryPending: activeExecutionBoundaryReading,
+          onRetry: () => reloadActiveExecutionBoundary(activeId),
+        }
+      : undefined;
   const {
     sessionListWidth,
     setSessionListWidth,
@@ -1345,6 +1373,7 @@ function AppShellContent({
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged: markSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged: reloadActiveExecutionBoundary,
     showModelSetupToast,
     toastApi,
     upsertSessionSummary,
@@ -1555,6 +1584,7 @@ function AppShellContent({
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged: markSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged: reloadActiveExecutionBoundary,
     showModelSetupToast,
     toastApi,
     notifyRunEnded: ({ kind, sessionId, body }) => {
@@ -2132,9 +2162,11 @@ function AppShellContent({
                         // Accumulate onto the open panel for this session rather
                         // than spawning a new one; otherwise start a fresh panel.
                         setQuotePanel((prev) =>
-                          prev && prev.sourceSessionId === activeId
-                            ? { ...prev, quotes: [...prev.quotes, quote] }
-                            : { sourceSessionId: activeId, quotes: [quote] },
+                          stageCompanionQuote(prev, {
+                            sourceSessionId: activeId,
+                            quote,
+                            newId: () => crypto.randomUUID(),
+                          }),
                         );
                         // Surface it inside the session workbar (as a tab) rather
                         // than a second right column — open the bar on the quote tab.
@@ -2198,6 +2230,7 @@ function AppShellContent({
                 onboardingComposerHidden={
                   onboardingComposerHidden || !activeBoundarySurface.localInteractionAvailable
                 }
+                boundaryUnreadableNotice={boundaryUnreadableNotice}
                 activeInteraction={activeInteraction}
                 activeId={activeId}
                 stopPendingBySession={stopPendingBySession}
@@ -2404,10 +2437,13 @@ function AppShellContent({
                   quotePanel && quotePanel.sourceSessionId === activeId ? quotePanel : null
                 }
                 onClearQuote={() => setQuotePanel(null)}
-                onQuotesConsumed={() =>
-                  setQuotePanel((prev) => (prev ? { ...prev, quotes: [] } : prev))
+                onQuotesConsumed={(snapshot) =>
+                  setQuotePanel((prev) => consumeCompanionQuoteSnapshot(prev, snapshot))
                 }
-                onForkChange={setCompanionForkId}
+                onRemoveQuote={(target) =>
+                  setQuotePanel((prev) => removeStagedCompanionQuote(prev, target))
+                }
+                onForkVisibilityChange={onCompanionForkVisibilityChange}
                 sourceSession={activeSessionForView}
                 modelChoices={chatModelChoices}
               />

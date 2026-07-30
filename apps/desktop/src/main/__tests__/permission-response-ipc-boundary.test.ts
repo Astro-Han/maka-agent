@@ -7,7 +7,10 @@ import {
   readRendererShellSource,
   readRendererShellSources,
 } from './renderer-shell-source-helpers.js';
-import { readMainProcessCombinedSource } from './main-process-contract-source-helpers.js';
+import {
+  readMainProcessCombinedSource,
+  readSessionsIpcSource,
+} from './main-process-contract-source-helpers.js';
 
 import {
   normalizeBranchFromTurnInput,
@@ -390,6 +393,35 @@ describe('permission response IPC boundary', () => {
       shell,
       /listPendingSandboxBoundaryRequests/,
       'the renderer must not turn ownerless persisted rows into actionable prompts',
+    );
+  });
+
+  it('retires an answered e2e-fixture boundary request through the one fixture-state owner', async () => {
+    const sessionsIpc = await readSessionsIpcSource();
+    const respondHandler =
+      sessionsIpc.match(/ipcMain\.handle\('sessions:respondToSandboxBoundary'[\s\S]*?\n  \}\);/)?.[0] ??
+      '';
+
+    // The fixture request is rebuilt from its scenario on every read, so unless
+    // the answer is remembered the prompt returns and retakes the composer
+    // slot. It must be remembered at the fixture-state owner, not next to one
+    // of its two exits: the sessions IPC serves the active-request list, and
+    // `e2eFixture:getState` hands the renderer a state it seeds its interaction
+    // queue from directly, bypassing that list entirely.
+    assert.match(respondHandler, /retireE2eFixtureSandboxBoundaryRequest\(normalized\.requestId\)/);
+    assert.doesNotMatch(
+      sessionsIpc,
+      /answeredFixtureSandboxBoundaryRequests/,
+      'retirement must not live in a side table only the sessions IPC can see',
+    );
+
+    // Allow retires only after the grant lands, matching the runtime, which
+    // drops an active request on the acknowledged decision rather than the
+    // received one. Deny has nothing to write, so it retires straight away.
+    assert.match(
+      respondHandler,
+      /await applyFixtureSandboxBoundaryExpansion\([\s\S]*?\)\;\s*\}\s*retireE2eFixtureSandboxBoundaryRequest/,
+      'a failed expansion must leave the request answerable instead of hiding it',
     );
   });
 
