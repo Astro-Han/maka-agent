@@ -843,6 +843,12 @@ describe('default session target resolver', () => {
     assert.equal(target.connection.slug, 'local');
     assert.equal(target.apiKey, '');
     assert.equal(target.model, 'llama3.2');
+    assert.deepEqual(target.connection.enabledModelIds, ['qwen2.5-coder', 'llama3.2']);
+    assert.equal(
+      connection.enabledModelIds,
+      undefined,
+      'call-scoped model authorization must not mutate the persisted connection object',
+    );
   });
 
   test('uses a stored subscription access token for OAuth default connections', async () => {
@@ -921,6 +927,7 @@ describe('default session target resolver', () => {
       providerType: 'github-copilot',
       baseUrl: 'https://api.githubcopilot.com',
       defaultModel: 'gpt-5.4',
+      models: [{ id: 'gpt-5.4', apiProtocol: 'openai-responses' }],
     });
     const target = await resolveDefaultSessionTarget({
       connectionStore: {

@@ -186,6 +186,8 @@ describe('Maka CLI runtime bootstrap', () => {
       await connectionStore.update('selected-local', {
         models: [{ id: 'requested-model', capabilities: { vision: true } }],
       });
+      const persistedEnabledModelIds = (await connectionStore.get('selected-local'))
+        ?.enabledModelIds;
       const observed: unknown[] = [];
       const observer = (result: unknown): void => {
         observed.push(result);
@@ -202,6 +204,15 @@ describe('Maka CLI runtime bootstrap', () => {
       try {
         assert.equal(context.target.connection.slug, 'selected-local');
         assert.equal(context.target.model, 'requested-model');
+        assert.deepEqual(context.target.connection.enabledModelIds, [
+          'selected-model',
+          'requested-model',
+        ]);
+        assert.deepEqual(
+          (await connectionStore.get('selected-local'))?.enabledModelIds,
+          persistedEnabledModelIds,
+          'the explicit CLI model must remain an in-memory authorization',
+        );
         const session = await context.runtime.createSession({
           cwd: context.cwd,
           backend: 'ai-sdk',

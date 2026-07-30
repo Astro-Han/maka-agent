@@ -81,6 +81,7 @@ async function resolveReadyTargetForConnection(
   connection: LlmConnection,
   input: ResolveDefaultSessionTargetInput,
 ): Promise<ReadySessionTarget> {
+  const requestConnection = authorizeRequestedModel(connection, input.requestedModel);
   const oauthProviderType = isOAuthSubscriptionProvider(connection.providerType)
     ? connection.providerType
     : null;
@@ -100,19 +101,35 @@ async function resolveReadyTargetForConnection(
       : '';
   const apiKey = oauthProviderType ? oauthTokens?.access_token : secret;
   const verdict = isConnectionReady({
-    connection,
+    connection: requestConnection,
     hasSecret: typeof apiKey === 'string' && apiKey.length > 0,
     requestedModel: input.requestedModel,
   });
   if (!verdict.ready) throw noRealConnection(verdict.reason);
   return {
     connection: oauthTokens?.base_url
-      ? { ...connection, baseUrl: oauthTokens.base_url }
-      : connection,
+      ? { ...requestConnection, baseUrl: oauthTokens.base_url }
+      : requestConnection,
     apiKey: apiKey ?? '',
     model: verdict.model,
     ...(oauthTokens ? { oauthTokens } : {}),
   };
+}
+
+/**
+ * A CLI model argument or an already-created CLI session model is an explicit,
+ * call-scoped authorization. Project it into readiness/runtime without
+ * mutating the persisted connection's curated enabled list.
+ */
+function authorizeRequestedModel(
+  connection: LlmConnection,
+  requestedModel: string | undefined,
+): LlmConnection {
+  const model = requestedModel?.trim();
+  if (!model) return connection;
+  const enabledModelIds = connectionEnabledModelIds(connection);
+  if (enabledModelIds.includes(model)) return connection;
+  return { ...connection, enabledModelIds: [...enabledModelIds, model] };
 }
 
 /**
