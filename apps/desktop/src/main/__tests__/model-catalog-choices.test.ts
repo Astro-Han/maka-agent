@@ -242,7 +242,7 @@ describe('model catalog picker helpers', () => {
       providerType: 'github-copilot',
       defaultModel: 'gpt-5.4',
       enabledModelIds: ['gpt-5.4'],
-      models: [{ id: 'gpt-5.4' }],
+      models: [{ id: 'gpt-5.4', apiProtocol: 'openai-responses' }],
       modelSource: 'fetched',
     });
 
