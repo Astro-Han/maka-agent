@@ -13,6 +13,7 @@ import {
 } from '@maka/core';
 import type {
   CreateSessionRequestInput,
+  SandboxBoundaryExpansion,
   SessionEvent,
   SessionChangedEvent,
   SessionChangedReason,
@@ -37,7 +38,11 @@ import {
   normalizeStopSessionInput,
   normalizeUserQuestionResponse,
 } from './permission-response-guard.js';
-import { getE2eFixtureState, type resolveE2eFixture } from './e2e-fixture.js';
+import {
+  getE2eFixtureState,
+  retireE2eFixtureSandboxBoundaryRequest,
+  type resolveE2eFixture,
+} from './e2e-fixture.js';
 import type { requireReadyConnection } from './chat-readiness.js';
 import type { MainTaskLedgerWiring } from './task-ledger-wiring.js';
 import type { MainGoalWiring } from './goal-wiring.js';
@@ -334,6 +339,8 @@ export function registerSessionsIpc(
     runtime.readExecutionBoundary(sessionId),
   );
   ipcMain.handle('sessions:listActiveSandboxBoundaryRequests', (_event, sessionId: string) => {
+    // Already filtered by retirement: `getE2eFixtureState` is the one owner of
+    // which fixture requests are still unanswered.
     const fixtureRequest = getE2eFixtureState(e2eFixture)?.sandboxBoundaryBySession?.[sessionId];
     return fixtureRequest
       ? [fixtureRequest]
@@ -342,7 +349,21 @@ export function registerSessionsIpc(
   ipcMain.handle('sessions:respondToSandboxBoundary', async (_event, sessionId: string, response) => {
     const normalized = normalizeSandboxBoundaryResponse(response);
     const fixtureRequest = getE2eFixtureState(e2eFixture)?.sandboxBoundaryBySession?.[sessionId];
-    if (fixtureRequest?.requestId === normalized.requestId) return;
+    if (fixtureRequest?.requestId === normalized.requestId) {
+      // The fixture request is synthetic — no runtime turn is waiting on it —
+      // but allowing it must still move the real boundary, or the fixture
+      // would model an "allow" that grants nothing and no surface built on the
+      // boundary could be exercised against it (#1611).
+      if (normalized.decision === 'allow') {
+        // Retired only once the grant has landed. The runtime drops an active
+        // request when the decision is acknowledged, not when it is received;
+        // hiding this one before the write succeeds would let the fixture
+        // swallow a settlement failure the renderer is about to be told about.
+        await applyFixtureSandboxBoundaryExpansion(store, sessionId, fixtureRequest.expansion);
+      }
+      retireE2eFixtureSandboxBoundaryRequest(normalized.requestId);
+      return;
+    }
     if (normalized.decision === 'allow') {
       await ensureSessionWorkspaceAvailable(sessionId);
     }
@@ -613,5 +634,37 @@ export function registerSessionsIpc(
       automationManager.removeAllForSession(id);
       emitSessionsChanged('deleted', id);
     }
+  });
+}
+
+/**
+ * Apply an e2e-fixture boundary expansion through the real storage authority.
+ *
+ * The fixture's pending request is a synthetic event with no runtime turn
+ * behind it, so it cannot be settled the normal way. Creating and settling a
+ * genuine request with the same expansion keeps the boundary — which every
+ * permission surface reads — honest about what the user just granted, instead
+ * of leaving "allow" as a no-op the UI can silently contradict.
+ */
+async function applyFixtureSandboxBoundaryExpansion(
+  store: SessionStore,
+  sessionId: string,
+  expansion: SandboxBoundaryExpansion,
+): Promise<void> {
+  const created = await store.createSandboxBoundaryRequest?.({
+    sessionId,
+    requestId: randomUUID(),
+    // Provenance is required so a real producer cannot drop it (#1612). This
+    // request has no turn to point at, so it names itself rather than
+    // borrowing an id that restart recovery could later attribute a closure to.
+    turnId: 'e2e-fixture-expansion',
+    expansion,
+    justification: 'e2e fixture expansion',
+  });
+  if (!created) return;
+  await store.settleSandboxBoundaryRequest?.({
+    sessionId,
+    requestId: created.requestId,
+    decision: 'allow',
   });
 }

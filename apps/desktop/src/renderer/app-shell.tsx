@@ -11,7 +11,6 @@ import {
   type SetStateAction,
 } from 'react';
 import type {
-  ExecutionBoundary,
   PlanReminder,
   QuoteRef,
   SessionSummary,
@@ -80,6 +79,7 @@ import { readNavigationState, selectNavigation } from './nav-selection';
 import { sessionMatchesNavSelection } from './session-nav-filter';
 import { deriveSessionRevisionNavigation } from './session-revisions';
 import { deriveDesktopExecutionBoundarySurface } from './desktop-execution-boundary-surface';
+import { useActiveExecutionBoundary } from './use-active-execution-boundary';
 import {
   SESSION_LIST_EXPANDED_MAX_WIDTH,
   SESSION_LIST_EXPANDED_MIN_WIDTH,
@@ -999,26 +999,12 @@ function AppShellContent({
     permissionMode: defaultPermissionMode,
         }
       : undefined);
-  const [activeExecutionBoundary, setActiveExecutionBoundary] = useState<
-    ExecutionBoundary | undefined
-  >();
-  useEffect(() => {
-    if (!activeId) {
-      setActiveExecutionBoundary(undefined);
-      return;
-    }
-    let cancelled = false;
-    setActiveExecutionBoundary(undefined);
-    void window.maka.sessions
-      .readExecutionBoundary(activeId)
-      .then((boundary) => {
-        if (!cancelled) setActiveExecutionBoundary(boundary);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeId, activeSessionForView?.permissionMode]);
+  const {
+    boundary: activeExecutionBoundary,
+    unreadable: activeExecutionBoundaryUnreadable,
+    reading: activeExecutionBoundaryReading,
+    reload: reloadActiveExecutionBoundary,
+  } = useActiveExecutionBoundary(activeId, activeSessionForView?.permissionMode);
   useEffect(() => {
     if (!activeId) return;
     let cancelled = false;
@@ -1139,6 +1125,21 @@ function AppShellContent({
     onboardingState.kind !== 'ready_with_history' &&
     onboardingState.kind !== 'ready_empty';
   const onboardingComposerHidden = isOnboardingLoading || (showOnboardingHero && onboardingState !== undefined);
+  // #1629: hiding the composer because the boundary is unknown is right, but
+  // hiding it silently and forever is not. Once the read has spent its retries
+  // the slot says so and hands the user another attempt; while it is still
+  // reading, or while onboarding owns the surface, there is nothing to say.
+  const boundaryUnreadableNotice =
+    activeId && activeExecutionBoundaryUnreadable && !onboardingComposerHidden
+      ? {
+          title: shellCopy.boundaryUnreadableTitle,
+          detail: shellCopy.boundaryUnreadableDetail,
+          retryLabel: shellCopy.boundaryUnreadableRetry,
+          retryPendingLabel: shellCopy.boundaryUnreadableRetrying,
+          retryPending: activeExecutionBoundaryReading,
+          onRetry: () => reloadActiveExecutionBoundary(activeId),
+        }
+      : undefined;
   const {
     sessionListWidth,
     setSessionListWidth,
@@ -1345,6 +1346,7 @@ function AppShellContent({
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged: markSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged: reloadActiveExecutionBoundary,
     showModelSetupToast,
     toastApi,
     upsertSessionSummary,
@@ -1555,6 +1557,7 @@ function AppShellContent({
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged: markSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged: reloadActiveExecutionBoundary,
     showModelSetupToast,
     toastApi,
     notifyRunEnded: ({ kind, sessionId, body }) => {
@@ -2198,6 +2201,7 @@ function AppShellContent({
                 onboardingComposerHidden={
                   onboardingComposerHidden || !activeBoundarySurface.localInteractionAvailable
                 }
+                boundaryUnreadableNotice={boundaryUnreadableNotice}
                 activeInteraction={activeInteraction}
                 activeId={activeId}
                 stopPendingBySession={stopPendingBySession}

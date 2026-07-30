@@ -684,18 +684,28 @@ export class ModelSearchOverlay implements Component {
   }
 }
 
+/**
+ * #1611: `current` marks an option that is genuinely in force, so choosing it
+ * is a no-op. A read-only session is neither of these options, and marking
+ * Auto as current there turned "confirm what I already have" into a silent
+ * widening of the boundary. Legacy `execute` has no boundary of its own and
+ * really does resolve to Auto, so it still marks Auto.
+ */
 export function permissionModePickerItems(currentMode: PermissionMode): SelectItem[] {
-  const current = currentMode === 'bypass' ? 'bypass' : 'ask';
+  const autoIsCurrent = currentMode === 'ask' || currentMode === 'execute';
   return [
     {
       value: 'auto',
       label: 'Auto',
-      description: current === 'ask' ? 'current · sandboxed' : 'sandboxed',
+      description: autoIsCurrent ? 'current · protected' : 'protected',
     },
     {
       value: 'bypass',
-      label: 'Bypass',
-      description: current === 'bypass' ? 'current · unrestricted' : 'unrestricted',
+      label: 'Full access',
+      description:
+        currentMode === 'bypass'
+          ? 'current · your files and network, unprotected'
+          : 'your files and network, unprotected',
     },
   ];
 }

@@ -197,11 +197,10 @@ export const Composer = forwardRef<
      * PR-MOVE-PERMISSION-MODE (WAWQAQ 47fe0d0e + a667cf6c): the
      * permission mode picker lives inside the composer left-controls
      * instead of the chat header. Composer renders a dropdown labelled
-     * by the current mode (询问权限 / 自动执行 / 跳过确认);
-     * selecting an option fires `onPermissionModeChange`. When the
-     * active session is in the legacy `explore` mode the picker
-     * collapses to display 询问权限 — explore is internal-only now and
-     * won't surface here.
+     * by the mode the session's boundary is actually in (只读 / 自动 /
+     * 完全权限); selecting an option fires `onPermissionModeChange`.
+     * A read-only session displays 只读 without it becoming a third
+     * option (#1611).
      */
     permissionMode?: PermissionMode;
     permissionModePending?: boolean;
@@ -907,12 +906,10 @@ export const Composer = forwardRef<
             {/* PR-MOVE-PERMISSION-MODE: the static "通用" role chip
                 was replaced by the permission-mode dropdown — that
                 spot is where the reference Settings expects users to
-                pick "Ask permissions" / "Auto mode" / "Bypass
-                permissions". Maka exposes the user-facing modes
-                `ask` / `execute` / `bypass`; `explore` collapses to `ask` in the
-                display because Deep Research sessions use it
-                internally but it's not a useful runtime toggle for
-                normal chat. */}
+                pick a permission mode. Maka offers Auto (`ask`) and
+                full access (`bypass`); a session running under a
+                read-only boundary displays as such (#1611) without
+                becoming a third option. */}
             {props.onPermissionModeChange ? (
               <PermissionModeSelect
                 appearance="quiet"

@@ -112,6 +112,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       newId: nextId(),
       now: () => 1,
       getPermissionPauseTarget: () => null,
+      getCurrentRunId: () => 'run-1',
     });
     runtime.beginTurn('turn-1');
     const tool = buildRequestSandboxBoundaryTool();
@@ -138,6 +139,10 @@ describe('ToolRuntime session sandbox boundary', () => {
 
     const requestEvent = await waitForBoundaryRequest(events);
     assert.deepEqual(requestEvent.expansion, created?.expansion);
+    // Provenance is committed with the row, before the request event is even
+    // published, so a crash in between still leaves the request attributable.
+    assert.equal(created?.turnId, 'turn-1');
+    assert.equal(created?.runId, 'run-1');
     await runtime.respondToSandboxBoundaryRequest('turn-1', {
       requestId: requestEvent.requestId,
       decision: 'allow',

@@ -8,7 +8,9 @@ import {
   createWorkspaceWritePermissionProfile,
   isDeniedPath,
   isProtectedMetadataPath,
+  isReadOnlyPermissionProfile,
   type PermissionProfile,
+  type PermissionProfileManaged,
 } from '../permission-profile.js';
 
 const WORKSPACE_CONTEXT = {
@@ -75,6 +77,40 @@ describe('PermissionProfile factories', () => {
     expect(profile.network.kind).toBe('enabled');
     expect(canReadPath(profile, '/etc/passwd')).toBe(true);
     expect(canWritePath(profile, '/var/log/maka.log')).toBe(true);
+  });
+});
+
+describe('isReadOnlyPermissionProfile', () => {
+  test('separates the read-only profile from every profile that grants more', () => {
+    expect(isReadOnlyPermissionProfile(createReadOnlyPermissionProfile())).toBe(true);
+    expect(isReadOnlyPermissionProfile(createWorkspaceWritePermissionProfile())).toBe(false);
+    expect(isReadOnlyPermissionProfile(createDangerFullAccessPermissionProfile())).toBe(false);
+  });
+
+  test('follows the policy rather than the profile name', () => {
+    const widenedByExpansion: PermissionProfileManaged = {
+      ...createReadOnlyPermissionProfile(),
+      fileSystem: {
+        kind: 'restricted',
+        entries: [
+          { kind: 'special', access: 'read', special: ':workspace_roots' },
+          { kind: 'path', access: 'write', path: '/workspace/out', match: 'subtree' },
+        ],
+      },
+    };
+    expect(isReadOnlyPermissionProfile(widenedByExpansion)).toBe(false);
+
+    const networkEnabled: PermissionProfileManaged = {
+      ...createReadOnlyPermissionProfile(),
+      network: { kind: 'enabled' },
+    };
+    expect(isReadOnlyPermissionProfile(networkEnabled)).toBe(false);
+
+    const renamedButStillReadOnly: PermissionProfileManaged = {
+      ...createReadOnlyPermissionProfile(),
+      name: 'custom',
+    };
+    expect(isReadOnlyPermissionProfile(renamedButStillReadOnly)).toBe(true);
   });
 });
 

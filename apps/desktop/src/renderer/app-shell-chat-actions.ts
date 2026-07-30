@@ -139,6 +139,8 @@ export function createAppShellChatActions(deps: {
   setLiveTurnBySession: LiveTurnRecordUpdater;
   setInteractionBySession: InteractionQueueUpdater;
   onSandboxBoundaryInteractionChanged?: (sessionId: string) => void;
+  /** A boundary decision settled: the session's execution boundary may have moved. */
+  onExecutionBoundaryChanged?: (sessionId: string) => void;
   showModelSetupToast: (description: string, reason?: string) => void;
   toastApi: ToastApi;
   upsertSessionSummary: (session: SessionSummary) => void;
@@ -168,6 +170,7 @@ export function createAppShellChatActions(deps: {
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged,
     showModelSetupToast,
     toastApi,
     upsertSessionSummary,
@@ -439,6 +442,11 @@ export function createAppShellChatActions(deps: {
     try {
       await window.maka.sessions.respondToSandboxBoundary(sessionId, response);
       onSandboxBoundaryInteractionChanged?.(sessionId);
+      // #1611: the answer has been applied to the authoritative boundary, so
+      // the permission label must stop describing the pre-decision one. The
+      // ack event covers decisions settled on other surfaces; this covers the
+      // one the user just made here, without waiting for the round trip.
+      onExecutionBoundaryChanged?.(sessionId);
       setInteractionBySession((current) =>
         dequeueInteractionByRequestId(current, sessionId, response.requestId),
       );

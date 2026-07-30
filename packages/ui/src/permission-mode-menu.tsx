@@ -17,30 +17,24 @@ import {
 export interface PermissionModeMeta {
   label: string;
   hint: string;
-  tone: 'info' | 'accent' | 'destructive';
 }
 
 /**
- * Internal sessions still use `explore` and legacy records may contain
- * `execute`, so metadata remains complete for the persisted PermissionMode
- * union. User-facing pickers expose only Auto (`ask`) and Bypass.
+ * Sessions may run under a read-only (`explore`) boundary and legacy records
+ * may contain `execute`, so metadata remains complete for the persisted
+ * PermissionMode union. User-facing pickers offer only Auto (`ask`) and full
+ * access (`bypass`), but any mode can be the state being displayed.
  *
  * This module is the one home for the mode table and shared picker: both the
  * composer and Settings render from it so labels, hints, and markup cannot
  * drift between the two surfaces.
+ *
+ * The danger of full access is carried by the words and by the destructive
+ * confirmation dialog that guards the switch — not by a per-mode colour. An
+ * earlier `tone` field here was never read by any renderer.
  */
-const PERMISSION_MODE_TONE: Record<PermissionMode, PermissionModeMeta['tone']> = {
-  explore: 'info', ask: 'accent', execute: 'info', bypass: 'destructive',
-};
-
 export function getPermissionModeMeta(locale: UiLocale): Record<PermissionMode, PermissionModeMeta> {
-  const copy = getConversationCopy(locale).permissions.mode;
-  return {
-    explore: { ...copy.explore, tone: PERMISSION_MODE_TONE.explore },
-    ask: { ...copy.ask, tone: PERMISSION_MODE_TONE.ask },
-    execute: { ...copy.execute, tone: PERMISSION_MODE_TONE.execute },
-    bypass: { ...copy.bypass, tone: PERMISSION_MODE_TONE.bypass },
-  };
+  return getConversationCopy(locale).permissions.mode;
 }
 
 /** User-selectable modes in canonical display order. */
@@ -56,8 +50,10 @@ export const PERMISSION_MODE_ORDER: readonly ChatDefaultPermissionMode[] = CHAT_
  * hint in the popup so the user never has to select a mode to learn what
  * it does; the selected option carries the standard Select check indicator.
  *
- * Internal `explore` and legacy `execute` sessions collapse to Auto for
- * display because neither is a user-selectable boundary mode.
+ * Legacy `execute` sessions collapse to Auto for display because that mode
+ * no longer maps to a boundary of its own. A read-only (`explore`) session
+ * is a state without a matching option, so the Select carries no value at
+ * all and the trigger is labelled from the display state instead.
  */
 export function PermissionModeSelect(props: {
   activeMode: PermissionMode;
@@ -72,12 +68,26 @@ export function PermissionModeSelect(props: {
   const locale = useUiLocale();
   const permissionCopy = getConversationCopy(locale).permissions;
   const modeMeta = getPermissionModeMeta(locale);
+  // #1611: only legacy `execute` collapses to Auto. `explore` is a real
+  // read-only boundary the user is running under, so it shows its own label
+  // and hint instead of borrowing Auto's.
   const displayMode: PermissionMode =
-    props.activeMode === 'bypass' ? 'bypass' : 'ask';
+    props.activeMode === 'execute' ? 'ask' : props.activeMode;
   const meta = modeMeta[displayMode];
+  // A display state with no matching option is expressed as "no value", the
+  // supported way to say nothing is selected. Passing an unmatched value
+  // instead would depend on Base UI treating it as stale and trying to reset
+  // it to null — behaviour we would only be surviving, not relying on.
+  // The trigger reads its label from the display state, so it stays correct
+  // whether or not the Select holds a value.
+  const selectedValue: ChatDefaultPermissionMode | null = PERMISSION_MODE_ORDER.includes(
+    displayMode as ChatDefaultPermissionMode,
+  )
+    ? (displayMode as ChatDefaultPermissionMode)
+    : null;
   return (
     <SelectRoot
-      value={displayMode}
+      value={selectedValue}
       items={PERMISSION_MODE_ORDER.map((mode) => ({ value: mode, label: modeMeta[mode].label }))}
       disabled={props.disabled}
       onValueChange={(value) => {
@@ -90,9 +100,7 @@ export function PermissionModeSelect(props: {
         title={props.disabledReason ?? meta.hint}
         className={props.className}
       >
-        <SelectValue>
-          {(value: string) => modeMeta[value as PermissionMode]?.label ?? meta.label}
-        </SelectValue>
+        <SelectValue>{() => meta.label}</SelectValue>
       </SelectTrigger>
       <SelectPortal>
         <SelectPositioner alignItemWithTrigger={false} align={props.align ?? 'start'} sideOffset={6}>

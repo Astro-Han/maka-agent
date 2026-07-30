@@ -202,6 +202,8 @@ async function openExecutionStoresForWrite<K extends StorageRootKind, E extends 
         run(() => sessionStore.createSandboxBoundaryRequest(input)),
       listPendingSandboxBoundaryRequests: (sessionId) =>
         run(() => sessionStore.listPendingSandboxBoundaryRequests(sessionId)),
+      listSandboxBoundaryRestartClosures: (sessionId) =>
+        run(() => sessionStore.listSandboxBoundaryRestartClosures(sessionId)),
       settleSandboxBoundaryRequest: (input) =>
         run(() => sessionStore.settleSandboxBoundaryRequest(input)),
       setExecutionBoundaryKind: (sessionId, boundaryKind, projection) =>

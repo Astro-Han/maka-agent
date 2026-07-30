@@ -1,4 +1,5 @@
 import type { ExecutionBoundary, PermissionMode } from '@maka/core';
+import { executionBoundaryDisplayMode } from '@maka/core';
 
 export interface DesktopExecutionBoundarySurface {
   permissionMode: PermissionMode | undefined;
@@ -16,14 +17,13 @@ export function deriveDesktopExecutionBoundarySurface(
       localInteractionAvailable: true,
     };
   }
-  if (!boundary || boundary.kind === 'external') {
-    return {
-      permissionMode: undefined,
-      localInteractionAvailable: false,
-    };
-  }
-  return {
-    permissionMode: boundary.kind === 'bypass' ? 'bypass' : 'ask',
-    localInteractionAvailable: true,
-  };
+  // #1611: the boundary is the authority on what the session may do, and
+  // `executionBoundaryDisplayMode` is the single place that maps it to a mode
+  // the user sees — shared with the TUI so the two surfaces cannot drift.
+  // Until it resolves (and permanently, for an externally isolated session)
+  // this surface fails closed: no mode, no local controls.
+  const permissionMode = boundary ? executionBoundaryDisplayMode(boundary) : undefined;
+  return permissionMode
+    ? { permissionMode, localInteractionAvailable: true }
+    : { permissionMode: undefined, localInteractionAvailable: false };
 }

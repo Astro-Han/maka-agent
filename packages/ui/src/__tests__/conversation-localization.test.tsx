@@ -259,12 +259,12 @@ describe('localized conversation journey', () => {
     const zh = render('zh', surface);
     const en = render('en', surface);
 
-    assert.match(zh, /扩大本会话的沙箱边界？/);
+    assert.match(zh, /允许访问工作区以外的内容？/);
     assert.match(zh, /读取 · 仅此路径/);
     assert.match(zh, /写入 · 目录及子目录/);
     assert.match(zh, /网络访问/);
     assert.match(zh, /本会话允许/);
-    assert.match(en, /Expand this session&#x27;s sandbox boundary\?/);
+    assert.match(en, /Allow access outside the workspace\?/);
     assert.match(en, /Read · Exact path/);
     assert.match(en, /Write · Directory subtree/);
     assert.match(en, /Network access/);

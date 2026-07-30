@@ -9,6 +9,7 @@ import {
   createWorkspaceWritePermissionProfile,
   DEEP_RESEARCH_SESSION_LABEL,
   deriveTurnRecords,
+  isSandboxBoundaryRestartClosure,
   isSessionInlineRun,
   isTerminalRuntimeEvent,
 } from '@maka/core';
@@ -9228,6 +9229,100 @@ describe('SessionManager permission mode updates', () => {
     });
   });
 
+  test('the in-flight overlay keeps a pending sandbox boundary request visible in the view', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const session = await store.create(makeInput());
+    const header = makeRunHeader({
+      sessionId: session.id,
+      runId: 'active-run',
+      turnId: 'active-turn',
+      status: 'running',
+      createdAt: 100,
+      updatedAt: 125,
+    });
+    await runStore.createRun(header);
+    await store.appendMessages(session.id, [
+      { type: 'user', id: 'active-user', turnId: header.turnId, ts: 100, text: 'build it' },
+      {
+        type: 'turn_state',
+        id: 'active-state',
+        turnId: header.turnId,
+        ts: 101,
+        status: 'running',
+        partialOutputRetained: false,
+      },
+    ]);
+    await runStore.appendRuntimeEvent(
+      session.id,
+      header.runId,
+      runtimeEvent({
+        id: 'active-boundary-request',
+        sessionId: session.id,
+        runId: header.runId,
+        turnId: header.turnId,
+        ts: 110,
+        actions: {
+          stateDelta: {
+            sandboxBoundaryRequest: {
+              requestId: 'boundary-pending',
+              toolUseId: 'tool-boundary',
+              justification: 'Write outside the workspace.',
+              expansion: { network: { enabled: true } },
+            },
+          },
+        },
+        refs: { toolCallId: 'tool-boundary' },
+      }),
+    );
+    await runStore.appendRuntimeEvent(
+      session.id,
+      header.runId,
+      runtimeEvent({
+        id: 'active-boundary-decision',
+        sessionId: session.id,
+        runId: header.runId,
+        turnId: header.turnId,
+        ts: 111,
+        author: 'user',
+        actions: {
+          stateDelta: {
+            sandboxBoundaryDecision: {
+              requestId: 'boundary-pending',
+              decision: 'deny',
+              status: 'denied',
+              revision: 0,
+            },
+          },
+        },
+        refs: { toolCallId: 'tool-boundary' },
+      }),
+    );
+
+    const view = await new RuntimeReadModel({
+      runStore,
+      runtimeEventStore: runStore,
+      projectionCache: store,
+    }).getSessionView(session.id);
+
+    const readRequestId = (value: unknown): string[] =>
+      value !== null && typeof value === 'object' && 'requestId' in value
+        ? [(value as { requestId: string }).requestId]
+        : [];
+    // Both halves of the interaction survive: without the decision the view
+    // would show a request that never resolves.
+    expect(
+      view.events.flatMap((event) =>
+        readRequestId(event.actions?.stateDelta?.sandboxBoundaryRequest),
+      ),
+    ).toEqual(['boundary-pending']);
+    expect(
+      view.events.flatMap((event) =>
+        readRequestId(event.actions?.stateDelta?.sandboxBoundaryDecision),
+      ),
+    ).toEqual(['boundary-pending']);
+  });
+
   test('active RuntimeEvent ledger without a projection cache produces an explicit read-model error', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
@@ -13183,6 +13278,132 @@ describe('SessionManager permission mode updates', () => {
     expect((await store.readHeader(session.id)).status).toBe('active');
   });
 
+  // The boundary request and decision are durable RuntimeEvents. Reopening the
+  // conversation rebuilds the read model from that ledger, so an unclaimed
+  // control fact there makes the whole completed session unreadable. Both
+  // outcomes write a decision, so both have to survive the round trip.
+  for (const decision of ['allow', 'deny'] as const) {
+    test(`reads a completed session back after a sandbox boundary ${decision}`, async () => {
+      const store = new MemorySessionStore();
+      const runStore = new MemoryAgentRunStore();
+      const backends = new BackendRegistry();
+      backends.register('fake', (ctx) => new SandboxBoundaryWaitBackend(ctx));
+      const manager = new SessionManager({
+        store,
+        runStore,
+        runtimeEventStore: runStore,
+        backends,
+        newId: nextId(),
+        now: nextNow(9_500),
+      });
+      const session = await manager.createSession(makeInput());
+
+      const iterator = manager
+        .sendMessage(session.id, { turnId: 'turn-1', text: 'hello' })
+        [Symbol.asyncIterator]();
+      expect((await iterator.next()).value?.type).toBe('sandbox_boundary_request');
+      await manager.respondToSandboxBoundary(session.id, { requestId: 'boundary-1', decision });
+      while (!(await iterator.next()).done) {}
+
+      const messages = await manager.getMessages(session.id);
+      expect(messages.some((message) => message.type === 'user')).toBe(true);
+      const turns = await manager.listTurns(session.id);
+      expect(turns.find((turn) => turn.turnId === 'turn-1')?.status).toBe('completed');
+    });
+  }
+
+  // The next unclaimed control fact must not repeat #1607. A complete ledger
+  // with one event the projection was never taught still reads back — messages,
+  // turns and every turn-scoped action — and the unclaimed event is reported as
+  // a diagnostic rather than costing the session that contains it.
+  test('reads a completed session back with an unclaimed control fact in its ledger', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new UnmappedSessionEventBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(9_600),
+    });
+    const session = await manager.createSession(makeInput());
+
+    for await (const _event of manager.sendMessage(session.id, {
+      turnId: 'turn-1',
+      text: 'hello',
+    })) {
+      // drain
+    }
+
+    const messages = await manager.getMessages(session.id);
+    expect(messages.filter((message) => message.type === 'user').length).toBe(1);
+    expect(
+      messages.some((message) => message.type === 'assistant' && message.text === 'hi back'),
+    ).toBe(true);
+    const turns = await manager.listTurns(session.id);
+    expect(turns.find((turn) => turn.turnId === 'turn-1')?.status).toBe('completed');
+
+    const view = await new RuntimeReadModel({
+      runStore,
+      runtimeEventStore: runStore,
+    }).getSessionView(session.id);
+    expect(
+      view.diagnostics.filter((diagnostic) => diagnostic.code === 'unclaimed_control_fact').length,
+    ).toBe(1);
+  });
+
+  // The counterpart of the soft case, at the caller that enforces the policy:
+  // an unclaimed event that carries content may have cost a reader a row, so
+  // getSessionView must still refuse the view rather than serve a lossy one.
+  test('refuses a session view when an unclaimed event carries content', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new UnmappedSessionEventBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(9_700),
+    });
+    const session = await manager.createSession(makeInput());
+
+    for await (const _event of manager.sendMessage(session.id, {
+      turnId: 'turn-1',
+      text: 'hello',
+    })) {
+      // drain
+    }
+
+    const [run] = await runStore.listSessionRuns(session.id);
+    await runStore.appendRuntimeEvent(
+      session.id,
+      run!.runId,
+      runtimeEvent({
+        id: 'unclaimed-content',
+        sessionId: session.id,
+        runId: run!.runId,
+        turnId: 'turn-1',
+        ts: 4,
+        role: 'model',
+        author: 'agent',
+        content: { kind: 'not_yet_projected', text: 'a reader would have seen this' } as never,
+      }),
+    );
+
+    await assert.rejects(
+      new RuntimeReadModel({ runStore, runtimeEventStore: runStore }).getSessionView(session.id),
+      (error: unknown) =>
+        error instanceof RuntimeReadModelError &&
+        error.diagnostics.some((diagnostic) => diagnostic.code === 'unsupported_event'),
+    );
+  });
+
   test('marks backend errors as blocked with a generalized reason', async () => {
     const store = new MemorySessionStore();
     const backends = new BackendRegistry();
@@ -15396,6 +15617,7 @@ describe('SessionManager permission mode updates', () => {
     await store.createSandboxBoundaryRequest({
       sessionId: session.id,
       requestId: 'boundary-before-restart',
+      turnId: 'turn-1',
       expansion: { network: { enabled: true } },
       justification: 'Fetch a dependency.',
     });
@@ -15424,11 +15646,185 @@ describe('SessionManager permission mode updates', () => {
     expect((await store.readHeader(session.id)).status).toBe('active');
     const [turn] = await store.listTurns(session.id);
     expect(turn?.status).toBe('failed');
-    expect(turn?.errorClass).toBe('app_restarted');
+    // This turn owned the pending request, so its failure names the closure
+    // rather than the bare restart.
+    expect(turn?.errorClass).toBe('sandbox_boundary_closed_by_restart');
     const [run] = await runStore.listSessionRuns(session.id);
     expect(run?.status).toBe('failed');
-    expect(run?.failureClass).toBe('app_restarted');
+    expect(run?.failureClass).toBe('sandbox_boundary_closed_by_restart');
     expect(await store.listPendingSandboxBoundaryRequests(session.id)).toEqual([]);
+  });
+
+  test('startup recovery attributes a closure whose RuntimeEvent never landed', async () => {
+    // The request row commits before the matching RuntimeEvent is published,
+    // and that append is fail-open. A crash inside that window leaves a ledger
+    // with no boundary event at all — provenance on the row is what keeps the
+    // closure attributable (#1612).
+    const { store, runStore, manager, session } = await seedBoundaryRestartSession({
+      now: 12_870,
+      requestId: 'boundary-unanswered',
+    });
+
+    await manager.recoverInterruptedSessions();
+
+    expect(await store.listPendingSandboxBoundaryRequests(session.id)).toEqual([]);
+    const [turn] = await store.listTurns(session.id);
+    expect(turn?.status).toBe('failed');
+    expect(turn?.errorClass).toBe('sandbox_boundary_closed_by_restart');
+    const [run] = await runStore.listSessionRuns(session.id);
+    expect(run?.status).toBe('failed');
+    expect(run?.failureClass).toBe('sandbox_boundary_closed_by_restart');
+    const terminalEvent = (await runStore.readRuntimeEvents(session.id, 'run-1')).find(
+      (event) => event.actions?.endInvocation === true,
+    );
+    expect(terminalEvent?.actions?.stateDelta?.sandboxBoundaryClosureReason).toBe('host_restarted');
+    expect(terminalEvent?.actions?.stateDelta?.sandboxBoundaryRequestIds).toEqual([
+      'boundary-unanswered',
+    ]);
+  });
+
+  test('startup recovery re-reads a closure it settled before an earlier crash', async () => {
+    // Stands in for a first recovery that settled the request and then died
+    // before committing the run's terminal fact: the row is no longer pending,
+    // so only a durable re-read of the closure can still attribute it.
+    const { store, runStore, manager, session } = await seedBoundaryRestartSession({
+      now: 12_880,
+      requestId: 'boundary-settled-earlier',
+    });
+    await store.settleSandboxBoundaryRequest({
+      sessionId: session.id,
+      requestId: 'boundary-settled-earlier',
+      decision: 'deny',
+      closureReason: 'host_restarted',
+    });
+    expect(await store.listPendingSandboxBoundaryRequests(session.id)).toEqual([]);
+
+    await manager.recoverInterruptedSessions();
+
+    const [turn] = await store.listTurns(session.id);
+    expect(turn?.errorClass).toBe('sandbox_boundary_closed_by_restart');
+    const terminalStatesAfterFirst = (await store.readMessages(session.id)).filter(
+      (message) => message.type === 'turn_state' && message.status === 'failed',
+    ).length;
+
+    // A further recovery pass must be a no-op rather than a second closure.
+    await manager.recoverInterruptedSessions();
+
+    const [turnAfterSecond] = await store.listTurns(session.id);
+    expect(turnAfterSecond?.errorClass).toBe('sandbox_boundary_closed_by_restart');
+    expect(
+      (await store.readMessages(session.id)).filter(
+        (message) => message.type === 'turn_state' && message.status === 'failed',
+      ).length,
+    ).toBe(terminalStatesAfterFirst);
+    expect((await runStore.listSessionRuns(session.id))[0]?.failureClass).toBe(
+      'sandbox_boundary_closed_by_restart',
+    );
+  });
+
+  test('startup recovery keeps the generic restart class for an answered boundary request', async () => {
+    const { store, runStore, manager, session } = await seedBoundaryRestartSession({
+      now: 12_890,
+      requestId: 'boundary-answered',
+    });
+    await store.settleSandboxBoundaryRequest({
+      sessionId: session.id,
+      requestId: 'boundary-answered',
+      decision: 'allow',
+    });
+    // A fully recorded request/decision pair in the ledger must not be mistaken
+    // for a closure: the user answered it before the host went away.
+    await runStore.appendRuntimeEvent(
+      session.id,
+      'run-1',
+      runtimeEvent({
+        id: 'rt-boundary-request',
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        ts: 12,
+        actions: {
+          stateDelta: {
+            sandboxBoundaryRequest: {
+              requestId: 'boundary-answered',
+              toolUseId: 'tool-1',
+              justification: 'Fetch a dependency.',
+              expansion: { network: { enabled: true } },
+            },
+          },
+        },
+        refs: { toolCallId: 'tool-1' },
+      }),
+    );
+    await runStore.appendRuntimeEvent(
+      session.id,
+      'run-1',
+      runtimeEvent({
+        id: 'rt-boundary-decision',
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        ts: 13,
+        author: 'user',
+        actions: {
+          stateDelta: {
+            sandboxBoundaryDecision: {
+              requestId: 'boundary-answered',
+              decision: 'allow',
+              status: 'approved',
+              revision: 1,
+            },
+          },
+        },
+        refs: { toolCallId: 'tool-1' },
+      }),
+    );
+
+    await manager.recoverInterruptedSessions();
+
+    const [turn] = await store.listTurns(session.id);
+    expect(turn?.errorClass).toBe('app_restarted');
+  });
+
+  test('startup recovery ignores a plain deny that carries no restart closure reason', async () => {
+    // `ToolRuntime.endTurn` denies unanswered requests without a closure reason.
+    // That is an ordinary settlement, not a host restart, and must never be
+    // described as one.
+    const { store, manager, session } = await seedBoundaryRestartSession({
+      now: 12_900,
+      requestId: 'boundary-plain-deny',
+    });
+    await store.settleSandboxBoundaryRequest({
+      sessionId: session.id,
+      requestId: 'boundary-plain-deny',
+      decision: 'deny',
+    });
+
+    await manager.recoverInterruptedSessions();
+
+    expect(await store.listSandboxBoundaryRestartClosures(session.id)).toEqual([]);
+    const [turn] = await store.listTurns(session.id);
+    expect(turn?.errorClass).toBe('app_restarted');
+  });
+
+  test('startup recovery never lends one turn a closure that belongs to another', async () => {
+    const { store, manager, session } = await seedBoundaryRestartSession({
+      now: 12_910,
+      requestId: 'boundary-elsewhere',
+      requestTurnId: 'turn-2',
+      requestRunId: 'run-2',
+    });
+
+    await manager.recoverInterruptedSessions();
+
+    // The closure is real and durable, but it belongs to a different run.
+    expect(
+      (await store.listSandboxBoundaryRestartClosures(session.id)).map(
+        (closure) => closure.requestId,
+      ),
+    ).toEqual(['boundary-elsewhere']);
+    const [turn] = await store.listTurns(session.id);
+    expect(turn?.errorClass).toBe('app_restarted');
   });
 
   test('startup recovery repairs stale completed model tails without leaving running runs', async () => {
@@ -18360,6 +18756,51 @@ class SandboxBoundaryWaitBackend implements AgentBackend {
   async dispose(): Promise<void> {}
 }
 
+/**
+ * Emits a SessionEvent variant the mapping has never been taught, wrapped in a
+ * turn that produces a real assistant message. That is what a future variant
+ * looks like from the read model's side: AiSdkFlow's exhaustiveness guard turns
+ * it into a control-only RuntimeEvent, and the ledger keeps it.
+ */
+class UnmappedSessionEventBackend implements AgentBackend {
+  readonly kind = 'fake' as const;
+  readonly sessionId: string;
+
+  constructor(ctx: BackendFactoryContext) {
+    this.sessionId = ctx.sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    yield {
+      type: 'text_complete',
+      id: `${input.turnId}-text`,
+      turnId: input.turnId,
+      ts: 1,
+      messageId: `${input.turnId}-message`,
+      text: 'hi back',
+    };
+    yield {
+      type: 'not_yet_mapped',
+      id: `${input.turnId}-unmapped`,
+      turnId: input.turnId,
+      ts: 2,
+    } as unknown as SessionEvent;
+    yield {
+      type: 'complete',
+      id: `${input.turnId}-complete`,
+      turnId: input.turnId,
+      ts: 3,
+      stopReason: 'end_turn',
+    };
+  }
+
+  async stop(): Promise<void> {}
+
+  async respondToSandboxBoundary(): Promise<void> {}
+
+  async dispose(): Promise<void> {}
+}
+
 class ThrowAfterTerminalBackend implements AgentBackend {
   readonly kind = 'fake' as const;
   readonly sessionId: string;
@@ -19381,6 +19822,12 @@ class MemorySessionStore implements SessionStore {
   async listPendingSandboxBoundaryRequests(sessionId: string): Promise<SandboxBoundaryRequest[]> {
     return [...this.sandboxBoundaryRequests.values()].filter(
       (request) => request.sessionId === sessionId && request.status === 'pending',
+    );
+  }
+
+  async listSandboxBoundaryRestartClosures(sessionId: string): Promise<SandboxBoundaryRequest[]> {
+    return [...this.sandboxBoundaryRequests.values()].filter(
+      (request) => request.sessionId === sessionId && isSandboxBoundaryRestartClosure(request),
     );
   }
 
@@ -20696,6 +21143,66 @@ function testInteractionAuthority(): RuntimeInteractionAuthority {
       release: () => {},
     }),
   };
+}
+
+/**
+ * A session interrupted while one turn held a sandbox boundary request: the
+ * request row exists with its turn/run provenance, the run is still
+ * non-terminal, and the ledger holds nothing about the boundary. Tests layer
+ * their own settlement or ledger events on top.
+ */
+async function seedBoundaryRestartSession(input: {
+  now: number;
+  requestId: string;
+  requestTurnId?: string;
+  requestRunId?: string;
+}): Promise<{
+  store: MemorySessionStore;
+  runStore: MemoryAgentRunStore;
+  manager: SessionManager;
+  session: SessionSummary;
+}> {
+  const store = new MemorySessionStore();
+  const runStore = new MemoryAgentRunStore();
+  const backends = new BackendRegistry();
+  backends.register('fake', (ctx) => new TestBackend(ctx));
+  const manager = new SessionManager({
+    store,
+    runStore,
+    runtimeEventStore: runStore,
+    backends,
+    newId: nextId(),
+    now: nextNow(input.now),
+  });
+  const session = await manager.createSession(makeInput({ status: 'waiting_for_user' }));
+  await store.createSandboxBoundaryRequest({
+    sessionId: session.id,
+    requestId: input.requestId,
+    turnId: input.requestTurnId ?? 'turn-1',
+    runId: input.requestRunId ?? 'run-1',
+    expansion: { network: { enabled: true } },
+    justification: 'Fetch a dependency.',
+  });
+  await seedRunningTurn(store, session.id, 'turn-1');
+  await seedRun(
+    runStore,
+    makeRunHeader({
+      sessionId: session.id,
+      runId: 'run-1',
+      turnId: 'turn-1',
+      status: 'waiting_for_user',
+    }),
+    [
+      makeRunEvent({
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        type: 'run_started',
+        ts: 11,
+      }),
+    ],
+  );
+  return { store, runStore, manager, session };
 }
 
 async function seedRunningTurn(

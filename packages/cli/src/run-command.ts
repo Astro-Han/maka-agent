@@ -281,7 +281,7 @@ export async function runMakaTextCli(
       if (parsed.options.yolo) {
         await context.runtime.setExecutionBoundaryKind(session.id, 'bypass');
       } else if (boundary.kind === 'bypass') {
-        throw new Error(`resuming Bypass session ${session.id} requires --yolo`);
+        throw new Error(`resuming a full-access session ${session.id} requires --yolo`);
       } else if (boundary.kind === 'external') {
         throw new Error(`cannot resume externally isolated session ${session.id} from maka run`);
       }
@@ -433,7 +433,7 @@ function makaRunHelpText(): string {
     '  --thinking <level>        off|minimal|low|medium|high|xhigh|max|default',
     '  --timeout <seconds>       Invocation timeout',
     '  --max-steps <count>       Tool-step cap',
-    '  --yolo                    Run this session with sandbox bypassed',
+    '  --yolo                    Give this session full access to your files and network',
     '  --resume <session-id>     Continue an explicit compatible session',
     '  --continue                Continue the latest compatible session for cwd',
     '  --graph                   Run this turn in Graph Mode and wait for graph completion',

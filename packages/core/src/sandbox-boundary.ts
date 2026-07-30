@@ -1,3 +1,4 @@
+import type { PermissionMode } from './permission.js';
 import {
   FILE_SYSTEM_ACCESS_MODES,
   FILE_SYSTEM_PATH_MATCHES,
@@ -5,6 +6,7 @@ import {
   createReadOnlyPermissionProfile,
   createWorkspaceWritePermissionProfile,
   isProtectedMetadataPath,
+  isReadOnlyPermissionProfile,
   type FileSystemPathMatch,
   type FileSystemSandboxEntry,
   type PermissionProfileManaged,
@@ -56,11 +58,25 @@ export interface SandboxBoundaryRequest {
   readonly settledAt?: number;
   readonly appliedRevision?: number;
   readonly outcomeReason?: string;
+  /**
+   * Turn that raised the request. Written with the row itself, so it survives
+   * every later crash — including one before the matching RuntimeEvent lands.
+   * Absent only on rows written before provenance existed.
+   */
+  readonly turnId?: string;
+  /** Run that raised it, when the creating surface had run identity. */
+  readonly runId?: string;
 }
 
 export interface CreateSandboxBoundaryRequest {
   readonly sessionId: string;
   readonly requestId: string;
+  /**
+   * Required: a request with no turn cannot be attributed back to the work it
+   * interrupted, and the row is the only record guaranteed to exist.
+   */
+  readonly turnId: string;
+  readonly runId?: string;
   readonly expansion: SandboxBoundaryExpansion;
   readonly justification: string;
 }
@@ -72,12 +88,35 @@ export interface SandboxBoundaryResponse {
   readonly decision: SandboxBoundaryDecision;
 }
 
+export const SANDBOX_BOUNDARY_HOST_RESTART_CLOSURE_REASON = 'host_restarted';
+
 export interface SettleSandboxBoundaryRequest {
   readonly sessionId: string;
   readonly requestId: string;
   readonly decision: SandboxBoundaryDecision;
   /** Internal fail-closed settlement used when a live request owner cannot survive restart. */
-  readonly closureReason?: 'host_restarted';
+  readonly closureReason?: typeof SANDBOX_BOUNDARY_HOST_RESTART_CLOSURE_REASON;
+}
+
+/**
+ * Turn/run failure class for the `host_restarted` closure above. The settlement
+ * is durable in the request row, but only the turn carries it to a surface, so
+ * this is the one string runtime writes and every surface reads to explain a
+ * boundary prompt the user never got to answer.
+ */
+export const SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS = 'sandbox_boundary_closed_by_restart';
+
+/**
+ * A settled request that a host restart closed against the user. This is the
+ * durable, re-readable fact recovery attributes from: it stays true across any
+ * number of interrupted recovery attempts, unlike the pending status it
+ * replaces or an in-memory record of what one recovery pass happened to close.
+ */
+export function isSandboxBoundaryRestartClosure(request: SandboxBoundaryRequest): boolean {
+  return (
+    request.status === 'denied' &&
+    request.outcomeReason === SANDBOX_BOUNDARY_HOST_RESTART_CLOSURE_REASON
+  );
 }
 
 export interface SandboxBoundarySettlement {
@@ -104,6 +143,33 @@ export type ExecutionBoundary =
     };
 
 export type LegacyPermissionMode = 'ask' | 'execute' | 'explore' | 'bypass';
+
+/**
+ * The permission mode a boundary should be *presented* as (#1611).
+ *
+ * The boundary is the authority on what a session may do; a session header's
+ * stored `permissionMode` is only what it was last set to and goes stale the
+ * moment an approved expansion widens the boundary. Every surface that shows
+ * the user which permissions are in force derives them here, so Desktop and
+ * the TUI cannot drift — and so the read-only/writable distinction the
+ * boundary carries survives all the way to the label.
+ *
+ * `undefined` means the session is not locally controllable at all (an
+ * externally isolated boundary), which each surface fails closed on.
+ *
+ * Everything managed that is not read-only maps to `ask`. That is a
+ * deliberate under-statement, not a description: a workspace-write profile,
+ * a profile widened by approved expansions, and `danger-full-access` all
+ * present as Auto. Auto's copy is therefore written to stay true for any of
+ * them — it never claims a specific boundary.
+ */
+export function executionBoundaryDisplayMode(
+  boundary: ExecutionBoundary,
+): PermissionMode | undefined {
+  if (boundary.kind === 'external') return undefined;
+  if (boundary.kind === 'bypass') return 'bypass';
+  return isReadOnlyPermissionProfile(boundary.profile) ? 'explore' : 'ask';
+}
 
 export function createGenesisExecutionBoundary(mode: LegacyPermissionMode): ExecutionBoundary {
   if (mode === 'bypass') return { kind: 'bypass', revision: 0 };

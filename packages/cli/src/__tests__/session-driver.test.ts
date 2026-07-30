@@ -14,6 +14,9 @@ import type {
   UserMessageInput,
   UserQuestionResponse,
 } from '@maka/core';
+import { createGenesisExecutionBoundary, createReadOnlyPermissionProfile } from '@maka/core';
+import { permissionModeLabel } from '../pi-transcript.js';
+import { permissionModePickerItems } from '../pi-tui-pickers.js';
 import { createMakaSessionDriver } from '../session-driver.js';
 import type { RuntimeContinuation, SafeBoundaryContinuationPlan } from '@maka/runtime';
 
@@ -514,7 +517,80 @@ describe('Maka session driver', () => {
 
       const resumed = await driver.switchSession('bypass');
 
-      assert.equal(resumed.summary.permissionMode, 'bypass');
+      assert.equal(driver.getPermissionMode?.(), 'bypass');
+      // The summary is the runtime's, reported as-is: the boundary is what the
+      // display is derived from, so there is no reason to rewrite the header.
+      assert.equal(resumed.summary.permissionMode, 'ask');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  test('presents a resumed read-only session as read-only, and never as the current Auto', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'maka-read-only-session-'));
+    try {
+      const runtime = new RecordingRuntime();
+      runtime.sessionSummaries = [
+        sessionSummary({ id: 'read-only', cwd: repo, permissionMode: 'ask' }),
+      ];
+      runtime.executionBoundaries.set('read-only', {
+        kind: 'managed',
+        profile: createReadOnlyPermissionProfile(),
+        revision: 4,
+      });
+      const driver = createMakaSessionDriver({
+        runtime,
+        cwd: repo,
+        llmConnectionSlug: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      });
+
+      await driver.switchSession('read-only');
+
+      assert.equal(driver.getPermissionMode?.(), 'explore');
+      assert.equal(permissionModeLabel(driver.getPermissionMode!()), 'Read only');
+      // #1611: marking Auto as `current` here made "select the option I am
+      // already on" silently replace the read-only boundary with a writable
+      // one. Neither option may claim to be in force.
+      assert.deepEqual(
+        permissionModePickerItems(driver.getPermissionMode!()).map((item) => item.description),
+        ['protected', 'your files and network, unprotected'],
+      );
+
+      // Choosing Auto is therefore a real change, and it is applied.
+      await driver.setPermissionMode('ask');
+      assert.deepEqual(runtime.permissionModes, [{ sessionId: 'read-only', mode: 'ask' }]);
+      assert.equal(driver.getPermissionMode?.(), 'ask');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  test('a fresh session does not inherit the resumed session read-only boundary', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'maka-read-only-new-'));
+    try {
+      const runtime = new RecordingRuntime();
+      runtime.sessionSummaries = [
+        sessionSummary({ id: 'read-only', cwd: repo, permissionMode: 'ask' }),
+      ];
+      runtime.executionBoundaries.set('read-only', {
+        kind: 'managed',
+        profile: createReadOnlyPermissionProfile(),
+        revision: 1,
+      });
+      const driver = createMakaSessionDriver({
+        runtime,
+        cwd: repo,
+        llmConnectionSlug: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      });
+
+      await driver.switchSession('read-only');
+      driver.startNewSession();
+
+      assert.equal(driver.getPermissionMode?.(), 'ask');
+      await collectPrompt(driver, 'fresh session');
+      assert.equal(runtime.created.at(-1)?.permissionMode, 'ask');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
@@ -1199,6 +1275,9 @@ class RecordingRuntime {
 
   async setPermissionMode(sessionId: string, mode: PermissionMode): Promise<SessionSummary> {
     this.permissionModes.push({ sessionId, mode });
+    // The real runtime replaces the session's execution boundary when the mode
+    // changes; surfaces read that boundary, so the fake must move it too.
+    this.executionBoundaries.set(sessionId, createGenesisExecutionBoundary(mode));
     return {
       id: sessionId,
       name: 'New Chat',

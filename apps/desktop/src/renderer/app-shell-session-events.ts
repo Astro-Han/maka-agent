@@ -41,6 +41,8 @@ export function createAppShellSessionEventHandlers(options: {
   setLiveTurnBySession: StateUpdater<Record<string, LiveTurnProjection>>;
   setInteractionBySession: StateUpdater<InteractionQueues>;
   onSandboxBoundaryInteractionChanged?: (sessionId: string) => void;
+  /** A boundary decision settled: the session's execution boundary may have moved. */
+  onExecutionBoundaryChanged?: (sessionId: string) => void;
   showModelSetupToast: (description: string, reason?: string) => void;
   toastApi: ToastApi;
   notifyRunEnded?: (payload: { kind: 'completed' | 'errored'; sessionId: string; body?: string }) => void;
@@ -54,6 +56,7 @@ export function createAppShellSessionEventHandlers(options: {
     setLiveTurnBySession,
     setInteractionBySession,
     onSandboxBoundaryInteractionChanged,
+    onExecutionBoundaryChanged,
     showModelSetupToast,
     toastApi,
     notifyRunEnded,
@@ -128,6 +131,11 @@ export function createAppShellSessionEventHandlers(options: {
         break;
       case 'sandbox_boundary_decision_ack':
         onSandboxBoundaryInteractionChanged?.(sessionId);
+        // #1611: an approved expansion changes only the boundary's revision —
+        // no session field moves — so the boundary read model has to be told,
+        // or the permission label keeps describing the permissions the session
+        // had before the user granted more.
+        onExecutionBoundaryChanged?.(sessionId);
         setInteractionBySession((current) =>
           dequeueInteractionByRequestId(current, sessionId, event.requestId),
         );

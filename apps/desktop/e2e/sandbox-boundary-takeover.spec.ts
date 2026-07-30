@@ -21,7 +21,7 @@ test('sandbox boundary request takes over the composer slot without hiding the w
   await expect(sandboxBoundaryWindow.locator('[role="dialog"]')).toHaveCount(0);
   await expect(sandboxBoundaryWindow.locator('.app')).not.toHaveAttribute('inert', '');
 
-  await expect(prompt.getByRole('heading', { name: '扩大本会话的沙箱边界？' })).toBeVisible();
+  await expect(prompt.getByRole('heading', { name: '允许访问工作区以外的内容？' })).toBeVisible();
   await expect(prompt.getByText('/outside/dist')).toBeVisible();
   await expect(prompt.getByText('写入 · 目录及子目录')).toBeVisible();
   await expect(prompt.getByRole('button', { name: '拒绝' })).toBeFocused();
