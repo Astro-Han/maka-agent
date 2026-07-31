@@ -73,6 +73,7 @@ import {
 import { envPath as parseEnvPath } from '#headless-run-env';
 import { buildSubjectFingerprint, buildToolchainFingerprint } from '#experiment-fingerprint';
 import { runExperiment } from '#experiment-engine';
+import { DEEPSEEK_V4_FLASH_PRICING } from '#deepseek-pricing';
 
 const execFileAsync = promisify(execFile);
 
@@ -96,6 +97,15 @@ const ZAI_CODING_PLAN_PRICING = Object.freeze({
   cachedInput: 0,
   output: 0,
   source: 'zai-coding-plan-account-plan',
+});
+const DEEPSEEK_V4_FLASH_HARNESS_PRICING = Object.freeze({
+  currency: 'USD',
+  unit: 'per_1m_tokens',
+  input: DEEPSEEK_V4_FLASH_PRICING.inputUsdPer1M,
+  cachedInput: DEEPSEEK_V4_FLASH_PRICING.cacheReadUsdPer1M,
+  cacheWrite: DEEPSEEK_V4_FLASH_PRICING.cacheWriteUsdPer1M,
+  output: DEEPSEEK_V4_FLASH_PRICING.outputUsdPer1M,
+  source: DEEPSEEK_V4_FLASH_PRICING.source,
 });
 const HARBOR_SETUP_TEARDOWN_GRACE_SEC = 15 * 60;
 const ORACLE_EVIDENCE_RESOLUTION_TIMEOUT_MS = 15_000;
@@ -296,6 +306,20 @@ export const HARNESS_RUNTIME_PROFILES = Object.freeze({
       keyFileEnv: 'MAKA_HARNESS_AB_ZAI_KEY_FILE',
     }),
   }),
+  'deepseek-v4-flash-max': Object.freeze({
+    id: 'deepseek-v4-flash-max',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    reasoningEffort: 'max',
+    baseUrl: 'https://api.deepseek.com',
+    billingMode: 'metered',
+    pricing: DEEPSEEK_V4_FLASH_HARNESS_PRICING,
+    auth: Object.freeze({
+      kind: 'api-key-file',
+      keyFileEnv: 'MAKA_HARNESS_AB_DEEPSEEK_KEY_FILE',
+      defaultPath: join(homedir(), '.maka/secrets/deepseek.key'),
+    }),
+  }),
   'openai-codex-gpt-5.6-sol-xhigh': Object.freeze({
     id: 'openai-codex-gpt-5.6-sol-xhigh',
     provider: 'openai-codex',
@@ -328,6 +352,7 @@ const SUPPORTED_HARNESS_COMPOSITIONS = new Set([
   'terminal-bench-2.1|kimi-coding-plan-k3-max|kimi-code',
   'terminal-bench-2.1|kimi-coding-plan-k3-max|opencode',
   'terminal-bench-2.1|zai-coding-plan-glm-5.2-max|opencode',
+  'terminal-bench-2.1|deepseek-v4-flash-max|opencode',
   'terminal-bench-2.1|openai-codex-gpt-5.6-sol-xhigh|codex',
   'deep-swe-1.1|kimi-coding-plan-k3-max|kimi-code',
   'deep-swe-1.1|openai-codex-gpt-5.6-sol-xhigh|codex',
@@ -406,6 +431,9 @@ export function buildHarnessExecutionProfile(runtimeProfile) {
     pricing: {
       inputUsdPer1M: runtimeProfile.pricing.input,
       cacheReadUsdPer1M: runtimeProfile.pricing.cachedInput,
+      ...(runtimeProfile.pricing.cacheWrite === undefined
+        ? {}
+        : { cacheWriteUsdPer1M: runtimeProfile.pricing.cacheWrite }),
       outputUsdPer1M: runtimeProfile.pricing.output,
       source: runtimeProfile.pricing.source,
     },

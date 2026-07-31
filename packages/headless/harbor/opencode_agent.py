@@ -145,6 +145,7 @@ class MakaOpenCodeAgent(OpenCode):
         provider_env_names = {
             "zai-coding-plan": ("ZAI_BASE_URL", "ZAI_API_KEY"),
             "kimi-coding-plan": ("KIMI_BASE_URL", "KIMI_API_KEY"),
+            "deepseek": ("DEEPSEEK_BASE_URL", "DEEPSEEK_API_KEY"),
         }
         if provider not in provider_env_names:
             raise ValueError(f"Unsupported Maka OpenCode benchmark provider: {provider}")

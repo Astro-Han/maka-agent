@@ -458,6 +458,65 @@ test('harness A/B resolves an explicit GLM 5.2 runtime independently from OpenCo
   assert.equal(resolveHarnessAbRunId(composition), 'glm-5.2-maka-vs-opencode-tbench-2.1-full-v1');
 });
 
+test('harness A/B resolves DeepSeek V4 Flash as a metered OpenCode comparison', async () => {
+  const {
+    buildHarnessAbManifest,
+    buildHarnessExecutionProfile,
+    resolveHarnessAbRunId,
+    resolveHarnessComposition,
+    resolveHarnessRuntimeCredentials,
+  } = await import(new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href);
+  const composition = resolveHarnessComposition({
+    runtime: 'deepseek-v4-flash-max',
+    competitor: 'opencode',
+  });
+
+  assert.deepEqual(buildHarnessExecutionProfile(composition.runtimeProfile), {
+    modelSpec: 'deepseek/deepseek-v4-flash',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    reasoningEffort: 'max',
+    baseUrl: 'https://api.deepseek.com',
+    billingMode: 'metered',
+    pricing: {
+      inputUsdPer1M: 0.145,
+      cacheReadUsdPer1M: 0.0029,
+      cacheWriteUsdPer1M: 0,
+      outputUsdPer1M: 0.29,
+      source: 'deepseek-v4-flash',
+    },
+  });
+  assert.deepEqual(
+    await resolveHarnessRuntimeCredentials({
+      composition,
+      env: { MAKA_HARNESS_AB_DEEPSEEK_KEY_FILE: '/secrets/deepseek.key' },
+    }),
+    { apiKeyFile: '/secrets/deepseek.key' },
+  );
+
+  const manifest = buildHarnessAbManifest({
+    subjectFingerprint: 'subject',
+    taskSourceFingerprint: 'tasks',
+    toolchainFingerprint: 'tools',
+    composition,
+  });
+  assert.deepEqual(manifest.metadata.pricing, {
+    currency: 'USD',
+    unit: 'per_1m_tokens',
+    input: 0.145,
+    cachedInput: 0.0029,
+    cacheWrite: 0,
+    output: 0.29,
+    source: 'deepseek-v4-flash',
+  });
+  assert.equal(manifest.arms[1].id, 'opencode');
+  assert.equal(manifest.arms[1].metadata.config.billingMode, 'metered');
+  assert.equal(
+    resolveHarnessAbRunId(composition),
+    'deepseek-v4-flash-maka-vs-opencode-tbench-2.1-full-v1',
+  );
+});
+
 test('harness A/B composition defaults preserve existing routes and reject unsupported triples', async () => {
   const {
     buildHarnessAbManifest,
@@ -499,7 +558,7 @@ test('harness A/B composition defaults preserve existing routes and reject unsup
   );
   assert.throws(
     () => resolveHarnessComposition({ runtime: 'unknown' }),
-    /MAKA_HARNESS_AB_RUNTIME must be one of: kimi-coding-plan-k3-max, zai-coding-plan-glm-5\.2-max, openai-codex-gpt-5\.6-sol-xhigh/,
+    /MAKA_HARNESS_AB_RUNTIME must be one of: kimi-coding-plan-k3-max, zai-coding-plan-glm-5\.2-max, deepseek-v4-flash-max, openai-codex-gpt-5\.6-sol-xhigh/,
   );
 
   const glmComposition = resolveHarnessComposition({
