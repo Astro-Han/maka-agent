@@ -358,6 +358,7 @@ const SUPPORTED_HARNESS_COMPOSITIONS = new Set([
   'deep-swe-1.1|openai-codex-gpt-5.6-sol-xhigh|codex',
   'deep-swe-1.1-full|kimi-coding-plan-k3-max|kimi-code',
   'deep-swe-1.1-full|openai-codex-gpt-5.6-sol-xhigh|codex',
+  'deep-swe-1.1-full|deepseek-v4-flash-max|opencode',
 ]);
 const RESOLVED_HARNESS_COMPOSITIONS = new WeakSet();
 

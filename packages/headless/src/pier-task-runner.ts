@@ -45,6 +45,11 @@ import {
   KIMI_CODE_TOOLCHAIN_FINGERPRINT,
 } from './kimi-code-toolchain.js';
 import {
+  OPENCODE_TOOLCHAIN_CONTAINER_PATH,
+  OPENCODE_TOOLCHAIN_FINGERPRINT,
+  OPENCODE_TOOLCHAIN_SPEC,
+} from './opencode-toolchain.js';
+import {
   MAKA_NODE_TOOLCHAIN_CONTAINER_PATH,
   MAKA_NODE_TOOLCHAIN_FINGERPRINT,
 } from './maka-node-toolchain.js';
@@ -135,6 +140,8 @@ export interface PierTaskRunnerOptions {
   kimiCodeToolchainPath?: string;
   /** Prepared Codex toolchain bind-mounted read-only into task containers. */
   codexToolchainPath?: string;
+  /** Prepared OpenCode toolchain bind-mounted read-only into task containers. */
+  opencodeToolchainPath?: string;
   /** Competitor CLI version, forwarded as the adapter's `version` kwarg. The
    * Codex arm requires it to match the pinned toolchain spec so the fixed
    * build under test is exactly the one fingerprinted into the manifest. */
@@ -235,7 +242,7 @@ export interface PierRunResult {
 
 export type PierProcessRunner = (request: PierRunRequest) => Promise<PierRunResult>;
 
-export type PierAgent = 'maka' | 'kimi-code' | 'codex';
+export type PierAgent = 'maka' | 'kimi-code' | 'codex' | 'opencode';
 
 interface PierProviderRuntime {
   /** Proxy-minted secret env delivered via `--env-file` (kept off argv). */
@@ -251,6 +258,14 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
   if (options.agent === 'codex' && options.agentVersion !== CODEX_TOOLCHAIN_SPEC.codex.version) {
     throw new Error(
       `Codex adapter version must match toolchain version ${CODEX_TOOLCHAIN_SPEC.codex.version}`,
+    );
+  }
+  if (
+    options.agent === 'opencode' &&
+    options.agentVersion !== OPENCODE_TOOLCHAIN_SPEC.opencode.version
+  ) {
+    throw new Error(
+      `OpenCode adapter version must match toolchain version ${OPENCODE_TOOLCHAIN_SPEC.opencode.version}`,
     );
   }
   const runPier = options.runPier ?? defaultPierProcessRunner;
@@ -589,7 +604,9 @@ export function buildPierRunArgs(input: BuildPierRunArgsInput): string[] {
       ? 'kimi_code_agent:MakaKimiCodeAgent'
       : input.agent === 'codex'
         ? 'codex_agent:MakaCodexAgent'
-        : 'maka_agent:MakaAgent';
+        : input.agent === 'opencode'
+          ? 'opencode_agent:MakaOpenCodeAgent'
+          : 'maka_agent:MakaAgent';
   const args = [
     'run',
     '--agent-import-path',
@@ -670,6 +687,17 @@ function buildPierMounts(
       read_only: true,
     });
   }
+  if (agent === 'opencode') {
+    if (!options.opencodeToolchainPath) {
+      throw new Error('opencodeToolchainPath is required for the OpenCode adapter');
+    }
+    mounts.push({
+      type: 'bind',
+      source: options.opencodeToolchainPath,
+      target: OPENCODE_TOOLCHAIN_CONTAINER_PATH,
+      read_only: true,
+    });
+  }
   return mounts;
 }
 
@@ -705,6 +733,10 @@ function buildPierAgentEnv(
   }
   if (agent === 'codex') {
     env.MAKA_CODEX_TOOLCHAIN_FINGERPRINT = CODEX_TOOLCHAIN_FINGERPRINT;
+  }
+  if (agent === 'opencode') {
+    env.MAKA_OPENCODE_TOOLCHAIN_FINGERPRINT = OPENCODE_TOOLCHAIN_FINGERPRINT;
+    if (options.reasoningEffort) env.MAKA_OPENCODE_VARIANT = options.reasoningEffort;
   }
   if (options.pricing) {
     env.MAKA_TRIAL_INPUT_USD_PER_1M = String(options.pricing.inputUsdPer1M);

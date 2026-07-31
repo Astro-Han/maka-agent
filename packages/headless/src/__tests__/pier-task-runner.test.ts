@@ -15,6 +15,7 @@ import {
   type TaskRunOutput,
 } from '../fixed-prompt-controller.js';
 import { CODEX_TOOLCHAIN_FINGERPRINT, CODEX_TOOLCHAIN_SPEC } from '../codex-toolchain.js';
+import { OPENCODE_TOOLCHAIN_FINGERPRINT, OPENCODE_TOOLCHAIN_SPEC } from '../opencode-toolchain.js';
 import { findTrialDir } from '../harbor-task-runner.js';
 import { MAKA_NODE_TOOLCHAIN_FINGERPRINT } from '../maka-node-toolchain.js';
 import {
@@ -1422,6 +1423,94 @@ test('createPierTaskRunner wires the Codex arm through the host proxy with the p
     const mountsFlag = args.indexOf('--mounts-json');
     const mounts = JSON.parse(args[mountsFlag + 1]!) as Array<{ target: string }>;
     assert.ok(mounts.some((mount) => mount.target === '/opt/maka-codex-toolchain'));
+  });
+});
+
+test('buildPierRunArgs targets the OpenCode adapter', () => {
+  const args = buildPierRunArgs({
+    agent: 'opencode',
+    model: 'deepseek-v4-flash',
+    taskPath: '/tasks/dasel',
+    jobsDir: '/jobs',
+    jobName: 'trial',
+    environment: 'docker',
+    timeoutMultiplier: 1,
+    mounts: [],
+    agentEnv: {},
+  });
+  assert.match(args.join(' '), /--agent-import-path opencode_agent:MakaOpenCodeAgent/);
+  assert.ok(!args.includes('--agent-timeout-multiplier'));
+});
+
+test('createPierTaskRunner rejects an OpenCode arm whose version does not match the pinned toolchain', () => {
+  assert.throws(
+    () =>
+      createPierTaskRunner({
+        makaRepoPath: '/repo',
+        jobsDir: '/jobs',
+        model: 'deepseek-v4-flash',
+        agent: 'opencode',
+        agentVersion: '0.0.1',
+      }),
+    /OpenCode adapter version must match toolchain version/,
+  );
+});
+
+test('createPierTaskRunner requires the OpenCode toolchain mount for the OpenCode arm', async () => {
+  await withDirs(async ({ jobsDir, repo }) => {
+    const runner = createPierTaskRunner(
+      baseOptions({
+        jobsDir,
+        makaRepoPath: repo,
+        agent: 'opencode',
+        agentVersion: OPENCODE_TOOLCHAIN_SPEC.opencode.version,
+        provider: 'deepseek',
+        apiKeyFile: '/secrets/deepseek.key',
+        runPier: fakePier({ reward: 0 }),
+      }),
+    );
+    await assert.rejects(runner(runInput()), /opencodeToolchainPath is required/);
+  });
+});
+
+test('createPierTaskRunner wires the OpenCode arm through the host proxy with the pinned toolchain', async () => {
+  await withDirs(async ({ jobsDir, repo }) => {
+    const captured: FakeOptions['captured'] = {};
+    const runner = createPierTaskRunner(
+      baseOptions({
+        jobsDir,
+        makaRepoPath: repo,
+        agent: 'opencode',
+        agentVersion: OPENCODE_TOOLCHAIN_SPEC.opencode.version,
+        backend: 'ai-sdk',
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash',
+        reasoningEffort: 'max',
+        opencodeToolchainPath: repo,
+        apiKeyFile: '/secrets/deepseek.key',
+        providerProxyPort: 0,
+        runPier: fakePier({ reward: 0, captured }),
+      }),
+    );
+    const output = await runner(runInput());
+    assert.equal(output.harbor.reward, 0);
+    // The proxy URL and a minted token reach the container via env-file,
+    // never argv — the adapter dials only the proxy.
+    assert.match(
+      captured.envFile?.MAKA_PROVIDER_PROXY_URL ?? '',
+      /^http:\/\/host\.docker\.internal:\d+/,
+    );
+    assert.ok((captured.envFile?.MAKA_PROVIDER_PROXY_TOKEN ?? '').length >= 32);
+    const args = captured.request?.args ?? [];
+    assert.ok(!args.includes('--agent-timeout-multiplier'));
+    // The pinned-toolchain fingerprint and the reasoning variant ride --ae.
+    assert.ok(
+      args.includes(`MAKA_OPENCODE_TOOLCHAIN_FINGERPRINT=${OPENCODE_TOOLCHAIN_FINGERPRINT}`),
+    );
+    assert.ok(args.includes('MAKA_OPENCODE_VARIANT=max'));
+    const mountsFlag = args.indexOf('--mounts-json');
+    const mounts = JSON.parse(args[mountsFlag + 1]!) as Array<{ target: string }>;
+    assert.ok(mounts.some((mount) => mount.target === '/opt/maka-opencode-toolchain'));
   });
 });
 

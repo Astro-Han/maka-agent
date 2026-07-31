@@ -10,10 +10,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from harbor.agents.installed.base import NonZeroAgentExitCodeError, with_prompt_template
-from harbor.agents.installed.opencode import OpenCode
-from harbor.environments.base import BaseEnvironment
-from harbor.models.agent.context import AgentContext
+from harness_compat import (
+    AgentContext,
+    BaseEnvironment,
+    NetworkAllowlist as _NetworkAllowlist,
+    NonZeroAgentExitCodeError,
+    OpenCode,
+    with_prompt_template,
+)
+from provider_proxy import provider_proxy_endpoint, warn_if_pier_unreachable_proxy_port
 
 from trial_pricing import estimate_cost, pricing_from_env
 
@@ -33,6 +38,29 @@ class MakaOpenCodeAgent(OpenCode):
 
     def get_version_command(self) -> str | None:
         return f"{shlex.quote(str(_TOOLCHAIN_OPENCODE))} --version"
+
+    def install_spec(self) -> None:
+        # The pinned OpenCode toolchain is bind-mounted read-only and only
+        # verified (sha256 checksums + manifest fingerprint) in install().
+        # Pier's inherited spec would instead install OpenCode from the
+        # network, which offline tasks cannot reach and which would break the
+        # fixed-build comparison. None keeps the runtime verify path
+        # unchanged (Pier runs install() when no spec is preinstalled).
+        return None
+
+    def network_allowlist(self) -> _NetworkAllowlist | None:
+        # Called only under Pier; plain Harbor never calls it and
+        # harness_compat exports NetworkAllowlist = None there.
+        if _NetworkAllowlist is None:
+            return None
+        # The container runs the pinned OpenCode CLI against
+        # OPENCODE_CONFIG (opencode-benchmark.json), whose provider options
+        # point at MAKA_PROVIDER_PROXY_URL (see _run_with_stop_sentinel);
+        # that proxy host is the only egress the container needs. No fallback
+        # domain: a misconfigured trial fails here, at environment creation.
+        hostname, port = provider_proxy_endpoint(self._get_env, "OpenCode")
+        warn_if_pier_unreachable_proxy_port(port, "OpenCode")
+        return _NetworkAllowlist(domains=[hostname])
 
     async def install(self, environment: BaseEnvironment) -> None:
         expected_fingerprint = self._get_env("MAKA_OPENCODE_TOOLCHAIN_FINGERPRINT")

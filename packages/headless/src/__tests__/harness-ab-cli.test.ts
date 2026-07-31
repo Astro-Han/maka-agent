@@ -1082,6 +1082,25 @@ test('harness A/B CLI rejects modified task contents before reading credentials'
   }
 });
 
+test('harness A/B supports the DeepSeek-metered OpenCode composition on full DeepSWE', async () => {
+  const { resolveHarnessAbRunId, resolveHarnessComposition } = await import(
+    new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
+  );
+  const composition = resolveHarnessComposition({
+    benchmark: 'deep-swe-1.1-full',
+    runtime: 'deepseek-v4-flash-max',
+    competitor: 'opencode',
+  });
+  assert.equal(composition.benchmarkProfile.executor, 'pier');
+  assert.equal(composition.runtimeProfile.model, 'deepseek-v4-flash');
+  assert.equal(composition.runtimeProfile.billingMode, 'metered');
+  assert.equal(composition.competitorProfile.id, 'opencode');
+  assert.equal(
+    resolveHarnessAbRunId(composition),
+    'deepseek-v4-flash-maka-vs-opencode-deepswe-full-v1',
+  );
+});
+
 test('harness A/B resolves the full DeepSWE benchmark as a sibling profile', async () => {
   const {
     resolveHarnessAbRunId,
