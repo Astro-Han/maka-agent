@@ -191,16 +191,21 @@ const baseComposerProps: ComposerProps = {
   permissionMode: 'ask',
   onPermissionModeChange: noop,
   // Fidelity: production app-shell always wires these (app-shell.tsx
-  // ~1851-1960), so the daily composer renders the ＋ menu, the Plan
-  // switch, and the Swarm switch. Omitting them here understated the
-  // persistent element count in every shell story. expertTeams stays
-  // empty — most users have none configured; the ＋ menu shows just the
-  // attachment item then, as it does for them.
+  // ~1851-1960), so the daily composer renders the upload button, the
+  // modes menu (Plan / Swarm), and the Skills picker. Omitting them here
+  // understated the persistent element count in every shell story.
+  // expertTeams stays empty — most users have none configured; the modes
+  // menu then shows just the switches, as it does for them.
   onPickAttachments: noop,
   planModeActive: false,
   onPlanModeChange: noop,
   swarmModeActive: false,
   onSwarmModeChange: noop,
+  mentionSkills: [
+    { ref: 'user:pdf', id: 'pdf', name: 'PDF 工具', description: '读取、拆分与合并 PDF' },
+    { ref: 'user:commit', id: 'commit', name: 'Commit', description: '生成提交信息' },
+    { ref: 'project:review', id: 'review', name: 'Code Review', description: '按仓库规范审查改动' },
+  ],
   workspacePicker: {
     label: 'maka-agent',
     branch: 'opencode/storybook-surface-coverage',

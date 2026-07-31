@@ -133,21 +133,79 @@ describe('localized conversation journey', () => {
     assert.match(en, /Go to model settings/);
   });
 
-  it('keeps Plan Mode out of the toolbar and reachable from the ＋ menu (#1433)', () => {
+  it('keeps Plan Mode out of the toolbar and reachable from the modes menu (#1433)', () => {
     const markup = render(
       'zh',
       <Composer onSend={() => {}} onStop={() => {}} onPickAttachments={() => {}} onPlanModeChange={() => {}} />,
     );
     // The toolbar no longer carries a standalone Plan switch…
     assert.doesNotMatch(markup, /maka-composer-plan-mode-control/);
-    // …but the ＋ trigger is present so the mode stays reachable from the menu.
-    assert.match(markup, /aria-label="添加"/);
+    // …but the modes trigger is present so the mode stays reachable.
+    assert.match(markup, /aria-label="模式"/);
   });
 
-  it('keeps the ＋ menu available when only mode switches are wired', () => {
+  it('keeps the modes menu available when only mode switches are wired', () => {
     const markup = render('zh', <Composer onSend={() => {}} onStop={() => {}} onPlanModeChange={() => {}} />);
-    assert.match(markup, /aria-label="添加"/);
+    assert.match(markup, /aria-label="模式"/);
     assert.doesNotMatch(markup, /maka-composer-plan-mode-control/);
+  });
+
+  it('splits upload, modes and skills into three named toolbar buttons (PR-COMPOSER-TOOLBAR-SPLIT)', () => {
+    const markup = render(
+      'zh',
+      <Composer
+        onSend={() => {}}
+        onStop={() => {}}
+        onPickAttachments={() => {}}
+        onPlanModeChange={() => {}}
+        mentionSkills={[{ id: 'skill-a', name: '技能 A', description: '描述 A' }]}
+      />,
+    );
+    // Upload is its own control with an upload mark — no longer an item
+    // buried in a generic ＋ menu.
+    assert.match(markup, /maka-composer-upload-button/);
+    assert.match(markup, /aria-label="添加文件或目录"/);
+    assert.match(markup, /class="lucide lucide-upload"/);
+    // Modes + expert teams keep one menu of their own.
+    assert.match(markup, /aria-label="模式"/);
+    assert.match(markup, /class="lucide lucide-workflow"/);
+    // Skills get a dedicated trigger; the panel itself opens on click.
+    assert.match(markup, /maka-composer-skill-trigger/);
+    assert.match(markup, /aria-label="技能"/);
+    assert.doesNotMatch(markup, /maka-composer-skill-panel/);
+    // The retired ＋ trigger is gone.
+    assert.doesNotMatch(markup, /aria-label="添加"[^>]*>/);
+
+    const en = render(
+      'en',
+      <Composer
+        onSend={() => {}}
+        onStop={() => {}}
+        onPickAttachments={() => {}}
+        onPlanModeChange={() => {}}
+        mentionSkills={[]}
+      />,
+    );
+    assert.match(en, /aria-label="Add file or directory"/);
+    assert.match(en, /aria-label="Modes"/);
+    assert.match(en, /aria-label="Skills"/);
+  });
+
+  it('hides the upload button while a turn is streaming but keeps modes reachable', () => {
+    const markup = render(
+      'zh',
+      <Composer
+        onSend={() => {}}
+        onStop={() => {}}
+        streaming
+        onPickAttachments={() => {}}
+        onPlanModeChange={() => {}}
+      />,
+    );
+    // Import no-ops mid-turn, so upload is disabled rather than removed…
+    assert.match(markup, /maka-composer-upload-button[^>]*aria-disabled="true"|aria-disabled="true"[^>]*maka-composer-upload-button/);
+    // …while the modes menu stays usable (#1444).
+    assert.match(markup, /aria-label="模式"/);
   });
 
   it('shows a quiet Plan indicator next to permission mode only while Plan is active', () => {
@@ -215,7 +273,7 @@ describe('localized conversation journey', () => {
     assert.match(en, /Graph mode is on/);
   });
 
-  it('keeps the ＋ menu reachable while streaming (#1444)', () => {
+  it('keeps the modes menu reachable while streaming (#1444)', () => {
     const markup = render(
       'zh',
       <Composer
@@ -229,10 +287,10 @@ describe('localized conversation journey', () => {
         onSwarmModeChange={() => {}}
       />,
     );
-    // Menu trigger must stay mounted mid-turn so attachments, expert teams,
-    // and Plan/Swarm remain reachable from the ＋ menu (import itself stays
-    // blocked mid-stream by runImportAction / the disabled attach item).
-    assert.match(markup, /aria-label="添加"/);
+    // The modes trigger must stay mounted mid-turn so expert teams and
+    // Plan/Swarm remain reachable (import itself stays blocked mid-stream by
+    // runImportAction / the disabled upload button).
+    assert.match(markup, /aria-label="模式"/);
   });
 
   it('keeps Swarm Mode out of the toolbar (#1433)', () => {
@@ -241,7 +299,7 @@ describe('localized conversation journey', () => {
       <Composer onSend={() => {}} onStop={() => {}} onPickAttachments={() => {}} onSwarmModeChange={() => {}} />,
     );
     assert.doesNotMatch(markup, /maka-composer-swarm-mode-control/);
-    assert.match(markup, /aria-label="添加"/);
+    assert.match(markup, /aria-label="模式"/);
   });
 
   it('localizes question chrome while preserving raw values', () => {

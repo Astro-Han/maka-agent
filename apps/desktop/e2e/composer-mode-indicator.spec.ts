@@ -28,7 +28,7 @@ async function enableMode(
   mode: 'plan' | 'swarm',
   label: 'Plan' | 'Swarm',
 ): Promise<Locator> {
-  await page.getByRole('button', { name: '添加' }).click();
+  await page.getByRole('button', { name: '模式' }).click();
   await page.getByRole('menuitemcheckbox', { name: label }).click();
   await page.keyboard.press('Escape');
   const indicator = page.locator(

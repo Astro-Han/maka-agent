@@ -17,6 +17,7 @@ export * from './tool-activity/copy.js';
 export * from './tool-activity/sandbox-denial.js';
 export * from './chat-input-behavior.js';
 export * from './composer-mention-popup.js';
+export * from './composer-skill-picker.js';
 export * from './use-composer-skill-draft.js';
 export * from './use-mention-popup.js';
 export * from './runtime-resume-copy.js';

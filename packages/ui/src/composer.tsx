@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useMountedRef } from './use-mounted-ref.js';
-import { ArrowUp, Blocks, Mic, Paperclip, Pencil, Plus, Volume2, X } from './icons.js';
+import { ArrowUp, Blocks, Mic, Pencil, Upload, Volume2, Workflow, X } from './icons.js';
 import { ChatModelSwitcher, ModelChipStatic, NewChatModelPicker } from './chat-model-switcher.js';
 import { useUiLocale } from './locale-context.js';
 import { getConversationCopy } from './conversation-copy.js';
@@ -45,6 +45,7 @@ import { AttachmentFileCard } from './attachment-file-card.js';
 import { QuoteRefChip } from './quote-ref-chip.js';
 import { Kbd } from './primitives/kbd.js';
 import { PermissionModeSelect } from './permission-mode-menu.js';
+import { ComposerSkillPicker, type ComposerSkillOption } from './composer-skill-picker.js';
 
 const COMPOSER_MAX_HEIGHT = 240;
 
@@ -92,8 +93,9 @@ export const Composer = forwardRef<
     /**
      * When true, a turn is in flight — live output OR (with `processing`) the
      * pre-first-token wait. Toolbar swaps to a working hint ("Maka 正在回答…" or
-     * "正在处理…") and Send becomes Stop. The ＋ menu stays reachable (#1444);
-     * import actions remain blocked mid-turn until the runtime accepts them.
+     * "正在处理…") and Send becomes Stop. The modes menu and Skills picker stay
+     * reachable (#1444); import stays blocked mid-turn, so the upload button is
+     * disabled until the runtime accepts it again.
      */
     streaming?: boolean;
     /**
@@ -132,9 +134,9 @@ export const Composer = forwardRef<
      * case a large paste behaves like any other paste.
      */
     onPasteAsQuote?(input: { text: string; label?: string }): void;
-    /** Built-in expert teams offered under 专家团 in the "+" menu. */
+    /** Built-in expert teams offered under 专家团 in the modes menu. */
     expertTeams?: readonly { id: string; name: string; description?: string }[];
-    /** Start a new expert-team session from the "+" menu. */
+    /** Start a new expert-team session from the modes menu. */
     onStartExpertTeam?(teamId: string): void;
     modelLabel?: string;
     activeSession?: SessionSummary;
@@ -238,9 +240,10 @@ export const Composer = forwardRef<
     /**
      * Composer mention popups. Both are optional and the whole feature no-ops
      * when absent (SSR contracts render Composer with minimal props):
-     *   - `mentionSkills` powers the `/` popup — pass only ENABLED skills; the
-     *     composer filters them client-side by id/name and creates a structured
-     *     Skill Chip (human-in-the-loop, never auto-send).
+     *   - `mentionSkills` powers the `/` popup AND the toolbar Skills picker
+     *     (PR-COMPOSER-TOOLBAR-SPLIT) — pass only ENABLED skills; the composer
+     *     filters them client-side by id/name and creates a structured Skill
+     *     Chip (human-in-the-loop, never auto-send).
      *   - `onSearchMentionFiles` powers the `@` popup — the composer debounces
      *     the query, and selecting a file inserts `@<relativePath> `.
      */
@@ -815,114 +818,142 @@ export const Composer = forwardRef<
         )}
         <div className="maka-composer-toolbar composerActions" data-streaming={props.streaming ? 'true' : undefined}>
           <div className="maka-composer-left-controls">
-            {/* #1444: keep the ＋ menu reachable while streaming. Import
-                actions still no-op mid-turn (`runImportAction` / drop
-                target), so the attach item is disabled rather than
-                vanishing the whole menu (and Plan/Swarm / expert teams). */}
-            {(props.onPickAttachments || (props.expertTeams?.length ?? 0) > 0 || props.onPlanModeChange || props.onSwarmModeChange || props.onGraphModeChange) ? (
+            {/* PR-COMPOSER-TOOLBAR-SPLIT: the single ＋ menu is split into
+                three named controls — upload / modes+expert teams / skills —
+                so each is one click away and readable at rest instead of
+                hidden behind a generic plus. Import still no-ops mid-turn
+                (`runImportAction` / drop target), so the upload button is
+                disabled while streaming rather than vanishing. */}
+            {props.onPickAttachments ? (
+              <IconButton
+                variant="ghost"
+                type="button"
+                size="sm"
+                className="maka-composer-upload-button"
+                isDisabled={props.disabled || props.streaming === true || importActionBusy}
+                aria-busy={pendingImportAction === 'pick' ? 'true' : undefined}
+                data-pending={pendingImportAction === 'pick' ? 'true' : undefined}
+                label={
+                  pendingImportAction === 'pick' ? copy.addingAttachment : copy.addFileOrDirectory
+                }
+                tooltip={
+                  pendingImportAction === 'pick' ? copy.addingAttachment : copy.uploadTitle
+                }
+                onClick={() => void runImportAction('pick', props.onPickAttachments)}
+                icon={<Upload size={15} aria-hidden="true" />}
+              />
+            ) : null}
+            {/* #1444 still holds for the modes menu: it stays reachable
+                mid-turn so Plan/Swarm/Graph and the expert teams never
+                disappear while a turn is in flight. */}
+            {(props.onPlanModeChange
+              || props.onSwarmModeChange
+              || props.onGraphModeChange
+              || (props.expertTeams?.length ?? 0) > 0) ? (
               <DropdownMenu
                 placement="above"
                 button={{
-                  label:
-                    pendingImportAction === 'pick'
-                      ? copy.addingAttachment
-                      : copy.add,
-                  icon: <Plus size={15} aria-hidden="true" />,
+                  label: copy.modesLabel,
+                  icon: <Workflow size={15} aria-hidden="true" />,
                   isIconOnly: true,
                   variant: 'ghost',
                   size: 'sm',
-                  isDisabled: props.disabled || importActionBusy,
-                  'aria-busy': importActionBusy ? 'true' : undefined,
-                  'data-pending': importActionBusy ? 'true' : undefined,
-                  tooltip: copy.addTitle,
+                  isDisabled: props.disabled,
+                  tooltip: copy.modesTitle,
                 }}
-                className="maka-composer-context-menu"
+                className="maka-composer-modes-menu"
               >
-                  {props.onPickAttachments ? (
-                    <DropdownMenuItem
-                      isDisabled={props.disabled || props.streaming === true || importActionBusy}
-                      onClick={() => void runImportAction('pick', props.onPickAttachments)}
-                      icon={<Paperclip size={13} aria-hidden="true" />}
-                      label={copy.addFileOrDirectory}
+                  {/* #1433 subtraction still applies: Plan/Swarm/Graph are
+                      switch items, not standalone toolbar switches — the
+                      toolbar keeps one named trigger per capability. */}
+                  {props.onPlanModeChange ? (
+                    <DropdownMenuCheckboxItem
+                      label={copy.planModeLabel}
+                      value={props.planModeActive === true}
+                      isDisabled={
+                        props.disabled
+                        || props.planModePending === true
+                        || Boolean(props.planModeDisabledReason)
+                      }
+                      onChange={(checked) => {
+                        void props.onPlanModeChange?.(checked);
+                      }}
+                      aria-description={props.planModeDisabledReason
+                        ?? (props.planModeActive ? copy.disablePlanMode : copy.enablePlanMode)}
+                    />
+                  ) : null}
+                  {props.onSwarmModeChange ? (
+                    <DropdownMenuCheckboxItem
+                      label={copy.swarmModeLabel}
+                      value={props.swarmModeActive === true}
+                      isDisabled={
+                        props.disabled
+                        || props.swarmModePending === true
+                        || Boolean(props.swarmModeDisabledReason)
+                      }
+                      onChange={(checked) => {
+                        void props.onSwarmModeChange?.(checked);
+                      }}
+                      aria-description={props.swarmModeDisabledReason
+                        ?? (props.swarmModeActive ? copy.disableSwarmMode : copy.enableSwarmMode)}
+                    />
+                  ) : null}
+                  {props.onGraphModeChange ? (
+                    <DropdownMenuCheckboxItem
+                      label={copy.graphModeLabel}
+                      value={props.graphModeActive === true}
+                      isDisabled={
+                        props.disabled
+                        || props.graphModePending === true
+                        || Boolean(props.graphModeDisabledReason)
+                      }
+                      onChange={(checked) => {
+                        void props.onGraphModeChange?.(checked);
+                      }}
+                      aria-description={props.graphModeDisabledReason
+                        ?? (props.graphModeActive ? copy.disableGraphMode : copy.enableGraphMode)}
                     />
                   ) : null}
                   {(props.expertTeams?.length ?? 0) > 0 ? (
                     <>
-                      <Divider orientation="horizontal" label={copy.expertTeam} />
-                        {props.expertTeams?.map((team) => (
-                          <DropdownMenuItem
-                            key={team.id}
-                            isDisabled={props.disabled}
-                            onClick={() => props.onStartExpertTeam?.(team.id)}
-                            icon={<Blocks size={13} aria-hidden="true" />}
-                            label={team.name}
-                            description={team.description}
-                          />
-                        ))}
-                    </>
-                  ) : null}
-                  {/* #1433 subtraction: Plan/Swarm live here as switch
-                      items instead of standalone toolbar switches — the
-                      toolbar keeps only add / permission / model / send. */}
-                  {props.onPlanModeChange || props.onSwarmModeChange || props.onGraphModeChange ? (
-                    <>
-                      {/* Separator only when an attachment/expert-team group
-                          precedes it — a modes-only menu must not lead with
-                          a divider (review P3). */}
-                      {props.onPickAttachments || (props.expertTeams?.length ?? 0) > 0 ? (
-                        <Divider orientation="horizontal" />
+                      {/* Heading only when a mode group precedes it — a
+                          teams-only menu must not lead with a divider. */}
+                      {props.onPlanModeChange || props.onSwarmModeChange || props.onGraphModeChange ? (
+                        <Divider orientation="horizontal" label={copy.expertTeam} />
                       ) : null}
-                      {props.onPlanModeChange ? (
-                        <DropdownMenuCheckboxItem
-                          label={copy.planModeLabel}
-                          value={props.planModeActive === true}
-                          isDisabled={
-                            props.disabled
-                            || props.planModePending === true
-                            || Boolean(props.planModeDisabledReason)
-                          }
-                          onChange={(checked) => {
-                            void props.onPlanModeChange?.(checked);
-                          }}
-                          aria-description={props.planModeDisabledReason
-                            ?? (props.planModeActive ? copy.disablePlanMode : copy.enablePlanMode)}
+                      {props.expertTeams?.map((team) => (
+                        <DropdownMenuItem
+                          key={team.id}
+                          isDisabled={props.disabled}
+                          onClick={() => props.onStartExpertTeam?.(team.id)}
+                          icon={<Blocks size={13} aria-hidden="true" />}
+                          label={team.name}
+                          description={team.description}
                         />
-                      ) : null}
-                      {props.onSwarmModeChange ? (
-                        <DropdownMenuCheckboxItem
-                          label={copy.swarmModeLabel}
-                          value={props.swarmModeActive === true}
-                          isDisabled={
-                            props.disabled
-                            || props.swarmModePending === true
-                            || Boolean(props.swarmModeDisabledReason)
-                          }
-                          onChange={(checked) => {
-                            void props.onSwarmModeChange?.(checked);
-                          }}
-                          aria-description={props.swarmModeDisabledReason
-                            ?? (props.swarmModeActive ? copy.disableSwarmMode : copy.enableSwarmMode)}
-                        />
-                      ) : null}
-                      {props.onGraphModeChange ? (
-                        <DropdownMenuCheckboxItem
-                          label={copy.graphModeLabel}
-                          value={props.graphModeActive === true}
-                          isDisabled={
-                            props.disabled
-                            || props.graphModePending === true
-                            || Boolean(props.graphModeDisabledReason)
-                          }
-                          onChange={(checked) => {
-                            void props.onGraphModeChange?.(checked);
-                          }}
-                          aria-description={props.graphModeDisabledReason
-                            ?? (props.graphModeActive ? copy.disableGraphMode : copy.enableGraphMode)}
-                        />
-                      ) : null}
+                      ))}
                     </>
                   ) : null}
               </DropdownMenu>
+            ) : null}
+            {/* PR-COMPOSER-TOOLBAR-SPLIT: Skills used to be reachable only by
+                typing `/`. The picker writes the same structured chips, so the
+                two paths share one draft instead of a second selection model.
+                Focus stays in the panel across toggles — unlike the `/` popup,
+                which returns to the textarea because it splices text there. */}
+            {props.mentionSkills ? (
+              <ComposerSkillPicker
+                skills={props.mentionSkills}
+                selected={skillDraft.skills}
+                disabled={props.disabled}
+                onToggle={(skill, selected) => {
+                  if (selected) skillDraft.add(skill);
+                  else skillDraft.remove(skill.ref ?? skill.id);
+                }}
+                onSelectAll={(skills: readonly ComposerSkillOption[]) => {
+                  for (const skill of skills) skillDraft.add(skill);
+                }}
+                onClearAll={() => skillDraft.clear(skillDraft.activeDraftKey())}
+              />
             ) : null}
             {/* PR-MOVE-PERMISSION-MODE: the static "通用" role chip
                 was replaced by the permission-mode dropdown — that
@@ -944,7 +975,7 @@ export const Composer = forwardRef<
               />
             ) : null}
             {/* #1433: active-mode indicators. The Plan/Swarm toggles live in
-                the ＋ menu (subtraction), so an ON mode would otherwise be
+                the modes menu (subtraction), so an ON mode would otherwise be
                 easy to miss without opening the menu. The indicator uses the
                 same quiet-text-button language as the permission select next
                 to it, WITHOUT a chevron: it cannot drop down. Clicking turns

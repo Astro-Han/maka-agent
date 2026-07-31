@@ -74,9 +74,25 @@ export interface ConversationCopy {
     selectModel: string;
     dropToImport: string;
     addingAttachment: string;
-    add: string;
-    addTitle: string;
     addFileOrDirectory: string;
+    /** Standalone upload button in the composer toolbar (PR-COMPOSER-TOOLBAR-SPLIT). */
+    uploadTitle: string;
+    /** Standalone Plan/Swarm/Graph + expert-team button in the toolbar (PR-COMPOSER-TOOLBAR-SPLIT). */
+    modesLabel: string;
+    modesTitle: string;
+    /** Standalone Skills picker button + its panel (PR-COMPOSER-TOOLBAR-SPLIT). */
+    skillPicker: {
+      label: string;
+      title: string;
+      panelAriaLabel: string;
+      searchPlaceholder: string;
+      autoHint: string;
+      selectAll: string;
+      clearAll: string;
+      empty: string;
+      noMatches: string;
+      selectedCount: (count: number) => string;
+    };
     switchDisabledStreaming: string;
     switchDisabledRunning: string;
     switchDisabledPermission: string;
@@ -323,7 +339,14 @@ const CONVERSATION_COPY = {
       sending: '正在发送…', importing: '正在导入…', sendLabel: '发送', stopLabel: '停止', stopping: '停止中…',
       streaming: 'Maka 正在回答…', processing: 'Maka 正在处理…', continuing: 'Maka 继续中…',
       interruptHint: '或点停止中断', addContext: '添加上下文', importText: '导入文本文件', attachFile: '附加文件', expertTeam: '专家团',
-      selectModel: '选择模型', dropToImport: '松开以导入文件内容', addingAttachment: '正在添加附件', add: '添加', addTitle: '添加文件、专家团…', addFileOrDirectory: '添加文件或目录',
+      selectModel: '选择模型', dropToImport: '松开以导入文件内容', addingAttachment: '正在添加附件', addFileOrDirectory: '添加文件或目录',
+      uploadTitle: '上传文件或目录', modesLabel: '模式', modesTitle: '协作模式与专家团',
+      skillPicker: {
+        label: '技能', title: '选择技能', panelAriaLabel: '技能选择', searchPlaceholder: '搜索技能…',
+        autoHint: '不选择时，Maka 自动匹配相关技能', selectAll: '全选', clearAll: '清除全部',
+        empty: '当前没有可用技能', noMatches: '没有匹配的技能',
+        selectedCount: (count) => `已选 ${count} 个技能`,
+      },
       switchDisabledStreaming: '当前对话正在流式输出，等结束后再切换模型。', switchDisabledRunning: '当前对话正在运行，等结束后再切换模型。', switchDisabledPermission: '当前有工具调用正在等待确认，处理后再切换模型。',
       planModeLabel: 'Plan', enablePlanMode: '开启 Plan Mode', disablePlanMode: '退出 Plan Mode',
       planModeOnTitle: 'Plan 模式已启用，点击关闭',
@@ -464,7 +487,14 @@ const CONVERSATION_COPY = {
       sending: 'Sending…', importing: 'Importing…', sendLabel: 'Send', stopLabel: 'Stop', stopping: 'Stopping…',
       streaming: 'Maka is responding…', processing: 'Maka is working…', continuing: 'Maka is continuing…',
       interruptHint: 'or click Stop to interrupt', addContext: 'Add context', importText: 'Import text file', attachFile: 'Attach file', expertTeam: 'Expert team',
-      selectModel: 'Choose model', dropToImport: 'Drop to import file contents', addingAttachment: 'Adding attachment', add: 'Add', addTitle: 'Add files or an expert team…', addFileOrDirectory: 'Add file or directory',
+      selectModel: 'Choose model', dropToImport: 'Drop to import file contents', addingAttachment: 'Adding attachment', addFileOrDirectory: 'Add file or directory',
+      uploadTitle: 'Upload a file or directory', modesLabel: 'Modes', modesTitle: 'Collaboration modes and expert teams',
+      skillPicker: {
+        label: 'Skills', title: 'Choose skills', panelAriaLabel: 'Skill selection', searchPlaceholder: 'Search skills…',
+        autoHint: 'Leave empty and Maka picks the relevant skills', selectAll: 'Select all', clearAll: 'Clear all',
+        empty: 'No skills available', noMatches: 'No matching skills',
+        selectedCount: (count) => `${count} skill${count === 1 ? '' : 's'} selected`,
+      },
       switchDisabledStreaming: 'Wait for the current response to finish before switching models.', switchDisabledRunning: 'Wait for the current run to finish before switching models.', switchDisabledPermission: 'Resolve the pending tool permission before switching models.',
       planModeLabel: 'Plan', enablePlanMode: 'Enable Plan Mode', disablePlanMode: 'Disable Plan Mode',
       planModeOnTitle: 'Plan mode is on — click to turn off',
