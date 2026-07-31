@@ -222,26 +222,26 @@ test('keyboard sidebar resize bypasses drawer motion without disabling collapse 
 
   await handle.focus();
   await expect(handle).toBeFocused();
-  expect(await shell.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe('0s');
+  const sidebarSlot = shell.locator('.maka-shell-sidebar-slot');
+  expect(await sidebarSlot.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe('0s');
 
   const beforeWidth = Number(await handle.getAttribute('aria-valuenow'));
   await handle.press('ArrowRight');
   const after = await shell.evaluate((element) => {
     const handle = element.querySelector('.maka-resize-handle');
-    const firstTrack = getComputedStyle(element).gridTemplateColumns.split(' ')[0];
+    const slot = element.querySelector('.maka-shell-sidebar-slot');
     return {
       ariaWidth: Number(handle?.getAttribute('aria-valuenow')),
-      trackWidth: Number.parseFloat(firstTrack ?? ''),
+      slotWidth: slot?.getBoundingClientRect().width ?? 0,
     };
   });
 
   expect(after.ariaWidth).toBe(beforeWidth + 10);
-  expect(after.trackWidth).toBe(after.ariaWidth);
+  expect(after.slotWidth).toBe(after.ariaWidth);
 
   await handle.blur();
   await expect
-    .poll(() => shell.evaluate((element) => getComputedStyle(element).transitionDuration))
+    .poll(() => sidebarSlot.evaluate((element) => getComputedStyle(element).transitionDuration))
     .toBe('0.28s');
-  expect(await shell.evaluate((element) => getComputedStyle(element).transitionProperty))
-    .toContain('grid-template-columns');
+  expect(await sidebarSlot.evaluate((element) => getComputedStyle(element).transitionProperty)).toContain('width');
 });

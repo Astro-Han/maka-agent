@@ -86,10 +86,9 @@ html[data-os="darwin"] .maka-session-list,
     color: var(--foreground);
   }
 
-/* `.maka-nav-row` is a semantic navigation control, so this darwin glass
-   override must outrank the sidebar default color — same maka.legacy layer,
-   higher specificity. */
-html[data-os="darwin"] .maka-nav-row {
+/* Astryx SideNav items are the semantic navigation controls, so this darwin
+   glass override must outrank the sidebar material inheritance. */
+html[data-os="darwin"] .maka-session-panel .astryx-side-nav-item {
   color: var(--foreground);
 }
 
@@ -125,7 +124,7 @@ html[data-os="darwin"] .maka-session-panel-footer {
 
 .maka-session-panel,
   .maka-session-panel-footer,
-  .maka-nav-row,
+  .maka-session-panel .astryx-side-nav-item,
   .maka-session-list-item,
   .maka-project-history-tree,
   .maka-module-main-header,

@@ -26,6 +26,7 @@ describe('sidebar subtraction', () => {
     assert.match(markup, />新任务</);
     assert.match(markup, />扩展</);
     assert.match(markup, />定时任务</);
+    assert.equal((markup.match(/astryx-side-nav-item/g) ?? []).length, 3);
     assert.doesNotMatch(markup, />技能</);
     assert.doesNotMatch(markup, />MCP</);
     assert.doesNotMatch(markup, />每日回顾</);
@@ -57,7 +58,8 @@ describe('sidebar subtraction', () => {
       </LocaleProvider>,
     );
 
-    assert.match(markup, /aria-label="Scheduled tasks, 1 unfinished reminder"/);
+    assert.match(markup, />Scheduled tasks</);
+    assert.match(markup, /class="maka-nav-pending-copy">, 1 unfinished reminder</);
     assert.match(markup, />Scheduled tasks</);
     assert.doesNotMatch(markup, /aria-label="Automations,/);
   });
@@ -242,6 +244,7 @@ describe('sidebar subtraction', () => {
     );
 
     assert.match(markup, /class="[^"]*astryx-list[^"]*"/);
+    assert.match(markup, /class="[^"]*astryx-side-nav[^"]*maka-session-panel[^"]*"/);
     assert.match(markup, /role="list"/);
     assert.doesNotMatch(markup, /maka-list-row/);
   });

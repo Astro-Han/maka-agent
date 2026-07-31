@@ -49,7 +49,6 @@
   align-items: stretch;
   gap: 0;
   overflow: hidden;
-  transition: grid-template-columns var(--duration-large) var(--ease-drawer);
   /* PR-CHAT-CHROME-FIX-0 (WAWQAQ msg `1e693dee` + `486b5611`):
      the shell used to carry a 172deg gradient from `--foreground-3`
      to `--background`. The session sidebar is transparent and
@@ -62,17 +61,38 @@
 }
 
 .app.maka-shell-2col {
-  grid-template-columns:
-    var(--maka-session-list-expanded-width)
-    var(--maka-resize-handle-width, 0px)
-    minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .app.maka-shell-2col[data-sidebar-state="collapsed"] {
-  grid-template-columns:
-    0px
-    var(--maka-resize-handle-width, 0px)
-    minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.maka-astryx-app-shell {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.maka-astryx-app-shell > [data-testid="skip-to-content"] {
+  -webkit-app-region: no-drag;
+}
+
+.maka-astryx-app-shell .astryx-app-shell-sidenav,
+.maka-astryx-app-shell .astryx-layout-content {
+  overflow: hidden;
+}
+
+.maka-shell-sidebar-slot {
+  position: relative;
+  flex: 0 0 auto;
+  height: 100%;
+  min-width: 0;
+  overflow: visible;
+  transition: width var(--duration-large) var(--ease-drawer);
 }
 
 .maka-panel {
@@ -89,6 +109,8 @@
 }
 
 .maka-panel-list.maka-floating-panel {
+  width: 100%;
+  height: 100%;
   border-right: 0;
   background: transparent;
   opacity: 1;
@@ -99,7 +121,7 @@
 }
 
 .maka-shell-2col .maka-panel-list > .maka-session-panel {
-  width: var(--maka-session-list-expanded-width);
+  width: 100%;
 }
 
 .maka-panel-detail.maka-floating-panel {
@@ -176,7 +198,17 @@
      on the right; Linux: neither, so the design floor stands). */
   padding-left: max(var(--space-6), var(--maka-titlebar-area-x));
   padding-right: calc(var(--space-6) + var(--maka-titlebar-overlay-right-width));
+  background:
+    linear-gradient(
+      to right,
+      var(--surface-canvas) 0 var(--maka-session-list-expanded-width),
+      var(--background) var(--maka-session-list-expanded-width) 100%
+    );
   -webkit-app-region: drag;
+}
+
+.maka-shell-2col[data-sidebar-state="collapsed"] .maka-window-titlebar {
+  background: var(--background);
 }
 
 .maka-shell-topbar-rail {
@@ -193,7 +225,10 @@
 }
 
 .maka-resize-handle {
-  position: relative;
+  position: absolute;
+  z-index: 2;
+  inset-block: 0;
+  inset-inline-end: 0;
   width: var(--maka-resize-handle-width, 0px);
   box-sizing: content-box;
   padding-inline: var(--space-1);
@@ -248,11 +283,11 @@
   user-select: none;
 }
 
-.isResizingColumns .maka-shell-2col {
+.isResizingColumns .maka-shell-sidebar-slot {
   transition: none;
 }
 
-.maka-shell-2col:has(> .maka-resize-handle:focus) {
+.maka-shell-2col:has(.maka-resize-handle:focus) .maka-shell-sidebar-slot {
   transition: none;
 }
 

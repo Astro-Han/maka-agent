@@ -4,6 +4,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from '@astryxdesign/core/DropdownMenu';
+import { SideNav } from '@astryxdesign/core/SideNav';
 import type { NavModuleMemory, NavSelection } from './nav-selection.js';
 import {
   SessionHistoryList,
@@ -48,59 +49,63 @@ export function SessionListPanel(props: {
   } = props;
 
   return (
-    <aside
+    <SideNav
       className="maka-session-panel agents-sidebar"
+      role="complementary"
       aria-label={copy.listAriaLabel}
-    >
-      <SessionSidebarNav
+      style={{ width: '100%' }}
+      topContent={<SessionSidebarNav
         selection={props.selection}
         planReminders={props.planReminders}
         moduleMemory={props.moduleMemory}
         onSelect={props.onSelect}
         onNew={props.onNew}
-      />
-      {onViewModeChange && (
-        <div className="maka-session-list-toolbar">
-          <span className="maka-session-list-heading">{copy.title}</span>
-          <DropdownMenu
-            button={{
-              label: copy.groupingAriaLabel,
-              icon: <ListTodo size={15} aria-hidden="true" />,
-              isIconOnly: true,
-              variant: 'ghost',
-              size: 'sm',
-              tooltip: copy.groupingAriaLabel,
-            }}
-          >
-              <DropdownMenuRadioGroup
-                value={viewMode}
-                onChange={(mode) => onViewModeChange(mode as SessionViewMode)}
-                aria-label={copy.groupingAriaLabel}
-              >
-                <DropdownMenuRadioItem value="conversation" label={copy.groupByTime} />
-                <DropdownMenuRadioItem value="project" label={copy.groupByProject} />
-              </DropdownMenuRadioGroup>
-          </DropdownMenu>
-        </div>
-      )}
-      <SessionHistoryList
-        sessions={props.sessions}
-        activeId={props.activeId}
-        streamingSessionIds={props.streamingSessionIds}
-        staleSessionIds={props.staleSessionIds}
-        groupVariant={viewMode}
-        groups={groups}
-        worktreeSessionIds={props.worktreeSessionIds}
-        projectActions={props.projectActions}
-        childSessionsByParentId={props.childSessionsByParentId}
-        onSelectSession={props.onSelectSession}
-        rowActions={props.rowActions}
-      />
-      <SessionSidebarFooter
+      />}
+      footer={<SessionSidebarFooter
         updateReminder={props.updateReminder}
         onOpenSettings={props.onOpenSettings}
         onOpenUpdate={props.onOpenUpdate}
-      />
-    </aside>
+      />}
+    >
+      <div className="maka-session-panel-scroll-region">
+        {onViewModeChange && (
+          <div className="maka-session-list-toolbar">
+            <span className="maka-session-list-heading">{copy.title}</span>
+            <DropdownMenu
+              button={{
+                label: copy.groupingAriaLabel,
+                icon: <ListTodo size={15} aria-hidden="true" />,
+                isIconOnly: true,
+                variant: 'ghost',
+                size: 'sm',
+                tooltip: copy.groupingAriaLabel,
+              }}
+            >
+                <DropdownMenuRadioGroup
+                  value={viewMode}
+                  onChange={(mode) => onViewModeChange(mode as SessionViewMode)}
+                  aria-label={copy.groupingAriaLabel}
+                >
+                  <DropdownMenuRadioItem value="conversation" label={copy.groupByTime} />
+                  <DropdownMenuRadioItem value="project" label={copy.groupByProject} />
+                </DropdownMenuRadioGroup>
+            </DropdownMenu>
+          </div>
+        )}
+        <SessionHistoryList
+          sessions={props.sessions}
+          activeId={props.activeId}
+          streamingSessionIds={props.streamingSessionIds}
+          staleSessionIds={props.staleSessionIds}
+          groupVariant={viewMode}
+          groups={groups}
+          worktreeSessionIds={props.worktreeSessionIds}
+          projectActions={props.projectActions}
+          childSessionsByParentId={props.childSessionsByParentId}
+          onSelectSession={props.onSelectSession}
+          rowActions={props.rowActions}
+        />
+      </div>
+    </SideNav>
   );
 }

@@ -313,6 +313,10 @@ async function collapseSidebar(page: Page): Promise<void> {
 test('the window titlebar owns its row across surfaces, sidebar states, and the narrow breakpoint', async ({
   window: page,
 }) => {
+  const appShell = page.locator(`${SHELL} > .maka-astryx-app-shell`);
+  await expect(appShell).toHaveClass(/astryx-app-shell/);
+  await expect(appShell.locator('.astryx-app-shell-sidenav')).toBeAttached();
+
   const wide = { width: 1280, height: 900 };
   const narrow = { width: 760, height: 900 };
 

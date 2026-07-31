@@ -17,6 +17,7 @@ import type {
   UiLocale,
   UiLocalePreference,
 } from '@maka/core';
+import { AppShell as AstryxAppShell } from '@astryxdesign/core/AppShell';
 import {
   buildDeepResearchImplementationPrompt,
   collapseSessionRevisions,
@@ -2082,48 +2083,63 @@ function AppShellContent({
             />
           )}
         </header>
-        <div
-          className="maka-panel maka-panel-list maka-floating-panel"
-          aria-hidden={sessionListCollapsed ? 'true' : undefined}
-          inert={sessionListCollapsed ? true : undefined}
+        <AstryxAppShell
+          className="maka-astryx-app-shell"
+          variant="elevated"
+          height="fill"
+          contentPadding={0}
+          mobileNav={false}
+          sideNav={(
+            <div
+              className="maka-shell-sidebar-slot"
+              data-sidebar-state={sessionListCollapsed ? 'collapsed' : 'expanded'}
+              style={{ width: sessionListCollapsed ? 0 : sessionListWidth }}
+            >
+              <div
+                className="maka-panel maka-panel-list maka-floating-panel"
+                aria-hidden={sessionListCollapsed ? 'true' : undefined}
+                inert={sessionListCollapsed ? true : undefined}
+              >
+                <SessionListPanel
+                  selection={navSelection}
+                  sessions={visibleSessions}
+                  activeId={activeId}
+                  planReminders={planReminders}
+                  streamingSessionIds={streamingSessionIds}
+                  staleSessionIds={staleSessionIds}
+                  viewMode={viewMode}
+                  onViewModeChange={setViewMode}
+                  groups={viewMode === 'project' ? sessionProjectGroups : undefined}
+                  childSessionsByParentId={visibleSessionTree.childrenByParentId}
+                  worktreeSessionIds={worktreeSessionIds}
+                  moduleMemory={navigationState.moduleMemory}
+                  onSelect={setNavSelection}
+                  onSelectSession={sessionListSelectSession}
+                  onOpenSettings={openSettings}
+                  updateReminder={updateReminder}
+                  onOpenUpdate={openUpdateDownload}
+                  onNew={createSession}
+                  rowActions={sessionRowActions}
+                  projectActions={projectRowActions}
+                />
+              </div>
+              <div
+                className="maka-resize-handle"
+                role="separator"
+                aria-label={sessionListCollapsed ? shellCopy.sidebarCollapsed : shellCopy.resizeConversationList}
+                aria-orientation="vertical"
+                aria-valuemin={SESSION_LIST_EXPANDED_MIN_WIDTH}
+                aria-valuemax={SESSION_LIST_EXPANDED_MAX_WIDTH}
+                aria-valuenow={sessionListWidth}
+                aria-hidden={sessionListCollapsed ? 'true' : undefined}
+                tabIndex={sessionListCollapsed ? -1 : 0}
+                onPointerDown={startColumnResize}
+                onKeyDown={onResizeHandleKeyDown}
+              />
+            </div>
+          )}
         >
-          <SessionListPanel
-            selection={navSelection}
-            sessions={visibleSessions}
-            activeId={activeId}
-            planReminders={planReminders}
-            streamingSessionIds={streamingSessionIds}
-            staleSessionIds={staleSessionIds}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-            groups={viewMode === 'project' ? sessionProjectGroups : undefined}
-            childSessionsByParentId={visibleSessionTree.childrenByParentId}
-            worktreeSessionIds={worktreeSessionIds}
-            moduleMemory={navigationState.moduleMemory}
-            onSelect={setNavSelection}
-            onSelectSession={sessionListSelectSession}
-            onOpenSettings={openSettings}
-            updateReminder={updateReminder}
-            onOpenUpdate={openUpdateDownload}
-            onNew={createSession}
-            rowActions={sessionRowActions}
-            projectActions={projectRowActions}
-          />
-        </div>
-        <div
-          className="maka-resize-handle"
-          role="separator"
-          aria-label={sessionListCollapsed ? shellCopy.sidebarCollapsed : shellCopy.resizeConversationList}
-          aria-orientation="vertical"
-          aria-valuemin={SESSION_LIST_EXPANDED_MIN_WIDTH}
-          aria-valuemax={SESSION_LIST_EXPANDED_MAX_WIDTH}
-          aria-valuenow={sessionListWidth}
-          aria-hidden={sessionListCollapsed ? 'true' : undefined}
-          tabIndex={sessionListCollapsed ? -1 : 0}
-          onPointerDown={startColumnResize}
-          onKeyDown={onResizeHandleKeyDown}
-        />
-        <AppShellDetailPanel
+          <AppShellDetailPanel
           data-sidebar-state={sessionListCollapsed ? 'collapsed' : 'expanded'}
           agentsView={agentsView}
         >
@@ -2574,7 +2590,8 @@ function AppShellContent({
             )}
           </div>
           </MakaUriContext.Provider>
-        </AppShellDetailPanel>
+          </AppShellDetailPanel>
+        </AstryxAppShell>
       </div>
       <AppShellOverlays
         settingsOpen={settingsOpen}
