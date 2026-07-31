@@ -374,6 +374,29 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
           tail(result.stderr || result.stdout),
         );
       }
+      const terminalProviderRequest = providerTelemetry.at(-1);
+      if (
+        !completeTimedOutTrial &&
+        terminalProviderRequest &&
+        terminalProviderRequest.outcome !== 'completed'
+      ) {
+        throw new HarborInfraError(
+          `terminal provider request did not complete for task ${input.task.id}`,
+          [
+            `outcome=${terminalProviderRequest.outcome}`,
+            terminalProviderRequest.status !== undefined
+              ? `status=${terminalProviderRequest.status}`
+              : undefined,
+            terminalProviderRequest.errorClass
+              ? `errorClass=${terminalProviderRequest.errorClass}`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join(', '),
+          'infra_failed',
+          { providerTelemetryPath },
+        );
+      }
       const reward = await readReward(rewardPath, resultPath, input.task.id);
       const rawCell = await readCellOutput(cellOutputPath, input.task.id);
       const usageCheckpoint = await readOptionalTokenSummary(
