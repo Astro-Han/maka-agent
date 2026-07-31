@@ -1071,6 +1071,34 @@ test('harness A/B resolves the full DeepSWE benchmark as a sibling profile', asy
     () => resolveHarnessComposition({ benchmark: benchmarkProfile.id, competitor: 'opencode' }),
     /unsupported harness composition: benchmark=deep-swe-1\.1-full/,
   );
+
+  // The full profile freezes its own manifest identity: distinct order seed,
+  // auditable Pier executor metadata, the 113-task evaluation set, and a
+  // manifest fingerprint that cannot collide with the subset profile's.
+  const { buildHarnessAbManifest } = await import(
+    new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
+  );
+  const fullManifest = buildHarnessAbManifest({
+    subjectFingerprint: 'subject',
+    taskSourceFingerprint: 'tasks',
+    toolchainFingerprint: 'tools',
+    composition: resolveHarnessComposition({ benchmark: benchmarkProfile.id, competitor: 'codex' }),
+    pierVersion: '0.3.0',
+  });
+  assert.equal(
+    fullManifest.metadata.order.seed,
+    'deep-swe-1.1-full:gpt-5.6-sol:harness-comparison:v1',
+  );
+  assert.deepEqual(fullManifest.metadata.benchmark.executor, { id: 'pier', version: '0.3.0' });
+  assert.equal(fullManifest.evaluationTaskIds.length, 113);
+  const subsetManifest = buildHarnessAbManifest({
+    subjectFingerprint: 'subject',
+    taskSourceFingerprint: 'tasks',
+    toolchainFingerprint: 'tools',
+    composition: resolveHarnessComposition({ benchmark: 'deep-swe-1.1', competitor: 'codex' }),
+    pierVersion: '0.3.0',
+  });
+  assert.notEqual(fullManifest.fingerprint, subsetManifest.fingerprint);
 });
 
 test('harness A/B frozen task resolution dispatches full vs subset DeepSWE profiles', async () => {

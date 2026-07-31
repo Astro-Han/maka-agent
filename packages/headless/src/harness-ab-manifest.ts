@@ -121,7 +121,9 @@ export const TERMINAL_BENCH_2_1_TASK_IDS = [
 ] as const;
 
 // Authoritative snapshot: https://github.com/datacurve-ai/deep-swe (113 scored
-// leaderboard tasks; the repo tree at this commit carries 117 task dirs).
+// leaderboard tasks; the repo tree at this commit carries exactly those 113
+// task dirs plus 4 metadata entries: README.md, dataset.toml, manifest.json,
+// manifest.schema.json).
 export const DEEP_SWE_REVISION = '6db64a40f3318d8659238ff34a8cc4b491c49205';
 
 /** 30-task discriminative subset for DeepSWE harness A/Bs (issue #1343).
