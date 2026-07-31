@@ -108,18 +108,20 @@
   position: absolute;
   top: -2px;
   right: -2px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--space-0-5);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-pill);
   background: var(--control);
   color: var(--control-foreground);
-  font-size: var(--font-size-2xs, 0.5rem);
+  /* --font-size-caption is the smallest governed size (typography-converge
+     contract), so the pill is sized to fit it rather than the reverse. */
+  font-size: var(--font-size-caption);
   font-weight: var(--font-weight-semibold);
-  line-height: 1;
+  line-height: var(--leading-none);
   pointer-events: none;
 }
 
@@ -248,9 +250,12 @@
   background: var(--muted);
 }
 
+/* The row fills the panel's inner width, so the focus ring sits on the row
+   itself with the shared offset — a negative inset would clip against the
+   panel edge and diverges from the focus-ring recipe. */
 .maka-composer-skill-panel-option:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
-  outline-offset: calc(var(--focus-ring-offset) * -1);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .maka-composer-skill-panel-box {

@@ -25,7 +25,7 @@ test('the Skills picker writes the same chips the slash popup does', async ({
   const trigger = page.getByRole('button', { name: '技能' });
   await trigger.click();
 
-  const panel = page.getByRole('dialog', { name: '技能选择' });
+  const panel = page.getByRole('group', { name: '技能选择' });
   await expect(panel).toBeVisible();
   // Search narrows the catalog; the picker filters by name/id/description.
   await panel.getByRole('textbox', { name: '搜索技能…' }).fill('Project Only');

@@ -323,9 +323,17 @@ describe('renderer utility surfaces use shared UI primitives', () => {
       );
     }
 
+    // PR-COMPOSER-TOOLBAR-SPLIT: the ＋ menu became three named triggers.
+    // The import-pending state moved onto the standalone upload IconButton,
+    // and the modes menu keeps the governed icon-only ghost/sm trigger shape
+    // the ＋ menu used to carry.
     assert.match(
       composer,
-      /button=\{\{[\s\S]*?pendingImportAction === 'pick'[\s\S]*?isIconOnly:\s*true,[\s\S]*?variant:\s*'ghost',[\s\S]*?size:\s*'sm'/,
+      /<IconButton[\s\S]*?className="maka-composer-upload-button"[\s\S]*?pendingImportAction === 'pick'/,
+    );
+    assert.match(
+      composer,
+      /button=\{\{[\s\S]*?label:\s*copy\.modesLabel,[\s\S]*?isIconOnly:\s*true,[\s\S]*?variant:\s*'ghost',[\s\S]*?size:\s*'sm'/,
     );
     assert.match(
       composer,

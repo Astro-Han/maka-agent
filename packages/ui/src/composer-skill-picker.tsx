@@ -118,7 +118,6 @@ export function ComposerSkillPicker(props: {
         isDisabled={props.disabled}
         label={copy.label}
         tooltip={selectedCount > 0 ? copy.selectedCount(selectedCount) : copy.title}
-        aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen((value) => !value)}
@@ -132,7 +131,11 @@ export function ComposerSkillPicker(props: {
       {open ? (
         <div
           id={panelId}
-          role="dialog"
+          // A labelled group, NOT role="dialog": dialog semantics belong to
+          // the Astryx Dialog primitive that owns focus trapping, Escape and
+          // the top layer (dialog-source-contract). This is a disclosure the
+          // trigger's aria-expanded/aria-controls already describe.
+          role="group"
           aria-label={copy.panelAriaLabel}
           className="maka-composer-skill-panel z-[var(--z-overlay)] rounded-md bg-popover text-popover-foreground shadow-maka-panel"
         >
@@ -171,7 +174,7 @@ export function ComposerSkillPicker(props: {
               onChange={(event) => setQuery(event.currentTarget.value)}
             />
           </div>
-          {/* The list carries no aria-label of its own — the dialog above
+          {/* The list carries no aria-label of its own — the group above
               already names the region, and a second identical label doubles
               the announcement on entry. */}
           {visible.length === 0 ? (
