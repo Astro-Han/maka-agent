@@ -2088,7 +2088,7 @@ function AppShellContent({
           variant="elevated"
           height="fill"
           contentPadding={0}
-          mobileNav={false}
+          mobileNav={{ breakpoint: 'none', hasToggle: false }}
           sideNav={(
             <div
               className="maka-shell-sidebar-slot"
