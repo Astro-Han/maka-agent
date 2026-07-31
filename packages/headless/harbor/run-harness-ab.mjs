@@ -655,6 +655,23 @@ export function resolveHarnessAbTaskSelection(
   return { taskIds: [taskId], limit: 1 };
 }
 
+export function resolveHarnessAdjudicatedInfraRetryRoundIds(raw) {
+  if (raw === undefined) return [];
+  const roundIds = raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (roundIds.length === 0) {
+    throw new Error('MAKA_HARNESS_AB_RETRY_ADJUDICATED_INFRA_ROUND_IDS_ONCE must not be empty');
+  }
+  if (new Set(roundIds).size !== roundIds.length) {
+    throw new Error(
+      'MAKA_HARNESS_AB_RETRY_ADJUDICATED_INFRA_ROUND_IDS_ONCE must not contain duplicates',
+    );
+  }
+  return roundIds;
+}
+
 export function harnessMakaContextBudgetEnv() {
   return {
     MAKA_CONTEXT_ACTIVE_TOOL_RESULT_PRUNE: 'on',
@@ -808,6 +825,9 @@ export async function main() {
     process.env.MAKA_HARNESS_AB_ARM_EXECUTION,
     selection.taskIds.length,
   );
+  const retryAdjudicatedInfraRoundIdsOnce = resolveHarnessAdjudicatedInfraRetryRoundIds(
+    process.env.MAKA_HARNESS_AB_RETRY_ADJUDICATED_INFRA_ROUND_IDS_ONCE,
+  );
   const runRoot = resolveFixedPromptRunRoot(outDir, runId, 'MAKA_HARNESS_AB_RUN_ID');
   await withHarnessAbRunLock(runRoot, async () => {
     const journal = backgroundJournal(runRoot);
@@ -823,6 +843,7 @@ export async function main() {
         executionPolicy,
         runRoot,
         composition,
+        retryAdjudicatedInfraRoundIdsOnce,
       });
     } catch (error) {
       exitCode = 1;
@@ -849,6 +870,7 @@ async function runLocked({
   executionPolicy,
   runRoot,
   composition,
+  retryAdjudicatedInfraRoundIdsOnce,
 }) {
   const { benchmarkProfile, runtimeProfile, competitorProfile } = composition;
   const { tasks: allTasks, taskSourceFingerprint } = await resolveFrozenBenchmarkTasks(
@@ -1027,6 +1049,7 @@ async function runLocked({
         ],
         pairConcurrency: manifest.maxConcurrency,
         armExecution: manifest.metadata.execution.armExecution,
+        retryAdjudicatedInfraRoundIdsOnce,
       });
       return buildHarnessAbReport(
         summary,

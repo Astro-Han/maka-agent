@@ -110,6 +110,23 @@ test('harness A/B uses one safe execution default and accepts per-run overrides'
   );
 });
 
+test('harness A/B parses an explicit one-shot adjudicated infra retry', async () => {
+  const { resolveHarnessAdjudicatedInfraRetryRoundIds } = await import(
+    new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
+  );
+
+  assert.deepEqual(resolveHarnessAdjudicatedInfraRetryRoundIds(undefined), []);
+  assert.deepEqual(
+    resolveHarnessAdjudicatedInfraRetryRoundIds(' ab-maka-r0-winning-avg-corewars '),
+    ['ab-maka-r0-winning-avg-corewars'],
+  );
+  assert.throws(() => resolveHarnessAdjudicatedInfraRetryRoundIds(' , '), /must not be empty/);
+  assert.throws(
+    () => resolveHarnessAdjudicatedInfraRetryRoundIds('ab-maka-r0-a,ab-maka-r0-a'),
+    /must not contain duplicates/,
+  );
+});
+
 test('harness A/B selects one named task only with an explicit run identity', async () => {
   const {
     buildHarnessAbManifest,

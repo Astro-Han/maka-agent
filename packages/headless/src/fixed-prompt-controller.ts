@@ -152,6 +152,9 @@ export interface RunFixedPromptControllerInput {
   /** Refuse resume when a model attempt was durably admitted but no terminal
    * event exists, preserving single-sample benchmark semantics. */
   protectPassAtOne?: boolean;
+  /** Permit exactly one additional attempt for explicitly adjudicated terminal
+   * infra failures. The durable attempt WAL prevents a third attempt. */
+  retryAdjudicatedInfraTaskIdsOnce?: readonly string[];
   taskRunner: TaskRunner;
   now?: () => number;
   newId?: () => string;
@@ -203,6 +206,16 @@ export async function runFixedPromptController(
     input.resumeFingerprint,
     terminalInfraFailures,
   );
+  permitAdjudicatedInfraRetries({
+    taskIds: input.retryAdjudicatedInfraTaskIdsOnce ?? [],
+    tasks: input.tasks,
+    completed,
+    attemptEvents,
+    runId: input.runId,
+    roundId: input.roundId,
+    expectedPromptHash,
+    resumeFingerprint: input.resumeFingerprint,
+  });
   const orphanedAttempts = orphanedTaskAttempts(
     [...attemptEvents, ...events],
     input.runId,
@@ -324,6 +337,39 @@ export async function runFixedPromptController(
     ...(input.resultsTsvPath !== undefined ? { resultsTsvPath: input.resultsTsvPath } : {}),
     ...(stopReason ? { stopReason } : {}),
   };
+}
+
+function permitAdjudicatedInfraRetries(input: {
+  taskIds: readonly string[];
+  tasks: readonly FixedPromptTask[];
+  completed: Map<string, FixedPromptTaskWalEvent>;
+  attemptEvents: readonly FixedPromptWalEvent[];
+  runId: string;
+  roundId: string;
+  expectedPromptHash: string;
+  resumeFingerprint?: string;
+}): void {
+  assertUniqueTaskIds(input.taskIds);
+  const configuredTaskIds = new Set(input.tasks.map((task) => task.id));
+  for (const taskId of input.taskIds) {
+    if (!configuredTaskIds.has(taskId)) {
+      throw new Error(`adjudicated infra retry names unknown task ${taskId}`);
+    }
+    const terminal = input.completed.get(taskId);
+    if (terminal?.type !== 'task_infra_failed') {
+      throw new Error(`adjudicated infra retry requires a terminal infra failure for ${taskId}`);
+    }
+    const admittedAttempts = input.attemptEvents.filter(
+      (event) =>
+        event.type === 'task_attempt_started' &&
+        event.runId === input.runId &&
+        event.roundId === input.roundId &&
+        event.taskId === taskId &&
+        event.promptHash === input.expectedPromptHash &&
+        event.resumeFingerprint === input.resumeFingerprint,
+    ).length;
+    if (admittedAttempts === 1) input.completed.delete(taskId);
+  }
 }
 
 function assertUniqueTaskIds(taskIds: readonly string[]): void {

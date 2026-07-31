@@ -845,6 +845,68 @@ describe('fixed prompt controller', () => {
     });
   });
 
+  test('permits one explicitly adjudicated infra retry without allowing a third attempt', async () => {
+    await withDir(async (dir) => {
+      const systemPromptPath = join(dir, 'system_prompt.md');
+      const resultsJsonlPath = join(dir, 'results.jsonl');
+      await writeFile(systemPromptPath, 'fixed prompt\n', 'utf8');
+      await appendFixedPromptWalEvent(`${resultsJsonlPath}.attempts.jsonl`, {
+        schemaVersion: 1,
+        type: 'task_attempt_started',
+        id: 'attempt-1',
+        ts: 1,
+        runId: 'run-1',
+        roundId: 'round-1',
+        taskId: 'task-a',
+        promptHash: hashSystemPrompt('fixed prompt\n'),
+      });
+      await appendFixedPromptWalEvent(resultsJsonlPath, {
+        schemaVersion: 1,
+        type: 'task_infra_failed',
+        id: 'infra-1',
+        ts: 2,
+        runId: 'run-1',
+        roundId: 'round-1',
+        taskId: 'task-a',
+        status: 'infra_failed',
+        passed: false,
+        scored: false,
+        eligible: false,
+        errorClass: 'infra_error',
+        error: 'adjudicated pre-execution failure',
+      });
+      let harborCalls = 0;
+      const input = {
+        runId: 'run-1',
+        roundId: 'round-1',
+        config,
+        systemPromptPath,
+        resultsJsonlPath,
+        tasks: [{ id: 'task-a', path: '/bench/task-a' }],
+        infraFailurePolicy: 'terminal' as const,
+        protectPassAtOne: true,
+        retryAdjudicatedInfraTaskIdsOnce: ['task-a'],
+        taskRunner: async () => {
+          harborCalls += 1;
+          throw new Error('provider failed before the agent started again');
+        },
+        now: () => 100,
+        newId: idFactory(),
+      };
+
+      const retried = await runFixedPromptController(input);
+      assert.equal(harborCalls, 1);
+      assert.equal(retried.events.at(-1)?.type, 'task_infra_failed');
+
+      await runFixedPromptController(input);
+      assert.equal(harborCalls, 1);
+      assert.equal(
+        (await readFile(`${resultsJsonlPath}.attempts.jsonl`, 'utf8')).trim().split('\n').length,
+        2,
+      );
+    });
+  });
+
   test('retries a thrown infra error once and records the successful retry', async () => {
     await withDir(async (dir) => {
       const systemPromptPath = join(dir, 'system_prompt.md');
