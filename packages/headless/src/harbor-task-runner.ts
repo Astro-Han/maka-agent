@@ -1609,7 +1609,7 @@ export function modelIdForProvider(model: string, provider: string): string {
   return model.startsWith(prefix) ? model.slice(prefix.length) : model;
 }
 
-function modelForOpenCode(model: string, provider: string): string {
+export function modelForOpenCode(model: string, provider: string): string {
   return model.includes('/') ? model : `${provider}/${model}`;
 }
 

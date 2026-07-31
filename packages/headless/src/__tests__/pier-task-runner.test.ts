@@ -1503,7 +1503,12 @@ test('createPierTaskRunner wires the OpenCode arm through the host proxy with th
     assert.ok((captured.envFile?.MAKA_PROVIDER_PROXY_TOKEN ?? '').length >= 32);
     const args = captured.request?.args ?? [];
     assert.ok(!args.includes('--agent-timeout-multiplier'));
-    // The pinned-toolchain fingerprint and the reasoning variant ride --ae.
+    // The adapter requires provider/model format (it splits on "/"), unlike
+    // the other arms which take the provider-local bare id.
+    assert.ok(args.includes('deepseek/deepseek-v4-flash'));
+    // The pinned version rides --ak so trial provenance records it; the
+    // toolchain fingerprint and reasoning variant ride --ae.
+    assert.ok(args.includes(`version=${OPENCODE_TOOLCHAIN_SPEC.opencode.version}`));
     assert.ok(
       args.includes(`MAKA_OPENCODE_TOOLCHAIN_FINGERPRINT=${OPENCODE_TOOLCHAIN_FINGERPRINT}`),
     );

@@ -32,6 +32,7 @@ import {
   readTrialException,
   resolveNativeTrialTimeoutMs,
   withProviderTelemetryArtifact,
+  modelForOpenCode,
   type HarborTaskPricing,
 } from './harbor-task-runner.js';
 import { lenientPositiveIntEnv } from './headless-run-env.js';
@@ -358,10 +359,13 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
           if (usesEnvFile) await writeEnvFile(envFilePath, envFileEntries);
           const args = buildPierRunArgs({
             agent,
-            // Provider-local bare id (same normalization contract as the Harbor
-            // runner): the adapter's model_name takes precedence over MAKA_MODEL, so
-            // a provider-prefixed `-m` would leak the prefixed id into the cell.
-            model: modelIdForProvider(options.model, options.provider ?? 'deepseek'),
+            // Provider-local bare id for the Maka/Kimi/Codex arms (same
+            // normalization contract as the Harbor runner); OpenCode instead
+            // requires the provider/model form its adapter splits on.
+            model:
+              agent === 'opencode'
+                ? modelForOpenCode(options.model, options.provider ?? 'deepseek')
+                : modelIdForProvider(options.model, options.provider ?? 'deepseek'),
             taskPath: input.task.path,
             jobsDir,
             jobName,
@@ -388,7 +392,14 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
                       : {}),
                   },
                 }
-              : {}),
+              : agent === 'opencode'
+                ? {
+                    // OpenCode pins its CLI build the same way so trial
+                    // provenance records the fingerprinted version instead of
+                    // 'unknown'; its reasoning variant rides --ae instead.
+                    agentKwargs: { version: options.agentVersion! },
+                  }
+                : {}),
           });
           return await runPier({
             pierBin,

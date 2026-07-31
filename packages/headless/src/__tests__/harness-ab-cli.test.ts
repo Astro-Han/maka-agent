@@ -1082,6 +1082,20 @@ test('harness A/B CLI rejects modified task contents before reading credentials'
   }
 });
 
+test('harness A/B forwards an explicit host-proxy advertised host for native-Linux Pier runs', async () => {
+  const { resolveHarnessProviderProxyHubOptions } = await import(
+    new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
+  );
+  // Native Linux Docker injects no host.docker.internal; the VM operator
+  // names the docker-bridge-reachable host address explicitly.
+  assert.deepEqual(resolveHarnessProviderProxyHubOptions('172.17.0.1'), {
+    providerProxyAdvertisedHost: '172.17.0.1',
+  });
+  // Unset or blank keeps the hub default (host.docker.internal).
+  assert.deepEqual(resolveHarnessProviderProxyHubOptions(undefined), {});
+  assert.deepEqual(resolveHarnessProviderProxyHubOptions('   '), {});
+});
+
 test('harness A/B supports the DeepSeek-metered OpenCode composition on full DeepSWE', async () => {
   const { resolveHarnessAbRunId, resolveHarnessComposition } = await import(
     new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
