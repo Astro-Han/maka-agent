@@ -1023,6 +1023,83 @@ test('harness A/B CLI rejects modified task contents before reading credentials'
   }
 });
 
+test('harness A/B resolves the full DeepSWE benchmark as a sibling profile', async () => {
+  const {
+    resolveHarnessAbRunId,
+    resolveHarnessAbTaskSelection,
+    resolveHarnessBenchmarkProfile,
+    resolveHarnessComposition,
+  } = await import(new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href);
+  const benchmarkProfile = resolveHarnessBenchmarkProfile('deep-swe-1.1-full');
+
+  // Same frozen task source and Pier executor as the subset profile; the
+  // frozen task list is the whole 113-task leaderboard set, not the 30-task
+  // discriminative subset.
+  assert.equal(benchmarkProfile.executor, 'pier');
+  assert.equal(benchmarkProfile.dataset, 'deep-swe');
+  assert.equal(benchmarkProfile.version, '1.1');
+  assert.equal(benchmarkProfile.taskIds.length, 113);
+
+  const selection = resolveHarnessAbTaskSelection(undefined, '113', undefined, benchmarkProfile);
+  assert.equal(selection.taskIds.length, 113);
+  assert.throws(
+    () => resolveHarnessAbTaskSelection(undefined, '30', undefined, benchmarkProfile),
+    /MAKA_HARNESS_AB_LIMIT must be 5 or 113/,
+  );
+  assert.throws(
+    () =>
+      resolveHarnessAbTaskSelection(
+        'extract-moves-from-video',
+        undefined,
+        undefined,
+        benchmarkProfile,
+      ),
+    /MAKA_HARNESS_AB_TASK_ID must name a DeepSWE full-113 task/,
+  );
+
+  assert.equal(
+    resolveHarnessAbRunId(resolveHarnessComposition({ benchmark: benchmarkProfile.id })),
+    'k3-maka-vs-kimi-code-deepswe-full-v1',
+  );
+  assert.equal(
+    resolveHarnessAbRunId(
+      resolveHarnessComposition({ benchmark: benchmarkProfile.id, competitor: 'codex' }),
+    ),
+    'gpt-5.6-sol-maka-vs-codex-oauth-deepswe-full-v1',
+  );
+  assert.throws(
+    () => resolveHarnessComposition({ benchmark: benchmarkProfile.id, competitor: 'opencode' }),
+    /unsupported harness composition: benchmark=deep-swe-1\.1-full/,
+  );
+});
+
+test('harness A/B frozen task resolution dispatches full vs subset DeepSWE profiles', async () => {
+  const { resolveFrozenBenchmarkTasks, resolveHarnessBenchmarkProfile } = await import(
+    new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
+  );
+  const dir = await mkdtemp(join(tmpdir(), 'maka-harness-ab-deepswe-dispatch-'));
+  try {
+    const tasksRoot = join(dir, 'tasks');
+    await mkdir(join(tasksRoot, 'fixture-task'), { recursive: true });
+    await writeFile(join(tasksRoot, 'fixture-task', 'task.toml'), '[agent]\ntimeout_sec = 900\n');
+
+    // The full profile asserts the whole tree against the 113-task leaderboard
+    // set — a partial tree is a set mismatch, not a subset pick.
+    await assert.rejects(
+      resolveFrozenBenchmarkTasks(resolveHarnessBenchmarkProfile('deep-swe-1.1-full'), tasksRoot),
+      /DeepSWE full-113 task set mismatch/,
+    );
+    // The subset profile keeps picking its 30 ids out of the same tree and
+    // fails loudly when none of them are present.
+    await assert.rejects(
+      resolveFrozenBenchmarkTasks(resolveHarnessBenchmarkProfile('deep-swe-1.1'), tasksRoot),
+      /DeepSWE subset-30 contains unknown task id/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('harness A/B resolves the DeepSWE benchmark axis orthogonally to competitors', async () => {
   const {
     buildHarnessAbManifest,

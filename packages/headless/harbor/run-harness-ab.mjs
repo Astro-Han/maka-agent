@@ -47,11 +47,14 @@ import {
 import { MAKA_NODE_TOOLCHAIN_FINGERPRINT, prepareMakaNodeToolchain } from '#maka-node-toolchain';
 import { createCodexOAuthHarnessCredentialBinding } from '#codex-oauth-harness';
 import {
+  assertDeepSweFullTaskSet,
+  assertDeepSweFullTaskTreeFingerprint,
   assertDeepSweSubset30TaskTreeFingerprint,
   assertTerminalBench21TaskSet,
   assertTerminalBench21TaskTreeFingerprint,
   buildHarnessAbResumeFingerprint,
   buildHarnessAbRunManifest,
+  DEEP_SWE_FULL_TASK_IDS,
   DEEP_SWE_REVISION,
   DEEP_SWE_SUBSET_30_TASK_IDS,
   HARNESS_MAKA_CONTEXT_BUDGET,
@@ -131,6 +134,17 @@ export const HARNESS_BENCHMARK_PROFILES = Object.freeze({
     runIdSlug: 'deepswe-subset30',
     oracle: false,
   }),
+  'deep-swe-1.1-full': Object.freeze({
+    id: 'deep-swe-1.1-full',
+    label: 'DeepSWE full-113',
+    dataset: 'deep-swe',
+    version: '1.1',
+    revision: DEEP_SWE_REVISION,
+    taskIds: DEEP_SWE_FULL_TASK_IDS,
+    executor: 'pier',
+    runIdSlug: 'deepswe-full',
+    oracle: false,
+  }),
 });
 
 export function resolveHarnessBenchmarkProfile(
@@ -157,6 +171,14 @@ export function defaultHarnessBenchmarkTasksRoot(benchmarkProfile) {
 export async function resolveFrozenBenchmarkTasks(benchmarkProfile, tasksRoot) {
   const discovered = await discoverCachedHarborTasks(tasksRoot);
   if (benchmarkProfile.dataset === 'deep-swe') {
+    if (benchmarkProfile.id === 'deep-swe-1.1-full') {
+      // The full profile compares the whole pinned tree: assert the exact
+      // 113-task leaderboard set and fingerprint every discovered task dir.
+      assertDeepSweFullTaskSet(discovered.map((task) => task.id));
+      const fullTreeFingerprint = await fingerprintFixedPromptTaskTree(discovered);
+      assertDeepSweFullTaskTreeFingerprint(fullTreeFingerprint);
+      return { tasks: discovered, taskSourceFingerprint: fullTreeFingerprint };
+    }
     // The DeepSWE repo tree carries more tasks than the frozen subset; pick
     // the subset (loud on any missing id) instead of asserting the whole tree.
     const tasks = selectTasksByIds(discovered, benchmarkProfile.taskIds, {
@@ -309,6 +331,8 @@ const SUPPORTED_HARNESS_COMPOSITIONS = new Set([
   'terminal-bench-2.1|openai-codex-gpt-5.6-sol-xhigh|codex',
   'deep-swe-1.1|kimi-coding-plan-k3-max|kimi-code',
   'deep-swe-1.1|openai-codex-gpt-5.6-sol-xhigh|codex',
+  'deep-swe-1.1-full|kimi-coding-plan-k3-max|kimi-code',
+  'deep-swe-1.1-full|openai-codex-gpt-5.6-sol-xhigh|codex',
 ]);
 const RESOLVED_HARNESS_COMPOSITIONS = new WeakSet();
 
