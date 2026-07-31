@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { ensureAbRunManifest, readAbRunManifest } from '#ab-manifest';
+import { buildRunManifestFingerprint, ensureAbRunManifest, readAbRunManifest } from '#ab-manifest';
 import {
   discoverCachedHarborTasks,
   fingerprintFixedPromptTaskTree,
@@ -794,6 +794,57 @@ export function buildHarnessAbManifest({
   });
 }
 
+export async function resolveHarnessAbManifestForRun({
+  manifestPath,
+  proposedManifest,
+  retryRoundIds,
+  expectedExistingFingerprint,
+}) {
+  if (!expectedExistingFingerprint) {
+    return ensureAbRunManifest(manifestPath, proposedManifest);
+  }
+  if (retryRoundIds.length === 0) {
+    throw new Error(
+      'MAKA_HARNESS_AB_EXPECTED_EXISTING_MANIFEST_FINGERPRINT requires an explicit adjudicated infra retry',
+    );
+  }
+  const existing = await readAbRunManifest(manifestPath);
+  if (!existing) {
+    throw new Error('explicit adjudicated infra retry requires an existing run manifest');
+  }
+  if (existing.fingerprint !== expectedExistingFingerprint) {
+    throw new Error(
+      `existing run manifest fingerprint does not match MAKA_HARNESS_AB_EXPECTED_EXISTING_MANIFEST_FINGERPRINT: expected ${expectedExistingFingerprint}, found ${existing.fingerprint}`,
+    );
+  }
+  const frozenMakaArm = existing.arms.find((arm) => arm.id === 'maka');
+  if (!frozenMakaArm) throw new Error('existing run manifest is missing the Maka arm');
+  const { fingerprint: _proposedFingerprint, ...proposedBody } = proposedManifest;
+  const normalizedBody = {
+    ...proposedBody,
+    subjectFingerprint: existing.subjectFingerprint,
+    toolchainFingerprint: existing.toolchainFingerprint,
+    arms: proposedBody.arms.map((arm) =>
+      arm.id === 'maka'
+        ? {
+            ...arm,
+            fingerprint: frozenMakaArm.fingerprint,
+            metadata: {
+              ...arm.metadata,
+              version: frozenMakaArm.metadata.version,
+            },
+          }
+        : arm,
+    ),
+  };
+  if (buildRunManifestFingerprint(normalizedBody) !== existing.fingerprint) {
+    throw new Error(
+      'adjudicated infra retry manifest differs beyond the frozen subject and toolchain identity',
+    );
+  }
+  return existing;
+}
+
 export async function main() {
   const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
   const makaRepoPath = process.env.MAKA_HARNESS_AB_MAKA_REPO
@@ -934,7 +985,7 @@ async function runLocked({
     makaNodeToolchainFingerprint:
       benchmarkProfile.executor === 'pier' ? MAKA_NODE_TOOLCHAIN_FINGERPRINT : null,
   });
-  const manifest = buildHarnessAbManifest({
+  const proposedManifest = buildHarnessAbManifest({
     subjectFingerprint,
     taskSourceFingerprint,
     toolchainFingerprint,
@@ -946,7 +997,12 @@ async function runLocked({
     credentialIdentity: credentials.credentialIdentity,
     pierVersion,
   });
-  await ensureAbRunManifest(manifestPath, manifest);
+  const manifest = await resolveHarnessAbManifestForRun({
+    manifestPath,
+    proposedManifest,
+    retryRoundIds: retryAdjudicatedInfraRoundIdsOnce,
+    expectedExistingFingerprint: process.env.MAKA_HARNESS_AB_EXPECTED_EXISTING_MANIFEST_FINGERPRINT,
+  });
   const evaluationTasks = manifest.evaluationTaskIds
     .slice(0, selection.limit)
     .map((taskId) => tasksById.get(taskId));
