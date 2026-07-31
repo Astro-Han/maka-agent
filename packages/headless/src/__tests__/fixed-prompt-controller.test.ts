@@ -2781,6 +2781,42 @@ describe('fixed prompt controller', () => {
     });
   });
 
+  test('accepts a prompt hash attested by execution identity without the legacy field', async () => {
+    await withDir(async (dir) => {
+      const systemPromptPath = join(dir, 'system_prompt.md');
+      const promptHash = hashSystemPrompt('fixed prompt\n');
+      await writeFile(systemPromptPath, 'fixed prompt\n', 'utf8');
+
+      const result = await runFixedPromptController({
+        runId: 'run-1',
+        roundId: 'round-1',
+        config,
+        systemPromptPath,
+        resultsJsonlPath: join(dir, 'results.jsonl'),
+        resultsTsvPath: join(dir, 'results.tsv'),
+        tasks: [{ id: 'task-a', path: '/bench/task-a' }],
+        requireExecutionIdentity: true,
+        expectedPricingProfile: 'test-profile',
+        taskRunner: async () =>
+          harborOutput({
+            taskId: 'task-a',
+            omitPromptHash: true,
+            executionIdentity: {
+              llmConnectionSlug: 'fake',
+              model: 'fake-model',
+              systemPromptHash: promptHash,
+              pricingProfile: 'test-profile',
+            },
+          }),
+        now: () => 100,
+        newId: idFactory(),
+      });
+
+      assert.equal(result.events[0]?.type, 'task_completed');
+      assert.equal(result.events[0]?.promptHash, promptHash);
+    });
+  });
+
   test('resumes a legacy terminal whose prompt hash is attested by execution identity', async () => {
     await withDir(async (dir) => {
       const systemPromptPath = join(dir, 'system_prompt.md');

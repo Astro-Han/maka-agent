@@ -653,7 +653,7 @@ function taskCompletedEvent(input: {
   ts: number;
 }): FixedPromptTaskCompletedEvent {
   const { output } = input;
-  const promptHash = output.cell.promptHash ?? output.cell.executionIdentity?.systemPromptHash;
+  const promptHash = attestedPromptHash(output.cell);
   const deadlineSettled = output.cell.deadlineSettlement?.source === 'benchmark.deadline';
   const verifierGrade = structuredVerifierGrade(output.harbor);
   const verifierGraded =
@@ -814,16 +814,17 @@ function classifyPlumbingFailure(
     expectedPricingProfile,
   );
   if (identityFailure) return identityFailure;
-  if (output.cell.status === 'completed' && output.cell.promptHash === undefined) {
+  const promptHash = attestedPromptHash(output.cell);
+  if (output.cell.status === 'completed' && promptHash === undefined) {
     return {
       errorClass: 'missing_prompt_hash',
       error: `Harbor cell did not report prompt hash ${expectedPromptHash}`,
     };
   }
-  if (output.cell.promptHash !== undefined && output.cell.promptHash !== expectedPromptHash) {
+  if (promptHash !== undefined && promptHash !== expectedPromptHash) {
     return {
       errorClass: 'prompt_hash_mismatch',
-      error: `Harbor cell prompt hash ${output.cell.promptHash} did not match ${expectedPromptHash}`,
+      error: `Harbor cell prompt hash ${promptHash} did not match ${expectedPromptHash}`,
     };
   }
   if (requireFinalUsage && output.cell.tokenSummary === undefined) {
@@ -844,6 +845,10 @@ function classifyPlumbingFailure(
     };
   }
   return undefined;
+}
+
+function attestedPromptHash(cell: TaskRunOutput['cell']): string | undefined {
+  return cell.promptHash ?? cell.executionIdentity?.systemPromptHash;
 }
 
 function classifyExecutionIdentityFailure(
