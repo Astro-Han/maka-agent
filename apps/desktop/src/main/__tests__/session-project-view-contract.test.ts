@@ -131,7 +131,7 @@ describe('sidebar project view mode', () => {
     });
 
     assert.match(markup, />Active project</);
-    assert.match(markup, /maka-list-project-count[^>]*>1</);
+    assert.match(markup, /maka-project-tree-count[^>]*>1</);
     assert.match(markup, />Missing project</);
     assert.match(markup, /aria-label="Active project 项目操作"/);
     assert.match(markup, /aria-label="Missing project 项目操作"/);
@@ -146,7 +146,7 @@ describe('sidebar project view mode', () => {
     assert.match(list, /copy\.projectRestore/);
   });
 
-  it('keeps collapsed project rows on the same vertical rhythm as conversation rows', async () => {
+  it('renders empty projects on the native balanced Astryx tree rhythm', () => {
     const projects = [
       project('project-a', 'Project A', [{ path: '/work/a', isWorktree: false }]),
       project('project-b', 'Project B', [{ path: '/work/b', isWorktree: false }]),
@@ -156,34 +156,10 @@ describe('sidebar project view mode', () => {
       groups: deriveProjectGroups([], projects, 'zh'),
       viewMode: 'project',
     });
-    const css = await readRepo('apps/desktop/src/renderer/styles/sidebar.css');
-
-    assert.equal(
-      (markup.match(/data-variant="project" data-expanded="false"/g) ?? []).length,
-      2,
-      'empty project groups should expose their collapsed state to the layout',
-    );
-    assert.match(
-      ruleBody(
-        css,
-        '.maka-list-group[data-variant="project"] + .maka-list-group[data-variant="project"]',
-      ),
-      /margin-top:\s*0/,
-      'adjacent collapsed projects should not add spacing beyond the list stack gap',
-    );
-    assert.match(
-      ruleBody(
-        css,
-        '.maka-list-group[data-variant="project"][data-expanded="true"] + .maka-list-group[data-variant="project"]',
-      ),
-      /margin-top:\s*var\(--space-3\)/,
-      'an expanded project may keep a group break before the next project',
-    );
-    assert.match(
-      ruleBody(css, '.maka-list-project-heading'),
-      /min-height:\s*var\(--h-control-lg\)/,
-    );
-    assert.match(ruleBody(css, '.maka-list-row'), /min-height:\s*var\(--h-control-lg\)/);
+    assert.match(markup, /class="[^"]*astryx-tree-list[^"]*balanced[^"]*"/);
+    assert.match(markup, /role="tree"/);
+    assert.equal((markup.match(/role="treeitem"/g) ?? []).length, 2);
+    assert.doesNotMatch(markup, /maka-list-project-heading|maka-list-row/);
   });
 
   it('renders project groups, the unassigned bucket, and keeps the conversation fallback path', () => {
@@ -290,7 +266,7 @@ describe('sidebar project view mode', () => {
     );
   });
 
-  it('renders project groups as folder headers with an initial four-session preview', () => {
+  it('renders every project session through the native expanded tree branch', () => {
     const sessions = Array.from({ length: 5 }, (_, index) => makeSessionSummary({
       id: `project-session-${index + 1}`,
       name: `Project chat ${index + 1}`,
@@ -309,34 +285,21 @@ describe('sidebar project view mode', () => {
       viewMode: 'project',
     });
 
-    // The heading is a UiButton (Base UI <button>); BaseButton reorders props
-    // so class is not guaranteed to precede aria-*. Assert the disclosure
-    // contract on the matched opening tag without assuming attribute order.
-    const headingTag = markup.match(/<button[^>]*maka-list-project-heading[^>]*>/)?.[0];
-    assert.ok(headingTag, 'project heading button must render');
-    assert.match(headingTag, /aria-expanded="true"/);
-    assert.match(headingTag, /aria-controls="maka-list-group-body-project:[^"]+"/);
+    const projectItem = markup.match(/<li(?=[^>]*data-tree-id="project:project-testzcode")[^>]*>/)?.[0];
+    assert.ok(projectItem, 'project tree item must render');
+    assert.match(projectItem, /aria-expanded="true"/);
     assert.match(markup, /lucide-folder-open/);
     assert.match(markup, />testzcode</);
     assert.match(markup, /Project chat 1/);
     assert.match(markup, /Project chat 4/);
-    assert.doesNotMatch(markup, /Project chat 5/);
-    assert.match(markup, /显示更多/);
+    assert.match(markup, /Project chat 5/);
+    assert.doesNotMatch(markup, /显示更多/);
   });
 
-  it('does not reopen a manually collapsed project when only session data refreshes', async () => {
+  it('delegates expansion persistence to Astryx TreeList instead of syncing active routes', async () => {
     const list = await readRepo('packages/ui/src/session-history-list.tsx');
-    const projectGroup =
-      list.match(
-        /function ProjectSessionGroup\([\s\S]*?\nfunction SessionTreeRow/,
-      )?.[0] ?? '';
-
-    assert.doesNotMatch(
-      projectGroup,
-      /useEffect\(\(\) => \{[\s\S]*setExpanded\(true\)[\s\S]*props\.sessions/,
-    );
-    assert.match(projectGroup, /observedActiveSessionId/);
-    assert.match(projectGroup, /activeSessionId !== disclosure\.observedActiveSessionId/);
+    assert.match(list, /<TreeList[\s\S]*density="balanced"[\s\S]*variant="lineGuides"/);
+    assert.doesNotMatch(list, /setDisclosure|observedActiveSessionId/);
   });
 
   it('renders linked child sessions directly beneath their parent as normal selectable rows', () => {
@@ -517,20 +480,17 @@ describe('sidebar project view mode', () => {
     assert.ok(groups.some((g) => g.label === 'repo-a'), 'expected a repo-a label');
     assert.ok(groups.some((g) => g.label === 'x'), 'expected an x label');
 
-    // Rendered markup: group body ids and aria-controls stay whitespace-free and pair up.
+    // Rendered markup: Astryx TreeList receives the same stable project identity.
     const markup = renderSessionListPanel({
       sessions,
       groups,
       viewMode: 'project',
     });
-    const bodyIds = [...markup.matchAll(/id="maka-list-group-body-([^"]*)"/g)].map((m) => m[1]);
-    const controls = [...markup.matchAll(/aria-controls="maka-list-group-body-([^"]*)"/g)].map((m) => m[1]);
-    assert.ok(bodyIds.length >= 3, `expected at least 3 group body ids, got ${bodyIds.length}`);
-    for (const id of [...bodyIds, ...controls]) {
-      assert.match(id, /^[A-Za-z0-9:_-]+$/, `rendered group id must be DOM-safe, got: ${id}`);
-    }
-    for (const control of controls) {
-      assert.ok(bodyIds.includes(control), `aria-controls references a missing body id: ${control}`);
+    const treeIds = [...markup.matchAll(/data-tree-id="(project:[^"]*)"/g)].map((m) => m[1]);
+    assert.equal(treeIds.length, 3);
+    assert.equal(new Set(treeIds).size, treeIds.length);
+    for (const id of treeIds) {
+      assert.match(id, /^[A-Za-z0-9:_-]+$/, `rendered tree id must be DOM-safe, got: ${id}`);
     }
   });
 });

@@ -31,13 +31,14 @@ test('session grouping menu switches between flat conversations and project disc
   const popup = page.getByRole('menu', { name: '会话分组方式' });
 
   await expect(sidebar.locator('.maka-list-group-label')).toHaveCount(0);
-  await expect(sidebar.locator('.maka-list-row').first()).toBeVisible();
+  await expect(sidebar.locator('.maka-session-list-item').first()).toBeVisible();
   await grouping.click();
   const byTime = page.getByRole('menuitemradio', { name: '按时间' });
   const byProject = page.getByRole('menuitemradio', { name: '按项目' });
   await expect(byTime).toHaveAttribute('aria-checked', 'true');
   await byProject.click();
-  await expect(sidebar.locator('.maka-list-project-heading').first()).toBeVisible();
+  await expect(sidebar.getByRole('tree')).toBeVisible();
+  await expect(sidebar.getByRole('treeitem').first()).toBeVisible();
 
   // A radio item does not dismiss the menu, so the single trigger click this
   // used to do was closing the menu, not reopening it — and the radios below
@@ -69,9 +70,8 @@ test('session delete intent opens only after its menu closes and restores the tr
   sidebarLongSessionsWindow: page,
 }) => {
   const sidebar = await expandedSidebar(page);
-  const row = sidebar.locator('.maka-list-row').filter({ hasText: '会话 00' }).first();
-  const rowButton = row.locator('[data-session-id]').first();
-  await rowButton.focus();
+  const row = sidebar.locator('.maka-session-list-item').filter({ hasText: '会话 00' }).first();
+  await row.getByRole('button').first().focus();
 
   const trigger = row.getByRole('button', { name: '对话操作' });
   await trigger.press('Enter');
@@ -86,6 +86,31 @@ test('session delete intent opens only after its menu closes and restores the tr
   await page.keyboard.press('Escape');
   await expect(confirm).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test('session rename keeps text-navigation keys inside the native tree item input', async ({
+  sidebarLongSessionsWindow: page,
+}) => {
+  const sidebar = await expandedSidebar(page);
+  await sidebar.getByRole('button', { name: '会话分组方式' }).click();
+  await page.getByRole('menuitemradio', { name: '按项目' }).click();
+
+  const tree = sidebar.getByRole('tree');
+  const initialRow = tree
+    .getByRole('button', { name: '会话 00', exact: true })
+    .locator('xpath=ancestor::li[@role="treeitem"][1]');
+  const treeId = await initialRow.getAttribute('data-tree-id');
+  if (!treeId) throw new Error('Expected the session tree item to expose its native tree id');
+  const row = tree.locator(`[role="treeitem"][data-tree-id="${treeId}"]`);
+  await row.getByRole('button', { name: '对话操作' }).click();
+  await page.getByRole('menuitem', { name: '重命名', exact: true }).click();
+
+  const input = row.getByRole('textbox', { name: '重命名对话' });
+  await expect(input).toBeFocused();
+  for (const key of ['Home', 'End', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) {
+    await input.press(key);
+    await expect(input).toBeFocused();
+  }
 });
 
 test('session heading stays singular and the default list has no redundant heading', async ({

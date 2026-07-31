@@ -161,7 +161,7 @@ test('sidebar list scrolls independently and keeps the footer in view with 60 se
   // handful of baseline chat sessions; their exact count is not this
   // contract's concern — the 60-row pin alone proves the overflow
   // precondition the geometry assertions depend on.
-  await expect(page.locator('.maka-list-row-main[title^="会话 "]')).toHaveCount(60);
+  await expect(page.locator('.maka-session-item-label').filter({ hasText: /^会话 \d{2}$/ })).toHaveCount(60);
 
   // The list scroller and the chat scroller are distinct elements.
   await expect(page.locator(LIST_VIEWPORT)).toHaveCount(1);

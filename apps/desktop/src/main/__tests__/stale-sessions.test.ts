@@ -122,13 +122,13 @@ describe('stale session CSS contract (@kenji review gate)', () => {
     // Inactive stale dimming rule must exist.
     assert.match(
       css,
-      /\.maka-list-row\[data-stale="true"\]\s*\{[\s\S]*?opacity:\s*var\(--opacity-muted\)/,
-      'expected `.maka-list-row[data-stale="true"]` opacity dim rule (var(--opacity-muted) per PR2)',
+      /\.maka-session-list-item\[data-stale="true"\]\s*\{[\s\S]*?opacity:\s*var\(--opacity-muted\)/,
+      'expected the Astryx session list item stale-state dim rule',
     );
     // Active stale restoration rule must exist.
     assert.match(
       css,
-      /\.maka-list-row\[data-stale="true"\]\[data-active="true"\]\s*\{[\s\S]*?opacity:\s*1/,
+      /\.maka-session-list-item\[data-stale="true"\]\[aria-current="true"\][\s\S]*?\{[\s\S]*?opacity:\s*1/,
       'expected active-stale opacity restore rule',
     );
   });

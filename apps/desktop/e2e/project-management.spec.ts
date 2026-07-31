@@ -28,5 +28,5 @@ test('project picker keeps fixed actions outside the scroll region and can creat
   const sidebar = page.locator('.maka-session-panel');
   await sidebar.getByRole('button', { name: '会话分组方式' }).click();
   await page.getByRole('menuitemradio', { name: '按项目' }).click();
-  await expect(sidebar.locator('.maka-list-project-heading').filter({ hasText: '未归属项目' })).toBeVisible();
+  await expect(sidebar.getByRole('treeitem').filter({ hasText: '未归属项目' }).last()).toBeVisible();
 });

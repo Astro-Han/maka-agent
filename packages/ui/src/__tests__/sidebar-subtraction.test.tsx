@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { PlanReminder, SessionSummary } from '@maka/core';
+import type { PlanReminder, ProjectRecord, SessionSummary } from '@maka/core';
 import { LocaleProvider } from '../locale-context.js';
 import { ModuleHubSelector } from '../module-hub-selector.js';
 import { SessionListPanel } from '../session-list-panel.js';
@@ -208,5 +208,87 @@ describe('sidebar subtraction', () => {
     assert.ok(markup.indexOf('最近置顶') < markup.indexOf('较早置顶'));
     assert.ok(markup.indexOf('最近会话') < markup.indexOf('较早会话'));
     assert.doesNotMatch(markup, /maka-list-group-toggle|maka-list-group-count/);
+  });
+
+  it('renders the time-grouped conversation history as an Astryx list', () => {
+    const session: SessionSummary = {
+      id: 'session-1',
+      name: '整理 Storybook 表面覆盖',
+      status: 'active',
+      isFlagged: false,
+      isArchived: false,
+      labels: [],
+      hasUnread: false,
+      lastMessageAt: 1,
+      backend: 'ai-sdk',
+      llmConnectionSlug: 'anthropic-main',
+      connectionLocked: false,
+      model: 'claude-sonnet-4-5',
+      permissionMode: 'ask',
+    };
+    const markup = renderToStaticMarkup(
+      <LocaleProvider locale="zh">
+        <SessionListPanel
+          selection={{ section: 'sessions', filter: 'chats' }}
+          sessions={[session]}
+          viewMode="conversation"
+          onViewModeChange={() => {}}
+          onSelectSession={() => {}}
+          onSelect={() => {}}
+          onOpenSettings={() => {}}
+          onNew={() => {}}
+        />
+      </LocaleProvider>,
+    );
+
+    assert.match(markup, /class="[^"]*astryx-list[^"]*"/);
+    assert.match(markup, /role="list"/);
+    assert.doesNotMatch(markup, /maka-list-row/);
+  });
+
+  it('renders project navigation as the native balanced Astryx tree with line guides', () => {
+    const project: ProjectRecord = {
+      id: 'project-1',
+      name: 'Maka Agent',
+      locations: [{ path: '/workspace/maka-agent', isWorktree: false }],
+      available: true,
+    };
+    const session: SessionSummary = {
+      id: 'session-1',
+      name: '迁移 Shell 导航',
+      status: 'active',
+      isFlagged: false,
+      isArchived: false,
+      labels: [],
+      hasUnread: false,
+      lastMessageAt: 1,
+      backend: 'ai-sdk',
+      llmConnectionSlug: 'anthropic-main',
+      connectionLocked: false,
+      model: 'claude-sonnet-4-5',
+      permissionMode: 'ask',
+    };
+    const markup = renderToStaticMarkup(
+      <LocaleProvider locale="zh">
+        <SessionListPanel
+          selection={{ section: 'sessions', filter: 'chats' }}
+          sessions={[session]}
+          groups={[{ id: project.id, label: project.name, project, sessions: [session] }]}
+          viewMode="project"
+          onViewModeChange={() => {}}
+          onSelectSession={() => {}}
+          onSelect={() => {}}
+          onOpenSettings={() => {}}
+          onNew={() => {}}
+        />
+      </LocaleProvider>,
+    );
+
+    assert.match(markup, /class="[^"]*astryx-tree-list[^"]*balanced[^"]*"/);
+    assert.match(markup, /role="tree"/);
+    assert.match(markup, /role="treeitem"/);
+    assert.match(markup, /data-tree-level="1"/);
+    assert.match(markup, /data-tree-level="2"/);
+    assert.doesNotMatch(markup, /maka-list-project-header/);
   });
 });

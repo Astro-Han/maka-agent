@@ -82,7 +82,7 @@ html[data-os="darwin"] .maka-list-group-label {
    foreground @ full alpha; nav rows / list rows / settings button all
    inherit. */
 html[data-os="darwin"] .maka-session-list,
-  html[data-os="darwin"] .maka-list-row {
+  html[data-os="darwin"] .maka-session-list-item {
     color: var(--foreground);
   }
 
@@ -126,7 +126,8 @@ html[data-os="darwin"] .maka-session-panel-footer {
 .maka-session-panel,
   .maka-session-panel-footer,
   .maka-nav-row,
-  .maka-list-row,
+  .maka-session-list-item,
+  .maka-project-history-tree,
   .maka-module-main-header,
   .maka-plan-heading,
   .maka-skill-tab,
