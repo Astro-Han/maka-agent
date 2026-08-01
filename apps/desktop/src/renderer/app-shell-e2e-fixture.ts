@@ -187,7 +187,7 @@ export function createAppShellE2eFixtureActions(options: {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           const activeRow = document.querySelector<HTMLElement>(
-            '[data-maka-contract="list-row"][aria-current="true"]',
+            '[data-maka-contract="session-row"] [aria-current="true"]',
           );
           const activeRowAction = activeRow?.querySelector<HTMLElement>(
             'button, a[href], [tabindex]:not([tabindex="-1"])',

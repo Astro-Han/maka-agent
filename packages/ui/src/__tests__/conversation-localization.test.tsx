@@ -373,7 +373,7 @@ describe('localized conversation journey', () => {
     assert.match(en, /Archived conversation/);
     assert.doesNotMatch(
       `${zh}${en}`,
-      /maka-list-group-label|maka-list-group-toggle|maka-list-group-count|aria-expanded/,
+      /maka-list-group-label|maka-list-group-toggle|maka-list-group-count/,
     );
   });
 

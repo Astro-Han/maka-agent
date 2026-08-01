@@ -24,7 +24,7 @@ export function SessionSidebarNav(props: {
   ).length;
 
   return (
-    <nav className="maka-sidebar-modules" aria-label={copy.mainLabel}>
+    <>
       <SideNavItem
         label={copy.newTask}
         icon={SquarePen}
@@ -48,7 +48,7 @@ export function SessionSidebarNav(props: {
         isSelected={automationsActive}
         onClick={() => props.onSelect({ section: 'automations', module: moduleMemory.automations })}
       />
-    </nav>
+    </>
   );
 }
 

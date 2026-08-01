@@ -98,7 +98,7 @@ function StoryFrame(props: {
     if (!focusActiveRow && !openActiveRowMenu) return;
     let menuTimeout: number | undefined;
     const focusTimeout = window.setTimeout(() => {
-      const activeRow = ref.current?.querySelector<HTMLElement>('.astryx-list-item[aria-current="true"]');
+      const activeRow = ref.current?.querySelector<HTMLElement>('[data-maka-contract="session-row"] [aria-current="true"]');
       activeRow?.querySelector<HTMLButtonElement>(':scope > button')?.focus({ preventScroll: true });
       if (openActiveRowMenu) {
         menuTimeout = window.setTimeout(() => {
