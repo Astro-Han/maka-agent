@@ -250,6 +250,12 @@ class MakaOpenCodeAgent(OpenCode):
         )
 
     def _opencode_config_path(self) -> str:
+        # Harness A/B prompt/config ablations point one arm at an alternate
+        # benchmark config (e.g. agent.build.prompt overrides) without
+        # shadowing the whole MAKA_REPO_ROOT tree.
+        override = self._get_env("MAKA_OPENCODE_CONFIG_PATH")
+        if override:
+            return override
         maka_repo = self._get_env("MAKA_REPO_ROOT") or "/opt/maka-agent"
         return str(
             Path(maka_repo)

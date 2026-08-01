@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { decodeRuntimeEvent } from '@maka/core';
 import { HARBOR_CELL_CONTEXT_ENV_KEYS } from '../harbor-cell.js';
 import { isBudgetExhaustedTrialException } from '../harbor-task-runner.js';
+import { DEFAULT_HEADLESS_SYSTEM_PROMPT } from '../system-prompts.js';
 
 const repoRoot = resolve(fileURLToPath(new URL('../../../..', import.meta.url)));
 const execFileAsync = promisify(execFile);
@@ -502,6 +503,22 @@ describe('Harbor adapter contract', () => {
     }
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /opencode_estimated_cost_usd/);
+  });
+
+  test('opencode-benchmark-makaprompt.json mirrors the benchmark config with only the prompt swapped', async () => {
+    const harborDir = resolve(repoRoot, 'packages/headless/harbor');
+    const baseline = JSON.parse(
+      await readFile(resolve(harborDir, 'opencode-benchmark.json'), 'utf8'),
+    );
+    const ablation = JSON.parse(
+      await readFile(resolve(harborDir, 'opencode-benchmark-makaprompt.json'), 'utf8'),
+    );
+    assert.deepEqual(ablation.provider, baseline.provider);
+    assert.equal(
+      ablation.agent?.build?.prompt,
+      DEFAULT_HEADLESS_SYSTEM_PROMPT,
+      'the ablation prompt must stay byte-identical to the headless default system prompt',
+    );
   });
 
   test('kimi_code_agent.py runs the pinned CLI contract without Harbor installed', (t: TestContext) => {
@@ -3291,6 +3308,19 @@ try:
             "baseURL": "{env:DEEPSEEK_BASE_URL}",
         }, benchmark_config
         assert "KIMI_API_KEY" not in deepseek_env, deepseek_env
+        override_agent = MakaOpenCodeAgent(Path(tmp), extra_env={
+            "MAKA_PROVIDER_PROXY_URL": "http://host.docker.internal:43210",
+            "MAKA_PROVIDER_PROXY_TOKEN": "ephemeral-proxy-token",
+            "MAKA_LLM_CONNECTION_SLUG": "zai-coding-plan",
+            "MAKA_SYSTEM_PROMPT": "",
+            "MAKA_REASONING_EFFORT": "max",
+            "MAKA_OPENCODE_VARIANT": "max",
+            "MAKA_OPENCODE_CONFIG_PATH": "/opt/maka-agent/packages/headless/harbor/opencode-benchmark-makaprompt.json",
+        }, prompt_template_path=template_path, model_name="zai-coding-plan/glm-5.2")
+        override_agent.exec_as_agent = exec_as_agent
+        asyncio.run(override_agent.run("hi", environment, AgentContext()))
+        _, override_env = environment.agent_commands[-1]
+        assert override_env["OPENCODE_CONFIG"] == "/opt/maka-agent/packages/headless/harbor/opencode-benchmark-makaprompt.json", override_env
         assert environment.uploaded_files == [], environment.uploaded_files
         assert 'cat --' not in command, command
         assert "test-zai-key" not in command, command
