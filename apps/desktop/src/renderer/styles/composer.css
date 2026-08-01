@@ -214,7 +214,7 @@
    Kill the global `*:focus-visible` ring (maka-tokens) — Astryx ChatComposer
    elevates the outer shell on focus-within; a second rectangle on the field
    is the bug users describe as “输入后出现长方形边框”. */
-.composer .maka-composer-editor [contenteditable] {
+.composer .maka-composer-editor [contenteditable="true"] {
   font: var(--maka-text-body);
   width: 100%;
   border: none;
@@ -225,8 +225,8 @@
   min-height: var(--h-composer-min);
 }
 
-.composer .maka-composer-editor [contenteditable]:focus,
-.composer .maka-composer-editor [contenteditable]:focus-visible {
+.composer .maka-composer-editor [contenteditable="true"]:focus,
+.composer .maka-composer-editor [contenteditable="true"]:focus-visible {
   border: none;
   outline: none;
   box-shadow: none;

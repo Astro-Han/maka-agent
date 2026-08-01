@@ -14,6 +14,9 @@ const DESKTOP_ROOT = process.cwd();
  * typing target is the contentEditable inside the component root, not the
  * root itself — and `toHaveValue` / `.value` no longer apply: assert with
  * `toHaveText` and type with `fill` / `pressSequentially`.
+ *
+ * `toHaveText` reads an inline token's rendered label, not the value it
+ * serializes to on send. Assert a mention's wire form on the sent message.
  */
 export const COMPOSER_INPUT = '.maka-composer-editor [contenteditable="true"]';
 
