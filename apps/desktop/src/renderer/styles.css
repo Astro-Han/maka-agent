@@ -46,7 +46,4 @@
 @import "./styles/prompt-rail.css" layer(components);
 @import "./styles/quote-chip.css" layer(components);
 @import "./styles/quote-side-panel.css" layer(components);
-/* Unlayered: must beat Astryx @scope / StyleX token pins on the Theme
-   wrapper (custom properties resolve by tree distance; layered components
-   lose to unlayered token sheets for --font-size-*). */
-@import "./styles/astryx-mount.css";
+@import "./styles/astryx-mount.css" layer(components);

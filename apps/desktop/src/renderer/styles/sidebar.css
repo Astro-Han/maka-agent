@@ -139,11 +139,19 @@
   -webkit-app-region: no-drag;
 }
 
-.maka-session-row[data-stale="true"] .astryx-side-nav-item {
+/*
+ * Dim only this row's SideNavItem. Child combinators stop before [role=group]
+ * nests, so a stale parent never mutes healthy subagent rows underneath.
+ * DOM: .maka-session-row > SideNavItem root > .astryx-side-nav-item
+ * (leaf: button; collapsible parent: split-action row that may host the
+ * primary control with aria-current).
+ */
+.maka-session-row[data-stale="true"] > div > .astryx-side-nav-item {
   opacity: var(--opacity-muted);
 }
 
-.maka-session-row[data-stale="true"]:has([aria-current="page"]) .astryx-side-nav-item {
+.maka-session-row[data-stale="true"] > div > .astryx-side-nav-item[aria-current="page"],
+.maka-session-row[data-stale="true"] > div > .astryx-side-nav-item:has(> [aria-current="page"]) {
   opacity: 1;
 }
 
