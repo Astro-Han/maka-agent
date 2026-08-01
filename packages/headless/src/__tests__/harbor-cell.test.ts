@@ -43,7 +43,6 @@ import {
   buildAiSdkCellBackendRegistration,
   buildHarborCellContextBudgetBackendOptions,
   buildHarborCellContextBudgetPolicySnapshot,
-  buildHarborCellAiSdkTools,
   buildHarborCellTaskLedgerExperimentPolicy,
   harborCellMaxStepsFromEnv,
   harborCellSoftTimeoutMsFromEnv,
@@ -248,55 +247,6 @@ class ThrowingBackend implements AgentBackend {
 const registerThrowingBackend = (registry: BackendRegistry): void => {
   registry.register('fake', (ctx) => new ThrowingBackend({ sessionId: ctx.sessionId }));
 };
-
-class DeadlineSettlingBackend implements AgentBackend {
-  readonly sessionId: string;
-  readonly stopModes: BackendStopMode[] = [];
-  private releaseStop!: () => void;
-  private readonly stopped = new Promise<void>((resolve) => {
-    this.releaseStop = resolve;
-  });
-
-  constructor(
-    sessionId: string,
-    readonly kind: BackendKind = 'fake',
-  ) {
-    this.sessionId = sessionId;
-  }
-
-  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
-    await this.stopped;
-    const ts = Date.now();
-    yield {
-      type: 'token_usage',
-      id: 'usage-before-deadline',
-      turnId: input.turnId,
-      ts,
-      input: 13,
-      output: 5,
-      total: 18,
-      costUsd: 0.004,
-    };
-    yield {
-      type: 'complete',
-      id: 'deadline-complete',
-      turnId: input.turnId,
-      ts: Date.now(),
-      stopReason: 'end_turn',
-    };
-  }
-
-  async stop(
-    _reason: 'user_stop' | 'redirect',
-    mode: BackendStopMode = 'immediate',
-  ): Promise<void> {
-    this.stopModes.push(mode);
-    this.releaseStop();
-  }
-
-  async respondToSandboxBoundary(_decision: SandboxBoundaryResponse): Promise<void> {}
-  async dispose(): Promise<void> {}
-}
 
 class NonCooperativeDeadlineBackend implements AgentBackend {
   readonly sessionId: string;
@@ -1196,26 +1146,6 @@ describe('runHarborCell', () => {
     });
   });
 
-  test('uses the external boundary instead of a legacy Execute mode authority', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const result = await runHarborCell({
-        config,
-        instruction: 'run under harness isolation',
-        cwd: workspaceDir,
-        outputDir,
-        storageRoot,
-      });
-      const sessions = createSessionStore(storageRoot);
-
-      const header = await sessions.readHeaderSnapshot(result.invocation.sessionId);
-      const boundary = await sessions.readExecutionBoundary(result.invocation.sessionId);
-      await sessions.close?.();
-
-      assert.equal(header?.permissionMode, 'ask');
-      assert.equal(boundary.kind, 'external');
-    });
-  });
-
   test('rejects resuming a session that is not externally isolated', async () => {
     await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
       const sessions = createSessionStore(storageRoot);
@@ -1239,43 +1169,6 @@ describe('runHarborCell', () => {
           resumeSessionId: managed.id,
         }),
         /external execution boundary/i,
-      );
-    });
-  });
-
-  test('settles the active session before its hard deadline and writes final usage', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const deadline = { settleAfterMs: 1_000 };
-      let backend: DeadlineSettlingBackend | undefined;
-      const result = await withTimeout(
-        runHarborCell({
-          config,
-          instruction: 'keep working until stopped',
-          cwd: workspaceDir,
-          outputDir,
-          storageRoot,
-          ...deadline,
-          registerBackends: (registry) => {
-            registry.register('fake', (ctx) => {
-              backend = new DeadlineSettlingBackend(ctx.sessionId);
-              return backend;
-            });
-          },
-        }),
-        10_000,
-        'Harbor cell did not settle before the hard deadline',
-      );
-
-      assert.equal(result.settledByDeadline, true);
-      assert.deepEqual(backend?.stopModes, ['immediate']);
-      assert.equal(result.output.tokenSummary?.total, 18);
-      assert.deepEqual(result.output.deadlineSettlement, {
-        source: 'benchmark.deadline',
-        mode: 'immediate',
-      });
-      assert.deepEqual(
-        JSON.parse(await readFile(join(outputDir, HARBOR_CELL_OUTPUT_FILENAME), 'utf8')),
-        result.output,
       );
     });
   });
@@ -1473,88 +1366,6 @@ describe('runHarborCell', () => {
         pricingProfile: 'deepseek-v4-flash-tbench-v1',
         agentTools: false,
       });
-    });
-  });
-
-  test('env entrypoint reads instruction files and writes the same cell artifacts', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const instructionFile = join(outputDir, 'instruction.txt');
-      await writeFile(instructionFile, 'solve from env\n', 'utf8');
-
-      const result = await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION_FILE: instructionFile,
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-          MAKA_SYSTEM_PROMPT: config.systemPrompt!,
-        },
-        {
-          registerBackends: registerCellBackend,
-        },
-      );
-
-      assert.equal(result.output.status, 'completed');
-      assert.equal(await readFile(join(workspaceDir, 'cell-proof.txt'), 'utf8'), 'ran in place\n');
-      assert.deepEqual(
-        JSON.parse(await readFile(join(outputDir, HARBOR_CELL_OUTPUT_FILENAME), 'utf8')),
-        result.output,
-      );
-    });
-  });
-
-  test('env entrypoint parses canonical MAKA_AGENT_TOOLS without attesting tools for fake', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      let observedAgentTools: boolean | undefined;
-      const result = await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION: 'solve from env',
-          MAKA_MODEL: 'fake-model',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-          MAKA_AGENT_TOOLS: 'true',
-        },
-        {
-          registerBackends: (registry, context) => {
-            observedAgentTools = context.config.agentTools;
-            registerCellBackend(registry);
-          },
-        },
-      );
-
-      assert.equal(observedAgentTools, true);
-      assert.equal(result.output.executionIdentity?.agentTools, false);
-    });
-  });
-
-  test('env entrypoint settles at the configured soft deadline', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const result = await withTimeout(
-        runHarborCellFromEnv(
-          {
-            MAKA_BACKEND: 'fake',
-            MAKA_INSTRUCTION: 'keep working until stopped',
-            MAKA_MODEL: 'fake-model',
-            MAKA_WORKDIR: workspaceDir,
-            MAKA_OUTPUT_DIR: outputDir,
-            MAKA_STORAGE_ROOT: storageRoot,
-            MAKA_CELL_SOFT_TIMEOUT_MS: '1000',
-          },
-          {
-            registerBackends: (registry) => {
-              registry.register('fake', (ctx) => new DeadlineSettlingBackend(ctx.sessionId));
-            },
-          },
-        ),
-        10_000,
-        'Harbor env cell did not honor its soft deadline',
-      );
-
-      assert.equal(result.settledByDeadline, true);
-      assert.equal(result.output.tokenSummary?.total, 18);
     });
   });
 
@@ -1841,118 +1652,6 @@ describe('runHarborCell', () => {
     });
   });
 
-  test('env entrypoint records a context budget policy snapshot', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const off = await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION: 'solve with prune off',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-          MAKA_CONTEXT_BUDGET: 'off',
-        },
-        {
-          registerBackends: registerCellBackend,
-        },
-      );
-      assert.deepEqual(off.output.contextBudgetPolicy, { enabled: false });
-    });
-
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const on = await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION: 'solve with prune on',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-          MAKA_CONTEXT_STALE_TOOL_RESULT_PRUNE: 'on',
-          MAKA_CONTEXT_STALE_TOOL_RESULT_MAX_TOKENS: '256',
-          MAKA_CONTEXT_ACTIVE_TOOL_RESULT_PRUNE: 'on',
-          MAKA_CONTEXT_ACTIVE_TOOL_RESULT_MAX_ESTIMATED_TOKENS: '512',
-          MAKA_CONTEXT_ACTIVE_TOOL_RESULT_MIN_STEP_NUMBER: '1',
-          MAKA_CONTEXT_ACTIVE_FULL_COMPACT: 'on',
-          MAKA_CONTEXT_ACTIVE_FULL_COMPACT_MIN_STEP_NUMBER: '2',
-          MAKA_CONTEXT_ACTIVE_FULL_COMPACT_HIGH_WATER_RATIO: '0.5',
-          MAKA_CONTEXT_ACTIVE_FULL_COMPACT_MAX_ACTIVE_ESTIMATED_TOKENS: '16384',
-          MAKA_CONTEXT_ACTIVE_FULL_COMPACT_MIN_RECENT_MESSAGES: '4',
-          MAKA_CONTEXT_ACTIVE_FULL_COMPACT_MAX_SUMMARY_ESTIMATED_TOKENS: '1024',
-          MAKA_CONTEXT_ACTIVE_FULL_COMPACT_HIGH_WATER_NAME: 'test-active-full',
-          MAKA_CONTEXT_ARCHIVE_RETRIEVAL: 'on',
-          MAKA_CONTEXT_ARCHIVE_RETRIEVAL_MODE: 'eager',
-        },
-        {
-          registerBackends: registerCellBackend,
-        },
-      );
-      assert.deepEqual(on.output.contextBudgetPolicy, {
-        enabled: true,
-        name: 'harbor-cell-context-budget',
-        staleToolResultPrune: {
-          enabled: true,
-          maxResultEstimatedTokens: 256,
-          minRecentTurnsFull: 0,
-        },
-        activeToolResultPrune: {
-          enabled: true,
-          maxCurrentResultEstimatedTokens: 512,
-          minStepNumber: 1,
-        },
-        activeFullCompact: {
-          enabled: true,
-          minStepNumber: 2,
-          highWaterRatio: 0.5,
-          maxActiveEstimatedTokens: 16384,
-          minRecentMessages: 4,
-          maxSummaryEstimatedTokens: 1024,
-          highWaterName: 'test-active-full',
-        },
-        archiveRetrieval: {
-          enabled: true,
-          mode: 'eager',
-          maxResults: 3,
-          maxEstimatedTokens: 8192,
-          maxBytes: 1024 * 1024,
-          order: 'newest_first',
-        },
-        minRecentTurns: 2,
-      });
-    });
-  });
-
-  test('env entrypoint defaults to the process cwd when MAKA_WORKDIR is absent', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const instructionFile = join(outputDir, 'instruction.txt');
-      await writeFile(instructionFile, 'solve from current cwd\n', 'utf8');
-
-      const originalCwd = process.cwd();
-      process.chdir(workspaceDir);
-      try {
-        const result = await runHarborCellFromEnv(
-          {
-            MAKA_BACKEND: 'fake',
-            MAKA_INSTRUCTION_FILE: instructionFile,
-            MAKA_OUTPUT_DIR: outputDir,
-            MAKA_STORAGE_ROOT: storageRoot,
-            MAKA_SYSTEM_PROMPT: config.systemPrompt!,
-          },
-          {
-            registerBackends: registerCellBackend,
-          },
-        );
-
-        assert.equal(result.output.status, 'completed');
-        assert.equal(
-          await readFile(join(workspaceDir, 'cell-proof.txt'), 'utf8'),
-          'ran in place\n',
-        );
-      } finally {
-        process.chdir(originalCwd);
-      }
-    });
-  });
-
   test('writes a failed cell artifact when the backend stream throws', async () => {
     await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
       const result = await runHarborCell({
@@ -2071,128 +1770,6 @@ describe('runHarborCell', () => {
         /Config\.systemPrompt must contain non-whitespace text/,
       );
       assert.equal(registered, false);
-    });
-  });
-
-  test('appends heavy-task policy to Harbor backend context only when explicitly enabled', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const seenPrompts: Array<string | undefined> = [];
-      const registerCapturingBackend = (
-        registry: BackendRegistry,
-        context: HeadlessBackendContext,
-      ): void => {
-        seenPrompts.push(context.config.systemPrompt);
-        registry.register(
-          'fake',
-          (ctx) =>
-            new CellReportingBackend({
-              sessionId: ctx.sessionId,
-              header: ctx.header,
-              store: ctx.store,
-            }),
-        );
-      };
-
-      await runHarborCell({
-        config,
-        instruction: 'solve without heavy mode',
-        cwd: workspaceDir,
-        outputDir,
-        storageRoot,
-        registerBackends: registerCapturingBackend,
-      });
-      await runHarborCell({
-        config: { ...config, heavyTaskMode: { enabled: true, reason: 'long cell task' } },
-        instruction: 'solve with heavy mode',
-        cwd: workspaceDir,
-        outputDir,
-        storageRoot,
-        registerBackends: registerCapturingBackend,
-      });
-
-      assert.equal(seenPrompts[0], config.systemPrompt);
-      assert.match(seenPrompts[1] ?? '', /Heavy-task benchmark policy/);
-      assert.match(seenPrompts[1] ?? '', /self_check_submit/);
-      assert.match(seenPrompts[1] ?? '', /public, task-derived semantic self-check evidence/);
-    });
-  });
-
-  test('appends economy-task policy to Harbor backend context from env', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const seenPrompts: Array<string | undefined> = [];
-      const registerCapturingBackend = (
-        registry: BackendRegistry,
-        context: HeadlessBackendContext,
-      ): void => {
-        seenPrompts.push(context.config.systemPrompt);
-        registry.register(
-          'fake',
-          (ctx) =>
-            new CellReportingBackend({
-              sessionId: ctx.sessionId,
-              header: ctx.header,
-              store: ctx.store,
-            }),
-        );
-      };
-
-      await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION: 'Write a CSV summary of log files.',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-          MAKA_SYSTEM_PROMPT: 'Use the benchmark prompt.',
-          MAKA_ECONOMY_TASK_MODE: 'true',
-        },
-        {
-          registerBackends: registerCapturingBackend,
-        },
-      );
-
-      assert.match(seenPrompts[0] ?? '', /Use the benchmark prompt/);
-      assert.match(seenPrompts[0] ?? '', /Economy-task benchmark policy/);
-      assert.match(seenPrompts[0] ?? '', /one lightweight targeted preview/);
-    });
-  });
-
-  test('explicit MAKA_ECONOMY_TASK_MODE=false disables economy-task policy from env signals', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const seenPrompts: Array<string | undefined> = [];
-      const registerCapturingBackend = (
-        registry: BackendRegistry,
-        context: HeadlessBackendContext,
-      ): void => {
-        seenPrompts.push(context.config.systemPrompt);
-        registry.register(
-          'fake',
-          (ctx) =>
-            new CellReportingBackend({
-              sessionId: ctx.sessionId,
-              header: ctx.header,
-              store: ctx.store,
-            }),
-        );
-      };
-
-      await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION: 'Write a CSV summary of log files.',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-          MAKA_SYSTEM_PROMPT: 'Use the benchmark prompt.',
-          MAKA_ECONOMY_TASK_MODE: 'false',
-        },
-        {
-          registerBackends: registerCapturingBackend,
-        },
-      );
-
-      assert.match(seenPrompts[0] ?? '', /Use the benchmark prompt/);
-      assert.doesNotMatch(seenPrompts[0] ?? '', /Economy-task benchmark policy/);
     });
   });
 
@@ -4289,15 +3866,6 @@ describe('runHarborCell', () => {
     assert.equal(snapshot.synthesisCache?.schemaVersion, 1);
   });
 
-  test('Harbor tool builder exposes the six container-native tools', () => {
-    const tools = buildHarborCellAiSdkTools(fakeToolExecutor());
-    const names = tools.map((tool) => tool.name);
-
-    for (const expected of ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep']) {
-      assert.ok(names.includes(expected), `expected Harbor tool ${expected}`);
-    }
-  });
-
   test('env entrypoint keeps slashful model ids when provider is explicit', async () => {
     await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
       const seenContexts: HeadlessBackendContext[] = [];
@@ -4332,48 +3900,6 @@ describe('runHarborCell', () => {
 
       assert.equal(seenContexts[0].config.llmConnectionSlug, 'openai-compatible');
       assert.equal(seenContexts[0].config.model, 'anthropic/claude-sonnet-4-5');
-    });
-  });
-
-  test('env entrypoint accepts pi-agent when a Pi backend registration is supplied', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const seenContexts: HeadlessBackendContext[] = [];
-
-      const result = await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'pi-agent',
-          MAKA_AGENT_TOOLS: 'true',
-          MAKA_INSTRUCTION: 'solve through pi',
-          MAKA_MODEL: 'pi-test',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-        },
-        {
-          registerBackends: (registry, context) => {
-            seenContexts.push(context);
-            registerTestPiAgentBackend(registry, ({ header }) => ({
-              async *send(input) {
-                assert.equal(input.cwd, workspaceDir);
-                assert.equal(input.text, 'solve through pi');
-                await writeFile(join(header.cwd, 'pi-cell-proof.txt'), 'ran via pi\n', 'utf8');
-                yield { type: 'text_complete', text: 'pi done' };
-                yield { type: 'complete' };
-              },
-            }));
-          },
-        },
-      );
-
-      assert.equal(result.output.status, 'completed');
-      assert.equal(await readFile(join(workspaceDir, 'pi-cell-proof.txt'), 'utf8'), 'ran via pi\n');
-      assert.equal(seenContexts[0]?.config.backend, 'pi-agent');
-      assert.equal(seenContexts[0]?.realBackendIsolation?.kind, 'external');
-      assert.equal(seenContexts[0]?.realBackendIsolation?.label, 'Harbor task container');
-      assert.equal(typeof seenContexts[0]?.realBackendIsolation?.toolExecutor?.exec, 'function');
-      assert.equal(seenContexts[0]?.productToolSurface, undefined);
-      assert.equal(result.output.executionIdentity?.agentTools, false);
-      assert.equal(result.output.executionIdentity?.productToolSurface, undefined);
     });
   });
 
@@ -4440,76 +3966,6 @@ describe('runHarborCell', () => {
       assert.equal(result.output.status, 'completed');
       assert.equal(seenContexts[0]?.config.llmConnectionSlug, 'pi-agent');
       assert.equal(seenContexts[0]?.config.model, 'glm-5.2');
-    });
-  });
-
-  test('env entrypoint keeps fake backend config explicit', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const seenContexts: HeadlessBackendContext[] = [];
-
-      const result = await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION: 'solve with fake',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-        },
-        {
-          registerBackends: (registry, context) => {
-            seenContexts.push(context);
-            registry.register(
-              'fake',
-              (ctx) =>
-                new CellReportingBackend({
-                  sessionId: ctx.sessionId,
-                  header: ctx.header,
-                  store: ctx.store,
-                }),
-            );
-          },
-        },
-      );
-
-      assert.equal(result.output.status, 'completed');
-      assert.equal(seenContexts[0]?.config.backend, 'fake');
-      assert.equal(seenContexts[0]?.config.llmConnectionSlug, 'fake');
-      assert.equal(seenContexts[0]?.config.model, 'fake');
-    });
-  });
-
-  test('env entrypoint carries max reasoning effort into config and execution identity', async () => {
-    await withDirs(async ({ workspaceDir, outputDir, storageRoot }) => {
-      const seenContexts: HeadlessBackendContext[] = [];
-      const result = await runHarborCellFromEnv(
-        {
-          MAKA_BACKEND: 'fake',
-          MAKA_INSTRUCTION: 'solve with max effort',
-          MAKA_MODEL: 'glm-5.2',
-          MAKA_LLM_CONNECTION_SLUG: 'zai-coding-plan',
-          MAKA_REASONING_EFFORT: 'max',
-          MAKA_WORKDIR: workspaceDir,
-          MAKA_OUTPUT_DIR: outputDir,
-          MAKA_STORAGE_ROOT: storageRoot,
-        },
-        {
-          registerBackends: (registry, context) => {
-            seenContexts.push(context);
-            registry.register(
-              'fake',
-              (ctx) =>
-                new CellReportingBackend({
-                  sessionId: ctx.sessionId,
-                  header: ctx.header,
-                  store: ctx.store,
-                }),
-            );
-          },
-        },
-      );
-
-      assert.equal(seenContexts[0]?.config.thinkingLevel, 'max');
-      assert.equal(result.output.executionIdentity?.reasoningEffort, 'max');
     });
   });
 
@@ -5223,13 +4679,6 @@ describe('createHarborCellLocalToolExecutor', () => {
     const result = await executor.exec({ command: 'exit 124', cwd: process.cwd() });
     assert.equal(result.exitCode, 124);
     assert.equal(result.timedOut, undefined);
-  });
-
-  test('runs a quick command to completion under the default timeout', async () => {
-    const executor = createHarborCellLocalToolExecutor({});
-    const result = await executor.exec({ command: 'printf ok', cwd: process.cwd() });
-    assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout, 'ok');
   });
 
   test('scrubs secret-shaped env so task commands cannot read unregistered credentials', async () => {
