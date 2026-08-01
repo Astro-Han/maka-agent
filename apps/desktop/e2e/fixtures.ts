@@ -309,7 +309,7 @@ export const test = base.extend<{
     await withE2eWindow(
       {
         seed: false,
-        readinessSelector: '[data-processing="block"] > button[aria-expanded="false"]',
+        readinessSelector: '.astryx-chat-tool-calls [role="button"][aria-expanded="false"]',
         e2eFixtureScenario: 'disclosure-output',
         locale: 'zh',
       },
