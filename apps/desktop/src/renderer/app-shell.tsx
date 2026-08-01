@@ -1827,6 +1827,7 @@ function AppShellContent({
     sessionListCollapsed,
     sessionListWidth,
     workbarCollapsed,
+    workbarWidth,
     workbarTab,
     themePalette,
     themePref,

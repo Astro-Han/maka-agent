@@ -4,30 +4,33 @@ import { readSessionListCollapsed, readSessionListWidth } from './session-list-l
 import {
   readSessionWorkbarCollapsed,
   readSessionWorkbarTab,
-  SESSION_WORKBAR_DEFAULT_WIDTH,
+  readSessionWorkbarWidth,
   SESSION_WORKBAR_MAX_WIDTH,
   SESSION_WORKBAR_MIN_WIDTH,
-  SESSION_WORKBAR_WIDTH_AUTOSAVE_ID,
 } from './session-workbar-layout';
 
 /**
- * Owns the shell layout state (issue #1043): session-list width, collapse flags
- * and the active workbar tab are hydrated from localStorage on first render and
+ * Owns the shell layout state (issue #1043): widths, collapse flags and the
+ * active workbar tab, each hydrated from localStorage on first render and
  * persisted by `useAppShellPersistenceEffects`.
  *
- * The workbar width does not go through either of those: `useResizable` owns its
- * clamping, pointer/keyboard resizing and persistence (issue #1861).
- * `workbarResizable` wires the region to the `ResizeHandle` in `chat-workbar.tsx`.
+ * `useResizable` owns the workbar's clamping and its pointer/keyboard resizing
+ * (issue #1861), but not its persistence: `autoSaveId` writes synchronously on
+ * every committed size, which is ~90 localStorage writes for one drag. Storage
+ * stays on the same debounced effect as the session list, so seeding
+ * `defaultSize` from storage is what closes the loop.
  */
 export function useShellLayout() {
   const [sessionListWidth, setSessionListWidth] = useState(() => readSessionListWidth());
   const [sessionListCollapsed, setSessionListCollapsed] = useState(() => readSessionListCollapsed());
   const [workbarCollapsed, setWorkbarCollapsed] = useState(() => readSessionWorkbarCollapsed());
+  // Read once: useResizable only consumes defaultSize on its first render, and
+  // AppShell re-renders on every stream tick.
+  const [workbarDefaultWidth] = useState(readSessionWorkbarWidth);
   const workbar = useResizable({
-    defaultSize: SESSION_WORKBAR_DEFAULT_WIDTH,
+    defaultSize: workbarDefaultWidth,
     minSizePx: SESSION_WORKBAR_MIN_WIDTH,
     maxSizePx: SESSION_WORKBAR_MAX_WIDTH,
-    autoSaveId: SESSION_WORKBAR_WIDTH_AUTOSAVE_ID,
   });
   const [workbarTab, setWorkbarTab] = useState(() => readSessionWorkbarTab());
   return {
