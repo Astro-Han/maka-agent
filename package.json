@@ -70,7 +70,8 @@
     "e2e:computer-use-real-runtime": "node scripts/cu-real-runtime-model-e2e.mjs"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.1.9",
+    "@astryxdesign/cli": "0.2.0",
+    "@astryxdesign/core": "0.2.0",
     "@biomejs/biome": "2.5.4",
     "@types/node": "^25.0.0",
     "knip": "^6.26.0",
