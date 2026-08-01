@@ -5,6 +5,21 @@
   height: 100%;
 }
 
+/*
+ * Astryx 0.2.0 ResizeHandle: when pillPlacement is not "center", hitAreaOffsetX
+ * applies translateY(-50%) without a matching top: 50%. The grab zone then only
+ * covers the top half of the handle, so a pointer drag at the vertical center
+ * (where the pill sits) hits the handle root — which has no pointerdown — and
+ * no-ops. SideNav uses pillPlacement="end" (sub-pixel X bias) and mounts the
+ * handle as a sibling of <nav.maka-session-panel>, not a descendant — target the
+ * handle test id. Remove once Astryx fixes hitAreaOffsetX.
+ */
+[data-testid="astryx-sidenav-resize-handle"] > div:not(.astryx-resize-handle-pill) {
+  /* !important: Astryx StyleX injects the bad transform unlayered, which
+     otherwise beats every rule in @layer maka.legacy. */
+  transform: none !important;
+}
+
 .maka-session-list {
   /* PR-SIDEBAR-IA-0 Phase 1 (xuan msg `dc790a54`, kenji msg `0f7bb872`):
    * scroll fix. The previous block layout let the inner `.maka-list-stack`
