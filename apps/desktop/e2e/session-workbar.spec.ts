@@ -13,6 +13,16 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
     workbar.getByRole('tree', { name: '活跃会话任务' }).getByText('完成会话任务台账升级'),
   ).toBeVisible();
 
+  // Width is user-controlled from the keyboard, and the workbar sits at the end
+  // of the row, so ArrowLeft must widen it (#1861). Both the direction and the
+  // bounds are config we hand Astryx Resizable, and both fail silently.
+  const resize = page.getByRole('separator', { name: '调整会话工作栏宽度' });
+  await expect(resize).toHaveAttribute('aria-valuemin', '320');
+  await expect(resize).toHaveAttribute('aria-valuemax', '600');
+  await resize.focus();
+  await resize.press('ArrowLeft');
+  await expect(resize).toHaveAttribute('aria-valuenow', '410');
+
   // Keyboard-driven disclosure, observed through what the user can read: a
   // collapsed section hides its rows, and Enter on the trigger reveals them.
   const recent = workbar.getByRole('button', { name: /最近结束/ });

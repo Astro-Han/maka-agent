@@ -32,33 +32,9 @@
   background: var(--background);
 }
 
-.maka-workbar-resize-handle {
-  position: relative;
-  flex: 0 0 0;
-  width: 0;
-  outline: none;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.maka-workbar-resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 14px;
-  bottom: 14px;
-  left: -4px;
-  width: 8px;
-  border-left: var(--border-width-hairline) solid transparent;
-}
-
-.maka-workbar-resize-handle:hover::after,
-.maka-workbar-resize-handle:focus-visible::after,
-.isResizingWorkbar .maka-workbar-resize-handle::after { border-left-color: var(--ring); }
-
-.isResizingWorkbar {
-  cursor: col-resize;
-  user-select: none;
-}
+/* The workbar resize handle is Astryx ResizeHandle: it owns the divider hit
+   area, grip, cursor and drag/keyboard sizing. `.maka-workbar-resize-handle`
+   survives only so the narrow breakpoint further down can hide it. */
 
 .maka-session-workbar-tabs {
   height: 100%;

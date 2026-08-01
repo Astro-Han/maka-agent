@@ -113,7 +113,6 @@ import {
   createAppShellRevisionActions,
   type TurnRevisionDraft,
 } from './app-shell-revision-actions';
-import { createAppShellLayoutActions } from './app-shell-layout-actions';
 import { createAppShellSessionStartActions } from './app-shell-session-start-actions';
 import { createAppShellDailyReviewActions } from './app-shell-daily-review-actions';
 import { createAppShellSessionRowActions } from './app-shell-session-row-actions';
@@ -1175,16 +1174,11 @@ function AppShellContent({
     workbarCollapsed,
     setWorkbarCollapsed,
     workbarWidth,
-    setWorkbarWidth,
+    workbarResizable,
     workbarTab,
     setWorkbarTab,
   } = useShellLayout();
   const sessionSideNavHandleRef = useRef<SideNavImperativeCollapseHandle>(null);
-  const { startWorkbarResize, onWorkbarResizeHandleKeyDown } = useStableActions(createAppShellLayoutActions, {
-    workbarCollapsed,
-    workbarWidth,
-    setWorkbarWidth,
-  });
 
   // The companion panel unmounts (and its fork is removed) when the workbar
   // collapses or the active session moves off the panel's source; clear the
@@ -1833,7 +1827,6 @@ function AppShellContent({
     sessionListCollapsed,
     sessionListWidth,
     workbarCollapsed,
-    workbarWidth,
     workbarTab,
     themePalette,
     themePref,
@@ -2570,8 +2563,7 @@ function AppShellContent({
                 onDismiss={() => setWorkbarCollapsed(true)}
                 activeTab={workbarTab}
                 onActiveTabChange={setWorkbarTab}
-                startWorkbarResize={startWorkbarResize}
-                onWorkbarResizeHandleKeyDown={onWorkbarResizeHandleKeyDown}
+                workbarResizable={workbarResizable}
                 quote={
                   quotePanel && quotePanel.sourceSessionId === activeId ? quotePanel : null
                 }
