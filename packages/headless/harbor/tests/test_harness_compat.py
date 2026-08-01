@@ -36,6 +36,8 @@ import importlib
 import io
 import os
 import sys
+import asyncio
+import tempfile
 from pathlib import Path
 
 _HARBOR_DIR = Path(__file__).resolve().parent.parent
@@ -381,6 +383,41 @@ def test_opencode_agent_network_shape_under_pier():
         ValueError,
         "OpenCode requires the host provider proxy",
     )
+
+@_isolated_maka_env
+def test_opencode_agent_hydrates_container_log_to_host_logs_dir():
+    # Runs under both interpreters: pier replaces the default /logs bind-mount
+    # when the runner passes explicit --mounts-json (pier docker.py), so the
+    # host-side adapter must download the CLI stream before _error_messages()
+    # and populate_context_post_run() parse it; under plain Harbor the file is
+    # already host-side and the download is skipped.
+    _, _, _, opencode_mod = _fresh_adapters()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        agent = opencode_mod.MakaOpenCodeAgent(logs_dir=Path(tmp))
+
+        written = {}
+
+        class _PierEnv:
+            async def download_file(self, remote, local):
+                written[remote] = Path(local)
+                Path(local).write_text('{"type":"step_finish"}\n')
+
+        asyncio.run(agent._download_agent_logs(_PierEnv()))
+        assert written == {"/logs/agent/opencode.txt": Path(tmp) / "opencode.txt"}
+
+        # Idempotent: an existing host-side log (plain-Harbor bind mount, or a
+        # repeated call from run()'s finally) is never overwritten.
+        calls = []
+
+        class _HarborEnv:
+            async def download_file(self, remote, local):
+                calls.append(remote)
+
+        asyncio.run(agent._download_agent_logs(_HarborEnv()))
+        assert calls == []
+        assert (Path(tmp) / "opencode.txt").read_text() == '{"type":"step_finish"}\n'
+
 
 @_isolated_maka_env
 def test_kimi_runtime_env_forwards_ipv6_proxy_url():

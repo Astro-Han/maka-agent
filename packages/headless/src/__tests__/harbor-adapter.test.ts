@@ -3691,6 +3691,9 @@ class OpenCode:
         self.model_name = kwargs.get("model_name") or "openai/mimo-v2.5-pro"
         self._instruction = None
         self._prompt_template_path = Path(prompt_template_path) if prompt_template_path else None
+        # Real harbor/pier bases set self.logger in __init__; the adapter's
+        # best-effort log hydration logs through it.
+        self.logger = types.SimpleNamespace(debug=lambda *args, **kwargs: None)
 
     @staticmethod
     def name():

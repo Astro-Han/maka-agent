@@ -97,6 +97,10 @@ class MakaOpenCodeAgent(OpenCode):
         self._started_at_ms = int(time.time() * 1000)
         try:
             await self._run_with_stop_sentinel(instruction, environment)
+            # Hydrate before reading error events: under Pier the explicit
+            # --mounts-json replaces the default /logs bind-mount, so the CLI
+            # stream only exists inside the container until downloaded.
+            await self._download_agent_logs(environment)
             if messages := self._error_messages():
                 raise NonZeroAgentExitCodeError(
                     "OpenCode emitted error event(s): " + "; ".join(messages[:3])
@@ -106,6 +110,25 @@ class MakaOpenCodeAgent(OpenCode):
             raise
         finally:
             self._finished_at_ms = int(time.time() * 1000)
+            await self._download_agent_logs(environment)
+
+    async def _download_agent_logs(self, environment: BaseEnvironment) -> None:
+        # _error_messages() and populate_context_post_run read opencode.txt
+        # from the host log dir. Under plain Harbor the agent log dir is
+        # bind-mounted, so the file is already host-side and is skipped; under
+        # Pier a --mounts-json run replaces the default log mounts while
+        # capabilities.mounted stays true (pier docker.py), so pier's own log
+        # download never runs — without this hydration a real provider error
+        # event is invisible to failure classification and the parsed
+        # trajectory/steps/token metadata come out empty. Best-effort, same
+        # contract as the Kimi and Codex arms.
+        local = self.logs_dir / "opencode.txt"
+        if local.exists():
+            return
+        try:
+            await environment.download_file("/logs/agent/opencode.txt", local)
+        except Exception as exc:  # noqa: BLE001 - best-effort log hydration.
+            self.logger.debug("Could not download OpenCode stream %s: %s", local, exc)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         super().populate_context_post_run(context)
