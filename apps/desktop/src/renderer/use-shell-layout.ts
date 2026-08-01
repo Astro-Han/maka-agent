@@ -26,7 +26,7 @@ export function useShellLayout() {
   const [workbarCollapsed, setWorkbarCollapsed] = useState(() => readSessionWorkbarCollapsed());
   // Read once: useResizable only consumes defaultSize on its first render, and
   // AppShell re-renders on every stream tick.
-  const [workbarDefaultWidth] = useState(readSessionWorkbarWidth);
+  const [workbarDefaultWidth] = useState(() => readSessionWorkbarWidth());
   const workbar = useResizable({
     defaultSize: workbarDefaultWidth,
     minSizePx: SESSION_WORKBAR_MIN_WIDTH,
@@ -40,7 +40,10 @@ export function useShellLayout() {
     setSessionListCollapsed,
     workbarCollapsed,
     setWorkbarCollapsed,
-    workbarWidth: workbar.size,
+    // Rounded because `clampSize` only bounds the size, it does not round it:
+    // a sub-pixel pointer delta otherwise reaches the CSS variable and storage
+    // as 479.70001220703125.
+    workbarWidth: Math.round(workbar.size),
     workbarResizable: workbar.props,
     workbarTab,
     setWorkbarTab,

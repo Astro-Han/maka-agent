@@ -13,19 +13,17 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
     workbar.getByRole('tree', { name: '活跃会话任务' }).getByText('完成会话任务台账升级'),
   ).toBeVisible();
 
-  // Width is user-controlled from the keyboard, and the workbar sits at the end
-  // of the row, so ArrowLeft must widen it (#1861). Both the direction and the
-  // bounds are config we hand Astryx Resizable, and both fail silently.
+  // Sizing is config handed to Astryx Resizable (#1861), and each part fails
+  // silently: a vertical separator is what makes the drag read clientX, and
+  // ArrowLeft has to widen an end-of-row panel. The width assertion is the
+  // load-bearing one — the aria-* values mirror hook state, not the panel.
   const resize = page.getByRole('separator', { name: '调整会话工作栏宽度' });
-  // A vertical separator is what makes the drag read clientX; get the axis wrong
-  // and arrow keys still resize while the mouse stops working entirely.
   await expect(resize).toHaveAttribute('aria-orientation', 'vertical');
   await expect(resize).toHaveAttribute('aria-valuemin', '320');
   await expect(resize).toHaveAttribute('aria-valuemax', '600');
   await resize.focus();
   await resize.press('ArrowLeft');
   await expect(resize).toHaveAttribute('aria-valuenow', '410');
-  // Not just the separator's own ARIA mirror: the panel has to actually resize.
   await expect(workbar).toHaveCSS('width', '410px');
 
   // Keyboard-driven disclosure, observed through what the user can read: a

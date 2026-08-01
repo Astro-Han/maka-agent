@@ -148,9 +148,6 @@ export function useAppShellPersistenceEffects(options: {
     safeLocalStorageSet('maka-chat-list-collapsed-v1', options.sessionListCollapsed ? 'true' : 'false');
   }, [options.sessionListCollapsed]);
 
-  // Same trailing debounce, same reason as the sidebar above: Astryx's
-  // ResizeHandle drives `_onResizeMove` on every pointermove, so an undebounced
-  // write is ~90 synchronous setItem calls for a single drag gesture.
   useEffect(() => {
     const handle = window.setTimeout(() => {
       safeLocalStorageSet('maka-session-workbar-width-v1', String(options.workbarWidth));
