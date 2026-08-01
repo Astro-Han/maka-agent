@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, COMPOSER_INPUT } from './fixtures';
 
 /**
  * Session management: a second chat can be created without clobbering the
@@ -11,7 +11,7 @@ import { test, expect } from './fixtures';
  * worse than no assertion.
  */
 test('creating a second chat keeps both in the sidebar', async ({ window: page }) => {
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await composer.fill('alpha-marker');
   await composer.press('Enter');
   await expect(page.getByText(/Fake backend received: alpha-marker/)).toBeVisible();

@@ -2,9 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   createChatInputActionOwner,
-  detectMentionTrigger,
   fileTransferContainsFiles,
-  focusTextInputAtEnd,
   isChatInputComposing,
   mentionQueryMatches,
   skillMentionQuery,
@@ -20,16 +18,6 @@ describe('shared chat input behavior', () => {
     assert.equal(fileTransferContainsFiles(['text/plain', 'Files'], 0), true);
     assert.equal(fileTransferContainsFiles(['text/plain'], 1), true);
     assert.equal(fileTransferContainsFiles(['text/plain'], 0), false);
-  });
-
-  it('focuses a text input at the visible value end', () => {
-    const calls: Array<string | [number, number]> = [];
-    focusTextInputAtEnd({
-      value: 'hello',
-      focus: () => calls.push('focus'),
-      setSelectionRange: (start, end) => calls.push([start, end]),
-    });
-    assert.deepEqual(calls, ['focus', [5, 5]]);
   });
 
   it('serializes async actions and releases only their owned pending state', async () => {
@@ -56,55 +44,6 @@ describe('shared chat input behavior', () => {
     release();
     await action;
     assert.deepEqual(states, ['drop']);
-  });
-});
-
-describe('detectMentionTrigger', () => {
-  it('finds @ queries at boundaries, inside paths, and relative to the caret', () => {
-    assert.deepEqual(detectMentionTrigger('@src', 4), { trigger: '@', query: 'src', start: 0 });
-    assert.deepEqual(detectMentionTrigger('open @src/app', 13), {
-      trigger: '@',
-      query: 'src/app',
-      start: 5,
-    });
-    assert.deepEqual(detectMentionTrigger('@src/app', 3), {
-      trigger: '@',
-      query: 'sr',
-      start: 0,
-    });
-    assert.deepEqual(detectMentionTrigger('@my file', 8), {
-      trigger: '@',
-      query: 'my file',
-      start: 0,
-    });
-  });
-
-  it('rejects non-boundary and terminated @ queries', () => {
-    for (const [value, caret] of [
-      ['foo@bar', 7],
-      ['user@host.com', 13],
-      ['hello world', 11],
-      ['@later', 0],
-      ['@my  file', 9],
-      ['@line\nmore', 10],
-    ] as const) {
-      assert.equal(detectMentionTrigger(value, caret), null, value);
-    }
-  });
-
-  it('keeps / queries single-token and chooses the nearest boundary trigger', () => {
-    assert.deepEqual(detectMentionTrigger('run /skill', 10), {
-      trigger: '/',
-      query: 'skill',
-      start: 4,
-    });
-    assert.deepEqual(detectMentionTrigger('@a /b', 5), {
-      trigger: '/',
-      query: 'b',
-      start: 3,
-    });
-    assert.equal(detectMentionTrigger('/deep research', 14), null);
-    assert.equal(detectMentionTrigger('/a\nb', 4), null);
   });
 });
 

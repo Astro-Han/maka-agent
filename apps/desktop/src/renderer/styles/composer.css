@@ -206,47 +206,42 @@
   padding-top: 0;
 }
 
-/* The textarea owns no chrome (the card does). It auto-resizes from
-   --h-composer-min up to 240px (capped in @maka/ui), then scrolls. Type
-   matches Astryx ChatComposer / ChatComposerInput: body scale tokens, not
-   a local 14/22 magic pair. The size keeps its --font-size-base fallback for
-   Storybook or mounts where the theme wrapper is absent; the leading dropped
-   its fallback chain with the product leading tiers it named, and there is no
-   second vocabulary left to fall back to.
+/* The input owns no chrome (the card does). ChatComposerInput sizes itself from
+   `maxRows`, so only the resting minimum is ours. Type is the `body` role, one
+   token for the whole shorthand — not a local 14/22 magic pair, and not a
+   fallback chain, since the role is the only vocabulary left.
 
    Kill the global `*:focus-visible` ring (maka-tokens) — Astryx ChatComposer
    elevates the outer shell on focus-within; a second rectangle on the field
    is the bug users describe as “输入后出现长方形边框”. */
-.composer .maka-composer-textarea {
+.composer .maka-composer-editor [contenteditable] {
   font: var(--maka-text-body);
-  display: block;
   width: 100%;
-  appearance: none;
   border: none;
   outline: none;
   box-shadow: none;
-  resize: none;
-  overflow-y: auto;
   background: transparent;
   color: var(--foreground);
   min-height: var(--h-composer-min);
-  max-height: 240px;
 }
 
-.composer .maka-composer-textarea:focus,
-.composer .maka-composer-textarea:focus-visible {
+.composer .maka-composer-editor [contenteditable]:focus,
+.composer .maka-composer-editor [contenteditable]:focus-visible {
   border: none;
   outline: none;
   box-shadow: none;
 }
 
-.composer .maka-composer-textarea::placeholder {
-  font: inherit;
+.composer .maka-composer-editor > [aria-hidden="true"] {
+  /* Astryx renders the placeholder as a sibling of the editable, not inside
+     it, so `font: inherit` would resolve against the card. Name the same role
+     the editable names. */
+  font: var(--maka-text-body);
   color: var(--muted-foreground);
   transition: opacity var(--duration-emphasized) var(--ease-out-strong);
 }
 
-.composer .maka-composer-textarea:focus::placeholder {
+.composer .maka-composer-editor:focus-within > [aria-hidden="true"] {
   opacity: var(--opacity-disabled);
 }
 

@@ -2,6 +2,7 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -13,6 +14,7 @@ import {
 import { useMountedRef } from './use-mounted-ref.js';
 import {
   ArrowUp,
+  FileText,
   ListTodo,
   Mic,
   Network,
@@ -41,20 +43,28 @@ import {
 import {
   createChatInputActionOwner,
   fileTransferContainsFiles,
-  focusTextInputAtEnd,
+  isCaretAtContentStart,
   isChatInputComposing,
+  mentionQueryMatches,
+  skillMentionQuery,
   type ChatInputActionOwner,
+  type ComposerTextPort,
 } from './chat-input-behavior.js';
-import { ComposerMentionPopup, mentionOptionId } from './composer-mention-popup.js';
-import { useMentionPopup } from './use-mention-popup.js';
 import { ComposerWorkspaceRow, type ComposerBranchPicker, type ComposerWorkspacePicker } from './composer-workspace-row.js';
 import type { AttachmentRef, PermissionMode, ProviderType, QuoteRef, SessionSummary } from '@maka/core';
 import {
   Button as UiButton,
   ChatComposer as AstryxChatComposer,
   ChatComposerDrawer,
+  ChatComposerInput,
   IconButton,
   Token,
+  useChatPasteAsToken,
+  type ChatComposerInputHandle,
+  type ChatComposerToken,
+  type ChatComposerTrigger,
+  type SearchableItem,
+  type SearchSource,
 } from '@astryxdesign/core';
 import {
   DropdownMenu,
@@ -64,7 +74,18 @@ import {
 import { PermissionModeSelect } from './permission-mode-menu.js';
 import { ComposerSkillPicker, type ComposerSkillOption } from './composer-skill-picker.js';
 
-const COMPOSER_MAX_HEIGHT = 240;
+/**
+ * Rows the input grows to before it scrolls. `ChatComposerInput` sizes itself
+ * from `maxRows × 22px`, which lands on the 240px cap the hand-rolled textarea
+ * auto-resize used to enforce.
+ */
+const COMPOSER_MAX_ROWS = 10;
+
+/** Last path segment of a POSIX-style relative path — the mention row's primary label. */
+function fileBasename(relativePath: string): string {
+  const segments = relativePath.split('/').filter(Boolean);
+  return segments[segments.length - 1] ?? relativePath;
+}
 
 /**
  * PR-UI-15 (@yuejing 2026-05-22): Composer copy is locale-aware.
@@ -75,11 +96,11 @@ const COMPOSER_MAX_HEIGHT = 240;
  * only one a user ever reads: one short, action-oriented line.
  */
 export interface ComposerHandle {
-  /** Replace the textarea value and resize, leaving focus on the input. */
+  /** Replace the input text, leaving focus on the input with the caret at the end. */
   setText(text: string): void;
   /** Append a prompt/context fragment after the existing draft instead of replacing it. */
   appendText(text: string): void;
-  /** Read the current uncontrolled textarea value. */
+  /** Read the current input text (inline tokens serialized to their values). */
   getText(): string;
   /** Snapshot the structured Skills owned by the active draft. */
   getSkills(): ComposerSkillSelection[];
@@ -94,7 +115,7 @@ export interface ComposerHandle {
     draftKey: string,
     skills: readonly ComposerSkillSelection[],
   ): void;
-  /** Move focus to the textarea without changing its content. */
+  /** Move focus to the input without changing its content. */
   focus(): void;
   /** Fixture/integration seam for the same structured selection state used by `/`. */
   setSkills(skills: ReadonlyArray<{ ref?: string; id: string; name: string }>): void;
@@ -264,7 +285,13 @@ export const Composer = forwardRef<
   }
 >(function Composer(props, ref) {
   const formRef = useRef<HTMLFormElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** Astryx's imperative handle on the contentEditable input. */
+  const inputHandleRef = useRef<ChatComposerInputHandle>(null);
+  /** ChatComposerInput's root, from which the editable node is resolved. */
+  const inputRootRef = useRef<HTMLDivElement>(null);
+  function editableNode(): HTMLElement | null {
+    return inputRootRef.current?.querySelector<HTMLElement>('[contenteditable="true"]') ?? null;
+  }
   /** Focus target when the hideTrigger skill panel dismisses (＋ opener). */
   const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -280,6 +307,31 @@ export const Composer = forwardRef<
       if (composerMountedRef.current) setPendingImportAction(action);
     });
   }
+  // The input is controlled: `text` is the serialized draft (inline tokens
+  // collapse to their values), mirrored into a ref so the imperative handle —
+  // memoized with an empty dep list — always reads the live value.
+  const [text, setText] = useState('');
+  const textRef = useRef('');
+  function applyText(next: string) {
+    textRef.current = next;
+    setText(next);
+  }
+  /**
+   * The three operations the draft / history hooks need from the input. Stable
+   * identity so neither hook re-runs an effect when the draft changes.
+   */
+  const textPortRef = useRef<ComposerTextPort>(null);
+  if (!textPortRef.current) {
+    textPortRef.current = {
+      getValue: () => textRef.current,
+      setValue: (value: string) => applyText(value),
+      // ChatComposerInput restores the caret to the end of the content when a
+      // controlled update lands on a focused editor, so callers that want the
+      // old "focus at end" behavior call `focus()` before `setValue()`.
+      focus: () => inputHandleRef.current?.focus(),
+    };
+  }
+  const textPort = textPortRef.current;
   // Draft persistence + prompt-history navigation live in dedicated hooks
   // (issue #1044). `resetPromptHistoryNavigation` is a hoisted wrapper so the
   // draft hook's swap effect can reset history navigation even though the
@@ -292,44 +344,19 @@ export const Composer = forwardRef<
     appendDraft,
     activeDraftKey,
   } = useComposerDraft({
-    textareaRef,
+    text: textPort,
     draftKey: props.draftKey,
-    autoResize,
     onDraftKeyChange: resetPromptHistoryNavigation,
   });
   const { resetNavigation, rememberSentEntry, handleArrowKey } = useComposerHistory({
-    textareaRef,
-    autoResize,
+    text: textPort,
     saveCurrentDraft,
   });
   const skillDraft = useComposerSkillDraft(props.draftKey);
-  // Mention popup state (@ file / skill) lives in useMentionPopup (issue
-  // #1044); the identifiers below keep their names so the keydown routing
-  // (arrows / Enter / Tab / Esc, pinned by the composer-mention contract)
-  // reads exactly as before.
-  const {
-    mention,
-    mentionItems,
-    mentionActiveIndex,
-    setMentionActiveIndex,
-    mentionLoading,
-    mentionListboxId,
-    mentionPopupOpen,
-    recomputeMention,
-    closeMention,
-    selectMention,
-  } = useMentionPopup({
-    textareaRef,
-    mentionSkills: props.mentionSkills,
-    onSearchMentionFiles: props.onSearchMentionFiles,
-    saveCurrentDraft,
-    autoResize,
-    resetPromptHistoryNavigation,
-    onSelectSkill: (skill) => skillDraft.add(skill),
-  });
   // PR-UI-15: locale-aware copy for placeholder + toolbar states.
   const locale = useUiLocale();
   const copy = getConversationCopy(locale).composer;
+  const mentionCopy = getConversationCopy(locale).mentions;
   const voiceCaptureLabel = props.voiceCaptureState === 'recording'
     ? copy.voiceStopRecording
     : props.voiceCaptureState === 'native_ready'
@@ -343,45 +370,215 @@ export const Composer = forwardRef<
     };
   }, []);
 
-  function autoResize() {
-    const el = textareaRef.current;
-    if (!el) return;
-    // Standard "reset to auto, then set to scrollHeight" trick so the
-    // textarea can both grow and shrink as the user edits. Cap at
-    // COMPOSER_MAX_HEIGHT so it never pushes the chat surface off-screen;
-    // overflow becomes an internal scroll past that.
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
-  }
+  /**
+   * Newlines have to be real `\n` text nodes, not block splits.
+   *
+   * Chrome answers Enter (and any multi-line insert) inside a plain
+   * contentEditable by wrapping each line in a `<div>`. Astryx's serializer
+   * only turns text nodes and `<br>` into newlines, so those blocks would
+   * silently flatten a multi-line draft into one line on send. Intercept the
+   * break and insert the text ourselves — the editor is `white-space:
+   * pre-wrap`, so a literal newline renders identically and round-trips.
+   */
+  useEffect(() => {
+    const editable = editableNode();
+    if (!editable) return undefined;
+    const onBeforeInput = (event: InputEvent) => {
+      const isBreak =
+        event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak';
+      const inserted = isBreak ? '\n' : (event.data ?? '');
+      if (!isBreak && !(event.inputType === 'insertText' && inserted.includes('\n'))) return;
+      event.preventDefault();
+      inputHandleRef.current?.insertText(inserted);
+      // ChatComposerInput re-serializes on `input`; we suppressed the native
+      // edit, so emit one for the mutation we made in its place.
+      editable.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    editable.addEventListener('beforeinput', onBeforeInput);
+    return () => editable.removeEventListener('beforeinput', onBeforeInput);
+  }, []);
 
   function resetPromptHistoryNavigation() {
     resetNavigation();
   }
 
+  // The `@` / `/` menus are Astryx trigger menus now. `useTriggerMenu` compares
+  // the active trigger by identity on every input event, so the trigger objects
+  // and their sources must not be rebuilt per render — they read live props
+  // through this ref instead.
+  const mentionSourceRef = useRef({
+    mentionSkills: props.mentionSkills,
+    onSearchMentionFiles: props.onSearchMentionFiles,
+    addSkill: (skill: ComposerSkillSelection) => skillDraft.add(skill),
+  });
+  mentionSourceRef.current = {
+    mentionSkills: props.mentionSkills,
+    onSearchMentionFiles: props.onSearchMentionFiles,
+    addSkill: (skill: ComposerSkillSelection) => skillDraft.add(skill),
+  };
+
+  const searchSourcesRef = useRef<{ files: SearchSource; skills: SearchSource }>(null);
+  if (!searchSourcesRef.current) {
+    // `useTriggerMenu` probes `search('')` on every keystroke to decide whether
+    // a source is sync, so an uncached `@` source would fire one extra IPC per
+    // character. A small bounded cache absorbs the probe and repeat queries;
+    // workspace file listings are stable enough over one composing session.
+    const fileResults = new Map<string, Promise<SearchableItem[]>>();
+    const searchFiles = (query: string): Promise<SearchableItem[]> => {
+      const cached = fileResults.get(query);
+      if (cached) return cached;
+      const search = mentionSourceRef.current.onSearchMentionFiles;
+      const pending = (search ? search(query) : Promise.resolve([])).then(
+        (files) =>
+          files
+            .filter((file) => mentionQueryMatches(query, file.relativePath))
+            .slice(0, 50)
+            .map((file) => ({ id: file.relativePath, label: file.relativePath })),
+        // Fail soft: an IPC error just yields an empty list (未找到文件).
+        () => [],
+      );
+      const oldest = fileResults.size >= 32 ? fileResults.keys().next().value : undefined;
+      if (oldest !== undefined) fileResults.delete(oldest);
+      fileResults.set(query, pending);
+      return pending;
+    };
+    const listSkills = (rawQuery: string): SearchableItem[] => {
+      const skills = mentionSourceRef.current.mentionSkills ?? [];
+      const query = skillMentionQuery(rawQuery);
+      return skills
+        .filter((skill) =>
+          mentionQueryMatches(query, `${skill.id} ${skill.name} ${skill.description ?? ''}`),
+        )
+        .slice(0, 50)
+        .map((skill) => ({
+          id: skill.ref ?? skill.id,
+          label: skill.name,
+          auxiliaryData: skill,
+        }));
+    };
+    searchSourcesRef.current = {
+      files: { bootstrap: () => searchFiles(''), search: searchFiles },
+      skills: { bootstrap: () => listSkills(''), search: listSkills },
+    };
+  }
+
+  // Rebuilt only when the locale changes (the menus carry localized labels);
+  // a closed menu is the only state a rebuild can disturb.
+  const triggers = useMemo<ChatComposerTrigger[]>(() => {
+    const sources = searchSourcesRef.current!;
+    const list: ChatComposerTrigger[] = [];
+    if (props.onSearchMentionFiles) {
+      list.push({
+        character: '@',
+        searchSource: sources.files,
+        menuLabel: mentionCopy.filesAriaLabel,
+        emptySearchResultsText: mentionCopy.noFiles,
+        loadingText: mentionCopy.loading,
+        renderItem: (item) => (
+          <>
+            <FileText size={14} aria-hidden="true" className="maka-composer-mention-icon" />
+            <span className="maka-composer-mention-text">
+              <span className="maka-composer-mention-name">{fileBasename(item.id)}</span>
+              <span className="maka-composer-mention-secondary">{item.id}</span>
+            </span>
+          </>
+        ),
+        // The token serializes back to the same `@<path>` the plain-text popup
+        // used to splice in, so the sent message is unchanged — it just reads
+        // as a chip while the draft is being composed.
+        onSelect: (item): ChatComposerToken => ({ value: `@${item.id}`, label: fileBasename(item.id) }),
+      });
+    }
+    if (props.mentionSkills !== undefined) {
+      list.push({
+        character: '/',
+        searchSource: sources.skills,
+        menuLabel: mentionCopy.skillsAriaLabel,
+        emptySearchResultsText: mentionCopy.noSkills,
+        loadingText: mentionCopy.loading,
+        renderItem: (item) => {
+          const skill = item.auxiliaryData as ComposerSkillOption;
+          return (
+            <>
+              <Sparkles size={14} aria-hidden="true" className="maka-composer-mention-icon" />
+              <span className="maka-composer-mention-text">
+                <span className="maka-composer-mention-name">{skill.name}</span>
+                <span className="maka-composer-mention-secondary">
+                  {skill.id}
+                  {skill.description ? ` · ${skill.description}` : ''}
+                </span>
+              </span>
+            </>
+          );
+        },
+        // A Skill is structured selection, not text: it lands in the drawer as
+        // a chip and contributes nothing to the draft, exactly as before.
+        onSelect: (item) => {
+          mentionSourceRef.current.addSkill(item.auxiliaryData as ComposerSkillSelection);
+          return '';
+        },
+      });
+    }
+    return list;
+    // The sources live in a ref, so only the localized copy, provider presence,
+    // and the Skill projection identity (see the refresh effect below) matter.
+  }, [locale, Boolean(props.onSearchMentionFiles), props.mentionSkills]);
+
+  /**
+   * A visible `/` menu must never keep offering a Skill the host has since
+   * withdrawn (mode change, session rebind, MCP event). The Astryx trigger menu
+   * only searches on input, so replay one input event when the projection
+   * changes while the menu is open: `triggers` was rebuilt on the same render,
+   * so `useTriggerMenu` sees a new active trigger and re-runs the search.
+   */
+  useEffect(() => {
+    const editable = editableNode();
+    if (editable?.getAttribute('aria-expanded') !== 'true') return;
+    editable.dispatchEvent(new Event('input', { bubbles: true }));
+  }, [props.mentionSkills]);
+
+  /**
+   * Reference-sized pastes never flood the input. When the host stages quotes
+   * they keep becoming drawer chips (the send path still carries them as
+   * structured `QuoteRef`s); otherwise Astryx's paste-as-token folds them into
+   * an expandable inline chip instead of dumping the whole blob inline.
+   */
+  const pasteAsInlineToken = useChatPasteAsToken({
+    inputRef: inputHandleRef,
+    threshold: 0,
+    toToken: (pasted) => ({ value: pasted, label: copy.pastedQuoteLabel }),
+  });
+  const pasteAsToken = {
+    onPaste: (event: ClipboardEvent<HTMLDivElement>, pasted: string) => {
+      if (props.disabled || !isReferenceSizedPaste(pasted)) return false;
+      if (props.onPasteAsQuote) {
+        props.onPasteAsQuote({ text: pasted, label: copy.pastedQuoteLabel });
+        return true;
+      }
+      return pasteAsInlineToken.onPaste(event, pasted);
+    },
+  };
+
   useImperativeHandle(
     ref,
     () => ({
-      setText(text: string) {
-        const el = textareaRef.current;
-        if (!el) return;
+      setText(nextText: string) {
         resetPromptHistoryNavigation();
-        el.value = text;
-        saveCurrentDraft(text);
-        autoResize();
-        // Move caret to end so the user can keep typing.
-        focusTextInputAtEnd(el);
+        // Focus first: the controlled update that follows restores the caret to
+        // the end of the new content only when the editor already has focus.
+        textPort.focus();
+        textPort.setValue(nextText);
+        saveCurrentDraft(nextText);
       },
-      appendText(text: string) {
-        const el = textareaRef.current;
-        if (!el) return;
+      appendText(nextText: string) {
         resetPromptHistoryNavigation();
-        el.value = appendPromptContextDraft(el.value, text);
-        saveCurrentDraft(el.value);
-        autoResize();
-        focusTextInputAtEnd(el);
+        const next = appendPromptContextDraft(textPort.getValue(), nextText);
+        textPort.focus();
+        textPort.setValue(next);
+        saveCurrentDraft(next);
       },
       getText() {
-        return textareaRef.current?.value ?? '';
+        return textPort.getValue();
       },
       getSkills() {
         return skillDraft.get(skillDraft.activeDraftKey());
@@ -390,30 +587,22 @@ export const Composer = forwardRef<
         clearDraft(draftKey);
         skillDraft.clear(draftKey);
         if (activeDraftKey() !== draftKey) return;
-        const el = textareaRef.current;
-        if (el) el.value = '';
+        textPort.setValue('');
         saveCurrentDraft('');
-        autoResize();
       },
-      setDraft(draftKey: string, text: string) {
-        setDraft(draftKey, text);
+      setDraft(draftKey: string, nextText: string) {
+        setDraft(draftKey, nextText);
         if (activeDraftKey() !== draftKey) return;
-        const el = textareaRef.current;
-        if (!el) return;
         resetPromptHistoryNavigation();
-        el.value = text;
-        autoResize();
-        focusTextInputAtEnd(el);
+        textPort.focus();
+        textPort.setValue(nextText);
       },
-      appendDraft(draftKey: string, text: string) {
-        const next = appendDraft(draftKey, text);
+      appendDraft(draftKey: string, nextText: string) {
+        const next = appendDraft(draftKey, nextText);
         if (activeDraftKey() !== draftKey) return;
-        const el = textareaRef.current;
-        if (!el) return;
         resetPromptHistoryNavigation();
-        el.value = next;
-        autoResize();
-        focusTextInputAtEnd(el);
+        textPort.focus();
+        textPort.setValue(next);
       },
       setSkillDraft(
         draftKey: string,
@@ -422,7 +611,7 @@ export const Composer = forwardRef<
         skillDraft.replace(draftKey, skills);
       },
       focus() {
-        textareaRef.current?.focus();
+        textPort.focus();
       },
       setSkills(skills) {
         skillDraft.replace(skillDraft.activeDraftKey(), skills);
@@ -433,9 +622,7 @@ export const Composer = forwardRef<
 
   async function sendCurrent() {
     if (props.disabled || sendPendingRef.current || importActionOwnerRef.current?.pending) return;
-    const textarea = textareaRef.current;
-    const form = formRef.current;
-    const text = (textarea?.value ?? '').trim();
+    const text = textPort.getValue().trim();
     // `skillIds` is the legacy wire field name. New selections submit the
     // stable scope-aware ref so send-time re-resolution cannot drift to a
     // same-id skill discovered at a different precedence.
@@ -462,15 +649,9 @@ export const Composer = forwardRef<
     // The owner may have changed while onSend awaited (new-session creation,
     // revision branch, or user navigation). Never erase a foreign draft.
     if (activeDraftKey() !== submittedDraftKey) return;
+    textPort.setValue('');
     saveCurrentDraft('');
     skillDraft.clear(skillDraft.activeDraftKey());
-    form?.reset();
-    // form.reset() empties the textarea but doesn't fire input — collapse
-    // manually so the composer snaps back to its single-row footprint.
-    if (textarea) {
-      textarea.style.height = '';
-      autoResize();
-    }
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -485,42 +666,25 @@ export const Composer = forwardRef<
     });
   }
 
-  function onTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  /**
+   * Our key conventions, hosted on `ChatComposerInput`'s `onKeyDown` seam. It
+   * runs AFTER the trigger menu has had its turn (arrows / Enter / Tab / Esc
+   * navigate and select a mention there) and BEFORE the input's own Enter
+   * handling — which we always pre-empt, because a send can be rejected and
+   * the built-in submit clears the editor unconditionally.
+   */
+  function onInputKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     // Skip when an IME composition is active so CJK input isn't interrupted.
+    // The composition guard has to live here rather than being inherited from
+    // the input: this handler owns Enter, so an Enter that commits an IME
+    // candidate must never reach `sendCurrent`.
     if (isChatInputComposing(event, compositionActiveRef.current)) return;
-    // Mention popup navigation. MUST come before the Esc/drag and streaming
-    // branches: while the popup is open Enter/Tab select a mention (never
-    // send), and Esc closes ONLY the popup (it must not clear a drag highlight
-    // or stop the stream). Arrow keys move the highlight and wrap around.
-    if (mentionPopupOpen) {
-      const count = mentionItems.length;
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        if (count > 0) setMentionActiveIndex((index) => (index + 1) % count);
-        return;
-      }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        if (count > 0) setMentionActiveIndex((index) => (index - 1 + count) % count);
-        return;
-      }
-      if (event.key === 'Enter' || event.key === 'Tab') {
-        if (count > 0) {
-          event.preventDefault();
-          selectMention(mentionActiveIndex);
-          return;
-        }
-        // Nothing to select (loading / no matches): swallow Enter so it can't
-        // send while the popup is up, and just close it. Let Tab move focus.
-        if (event.key === 'Enter') event.preventDefault();
-        closeMention();
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeMention();
-        return;
-      }
+    // A trigger menu that is open but has nothing highlighted (loading, or no
+    // matches) leaves Enter unconsumed. Swallow it so a mention query can never
+    // send the draft out from under the popup.
+    if (event.key === 'Enter' && event.currentTarget.getAttribute('aria-expanded') === 'true') {
+      event.preventDefault();
+      return;
     }
     if (
       event.key === 'Escape' &&
@@ -533,8 +697,7 @@ export const Composer = forwardRef<
     }
     if (
       event.key === 'Backspace' &&
-      event.currentTarget.selectionStart === 0 &&
-      event.currentTarget.selectionEnd === 0 &&
+      isCaretAtContentStart(event.currentTarget, window.getSelection()) &&
       skillDraft.removeLast()
     ) {
       event.preventDefault();
@@ -570,11 +733,10 @@ export const Composer = forwardRef<
     void sendCurrent();
   }
 
-  function onTextareaInput() {
+  function onInputChange(next: string) {
+    applyText(next);
     resetPromptHistoryNavigation();
-    autoResize();
-    saveCurrentDraft();
-    recomputeMention();
+    saveCurrentDraft(next);
   }
 
   function canAcceptDroppedFiles(): boolean {
@@ -583,10 +745,6 @@ export const Composer = forwardRef<
 
   function hasDraggedFiles(event: DragEvent<HTMLFormElement>): boolean {
     return fileTransferContainsFiles(event.dataTransfer.types, event.dataTransfer.files.length);
-  }
-
-  function hasPastedFiles(event: ClipboardEvent<HTMLTextAreaElement>): boolean {
-    return fileTransferContainsFiles(event.clipboardData.types, event.clipboardData.files.length);
   }
 
   function onComposerDragOver(event: DragEvent<HTMLFormElement>) {
@@ -611,45 +769,15 @@ export const Composer = forwardRef<
     void runImportAction('attach', () => props.onAttachFilePaths?.(files));
   }
 
-  function onTextareaPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    // PR-FE-BUG-HUNT-10 hotfix: extend the IME composition guard from
-    // the keydown path (line 5640) to the paste path. If the user is
-    // mid-CJK composition and the clipboard happens to contain a file
-    // (screenshot shortcut etc.), `event.preventDefault()` below would
-    // interrupt the IME mid-character.
-    //
-    // Original PR #216 copied `event.nativeEvent.isComposing` from the
-    // keydown handler verbatim, but `isComposing` only exists on
-    // KeyboardEvent / InputEvent in the DOM spec — not ClipboardEvent.
-    // (Browsers happen to expose it on the underlying event too, but
-    // TypeScript types don't acknowledge that.) Use a narrow `in` check
-    // + a typed cast so this compiles AND keeps working when the
-    // browser does expose the flag.
-    if (isChatInputComposing(event, compositionActiveRef.current)) return;
-    if (!hasPastedFiles(event)) {
-      pasteLongTextAsQuote(event);
-      return;
-    }
-    if (!canAcceptDroppedFiles()) return;
-    const files = Array.from(event.clipboardData.files);
-    if (files.length === 0) return;
-    event.preventDefault();
-    void runImportAction('attach', () => props.onAttachFilePaths?.(files));
-  }
-
   /**
-   * A paste this big is reference material (a log, a diff, a doc section), not
-   * a prompt the user is going to keep editing inline — so it becomes a quote
-   * chip instead of flooding the textarea, and the model still receives it
-   * verbatim. Below the threshold the paste stays a normal paste; the user is
-   * writing, not attaching.
+   * Files pasted into the input (screenshot shortcut, Finder copy) take the
+   * same import path as a drop. `ChatComposerInput` routes them here before it
+   * looks at text, so the clipboard-file branch of the old paste handler is
+   * gone — only the acceptance gate remains ours.
    */
-  function pasteLongTextAsQuote(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!props.onPasteAsQuote || props.disabled) return;
-    const text = event.clipboardData.getData('text/plain');
-    if (!isReferenceSizedPaste(text)) return;
-    event.preventDefault();
-    props.onPasteAsQuote({ text, label: copy.pastedQuoteLabel });
+  function onInputFiles(files: File[]) {
+    if (!canAcceptDroppedFiles() || files.length === 0) return;
+    void runImportAction('attach', () => props.onAttachFilePaths?.(files));
   }
 
   useEffect(() => {
@@ -790,7 +918,7 @@ export const Composer = forwardRef<
                     label={skill.name}
                     onRemove={() => {
                       skillDraft.remove(skill.ref ?? skill.id);
-                      window.requestAnimationFrame(() => textareaRef.current?.focus());
+                      window.requestAnimationFrame(() => textPort.focus());
                     }}
                   />
                 ))}
@@ -867,44 +995,39 @@ export const Composer = forwardRef<
             </ChatComposerDrawer>
           ) : undefined}
           input={(
-            <div className="maka-composer-input">
-              <textarea
-                ref={textareaRef}
+            <div
+              className="maka-composer-input"
+              // PR-FE-BUG-HUNT-10: a paste that lands mid-CJK-composition must
+              // not be consumed — `ChatComposerInput` always preventDefault()s
+              // the paste, which would interrupt the IME mid-character. The
+              // guard has to sit above the input on the capture phase, since
+              // the component's own handler is what we need to skip.
+              onPasteCapture={(event) => {
+                if (isChatInputComposing(event, compositionActiveRef.current)) event.stopPropagation();
+              }}
+            >
+              <ChatComposerInput
+                ref={inputRootRef}
+                handleRef={inputHandleRef}
                 data-maka-contract="composer-input"
-                name="text"
-                className="maka-composer-textarea resize-none"
+                className="maka-composer-editor"
+                value={text}
+                onChange={onInputChange}
                 placeholder={copy.placeholder}
-                aria-label={copy.textareaAriaLabel}
-                aria-controls={mentionPopupOpen ? mentionListboxId : undefined}
-                aria-expanded={mentionPopupOpen ? true : undefined}
-                aria-activedescendant={
-                  mentionPopupOpen && mentionItems.length > 0
-                    ? mentionOptionId(mentionListboxId, mentionActiveIndex)
-                    : undefined
-                }
-                disabled={props.disabled}
-                onKeyDown={onTextareaKeyDown}
-                onKeyUp={recomputeMention}
-                onClick={recomputeMention}
-                onPaste={onTextareaPaste}
+                label={copy.textareaAriaLabel}
+                isDisabled={props.disabled}
+                maxRows={COMPOSER_MAX_ROWS}
+                // Prompt history stays ours: persisted, shared across input
+                // surfaces, and clearable from Settings · 数据 (see
+                // use-composer-history.ts).
+                hasHistory={false}
+                triggers={triggers}
+                pasteAsToken={pasteAsToken}
+                onFiles={onInputFiles}
+                onKeyDown={onInputKeyDown}
                 onCompositionStart={() => { compositionActiveRef.current = true; }}
-                onCompositionEnd={() => { compositionActiveRef.current = false; recomputeMention(); }}
-                onInput={onTextareaInput}
-                rows={1}
-                autoComplete="off"
-                spellCheck={false}
+                onCompositionEnd={() => { compositionActiveRef.current = false; }}
               />
-              {mention ? (
-                <ComposerMentionPopup
-                  trigger={mention.trigger}
-                  items={mentionItems}
-                  activeIndex={mentionActiveIndex}
-                  loading={mentionLoading}
-                  listboxId={mentionListboxId}
-                  onSelect={selectMention}
-                  onHover={setMentionActiveIndex}
-                />
-              ) : null}
               {dragActive && (
                 <span className="maka-visually-hidden" role="status" aria-live="polite">
                   {copy.dropToImport}
@@ -1080,7 +1203,7 @@ export const Composer = forwardRef<
                   onDismissFocus={() => {
                     const plus = plusMenuButtonRef.current;
                     if (plus) plus.focus();
-                    else textareaRef.current?.focus();
+                    else textPort.focus();
                   }}
                   skills={props.mentionSkills}
                   selected={skillDraft.skills}

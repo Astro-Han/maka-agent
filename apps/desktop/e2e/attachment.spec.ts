@@ -1,16 +1,16 @@
-import { test, expect } from './fixtures';
+import { test, expect, COMPOSER_INPUT } from './fixtures';
 
 test('chat input preserves an IME composition when a file paste arrives', async ({ window: page }) => {
-  const firstSend = page.locator('.maka-composer-textarea');
+  const firstSend = page.locator(COMPOSER_INPUT);
   await firstSend.fill('ime-paste-test');
   await firstSend.press('Enter');
   await expect(page.getByText(/Fake backend received: ime-paste-test/)).toBeVisible();
 
   const composer = page.locator('.maka-composer');
   await expect(composer).toHaveAttribute('data-maka-file-drop-target', 'true');
-  const textarea = composer.locator('textarea');
+  const editable = composer.locator('[contenteditable="true"]');
 
-  const pasteResults = await textarea.evaluate((input) => {
+  const pasteResults = await editable.evaluate((input) => {
     const dispatchFilePaste = () => {
       const clipboardData = new DataTransfer();
       clipboardData.items.add(new File(['content'], 'note.txt', { type: 'text/plain' }));
@@ -40,7 +40,7 @@ test('chat input preserves an IME composition when a file paste arrives', async 
 test('dropping a file onto the composer delivers it to the backend on send', async ({ window: page }) => {
   // Enter chat view by sending a first message from the composer, which
   // creates the session on send.
-  const firstSend = page.locator('.maka-composer-textarea');
+  const firstSend = page.locator(COMPOSER_INPUT);
   await firstSend.fill('attach-test');
   await firstSend.press('Enter');
   await expect(page.getByText(/Fake backend received: attach-test/)).toBeVisible();
@@ -64,8 +64,8 @@ test('dropping a file onto the composer delivers it to the backend on send', asy
   // Send the message carrying the attachment — the fake backend echoes the
   // attachment name, proving the ingest-on-send path delivered it (not just
   // that the UI rendered a card).
-  const textarea = page.locator('.maka-composer textarea');
-  await textarea.fill('sending with a file');
-  await textarea.press('Enter');
+  const composerInput = page.locator(COMPOSER_INPUT);
+  await composerInput.fill('sending with a file');
+  await composerInput.press('Enter');
   await expect(page.getByText(/Attachments received: note\.txt/)).toBeVisible();
 });

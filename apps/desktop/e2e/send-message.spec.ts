@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, COMPOSER_INPUT } from './fixtures';
 
 /**
  * Core chat loop: type a message, send it, see the deterministic fake backend
@@ -7,7 +7,7 @@ import { test, expect } from './fixtures';
  * seeded 'e2e' connection clears onboarding so the composer is usable.
  */
 test('send a message and see the fake backend stream a reply', async ({ window: page }) => {
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   // #1433: the deleted first-run panel had its own input, and the spec that
   // covered the handoff between the two asserted this accessible name. With
   // one composer left, the name is what a screen-reader user has to find the
@@ -19,9 +19,35 @@ test('send a message and see the fake backend stream a reply', async ({ window: 
   await expect(page.getByText(/Fake backend received: hello e2e/)).toBeVisible();
 });
 
+/**
+ * Enter commits a candidate in a CJK IME; it must never also send. The composer
+ * owns Enter on ChatComposerInput's onKeyDown seam — which runs before the
+ * component's own composition guard — so the guard has to be ours.
+ */
+test('Enter mid-IME-composition commits the candidate instead of sending', async ({
+  window: page,
+}) => {
+  const composer = page.locator(COMPOSER_INPUT);
+  await composer.fill('中文草稿');
+  await composer.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(composer).toHaveText('中文草稿');
+  await expect(page.getByText(/Fake backend received/)).toHaveCount(0);
+
+  await composer.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+  });
+  await composer.press('Enter');
+  await expect(page.getByText(/Fake backend received: 中文草稿/)).toBeVisible();
+});
+
 test('exposes the Astryx Markdown code-copy action', async ({ window: page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await composer.fill([
     'show code',
     '',

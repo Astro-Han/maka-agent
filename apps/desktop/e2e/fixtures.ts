@@ -10,6 +10,14 @@ import { closeElectronApplication } from '../../../scripts/electron-lifecycle.mj
 const DESKTOP_ROOT = process.cwd();
 
 /**
+ * The composer's text surface. It is Astryx's `ChatComposerInput`, so the
+ * typing target is the contentEditable inside the component root, not the
+ * root itself — and `toHaveValue` / `.value` no longer apply: assert with
+ * `toHaveText` and type with `fill` / `pressSequentially`.
+ */
+export const COMPOSER_INPUT = '.maka-composer-editor [contenteditable="true"]';
+
+/**
  * Pre-seed a real-looking connection into the throwaway workspace so onboarding
  * clears and the composer is enabled. Actual sessions still run on the fake
  * backend (BackendRegistry override in main); this only satisfies the UI
@@ -235,13 +243,13 @@ export const test = base.extend<{
   // Seeded: a pre-staged connection clears onboarding so the composer is ready.
   // Used by chat / session / settings / attachment specs.
   window: async ({}, use) => {
-    await withE2eWindow({ seed: true, readinessSelector: '.maka-composer-textarea', locale: 'zh' }, use);
+    await withE2eWindow({ seed: true, readinessSelector: COMPOSER_INPUT, locale: 'zh' }, use);
   },
   modelPickerLongWindow: async ({}, use) => {
     await withE2eWindow(
       {
         seed: true,
-        readinessSelector: '.maka-composer-textarea',
+        readinessSelector: COMPOSER_INPUT,
         locale: 'zh',
         extraConnectionCount: 10,
       },
@@ -327,7 +335,7 @@ export const test = base.extend<{
   // travelling main → IPC → renderer.
   readOnlyBoundaryWindow: async ({}, use) => {
     await withE2eWindow(
-      { seed: false, readinessSelector: '.maka-composer-textarea', e2eFixtureScenario: 'deep-research-progress', locale: 'zh' },
+      { seed: false, readinessSelector: COMPOSER_INPUT, e2eFixtureScenario: 'deep-research-progress', locale: 'zh' },
       use,
     );
   },
@@ -377,14 +385,14 @@ export const test = base.extend<{
   // Keep this fixture unpinned so the Follow system assertion observes the
   // actual host language while the legacy fixtures remain deterministic.
   localeSwitchWindow: async ({}, use) => {
-    await withE2eWindow({ seed: true, readinessSelector: '.maka-composer-textarea' }, use);
+    await withE2eWindow({ seed: true, readinessSelector: COMPOSER_INPUT }, use);
   },
   // Project + Maka-workspace Skills with one deliberately host-incompatible
   // entry. Proves `/` uses Runtime discovery/gating rather than management UI data.
   invocableSkillsWindow: async ({}, use) => {
     await withE2eWindow({
       seed: true,
-      readinessSelector: '.maka-composer-textarea',
+      readinessSelector: COMPOSER_INPUT,
       locale: 'zh',
       invocableSkills: true,
     }, use);

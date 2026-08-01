@@ -1,22 +1,22 @@
 import type { Page } from '@playwright/test';
-import { expect, test } from './fixtures';
+import { expect, test, COMPOSER_INPUT } from './fixtures';
 
 async function createStarterSkill(page: Page): Promise<void> {
   const result = await page.evaluate(() => window.maka.skills.createStarter());
   expect(result.ok).toBe(true);
   await page.reload();
-  await expect(page.locator('.maka-composer-textarea')).toBeVisible();
+  await expect(page.locator(COMPOSER_INPUT)).toBeVisible();
 }
 
 async function seedEditableTurn(page: Page): Promise<void> {
-  const firstSend = page.locator('.maka-composer-textarea');
+  const firstSend = page.locator(COMPOSER_INPUT);
   await firstSend.fill('original message');
   await firstSend.press('Enter');
   await expect(page.getByText(/Fake backend received: original message/)).toBeVisible();
 }
 
 async function selectSkill(page: Page, name: RegExp): Promise<void> {
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await composer.fill('/');
   const option = page.getByRole('listbox', { name: '技能' }).getByRole('option', { name });
   await expect(option).toBeVisible();
@@ -36,10 +36,10 @@ async function failStarterSkillRevision(page: Page): Promise<void> {
   );
   expect(disabled.ok).toBe(true);
 
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await composer.press('Enter');
   await expect(page.getByText('Skill 调用失败，消息未发送')).toBeVisible();
-  await expect(composer).toHaveValue('edited with skill');
+  await expect(composer).toHaveText('edited with skill');
   await expect(page.locator('.maka-composer-skill-token')).toContainText('示例技能');
 }
 
@@ -50,24 +50,24 @@ test('a successful revision retry clears both child and source drafts', async ({
   await seedEditableTurn(page);
   await beginRevision(page);
   await selectSkill(page, /示例技能/);
-  await page.locator('.maka-composer-textarea').fill('edited with skill');
+  await page.locator(COMPOSER_INPUT).fill('edited with skill');
   await failStarterSkillRevision(page);
 
   const enabled = await page.evaluate(() =>
     window.maka.skills.setEnabled('starter-skill', true),
   );
   expect(enabled.ok).toBe(true);
-  await page.locator('.maka-composer-textarea').press('Enter');
+  await page.locator(COMPOSER_INPUT).press('Enter');
 
   await expect(page.locator('[data-revision-notice="true"]')).toHaveCount(0);
   await expect(page.locator('.maka-composer-skill-token')).toHaveCount(0);
-  await expect(page.locator('.maka-composer-textarea')).toHaveValue('');
+  await expect(page.locator(COMPOSER_INPUT)).toHaveText('');
   await page.getByRole('button', { name: '查看上一版本' }).click();
   await expect(
     page.getByLabel('你发送的消息').getByText('original message', { exact: true }),
   ).toBeVisible();
   await expect(page.locator('.maka-composer-skill-token')).toHaveCount(0);
-  await expect(page.locator('.maka-composer-textarea')).toHaveValue('');
+  await expect(page.locator(COMPOSER_INPUT)).toHaveText('');
 });
 
 test('cancelling a failed revision restores the complete pre-edit draft', async ({
@@ -76,7 +76,7 @@ test('cancelling a failed revision restores the complete pre-edit draft', async 
   await createStarterSkill(page);
   await seedEditableTurn(page);
 
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await selectSkill(page, /Workspace Only/);
   await composer.fill('previous unsent draft');
   await beginRevision(page);
@@ -88,7 +88,7 @@ test('cancelling a failed revision restores the complete pre-edit draft', async 
   await page.getByRole('button', { name: '取消' }).click();
 
   await expect(page.locator('[data-revision-notice="true"]')).toHaveCount(0);
-  await expect(composer).toHaveValue('previous unsent draft');
+  await expect(composer).toHaveText('previous unsent draft');
   await expect(page.locator('.maka-composer-skill-token')).toHaveCount(1);
   await expect(page.locator('.maka-composer-skill-token')).toContainText('Workspace Only');
 });

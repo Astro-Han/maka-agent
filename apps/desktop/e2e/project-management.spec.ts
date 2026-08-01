@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, COMPOSER_INPUT } from './fixtures';
 
 // Project picker product journey. "Fixed actions outside the scroll region"
 // is owned by `.maka-composer-project-scroll` CSS
@@ -15,7 +15,7 @@ test('project picker can create an unassigned task and surfaces it under project
   await noProject.click();
   await expect(picker).toContainText('无项目');
 
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await composer.fill('unassigned-project-marker');
   await composer.press('Enter');
   await expect(page.getByText(/Fake backend received: unassigned-project-marker/)).toBeVisible();

@@ -1,46 +1,12 @@
-/* Composer mention popup — the @ file / skill overlay rendered by
-   ComposerMentionPopup (@maka/ui). The package owns its popover surface;
-   this file owns renderer placement + row chrome only.
+/* Composer mention rows — the two-line content Composer renders inside the
+   Astryx trigger menu for `@` files and `/` Skills.
 
-   The popup is an ABSOLUTE overlay anchored to `.maka-composer-input` (which is
-   already position:relative at rest), bottom-anchored so it floats above the
-   textarea and never grows the composer box (composer-constant-footprint-
-   contract). Astryx remains the only composer-shell chrome owner. */
-.maka-composer-mention-popup {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + var(--space-2));
-  width: min(360px, 100%);
-  max-height: 280px;
-  overflow-y: auto;
-  padding: var(--space-1);
-}
-
-.maka-composer-mention-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--space-0-5);
-}
-
-.maka-composer-mention-option {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1-5) var(--space-2);
-  border-radius: var(--radius-control);
-  color: var(--foreground);
-  /* Cursor: styles/native-cursor.css (hand only on links). */
-  transition: background var(--duration-base) var(--ease-out-strong);
-}
-
-.maka-composer-mention-option[data-active="true"] {
-  background: var(--muted);
-}
-
+   The popover surface, its placement, row padding and the highlighted state
+   all belong to `useTriggerMenu` now; this file only styles what our
+   `renderItem` puts inside a row. */
 .maka-composer-mention-icon {
   flex: 0 0 auto;
+  margin-inline-end: var(--space-2);
   color: var(--muted-foreground);
 }
 
@@ -71,13 +37,6 @@
 
 .maka-composer-mention-secondary:empty {
   display: none;
-}
-
-.maka-composer-mention-status {
-  font: var(--maka-text-supporting);
-  padding: var(--space-2) var(--space-2);
-  color: var(--muted-foreground);
-  text-align: center;
 }
 
 /* PR-COMPOSER-TOOLBAR-SPLIT Skills picker — the toolbar button + its panel. Same overlay

@@ -124,10 +124,12 @@ describe('localized conversation journey', () => {
 
     assert.match(zh, /aria-label="开始对话"/);
     // U6: placeholder teaches the @ 引用文件 / 选择技能 mentions in both locales.
-    assert.match(zh, /placeholder="描述任务，@ 引用文件，\/ 选择技能…"/);
+    // ChatComposerInput paints it as an aria-hidden overlay, not a `placeholder`
+    // attribute, so match the rendered text.
+    assert.match(zh, /aria-hidden="true">描述任务，@ 引用文件，\/ 选择技能…</);
     assert.match(zh, /aria-label="发送"/);
     assert.match(en, /aria-label="Start a conversation"/);
-    assert.match(en, /placeholder="Describe a task, @ to reference files, \/ for skills…"/);
+    assert.match(en, /aria-hidden="true">Describe a task, @ to reference files, \/ for skills…</);
     assert.match(en, /aria-label="Send"/);
     assert.doesNotMatch(en, /开始对话|描述任务|发送/);
     assert.match(en, /RawUser/);

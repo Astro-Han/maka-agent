@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures.js';
+import { expect, test, COMPOSER_INPUT } from './fixtures.js';
 
 /**
  * #1565 PR 5 — Astryx owns Tooltip and Popover behavior. These journeys lock
@@ -118,7 +118,7 @@ test('model and adjacent thinking Selectors persist one real Electron journey', 
   await page.getByRole('option', { name: '关', exact: true }).click();
   await expect(thinkingTrigger).toContainText('关');
 
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await composer.fill('model selector persistence journey');
   await composer.press('Enter');
   await expect(
@@ -128,7 +128,7 @@ test('model and adjacent thinking Selectors persist one real Electron journey', 
   const activeThinkingTrigger = page.getByRole('combobox', { name: '思考级别' });
   await expect(activeThinkingTrigger).toContainText('关');
   await page.reload();
-  await expect(page.locator('.maka-composer-textarea')).toBeVisible();
+  await expect(page.locator(COMPOSER_INPUT)).toBeVisible();
   await expect(page.getByRole('combobox', { name: '思考级别' })).toContainText('关');
 
   const modelTrigger = page.getByRole('button', { name: '切换当前会话模型' });
@@ -189,7 +189,7 @@ test('search closes before navigating and focusing the matched turn', async ({
   window: page,
 }) => {
   const needle = 'search ownership needle 7319';
-  const composer = page.locator('.maka-composer-textarea');
+  const composer = page.locator(COMPOSER_INPUT);
   await composer.fill(needle);
   await composer.press('Enter');
   await expect(page.getByText(`Fake backend received: ${needle}`)).toBeVisible();
