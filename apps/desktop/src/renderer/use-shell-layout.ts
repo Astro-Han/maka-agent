@@ -11,14 +11,13 @@ import {
 } from './session-workbar-layout';
 
 /**
- * Owns the shell layout state (issue #1043): session-list and workbar widths,
- * collapse flags, and the active workbar tab. Each value is hydrated from
- * localStorage on first render and persisted by `useAppShellPersistenceEffects`.
+ * Owns the shell layout state (issue #1043): session-list width, collapse flags
+ * and the active workbar tab are hydrated from localStorage on first render and
+ * persisted by `useAppShellPersistenceEffects`.
  *
- * The workbar width is the exception: `useResizable` owns its clamping,
- * pointer/keyboard resizing and persistence (issue #1861), so nothing here
- * reads or writes that value. `workbarResizable` wires the region to the
- * `ResizeHandle` in `chat-workbar.tsx`.
+ * The workbar width does not go through either of those: `useResizable` owns its
+ * clamping, pointer/keyboard resizing and persistence (issue #1861).
+ * `workbarResizable` wires the region to the `ResizeHandle` in `chat-workbar.tsx`.
  */
 export function useShellLayout() {
   const [sessionListWidth, setSessionListWidth] = useState(() => readSessionListWidth());

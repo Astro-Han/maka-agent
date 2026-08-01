@@ -80,9 +80,11 @@ export function ChatWorkbar({
         // must widen it.
         isReversed
         isAlwaysVisible={false}
-        // Astryx 0.2.0 offsets a side-placed horizontal grab zone with
+        // Astryx offsets a side-placed horizontal grab zone with
         // `translateY(-50%)` on top of `top: 0; bottom: 0`, which lifts it half
-        // its height off the divider. Centering keeps the full-height hit area.
+        // its height off the divider and makes the lower half undraggable.
+        // Centering keeps the full-height hit area. Still unfixed on astryx
+        // HEAD as of 0.2.0 — verify upstream before removing this.
         pillPlacement="center"
         label={copy.resizeWorkbar}
       />
