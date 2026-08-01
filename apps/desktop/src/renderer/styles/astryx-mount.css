@@ -23,7 +23,7 @@
    entire subtree regardless of layer order — custom properties resolve by
    tree distance, not by layer. --font-size-base used to be pinned back to
    the product's :root value here to undo the 13px root multiplier; the type
-   scale in astryx-theme/makaTheme.ts now emits 13px directly, so the two
+   scale in astryx-theme/makaTheme.ts now emits the body tier directly, so the two
    definitions agree and the pin has nothing left to correct. If a future
    Astryx upgrade reintroduces a conflict, re-derive the set (astryx theme
    defs ∩ product defs ∩ product var() usage) before pinning anything. */

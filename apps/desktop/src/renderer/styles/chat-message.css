@@ -31,14 +31,10 @@
   line-height: var(--text-body-leading);
 }
 
-/* The transcript's baseline grid, derived from the scale rather than typed in:
-   14px × 1.4286 = 20px. Everything in the conversation that is not running
-   prose (headings, disclosure rows) snaps to this so a turn reads as one
-   rhythm instead of a stack of differently-spaced blocks. */
-.maka-turn,
-.maka-chat-message {
-  --maka-chat-line: calc(var(--text-body-size) * var(--text-body-leading));
-}
+/* Everything in the conversation that is not running prose (headings,
+   disclosure rows) snaps to --maka-line-body — declared with the type tiers
+   in maka-tokens.css — so a turn reads as one rhythm instead of a stack of
+   differently-spaced blocks. */
 
 /* Geometry (radius, padding, max-width) belongs to ChatMessageBubble: under
    `density="compact"` it resolves --radius-container plus the compact padding
@@ -68,7 +64,7 @@
    styles/native-cursor.css (role=button + default !important). */
 
 .maka-turn .astryx-chat-tool-calls [role="button"] > span:nth-child(2) {
-  font-family: var(--font-family-body) !important;
+  font-family: var(--font-family-body);
 }
 
 /* Reasoning and tool-call rows read at BODY size, not supporting size.
@@ -79,12 +75,22 @@
    Cursor makes the same call: its tool rows sit at body size and lean
    entirely on --text-secondary/tertiary for de-emphasis. Weight and colour
    already do that here, so size does not need to.
-   :not(:last-child) leaves the trailing chevron span alone — it is an icon
-   box with its own width/height below. */
-.maka-turn .astryx-chat-reasoning [role="button"] > span:not(:last-child),
-.maka-turn .astryx-chat-tool-calls [role="button"] > span:not(:last-child) {
-  font-size: var(--text-body-size) !important;
-  line-height: var(--maka-chat-line) !important;
+
+   Rebinding the role token rather than restyling the spans. Astryx's
+   supporting atoms are `font-size: var(--text-supporting-size)` and
+   `line-height: var(--text-supporting-leading)`, so redefining those two on
+   the trigger reaches every span that opts into the role, at any depth,
+   through inheritance — no !important, since nothing else declares them
+   here, and no dependency on child order.
+   The earlier form of this rule selected `> span:not(:last-child)`, which
+   read as "every span except the chevron". It was wrong for exactly the
+   reason positional selectors are: ChatReasoning wraps its label, duration
+   and preview in a `<div>` (packages/ui/src/astryx-chat-reasoning.tsx), so
+   the rule enlarged the leading icon wrapper and left the reasoning text at
+   supporting size — the one row the retune was for. */
+.maka-turn :is(.astryx-chat-reasoning, .astryx-chat-tool-calls) [role="button"] {
+  --text-supporting-size: var(--text-body-size);
+  --text-supporting-leading: var(--maka-line-body);
 }
 
 .maka-turn .astryx-chat-reasoning [role="button"] > span:last-child,
@@ -110,17 +116,20 @@
   }
 }
 
-/* Product trow (permission / sandbox / interrupted): Collapsible defaults large. */
+/* Product trow (permission / sandbox / interrupted): Collapsible defaults large.
+   No !important: Astryx's StyleX atoms live in the earlier astryx-components
+   layer, so product CSS in `components` already wins on cascade order alone,
+   whatever their specificity. The declarations here carried it as cargo. */
 .maka-turn [data-trow] .astryx-collapsible-trigger {
   min-height: 24px;
   gap: var(--spacing-1-5, 6px);
   padding-block: 2px;
   border-radius: var(--radius-element);
-  font-family: var(--font-family-body) !important;
-  font-size: var(--text-body-size) !important;
-  line-height: var(--maka-chat-line) !important;
-  font-weight: var(--font-weight-medium, 500) !important;
-  color: var(--color-text-secondary) !important;
+  font-family: var(--font-family-body);
+  font-size: var(--text-body-size);
+  line-height: var(--maka-line-body);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--color-text-secondary);
 }
 
 .maka-turn [data-trow] .astryx-collapsible-trigger > span:last-child {
@@ -172,7 +181,7 @@
 /* --- User-turn meta row (relocated from tool-output.css) ----------------- */
 /* PR-CHAT-CHROME-FOLLOWUP-0 / PR5 CHAT-MESSAGE-TIME-0: the relative time is
    always visible now (it was `opacity: 0` until hover, which hid it on
-   touch + from assistive tech). It stays quiet — caption tier (11px) at
+   touch + from assistive tech). It stays quiet — caption tier at
    normal weight, muted — and rides in the user turn's meta row beneath
    the block. Aligned to the same tier the footer-action cva uses (text-xs). */
 .maka-message-time-inline {
@@ -211,21 +220,24 @@
    Claude Code goes furthest and merges h4–h6 into `strong`. Two steps sits
    inside that range.
    Every level shares the transcript baseline so headings do not add rhythm of
-   their own. Scoped to the Markdown contract, so the settings/docs surfaces
-   keep Astryx's full ladder. */
-[data-maka-contract="markdown"] :is(h1, .astryx-heading.level-1) {
+   their own.
+   Scoped to `.maka-turn`, not to the Markdown contract alone. The contract is
+   emitted by the shared MarkdownBody, whose other caller is the Daily Review
+   panel — and a review report IS a document, so the argument above does not
+   apply to it. It keeps Astryx's full ladder.
+   Bare tags are the whole story: Astryx's Markdown renderer emits plain
+   h1–h6 with stylex props (Markdown.js `const Tag = \`h${level}\``). The
+   .astryx-heading.level-N classes come from the standalone Heading
+   component, which Markdown never mounts. */
+.maka-turn [data-maka-contract="markdown"] h1 {
   font-size: var(--font-size-lg);
-  line-height: var(--maka-chat-line);
+  line-height: var(--maka-line-body);
   font-weight: var(--font-weight-semibold);
 }
 
-[data-maka-contract="markdown"]
-  :is(h2, h3, h4, h5, h6,
-      .astryx-heading.level-2, .astryx-heading.level-3,
-      .astryx-heading.level-4, .astryx-heading.level-5,
-      .astryx-heading.level-6) {
+.maka-turn [data-maka-contract="markdown"] :is(h2, h3, h4, h5, h6) {
   font-size: var(--text-body-size);
-  line-height: var(--maka-chat-line);
+  line-height: var(--maka-line-body);
   font-weight: var(--font-weight-semibold);
 }
 
