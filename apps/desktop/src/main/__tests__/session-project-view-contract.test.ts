@@ -123,7 +123,7 @@ describe('sidebar project view mode', () => {
     });
 
     assert.match(markup, />Active project</);
-    assert.match(markup, /maka-list-project-count[^>]*>1</);
+    assert.match(markup, /astryx-badge[^>]*>1</);
     assert.match(markup, />Missing project</);
     assert.match(markup, /aria-label="Active project 项目操作"/);
     assert.match(markup, /aria-label="Missing project 项目操作"/);

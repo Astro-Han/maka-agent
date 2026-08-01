@@ -17,12 +17,14 @@ import {
   FolderOpen,
   MessageSquare,
 } from './icons.js';
+import { Badge } from '@astryxdesign/core/Badge';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { MoreMenu } from '@astryxdesign/core/MoreMenu';
 import {
   SideNavItem,
   SideNavSection,
 } from '@astryxdesign/core/SideNav';
+import { VStack } from '@astryxdesign/core/Stack';
 import { StatusDot, type StatusDotVariant } from '@astryxdesign/core/StatusDot';
 import { describeBlockedReason, presentSessionStatus } from './session-status-presentation.js';
 import { useUiLocale } from './locale-context.js';
@@ -233,26 +235,18 @@ function SessionListGroups(props: {
         );
       }
       return (
-        <div key={group.key} data-project-id={group.key} className="maka-project-row">
-          <SideNavItem
-            label={group.label}
-            icon={FolderOpen}
-            collapsible={{ defaultIsCollapsed: group.sessions.length === 0 }}
-            endContent={
-              <ProjectItemEndContent
-                project={project}
-                sessionCount={group.sessions.length}
-                editing={false}
-                actions={props.projectActions}
-                onStartRename={() => {
-                  if (project) setEditingProjectId(project.id);
-                }}
-              />
-            }
-          >
-            {group.sessions.map((session) => renderSessionTree(session, true))}
-          </SideNavItem>
-        </div>
+        <ProjectNavRow
+          key={group.key}
+          groupKey={group.key}
+          label={group.label}
+          project={project}
+          sessions={group.sessions}
+          projectActions={props.projectActions}
+          onStartRename={() => {
+            if (project) setEditingProjectId(project.id);
+          }}
+          renderSession={(session) => renderSessionTree(session, false)}
+        />
       );
     }
 
@@ -292,6 +286,37 @@ function SessionListGroups(props: {
         );
       })}
     </>
+  );
+}
+
+function ProjectNavRow(props: {
+  groupKey: string;
+  label: string;
+  project?: ProjectRecord;
+  sessions: SessionSummary[];
+  projectActions?: ProjectRowActions;
+  onStartRename(): void;
+  renderSession(session: SessionSummary): ReactNode;
+}) {
+  return (
+    <div data-project-id={props.groupKey} className="maka-project-row">
+      <SideNavItem
+        label={props.label}
+        icon={FolderOpen}
+        collapsible={{ defaultIsCollapsed: props.sessions.length === 0 }}
+        endContent={
+          <ProjectItemEndContent
+            project={props.project}
+            sessionCount={props.sessions.length}
+            actions={props.projectActions}
+            onStartRename={props.onStartRename}
+          />
+        }
+      >
+        {/* shell-side-nav: nest under collapsible parent; sessions are not subagents */}
+        <VStack gap={0.5}>{props.sessions.map((session) => props.renderSession(session))}</VStack>
+      </SideNavItem>
+    </div>
   );
 }
 
@@ -481,7 +506,6 @@ function ProjectRenameRow(props: {
 function ProjectItemEndContent(props: {
   project?: ProjectRecord;
   sessionCount: number;
-  editing: boolean;
   actions?: ProjectRowActions;
   onStartRename(): void;
 }) {
@@ -517,7 +541,9 @@ function ProjectItemEndContent(props: {
     })();
   }
 
-  const menuItems = project && actions && !props.editing
+  // Projects keep a permanent MoreMenu (SideNavEndContent pattern). Hover-only
+  // would fire on nested session rows if wired to the project wrapper.
+  const menuItems = project && actions
     ? project.archivedAt !== undefined
       ? [
           {
@@ -557,7 +583,7 @@ function ProjectItemEndContent(props: {
       {project && !project.available && (
         <AlertTriangle size={12} aria-label={copy.projectUnavailable} />
       )}
-      <span className="maka-list-project-count">{props.sessionCount}</span>
+      <Badge variant="neutral" label={props.sessionCount} />
       {menuItems.length > 0 && (
         <MoreMenu
           size="sm"
@@ -622,6 +648,74 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
     })();
   }
 
+  // Trailing slot is fixed-width so hover MoreMenu ↔ StatusDot never steals
+  // label width (the "actions squeezed left" jump). shell-side-nav always
+  // keeps either a StatusDot or MoreMenu in endContent.
+  const trailing = props.showMenu && actions ? (
+    <MoreMenu
+      size="sm"
+      label={copy.actionsAriaLabel}
+      isDisabled={pendingAction !== null}
+      isMenuOpen={props.menuOpen}
+      onOpenChange={(open) => {
+        props.setMenuOpen(open);
+        if (open) return;
+        const intent = pendingMenuIntentRef.current;
+        pendingMenuIntentRef.current = null;
+        if (intent) {
+          window.requestAnimationFrame(() => {
+            intent();
+          });
+        }
+      }}
+      items={[
+        {
+          label: props.session.isFlagged ? copy.unpin : copy.pin,
+          onClick: () =>
+            runRowAction('flag', () =>
+              actions.onToggleFlag(props.session.id, !props.session.isFlagged),
+            ),
+        },
+        {
+          label: copy.rename,
+          onClick: () => {
+            pendingMenuIntentRef.current = () =>
+              props.setEditingSessionId(props.session.id);
+          },
+        },
+        {
+          label: props.session.isArchived ? copy.unarchive : copy.archive,
+          onClick: () =>
+            runRowAction('archive', () =>
+              props.session.isArchived
+                ? actions.onUnarchive(props.session.id)
+                : actions.onArchive(props.session.id),
+            ),
+        },
+        { type: 'divider' },
+        {
+          label: copy.delete,
+          onClick: () => {
+            pendingMenuIntentRef.current = () =>
+              runRowAction('delete', () => actions.onDelete(props.session.id));
+          },
+        },
+      ]}
+    />
+  ) : statusDot ? (
+    <StatusDot
+      variant={statusDot.variant}
+      label={statusDot.label}
+      isPulsing={statusDot.isPulsing}
+      tooltip={statusDot.tooltip}
+      data-session-status={props.session.status}
+    />
+  ) : shouldShowSessionUnreadDot(props.session, props.streaming, props.active) ? (
+    <StatusDot variant="accent" label={copy.unreadAriaLabel} data-session-status="unread" />
+  ) : (
+    <span className="maka-session-row-trailing-spacer" aria-hidden="true" />
+  );
+
   return (
     <span className="maka-session-row-end">
       {props.stale && (
@@ -640,68 +734,7 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
           className="maka-session-worktree-icon"
         />
       )}
-      {props.showMenu && actions ? (
-        <MoreMenu
-          size="sm"
-          label={copy.actionsAriaLabel}
-          isDisabled={pendingAction !== null}
-          isMenuOpen={props.menuOpen}
-          onOpenChange={(open) => {
-            props.setMenuOpen(open);
-            if (open) return;
-            const intent = pendingMenuIntentRef.current;
-            pendingMenuIntentRef.current = null;
-            if (intent) {
-              window.requestAnimationFrame(() => {
-                intent();
-              });
-            }
-          }}
-          items={[
-            {
-              label: props.session.isFlagged ? copy.unpin : copy.pin,
-              onClick: () =>
-                runRowAction('flag', () =>
-                  actions.onToggleFlag(props.session.id, !props.session.isFlagged),
-                ),
-            },
-            {
-              label: copy.rename,
-              onClick: () => {
-                pendingMenuIntentRef.current = () =>
-                  props.setEditingSessionId(props.session.id);
-              },
-            },
-            {
-              label: props.session.isArchived ? copy.unarchive : copy.archive,
-              onClick: () =>
-                runRowAction('archive', () =>
-                  props.session.isArchived
-                    ? actions.onUnarchive(props.session.id)
-                    : actions.onArchive(props.session.id),
-                ),
-            },
-            { type: 'divider' },
-            {
-              label: copy.delete,
-              onClick: () => {
-                pendingMenuIntentRef.current = () =>
-                  runRowAction('delete', () => actions.onDelete(props.session.id));
-              },
-            },
-          ]}
-        />
-      ) : statusDot ? (
-        <StatusDot
-          variant={statusDot.variant}
-          label={statusDot.label}
-          isPulsing={statusDot.isPulsing}
-          tooltip={statusDot.tooltip}
-          data-session-status={props.session.status}
-        />
-      ) : shouldShowSessionUnreadDot(props.session, props.streaming, props.active) ? (
-        <StatusDot variant="accent" label={copy.unreadAriaLabel} data-session-status="unread" />
-      ) : null}
+      <span className="maka-session-row-trailing">{trailing}</span>
     </span>
   );
 });

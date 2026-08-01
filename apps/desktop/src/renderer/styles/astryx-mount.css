@@ -23,10 +23,14 @@
   /* theme.css declares its tokens ON the wrapper (@scope root), so a name
      both sides define is shadowed for the entire subtree no matter what the
      layer order says — custom properties resolve by tree distance, not by
-     layer. The only name both maka-tokens.css and the Astryx theme define
-     AND product CSS consumes is --font-size-base (13px vs 0.875rem);
-     `inherit` reopens the path to the product's :root value. Re-derive this
-     list (astryx theme defs ∩ product defs ∩ product var() usage) whenever
-     the Astryx pin moves. */
+     layer. Product pins --font-size-base to 13px absolute and sets
+     html { font-size: 13px }. Astryx still ships rem steps on the wrapper
+     (--font-size-base: 0.875rem, --font-size-sm: 0.75rem); without these
+     pins, rem collapses against the 13px root (base→~11.4px if not
+     inherited, sm→9.75px). SideNavSection titles use supporting/sm and
+     become unreadably small next to 13px nav labels. Re-derive this list
+     (astryx theme defs ∩ product defs ∩ product var() usage) whenever the
+     Astryx pin moves. */
   --font-size-base: inherit;
+  --font-size-sm: var(--font-size-caption);
 }

@@ -71,15 +71,11 @@ html[data-os="darwin"] .maka-session-list {
 }
 
 html[data-os="darwin"] .maka-session-panel-footer {
-    /* PR-FE-BUG-HUNT-8 (kenji aesthetic-audit reminder 9, finding #2):
-       drop the 180deg footer linear-gradient. Even though it was a
-       subtle transparent→30% surface-canvas fade, it's exactly the
-       "上面灰下面白" pattern WAWQAQ called out twice (`1e693dee` /
-       `5d3b10e5`). The 50% glass base on the panel already provides
-       material depth; the footer only needs a hairline border-top
-       to separate it from the scroll area. No gradient. No seam. */
+    /* Footer is SideNavSection chrome (same SideNavItem as the rail).
+       Only a hairline separates sticky bottom from the scroller — no
+       tinted plate that made Settings look like a foreign control. */
     border-top: var(--border-width-hairline) solid oklch(from var(--foreground) l c h / 0.05);
-    background: oklch(from var(--surface-canvas) l c h / 0.15);
+    background: transparent;
   }
 
 /* =============================================================================

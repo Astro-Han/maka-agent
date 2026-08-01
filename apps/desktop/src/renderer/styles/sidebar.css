@@ -30,13 +30,27 @@
   min-width: 0;
 }
 
+/*
+ * SideNavSection titles use Astryx supporting/sm. Product root is 13px and
+ * Astryx still declares sm as 0.75rem on the Theme wrapper, so supporting
+ * collapses to ~9.75px — smaller than caption and hard to scan next to 13px
+ * nav labels. Pin session-list section titles to product UI size; keep the
+ * secondary color from Astryx.
+ */
+.maka-session-list .astryx-side-nav-section [id$="-title"] {
+  font-size: var(--font-size-ui) !important;
+  line-height: var(--leading-snug, 1.35);
+}
+
+/* Footer is a SideNavSection (shell-side-nav). Keep the class as the e2e /
+ * glass seam hook; do not re-grid SideNavItem next to product chrome. */
 .maka-session-panel-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-1-5);
-  align-items: center;
-  padding: var(--space-2) 0 0;
+  padding: 0;
   border-top: 0;
+}
+
+.maka-session-panel-footer .maka-sidebar-update-button {
+  margin-block-start: var(--space-1);
 }
 
 .maka-sidebar-update-button {
@@ -120,15 +134,26 @@
 .maka-project-item-end {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-1);
-  min-width: 0;
+  flex-shrink: 0;
 }
 
-.maka-list-project-count {
+/* Fixed trailing column so StatusDot ↔ MoreMenu swaps do not reflow the label
+ * (hover used to steal ~28px and shove the title left). */
+.maka-session-row-trailing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  color: var(--muted-foreground);
-  font-size: var(--font-size-caption);
-  font-variant-numeric: tabular-nums;
+  width: var(--h-control-sm, 24px);
+  min-height: var(--h-control-sm, 24px);
+}
+
+.maka-session-row-trailing-spacer {
+  display: block;
+  width: 8px;
+  height: 8px;
 }
 
 .maka-session-worktree-icon {
