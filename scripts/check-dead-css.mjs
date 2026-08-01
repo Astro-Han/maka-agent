@@ -55,6 +55,10 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   'astryx-button',
   'astryx-badge',
   'astryx-resize-handle-pill',
+  // SideNav shell + items + section titles (sidebar.css product overrides).
+  'astryx-side-nav',
+  'astryx-side-nav-item',
+  'astryx-side-nav-section',
   // Selector / MultiSelector trigger shell (themeProps class on the outer
   // field). native-cursor.css and model-switcher.css target these so the
   // multi-node hit target (label button + sibling chevron) stays one cursor.

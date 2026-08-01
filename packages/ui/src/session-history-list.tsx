@@ -262,7 +262,10 @@ function SessionListGroups(props: {
               onCollapsedChange: (collapsed) => setArchivedExpanded(!collapsed),
             }}
           >
-            {archivedExpanded ? archivedGroups.map(renderProjectGroup) : null}
+            {/* Always mount children: Astryx derives collapsible chrome from
+                !!children. Nulling on collapse removes the chevron and makes
+                the controlled isCollapsed prop a no-op. */}
+            {archivedGroups.map(renderProjectGroup)}
           </SideNavItem>
         )}
       </>

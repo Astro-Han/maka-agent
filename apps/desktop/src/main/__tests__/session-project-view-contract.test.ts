@@ -127,8 +127,12 @@ describe('sidebar project view mode', () => {
     assert.match(markup, />Missing project</);
     assert.match(markup, /aria-label="Active project 项目操作"/);
     assert.match(markup, /aria-label="Missing project 项目操作"/);
+    // Archived disclosure stays collapsible: children always mount so Astryx
+    // can keep the chevron; default collapsed hides them with inert/aria-hidden.
     assert.match(markup, />已归档项目</);
-    assert.doesNotMatch(markup, />Archived project</);
+    assert.match(markup, /aria-expanded="false"/);
+    assert.match(markup, /inert[\s\S]*Archived project|aria-hidden="true"[\s\S]*Archived project/);
+    assert.match(markup, />Archived project</);
     assert.equal((markup.match(/lucide-folder-git-2/g) ?? []).length, 1);
   });
 

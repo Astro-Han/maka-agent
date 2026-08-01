@@ -155,10 +155,12 @@
  * Project groups are a section label + peer sessions, not a deep tree.
  * Astryx SideNavItem always pads children with spacing-6 (24px); that is the
  * shell-side-nav workspace pattern, but it wastes a full icon column in a
- * narrow session rail. Zero the nest so project sessions share the same left
- * edge as time-sort rows. True subagent children still nest under SessionNavRow.
+ * narrow session rail. Zero only the project item's own nest so sessions share
+ * the time-sort left edge. Do not use a descendant selector — that would also
+ * punch through subagent trees under session rows inside the project.
+ * DOM: .maka-project-row > SideNavItem root > [role=group] > childrenInner
  */
-.maka-project-row [role="group"] > div {
+.maka-project-row > div > [role="group"] > div {
   /* !important: StyleX childrenInner paddingInlineStart is unlayered. */
   padding-inline-start: 0 !important;
 }

@@ -105,6 +105,22 @@ export function SessionListPanel(props: {
         maxWidth,
         onWidthChange,
       }}
+      // Permanent chrome stays sticky via SideNav topContent; only history
+      // scrolls in children (Astryx five-zone model).
+      topContent={
+        <>
+          <SideNavSection title="Main" isHeaderHidden className="maka-session-panel-top">
+            <SessionSidebarNav
+              selection={props.selection}
+              planReminders={props.planReminders}
+              moduleMemory={props.moduleMemory}
+              onSelect={props.onSelect}
+              onNew={props.onNew}
+            />
+          </SideNavSection>
+          {!collapsed ? <Divider /> : null}
+        </>
+      }
       footer={
         <SessionSidebarFooter
           updateReminder={props.updateReminder}
@@ -113,36 +129,23 @@ export function SessionListPanel(props: {
         />
       }
     >
-      <SideNavSection title="Main" isHeaderHidden>
-        <SessionSidebarNav
-          selection={props.selection}
-          planReminders={props.planReminders}
-          moduleMemory={props.moduleMemory}
-          onSelect={props.onSelect}
-          onNew={props.onNew}
+      {!collapsed ? (
+        <SessionHistoryList
+          sessions={props.sessions}
+          activeId={props.activeId}
+          streamingSessionIds={props.streamingSessionIds}
+          staleSessionIds={props.staleSessionIds}
+          groupVariant={viewMode}
+          groups={groups}
+          worktreeSessionIds={props.worktreeSessionIds}
+          projectActions={props.projectActions}
+          childSessionsByParentId={props.childSessionsByParentId}
+          onSelectSession={props.onSelectSession}
+          rowActions={props.rowActions}
+          heading={onViewModeChange ? copy.title : undefined}
+          headingEnd={groupingMenu}
         />
-      </SideNavSection>
-
-      {!collapsed && (
-        <>
-          <Divider />
-          <SessionHistoryList
-            sessions={props.sessions}
-            activeId={props.activeId}
-            streamingSessionIds={props.streamingSessionIds}
-            staleSessionIds={props.staleSessionIds}
-            groupVariant={viewMode}
-            groups={groups}
-            worktreeSessionIds={props.worktreeSessionIds}
-            projectActions={props.projectActions}
-            childSessionsByParentId={props.childSessionsByParentId}
-            onSelectSession={props.onSelectSession}
-            rowActions={props.rowActions}
-            heading={onViewModeChange ? copy.title : undefined}
-            headingEnd={groupingMenu}
-          />
-        </>
-      )}
+      ) : null}
     </SideNav>
   );
 }

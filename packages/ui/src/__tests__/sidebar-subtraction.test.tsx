@@ -65,6 +65,60 @@ describe('sidebar subtraction', () => {
     assert.doesNotMatch(markup, /maka-nav-count/);
   });
 
+  it('pins permanent destinations in SideNav topContent outside the scroll history', () => {
+    const session: SessionSummary = {
+      id: 'session-1',
+      name: '侧栏置顶导航',
+      status: 'active',
+      isFlagged: false,
+      isArchived: false,
+      labels: [],
+      hasUnread: false,
+      lastMessageAt: 1,
+      backend: 'ai-sdk',
+      llmConnectionSlug: 'anthropic-main',
+      connectionLocked: false,
+      model: 'claude-sonnet-4-5',
+      permissionMode: 'ask',
+    };
+    const expanded = renderToStaticMarkup(
+      <LocaleProvider locale="zh">
+        <SessionListPanel
+          selection={{ section: 'sessions', filter: 'chats' }}
+          sessions={[session]}
+          onSelectSession={() => {}}
+          onSelect={() => {}}
+          onOpenSettings={() => {}}
+          onNew={() => {}}
+        />
+      </LocaleProvider>,
+    );
+    assert.match(expanded, /maka-session-panel-top/);
+    assert.ok(
+      expanded.indexOf('maka-session-panel-top') < expanded.indexOf('maka-session-list'),
+      'permanent nav top slot must precede scrollable session history',
+    );
+    assert.match(expanded, /maka-session-panel-top[\s\S]*?>新任务</);
+    assert.match(expanded, /maka-session-list[\s\S]*侧栏置顶导航/);
+
+    const collapsed = renderToStaticMarkup(
+      <LocaleProvider locale="zh">
+        <SessionListPanel
+          collapsed
+          selection={{ section: 'sessions', filter: 'chats' }}
+          sessions={[session]}
+          onSelectSession={() => {}}
+          onSelect={() => {}}
+          onOpenSettings={() => {}}
+          onNew={() => {}}
+        />
+      </LocaleProvider>,
+    );
+    assert.match(collapsed, /maka-session-panel-top/);
+    assert.doesNotMatch(collapsed, /maka-session-list/);
+    assert.doesNotMatch(collapsed, /侧栏置顶导航/);
+  });
+
   it('renders each pair of peer modules as localized view navigation', () => {
     const extensions = renderToStaticMarkup(
       <LocaleProvider locale="zh">
