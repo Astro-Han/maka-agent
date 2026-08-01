@@ -159,7 +159,12 @@ export function planTests(changedFiles, options = {}) {
     e2e: directWorkspaces.has('apps/desktop') || directWorkspaces.has('packages/ui'),
     full: false,
     headless: workspaces.includes('packages/headless'),
-    runtimeSandbox: directWorkspaces.has('packages/runtime'),
+    runtimeSandbox:
+      directWorkspaces.has('packages/runtime') ||
+      // runtime-bootstrap.test.ts (packages/cli) executes real sandboxed shell
+      // tools, so it needs the bubblewrap + user-namespace setup even though
+      // the change is scoped to the cli workspace.
+      files.some((path) => path === 'packages/cli/src/__tests__/runtime-bootstrap.test.ts'),
     scriptMode,
     storageStress,
     workspaces,
