@@ -16,18 +16,18 @@
    data-astryx-theme (and data-theme) onto <html>, and a bare
    [data-astryx-theme] would quietly pin html-level text properties too.
    Keeping both renderer mounts on the same selector is required for Storybook
-   pixels to remain evidence for the live app. */
+   pixels to remain evidence for the live app.
+
+   No token is re-pinned here. theme.css declares its tokens ON the wrapper
+   (@scope root), so any name both sides define would be shadowed for the
+   entire subtree regardless of layer order — custom properties resolve by
+   tree distance, not by layer. --font-size-base used to be pinned back to
+   the product's :root value here to undo the 13px root multiplier; the type
+   scale in astryx-theme/makaTheme.ts now emits 13px directly, so the two
+   definitions agree and the pin has nothing left to correct. If a future
+   Astryx upgrade reintroduces a conflict, re-derive the set (astryx theme
+   defs ∩ product defs ∩ product var() usage) before pinning anything. */
 :is(#root, #storybook-root) [data-astryx-theme] {
   color: inherit;
   font-family: inherit;
-  /* theme.css declares its tokens ON the wrapper (@scope root), so a name
-     both sides define is shadowed for the entire subtree no matter what the
-     layer order says — custom properties resolve by tree distance, not by
-     layer. The only name both maka-tokens.css and the Astryx theme define
-     AND product CSS consumes is --font-size-base (13px vs 0.875rem);
-     `inherit` reopens the path to the product's :root value. Re-derive this
-     list (astryx theme defs ∩ product defs ∩ product var() usage) whenever
-     the Astryx pin moves. SideNav section titles that need product scale are
-     pinned locally in sidebar.css — do not widen this list to --font-size-sm. */
-  --font-size-base: inherit;
 }

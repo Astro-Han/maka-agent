@@ -1,7 +1,8 @@
-// Maka's Astryx theme (#1565 PR 3). A pure `extends` of the neutral default
-// theme — issue #1565 fixes the target theme as "Astryx's default theme,
-// light and dark", with no token extraction from design files. The only
-// reason this file exists (rather than importing theme-neutral/built
+// Maka's Astryx theme (#1565 PR 3). An `extends` of the neutral default theme
+// — issue #1565 fixes the target theme as "Astryx's default theme, light and
+// dark", with no token extraction from design files — plus the one deviation
+// Maka's product density genuinely requires: the type scale (see below). The
+// other reason this file exists (rather than importing theme-neutral/built
 // directly) is the build step: `astryx theme build` emits the theme CSS as a
 // file we own, so scripts/build-astryx-theme.mjs can drop the @layer reset
 // element-typography block at generation time — see styles.css for why that
@@ -22,4 +23,52 @@ export const makaTheme = defineTheme({
   // maka.js ships no icons and every semantic icon in Astryx components
   // silently falls back.
   icons: neutralIconRegistry,
+  // THE type-scale authority for the whole renderer.
+  //
+  // Maka is denser than Astryx's neutral default (`{base: 14, ratio: 1.2}`).
+  // That density used to be expressed as `html { font-size: 13px }` in
+  // maka-tokens.css, which is not a type scale at all but an implicit ×0.8125
+  // multiplier on every rem in the document — including the radius and spacing
+  // rem constants Astryx compiles against a 16px root. The product then had to
+  // pin --font-size-base back on the Theme wrapper to undo the multiplier for
+  // body copy alone, leaving every other tier shrunk. One intent, two
+  // contradicting expressions, and a compensating patch between them.
+  //
+  // `scale` is where Astryx expects that intent, and it happens to reproduce
+  // Maka's hand-written tiers exactly (expandTypeScale rounds base × ratio^n):
+  //   step -1  --font-size-sm    11px  (was --font-size-caption)
+  //   step  0  --font-size-base  13px  (was --font-size-base / --font-size-ui)
+  //   step +1  --font-size-lg    15px  (was --font-size-heading)
+  //   step +3  --font-size-2xl   20px  (was --font-size-stat)
+  // Those four names now alias these tokens in maka-tokens.css rather than
+  // holding independent values, so the ladder — and the 4px-grid line heights
+  // generated alongside it — has exactly one source.
+  //
+  // The font stacks move here for the same reason. Astryx's neutral default
+  // leads with Figtree, which Maka does not bundle, so every Astryx surface
+  // (Markdown prose included) declared a family that silently fell back —
+  // and its stack carries no CJK face, while Maka is CJK-first. Declaring the
+  // product stacks here makes --font-family-body/heading/code identical to
+  // what the product already uses; maka-tokens.css now aliases --font-sans /
+  // --font-mono to these instead of holding a second copy.
+  typography: {
+    scale: { base: 13, ratio: 1.15 },
+    // PR-UI-ALIGN-0's "clean native" feel comes from the SYSTEM font (SF Pro
+    // on macOS), not a bundled geometric face; Geist stays a late fallback.
+    body: {
+      family: '-apple-system',
+      fallbacks:
+        'BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, ' +
+        '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Microsoft YaHei UI", ' +
+        '"Noto Sans CJK SC", "Noto Sans SC", "WenQuanYi Micro Hei", "Source Han Sans SC", ' +
+        '"Geist Variable", sans-serif',
+    },
+    // heading intentionally omitted — it inherits body's family/fallbacks.
+    code: {
+      family: 'Geist Mono Variable',
+      fallbacks:
+        '"JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, ' +
+        '"Liberation Mono", monospace',
+    },
+  },
 });

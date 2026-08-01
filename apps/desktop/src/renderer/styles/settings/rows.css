@@ -49,6 +49,6 @@
   .settingsActionRow > button {
     flex-shrink: 1;
     height: auto;
-    min-height: 2rem;
+    min-height: 26px;
   }
 }

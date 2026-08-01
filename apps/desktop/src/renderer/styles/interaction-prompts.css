@@ -31,7 +31,7 @@
 .maka-sandbox-boundary-scopes {
   display: grid;
   gap: var(--space-1);
-  max-height: min(16rem, 40vh);
+  max-height: min(208px, 40vh);
   margin: 0;
   padding: 0;
   overflow-y: auto;

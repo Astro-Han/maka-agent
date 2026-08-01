@@ -23,9 +23,13 @@
   width: 100%;
 }
 
+/* The conversation reading tier is Astryx's body role: 13px with the 20px
+   4px-grid leading the type scale computes for it. The leading used to be a
+   hand-rolled 1.6154em (21px) that matched neither Maka's --leading-* tiers
+   nor Astryx's. */
 .maka-chat-message-bubble {
-  font-size: var(--font-size-base);
-  line-height: 1.6154em;
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-leading);
 }
 
 /* Geometry (radius, padding, max-width) belongs to ChatMessageBubble: under
@@ -69,8 +73,8 @@
 .maka-turn .astryx-chat-reasoning [role="button"] > span:last-child svg,
 .maka-turn .astryx-chat-tool-calls [role="button"] > span:last-child svg,
 .maka-turn .astryx-chat-tool-calls [role="button"] > span:last-child > * {
-  width: 0.75rem !important;
-  height: 0.75rem !important;
+  width: 10px !important;
+  height: 10px !important;
 }
 
 @media (hover: hover) {
@@ -101,8 +105,8 @@
 
 .maka-turn [data-trow] .astryx-collapsible-trigger > span:last-child svg,
 .maka-turn [data-trow] .astryx-collapsible-trigger > span:last-child > * {
-  width: 0.75rem !important;
-  height: 0.75rem !important;
+  width: 10px !important;
+  height: 10px !important;
 }
 
 /* Row detail open: same 0fr→1fr medium motion as group/reasoning. */

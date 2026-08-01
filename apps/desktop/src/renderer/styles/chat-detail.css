@@ -114,12 +114,12 @@
 .maka-browser-empty {
   position: absolute;
   inset: 0;
-  padding-block: 2.5rem;
+  padding-block: 32px;
   color: var(--muted-foreground);
 }
 
 @media (min-width: 768px) {
-  .maka-browser-empty { padding-block: 3rem; }
+  .maka-browser-empty { padding-block: 39px; }
 }
 
 .maka-artifact-pane {

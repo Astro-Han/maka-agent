@@ -61,12 +61,12 @@
   gap: var(--space-2-5);
 }
 
-.settingsActionWidthXs { min-width: 3.5rem; }
-.settingsActionWidthSm { min-width: 4rem; }
-.settingsActionWidthMd { min-width: 5rem; }
-.settingsActionWidthLg { min-width: 6rem; }
-.settingsActionWidthXl { min-width: 7rem; }
-.settingsActionWidth2Xl { min-width: 7.5rem; }
+.settingsActionWidthXs { min-width: 46px; }
+.settingsActionWidthSm { min-width: 52px; }
+.settingsActionWidthMd { min-width: 65px; }
+.settingsActionWidthLg { min-width: 78px; }
+.settingsActionWidthXl { min-width: 91px; }
+.settingsActionWidth2Xl { min-width: 98px; }
 
 .settingsSubheading {
   margin: 0;
