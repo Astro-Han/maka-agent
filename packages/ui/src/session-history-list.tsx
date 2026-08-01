@@ -130,13 +130,9 @@ export function SessionHistoryList(props: {
       />
     );
 
+  // Outer SideNav is the sole navigation landmark; this is scroll content only.
   return (
-    <div
-      className="maka-session-list"
-      role="navigation"
-      aria-label={sessionListTitle}
-      onKeyDown={handleListKeyDown}
-    >
+    <div className="maka-session-list" aria-label={sessionListTitle} onKeyDown={handleListKeyDown}>
       {props.heading ? (
         <SideNavSection
           title={props.heading}
@@ -174,14 +170,6 @@ function SessionListGroups(props: {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [archivedExpanded, setArchivedExpanded] = useState(false);
 
-  function commitSessionRename(session: SessionSummary, name: string) {
-    setEditingSessionId(null);
-    if (!props.rowActions || !name || name === session.name) return;
-    void Promise.resolve(props.rowActions.onRename(session.id, name)).catch(() => {
-      // AppShell owns visible session-action failure feedback.
-    });
-  }
-
   function commitProjectRename(project: ProjectRecord, name: string) {
     setEditingProjectId(null);
     if (!props.projectActions || !name || name === project.name) return;
@@ -191,7 +179,11 @@ function SessionListGroups(props: {
   }
 
   function renderSessionTree(session: SessionSummary, nested: boolean): ReactNode {
-    const children = props.childSessionsByParentId?.get(session.id) ?? [];
+    const childSessions = props.childSessionsByParentId?.get(session.id);
+    const childNodes =
+      childSessions && childSessions.length > 0
+        ? childSessions.map((child) => renderSessionTree(child, true))
+        : undefined;
     return (
       <SessionNavRow
         key={session.id}
@@ -202,16 +194,11 @@ function SessionListGroups(props: {
         stale={props.staleSessionIds?.has(session.id) ?? false}
         worktree={props.worktreeSessionIds?.has(session.id) ?? false}
         editing={editingSessionId === session.id}
-        onSelect={() => props.onSelectSession(session.id)}
-        onStartRename={
-          props.rowActions ? () => setEditingSessionId(session.id) : undefined
-        }
-        onCommitRename={(name) => commitSessionRename(session, name)}
-        onCancelRename={() => setEditingSessionId(null)}
+        onSelectSession={props.onSelectSession}
         actions={props.rowActions}
         setEditingSessionId={setEditingSessionId}
       >
-        {children.map((child) => renderSessionTree(child, true))}
+        {childNodes}
       </SessionNavRow>
     );
   }
@@ -229,6 +216,7 @@ function SessionListGroups(props: {
         return (
           <ProjectRenameRow
             key={group.key}
+            groupKey={group.key}
             label={group.label}
             onCommit={(name) => commitProjectRename(project, name)}
             onCancel={() => setEditingProjectId(null)}
@@ -302,12 +290,15 @@ function ProjectNavRow(props: {
   onStartRename(): void;
   renderSession(session: SessionSummary): ReactNode;
 }) {
+  // Collapsible only when there is a real session subtree. An empty VStack is
+  // still truthy children for Astryx (!!children) and fabricates a disclosure.
+  const hasSessions = props.sessions.length > 0;
   return (
     <div data-project-id={props.groupKey} className="maka-project-row">
       <SideNavItem
         label={props.label}
         icon={FolderOpen}
-        collapsible={{ defaultIsCollapsed: props.sessions.length === 0 }}
+        collapsible={hasSessions ? { defaultIsCollapsed: false } : undefined}
         endContent={
           <ProjectItemEndContent
             project={props.project}
@@ -317,11 +308,26 @@ function ProjectNavRow(props: {
           />
         }
       >
-        {/* Collapsible project parent; nest indent is zeroed in sidebar.css so
-            sessions share the time-sort left edge (not shell-side-nav's 24px). */}
-        <VStack gap={0.5}>{props.sessions.map((session) => props.renderSession(session))}</VStack>
+        {/* Nest indent zeroed one level in sidebar.css (time-sort left edge). */}
+        {hasSessions ? (
+          <VStack gap={0.5}>{props.sessions.map((session) => props.renderSession(session))}</VStack>
+        ) : undefined}
       </SideNavItem>
     </div>
+  );
+}
+
+/** Keeps trailing controls from activating the parent SideNavItem button. */
+function EndContentHitTarget(props: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={props.className}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      {props.children}
+    </span>
   );
 }
 
@@ -333,19 +339,12 @@ const SessionNavRow = memo(function SessionNavRow(props: {
   stale: boolean;
   worktree: boolean;
   editing: boolean;
-  onSelect(): void;
-  onStartRename?: () => void;
-  onCommitRename(name: string): void;
-  onCancelRename(): void;
+  onSelectSession(sessionId: string): void;
   actions?: SessionRowActions;
   setEditingSessionId: Dispatch<SetStateAction<string | null>>;
   children?: ReactNode;
 }) {
   const locale = useUiLocale();
-  const copy = getConversationCopy(locale).sessions;
-  const [hovered, setHovered] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const showMenu = Boolean(props.actions) && (hovered || menuOpen);
   const metaTitle = formatSessionMeta(props.session, locale);
   const childArray = props.children
     ? Array.isArray(props.children)
@@ -358,8 +357,14 @@ const SessionNavRow = memo(function SessionNavRow(props: {
     return (
       <SessionRenameRow
         session={props.session}
-        onCommit={props.onCommitRename}
-        onCancel={props.onCancelRename}
+        onCommit={(name) => {
+          props.setEditingSessionId(null);
+          if (!props.actions || !name || name === props.session.name) return;
+          void Promise.resolve(props.actions.onRename(props.session.id, name)).catch(() => {
+            // AppShell owns visible session-action failure feedback.
+          });
+        }}
+        onCancel={() => props.setEditingSessionId(null)}
       />
     );
   }
@@ -372,8 +377,6 @@ const SessionNavRow = memo(function SessionNavRow(props: {
       data-subagent={props.nested ? 'true' : undefined}
       data-stale={props.stale ? 'true' : undefined}
       title={metaTitle}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       <SideNavItem
         label={props.session.name}
@@ -384,11 +387,11 @@ const SessionNavRow = memo(function SessionNavRow(props: {
         isSelected={props.active}
         collapsible={hasChildren ? { defaultIsCollapsed: false } : undefined}
         onClick={(event) => {
-          if (event.detail > 1 && props.onStartRename) {
-            props.onStartRename();
+          if (event.detail > 1 && props.actions) {
+            props.setEditingSessionId(props.session.id);
             return;
           }
-          props.onSelect();
+          props.onSelectSession(props.session.id);
         }}
         endContent={
           <SessionItemEndContent
@@ -397,9 +400,6 @@ const SessionNavRow = memo(function SessionNavRow(props: {
             streaming={props.streaming}
             stale={props.stale}
             worktree={props.worktree}
-            showMenu={showMenu}
-            menuOpen={menuOpen}
-            setMenuOpen={setMenuOpen}
             actions={props.actions}
             setEditingSessionId={props.setEditingSessionId}
           />
@@ -464,6 +464,7 @@ function SessionRenameRow(props: {
 }
 
 function ProjectRenameRow(props: {
+  groupKey: string;
   label: string;
   onCommit(name: string): void;
   onCancel(): void;
@@ -478,7 +479,10 @@ function ProjectRenameRow(props: {
   }, []);
 
   return (
-    <div className="maka-session-row maka-session-row--editing">
+    <div
+      data-project-id={props.groupKey}
+      className="maka-session-row maka-session-row--editing"
+    >
       <input
         ref={inputRef}
         className="maka-session-rename-input"
@@ -587,7 +591,7 @@ function ProjectItemEndContent(props: {
     : [];
 
   return (
-    <span className="maka-session-row-end maka-project-item-end">
+    <EndContentHitTarget className="maka-session-row-end maka-project-item-end">
       {project && !project.available && (
         <AlertTriangle size={12} aria-label={copy.projectUnavailable} />
       )}
@@ -608,7 +612,7 @@ function ProjectItemEndContent(props: {
           items={menuItems}
         />
       )}
-    </span>
+    </EndContentHitTarget>
   );
 }
 
@@ -618,14 +622,12 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
   streaming: boolean;
   stale: boolean;
   worktree: boolean;
-  showMenu: boolean;
-  menuOpen: boolean;
-  setMenuOpen: Dispatch<SetStateAction<boolean>>;
   actions?: SessionRowActions;
   setEditingSessionId: Dispatch<SetStateAction<string | null>>;
 }) {
   const locale = useUiLocale();
   const copy = getConversationCopy(locale).sessions;
+  const [menuOpen, setMenuOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<SessionRowActionId | null>(null);
   const mountedRef = useMountedRef();
   const pendingActionRef = useRef<SessionRowActionId | null>(null);
@@ -656,61 +658,9 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
     })();
   }
 
-  // Trailing slot is fixed-width so hover MoreMenu ↔ StatusDot never steals
-  // label width (the "actions squeezed left" jump). shell-side-nav always
-  // keeps either a StatusDot or MoreMenu in endContent.
-  const trailing = props.showMenu && actions ? (
-    <MoreMenu
-      size="sm"
-      label={copy.actionsAriaLabel}
-      isDisabled={pendingAction !== null}
-      isMenuOpen={props.menuOpen}
-      onOpenChange={(open) => {
-        props.setMenuOpen(open);
-        if (open) return;
-        const intent = pendingMenuIntentRef.current;
-        pendingMenuIntentRef.current = null;
-        if (intent) {
-          window.requestAnimationFrame(() => {
-            intent();
-          });
-        }
-      }}
-      items={[
-        {
-          label: props.session.isFlagged ? copy.unpin : copy.pin,
-          onClick: () =>
-            runRowAction('flag', () =>
-              actions.onToggleFlag(props.session.id, !props.session.isFlagged),
-            ),
-        },
-        {
-          label: copy.rename,
-          onClick: () => {
-            pendingMenuIntentRef.current = () =>
-              props.setEditingSessionId(props.session.id);
-          },
-        },
-        {
-          label: props.session.isArchived ? copy.unarchive : copy.archive,
-          onClick: () =>
-            runRowAction('archive', () =>
-              props.session.isArchived
-                ? actions.onUnarchive(props.session.id)
-                : actions.onArchive(props.session.id),
-            ),
-        },
-        { type: 'divider' },
-        {
-          label: copy.delete,
-          onClick: () => {
-            pendingMenuIntentRef.current = () =>
-              runRowAction('delete', () => actions.onDelete(props.session.id));
-          },
-        },
-      ]}
-    />
-  ) : statusDot ? (
+  // Signal (status/unread) and action (MoreMenu) are orthogonal — same as
+  // project rows (badge + menu). No hover XOR state machine.
+  const signal = statusDot ? (
     <StatusDot
       variant={statusDot.variant}
       label={statusDot.label}
@@ -720,12 +670,10 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
     />
   ) : shouldShowSessionUnreadDot(props.session, props.streaming, props.active) ? (
     <StatusDot variant="accent" label={copy.unreadAriaLabel} data-session-status="unread" />
-  ) : (
-    <span className="maka-session-row-trailing-spacer" aria-hidden="true" />
-  );
+  ) : null;
 
   return (
-    <span className="maka-session-row-end">
+    <EndContentHitTarget className="maka-session-row-end">
       {props.stale && (
         <span
           className="maka-list-row-stale-pill"
@@ -742,8 +690,66 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
           className="maka-session-worktree-icon"
         />
       )}
-      <span className="maka-session-row-trailing">{trailing}</span>
-    </span>
+      {signal}
+      {actions ? (
+        <span className="maka-session-row-trailing">
+          <MoreMenu
+            size="sm"
+            label={copy.actionsAriaLabel}
+            isDisabled={pendingAction !== null}
+            isMenuOpen={menuOpen}
+            onOpenChange={(open) => {
+              setMenuOpen(open);
+              if (open) return;
+              const intent = pendingMenuIntentRef.current;
+              pendingMenuIntentRef.current = null;
+              if (intent) {
+                window.requestAnimationFrame(() => {
+                  intent();
+                });
+              }
+            }}
+            items={[
+              {
+                label: props.session.isFlagged ? copy.unpin : copy.pin,
+                onClick: () =>
+                  runRowAction('flag', () =>
+                    actions.onToggleFlag(props.session.id, !props.session.isFlagged),
+                  ),
+              },
+              {
+                label: copy.rename,
+                onClick: () => {
+                  pendingMenuIntentRef.current = () =>
+                    props.setEditingSessionId(props.session.id);
+                },
+              },
+              {
+                label: props.session.isArchived ? copy.unarchive : copy.archive,
+                onClick: () =>
+                  runRowAction('archive', () =>
+                    props.session.isArchived
+                      ? actions.onUnarchive(props.session.id)
+                      : actions.onArchive(props.session.id),
+                  ),
+              },
+              { type: 'divider' },
+              {
+                label: copy.delete,
+                onClick: () => {
+                  pendingMenuIntentRef.current = () =>
+                    runRowAction('delete', () => actions.onDelete(props.session.id));
+                },
+              },
+            ]}
+          />
+        </span>
+      ) : (
+        <span className="maka-session-row-trailing">
+          {signal ? null : <span className="maka-session-row-trailing-spacer" aria-hidden="true" />}
+        </span>
+      )}
+    </EndContentHitTarget>
   );
 });
 

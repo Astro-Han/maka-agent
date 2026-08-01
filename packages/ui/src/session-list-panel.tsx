@@ -7,7 +7,6 @@ import {
 import { Divider } from '@astryxdesign/core/Divider';
 import {
   SideNav,
-  SideNavSection,
   type SideNavImperativeCollapseHandle,
 } from '@astryxdesign/core/SideNav';
 import type { NavModuleMemory, NavSelection } from './nav-selection.js';
@@ -106,10 +105,11 @@ export function SessionListPanel(props: {
         onWidthChange,
       }}
       // Permanent chrome stays sticky via SideNav topContent; only history
-      // scrolls in children (Astryx five-zone model).
+      // scrolls in children (Astryx five-zone model). Not a titled section —
+      // the rail landmark already names the whole panel.
       topContent={
         <>
-          <SideNavSection title="Main" isHeaderHidden className="maka-session-panel-top">
+          <div className="maka-session-panel-top">
             <SessionSidebarNav
               selection={props.selection}
               planReminders={props.planReminders}
@@ -117,7 +117,7 @@ export function SessionListPanel(props: {
               onSelect={props.onSelect}
               onNew={props.onNew}
             />
-          </SideNavSection>
+          </div>
           {!collapsed ? <Divider /> : null}
         </>
       }

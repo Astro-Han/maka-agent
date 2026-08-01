@@ -129,7 +129,8 @@ test('session delete intent opens only after its menu closes and restores the tr
 }) => {
   const sidebar = await expandedSidebar(page);
   const row = sidebar.locator('[data-maka-contract="session-row"]').filter({ hasText: '会话 00' }).first();
-  const rowButton = row.locator(':scope > button');
+  // SideNavItem wraps the primary control: row > root div > button (not row > button).
+  const rowButton = row.getByRole('button', { name: '会话 00' });
   await expect(rowButton).toHaveCount(1);
   await rowButton.focus();
 

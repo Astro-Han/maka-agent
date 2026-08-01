@@ -49,13 +49,15 @@ describe('UI render memo boundary contract', () => {
       createSession('session-b', 'Beta'),
     ];
     const groups = [{ id: 'all', label: '', sessions }];
+    // Omit rowActions: permanent MoreMenu mounts Astryx DropdownMenu, which
+    // needs a full focusable DOM (hasAttribute). This contract only measures
+    // SessionNavRow identity for formatSessionMeta under stable props.
     const stableProps = {
       SessionHistoryList,
       LocaleProvider,
       activeId: 'session-a',
       groups,
       onSelectSession: () => {},
-      rowActions: createRowActions(),
       sessions,
       staleSessionIds: new Set<string>(),
     };
@@ -101,7 +103,6 @@ function RenderHost(props: {
   groups: ReadonlyArray<{ id: string; label: string; sessions: SessionSummary[] }>;
   label: string;
   onSelectSession(sessionId: string): void;
-  rowActions: NonNullable<Parameters<SessionHistoryModule['SessionHistoryList']>[0]['rowActions']>;
   sessions: SessionSummary[];
   staleSessionIds: Set<string>;
   streamingSessionIds: Set<string>;
@@ -119,7 +120,6 @@ function RenderHost(props: {
         streamingSessionIds: props.streamingSessionIds,
         staleSessionIds: props.staleSessionIds,
         onSelectSession: props.onSelectSession,
-        rowActions: props.rowActions,
       }),
     ),
   });
@@ -161,16 +161,6 @@ function timestampReads(sessions: SessionSummary[]): number[] {
   return sessions.map((session) =>
     (session.lastMessageAt as CountedTimestamp).readCount()
   );
-}
-
-function createRowActions(): NonNullable<Parameters<SessionHistoryModule['SessionHistoryList']>[0]['rowActions']> {
-  return {
-    onToggleFlag() {},
-    onArchive() {},
-    onUnarchive() {},
-    onRename() {},
-    onDelete() {},
-  };
 }
 
 async function importSessionHistoryList(): Promise<SessionHistoryModule> {

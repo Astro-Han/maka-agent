@@ -119,17 +119,16 @@ describe('stale session CSS contract (@kenji review gate)', () => {
 
   it('inactive stale row dims, active stale row restores opacity', async () => {
     const css = await readRendererContractCss();
-    // Inactive stale dimming rule must exist.
+    // SideNav session rows: stale dims the item; current page restores opacity.
     assert.match(
       css,
-      /\.maka-session-item-label\[data-stale="true"\]\s*\{[\s\S]*?opacity:\s*var\(--opacity-muted\)/,
-      'expected stale product content to use the muted opacity token',
+      /\.maka-session-row\[data-stale="true"\]\s+\.astryx-side-nav-item\s*\{[\s\S]*?opacity:\s*var\(--opacity-muted\)/,
+      'expected stale SideNav session rows to use the muted opacity token',
     );
-    // Active stale restoration rule must exist.
     assert.match(
       css,
-      /\[role="treeitem"\]\[aria-selected="true"\][\s\S]*?\.maka-session-item-label\[data-stale="true"\][\s\S]*?opacity:\s*1/,
-      'expected Astryx-selected stale content to restore full opacity',
+      /\.maka-session-row\[data-stale="true"\]:has\(\[aria-current="page"\]\)\s+\.astryx-side-nav-item\s*\{[\s\S]*?opacity:\s*1/,
+      'expected the active stale SideNav row to restore full opacity',
     );
   });
 
