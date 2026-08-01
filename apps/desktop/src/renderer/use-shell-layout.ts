@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useResizable } from '@astryxdesign/core/Resizable';
 import { readSessionListCollapsed, readSessionListWidth } from './session-list-layout';
 import {
@@ -45,6 +45,16 @@ export function useShellLayout() {
     }),
     [workbar.props],
   );
+  // Astryx ends a drag on pointerup, pointercancel or unmount, but not on focus
+  // loss: Cmd+Tab mid-drag and release outside the app leaves the listeners
+  // attached and `body` stuck at `cursor: col-resize; user-select: none`. The
+  // deleted hand-rolled resize cleaned up on blur; this routes blur back into
+  // Astryx's own cancel path rather than re-growing a second teardown.
+  useEffect(() => {
+    const cancelDrag = () => window.dispatchEvent(new PointerEvent('pointercancel'));
+    window.addEventListener('blur', cancelDrag);
+    return () => window.removeEventListener('blur', cancelDrag);
+  }, []);
   const [workbarTab, setWorkbarTab] = useState(() => readSessionWorkbarTab());
   return {
     sessionListWidth,

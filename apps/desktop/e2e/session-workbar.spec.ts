@@ -40,6 +40,18 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(workbar).toHaveCSS('width', '431px');
   await expect(resize).toHaveAttribute('aria-valuenow', '431');
 
+  // Cmd+Tab mid-drag and release outside the app: Astryx only ends a drag on
+  // pointerup/pointercancel, so without a blur guard the listeners survive and
+  // the panel keeps tracking a button-less pointer while `body` stays stuck at
+  // `user-select: none`.
+  await page.mouse.move(box.x - 20.5, y);
+  await page.mouse.down();
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.mouse.move(box.x - 200, y, { steps: 2 });
+  await page.mouse.up();
+  await expect(workbar).toHaveCSS('width', '431px');
+  await expect(page.locator('body')).toHaveCSS('user-select', 'auto');
+
   // Keyboard-driven disclosure, observed through what the user can read: a
   // collapsed section hides its rows, and Enter on the trigger reveals them.
   const recent = workbar.getByRole('button', { name: /最近结束/ });
