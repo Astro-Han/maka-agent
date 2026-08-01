@@ -833,7 +833,9 @@ function groupSessionsForHistory(sessions: SessionSummary[], locale: UiLocale): 
     groups.push({ id: 'pinned', label: copy.pinned, sessions: pinned });
   }
   if (unpinned.length > 0) {
-    groups.push({ id: 'unpinned', label: '', sessions: unpinned });
+    // Visible SideNavSection title so pinned / recent read as two zones
+    // (empty label used to drop the section chrome and blur the boundary).
+    groups.push({ id: 'unpinned', label: copy.recent, sessions: unpinned });
   }
   return groups;
 }
