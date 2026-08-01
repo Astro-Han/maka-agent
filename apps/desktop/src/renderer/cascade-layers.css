@@ -10,7 +10,17 @@
    tree distance rather than by layer. The moment anything resolves a token
    at `:root` (product aliases, or an Astryx component portaled to <body>,
    outside the wrapper) the old order silently handed back neutral values.
-   The theme file contains only `.astryx-*` class rules besides its tokens —
-   the bare-element prose block is stripped at build time — so promoting it
-   cannot reach product markup, and product CSS still owns `components`. */
+   This is also the order Astryx itself prescribes: its README integration
+   snippet declares `reset, theme, base, astryx-base, astryx-theme,
+   components` — the theme AFTER the component sheet. The old order was the
+   deviation, not this one.
+
+   Promoting the theme is NOT typography-only, and it should not be read as
+   such. Besides its tokens, maka.css carries 67 `.astryx-*` class rules —
+   button variants, badge tones, status dots — that lost to Astryx's own
+   StyleX atoms under the old order and now win. That is what a theme is
+   supposed to do, and those rules come from `astryx theme build` on the
+   neutral base Maka extends, so the values are Astryx's own. But the visible
+   result does change on those components; see PR #1857 for the before/after.
+   Product CSS still owns `components`, which stays last. */
 @layer reset, theme, base, astryx-components, astryx-tokens, components;
