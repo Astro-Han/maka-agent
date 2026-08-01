@@ -146,7 +146,7 @@ const conversation: StoredMessage[] = [
   user('msg-1', 'turn-1', 14, '帮我把这轮 Storybook 覆盖的风险列出来，只保留真正会影响 review 的部分。'),
   assistant('msg-2', 'turn-1', 12, '现在最值得先固定的是几个高频但还没有 story 的页面：权限弹窗、顶层布局、首次启动引导。把它们的可见状态摆出来，reviewer 就能在 Storybook 里逐个看，不用手动把 app 驱动到这些路径。'),
   user('msg-3', 'turn-2', 6, '顶层布局怎么处理？它依赖很多 IPC。'),
-  assistant('msg-4', 'turn-2', 4, '直接挂载 Astryx AppShell，并通过官方 topNav、sideNav 和 content 插槽组合真实侧栏、聊天区与标题栏。Story 只隔离 IPC，布局 authority 与产品保持一致。'),
+  assistant('msg-4', 'turn-2', 4, '直接挂载 Astryx AppShell 的 sideNav 与 content 列，窗体标题栏作为透明 drag 叠层挂在 frame 上。Story 只隔离 IPC，布局 authority 与产品保持一致。'),
 ];
 
 const baseChatProps: ChatViewProps = {
@@ -211,17 +211,17 @@ const baseComposerProps: ComposerProps = {
 function ShellFrame(props: { children: ReactNode; motionEnabled?: boolean }) {
   return (
     <div
+      className="appFrame agents-layout-root"
       data-maka-e2e-fixture={props.motionEnabled ? undefined : 'true'}
-      style={{ background: 'var(--surface-canvas)', height: '100%', minHeight: 640 }}
+      style={{ height: '100%', minHeight: 640 }}
     >
       {props.children}
     </div>
   );
 }
 
-// Production-faithful shell composition: Astryx AppShell owns the frame,
-// SideNav owns sidebar geometry, and Maka supplies only Electron chrome and
-// product content through their public slots.
+// Production-faithful shell composition: Astryx AppShell owns the columns;
+// window chrome is a transparent frame-level drag overlay (not topNav).
 function ComposedShell(props: {
   sidebarCollapsed?: boolean;
   initialViewMode?: SessionViewMode;
@@ -296,6 +296,23 @@ function ComposedShell(props: {
 
   return (
     <ShellFrame motionEnabled={props.motionEnabled}>
+      <header className="maka-window-titlebar">
+        <AppShellTopbarActions
+          sidebarCollapsed={collapsed}
+          sidebarHandleRef={sidebarHandleRef}
+          onOpenSearchModal={noop}
+          onCreateSession={noop}
+        />
+        <AppShellWorkspaceTopActions
+          workbarAvailable
+          workbarCollapsed={false}
+          onToggleWorkbar={noop}
+          onOpenFeedback={noop}
+          onOpenPalette={noop}
+          onOpenHelp={noop}
+          onOpenHealth={noop}
+        />
+      </header>
       <AstryxAppShell
         className="app maka-shell-astryx agents-layout-body"
         variant="surface"
@@ -303,25 +320,6 @@ function ComposedShell(props: {
         contentPadding={0}
         mobileNav={{ breakpoint: 'none', hasToggle: false }}
         data-sidebar-state={collapsed ? 'collapsed' : 'expanded'}
-        topNav={
-          <header className="maka-window-titlebar">
-            <AppShellTopbarActions
-              sidebarCollapsed={collapsed}
-              sidebarHandleRef={sidebarHandleRef}
-              onOpenSearchModal={noop}
-              onCreateSession={noop}
-            />
-            <AppShellWorkspaceTopActions
-              workbarAvailable
-              workbarCollapsed={false}
-              onToggleWorkbar={noop}
-              onOpenFeedback={noop}
-              onOpenPalette={noop}
-              onOpenHelp={noop}
-              onOpenHealth={noop}
-            />
-          </header>
-        }
         sideNav={
           <SessionListPanel
             collapseHandleRef={sidebarHandleRef}

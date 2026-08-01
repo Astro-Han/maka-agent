@@ -27,6 +27,9 @@ import {
 import { useRef, useState, type RefObject } from 'react';
 import { getShellCopy } from './locales/shell-copy';
 
+/** Match Astryx Button icon wrapper / SideNav renderIconSlot sm (16px). */
+const CHROME_ICON_SIZE = 16;
+
 export function AppShellTopbarActions(props: {
   sidebarCollapsed: boolean;
   sidebarHandleRef: RefObject<SideNavImperativeCollapseHandle | null>;
@@ -40,7 +43,7 @@ export function AppShellTopbarActions(props: {
       <Tooltip content={copy.searchConversations}>
         <IconButton
           label={copy.searchConversations}
-          icon={<Search aria-hidden="true" />}
+          icon={<Search size={CHROME_ICON_SIZE} aria-hidden="true" />}
           variant="ghost"
           size="md"
           className="maka-titlebar-action"
@@ -55,14 +58,18 @@ export function AppShellTopbarActions(props: {
           className="maka-titlebar-action"
           aria-expanded={!props.sidebarCollapsed}
         >
-          {props.sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+          {props.sidebarCollapsed ? (
+            <PanelLeftOpen size={CHROME_ICON_SIZE} aria-hidden="true" />
+          ) : (
+            <PanelLeftClose size={CHROME_ICON_SIZE} aria-hidden="true" />
+          )}
         </SideNavCollapseButton>
       </Tooltip>
       {props.sidebarCollapsed && (
         <Tooltip content={copy.newTask}>
           <IconButton
             label={copy.newTask}
-            icon={<SquarePen aria-hidden="true" />}
+            icon={<SquarePen size={CHROME_ICON_SIZE} aria-hidden="true" />}
             variant="ghost"
             size="md"
             className="maka-titlebar-action"
@@ -106,23 +113,29 @@ export function AppShellWorkspaceTopActions(props: {
         }}
         button={{
           label: copy.moreActions,
-          icon: <MoreHorizontal aria-hidden="true" />,
+          icon: <MoreHorizontal size={CHROME_ICON_SIZE} aria-hidden="true" />,
           isIconOnly: true,
           variant: 'ghost',
           size: 'md',
           className: 'maka-titlebar-action',
         }}
       >
-          <DropdownMenuItem icon={<MessageCircleQuestion aria-hidden="true" />} label={copy.feedback} onClick={() => scheduleAfterMenuClose(props.onOpenFeedback)} />
-          <DropdownMenuItem icon={<Grid3X3 aria-hidden="true" />} label={copy.openCommandPalette} onClick={() => scheduleAfterMenuClose(props.onOpenPalette)} />
-          <DropdownMenuItem icon={<HelpCircle aria-hidden="true" />} label={copy.openHelp} onClick={() => scheduleAfterMenuClose(props.onOpenHelp)} />
-          <DropdownMenuItem icon={<CircleGauge aria-hidden="true" />} label={copy.openHealth} onClick={() => scheduleAfterMenuClose(props.onOpenHealth)} />
+          <DropdownMenuItem icon={<MessageCircleQuestion size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.feedback} onClick={() => scheduleAfterMenuClose(props.onOpenFeedback)} />
+          <DropdownMenuItem icon={<Grid3X3 size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.openCommandPalette} onClick={() => scheduleAfterMenuClose(props.onOpenPalette)} />
+          <DropdownMenuItem icon={<HelpCircle size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.openHelp} onClick={() => scheduleAfterMenuClose(props.onOpenHelp)} />
+          <DropdownMenuItem icon={<CircleGauge size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.openHealth} onClick={() => scheduleAfterMenuClose(props.onOpenHealth)} />
       </DropdownMenu>
       {props.workbarAvailable && (
         <Tooltip content={workbarLabel}>
           <IconButton
             label={workbarLabel}
-            icon={props.workbarCollapsed ? <PanelRightOpen aria-hidden="true" /> : <PanelRightClose aria-hidden="true" />}
+            icon={
+              props.workbarCollapsed ? (
+                <PanelRightOpen size={CHROME_ICON_SIZE} aria-hidden="true" />
+              ) : (
+                <PanelRightClose size={CHROME_ICON_SIZE} aria-hidden="true" />
+              )
+            }
             variant="ghost"
             size="md"
             className="maka-titlebar-action"

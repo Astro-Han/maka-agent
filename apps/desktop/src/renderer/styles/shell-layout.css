@@ -1,5 +1,6 @@
 /* Shell layout — app frame, panels, topbar rail, main column, workspace top actions. */
 .appFrame {
+  position: relative;
   height: 100dvh;
   width: 100%;
   padding: 0;
@@ -28,13 +29,25 @@
   height: 100%;
 }
 
-/* Astryx AppShell is the shell authority. Maka only supplies the native
-   Electron titlebar and product surfaces through its public slots. */
+/* Astryx AppShell owns the column layout (sideNav + content). Window chrome
+   is a transparent absolute hit-test overlay on the frame — not an AppShell
+   topNav row — so sidebar canvas and session --background both paint to the
+   window top (Codex / Claude Desktop / Cursor). Keep the shell host from
+   introducing a third surface over the frame plate. */
 .maka-shell-astryx {
   width: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* StyleX AppShell variant paints an opaque root; columns must show the
+     frame canvas (sidebar) or their own surface (detail). */
+  background: transparent !important;
+}
+
+/* SideNav slot inherits AppShell surface fill; force transparency so the
+   frame plate reads through (same intent as .agents-sidebar). */
+.maka-shell-astryx .astryx-app-shell-sidenav {
+  background: transparent !important;
 }
 
 .maka-shell-astryx .maka-panel-detail {
@@ -45,6 +58,17 @@
   display: flex;
   flex-direction: column;
   background: var(--background);
+  /* Clear the absolute chrome strip; padding still paints --background so
+     the session color extends under the transparent titleband. */
+  padding-top: var(--h-titlebar);
+  box-sizing: border-box;
+}
+
+/* Same top clear for the sidebar column so list/nav content sits below the
+   traffic-light / left chrome cluster while the transparent plate shows. */
+.maka-shell-astryx .maka-session-panel {
+  padding-top: var(--h-titlebar);
+  box-sizing: border-box;
 }
 
 .maka-panel {
@@ -54,9 +78,10 @@
 }
 
 /* The window's only drag surface, and the only `-webkit-app-region: drag` in
-   the app. It is an ordinary grid row holding ordinary in-flow children, which
-   is what makes the arithmetic disappear: the draggable region is whatever the
-   row has left after its action clusters carve themselves out with `no-drag`.
+   the app. It is a transparent absolute overlay — pure hit-test chrome — so
+   column surfaces paint through it. Action clusters carve themselves out with
+   `no-drag`. Chromium builds drag regions in document order: this node must
+   precede the columns so later no-drag controls can subtract from it.
 
    This replaced an arrangement where every container that happened to overlap
    the titlebar declared its own drag region and then reserved room for its
@@ -66,7 +91,7 @@
    collapsed. The sidebar's strip reserved room for two, the third button landed
    in the space nobody reserved, and clicks on it reached the OS as window drags.
 
-   The margin keeps the drag rect off the window frame on the three sides it
+   The inset keeps the drag rect off the window frame on the three sides it
    touches, so the OS keeps its resize corridor there. It is DEFENSIVE, not
    demonstrated: this area's other bug (`af681c1`, msg `5b85fdb1`) was a window
    that could not be resized from its edges, and no automated check in this repo
@@ -80,14 +105,21 @@
    places to keep the clusters at an exact pixel — which is the habit this whole
    change exists to remove. */
 .maka-window-titlebar {
-  width: auto;
+  position: absolute;
+  z-index: var(--z-titlebar);
+  top: var(--maka-window-resize-edge);
+  left: var(--maka-window-resize-edge);
+  right: var(--maka-window-resize-edge);
   height: calc(var(--h-titlebar) - var(--maka-window-resize-edge));
   min-height: calc(var(--h-titlebar) - var(--maka-window-resize-edge));
   box-sizing: border-box;
-  margin: var(--maka-window-resize-edge) var(--maka-window-resize-edge) 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  /* No paint: column surfaces under this strip own the color (canvas left,
+     --background right). Windows titleBarOverlay still samples --background
+     for the OS caption strip on the content side. */
+  background: transparent;
   /* One gutter rule per side: our own `--space-6` of breathing room, or the
      platform's native-control safe area when that is wider. Nothing here knows
      which platform it is on or how wide any control is — `max()` picks whichever
@@ -109,6 +141,8 @@
     opacity var(--duration-quick) var(--ease-out-strong),
     transform var(--duration-base) var(--ease-out-strong);
   -webkit-app-region: no-drag;
+  /* Match SideNav unselected icon ink (secondary), not ghost Button primary. */
+  color: var(--foreground-secondary);
 }
 
 .mainColumn {
@@ -138,6 +172,15 @@
   align-items: center;
   gap: var(--space-1-5);
   color: var(--foreground-secondary);
+}
+
+/* Chrome icon-only buttons: same secondary ink as SideNav icons. StyleX ghost
+   buttons set primary text; pin secondary so left rail and right cluster match
+   the sidebar without a third paint recipe. !important: StyleX injects unlayered
+   color on .astryx-button. */
+.maka-shell-topbar-rail .astryx-button,
+.maka-workspace-top-actions .astryx-button {
+  color: var(--foreground-secondary) !important;
 }
 
 /* `.maka-titlebar-action` needs no `no-drag` of its own: every one of these

@@ -1,11 +1,12 @@
 /**
  * App-region hygiene for the frameless Electron shell.
  *
- * `.maka-window-titlebar` is the only `-webkit-app-region: drag` surface; action
- * clusters carve themselves out with `no-drag`. Live rendered-geometry checks
- * stay in e2e/window-titlebar.spec.ts (Playwright cannot exercise the OS hit
- * test). These contracts pin the declarations that used to be only assumed by
- * comments in main-window.ts — scoped to each rule body, not a cross-`}` scan.
+ * `.maka-window-titlebar` is the only `-webkit-app-region: drag` surface — a
+ * transparent absolute overlay so column surfaces paint to the window top;
+ * action clusters carve themselves out with `no-drag`. Live rendered-geometry
+ * checks stay in e2e/window-titlebar.spec.ts (Playwright cannot exercise the OS
+ * hit test). These contracts pin the declarations that used to be only assumed
+ * by comments in main-window.ts — scoped to each rule body, not a cross-`}` scan.
  */
 import { strict as assert } from 'node:assert';
 import { readFile } from 'node:fs/promises';
@@ -38,10 +39,14 @@ describe('app-region hygiene', () => {
       '.maka-window-titlebar',
       [
         /-webkit-app-region:\s*drag/,
+        /position:\s*absolute/,
+        /background:\s*transparent/,
         /height:\s*calc\(\s*var\(--h-titlebar\)\s*-\s*var\(--maka-window-resize-edge\)\s*\)/,
-        /margin:\s*var\(--maka-window-resize-edge\)\s+var\(--maka-window-resize-edge\)\s+0/,
+        /top:\s*var\(--maka-window-resize-edge\)/,
+        /left:\s*var\(--maka-window-resize-edge\)/,
+        /right:\s*var\(--maka-window-resize-edge\)/,
       ],
-      'titlebar must be the sole drag surface with resize-edge insets',
+      'titlebar must be a transparent absolute drag overlay with resize-edge insets',
     );
     assertCssRuleDecls(
       shell,

@@ -39,6 +39,9 @@ describe('flat shell chrome CSS contract', () => {
     assert.match(host!, /min-width:\s*0/);
     assert.match(host!, /min-height:\s*0/);
     assert.match(host!, /overflow:\s*hidden/);
+    // Transparent host so frame canvas + detail surface own paint; the absolute
+    // titleband does not introduce a third chrome color.
+    assert.match(host!, /background:\s*transparent\s*!important/);
     assert.doesNotMatch(host!, /background-image\s*:/);
     assert.doesNotMatch(host!, /box-shadow\s*:/);
     assert.doesNotMatch(host!, /filter\s*:/);
@@ -48,6 +51,7 @@ describe('flat shell chrome CSS contract', () => {
     assert.match(detail!, /min-width:\s*0/);
     assert.match(detail!, /min-height:\s*0/);
     assert.match(detail!, /background:\s*var\(--background\)/);
+    assert.match(detail!, /padding-top:\s*var\(--h-titlebar\)/);
     assert.doesNotMatch(detail!, /background-image\s*:/);
     assert.doesNotMatch(detail!, /box-shadow\s*:/);
   });

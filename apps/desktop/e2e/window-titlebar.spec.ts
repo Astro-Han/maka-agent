@@ -5,11 +5,11 @@ import type { Page } from '@playwright/test';
  * Rendered-geometry contract for the window titlebar.
  *
  * `.maka-window-titlebar` is the only element allowed to declare
- * `-webkit-app-region: drag`, and it occupies the shell's first grid row — both
- * static gates live in `app-region-hygiene-contract.test.ts`. What no static
- * gate can see is the
- * RENDERED rectangle against whatever the window currently contains, and that is
- * where every known defect in this area lived:
+ * `-webkit-app-region: drag`. It is a transparent absolute overlay on the
+ * frame (not an AppShell topNav row) so column surfaces paint to the window
+ * top; static gates live in `app-region-hygiene-contract.test.ts`. What no
+ * static gate can see is the RENDERED rectangle against whatever the window
+ * currently contains, and that is where every known defect in this area lived:
  *
  *   1. The original bug: the sidebar's drag strip reserved room for two titlebar
  *      buttons while the collapsed rail renders three, so the third one sat under
@@ -27,10 +27,11 @@ import type { Page } from '@playwright/test';
  * Playwright and CDP synthesise input into the renderer, bypassing the OS
  * hit-test the defects live in. So this spec measures rectangles:
  *
- *   (a) the titlebar is the shell's first element child, so every `no-drag`
- *       below it can be subtracted from it;
+ *   (a) the titlebar precedes column surfaces in document order, so every
+ *       `no-drag` below it can be subtracted from it;
  *   (b) it keeps a resize corridor on the top, left, and right window edges;
- *   (c) its bottom edge does not reach into the content row;
+ *   (c) column surfaces may extend under the transparent strip (color
+ *       continuity); interactive hits under the strip still resolve to no-drag;
  *   (d) every interactive element REACHABLE inside it resolves to `no-drag` — via
  *       an ancestor whose own rect actually covers the intersection — and sits
  *       after it in document order.
@@ -248,7 +249,7 @@ async function assertTitlebarIsWellFormed(page: Page, label: string): Promise<vo
 
   expect(
     report.isFirstElementChild,
-    `${label}: the titlebar must be the first element child of ${SHELL}; Chromium subtracts a \`no-drag\` rect only from drag rects declared before it, so anything hoisted above the titlebar silently loses its hit area`,
+    `${label}: the titlebar must precede column surfaces in document order; Chromium subtracts a \`no-drag\` rect only from drag rects declared before it, so anything hoisted above the titlebar silently loses its hit area`,
   ).toBe(true);
 
   // Width alone is not enough: a zero-height drag rect is still full-width, and
@@ -276,17 +277,18 @@ async function assertTitlebarIsWellFormed(page: Page, label: string): Promise<vo
   // visible design change rather than the silent geometry drift this spec exists
   // to catch.
 
-  // The titlebar owns a row. If its rect reached past the row into content, the
-  // overlapping content would silently lose its hit area — the failure mode the
-  // previous overlay band had, and the reason the row exists.
+  // Column surfaces intentionally extend under the transparent chrome strip so
+  // sidebar canvas and session --background paint to the window top. Interactive
+  // hits under the band are still gated by the offenders check below (no-drag +
+  // document order), not by forcing content below the strip.
   expect(
     report.contentTop,
-    `${label}: the shell must render content below the titlebar for this check to mean anything`,
+    `${label}: the shell must render session/detail columns for this check to mean anything`,
   ).not.toBeNull();
   expect(
-    report.band.bottom,
-    `${label}: the titlebar's drag rect must stop at or before the content row's top edge (content starts at ${report.contentTop}). ${context}`,
-  ).toBeLessThanOrEqual(report.contentTop!);
+    report.contentTop,
+    `${label}: column surfaces must reach the top of the frame under the chrome strip (content top ${report.contentTop}, band bottom ${report.band.bottom}). ${context}`,
+  ).toBeLessThanOrEqual(report.band.bottom);
 
   // Scope, stated honestly: semantically interactive elements matching
   // INTERACTIVE_SELECTOR, judged at the sampled points of their overlap with the
