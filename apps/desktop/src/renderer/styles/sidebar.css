@@ -163,18 +163,6 @@
   padding-inline-start: 0 !important;
 }
 
-/*
- * Astryx parks the collapse chevron after endContent (label | menu | chevron),
- * so MoreMenu slides left whenever a parent has children. Lead with the
- * chevron (tree convention); keep trailing actions flush right.
- * - Independent toggle (session + onClick): chevron is a sibling <button>.
- * - Project (no primary action): chevron is the last child inside the row.
- */
-.maka-session-row .astryx-side-nav-item > button[aria-expanded],
-.maka-project-row .astryx-side-nav-item > *:last-child {
-  order: -1;
-}
-
 .maka-session-row-end,
 .maka-project-item-end {
   display: inline-flex;
