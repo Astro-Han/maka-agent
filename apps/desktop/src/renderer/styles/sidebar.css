@@ -42,11 +42,32 @@
   line-height: var(--leading-snug, 1.35);
 }
 
-/* Footer is a SideNavSection (shell-side-nav). Keep the class as the e2e /
- * glass seam hook; do not re-grid SideNavItem next to product chrome. */
+/*
+ * Footer is a SideNavSection (shell-side-nav). Sticky bottom already owns
+ * padding; Astryx defaults are asymmetric (spacing-1 top / spacing-2 bottom)
+ * and the section adds another paddingBlock, so Settings sat tight under the
+ * hairline and airy above the window edge. Equalize on the sticky shell and
+ * kill the section's own padding so hover never kisses the divider.
+ */
+.astryx-side-nav.maka-session-panel > div:has(> .maka-session-panel-footer) {
+  /* !important: StyleX stickyBottom is unlayered. */
+  padding-block: var(--space-2) !important;
+  gap: 0 !important;
+  border-top: var(--border-width-hairline) solid oklch(from var(--foreground) l c h / 0.05);
+  background: transparent;
+}
+
+/* Empty footerRow still mounts when hasButton:false; hide so it cannot
+ * reserve flex gap under Settings. */
+.astryx-side-nav.maka-session-panel > div:has(> .maka-session-panel-footer) > div:empty {
+  display: none;
+}
+
 .maka-session-panel-footer {
-  padding: 0;
-  border-top: 0;
+  /* !important: SideNavSection paddingBlock is StyleX/unlayered. */
+  padding: 0 !important;
+  border-top: 0 !important;
+  background: transparent;
 }
 
 .maka-session-panel-footer .maka-sidebar-update-button {
@@ -128,6 +149,30 @@
 
 .maka-session-row[data-subagent="true"] .astryx-side-nav-item {
   color: var(--foreground-secondary);
+}
+
+/*
+ * Project groups are a section label + peer sessions, not a deep tree.
+ * Astryx SideNavItem always pads children with spacing-6 (24px); that is the
+ * shell-side-nav workspace pattern, but it wastes a full icon column in a
+ * narrow session rail. Zero the nest so project sessions share the same left
+ * edge as time-sort rows. True subagent children still nest under SessionNavRow.
+ */
+.maka-project-row [role="group"] > div {
+  /* !important: StyleX childrenInner paddingInlineStart is unlayered. */
+  padding-inline-start: 0 !important;
+}
+
+/*
+ * Astryx parks the collapse chevron after endContent (label | menu | chevron),
+ * so MoreMenu slides left whenever a parent has children. Lead with the
+ * chevron (tree convention); keep trailing actions flush right.
+ * - Independent toggle (session + onClick): chevron is a sibling <button>.
+ * - Project (no primary action): chevron is the last child inside the row.
+ */
+.maka-session-row .astryx-side-nav-item > button[aria-expanded],
+.maka-project-row .astryx-side-nav-item > *:last-child {
+  order: -1;
 }
 
 .maka-session-row-end,

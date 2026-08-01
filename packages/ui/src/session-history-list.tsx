@@ -313,7 +313,8 @@ function ProjectNavRow(props: {
           />
         }
       >
-        {/* shell-side-nav: nest under collapsible parent; sessions are not subagents */}
+        {/* Collapsible project parent; nest indent is zeroed in sidebar.css so
+            sessions share the time-sort left edge (not shell-side-nav's 24px). */}
         <VStack gap={0.5}>{props.sessions.map((session) => props.renderSession(session))}</VStack>
       </SideNavItem>
     </div>

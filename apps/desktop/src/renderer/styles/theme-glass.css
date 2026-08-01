@@ -71,10 +71,9 @@ html[data-os="darwin"] .maka-session-list {
 }
 
 html[data-os="darwin"] .maka-session-panel-footer {
-    /* Footer is SideNavSection chrome (same SideNavItem as the rail).
-       Only a hairline separates sticky bottom from the scroller — no
-       tinted plate that made Settings look like a foreign control. */
-    border-top: var(--border-width-hairline) solid oklch(from var(--foreground) l c h / 0.05);
+    /* Hairline + equal padding live on the sticky shell (sidebar.css).
+       Footer section stays transparent so Settings is the same SideNavItem. */
+    border-top: 0;
     background: transparent;
   }
 
