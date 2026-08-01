@@ -1,5 +1,4 @@
-/* ============================================================================
-   Chat message body
+/* =====================================================================   Chat message body
    ----------------------------------------------------------------------------
    The MessageBody surface: message row shell, assistant bubble shell, the
    hover copy button, the streaming caret, and the user-turn meta row.
@@ -23,13 +22,22 @@
   width: 100%;
 }
 
-/* The conversation reading tier is Astryx's body role: 13px with the 20px
+/* The conversation reading tier is Astryx's body role: 14px with the 20px
    4px-grid leading the type scale computes for it. The leading used to be a
    hand-rolled 1.6154em (21px) that matched neither Maka's --leading-* tiers
    nor Astryx's. */
 .maka-chat-message-bubble {
   font-size: var(--text-body-size);
   line-height: var(--text-body-leading);
+}
+
+/* The transcript's baseline grid, derived from the scale rather than typed in:
+   14px × 1.4286 = 20px. Everything in the conversation that is not running
+   prose (headings, disclosure rows) snaps to this so a turn reads as one
+   rhythm instead of a stack of differently-spaced blocks. */
+.maka-turn,
+.maka-chat-message {
+  --maka-chat-line: calc(var(--text-body-size) * var(--text-body-leading));
 }
 
 /* Geometry (radius, padding, max-width) belongs to ChatMessageBubble: under
@@ -63,6 +71,22 @@
   font-family: var(--font-family-body) !important;
 }
 
+/* Reasoning and tool-call rows read at BODY size, not supporting size.
+   Astryx puts the label and preview on inner spans styled as `supporting`
+   (12px on this scale); at 11px on the old one they were the least legible
+   text in the product, and they carry real content — what the agent is
+   thinking and which tool is running — not metadata.
+   Cursor makes the same call: its tool rows sit at body size and lean
+   entirely on --text-secondary/tertiary for de-emphasis. Weight and colour
+   already do that here, so size does not need to.
+   :not(:last-child) leaves the trailing chevron span alone — it is an icon
+   box with its own width/height below. */
+.maka-turn .astryx-chat-reasoning [role="button"] > span:not(:last-child),
+.maka-turn .astryx-chat-tool-calls [role="button"] > span:not(:last-child) {
+  font-size: var(--text-body-size) !important;
+  line-height: var(--maka-chat-line) !important;
+}
+
 .maka-turn .astryx-chat-reasoning [role="button"] > span:last-child,
 .maka-turn .astryx-chat-tool-calls [role="button"] > span:last-child {
   width: 14px !important;
@@ -93,7 +117,8 @@
   padding-block: 2px;
   border-radius: var(--radius-element);
   font-family: var(--font-family-body) !important;
-  font-size: var(--text-supporting-size) !important;
+  font-size: var(--text-body-size) !important;
+  line-height: var(--maka-chat-line) !important;
   font-weight: var(--font-weight-medium, 500) !important;
   color: var(--color-text-secondary) !important;
 }
@@ -173,6 +198,36 @@
    `@maka/ui` Marker chat primitive's own variants (issue #332 PR2 —
    packages/ui/src/primitives/chat.tsx); the layout is now location-
    independent instead of keyed on a `[data-role="assistant"]` descendant. */
+
+/* --- Conversation heading scale ------------------------------------------- */
+/* Astryx's heading ladder (20/18/16/14…) is a DOCUMENT scale, and the
+   transcript is not a document. An agent turn emits `##` freely, so a ladder
+   that steps 1.4× per level shreds one reply into visually unrelated slabs.
+   Flatten it to two steps — h1 for a genuine section break, everything below
+   at body size — and let weight 600 plus colour carry the hierarchy, which is
+   what the rest of the conversation already does.
+   Cursor (1.43/1.32/1.21), Claude Code (1.14/1.07/1.0) and Codex
+   (1.71/1.43/1.21) all flatten here relative to their own document styles;
+   Claude Code goes furthest and merges h4–h6 into `strong`. Two steps sits
+   inside that range.
+   Every level shares the transcript baseline so headings do not add rhythm of
+   their own. Scoped to the Markdown contract, so the settings/docs surfaces
+   keep Astryx's full ladder. */
+[data-maka-contract="markdown"] :is(h1, .astryx-heading.level-1) {
+  font-size: var(--font-size-lg);
+  line-height: var(--maka-chat-line);
+  font-weight: var(--font-weight-semibold);
+}
+
+[data-maka-contract="markdown"]
+  :is(h2, h3, h4, h5, h6,
+      .astryx-heading.level-2, .astryx-heading.level-3,
+      .astryx-heading.level-4, .astryx-heading.level-5,
+      .astryx-heading.level-6) {
+  font-size: var(--text-body-size);
+  line-height: var(--maka-chat-line);
+  font-weight: var(--font-weight-semibold);
+}
 
 .maka-chat-message pre:not([data-maka-contract="markdown"] pre) {
   margin: 0;

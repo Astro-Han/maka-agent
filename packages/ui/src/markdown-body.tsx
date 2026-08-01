@@ -48,6 +48,13 @@ export function MarkdownBody(props: { text: string; streaming?: boolean }) {
     >
       <AstryxMarkdown
         autolink="gfm"
+        // Transcript rhythm, not document rhythm. Astryx's default heading
+        // spacing assumes a page with a handful of sections; an agent turn
+        // emits headings every few lines, and the default margins push each
+        // one into its own visual slab. `compact` is Astryx's own answer to
+        // this — the same reason the conversation flattens the heading sizes
+        // in styles/chat-message.css.
+        density="compact"
         components={MAKA_MARKDOWN_COMPONENTS}
       >
         {safeText}

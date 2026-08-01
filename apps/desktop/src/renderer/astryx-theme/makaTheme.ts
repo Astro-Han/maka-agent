@@ -34,15 +34,26 @@ export const makaTheme = defineTheme({
   // body copy alone, leaving every other tier shrunk. One intent, two
   // contradicting expressions, and a compensating patch between them.
   //
-  // `scale` is where Astryx expects that intent, and it happens to reproduce
-  // Maka's hand-written tiers exactly (expandTypeScale rounds base × ratio^n):
-  //   step -1  --font-size-sm    11px  (was --font-size-caption)
-  //   step  0  --font-size-base  13px  (was --font-size-base / --font-size-ui)
-  //   step +1  --font-size-lg    15px  (was --font-size-heading)
-  //   step +3  --font-size-2xl   20px  (was --font-size-stat)
-  // Those four names now alias these tokens in maka-tokens.css rather than
-  // holding independent values, so the ladder — and the 4px-grid line heights
-  // generated alongside it — has exactly one source.
+  // `scale` is where Astryx expects that intent (expandTypeScale rounds
+  // base × ratio^n), and the four product tiers in maka-tokens.css alias its
+  // output rather than holding independent values, so the ladder — and the
+  // 4px-grid line heights generated alongside it — has exactly one source:
+  //   step -2  --font-size-xs    11px
+  //   step -1  --font-size-sm    12px  (--font-size-caption)
+  //   step  0  --font-size-base  14px  (--font-size-base / --font-size-ui)
+  //   step +1  --font-size-lg    16px  (--font-size-heading)
+  //   step +3  --font-size-2xl   20px  (--font-size-stat)
+  //
+  // Why 14/1.125 rather than the 13/1.15 this file first shipped: benchmarking
+  // the transcript against Cursor, Claude Code's desktop surface, and Codex
+  // desktop (all three read from their shipped bundles) put every one of them
+  // at 14px body — and put their secondary text at 12–14px, never as low as
+  // the 11px Maka had. 1.125 is then the only ratio that keeps 11 and 20 on
+  // the ladder while moving base to 14; it is also the ratio Astryx's own
+  // expandTypeScale header recommends for "Dense/functional". Body leading
+  // lands back on 20px (1.42857) — the same absolute leading as before, and
+  // the same value Claude Code uses, so the text gets bigger without the
+  // paragraph getting looser.
   //
   // The font stacks move here for the same reason. Astryx's neutral default
   // leads with Figtree, which Maka does not bundle, so every Astryx surface
@@ -52,7 +63,7 @@ export const makaTheme = defineTheme({
   // what the product already uses; maka-tokens.css now aliases --font-sans /
   // --font-mono to these instead of holding a second copy.
   typography: {
-    scale: { base: 13, ratio: 1.15 },
+    scale: { base: 14, ratio: 1.125 },
     // PR-UI-ALIGN-0's "clean native" feel comes from the SYSTEM font (SF Pro
     // on macOS), not a bundled geometric face; Geist stays a late fallback.
     body: {
