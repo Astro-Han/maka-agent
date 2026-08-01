@@ -976,6 +976,16 @@ html[data-os="darwin"].dark {
      dragging every other rem down with it. Keep rem out of product CSS —
      the spacing scale below is absolute px for the same reason. */
 
+  /* Astryx's reset hard-codes a monospace stack on :where(code, kbd, samp,
+     pre) that never consults --font-family-code, so every code element —
+     Markdown code blocks included — silently opted out of the theme and out
+     of the Geist Mono the app bundles. Point them back at the token; :where()
+     has zero specificity and reset is the lowest layer, so this is the whole
+     fix. Last of the parallel typography authorities. */
+  :where(code, kbd, samp, pre) {
+    font-family: var(--font-mono);
+  }
+
   body {
     font-size: var(--font-size-base);
     font-family: var(--font-default);
