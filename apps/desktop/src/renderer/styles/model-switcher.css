@@ -104,13 +104,19 @@
 
 /* Cursor: product-wide native-cursor.css (maka.legacy) owns default vs pointer. */
 
+/* The one rem that stays. Everywhere else in product CSS rem was a stale
+   habit — a length that happened to be written in root-relative units and had
+   to become absolute once the root stopped being a density knob. Here it is
+   the declared contract: chat-shell-layout-contract.test.ts asserts a fixed
+   1rem square so the provider mark tracks the root rather than any one font
+   tier, and stays square when flex would otherwise squash it. */
 .modelPickerProviderMark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 1rem;
   color: var(--foreground);
 }
 
