@@ -41,7 +41,7 @@
 .settingsAboutHeading h2 {
   margin: 0;
   color: var(--foreground);
-  font-size: 1.4667em;
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
   letter-spacing: var(--tracking-normal);
 }

@@ -29,7 +29,7 @@
   margin: 0;
   max-width: 32ch;
   color: var(--foreground);
-  font-size: 1.2em;
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-normal);
@@ -78,7 +78,7 @@
 .maka-firstrun-title {
   margin: 0;
   max-width: none;
-  font-size: 1.7333em;
+  font-size: var(--font-size-3xl);
   font-weight: var(--font-weight-bold);
   line-height: var(--leading-tight);
   letter-spacing: var(--tracking-normal);
@@ -361,7 +361,7 @@
      warm/amber for `warning` (info family), shifts destructive
      for `blocked` so a stranded user immediately sees gravity. */
 .maka-onboarding-setup header h1 {
-  font-size: 1.4667em;
+  font-size: var(--font-size-xl);
 }
 .maka-onboarding-setup header p {
   margin-top: var(--space-2);

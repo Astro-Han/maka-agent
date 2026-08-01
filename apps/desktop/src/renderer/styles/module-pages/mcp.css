@@ -35,7 +35,7 @@
 
 .maka-mcp-hero strong {
   color: var(--foreground);
-  font-size: 1.2em;
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   line-height: var(--leading-tight);
 }
