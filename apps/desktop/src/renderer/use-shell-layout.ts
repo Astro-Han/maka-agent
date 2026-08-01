@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useResizable } from '@astryxdesign/core/Resizable';
 import { readSessionListCollapsed, readSessionListWidth } from './session-list-layout';
 import {
@@ -32,6 +32,19 @@ export function useShellLayout() {
     minSizePx: SESSION_WORKBAR_MIN_WIDTH,
     maxSizePx: SESSION_WORKBAR_MAX_WIDTH,
   });
+  // `_onResizeMove` takes the distance from where the pointer went down, not a
+  // per-move increment, so rounding here quantises the drag to whole pixels
+  // without accumulating drift. Every other delta the handle sends (arrow keys,
+  // Home/End) is already integral. Keeping the hook's own state integral is what
+  // lets `aria-valuenow`, the CSS variable and storage agree on one number —
+  // rounding at the consumer only fixed the last two.
+  const workbarResizable = useMemo(
+    () => ({
+      ...workbar.props,
+      _onResizeMove: (delta: number) => workbar.props._onResizeMove(Math.round(delta)),
+    }),
+    [workbar.props],
+  );
   const [workbarTab, setWorkbarTab] = useState(() => readSessionWorkbarTab());
   return {
     sessionListWidth,
@@ -40,11 +53,8 @@ export function useShellLayout() {
     setSessionListCollapsed,
     workbarCollapsed,
     setWorkbarCollapsed,
-    // Rounded because `clampSize` only bounds the size, it does not round it:
-    // a sub-pixel pointer delta otherwise reaches the CSS variable and storage
-    // as 479.70001220703125.
-    workbarWidth: Math.round(workbar.size),
-    workbarResizable: workbar.props,
+    workbarWidth: workbar.size,
+    workbarResizable,
     workbarTab,
     setWorkbarTab,
   };

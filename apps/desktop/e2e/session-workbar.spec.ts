@@ -26,6 +26,20 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(resize).toHaveAttribute('aria-valuenow', '410');
   await expect(workbar).toHaveCSS('width', '410px');
 
+  // Pointer drag, grabbed near the bottom of the divider: Astryx's default
+  // side-placed grab zone lifts itself half its height off the handle, so a
+  // low grab is what proves `pillPlacement="center"` is still holding the hit
+  // area open. The fractional delta proves the width stays a whole pixel in
+  // both the panel and the value screen readers announce.
+  const box = (await resize.boundingBox())!;
+  const y = box.y + box.height * 0.9;
+  await page.mouse.move(box.x, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 20.5, y, { steps: 2 });
+  await page.mouse.up();
+  await expect(workbar).toHaveCSS('width', '431px');
+  await expect(resize).toHaveAttribute('aria-valuenow', '431');
+
   // Keyboard-driven disclosure, observed through what the user can read: a
   // collapsed section hides its rows, and Enter on the trigger reveals them.
   const recent = workbar.getByRole('button', { name: /最近结束/ });
