@@ -13,6 +13,7 @@ import type { ProjectRecord, SessionSummary, UiLocale } from '@maka/core';
 import { formatCompactTimestamp } from '@maka/core';
 import {
   AlertTriangle,
+  Bot,
   FolderGit2,
   FolderOpen,
   MessageSquare,
@@ -373,6 +374,9 @@ const SessionNavRow = memo(function SessionNavRow(props: {
     >
       <SideNavItem
         label={props.session.name}
+        // Nested (subagent) rows: native leading Bot icon keeps hierarchy
+        // readable without CSS nest-padding overrides. Parent rows stay iconless.
+        icon={props.nested ? Bot : undefined}
         size="md"
         isSelected={props.active}
         collapsible={hasChildren ? { defaultIsCollapsed: false } : undefined}

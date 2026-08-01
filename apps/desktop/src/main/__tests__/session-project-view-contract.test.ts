@@ -227,6 +227,13 @@ describe('sidebar project view mode', () => {
     assert.match(markup, /data-subagent="true"/);
     assert.match(markup, /data-session-id="child"/);
     assert.match(markup, /data-maka-contract="session-row"/);
+    // Nested subagent rows use native SideNavItem Bot icon (lucide-bot).
+    const childChunk =
+      markup.match(/data-session-id="child"[\s\S]*?(?=data-session-id="|$)/)?.[0] ?? '';
+    assert.match(childChunk, /lucide-bot/);
+    const parentChunk =
+      markup.match(/data-session-id="parent"[\s\S]*?(?=data-session-id="child"|$)/)?.[0] ?? '';
+    assert.doesNotMatch(parentChunk, /lucide-bot/);
   });
 
   it('applies Chats, Flagged, and Archived filters independently to parents and children', () => {
