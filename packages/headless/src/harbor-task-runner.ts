@@ -82,6 +82,20 @@ const PROVIDER_REQUEST_TELEMETRY = 'provider-request-telemetry.json';
 /** A Harbor-side failure (build/docker/timeout/missing artifact) — NOT a benchmark
  * result. The controller turns a thrown error into an infra_failed event so it is
  * excluded from scoring instead of polluting the KEEP/DISCARD decision as reward 0. */
+/** Shared across runners: the last proxied provider request must have
+ * completed. A 200 stream without its protocol terminal event means the
+ * provider response is incomplete — the trial is an infra failure, never a
+ * graded model failure. Complete timed-out trials settle by deadline, so
+ * their truncated tail request is expected and exempt. */
+export function incompleteTerminalProviderRequest(
+  providerTelemetry: readonly ProviderRequestTelemetry[],
+  completeTimedOutTrial: boolean,
+): ProviderRequestTelemetry | undefined {
+  if (completeTimedOutTrial) return undefined;
+  const terminal = providerTelemetry.at(-1);
+  return terminal && terminal.outcome !== 'completed' ? terminal : undefined;
+}
+
 export class HarborInfraError extends Error {
   constructor(
     message: string,
@@ -374,12 +388,11 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
           tail(result.stderr || result.stdout),
         );
       }
-      const terminalProviderRequest = providerTelemetry.at(-1);
-      if (
-        !completeTimedOutTrial &&
-        terminalProviderRequest &&
-        terminalProviderRequest.outcome !== 'completed'
-      ) {
+      const terminalProviderRequest = incompleteTerminalProviderRequest(
+        providerTelemetry,
+        completeTimedOutTrial,
+      );
+      if (terminalProviderRequest) {
         throw new HarborInfraError(
           `terminal provider request did not complete for task ${input.task.id}`,
           [
