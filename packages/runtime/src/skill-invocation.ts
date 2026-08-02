@@ -1,3 +1,4 @@
+import { SKILL_INVOCATION_TOKEN_SOURCE } from '@maka/core';
 import {
   gateSkillsByHostCapabilities,
   loadSkillInstructionsFromScan,
@@ -84,7 +85,7 @@ export type PreparedSkillInvocationMessage =
       skillInvocation: SkillInvocationResult;
     };
 
-export const SKILL_INVOCATION_TOKEN_SOURCE = String.raw`(?:^|(?<=\s))\/skill:([A-Za-z0-9._-]+)`;
+export { SKILL_INVOCATION_TOKEN_SOURCE };
 
 /** Parse distinct invocation tokens in first-appearance order. */
 export function parseSkillInvocationTokens(text: string): SkillInvocationToken[] {
