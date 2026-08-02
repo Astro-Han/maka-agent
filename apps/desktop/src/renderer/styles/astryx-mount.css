@@ -66,3 +66,17 @@
   height: 24px;
   font-size: 24px;
 }
+
+/* Astryx tooltips are text popovers with no interactive content, but they leave
+   pointer-events at auto, so the popover is a hit target for as long as it is
+   open. Anchored to a control in the titlebar there is no room above it, so the
+   layer flips below the window's top edge and lands on the SideNav's first row:
+   clicking 展开侧边栏 leaves the pointer parked on its trigger, and the tooltip
+   that opens covers 新任务 until the pointer moves. Measured live at 86×28 over
+   the row. A tooltip is an affordance, never a target — take it out of the hit
+   test. Unscoped, unlike the icon rules above: the popover renders in the top
+   layer, where a mount-scoped selector is not reliably in the chain. No
+   !important needed — StyleX does not declare pointer-events on the layer. */
+[role="tooltip"] {
+  pointer-events: none;
+}

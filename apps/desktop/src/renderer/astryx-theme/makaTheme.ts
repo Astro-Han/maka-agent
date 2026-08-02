@@ -69,26 +69,6 @@ export const makaTheme = defineTheme({
   // product stacks here makes --font-family-body/heading/code identical to
   // what the product already uses; maka-tokens.css now aliases --font-sans /
   // --font-mono to these instead of holding a second copy.
-  // The two shell materials, pointed back at the product palette.
-  //
-  // AppShell paints its own columns from these: nav gets --color-background-body,
-  // content gets --color-background-surface (variant "elevated"). Astryx ships
-  // them as a static light-dark() pair, which cannot follow Maka's six
-  // switchable palettes — every one of them overrides --background and none can
-  // reach an Astryx token. Left stock, the shell would hold one hardcoded pair
-  // while the product around it moved, and in dark mode the two disagree
-  // outright: Astryx's surface is #262626 against the product's #171719, so the
-  // nav column rendered LIGHTER than the content it navigates.
-  //
-  // Direction of authority is the opposite of the type scale above, and for the
-  // opposite reason: Astryx's scale covers everything Maka needs from type,
-  // while its neutral pair is a fraction of a palette that also carries status,
-  // chat, and per-theme colors. So type flows Astryx → product, and these two
-  // flow product → Astryx.
-  tokens: {
-    '--color-background-surface': 'var(--background)',
-    '--color-background-body': 'var(--surface-canvas)',
-  },
   typography: {
     scale: { base: 14, ratio: 1.125 },
     // PR-UI-ALIGN-0's "clean native" feel comes from the SYSTEM font (SF Pro
@@ -108,5 +88,25 @@ export const makaTheme = defineTheme({
         '"JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, ' +
         '"Liberation Mono", monospace',
     },
+  },
+  // The two shell materials, pointed back at the product palette.
+  //
+  // AppShell paints its own columns from these: nav gets --color-background-body,
+  // content gets --color-background-surface (variant "elevated"). Astryx ships
+  // them as a static light-dark() pair, which cannot follow Maka's six
+  // switchable palettes — every one of them overrides --background and none can
+  // reach an Astryx token. Left stock, the shell would hold one hardcoded pair
+  // while the product around it moved, and in dark mode the two disagree
+  // outright: Astryx's surface is #262626 against the product's #171719, so the
+  // nav column rendered LIGHTER than the content it navigates.
+  //
+  // Direction of authority is the opposite of the type scale above, and for the
+  // opposite reason: Astryx's scale covers everything Maka needs from type,
+  // while its neutral pair is a fraction of a palette that also carries status,
+  // chat, and per-theme colors. So type flows Astryx → product, and these two
+  // flow product → Astryx.
+  tokens: {
+    '--color-background-surface': 'var(--background)',
+    '--color-background-body': 'var(--surface-canvas)',
   },
 });
