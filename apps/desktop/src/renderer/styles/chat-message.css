@@ -1,4 +1,5 @@
-/* =====================================================================   Chat message body
+/* ============================================================================
+   Chat message body
    ----------------------------------------------------------------------------
    The MessageBody surface: message row shell, assistant bubble shell, the
    hover copy button, the streaming caret, and the user-turn meta row.
@@ -30,11 +31,6 @@
   font-size: var(--text-body-size);
   line-height: var(--text-body-leading);
 }
-
-/* Everything in the conversation that is not running prose (headings,
-   disclosure rows) snaps to --maka-line-body — declared with the type tiers
-   in maka-tokens.css — so a turn reads as one rhythm instead of a stack of
-   differently-spaced blocks. */
 
 /* Geometry (radius, padding, max-width) belongs to ChatMessageBubble: under
    `density="compact"` it resolves --radius-container plus the compact padding
@@ -69,8 +65,9 @@
 
 /* Reasoning and tool-call rows read at BODY size, not supporting size.
    Astryx puts the label and preview on inner spans styled as `supporting`
-   (12px on this scale); at 11px on the old one they were the least legible
-   text in the product, and they carry real content — what the agent is
+   (12px on this scale). Measured on main they rendered at 9.75px — Astryx's
+   sm tier at 0.75rem against the old 13px root — which made them the least
+   legible text in the product, and they carry real content — what the agent is
    thinking and which tool is running — not metadata.
    Cursor makes the same call: its tool rows sit at body size and lean
    entirely on --text-secondary/tertiary for de-emphasis. Weight and colour
@@ -95,16 +92,16 @@
 
 .maka-turn .astryx-chat-reasoning [role="button"] > span:last-child,
 .maka-turn .astryx-chat-tool-calls [role="button"] > span:last-child {
-  width: 14px !important;
-  height: 14px !important;
+  width: 14px;
+  height: 14px;
   margin-inline-start: auto;
 }
 
 .maka-turn .astryx-chat-reasoning [role="button"] > span:last-child svg,
 .maka-turn .astryx-chat-tool-calls [role="button"] > span:last-child svg,
 .maka-turn .astryx-chat-tool-calls [role="button"] > span:last-child > * {
-  width: 10px !important;
-  height: 10px !important;
+  width: 10px;
+  height: 10px;
 }
 
 @media (hover: hover) {
@@ -117,9 +114,15 @@
 }
 
 /* Product trow (permission / sandbox / interrupted): Collapsible defaults large.
-   No !important: Astryx's StyleX atoms live in the earlier astryx-components
+
+   Nothing in this file declares !important any more, including the icon-box
+   sizes above. Astryx's StyleX atoms live in the earlier astryx-components
    layer, so product CSS in `components` already wins on cascade order alone,
-   whatever their specificity. The declarations here carried it as cargo. */
+   whatever their specificity — verified by deleting all eight of them and
+   re-measuring: the disclosure chevrons still render 14x14 with a 10x10 svg.
+   Everything here that is not running prose snaps to --maka-line-body, which
+   is declared with the type tiers in maka-tokens.css, so a turn reads as one
+   rhythm rather than a stack of differently-spaced blocks. */
 .maka-turn [data-trow] .astryx-collapsible-trigger {
   min-height: 24px;
   gap: var(--spacing-1-5, 6px);
@@ -133,14 +136,14 @@
 }
 
 .maka-turn [data-trow] .astryx-collapsible-trigger > span:last-child {
-  width: 14px !important;
-  height: 14px !important;
+  width: 14px;
+  height: 14px;
 }
 
 .maka-turn [data-trow] .astryx-collapsible-trigger > span:last-child svg,
 .maka-turn [data-trow] .astryx-collapsible-trigger > span:last-child > * {
-  width: 10px !important;
-  height: 10px !important;
+  width: 10px;
+  height: 10px;
 }
 
 /* Row detail open: same 0fr→1fr medium motion as group/reasoning. */

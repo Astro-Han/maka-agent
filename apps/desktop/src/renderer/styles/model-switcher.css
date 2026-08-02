@@ -104,12 +104,15 @@
 
 /* Cursor: product-wide native-cursor.css (maka.legacy) owns default vs pointer. */
 
-/* The one rem that stays. Everywhere else in product CSS rem was a stale
-   habit — a length that happened to be written in root-relative units and had
-   to become absolute once the root stopped being a density knob. Here it is
-   the declared contract: chat-shell-layout-contract.test.ts asserts a fixed
-   1rem square so the provider mark tracks the root rather than any one font
-   tier, and stays square when flex would otherwise squash it. */
+/* The one rem that stays, and the reason is the icon scale rather than the
+   root. Everywhere else in product CSS rem was a stale habit — a length
+   written in root-relative units that had to become absolute once the root
+   stopped being a density knob. This is an icon box, and Astryx authors its
+   icon sizes in rem against a 16px root (12/16/20/24, see Icon.tsx), so 1rem
+   IS the `sm` icon box next to body text. Under the old 13px root it rendered
+   13px, i.e. one step below Astryx's own smallest body-text icon; it now
+   renders the 16px it always meant. chat-shell-layout-contract.test.ts pins
+   the square so flex cannot squash it. */
 .modelPickerProviderMark {
   display: inline-flex;
   align-items: center;

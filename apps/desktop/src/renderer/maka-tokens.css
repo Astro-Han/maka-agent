@@ -17,12 +17,15 @@
      - 14px base font, 4px spacing unit → dense but readable.
 
    ── Token authority (Round C consolidation) ────────────────────────────────
-   This file is the single source of truth for design tokens. Authority order
-   when two token names describe the same thing:
+   This file is the single source of truth for design tokens EXCEPT the type
+   scale, which moved to astryx-theme/makaTheme.ts: `typography.scale` there
+   generates the whole size ladder, and the four product size names below only
+   alias its rungs. Authority order when two token names describe the same
+   thing:
      1. AUTHORITATIVE — the --background / --foreground family (+ --accent, the
         status colors, and the derived --foreground-N / alpha / border / state
-        / spacing / radius / typography / elevation scales). New code consumes
-        these.
+        / spacing / radius / elevation scales), plus the font-size aliases of
+        the generated ladder. New code consumes these.
      2. COMPATIBILITY ALIASES — the --color-bg-* / --color-text-* /
         --color-border-* names (see "color-system compatibility aliases" in
         :root). Kept only for existing consumers. Do NOT add new --color-*
@@ -978,8 +981,11 @@ html[data-os="darwin"].dark {
   /* The root font-size stays at the browser default (16px) ON PURPOSE.
      It used to be pinned to 13px to express Maka's density, but the root is
      not a density knob: it is an implicit multiplier on every rem in the
-     document, including the radius and spacing constants Astryx compiles
-     against a 16px root. Density now lives in the Astryx type scale
+     document, including Astryx's Icon size atoms, which it authors as the
+     px-equivalents at a 16px root — the pin rendered the icon set at
+     9.75/13/16.25/19.5 instead of 12/16/20/24, measured in the live app.
+     (Astryx's spacing and radius tokens are px literals and never moved.)
+     Density now lives in the Astryx type scale
      (astryx-theme/makaTheme.ts), which sets the body tier directly without
      dragging every other rem down with it. Keep rem out of product CSS —
      the spacing scale below is absolute px for the same reason. */

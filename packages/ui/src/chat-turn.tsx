@@ -212,7 +212,7 @@ const MessageBody = memo(function MessageBody(props: {
   }
   return (
     <ChatMessageBubble variant="ghost" className="maka-chat-message-bubble maka-chat-message-bubble-assistant">
-      <Markdown text={props.text} />
+      <Markdown text={props.text} density="compact" />
     </ChatMessageBubble>
   );
 });
@@ -794,7 +794,7 @@ function StreamingAssistantBubble(props: { text: string; live: boolean; truncate
 
   return (
     <ChatMessageBubble variant="ghost" className="maka-chat-message-bubble maka-chat-message-bubble-assistant maka-bubble-streaming">
-      <Markdown text={displayed} streaming />
+      <Markdown text={displayed} streaming density="compact" />
       {props.truncated && (
         <div
           className="maka-turn-truncation-badge"

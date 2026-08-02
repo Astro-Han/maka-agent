@@ -28,8 +28,12 @@ export const makaTheme = defineTheme({
   // Maka is denser than Astryx's neutral default (`{base: 14, ratio: 1.2}`).
   // That density used to be expressed as `html { font-size: 13px }` in
   // maka-tokens.css, which is not a type scale at all but an implicit ×0.8125
-  // multiplier on every rem in the document — including the radius and spacing
-  // rem constants Astryx compiles against a 16px root. The product then had to
+  // multiplier on every rem in the document. Astryx's spacing and radius
+  // tokens are px literals and were never affected, but its Icon size atoms
+  // are rem and are documented as "the px-equivalents at a 16px root"
+  // (Icon.tsx): the pin was quietly rendering the whole icon set at
+  // 9.75/13/16.25/19.5 instead of 12/16/20/24. Measured in the live app, both
+  // before and after. The product then had to
   // pin --font-size-base back on the Theme wrapper to undo the multiplier for
   // body copy alone, leaving every other tier shrunk. One intent, two
   // contradicting expressions, and a compensating patch between them.
@@ -45,15 +49,18 @@ export const makaTheme = defineTheme({
   //   step +3  --font-size-2xl   20px  (--font-size-stat)
   //
   // Why 14/1.125 rather than the 13/1.15 this file first shipped: benchmarking
-  // the transcript against Cursor, Claude Code's desktop surface, and Codex
-  // desktop (all three read from their shipped bundles) put every one of them
-  // at 14px body — and put their secondary text at 12–14px, never as low as
-  // the 11px Maka had. 1.125 is then the only ratio that keeps 11 and 20 on
-  // the ladder while moving base to 14; it is also the ratio Astryx's own
-  // expandTypeScale header recommends for "Dense/functional". Body leading
-  // lands back on 20px (1.42857) — the same absolute leading as before, and
-  // the same value Claude Code uses, so the text gets bigger without the
-  // paragraph getting looser.
+  // the transcript in 2026-08 against Cursor 3.14.7, Claude Code's desktop
+  // surface (the Epitaxy layer inside Claude.app) and Codex desktop
+  // (openai-codex-electron), all three read from their shipped bundles rather
+  // than from documentation. Treat the numbers as of that date — they put
+  // every one of the three at 14px body, and their secondary text at 12–14px,
+  // never as low as the 9.75px Maka had. 1.125 keeps 11 and 20 on the ladder
+  // while moving
+  // base to 14, and it is the ratio in Astryx's own "Dense/functional" preset
+  // (`{base: 12, ratio: 1.125}`, expandTypeScale.ts). Body leading lands on
+  // 20px (1.42857) — the same value Claude Code uses, and 1px TIGHTER than
+  // the transcript's previous 21px, so the text gets bigger while the
+  // paragraph gets marginally denser rather than looser.
   //
   // The font stacks move here for the same reason. Astryx's neutral default
   // leads with Figtree, which Maka does not bundle, so every Astryx surface

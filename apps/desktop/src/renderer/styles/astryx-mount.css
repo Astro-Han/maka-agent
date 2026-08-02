@@ -18,10 +18,11 @@
    Keeping both renderer mounts on the same selector is required for Storybook
    pixels to remain evidence for the live app.
 
-   No token is re-pinned here. theme.css declares its tokens ON the wrapper
-   (@scope root), so any name both sides define would be shadowed for the
-   entire subtree regardless of layer order — custom properties resolve by
-   tree distance, not by layer. --font-size-base used to be pinned back to
+   No token is re-pinned here, and re-pinning is a last resort: the theme
+   declares its tokens through an `@scope` root, so a name both sides define
+   can be shadowed for a whole subtree in ways layer order alone does not
+   predict — verify any such pin against the live app rather than reasoning
+   about it. --font-size-base used to be pinned back to
    the product's :root value here to undo the 13px root multiplier; the type
    scale in astryx-theme/makaTheme.ts now emits the body tier directly, so the two
    definitions agree and the pin has nothing left to correct. If a future

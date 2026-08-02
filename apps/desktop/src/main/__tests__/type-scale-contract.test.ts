@@ -39,8 +39,9 @@ async function read(rel: string): Promise<string> {
 describe('type scale contracts', () => {
   it('leaves the root font-size at the browser default', async () => {
     // `html { font-size: 13px }` is not a type scale: it is an implicit
-    // ×0.8125 on every rem in the document, including the radius and spacing
-    // constants Astryx compiles against a 16px root. The whole generated
+    // ×0.8125 on every rem in the document, including Astryx's Icon size
+    // atoms, which it authors as the px-equivalents at a 16px root and which
+    // the pin therefore rendered at 9.75/13/16.25/19.5. The whole generated
     // ladder is expressed in rem, so a re-pinned root moves every tier at
     // once and nothing else in the suite notices.
     const tokens = stripCssComments(await read('maka-tokens.css'));
@@ -49,10 +50,14 @@ describe('type scale contracts', () => {
       null,
       'maka-tokens.css must not declare an `html` rule — the root is not a density knob',
     );
+    // Qualified selectors count. maka-tokens.css already ships
+    // `html[data-os="darwin"]` rules, so an attribute-scoped re-pin is the
+    // natural shape a density knob would come back in, and the earlier
+    // `html\s*\{` form did not see it.
     assert.doesNotMatch(
       stripCssComments(await readAllRendererCss()),
-      /(?:^|[{}])\s*(?:html|:root)\s*\{[^}]*\bfont-size\s*:/,
-      'no renderer stylesheet may pin font-size on html or :root',
+      /(?:^|[{}])\s*(?:html|:root)[^{]*\{[^}]*\bfont-size\s*:/,
+      'no renderer stylesheet may pin font-size on html or :root, qualified or not',
     );
   });
 
@@ -83,6 +88,20 @@ describe('type scale contracts', () => {
       parseCssCustomProps(tokens).get('--font-size-base'),
       undefined,
       '--font-size-base IS the Astryx token; redefining it here shadows the scale and makes --font-size-ui self-referential',
+    );
+  });
+
+  it('derives the transcript baseline instead of typing it in', async () => {
+    // The one token in this PR that is computed rather than aliased, and the
+    // only one whose failure is silent in both directions: typed in as a
+    // literal it drifts the next time the scale moves, and undefined it
+    // resolves to nothing and lands as `line-height: <invalid>` — which
+    // renders as normal leading, not as a visible break. Deleting the
+    // declaration outright left every other case in this file green.
+    assertCustomPropPinnedOnce(
+      await read('maka-tokens.css'),
+      '--maka-line-body',
+      'calc(var(--text-body-size) * var(--text-body-leading))',
     );
   });
 
@@ -126,8 +145,12 @@ describe('type scale contracts', () => {
       '.maka-turn [data-maka-contract="markdown"] :is(h2, h3, h4, h5, h6)',
       [/font-size:\s*var\(--text-body-size\)/],
     );
+    // Scanned repo-wide, not just in this file: the invariant is about the
+    // shared MarkdownBody contract, and the Daily Review panel it protects
+    // renders from a different stylesheet. The same rule added to
+    // chat-detail.css was invisible to the file-local form of this check.
     assert.doesNotMatch(
-      chat,
+      stripCssComments(await readAllRendererCss()),
       /(?:^|[{},])\s*\[data-maka-contract="markdown"\]\s+(?:h[1-6]|:is\(h)/,
       'heading overrides must be scoped to .maka-turn, not to the shared Markdown contract',
     );
@@ -146,10 +169,16 @@ describe('type scale contracts', () => {
         /--text-supporting-leading:\s*var\(--maka-line-body\)/,
       ],
     );
+    // Repo-wide, and deliberately wider than the rule above it. A
+    // `font-size: … !important` anywhere in the renderer is a site declaring
+    // itself exempt from the ladder, which is the thing this branch exists to
+    // end; the sidebar's section-title pin was exactly that shape, and it
+    // survived because the ban only looked at one file. Product CSS sits in
+    // the last cascade layer, so nothing here needs the keyword to win.
     assert.doesNotMatch(
-      chat,
+      stripCssComments(await readAllRendererCss()),
       /font-size:[^;]*!important/,
-      'the disclosure rows no longer need !important — product CSS is in the last layer',
+      'no renderer stylesheet may force a font-size — product CSS is already in the last layer',
     );
   });
 
