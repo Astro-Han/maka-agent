@@ -317,7 +317,7 @@ export const Composer = forwardRef<
     setText(next);
   }
   /**
-   * The three operations the draft / history hooks need from the input. Stable
+   * The two operations the draft / history hooks need from the input. Stable
    * identity so neither hook re-runs an effect when the draft changes.
    */
   const textPortRef = useRef<ComposerTextPort>(null);
@@ -325,19 +325,22 @@ export const Composer = forwardRef<
     textPortRef.current = {
       getValue: () => textRef.current,
       setValue: (value: string) => applyText(value),
-      // ChatComposerInput restores the caret to the end of the content when a
-      // controlled update lands on a focused editor, so callers that want the
-      // old "focus at end" behavior call `focus()` before `setValue()`.
-      focus: () => inputHandleRef.current?.focus(),
     };
   }
   const textPort = textPortRef.current;
+  /**
+   * ChatComposerInput restores the caret to the end of the content when a
+   * controlled update lands on a focused editor, so callers that want the old
+   * "focus at end" behavior focus first, then set the value.
+   */
+  function focusInput() {
+    inputHandleRef.current?.focus();
+  }
   // Draft persistence + prompt-history navigation live in dedicated hooks
   // (issue #1044). `resetPromptHistoryNavigation` is a hoisted wrapper so the
   // draft hook's swap effect can reset history navigation even though the
   // history hook is created one line below it.
   const {
-    hasDraftText,
     saveCurrentDraft,
     clearDraft,
     setDraft,
@@ -371,31 +374,55 @@ export const Composer = forwardRef<
   }, []);
 
   /**
-   * Newlines have to be real `\n` text nodes, not block splits.
+   * Nothing may act on a keystroke the IME is still using.
    *
-   * Chrome answers Enter (and any multi-line insert) inside a plain
-   * contentEditable by wrapping each line in a `<div>`. Astryx's serializer
-   * only turns text nodes and `<br>` into newlines, so those blocks would
-   * silently flatten a multi-line draft into one line on send. Intercept the
-   * break and insert the text ourselves — the editor is `white-space:
-   * pre-wrap`, so a literal newline renders identically and round-trips.
+   * ChatComposerInput runs its own trigger-menu key handling *before* the
+   * `onKeyDown` we pass it, and that handler takes Enter as "accept the
+   * highlighted suggestion" without checking `isComposing` — so a guard inside
+   * our handler would arrive too late to stop a CJK candidate commit from
+   * inserting a file mention. A native listener on the component root fires
+   * before React dispatches at its own root container, so stopping propagation
+   * here takes the key away from every React handler at once, theirs and ours.
    */
   useEffect(() => {
-    const editable = editableNode();
-    if (!editable) return undefined;
-    const onBeforeInput = (event: InputEvent) => {
-      const isBreak =
-        event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak';
-      const inserted = isBreak ? '\n' : (event.data ?? '');
-      if (!isBreak && !(event.inputType === 'insertText' && inserted.includes('\n'))) return;
-      event.preventDefault();
-      inputHandleRef.current?.insertText(inserted);
-      // ChatComposerInput re-serializes on `input`; we suppressed the native
-      // edit, so emit one for the mutation we made in its place.
-      editable.dispatchEvent(new Event('input', { bubbles: true }));
+    const root = inputRootRef.current;
+    if (!root) return undefined;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (isChatInputComposing(event, compositionActiveRef.current)) event.stopPropagation();
     };
-    editable.addEventListener('beforeinput', onBeforeInput);
-    return () => editable.removeEventListener('beforeinput', onBeforeInput);
+    root.addEventListener('keydown', onKeyDown);
+    return () => root.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  /**
+   * A multi-line insert has to survive serialization, and Chrome's answer
+   * doesn't: it wraps each line in a `<div>`, while Astryx's serializer only
+   * emits a newline for text nodes and `<br>`, so the blocks flatten the draft
+   * into one line on send. Replay the insert as the browser's own line-break
+   * command, which produces the `<br>` the serializer does understand — and,
+   * unlike a scripted Range insertion, keeps the caret and the undo stack
+   * intact. Typed line breaks don't come through here; `onInputKeyDown` owns
+   * Enter, and `insertLineBreak` already serializes correctly.
+   *
+   * Listen on the component root, not the editable: `beforeinput` bubbles, and
+   * a host that mounts the composer disabled renders `contenteditable="false"`,
+   * so an editable lookup here would miss and never retry.
+   */
+  useEffect(() => {
+    const root = inputRootRef.current;
+    if (!root) return undefined;
+    const onBeforeInput = (event: InputEvent) => {
+      if (event.inputType !== 'insertText') return;
+      const lines = (event.data ?? '').split('\n');
+      if (lines.length < 2) return;
+      event.preventDefault();
+      for (const [index, line] of lines.entries()) {
+        if (index > 0) document.execCommand('insertLineBreak');
+        if (line) document.execCommand('insertText', false, line);
+      }
+    };
+    root.addEventListener('beforeinput', onBeforeInput);
+    return () => root.removeEventListener('beforeinput', onBeforeInput);
   }, []);
 
   function resetPromptHistoryNavigation() {
@@ -411,36 +438,48 @@ export const Composer = forwardRef<
     onSearchMentionFiles: props.onSearchMentionFiles,
     addSkill: (skill: ComposerSkillSelection) => skillDraft.add(skill),
   });
-  mentionSourceRef.current = {
-    mentionSkills: props.mentionSkills,
-    onSearchMentionFiles: props.onSearchMentionFiles,
-    addSkill: (skill: ComposerSkillSelection) => skillDraft.add(skill),
-  };
+  useEffect(() => {
+    mentionSourceRef.current = {
+      mentionSkills: props.mentionSkills,
+      onSearchMentionFiles: props.onSearchMentionFiles,
+      addSkill: (skill: ComposerSkillSelection) => skillDraft.add(skill),
+    };
+  });
 
   const searchSourcesRef = useRef<{ files: SearchSource; skills: SearchSource }>(null);
   if (!searchSourcesRef.current) {
-    // `useTriggerMenu` probes `search('')` on every keystroke to decide whether
-    // a source is sync, so an uncached `@` source would fire one extra IPC per
-    // character. A small bounded cache absorbs the probe and repeat queries;
-    // workspace file listings are stable enough over one composing session.
-    const fileResults = new Map<string, Promise<SearchableItem[]>>();
-    const searchFiles = (query: string): Promise<SearchableItem[]> => {
-      const cached = fileResults.get(query);
-      if (cached) return cached;
+    let probeSource: unknown;
+    let probe: Promise<SearchableItem[]> | null = null;
+    const runFileSearch = (query: string): Promise<SearchableItem[]> => {
       const search = mentionSourceRef.current.onSearchMentionFiles;
-      const pending = (search ? search(query) : Promise.resolve([])).then(
-        (files) =>
-          files
-            .filter((file) => mentionQueryMatches(query, file.relativePath))
-            .slice(0, 50)
-            .map((file) => ({ id: file.relativePath, label: file.relativePath })),
-        // Fail soft: an IPC error just yields an empty list (未找到文件).
-        () => [],
+      return (search ? search(query) : Promise.resolve([])).then((files) =>
+        files
+          .filter((file) => mentionQueryMatches(query, file.relativePath))
+          .slice(0, 50)
+          .map((file) => ({ id: file.relativePath, label: file.relativePath })),
       );
-      const oldest = fileResults.size >= 32 ? fileResults.keys().next().value : undefined;
-      if (oldest !== undefined) fileResults.delete(oldest);
-      fileResults.set(query, pending);
-      return pending;
+    };
+    const searchFiles = (query: string): Promise<SearchableItem[]> => {
+      if (query !== '') {
+        // Fail soft: an IPC error just yields an empty list (未找到文件).
+        return runFileSearch(query).catch(() => []);
+      }
+      // `useTriggerMenu` calls `search('')` once per keystroke purely to learn
+      // whether this source is async, and discards the result — so answer the
+      // probe, and the real bare-`@` listing, from one cached promise. It is
+      // keyed by the search callback, which changes with the session, so it
+      // can never hand another workspace's files to the menu. Every other
+      // query stays uncached: the menu debounces, and a stale listing here
+      // would outlive files the user creates while composing.
+      const search = mentionSourceRef.current.onSearchMentionFiles;
+      if (!probe || probeSource !== search) {
+        probeSource = search;
+        probe = runFileSearch('').catch(() => {
+          probe = null;
+          return [];
+        });
+      }
+      return probe;
     };
     const listSkills = (rawQuery: string): SearchableItem[] => {
       const skills = mentionSourceRef.current.mentionSkills ?? [];
@@ -456,6 +495,8 @@ export const Composer = forwardRef<
           auxiliaryData: skill,
         }));
     };
+    // `bootstrap` is required by SearchSource but never called by
+    // `useTriggerMenu`; the menu opens straight into `search`.
     searchSourcesRef.current = {
       files: { bootstrap: () => searchFiles(''), search: searchFiles },
       skills: { bootstrap: () => listSkills(''), search: listSkills },
@@ -483,9 +524,12 @@ export const Composer = forwardRef<
             </span>
           </>
         ),
-        // The token serializes back to the same `@<path>` the plain-text popup
-        // used to splice in, so the sent message is unchanged — it just reads
-        // as a chip while the draft is being composed.
+        // The token serializes back to `@<path>`, so the mention reaches the
+        // model exactly as the plain-text popup used to splice it in — it just
+        // reads as a chip while the draft is being composed. One difference:
+        // `insertToken` follows the token with a non-breaking space rather
+        // than a plain one. Nothing downstream parses `@<path>`, and the skill
+        // token grammar's `\s` boundary matches U+00A0.
         onSelect: (item): ChatComposerToken => ({ value: `@${item.id}`, label: fileBasename(item.id) }),
       });
     }
@@ -566,14 +610,14 @@ export const Composer = forwardRef<
         resetPromptHistoryNavigation();
         // Focus first: the controlled update that follows restores the caret to
         // the end of the new content only when the editor already has focus.
-        textPort.focus();
+        focusInput();
         textPort.setValue(nextText);
         saveCurrentDraft(nextText);
       },
       appendText(nextText: string) {
         resetPromptHistoryNavigation();
         const next = appendPromptContextDraft(textPort.getValue(), nextText);
-        textPort.focus();
+        focusInput();
         textPort.setValue(next);
         saveCurrentDraft(next);
       },
@@ -594,14 +638,14 @@ export const Composer = forwardRef<
         setDraft(draftKey, nextText);
         if (activeDraftKey() !== draftKey) return;
         resetPromptHistoryNavigation();
-        textPort.focus();
+        focusInput();
         textPort.setValue(nextText);
       },
       appendDraft(draftKey: string, nextText: string) {
         const next = appendDraft(draftKey, nextText);
         if (activeDraftKey() !== draftKey) return;
         resetPromptHistoryNavigation();
-        textPort.focus();
+        focusInput();
         textPort.setValue(next);
       },
       setSkillDraft(
@@ -611,7 +655,7 @@ export const Composer = forwardRef<
         skillDraft.replace(draftKey, skills);
       },
       focus() {
-        textPort.focus();
+        focusInput();
       },
       setSkills(skills) {
         skillDraft.replace(skillDraft.activeDraftKey(), skills);
@@ -674,16 +718,18 @@ export const Composer = forwardRef<
    * the built-in submit clears the editor unconditionally.
    */
   function onInputKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    // Skip when an IME composition is active so CJK input isn't interrupted.
-    // The composition guard has to live here rather than being inherited from
-    // the input: this handler owns Enter, so an Enter that commits an IME
-    // candidate must never reach `sendCurrent`.
-    if (isChatInputComposing(event, compositionActiveRef.current)) return;
-    // A trigger menu that is open but has nothing highlighted (loading, or no
-    // matches) leaves Enter unconsumed. Swallow it so a mention query can never
-    // send the draft out from under the popup.
+    // Keystrokes made during an IME composition never reach this handler — the
+    // native listener above takes them away from React entirely.
     if (event.key === 'Enter' && event.currentTarget.getAttribute('aria-expanded') === 'true') {
+      // A trigger menu that is open but has nothing highlighted (loading, or no
+      // matches) leaves Enter unconsumed. Swallow this one so a mention query
+      // can't send the draft out from under the popup — and close the menu,
+      // because "@" with no matches is otherwise a stable state in which Enter
+      // never sends again.
       event.preventDefault();
+      event.currentTarget.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
       return;
     }
     if (
@@ -728,7 +774,16 @@ export const Composer = forwardRef<
       if (handleArrowKey(event)) return;
     }
     if (event.key !== 'Enter') return;
-    if (event.shiftKey || event.altKey) return; // Shift+Enter / Alt+Enter inserts a newline.
+    // Shift+Enter / Alt+Enter insert a line break instead of sending. We have
+    // to insert it ourselves rather than fall through: ChatComposerInput's own
+    // Enter branch only exempts Shift, so a bare `return` here would hand it
+    // Alt+Enter as a submit — and that path clears the editor even when it
+    // sends nothing, silently dropping the draft.
+    if (event.shiftKey || event.altKey) {
+      event.preventDefault();
+      document.execCommand('insertLineBreak');
+      return;
+    }
     event.preventDefault();
     void sendCurrent();
   }
@@ -799,7 +854,7 @@ export const Composer = forwardRef<
     props.disabled ||
     sendPending ||
     importActionBusy ||
-    (!hasDraftText && skillDraft.skills.length === 0) ||
+    (!text.trim() && skillDraft.skills.length === 0) ||
     noModelConnection;
   // The disabled Send is explanatory only in the no-model dead-end; other
   // disabled reasons (empty draft, in-flight import) keep the neutral label.
@@ -886,10 +941,14 @@ export const Composer = forwardRef<
           className="maka-composer-astryx"
           data-maka-contract="composer-inner"
           data-streaming={props.streaming ? 'true' : undefined}
-          onSubmit={() => void sendCurrent()}
+          // Unreachable, and required. The shell only submits its own value,
+          // and it never has one: `value` is passed straight to the controlled
+          // ChatComposerInput, so the shell's copy stays empty and its submit
+          // short-circuits. Sending is owned by the form (the send button) and
+          // by `onInputKeyDown` (Enter). Same for the shell's stop button — we
+          // render our own into the `sendButton` slot.
+          onSubmit={() => {}}
           isDisabled={props.disabled}
-          isStopShown={props.streaming === true}
-          onStop={props.streaming ? () => { void props.onStop(); } : undefined}
           drawer={drawerTokenCount > 0 ? (
             <ChatComposerDrawer count={drawerTokenCount} label={copy.addContext}>
               <div className="maka-composer-context-drawer" aria-label={copy.addContext}>
@@ -918,7 +977,7 @@ export const Composer = forwardRef<
                     label={skill.name}
                     onRemove={() => {
                       skillDraft.remove(skill.ref ?? skill.id);
-                      window.requestAnimationFrame(() => textPort.focus());
+                      window.requestAnimationFrame(() => focusInput());
                     }}
                   />
                 ))}
@@ -1003,7 +1062,12 @@ export const Composer = forwardRef<
               // guard has to sit above the input on the capture phase, since
               // the component's own handler is what we need to skip.
               onPasteCapture={(event) => {
-                if (isChatInputComposing(event, compositionActiveRef.current)) event.stopPropagation();
+                if (!isChatInputComposing(event, compositionActiveRef.current)) return;
+                // Stand fully down: keep our file-attachment and paste-as-token
+                // handlers off the event, but let the browser complete the
+                // paste itself. Cancelling it here would drop the payload and
+                // disturb the composition the guard exists to protect.
+                event.stopPropagation();
               }}
             >
               <ChatComposerInput
@@ -1015,7 +1079,6 @@ export const Composer = forwardRef<
                 onChange={onInputChange}
                 placeholder={copy.placeholder}
                 label={copy.textareaAriaLabel}
-                isDisabled={props.disabled}
                 maxRows={COMPOSER_MAX_ROWS}
                 // Prompt history stays ours: persisted, shared across input
                 // surfaces, and clearable from Settings · 数据 (see
@@ -1203,7 +1266,7 @@ export const Composer = forwardRef<
                   onDismissFocus={() => {
                     const plus = plusMenuButtonRef.current;
                     if (plus) plus.focus();
-                    else textPort.focus();
+                    else focusInput();
                   }}
                   skills={props.mentionSkills}
                   selected={skillDraft.skills}

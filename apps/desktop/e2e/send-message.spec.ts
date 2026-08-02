@@ -20,9 +20,11 @@ test('send a message and see the fake backend stream a reply', async ({ window: 
 });
 
 /**
- * Enter commits a candidate in a CJK IME; it must never also send. The composer
- * owns Enter on ChatComposerInput's onKeyDown seam — which runs before the
- * component's own composition guard — so the guard has to be ours.
+ * Enter commits a candidate in a CJK IME; nothing else may act on it. Both the
+ * composer's send and ChatComposerInput's trigger menu read Enter, and the
+ * component runs its menu handling before the `onKeyDown` we pass it — so the
+ * guard is a native capture on the composer root that takes the key away from
+ * React entirely.
  */
 test('Enter mid-IME-composition commits the candidate instead of sending', async ({
   window: page,
@@ -31,19 +33,46 @@ test('Enter mid-IME-composition commits the candidate instead of sending', async
   await composer.fill('中文草稿');
   await composer.evaluate((element) => {
     element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    // `isComposing: false` on purpose: only the composition we track ourselves
+    // can stop this one, so a passing test can't be crediting the component's
+    // own `nativeEvent.isComposing` check.
     element.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
     );
-  });
-  await expect(composer).toHaveText('中文草稿');
-  await expect(page.getByText(/Fake backend received/)).toHaveCount(0);
-
-  await composer.evaluate((element) => {
     element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
   });
+
+  // A leaked send is asynchronous, so `toHaveCount(0)` can pass before it
+  // lands, and a second send of the same text would hide it. Send something
+  // different and pin the total instead.
+  await composer.fill('中文草稿 已提交');
   await composer.press('Enter');
-  await expect(page.getByText(/Fake backend received: 中文草稿/)).toBeVisible();
+  await expect(page.getByText(/Fake backend received: 中文草稿 已提交/)).toBeVisible();
+  await expect(page.getByLabel('你发送的消息')).toHaveCount(1);
 });
+
+/**
+ * Enter is the send key, so the modifiers are the composer's only way to write
+ * a second line — and a mishandled one is destructive rather than inert:
+ * ChatComposerInput's own Enter branch clears the editor before it knows
+ * whether anything was sent, and it only exempts Shift.
+ */
+for (const modifier of ['Shift', 'Alt'] as const) {
+  test(`${modifier}+Enter adds a line instead of sending`, async ({ window: page }) => {
+    const composer = page.locator(COMPOSER_INPUT);
+    await composer.click();
+    await composer.pressSequentially('line one');
+    await composer.press(`${modifier}+Enter`);
+    await composer.pressSequentially('line two');
+
+    // Assert the break's position, not just that both lines survived: the
+    // failure mode this pins put the newline at the end of the draft.
+    await expect(composer).toHaveText('line one\nline two');
+    await expect(page.getByText(/Fake backend received/)).toHaveCount(0);
+    await composer.press('Enter');
+    await expect(page.getByText('Fake backend received: line one\nline two')).toBeVisible();
+  });
+}
 
 test('exposes the Astryx Markdown code-copy action', async ({ window: page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);

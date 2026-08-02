@@ -1,14 +1,16 @@
+/** Either a React synthetic event or the native one it wraps. */
 export interface ChatInputCompositionEvent {
   key?: string;
-  nativeEvent: object;
+  nativeEvent?: object;
 }
 
 export function isChatInputComposing(
   event: ChatInputCompositionEvent,
   trackedComposition = false,
 ): boolean {
+  const native: object = event.nativeEvent ?? event;
   return trackedComposition || event.key === 'Process'
-    || ('isComposing' in event.nativeEvent && event.nativeEvent.isComposing === true);
+    || ('isComposing' in native && native.isComposing === true);
 }
 
 export function fileTransferContainsFiles(types: Iterable<string>, fileCount: number): boolean {
@@ -22,7 +24,7 @@ export function fileTransferContainsFiles(types: Iterable<string>, fileCount: nu
  * Those hooks used to hold an `HTMLTextAreaElement` ref and poke `.value` /
  * `.setSelectionRange()` directly. The input is now Astryx's contentEditable
  * `ChatComposerInput`, whose value is React state and whose caret is owned by
- * the component — so they talk to this three-method port instead and stay free
+ * the component — so they talk to this two-method port instead and stay free
  * of any DOM shape.
  */
 export interface ComposerTextPort {
@@ -30,8 +32,6 @@ export interface ComposerTextPort {
   getValue(): string;
   /** Replace the draft text without moving focus. */
   setValue(value: string): void;
-  /** Move focus into the input, caret at the end of the text. */
-  focus(): void;
 }
 
 /**

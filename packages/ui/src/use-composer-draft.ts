@@ -2,8 +2,8 @@
  * Composer draft-persistence hook (issue #1044).
  *
  * Owns the per-session unsent-draft store that used to live inline in
- * `composer.tsx`: a bounded Map keyed by `draftKey`, the active key, and the
- * `hasDraftText` flag that gates the send button. The pure store operations
+ * `composer.tsx`: a bounded Map keyed by `draftKey` and the active key.
+ * The pure store operations
  * (remember / read, with the 120k-char and 32-entry bounds) stay in
  * `composer-helpers.ts` — this hook is the React seam that wires them to the
  * input's `ComposerTextPort`.
@@ -16,7 +16,7 @@
  * same moment without this hook depending on them.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ComposerTextPort } from './chat-input-behavior.js';
 import {
   appendPromptContextDraft,
@@ -25,12 +25,7 @@ import {
 } from './composer-helpers.js';
 
 export interface ComposerDraftApi {
-  /** True while the active draft holds non-whitespace text (gates Send). */
-  hasDraftText: boolean;
-  /**
-   * Persist the current (or given) input value under the active draft key and
-   * refresh `hasDraftText`.
-   */
+  /** Persist the current (or given) input value under the active draft key. */
   saveCurrentDraft(value?: string): void;
   /**
    * Clear the draft stored under an explicit key. A successful send clears
@@ -53,14 +48,12 @@ export function useComposerDraft(input: {
   /** Fired after the active key swaps so sibling state machines can reset. */
   onDraftKeyChange(): void;
 }): ComposerDraftApi {
-  const [hasDraftText, setHasDraftText] = useState(false);
   const draftStoreRef = useRef<Map<string, string>>(new Map());
   const activeDraftKeyRef = useRef<string | undefined>(input.draftKey);
 
   function saveCurrentDraft(value?: string) {
     const nextValue = value ?? input.text.getValue();
     rememberComposerDraft(draftStoreRef.current, activeDraftKeyRef.current, nextValue);
-    setHasDraftText(Boolean(nextValue.trim()));
   }
 
   function clearDraft(key: string | undefined) {
@@ -69,7 +62,6 @@ export function useComposerDraft(input: {
 
   function setDraft(key: string | undefined, value: string) {
     rememberComposerDraft(draftStoreRef.current, key, value);
-    if (activeDraftKeyRef.current === key) setHasDraftText(Boolean(value.trim()));
   }
 
   function appendDraft(key: string | undefined, value: string) {
@@ -96,11 +88,9 @@ export function useComposerDraft(input: {
     input.onDraftKeyChange();
     const nextDraft = readComposerDraft(draftStoreRef.current, nextKey);
     input.text.setValue(nextDraft);
-    setHasDraftText(Boolean(nextDraft.trim()));
   }, [input.draftKey]);
 
   return {
-    hasDraftText,
     saveCurrentDraft,
     clearDraft,
     setDraft,
