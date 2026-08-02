@@ -37,15 +37,10 @@ import { appendPromptContextDraft, isReferenceSizedPaste } from './composer-help
 import { useComposerDraft } from './use-composer-draft.js';
 import { useComposerHistory } from './use-composer-history.js';
 import {
-  useComposerSkillDraft,
-  type ComposerSkillSelection,
-} from './use-composer-skill-draft.js';
-import {
   composerWireText,
   createChatInputActionOwner,
   createTriggerSearchSource,
   fileTransferContainsFiles,
-  isCaretAtContentStart,
   isChatInputComposing,
   mentionQueryMatches,
   skillMentionQuery,
@@ -75,14 +70,37 @@ import {
 } from '@astryxdesign/core/DropdownMenu';
 import { PermissionModeSelect } from './permission-mode-menu.js';
 
-/** A Skill as the composer offers it: a draft selection plus the `/` menu's
- * secondary line. */
+/** A Skill as the composer offers it: what the `/` menu lists and what a
+ * chosen entry writes into the draft. */
 export interface ComposerSkillOption {
-  /** Stable scope-aware ref; falls back to `id` for older catalog entries. */
-  ref?: string;
+  /** The id the `/skill:<id>` token carries, and what Runtime resolves. */
   id: string;
   name: string;
   description?: string;
+}
+
+/**
+ * The draft text a chosen Skill becomes. This is the product-wide invocation
+ * grammar (`SKILL_INVOCATION_TOKEN_SOURCE` in `@maka/runtime`), the same one
+ * the TUI submits and the same one a user can type by hand — the chip is a
+ * rendering of it, not a second channel beside it.
+ *
+ * By id, not by the scope-aware ref: the ref cannot be spelled in this grammar
+ * (`project:.maka/skills:writer` would parse as `project`), and ids are unique
+ * within a scan — `scanSkills` drops shadowed duplicates before the picker ever
+ * sees them. What the structured channel bought was pinning the exact file
+ * across the gap between choosing and sending; in that gap a ref is no less
+ * stale than an id, it is only differently stale, and resolving at send time is
+ * what `/skill:` means everywhere else in the product.
+ *
+ * The chip survives every edit the draft survives, but not an external rewrite:
+ * a controlled `value` set rebuilds the editor from the string, so a draft
+ * restored by session switch, prompt history, or revision rollback comes back
+ * with this token as plain text. It still reads, still sends, and still means
+ * the same thing — the same degradation `@` file chips already have.
+ */
+function skillTokenValue(id: string): string {
+  return `/skill:${id}`;
 }
 
 /**
@@ -115,23 +133,14 @@ export interface ComposerHandle {
   appendText(text: string): void;
   /** Read the current input text (inline tokens serialized to their values). */
   getText(): string;
-  /** Snapshot the structured Skills owned by the active draft. */
-  getSkills(): ComposerSkillSelection[];
-  /** Clear one persisted text and Skill draft without affecting another session. */
+  /** Clear one persisted draft without affecting another session's. */
   clearDraft(draftKey: string): void;
   /** Write a specific session draft before navigation changes the active key. */
   setDraft(draftKey: string, text: string): void;
   /** Append to a specific session draft without replacing newer text. */
   appendDraft?(draftKey: string, text: string): void;
-  /** Replace structured Skills under an explicit session draft key. */
-  setSkillDraft(
-    draftKey: string,
-    skills: readonly ComposerSkillSelection[],
-  ): void;
   /** Move focus to the input without changing its content. */
   focus(): void;
-  /** Fixture/integration seam for the same structured selection state used by `/`. */
-  setSkills(skills: ReadonlyArray<{ ref?: string; id: string; name: string }>): void;
 }
 
 type ComposerImportActionId = 'pick' | 'attach';
@@ -161,10 +170,7 @@ export const Composer = forwardRef<
     stopPending?: boolean;
     /** Runtime-only key used to keep unsent drafts isolated per session. */
     draftKey?: string;
-    onSend(
-      text: string,
-      skillIds: readonly string[],
-    ): boolean | void | Promise<boolean | void>;
+    onSend(text: string): boolean | void | Promise<boolean | void>;
     onStop(): void | Promise<void>;
     onPickAttachments?(): void | Promise<void>;
     onAttachFilePaths?(files: File[]): void | Promise<void>;
@@ -290,8 +296,9 @@ export const Composer = forwardRef<
      * when absent (SSR contracts render Composer with minimal props):
      *   - `mentionSkills` powers the `/` popup, which the ＋ menu's Skills entry
      *     opens by typing the trigger — one menu, one entry point in code. Pass
-     *     only ENABLED skills; the composer filters them client-side and creates
-     *     structured Skill tokens (human-in-the-loop, never auto-send).
+     *     only ENABLED skills; the composer filters them client-side and writes
+     *     the chosen one into the draft as a `/skill:<id>` chip (human-in-the-
+     *     loop, never auto-send).
      *   - `onSearchMentionFiles` powers the `@` popup.
      */
     mentionSkills?: ReadonlyArray<ComposerSkillOption>;
@@ -435,7 +442,6 @@ export const Composer = forwardRef<
     text: textPort,
     saveCurrentDraft,
   });
-  const skillDraft = useComposerSkillDraft(props.draftKey);
   // PR-UI-15: locale-aware copy for placeholder + toolbar states.
   const locale = useUiLocale();
   const copy = getConversationCopy(locale).composer;
@@ -522,13 +528,11 @@ export const Composer = forwardRef<
   const mentionSourceRef = useRef({
     mentionSkills: props.mentionSkills,
     onSearchMentionFiles: props.onSearchMentionFiles,
-    addSkill: (skill: ComposerSkillSelection) => skillDraft.add(skill),
   });
   useEffect(() => {
     mentionSourceRef.current = {
       mentionSkills: props.mentionSkills,
       onSearchMentionFiles: props.onSearchMentionFiles,
-      addSkill: (skill: ComposerSkillSelection) => skillDraft.add(skill),
     };
   });
 
@@ -552,11 +556,7 @@ export const Composer = forwardRef<
           mentionQueryMatches(query, `${skill.id} ${skill.name} ${skill.description ?? ''}`),
         )
         .slice(0, 50)
-        .map((skill) => ({
-          id: skill.ref ?? skill.id,
-          label: skill.name,
-          auxiliaryData: skill,
-        }));
+        .map((skill) => ({ id: skill.id, label: skill.name, auxiliaryData: skill }));
     };
     // `bootstrap` is required by SearchSource but never called by
     // `useTriggerMenu`; the menu opens straight into `search`.
@@ -623,12 +623,26 @@ export const Composer = forwardRef<
             </>
           );
         },
-        // A Skill is structured selection, not text: it lands in the drawer as
-        // a chip and contributes nothing to the draft, exactly as before.
-        onSelect: (item) => {
-          mentionSourceRef.current.addSkill(item.auxiliaryData as ComposerSkillSelection);
-          return '';
-        },
+        // A chosen Skill is an inline chip in the draft — Astryx's own
+        // `onSelect → ChatComposerToken` contract, the same one `@` uses.
+        //
+        // It used to be a selection held beside the draft and shown in the
+        // context drawer. That made the staged Skill a second source of truth
+        // for one fact, and every draft operation had to carry it separately:
+        // per-session persistence, prompt history, blocked-send recovery and
+        // revision rollback each had their own Skill-shaped twin. In the text
+        // there is one draft, and `/skill:<id>` is already the invocation
+        // grammar Runtime parses — so the chip a user picks and the token a
+        // user types are the same thing, and both survive every path the text
+        // survives.
+        //
+        // No colour: Maka blue is the single product accent, and a staged
+        // Skill is identified by its sparkle and its label.
+        onSelect: (item): ChatComposerToken => ({
+          value: skillTokenValue(item.id),
+          label: (item.auxiliaryData as ComposerSkillOption).name,
+          icon: <Sparkles size={12} aria-hidden="true" />,
+        }),
       });
     }
     return list;
@@ -717,12 +731,8 @@ export const Composer = forwardRef<
       getText() {
         return textPort.getValue();
       },
-      getSkills() {
-        return skillDraft.get(skillDraft.activeDraftKey());
-      },
       clearDraft(draftKey: string) {
         clearDraft(draftKey);
-        skillDraft.clear(draftKey);
         if (activeDraftKey() !== draftKey) return;
         textPort.setValue('');
         saveCurrentDraft('');
@@ -741,17 +751,8 @@ export const Composer = forwardRef<
         focusInput();
         textPort.setValue(next);
       },
-      setSkillDraft(
-        draftKey: string,
-        skills: readonly ComposerSkillSelection[],
-      ) {
-        skillDraft.replace(draftKey, skills);
-      },
       focus() {
         focusInput();
-      },
-      setSkills(skills) {
-        skillDraft.replace(skillDraft.activeDraftKey(), skills);
       },
     }),
     [],
@@ -759,19 +760,17 @@ export const Composer = forwardRef<
 
   async function sendCurrent() {
     if (props.disabled || sendPendingRef.current || importActionOwnerRef.current?.pending) return;
+    // One argument, because there is one draft: staged Skills ride inside the
+    // text as `/skill:<id>` tokens, and Runtime resolves and strips them before
+    // the model sees the message.
     const text = composerWireText(textPort.getValue());
-    // `skillIds` is the legacy wire field name. New selections submit the
-    // stable scope-aware ref so send-time re-resolution cannot drift to a
-    // same-id skill discovered at a different precedence.
-    const skillIds = skillDraft.skills.map((skill) => skill.ref ?? skill.id);
-    if (!text && skillIds.length === 0) return;
+    if (!text) return;
     const submittedDraftKey = activeDraftKey();
-    const submittedSkillDraftKey = skillDraft.activeDraftKey();
     sendPendingRef.current = true;
     setSendPending(true);
     let sent: boolean | void;
     try {
-      sent = await props.onSend(text, skillIds);
+      sent = await props.onSend(text);
     } finally {
       sendPendingRef.current = false;
       if (composerMountedRef.current) setSendPending(false);
@@ -780,15 +779,13 @@ export const Composer = forwardRef<
     if (sent === false) return;
     // Save to both local ref and global persistence so the history
     // survives page reloads and is shared across all input surfaces.
-    if (text) rememberSentEntry(text);
+    rememberSentEntry(text);
     clearDraft(submittedDraftKey);
-    skillDraft.clear(submittedSkillDraftKey);
     // The owner may have changed while onSend awaited (new-session creation,
     // revision branch, or user navigation). Never erase a foreign draft.
     if (activeDraftKey() !== submittedDraftKey) return;
     textPort.setValue('');
     saveCurrentDraft('');
-    skillDraft.clear(skillDraft.activeDraftKey());
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -832,14 +829,6 @@ export const Composer = forwardRef<
     ) {
       event.preventDefault();
       props.onCancelVoiceCapture?.();
-      return;
-    }
-    if (
-      event.key === 'Backspace' &&
-      isCaretAtContentStart(event.currentTarget, window.getSelection()) &&
-      skillDraft.removeLast()
-    ) {
-      event.preventDefault();
       return;
     }
     // Esc while a drag-active highlight is showing should clear it
@@ -947,7 +936,7 @@ export const Composer = forwardRef<
     props.disabled ||
     sendPending ||
     importActionBusy ||
-    (!text.trim() && skillDraft.skills.length === 0) ||
+    !text.trim() ||
     noModelConnection;
   // The disabled Send is explanatory only in the no-model dead-end; other
   // disabled reasons (empty draft, in-flight import) keep the neutral label.
@@ -962,17 +951,16 @@ export const Composer = forwardRef<
         : undefined;
 
   /**
-   * The drawer's contract is context staged for the *next send*: quotes,
-   * attachments and Skills are consumed when the message goes out, and this
-   * count tells the user how many such items are pending. Plan / Swarm / Graph
-   * are session-scoped modes that survive the send, so they are not counted
-   * here and no longer render inside the drawer (#1897) — they read as mode
-   * state on the footer toolbar instead.
+   * The drawer's contract is context staged for the *next send*: quotes and
+   * attachments are consumed when the message goes out, and this count tells
+   * the user how many such items are pending. Plan / Swarm / Graph are
+   * session-scoped modes that survive the send, so they are not counted here
+   * and no longer render inside the drawer (#1897) — they read as mode state
+   * on the footer toolbar instead. Skills are not counted either: a staged
+   * Skill is a chip in the draft itself, visible where it will be sent from.
    */
   const drawerTokenCount =
-    (props.pendingQuotes?.length ?? 0)
-    + (props.pendingAttachments?.length ?? 0)
-    + skillDraft.skills.length;
+    (props.pendingQuotes?.length ?? 0) + (props.pendingAttachments?.length ?? 0);
   /**
    * The session modes that are currently on, in the order the ＋ menu lists
    * them. The menu stays the switch — it turns each mode on *and* off; these
@@ -1127,21 +1115,6 @@ export const Composer = forwardRef<
                     size="sm"
                     label={attachment.displayName}
                     onRemove={props.onRemoveAttachment ? () => props.onRemoveAttachment?.(index) : undefined}
-                  />
-                ))}
-                {skillDraft.skills.map((skill) => (
-                  <Token
-                    key={skill.ref ?? skill.id}
-                    size="sm"
-                    // No colour: Maka blue is the single product accent, and a
-                    // staged Skill is identified by its sparkle and its label.
-                    icon={<Sparkles size={12} aria-hidden="true" />}
-                    className="maka-composer-skill-token"
-                    label={skill.name}
-                    onRemove={() => {
-                      skillDraft.remove(skill.ref ?? skill.id);
-                      window.requestAnimationFrame(() => focusInput());
-                    }}
                   />
                 ))}
               </div>

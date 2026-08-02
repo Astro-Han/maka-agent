@@ -192,9 +192,9 @@ const baseComposerProps: ComposerProps = {
   activeThinkingLevel: 'medium',
   onThinkingLevelChange: noop,
   mentionSkills: [
-    { ref: 'user:pdf', id: 'pdf', name: 'PDF 工具', description: '读取、拆分与合并 PDF' },
-    { ref: 'user:commit', id: 'commit', name: 'Commit', description: '生成提交信息' },
-    { ref: 'project:review', id: 'review', name: 'Code Review', description: '按仓库规范审查改动' },
+    { id: 'pdf', name: 'PDF 工具', description: '读取、拆分与合并 PDF' },
+    { id: 'commit', name: 'Commit', description: '生成提交信息' },
+    { id: 'review', name: 'Code Review', description: '按仓库规范审查改动' },
   ],
   workspacePicker: {
     label: 'maka-agent',

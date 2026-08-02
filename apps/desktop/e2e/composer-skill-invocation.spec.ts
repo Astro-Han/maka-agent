@@ -6,19 +6,49 @@ async function createStarterSkillAndReload(page: Page): Promise<void> {
   expect(result.ok).toBe(true);
   await page.reload();
   await expect(page.locator(COMPOSER_INPUT)).toBeVisible();
+  // The `/` menu lists what the renderer has projected, and that projection is
+  // refreshed asynchronously after load. Wait for the Skill to be invocable so
+  // an empty first search is never mistaken for a missing suggestion.
+  await expect
+    .poll(async () =>
+      (await page.evaluate(() => window.maka.skills.listInvocable(undefined))).map(
+        (skill) => skill.id,
+      ),
+    )
+    .toContain('starter-skill');
 }
 
-async function selectStarterSkill(page: Page): Promise<void> {
+/** The staged Skill's inline chip, addressed by the token it serializes to. */
+const STARTER_CHIP = '[data-astryx-token-value="/skill:starter-skill"]';
+
+/**
+ * Pick 示例技能 from the `/` menu. `append` types the trigger after whatever
+ * is already in the draft; the default replaces the draft, which is what a
+ * chip-only send needs.
+ */
+async function selectStarterSkill(
+  page: Page,
+  options: { append?: boolean } = {},
+): Promise<void> {
   const composer = page.locator(COMPOSER_INPUT);
-  await composer.fill('/');
+  if (options.append) {
+    await composer.click();
+    await composer.pressSequentially(' /');
+  } else {
+    await composer.fill('/');
+  }
   const listbox = page.getByRole('listbox', { name: '技能' });
   await expect(listbox).toBeVisible();
   await expect(listbox.getByRole('option', { name: /示例技能/ })).toBeVisible();
   await composer.press('Enter');
-  await expect(page.locator('.maka-composer-skill-token')).toContainText('示例技能');
-  await expect(composer).toHaveText('');
+  await expect(page.locator(STARTER_CHIP)).toContainText('示例技能');
 }
 
+/**
+ * A chosen Skill is a chip in the draft, not a selection held beside it: the
+ * caret lands after it, it serializes to the `/skill:<id>` token a user could
+ * have typed, and Backspace behind it takes it away.
+ */
 test('the composer selects a structured Skill from slash suggestions', async ({
   window: page,
 }) => {
@@ -26,39 +56,37 @@ test('the composer selects a structured Skill from slash suggestions', async ({
   await selectStarterSkill(page);
 
   const composer = page.locator(COMPOSER_INPUT);
-  const token = page.locator('.maka-composer-skill-token');
-  await expect(token).toContainText('示例技能');
-  const removeButton = token.getByRole('button');
-  await removeButton.focus();
-  await removeButton.press('Enter');
-  await expect(token).toHaveCount(0);
-  await expect(composer).toBeFocused();
+  const chip = page.locator(STARTER_CHIP);
+  await expect(chip).toContainText('示例技能');
 
-  await selectStarterSkill(page);
+  // Two presses, as for a `@` file chip: `insertToken` anchors the chip with a
+  // trailing U+00A0, so the first Backspace eats the anchor and the second the
+  // chip. One press would mean deleting the chip while a space still separates
+  // the caret from it.
   await composer.press('Backspace');
-  await expect(token).toHaveCount(0);
+  await composer.press('Backspace');
+  await expect(chip).toHaveCount(0);
+  await expect(composer).toHaveText('');
 });
 
 /**
- * Backspace eats the staged Skill only from the very start of the draft. On a
- * textarea that was `selectionStart === 0`; on a contentEditable it is a Range
- * comparison, and getting it wrong is silent — the Skill disappears while the
- * user is deleting a character in the middle of a word.
+ * Backspace eats the chip only from directly behind it. Get that wrong and the
+ * Skill disappears silently while the user is deleting a character in a word
+ * they typed after it.
  */
-test('Backspace away from the start deletes a character, not the staged Skill', async ({
+test('Backspace away from the chip deletes a character, not the staged Skill', async ({
   window: page,
 }) => {
   await createStarterSkillAndReload(page);
   await selectStarterSkill(page);
 
   const composer = page.locator(COMPOSER_INPUT);
-  const token = page.locator('.maka-composer-skill-token');
   await composer.click();
   await composer.pressSequentially('abc');
   await composer.press('Backspace');
 
-  await expect(composer).toHaveText('ab');
-  await expect(token).toHaveCount(1);
+  await expect(composer).toContainText('ab');
+  await expect(page.locator(STARTER_CHIP)).toHaveCount(1);
 });
 
 test('slash suggestions follow Runtime project discovery and host gating', async ({
@@ -154,6 +182,11 @@ test('the ＋ Skills entry opens the `/` menu, on an empty draft and after a wor
   const plusMenu = page.locator('.maka-composer-plus-menu').getByRole('button');
   const listbox = page.getByRole('listbox', { name: '技能' });
   const openFromPlus = async () => {
+    // The wait is Astryx's, not ours: a float that has just light-dismissed
+    // ignores clicks for ~100ms, and every step below closes the `/` menu
+    // right before reaching for ＋. Under that threshold the click on ＋
+    // reaches nothing at all.
+    await page.waitForTimeout(300);
     await plusMenu.click();
     await page.getByRole('menuitem', { name: '选择技能' }).click();
   };
@@ -163,12 +196,16 @@ test('the ＋ Skills entry opens the `/` menu, on an empty draft and after a wor
   await expect(listbox).toBeVisible();
   await expect(listbox.getByRole('option', { name: /示例技能/ })).toBeVisible();
   await composer.press('Enter');
-  await expect(page.locator('.maka-composer-skill-token')).toContainText('示例技能');
+  await expect(page.locator(STARTER_CHIP)).toContainText('示例技能');
 
-  // After a word: without an inserted space the menu would never open, and the
-  // slash would sit in the draft as literal text.
-  await composer.click();
-  await composer.pressSequentially('看看');
+  // After a chip: `insertToken` anchors it with U+00A0, which is not a space,
+  // so ＋ has to insert one or the menu never opens.
+  await openFromPlus();
+  await expect(listbox).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // After a word: same rule, the case a user hits by typing.
+  await composer.fill('看看');
   await openFromPlus();
   await expect(listbox).toBeVisible();
 
@@ -176,7 +213,7 @@ test('the ＋ Skills entry opens the `/` menu, on an empty draft and after a wor
   // types `/` themselves — it is ordinary draft text, not a surface to dismiss.
   await page.keyboard.press('Escape');
   await expect(listbox).toBeHidden();
-  await expect(composer).toHaveText('看看 /');
+  await expect(composer).toContainText('看看 /');
 });
 
 /**
@@ -209,10 +246,13 @@ test('the ＋ Skills entry is unavailable when no Skill is installed', async ({
   await expect(composer).toHaveText('看看');
   await expect(page.getByRole('listbox', { name: '技能' })).toHaveCount(0);
 
-  // And the footer still answers the very first click.
+  // And the footer still answers the very first click. Assert the menu it
+  // owns opened, not where focus went: the trigger keeps focus or hands it to
+  // the menu depending on how fast the float mounts, and either way the click
+  // was received — which is the whole complaint this covers.
   const permission = page.locator('.maka-composer-left-controls button').nth(1);
   await permission.click();
-  await expect(permission).toBeFocused();
+  await expect(permission).toHaveAttribute('aria-expanded', 'true');
 });
 
 test('chip-only send renders a readable user message', async ({ window: page }) => {
@@ -229,17 +269,17 @@ test('a blocked Skill invocation keeps the complete composer draft', async ({
   window: page,
 }) => {
   await createStarterSkillAndReload(page);
-  await selectStarterSkill(page);
+  const composer = page.locator(COMPOSER_INPUT);
+  await composer.fill('run it');
+  await selectStarterSkill(page, { append: true });
   const disabled = await page.evaluate(() => window.maka.skills.setEnabled('starter-skill', false));
   expect(disabled.ok).toBe(true);
 
-  const composer = page.locator(COMPOSER_INPUT);
-  await composer.fill('run it');
   await composer.press('Enter');
 
   await expect(page.getByText('Skill 调用失败，消息未发送')).toBeVisible();
-  await expect(composer).toHaveText('run it');
-  await expect(page.locator('.maka-composer-skill-token')).toContainText('示例技能');
+  await expect(composer).toContainText('run it');
+  await expect(page.locator(STARTER_CHIP)).toContainText('示例技能');
   await expect(page.locator('.maka-turn')).toHaveCount(0);
   // #1433: the composer creates the session BEFORE it sends, so a rejected
   // first send has to remove it again. Otherwise every blocked invocation
