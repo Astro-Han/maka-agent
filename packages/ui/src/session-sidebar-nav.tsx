@@ -23,6 +23,9 @@ export function SessionSidebarNav(props: {
     (reminder) => reminder.status !== 'completed',
   ).length;
 
+  // Always SideNavItem — expanded and collapsed. Astryx collapse context turns
+  // these into icon-only slots without remounting a different control recipe
+  // (which read as a squeeze when the rail previously swapped to IconButton).
   return (
     <>
       <SideNavItem

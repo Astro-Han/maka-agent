@@ -9,7 +9,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Search,
-  SquarePen,
 } from '@maka/ui/icons';
 import {
   IconButton,
@@ -19,6 +18,7 @@ import {
   DropdownMenu,
   DropdownMenuItem,
 } from '@astryxdesign/core/DropdownMenu';
+import { Icon } from '@astryxdesign/core/Icon';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import {
   SideNavCollapseButton,
@@ -27,14 +27,19 @@ import {
 import { useRef, useState, type RefObject } from 'react';
 import { getShellCopy } from './locales/shell-copy';
 
-/** Match Astryx Button icon wrapper / SideNav renderIconSlot sm (16px). */
-const CHROME_ICON_SIZE = 16;
+/**
+ * Match SideNavItem collapsed/expanded icon slot: Astryx `renderIconSlot`
+ * uses size `sm` (1rem) + color `secondary`. Titlebar follows that recipe
+ * — not raw Lucide size props — so chrome and sidebar share one glyph look.
+ */
+function ChromeIcon(props: { icon: typeof Search }) {
+  return <Icon icon={props.icon} size="sm" color="secondary" />;
+}
 
 export function AppShellTopbarActions(props: {
   sidebarCollapsed: boolean;
   sidebarHandleRef: RefObject<SideNavImperativeCollapseHandle | null>;
   onOpenSearchModal(): void;
-  onCreateSession(): void;
 }) {
   const locale = useUiLocale();
   const copy = getShellCopy(locale).chrome;
@@ -43,7 +48,7 @@ export function AppShellTopbarActions(props: {
       <Tooltip content={copy.searchConversations}>
         <IconButton
           label={copy.searchConversations}
-          icon={<Search size={CHROME_ICON_SIZE} aria-hidden="true" />}
+          icon={<ChromeIcon icon={Search} />}
           variant="ghost"
           size="md"
           className="maka-titlebar-action"
@@ -59,24 +64,15 @@ export function AppShellTopbarActions(props: {
           aria-expanded={!props.sidebarCollapsed}
         >
           {props.sidebarCollapsed ? (
-            <PanelLeftOpen size={CHROME_ICON_SIZE} aria-hidden="true" />
+            <ChromeIcon icon={PanelLeftOpen} />
           ) : (
-            <PanelLeftClose size={CHROME_ICON_SIZE} aria-hidden="true" />
+            <ChromeIcon icon={PanelLeftClose} />
           )}
         </SideNavCollapseButton>
       </Tooltip>
-      {props.sidebarCollapsed && (
-        <Tooltip content={copy.newTask}>
-          <IconButton
-            label={copy.newTask}
-            icon={<SquarePen size={CHROME_ICON_SIZE} aria-hidden="true" />}
-            variant="ghost"
-            size="md"
-            className="maka-titlebar-action"
-            onClick={props.onCreateSession}
-          />
-        </Tooltip>
-      )}
+      {/* Collapsed "new task" lives on the SideNav rail (SessionSidebarNav),
+          not here — a third titlebar button duplicated the rail icon and made
+          left-cluster width state-dependent for drag-region math. */}
     </div>
   );
 }
@@ -113,17 +109,17 @@ export function AppShellWorkspaceTopActions(props: {
         }}
         button={{
           label: copy.moreActions,
-          icon: <MoreHorizontal size={CHROME_ICON_SIZE} aria-hidden="true" />,
+          icon: <ChromeIcon icon={MoreHorizontal} />,
           isIconOnly: true,
           variant: 'ghost',
           size: 'md',
           className: 'maka-titlebar-action',
         }}
       >
-          <DropdownMenuItem icon={<MessageCircleQuestion size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.feedback} onClick={() => scheduleAfterMenuClose(props.onOpenFeedback)} />
-          <DropdownMenuItem icon={<Grid3X3 size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.openCommandPalette} onClick={() => scheduleAfterMenuClose(props.onOpenPalette)} />
-          <DropdownMenuItem icon={<HelpCircle size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.openHelp} onClick={() => scheduleAfterMenuClose(props.onOpenHelp)} />
-          <DropdownMenuItem icon={<CircleGauge size={CHROME_ICON_SIZE} aria-hidden="true" />} label={copy.openHealth} onClick={() => scheduleAfterMenuClose(props.onOpenHealth)} />
+          <DropdownMenuItem icon={<ChromeIcon icon={MessageCircleQuestion} />} label={copy.feedback} onClick={() => scheduleAfterMenuClose(props.onOpenFeedback)} />
+          <DropdownMenuItem icon={<ChromeIcon icon={Grid3X3} />} label={copy.openCommandPalette} onClick={() => scheduleAfterMenuClose(props.onOpenPalette)} />
+          <DropdownMenuItem icon={<ChromeIcon icon={HelpCircle} />} label={copy.openHelp} onClick={() => scheduleAfterMenuClose(props.onOpenHelp)} />
+          <DropdownMenuItem icon={<ChromeIcon icon={CircleGauge} />} label={copy.openHealth} onClick={() => scheduleAfterMenuClose(props.onOpenHealth)} />
       </DropdownMenu>
       {props.workbarAvailable && (
         <Tooltip content={workbarLabel}>
@@ -131,9 +127,9 @@ export function AppShellWorkspaceTopActions(props: {
             label={workbarLabel}
             icon={
               props.workbarCollapsed ? (
-                <PanelRightOpen size={CHROME_ICON_SIZE} aria-hidden="true" />
+                <ChromeIcon icon={PanelRightOpen} />
               ) : (
-                <PanelRightClose size={CHROME_ICON_SIZE} aria-hidden="true" />
+                <ChromeIcon icon={PanelRightClose} />
               )
             }
             variant="ghost"

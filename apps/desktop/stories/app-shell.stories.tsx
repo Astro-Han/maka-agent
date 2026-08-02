@@ -301,7 +301,6 @@ function ComposedShell(props: {
           sidebarCollapsed={collapsed}
           sidebarHandleRef={sidebarHandleRef}
           onOpenSearchModal={noop}
-          onCreateSession={noop}
         />
         <AppShellWorkspaceTopActions
           workbarAvailable

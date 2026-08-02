@@ -2071,7 +2071,6 @@ function AppShellContent({
           sidebarCollapsed={sessionListCollapsed}
           sidebarHandleRef={sessionSideNavHandleRef}
           onOpenSearchModal={() => setSearchModalOpen(true)}
-          onCreateSession={createSession}
         />
         {!VIEWS_WITHOUT_WORKSPACE_ACTIONS.has(agentsView) && (
           <AppShellWorkspaceTopActions

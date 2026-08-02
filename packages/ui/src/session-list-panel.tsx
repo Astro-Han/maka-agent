@@ -20,9 +20,13 @@ import { SessionSidebarFooter, SessionSidebarNav, type SidebarUpdateReminder } f
 import { ListTodo } from './icons.js';
 import { useUiLocale } from './locale-context.js';
 import { getConversationCopy } from './conversation-copy.js';
-import type { Ref } from 'react';
+import { useState, type Ref, type TransitionEvent } from 'react';
 
 export type SessionViewMode = 'conversation' | 'project';
+
+/** Astryx SideNav `rootCollapsed` uses spacing-12 (48px). Product shell owns
+ *  the animated width so expand/collapse eases; SideNav fills 100% of this. */
+export const SESSION_LIST_COLLAPSED_RAIL_WIDTH = 48;
 
 export function SessionListPanel(props: {
   collapsed?: boolean;
@@ -66,6 +70,25 @@ export function SessionListPanel(props: {
     groups,
   } = props;
 
+  // Shell owns pixel width + transition. Astryx SideNav has no width motion on
+  // collapsible; it also drops the inline width when collapsed (class only),
+  // which skips CSS interpolation. Keep one animating box and force SideNav to
+  // fill it (see .maka-sidenav-motion in shell-layout.css).
+  const shellWidth = collapsed ? SESSION_LIST_COLLAPSED_RAIL_WIDTH : width;
+
+  // Ease the width only while collapse/expand is in flight. Resize drags feed
+  // `width` back through onWidthChange on every pointer move; with a standing
+  // transition each move restarts the 280ms ease and the rail lags the cursor.
+  const [prevCollapsed, setPrevCollapsed] = useState(collapsed);
+  const [easing, setEasing] = useState(false);
+  if (prevCollapsed !== collapsed) {
+    setPrevCollapsed(collapsed);
+    setEasing(true);
+  }
+  const endEase = (event: TransitionEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget && event.propertyName === 'width') setEasing(false);
+  };
+
   const groupingMenu = onViewModeChange ? (
     <DropdownMenu
       button={{
@@ -89,6 +112,13 @@ export function SessionListPanel(props: {
   ) : undefined;
 
   return (
+    <div
+      className="maka-sidenav-motion"
+      data-collapsed={collapsed ? 'true' : 'false'}
+      data-easing={easing ? 'true' : undefined}
+      onTransitionEnd={endEase}
+      style={{ width: shellWidth }}
+    >
     <SideNav
       handleRef={props.collapseHandleRef}
       className="maka-session-panel agents-sidebar"
@@ -147,5 +177,6 @@ export function SessionListPanel(props: {
         />
       ) : null}
     </SideNav>
+    </div>
   );
 }
