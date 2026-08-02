@@ -92,24 +92,67 @@ describe('composer quiet chrome', () => {
     );
   });
 
-  it('surfaces active mode and skill selections as drawer tokens, not footer chips', () => {
+  it('reads active modes off the footer toolbar, after the model pair', () => {
     const markup = render(
       <Composer
         onSend={() => true}
         onStop={() => {}}
         planModeActive
         onPlanModeChange={() => {}}
-        mentionSkills={[{ id: 'pdf', name: 'PDF 工具' }]}
+        swarmModeActive
+        onSwarmModeChange={() => {}}
+        modelLabel="demo"
+        modelChoices={[]}
+        newChatThinkingLevels={['off', 'high']}
+        newChatThinkingLevel="high"
+        onNewChatThinkingLevelChange={() => {}}
+      />,
+    );
+
+    const leftControls = markup.match(
+      /maka-composer-left-controls[\s\S]*?maka-composer-right-controls/,
+    )?.[0] ?? '';
+    assert.match(leftControls, /maka-composer-mode-indicator[^>]*data-mode="plan"/);
+    assert.match(leftControls, /maka-composer-mode-indicator[^>]*data-mode="swarm"/);
+    // Modes trail the model + thinking pair so toggling one never shifts them.
+    const modelIdx = leftControls.indexOf('maka-model-selection-controls');
+    const modeIdx = leftControls.indexOf('maka-composer-mode-indicator');
+    assert.ok(modelIdx >= 0 && modeIdx > modelIdx, 'modes must follow the model pair');
+    // Icon-only, and still nameable + removable: Astryx hides the label
+    // visually while keeping it as the token's accessible name.
+    const planMark = leftControls.slice(
+      leftControls.indexOf('data-mode="plan"'),
+      leftControls.indexOf('data-mode="swarm"'),
+    );
+    assert.match(planMark, /lucide-list-todo/, 'the mark is the mode icon');
+    assert.match(planMark, /aria-label="Plan"/, 'the hidden label names the token');
+    assert.match(planMark, /aria-label="Remove Plan"/, 'the way out stays reachable');
+    // Modes alone stage nothing for the next send, so no drawer mounts.
+    assert.doesNotMatch(markup, /maka-composer-context-drawer/);
+  });
+
+  it('counts only send-consumed context in the drawer badge, never modes', () => {
+    const markup = render(
+      <Composer
+        onSend={() => true}
+        onStop={() => {}}
+        planModeActive
+        onPlanModeChange={() => {}}
+        swarmModeActive
+        onSwarmModeChange={() => {}}
+        pendingAttachments={[{ displayName: 'notes.md', kind: 'doc', size: 12 }]}
+        onRemoveAttachment={() => {}}
         modelLabel="demo"
       />,
     );
 
-    // Drawer mounts when there is staged context; mode indicator is a token.
     assert.match(markup, /maka-composer-context-drawer/);
-    assert.match(markup, /maka-composer-mode-indicator[^>]*data-mode="plan"/);
-    assert.match(markup, /astryx-token/);
-    // Legacy text mode-indicator button is gone from the footer.
-    assert.doesNotMatch(markup, /<button[^>]*maka-composer-mode-indicator/);
+    // One attachment staged, two modes on — the badge reads 1.
+    const badge = markup.match(/astryx-badge[\s\S]*?<\/span>/)?.[0] ?? '';
+    assert.match(badge, />1</, `drawer badge must exclude modes, got: ${badge}`);
+    // The drawer itself carries no mode marks any more.
+    const drawer = markup.match(/maka-composer-context-drawer[\s\S]*?<\/div>/)?.[0] ?? '';
+    assert.doesNotMatch(drawer, /maka-composer-mode-indicator/);
   });
 
   it('shows a single voice control only when the host wires capture', () => {

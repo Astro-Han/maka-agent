@@ -238,7 +238,7 @@ describe('localized conversation journey', () => {
     assert.match(markup, /aria-disabled="true"[^>]*>[\s\S]*?添加文件或目录|添加文件或目录[\s\S]*?aria-disabled="true"/);
   });
 
-  it('shows a Plan token in the drawer only while Plan is active', () => {
+  it('marks Plan on the footer toolbar only while Plan is active', () => {
     const on = render(
       'zh',
       <Composer onSend={() => {}} onStop={() => {}} planModeActive onPlanModeChange={() => {}} />,
@@ -252,7 +252,7 @@ describe('localized conversation journey', () => {
     assert.doesNotMatch(off, /maka-composer-mode-indicator/);
   });
 
-  it('keeps the active-mode token visible but non-removable with reason while streaming', () => {
+  it('keeps the active-mode mark visible but non-removable with reason while streaming', () => {
     const markup = render(
       'zh',
       <Composer

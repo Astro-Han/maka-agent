@@ -740,3 +740,44 @@ export const SessionContextLayer: Story = {
     />
   ),
 };
+
+// Real path: 开启 Plan Mode from the ＋ menu. The mode is session-scoped — it
+// survives the send — so it reads as a mark at the tail of the composer's
+// footer controls rather than as staged context in the drawer (#1897). It
+// trails the model + thinking pair so switching it never shifts those two.
+export const PlanModeOn: Story = {
+  render: () => <ComposedShell composer={{ planModeActive: true }} />,
+};
+
+// Real path: the same for the orchestration side. Swarm carries its own colour
+// and icon, so the two modes stay distinguishable at icon size.
+export const SwarmModeOn: Story = {
+  render: () => <ComposedShell composer={{ swarmModeActive: true }} />,
+};
+
+// Real path: Plan and Swarm are independent switches (collaborationMode vs
+// orchestrationMode), so both can be on at once. This is the widest the mode
+// tail ever gets next to a real model name.
+export const PlanAndSwarmModeOn: Story = {
+  render: () => (
+    <ComposedShell composer={{ planModeActive: true, swarmModeActive: true }} />
+  ),
+};
+
+// Real path: a mode is on AND context is staged for the next send. The point of
+// the story is the split: the drawer badge counts the two attachments only,
+// while Plan reads off the footer — the mode is not something the send consumes.
+export const ModeOnWithPendingAttachments: Story = {
+  render: () => (
+    <ComposedShell
+      composer={{
+        planModeActive: true,
+        pendingAttachments: [
+          { displayName: 'design-review.pdf', kind: 'pdf', size: 182_400 },
+          { displayName: 'composer.tsx', kind: 'code', size: 41_200 },
+        ],
+        onRemoveAttachment: noop,
+      }}
+    />
+  ),
+};
