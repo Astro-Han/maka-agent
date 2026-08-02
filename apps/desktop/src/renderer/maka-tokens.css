@@ -139,14 +139,12 @@
      emphasis, and using this for CTAs is exactly the palette-invisibility
      bug called out in the --brand-deep note above. */
   --maka-brand: #71a8fd;
-  /* Every MCP market tile now renders a real library brand mark on a neutral
-     plate (mcp-brand-marks.tsx: simple-icons + @ant-design/icons-svg DingTalk +
-     the vendored Feishu mark), so no per-brand plate-tint tokens are needed —
-     a colourful logo already supplies the brand identity. */
-  /* PALETTE-LEAK-0: semantic alias for informational system banners (the
-     plan-reminders 系统提醒 banner) — component CSS derives its tint family
-     from this instead of referencing var(--accent) directly, so a palette
-     retune moves the banner with it (#406). Convention, not enforced. */
+  /* Every MCP market tile renders a real library brand mark on a neutral plate
+     (mcp-brand-marks.tsx: simple-icons + @ant-design/icons-svg DingTalk + the
+     vendored Feishu mark), so no per-brand plate-tint token is needed — a
+     colourful logo already supplies the brand identity. The system-banner tint
+     alias went the same way: the plan-reminders banner derives from --accent
+     directly, which is one indirection fewer for the same result. */
 
   /* === text variants (mixed toward foreground for better contrast) === */
   --success-text: color-mix(in oklab, var(--success) 50%, var(--foreground));
@@ -272,7 +270,6 @@
     oklch(from var(--foreground) l c h / 0.06) 0 3px 3px -1.5px,
     oklch(from var(--foreground) l c h / 0.06) 0 6px 6px -3px,
     oklch(from var(--foreground) l c h / 0.04) 0 12px 12px -6px;
-
 
   /* === z-index scale (semantic) === */
   --z-base: 0;
@@ -412,11 +409,6 @@
   --tracking-wider: 0.05em;
   --tracking-widest: 0.1em;
 
-  /* === font-family (serif addition) ===
-     PR-FONT-FAMILY-MINOR-0 (issue #520 PR1): onboarding hero uses a
-     serif face; tokenize so font-family declarations reference tokens
-     instead of bare `Georgia, serif`. */
-
   /* === layout ===
      Concentric nesting — inner radius = outer radius − inset.
 
@@ -542,10 +534,10 @@
    /* === focus-ring recipe ===
       --focus-ring is the strong accent color (existing); --ring is the
       subtle foreground-derived color (existing, for compact/secondary
-      focus). These three geometry tokens converge outline width/offset
-      plus the outer focus-glow halo width so every focus ring shares one
-      recipe instead of hand-written 2px. The glow is the low-alpha
-      4px halo that sits outside the 2px ring on focus-within fields.
+      focus). These two geometry tokens converge outline width and offset so
+      every focus ring shares one recipe instead of hand-written 2px. The
+      recipe once carried a third, the outer glow halo width, but nothing
+      drew that halo.
       PR-FOCUS-RING-RECIPE-0 (issue #520 PR2). */
    --focus-ring-width: 2px;
    --focus-ring-offset: 2px;
@@ -553,7 +545,8 @@
    /* === transform amplitude (motion) ===
       Tokenize the geometric magnitude of press/hover feedback so the
       motion scale covers amplitude, not just duration/easing. Press
-      scale (active 缩小), hover scale (悬停放大), hover lift (上浮). Reset
+      scale (active 缩小) and hover lift (上浮); no hover scale — nothing in
+      the app grows on hover. Reset
       transform: translate(0)/scale(1) uses literal 0/1. Decorative
       scale(1.1), strong lift -3px, sidebar slide translateX, and rotate
       are NOT tokenized (diverse, low coverage). Keyframe transform
@@ -1382,9 +1375,10 @@ html[data-os="darwin"].dark {
    every SVG presentation attribute, so all lucide glyphs render at a
    single weight without touching call sites. Stroke is the only thing
    hammered globally: width/height stay per call site, because a global
-   size rule would also catch the Astryx-slot icons that styles/
-   astryx-mount.css sizes by class. If a surface ever needs a heavier
-   stroke, scope a more specific selector with a comment.
+   size rule would also catch the icons Astryx sizes through its own slot
+   props (Icon `size`, SideNavItem's `renderIconSlot`), and those are the
+   component's decision, not the product's. If a surface ever needs a
+   heavier stroke, scope a more specific selector with a comment.
 ============================================================================= */
 svg.lucide {
   stroke-width: 1.75;
