@@ -37,29 +37,6 @@
   padding-block: var(--space-1) 0;
 }
 
-/* Skill panel opened from the ＋ menu — containing block is left-controls
-   (starts at ＋), not the zero-width picker host at the end of the row. */
-.maka-composer-left-controls {
-  position: relative;
-}
-
-.maka-composer-skill-picker[data-anchored="footer"] {
-  /* Stay out of the positioning chain so the absolute panel uses left-controls. */
-  position: static;
-  width: 0;
-  height: 0;
-  overflow: visible;
-  margin: 0;
-  padding: 0;
-  border: none;
-  pointer-events: none;
-}
-
-.maka-composer-skill-picker[data-anchored="footer"] .maka-composer-skill-panel {
-  pointer-events: auto;
-  inset-inline-start: 0;
-}
-
 .maka-composer-context-drawer {
   display: flex;
   min-width: 0;

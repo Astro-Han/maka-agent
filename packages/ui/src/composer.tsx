@@ -74,7 +74,16 @@ import {
   DropdownMenuItem,
 } from '@astryxdesign/core/DropdownMenu';
 import { PermissionModeSelect } from './permission-mode-menu.js';
-import { ComposerSkillPicker, type ComposerSkillOption } from './composer-skill-picker.js';
+
+/** A Skill as the composer offers it: a draft selection plus the `/` menu's
+ * secondary line. */
+export interface ComposerSkillOption {
+  /** Stable scope-aware ref; falls back to `id` for older catalog entries. */
+  ref?: string;
+  id: string;
+  name: string;
+  description?: string;
+}
 
 /**
  * Rows the input grows to before it scrolls. `ChatComposerInput` prices this in
@@ -279,12 +288,13 @@ export const Composer = forwardRef<
     /**
      * Composer mention popups. Both are optional and the whole feature no-ops
      * when absent (SSR contracts render Composer with minimal props):
-     *   - `mentionSkills` powers the `/` popup AND the ＋ menu Skills entry —
-     *     pass only ENABLED skills; the composer filters them client-side and
-     *     creates structured Skill tokens (human-in-the-loop, never auto-send).
+     *   - `mentionSkills` powers the `/` popup, which the ＋ menu's Skills entry
+     *     opens by typing the trigger — one menu, one entry point in code. Pass
+     *     only ENABLED skills; the composer filters them client-side and creates
+     *     structured Skill tokens (human-in-the-loop, never auto-send).
      *   - `onSearchMentionFiles` powers the `@` popup.
      */
-    mentionSkills?: ReadonlyArray<{ ref?: string; id: string; name: string; description?: string }>;
+    mentionSkills?: ReadonlyArray<ComposerSkillOption>;
     onSearchMentionFiles?(query: string): Promise<ReadonlyArray<{ relativePath: string }>>;
   }
 >(function Composer(props, ref) {
@@ -296,11 +306,8 @@ export const Composer = forwardRef<
   function editableNode(): HTMLElement | null {
     return inputRootRef.current?.querySelector<HTMLElement>('[contenteditable="true"]') ?? null;
   }
-  /** Focus target when the hideTrigger skill panel dismisses (＋ opener). */
-  const plusMenuButtonRef = useRef<HTMLButtonElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [sendPending, setSendPending] = useState(false);
-  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
   const [pendingImportAction, setPendingImportAction] = useState<ComposerImportActionId | null>(null);
   const composerMountedRef = useMountedRef();
   const sendPendingRef = useRef(false);
@@ -364,6 +371,37 @@ export const Composer = forwardRef<
     const selection = document.getSelection();
     if (!editable || (selection?.anchorNode && editable.contains(selection.anchorNode))) return;
     caretToContentEnd();
+  }
+  /**
+   * The ＋ menu's Skills entry opens the same `/` menu the keyboard opens: it
+   * types the trigger for the user. There is no second Skill surface to keep in
+   * step with this one, because there is no second surface.
+   *
+   * `useTriggerMenu` only recognizes a trigger at a line start or after a space
+   * or newline (`findActiveTrigger`), so a draft ending in a word — or in a chip,
+   * which `insertToken` anchors with U+00A0 — needs a space in front of the
+   * slash or the menu silently never opens. One `insertText` carries both, so
+   * the editor sees a single input event and a single undo step.
+   *
+   * Deferred a frame: the DropdownMenu returns focus to ＋ as it closes, and a
+   * focus call racing that lands the caret nowhere.
+   *
+   * `caretToContentEnd` unconditionally, not `focusInput`: the latter keeps a
+   * selection the editor already owns, and the menu round trip leaves a stale
+   * one collapsed at offset 0 — measured, the slash landed in front of the
+   * draft rather than after it. Appending from ＋ is the predictable read
+   * anyway. With the caret at the end, the character before it is the last
+   * character of the content, chips included (U+00A0, which is not a space, so
+   * it takes the space too).
+   */
+  function openSkillMenu() {
+    window.requestAnimationFrame(() => {
+      inputHandleRef.current?.focus();
+      caretToContentEnd();
+      const previous = (editableNode()?.textContent ?? '').at(-1);
+      const needsSpace = previous !== undefined && previous !== ' ' && previous !== '\n';
+      document.execCommand('insertText', false, needsSpace ? ' /' : '/');
+    });
   }
   /**
    * Every port write lands the caret at the end, which is what the textarea's
@@ -1095,7 +1133,9 @@ export const Composer = forwardRef<
                   <Token
                     key={skill.ref ?? skill.id}
                     size="sm"
-                    color="purple"
+                    // No colour: Maka blue is the single product accent, and a
+                    // staged Skill is identified by its sparkle and its label.
+                    icon={<Sparkles size={12} aria-hidden="true" />}
                     className="maka-composer-skill-token"
                     label={skill.name}
                     onRemove={() => {
@@ -1162,7 +1202,6 @@ export const Composer = forwardRef<
                     hasChevron={false}
                     className="maka-composer-quiet-menu"
                     button={{
-                      ref: plusMenuButtonRef,
                       label: copy.addContext,
                       icon: <Plus size={15} aria-hidden="true" />,
                       isIconOnly: true,
@@ -1184,12 +1223,10 @@ export const Composer = forwardRef<
                     ) : null}
                     {props.mentionSkills ? (
                       <DropdownMenuItem
-                        label={copy.skillPicker.title}
+                        label={copy.chooseSkill}
                         icon={<Sparkles size={15} aria-hidden="true" />}
                         isDisabled={props.disabled}
-                        onClick={() => {
-                          setSkillPanelOpen(true);
-                        }}
+                        onClick={openSkillMenu}
                       />
                     ) : null}
                     {props.onPlanModeChange ? (
@@ -1338,29 +1375,6 @@ export const Composer = forwardRef<
                   icon={mode.icon}
                 />
               ))}
-              {props.mentionSkills ? (
-                <ComposerSkillPicker
-                  hideTrigger
-                  open={skillPanelOpen}
-                  onOpenChange={setSkillPanelOpen}
-                  onDismissFocus={() => {
-                    const plus = plusMenuButtonRef.current;
-                    if (plus) plus.focus();
-                    else focusInput();
-                  }}
-                  skills={props.mentionSkills}
-                  selected={skillDraft.skills}
-                  disabled={props.disabled}
-                  onToggle={(skill, selected) => {
-                    if (selected) skillDraft.add(skill);
-                    else skillDraft.remove(skill.ref ?? skill.id);
-                  }}
-                  onSelectAll={(skills: readonly ComposerSkillOption[]) => {
-                    for (const skill of skills) skillDraft.add(skill);
-                  }}
-                  onClearAll={() => skillDraft.clear(skillDraft.activeDraftKey())}
-                />
-              ) : null}
             </div>
           )}
           sendActions={(

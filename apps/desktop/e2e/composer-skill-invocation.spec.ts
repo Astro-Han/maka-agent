@@ -134,6 +134,51 @@ test('open Skill suggestions follow current collaboration capabilities', async (
   await expect(listbox).not.toContainText('Agent Write');
 });
 
+/**
+ * #1912: ＋ → 选择技能 opens the SAME `/` menu the keyboard opens, by typing the
+ * trigger. There is no second Skill surface — the multi-select panel that used
+ * to live here is gone, and with it the transparent, product-owned popover that
+ * was the reported defect.
+ *
+ * The half that only a real window can show is the trigger boundary.
+ * `useTriggerMenu` recognizes `/` at a line start or after a space or newline,
+ * so ＋ on a draft ending in a word has to insert the space itself. Get that
+ * wrong and ＋ does nothing at all — silently, and only when a draft is present.
+ */
+test('the ＋ Skills entry opens the `/` menu, on an empty draft and after a word', async ({
+  window: page,
+}) => {
+  await createStarterSkillAndReload(page);
+
+  const composer = page.locator(COMPOSER_INPUT);
+  const plusMenu = page.locator('.maka-composer-plus-menu').getByRole('button');
+  const listbox = page.getByRole('listbox', { name: '技能' });
+  const openFromPlus = async () => {
+    await plusMenu.click();
+    await page.getByRole('menuitem', { name: '选择技能' }).click();
+  };
+
+  // Empty draft: the trigger is at a line start, so no space is needed.
+  await openFromPlus();
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole('option', { name: /示例技能/ })).toBeVisible();
+  await composer.press('Enter');
+  await expect(page.locator('.maka-composer-skill-token')).toContainText('示例技能');
+
+  // After a word: without an inserted space the menu would never open, and the
+  // slash would sit in the draft as literal text.
+  await composer.click();
+  await composer.pressSequentially('看看');
+  await openFromPlus();
+  await expect(listbox).toBeVisible();
+
+  // Escape leaves the typed trigger behind, exactly as it does when the user
+  // types `/` themselves — it is ordinary draft text, not a surface to dismiss.
+  await page.keyboard.press('Escape');
+  await expect(listbox).toBeHidden();
+  await expect(composer).toHaveText('看看 /');
+});
+
 test('chip-only send renders a readable user message', async ({ window: page }) => {
   await createStarterSkillAndReload(page);
   await selectStarterSkill(page);

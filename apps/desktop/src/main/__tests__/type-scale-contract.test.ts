@@ -215,13 +215,14 @@ const COMPONENT_OWNED = [
  * about — the box does not come from the line box — already holds; only the
  * vocabulary differs, and each has a reason the ruler cannot express.
  * Asserted as "is pinned", so losing the literal fails rather than passing as
- * a box with no height at all. */
-const PINNED_OFF_RULER = [
-  // A `pointer-events: none` overlay on a button's corner: it aligns with no
-  // control, so no neighbour names a tier, and the ruler's smallest rung would
-  // grow a decorative badge by 25%. Reasoning at the rule.
-  '.maka-composer-skill-trigger-count',
-] as const;
+ * a box with no height at all.
+ *
+ * Currently empty: its one member was the Skills trigger's corner count badge,
+ * and #1912 deleted the whole multi-select panel it rode on — ＋ now opens the
+ * same `/` menu the keyboard does. The group stays because the reasoning it
+ * encodes — pinned, but to a literal the ruler cannot express — outlives that
+ * one chip. */
+const PINNED_OFF_RULER: readonly string[] = [];
 
 /** Pinned boxes whose flex display comes from a BASE rule, not from the
  * modifier that pins them. `mergeBySelector` keys on literal selector text, so

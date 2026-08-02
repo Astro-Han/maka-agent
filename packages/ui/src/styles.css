@@ -215,8 +215,6 @@
 .maka-daily-review-save { min-width: 64px; }
 .maka-daily-review-append { min-width: 80px; }
 .maka-daily-review-quick-run { min-width: 96px; }
-.maka-composer-mention-panel,
-.maka-composer-skill-panel { z-index: var(--z-overlay); border-radius: var(--radius-surface); color: var(--popover-foreground); background: var(--popover); box-shadow: var(--shadow-maka-panel); }
 .maka-agent-preview-failure { color: var(--destructive); }
 .maka-automation-result-icon { display: inline; margin-right: 4px; vertical-align: text-bottom; }
 .maka-turn-status-icon { flex: 0 0 auto; }
