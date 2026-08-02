@@ -215,6 +215,10 @@ async function confirmDesktopStorageRootRepair(): Promise<boolean> {
   if (!app.isReady()) {
     throw new Error('storage-root repair dialog requires app ready');
   }
+  // Explicit startup contract for the storage-root-conflict E2E: printed
+  // synchronously before the modal, so the test can observe the gate firing
+  // on any platform (macOS modal loops block CDP evaluation, Linux does not).
+  console.log('[storage-root] root-identity conflict; parking at repair dialog');
   const isChinese = resolveSystemUiLocale(app.getPreferredSystemLanguages()) === 'zh';
   const { response } = await dialog.showMessageBox({
     type: 'warning',
