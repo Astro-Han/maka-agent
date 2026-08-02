@@ -67,7 +67,6 @@ import {
   type ChatComposerTrigger,
   type SearchableItem,
   type SearchSource,
-  type TokenColor,
 } from '@astryxdesign/core';
 import {
   DropdownMenu,
@@ -942,11 +941,15 @@ export const Composer = forwardRef<
    * marks are the resting state readout, plus one nearby way out. They sit at
    * the tail of the footer's left controls, after the model and thinking
    * pickers, so switching a mode never shifts those two.
+   *
+   * Which mode a mark is comes from its icon, never from a hue. Maka blue is
+   * the single product accent (DESIGN.md), so a per-mode colour would be a
+   * second and third accent carrying no semantic — and a coloured pill per
+   * status is on the same file's Don't list.
    */
   const modes: ReadonlyArray<{
     id: string;
     active: boolean;
-    color: TokenColor;
     icon: ReactNode;
     label: string;
     onTitle: string;
@@ -957,7 +960,6 @@ export const Composer = forwardRef<
     {
       id: 'plan',
       active: props.planModeActive === true,
-      color: 'blue',
       icon: <ListTodo size={13} aria-hidden="true" />,
       label: copy.planModeLabel,
       onTitle: copy.planModeOnTitle,
@@ -968,7 +970,6 @@ export const Composer = forwardRef<
     {
       id: 'swarm',
       active: props.swarmModeActive === true,
-      color: 'teal',
       icon: <Network size={13} aria-hidden="true" />,
       label: copy.swarmModeLabel,
       onTitle: copy.swarmModeOnTitle,
@@ -979,7 +980,6 @@ export const Composer = forwardRef<
     {
       id: 'graph',
       active: props.graphModeActive === true,
-      color: 'cyan',
       icon: <Workflow size={13} aria-hidden="true" />,
       label: copy.graphModeLabel,
       onTitle: copy.graphModeOnTitle,
@@ -1310,23 +1310,25 @@ export const Composer = forwardRef<
               ) : null}
               {/* Mode readouts sit after the model pair, so a mode turning on
                   or off never nudges the model and thinking pickers (#1897).
-                  Icon-only Tokens: the label is kept for screen readers, and
-                  Astryx's own remove button is the way out. */}
+                  Same ghost icon button as ＋ and permission two slots left —
+                  a mode is state on this toolbar, not a coloured pill, and the
+                  icon carries which mode it is. Clicking it leaves the mode. */}
               {activeModes.map((mode) => (
                 <span
                   key={mode.id}
                   className="maka-composer-mode-indicator"
                   data-mode={mode.id}
-                  title={mode.disabledReason ?? mode.onTitle}
                 >
-                  <Token
+                  <IconButton
+                    variant="ghost"
+                    type="button"
                     size="sm"
-                    color={mode.color}
-                    icon={mode.icon}
+                    className="maka-composer-mode-button"
                     label={mode.label}
-                    isLabelHidden
+                    tooltip={mode.disabledReason ?? mode.onTitle}
                     isDisabled={mode.isDisabled}
-                    onRemove={mode.isDisabled ? undefined : mode.onDeactivate}
+                    onClick={mode.onDeactivate}
+                    icon={mode.icon}
                   />
                 </span>
               ))}

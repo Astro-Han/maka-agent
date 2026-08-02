@@ -118,15 +118,16 @@ describe('composer quiet chrome', () => {
     const modelIdx = leftControls.indexOf('maka-model-selection-controls');
     const modeIdx = leftControls.indexOf('maka-composer-mode-indicator');
     assert.ok(modelIdx >= 0 && modeIdx > modelIdx, 'modes must follow the model pair');
-    // Icon-only, and still nameable + removable: Astryx hides the label
-    // visually while keeping it as the token's accessible name.
+    // The mark is the same ghost icon button as ＋ and permission, named by
+    // its mode and identified by its icon — never by a hue.
     const planMark = leftControls.slice(
       leftControls.indexOf('data-mode="plan"'),
       leftControls.indexOf('data-mode="swarm"'),
     );
-    assert.match(planMark, /lucide-list-todo/, 'the mark is the mode icon');
-    assert.match(planMark, /aria-label="Plan"/, 'the hidden label names the token');
-    assert.match(planMark, /aria-label="Remove Plan"/, 'the way out stays reachable');
+    assert.match(planMark, /lucide-list-todo/, 'the icon says which mode it is');
+    assert.match(planMark, /aria-label="Plan"/, 'the button is named for the mode');
+    assert.match(planMark, /maka-composer-mode-button/, 'the way out stays reachable');
+    assert.doesNotMatch(planMark, /astryx-token/, 'a mode is not a coloured pill');
     // Modes alone stage nothing for the next send, so no drawer mounts.
     assert.doesNotMatch(markup, /maka-composer-context-drawer/);
   });

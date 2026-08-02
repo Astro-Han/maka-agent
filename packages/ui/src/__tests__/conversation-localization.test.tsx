@@ -244,15 +244,15 @@ describe('localized conversation journey', () => {
       <Composer onSend={() => {}} onStop={() => {}} planModeActive onPlanModeChange={() => {}} />,
     );
     assert.match(on, /maka-composer-mode-indicator[^>]*data-mode="plan"/);
-    assert.match(on, /Plan 模式已启用|title="Plan 模式已启用/);
-    assert.match(on, /astryx-token/);
-    assert.match(on, /aria-label="Remove Plan"/);
+    assert.match(on, /Plan 模式已启用/);
+    assert.match(on, /maka-composer-mode-button/);
+    assert.match(on, /aria-label="Plan"/);
 
     const off = render('zh', <Composer onSend={() => {}} onStop={() => {}} onPlanModeChange={() => {}} />);
     assert.doesNotMatch(off, /maka-composer-mode-indicator/);
   });
 
-  it('keeps the active-mode mark visible but non-removable with reason while streaming', () => {
+  it('keeps the active-mode mark visible but inert with its reason while streaming', () => {
     const markup = render(
       'zh',
       <Composer
@@ -266,11 +266,13 @@ describe('localized conversation journey', () => {
     );
     assert.match(markup, /maka-composer-mode-indicator[^>]*data-mode="swarm"/);
     assert.match(markup, /等待流式输出结束/);
-    // Disabled reason keeps the remove control off the token.
-    assert.doesNotMatch(markup, /aria-label="Remove Swarm"/);
+    // The disabled reason replaces the tooltip and takes the button out of
+    // reach, so the mark reads as state without offering a way to act on it.
+    const mark = markup.slice(markup.indexOf('data-mode="swarm"'));
+    assert.match(mark, /aria-disabled="true"|disabled=""/);
   });
 
-  it('localizes the active Graph Mode token title', () => {
+  it('localizes the active Graph Mode tooltip', () => {
     const zh = render(
       'zh',
       <Composer

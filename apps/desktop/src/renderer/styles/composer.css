@@ -157,18 +157,27 @@
   border-color: transparent;
 }
 
-/* Mode ON marks are icon-only Tokens at the tail of the footer's left
-   controls (#1897) — session state, not context staged for the next send, so
-   they no longer live in the drawer. The wrapper only carries data-mode /
-   title for E2E and tooltips; no second pill geometry on top of Token chrome.
-   Keep a real box (not display:contents) so Playwright visibility and
-   title hover still work on the host, and never let a long model name
-   compress the mark away. */
+/* Mode ON marks sit at the tail of the footer's left controls (#1897) —
+   session state, not context staged for the next send, so they no longer live
+   in the drawer. They are the same ghost icon button as ＋ and permission, so
+   the toolbar reads as one row of controls rather than a row of controls plus
+   two coloured pills. The wrapper only carries data-mode for E2E; keep it a
+   real box (not display:contents) so Playwright visibility still works, and
+   never let a long model name compress the mark away. */
 .maka-composer-mode-indicator {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
   min-width: 0;
+}
+
+/* Maka blue is the single product accent (DESIGN.md), and it is exactly what
+   this is: an active state. Which mode it is comes from the icon, not a hue,
+   so all three marks share the one accent. The wash is derived from
+   currentColor, so a disabled mark dims both layers together. */
+.maka-composer-mode-button {
+  color: var(--accent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 /* Model + thinking pair lives in left-controls (after permission), not send. */
 .maka-composer-left-controls .maka-model-selection-controls {
