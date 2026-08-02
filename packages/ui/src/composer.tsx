@@ -666,7 +666,12 @@ export const Composer = forwardRef<
 
   async function sendCurrent() {
     if (props.disabled || sendPendingRef.current || importActionOwnerRef.current?.pending) return;
-    const text = textPort.getValue().trim();
+    // ChatComposerInput separates an inline token from what follows with a
+    // NO-BREAK SPACE, and its own backspace-eats-the-token check keys on that
+    // exact character — so the editor keeps it, and only the wire is
+    // normalized. Otherwise every message written after a mention reaches the
+    // backend with a U+00A0 where the user typed a space.
+    const text = textPort.getValue().replace(/ /g, ' ').trim();
     // `skillIds` is the legacy wire field name. New selections submit the
     // stable scope-aware ref so send-time re-resolution cannot drift to a
     // same-id skill discovered at a different precedence.

@@ -31,8 +31,11 @@ test('a picked file mention becomes an inline token and sends as its path', asyn
   expect(tokenWidth).toBeLessThan(lineWidth / 2);
 
   await composer.press('Enter');
+  // Exact, and with an ASCII space after the token: ChatComposerInput anchors
+  // the chip with a NO-BREAK SPACE, and an unnormalized draft sends U+00A0
+  // into the message — invisible in the transcript, wrong on the wire.
   await expect(
-    page.getByText(/Fake backend received: 看一下 @\.maka\/skills\/agent-write\/SKILL\.md/),
+    page.getByText('Fake backend received: 看一下 @.maka/skills/agent-write/SKILL.md 里的说明'),
   ).toBeVisible();
 });
 
