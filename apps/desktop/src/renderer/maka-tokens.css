@@ -91,11 +91,9 @@
      (connected/ok semantics); running/focus-ring/link/nav-active/selection
      all follow --accent. */
   --accent: oklch(0.70 0.135 250);
-  /* The primary CTA (--action) is a pale blue chip (L0.85, low chroma) with
-     deep-blue text — a light, fresh button instead of a heavy solid. Checked
-     controls (--control) use a slightly deeper blue (L0.65, one step below
-     the accent) so the near-white glyph clears WCAG 1.4.11 non-text contrast
-     3:1 (3.09:1); the logo L0.70 only reaches 2.55:1. */
+  /* Checked controls (--control) use a slightly deeper blue (L0.65, one step
+     below the accent) so the near-white glyph clears WCAG 1.4.11 non-text
+     contrast 3:1 (3.09:1); the logo L0.70 only reaches 2.55:1. */
   /* PALETTE-LEAK-0: derive hue/chroma from --accent instead of hardcoding
      blue h250 — palettes only override the base tokens, so literals here
      kept the send button, onboarding CTA and every checked control blue
@@ -103,15 +101,12 @@
      Lightness anchors stay literal to preserve the WCAG 1.4.11 tuning;
      min(c, …) keeps the default palette byte-identical while following
      low-chroma palettes down. */
-  --action: oklch(from var(--accent) 0.85 min(c, 0.08) h);
-  --action-foreground: oklch(from var(--accent) 0.30 min(c, 0.06) h);
   --control: oklch(from var(--accent) 0.65 min(c, 0.135) h);
   --control-foreground: oklch(from var(--accent) 0.985 min(c, 0.003) h);
   --link: var(--accent);
   --focus-ring: var(--accent);
   --status-running: var(--accent);
   --nav-active: var(--accent);
-  --toast-accent: var(--accent);
   /* Cool info blue (h240, azure-family — see the blue-info alt themes at
      :773 nord h200 / :817 azure h240). Was amber h70, which collided with
      --warning's orange h55 (info + warning were indistinguishable). Blue is
@@ -121,13 +116,12 @@
   --success: oklch(0.55 0.17 145);      /* green — connected, ok */
   --destructive: oklch(0.58 0.24 28);   /* red — errors, denied */
 
-  /* Legacy brand affordance for a few emphasized surfaces. New CTA and checked
-     control states use --action / --control instead.
+  /* Legacy brand affordance for a few emphasized surfaces. New checked
+     control states use --control instead.
      PR-THEME-APPLY-AND-DONE-POLISH-0 (WAWQAQ msg `dec85e5b`): was a static
      "Solarpunk deep" green, which made palette switching invisible on the
      Done CTA and made every palette read as olive-green. */
   --brand-deep: var(--accent);
-  --brand-deep-hover: oklch(from var(--accent) calc(l - 0.06) c h);
   /* Fixed external channel identity; unlike palette-derived Maka accents. */
   --brand-wechat: #07c160;
   /* Maka's own identity colour, sampled from the `maka` lockup in the app
@@ -145,12 +139,10 @@
      plate (mcp-brand-marks.tsx: simple-icons + @ant-design/icons-svg DingTalk +
      the vendored Feishu mark), so no per-brand plate-tint tokens are needed —
      a colourful logo already supplies the brand identity. */
-  --bot-brand-default: var(--accent);
   /* PALETTE-LEAK-0: semantic alias for informational system banners (the
      plan-reminders 系统提醒 banner) — component CSS derives its tint family
      from this instead of referencing var(--accent) directly, so a palette
      retune moves the banner with it (#406). Convention, not enforced. */
-  --system-alert-accent: var(--accent);
 
   /* === text variants (mixed toward foreground for better contrast) === */
   --success-text: color-mix(in oklab, var(--success) 50%, var(--foreground));
@@ -236,17 +228,14 @@
      Legacy `--color-*` names that predate the --background family, relocated
      here from reference-shell.css (Round C). Kept as thin aliases for the few
      consumers still on them: `--color-bg-container` backs the agents content
-     surface (reference-shell.css) + darwin glass card; `--color-border-tertiary`
-     the composer border (composer.css); `--color-text-quaternary` the darwin
-     sidebar label text (theme-glass.css). Authoritative source is the token
-     each aliases — see the token README at the top of this file. Do NOT add
-     new --color-* names.
+     surface (reference-shell.css) + darwin glass card. The border/text alias
+     tiers went out once their last consumers moved to the --background
+     family. Authoritative source is the token each aliases — see the token
+     README at the top of this file. Do NOT add new --color-* names.
      `--color-bg-container` is the one shipped exception where the alias name is
      the canonical handle for the content-card surface (resolves to
      --background); it carries its darwin overrides in "DARWIN GLASS" below. */
   --color-bg-container: var(--background);
-  --color-border-tertiary: color-mix(in srgb, var(--border) 92%, transparent);
-  --color-text-quaternary: var(--muted-foreground);
 
   /* === shadow opacity (subtle in light, stronger in dark) === */
   --shadow-blur-opacity:   0.06;
@@ -280,15 +269,6 @@
     oklch(from var(--foreground) l c h / 0.06) 0 6px 6px -3px,
     oklch(from var(--foreground) l c h / 0.04) 0 12px 12px -6px;
 
-  --shadow-modal:
-    rgba(0,0,0,0) 0 0 0 0,
-    rgba(0,0,0,0) 0 0 0 0,
-    oklch(from var(--foreground) l c h / 0.06) 0 0 0 1px,
-    oklch(from var(--foreground) l c h / 0.04) 0 1px 1px -0.5px,
-    oklch(from var(--foreground) l c h / 0.04) 0 3px 3px 0,
-    oklch(from var(--foreground) l c h / 0.02) 0 6px 6px 0,
-    oklch(from var(--foreground) l c h / 0.02) 0 12px 12px 0,
-    oklch(from var(--foreground) l c h / 0.02) 0 24px 24px 0;
 
   /* === z-index scale (semantic) === */
   --z-base: 0;
@@ -432,7 +412,6 @@
      PR-FONT-FAMILY-MINOR-0 (issue #520 PR1): onboarding hero uses a
      serif face; tokenize so font-family declarations reference tokens
      instead of bare `Georgia, serif`. */
-  --font-serif: Georgia, "Times New Roman", Times, serif;
 
   /* === layout ===
      Concentric nesting — inner radius = outer radius − inset.
@@ -510,8 +489,7 @@
   /* === motion ===
      Custom easing curves per emil-design-eng — the built-in CSS easings
      are too weak to feel intentional. Use --ease-out-strong for
-     feedback/state changes, --ease-in-out-strong for on-screen movement,
-     --ease-drawer for iOS-style drawer/sheet motion.
+     feedback/state changes and --ease-in-out-strong for on-screen movement.
 
      PR-MOTION-TOKEN-CONVERGE-0 (kenji's category 4, 2026-06-24):
      duration scale paired with the easing scale. The values come from
@@ -536,7 +514,6 @@
      neighbour, or use this scale — never split the difference by hand. */
    --ease-out-strong: cubic-bezier(0.16, 1, 0.3, 1);
    --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
-   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
    --ease-linear: linear;
 
   --duration-quick: 120ms;
@@ -568,7 +545,6 @@
       PR-FOCUS-RING-RECIPE-0 (issue #520 PR2). */
    --focus-ring-width: 2px;
    --focus-ring-offset: 2px;
-   --focus-glow-width: 4px;
 
    /* === transform amplitude (motion) ===
       Tokenize the geometric magnitude of press/hover feedback so the
@@ -580,7 +556,6 @@
       excluded — animation tracks, not interaction feedback.
       PR-TRANSFORM-AMPLITUDE-0 (issue #520 PR2). */
    --scale-press: 0.96;        /* active/press 缩小 (snap 0.96/0.97/0.98) */
-   --scale-hover: 1.03;        /* hover 放大 (snap 1.02/1.03) */
    --lift-hover: -1px;         /* hover 上浮 (snap -0.5/-1) */
 
    /* === page-card recipe ===
@@ -596,7 +571,6 @@
   --w-sidebar: 240px;
   --w-rail: 240px;
   --h-titlebar: 36px;
-  --h-toolbar: 40px;
   --h-composer-min: 44px;
 
   /* OS window-resize corridor. A draggable app-region rect flush against a
@@ -631,8 +605,6 @@
   );
 
   /* session list geometry */
-  --w-sessionlist: 240px;
-  --h-list-header: 52px;
 
   /* === control-height scale (component sizing, #520 PR4 item 15) =========
      Interactive controls (button / input / select / tab / nav row / badge /
@@ -641,8 +613,8 @@
      The historic sidebar/会话/设置 height drift came from off-ruler bare px
      (22/26/30/34/38); this scale converges them. Square icon controls use
      the same token for width and height (their footprint = control size).
-     App-chrome bars (--h-titlebar/--h-toolbar/--h-composer-min/--h-list-header)
-     stay as their own semantic tokens — they are structure, not controls.
+     App-chrome bars (--h-titlebar/--h-composer-min) stay as their own
+     semantic tokens — they are structure, not controls.
      md (28) and xl (36) use calc(var(--spacing) * 7/9) directly because maka's
      discrete spacing scale skips 7 and 9 — control-only tiers must not expand
      the general --space-* scale (that would invite p-7 / gap-7 drift). */
@@ -697,15 +669,12 @@
      Lightness anchors stay literal to preserve the WCAG 1.4.11 tuning;
      min(c, …) keeps the default palette byte-identical while following
      low-chroma palettes down. */
-  --action: oklch(from var(--accent) 0.85 min(c, 0.08) h);
-  --action-foreground: oklch(from var(--accent) 0.30 min(c, 0.06) h);
   --control: oklch(from var(--accent) 0.65 min(c, 0.135) h);
   --control-foreground: oklch(from var(--accent) 0.985 min(c, 0.003) h);
   --link: var(--accent);
   --focus-ring: var(--accent);
   --status-running: var(--accent);
   --nav-active: var(--accent);
-  --toast-accent: var(--accent);
   --info: oklch(0.74 0.13 240);         /* blue — see light-mode note */
   --success: oklch(0.60 0.17 145);
   --destructive: oklch(0.70 0.19 22);
@@ -727,9 +696,6 @@
   --shadow-medium:
     0 0 0 1px oklch(1 0 0 / 0.09),
     0 4px 12px -6px oklch(0 0 0 / 0.5);
-  --shadow-modal:
-    0 0 0 1px oklch(1 0 0 / 0.10),
-    0 12px 32px -8px oklch(0 0 0 / 0.6);
 
   /* Slate user bubble for dark mode — distinct from --accent and readable
      against the dark background.
@@ -745,8 +711,6 @@
   /* Brand deep follows accent in dark mode too; hover is a brighter
      variant for the darker surface. */
   --brand-deep: var(--accent);
-  --brand-deep-hover: oklch(from var(--accent) calc(l + 0.06) c h);
-  --bot-brand-default: var(--accent);
 }
 
 /* =============================================================================
@@ -762,7 +726,6 @@
 ============================================================================= */
 html[data-os="darwin"] {
   --color-bg-container: var(--background);
-  --color-text-quaternary: oklch(from var(--foreground) l c h / 0.45);
 }
 html[data-os="darwin"].dark {
   /* Dark glass lifts the card one lightness step off the darker shell. */
