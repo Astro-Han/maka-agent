@@ -101,6 +101,31 @@ test('long session opens pinned to bottom and stays pinned while geometry settle
   ).toBeLessThanOrEqual(48);
 });
 
+test('the composer card rests above the window edge at every window height', async ({ longTranscriptWindow: page }) => {
+  // The dock's bottom gutter comes from ChatLayout's density, not from any
+  // product rule, so it is invisible to a CSS read — and it is the only thing
+  // holding the composer card's rounded bottom edge off the frame. It must not
+  // depend on how tall the window is: the dock is sticky-bottom, so a short
+  // window is exactly where a wrong flex or min-height contract would let the
+  // card slide into the edge.
+  for (const height of [860, 617, 500]) {
+    await page.setViewportSize({ width: 915, height });
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const composer = document.querySelector<HTMLElement>('.maka-composer');
+          const layout = composer?.closest<HTMLElement>('.maka-chat-layout');
+          if (!composer || !layout) throw new Error('Expected the composer inside the chat layout');
+          return Math.round(
+            layout.getBoundingClientRect().bottom - composer.getBoundingClientRect().bottom,
+          );
+        }),
+      )
+      // spacing-3 — Astryx `balanced`. `compact` would read 8.
+      .toBe(12);
+  }
+});
+
 test('graph status stays docked above the composer while transcript history scrolls', async ({ longTranscriptWindow: page }) => {
   await settleGeometry(page, { pinned: true });
   const graphPanel = page.locator('.maka-agent-graph-panel');
