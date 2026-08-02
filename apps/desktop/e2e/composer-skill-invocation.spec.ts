@@ -89,6 +89,37 @@ test('Backspace away from the chip deletes a character, not the staged Skill', a
   await expect(page.locator(STARTER_CHIP)).toHaveCount(1);
 });
 
+/**
+ * `useTriggerMenu` gives the menu a 180px floor and no ceiling, so it sizes to
+ * its widest row — and our second line (`<id> · <description>`) never wraps.
+ * The `user-only` fixture carries a sentence-length description for exactly
+ * this: without the cap the popover stretches past the composer it is anchored
+ * to and keeps going until the window edge.
+ */
+test('a long Skill description elides instead of stretching the `/` menu', async ({
+  invocableSkillsWindow: page,
+}) => {
+  const composer = page.locator(COMPOSER_INPUT);
+  await composer.fill('/user');
+  const listbox = page.getByRole('listbox', { name: '技能' });
+  await expect(listbox).toContainText('User Only');
+
+  const geometry = await listbox.evaluate((menu) => {
+    const secondary = menu.querySelector('.maka-composer-mention-secondary');
+    return {
+      menuWidth: menu.getBoundingClientRect().width,
+      composerWidth: document.querySelector('.maka-composer')!.getBoundingClientRect().width,
+      // Overflowing its own box is what makes the ellipsis appear; a box that
+      // grew to fit the text would report these equal and show no ellipsis.
+      textWidth: secondary!.scrollWidth,
+      boxWidth: secondary!.clientWidth,
+    };
+  });
+  expect(geometry.menuWidth).toBeLessThanOrEqual(420);
+  expect(geometry.menuWidth).toBeLessThan(geometry.composerWidth);
+  expect(geometry.textWidth).toBeGreaterThan(geometry.boxWidth);
+});
+
 test('slash suggestions follow Runtime project discovery and host gating', async ({
   invocableSkillsWindow: page,
 }) => {
