@@ -31,18 +31,6 @@
 }
 
 /*
- * SideNavSection titles use Astryx supporting/sm. Product root is 13px and
- * Astryx still declares sm as 0.75rem on the Theme wrapper, so supporting
- * collapses to ~9.75px — smaller than caption and hard to scan next to 13px
- * nav labels. Pin session-list section titles to product UI size; keep the
- * secondary color from Astryx.
- */
-.maka-session-list .astryx-side-nav-section [id$="-title"] {
-  font-size: var(--font-size-ui) !important;
-  line-height: var(--leading-snug, 1.35);
-}
-
-/*
  * Footer is a SideNavSection (shell-side-nav). Sticky bottom already owns
  * padding; Astryx defaults are asymmetric (spacing-1 top / spacing-2 bottom)
  * and the section adds another paddingBlock, so Settings sat tight under the

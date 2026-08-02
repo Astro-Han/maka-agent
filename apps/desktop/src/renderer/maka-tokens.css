@@ -395,7 +395,7 @@
      --tracking-tight: Maka is a CJK-first app, so avoid
      tightening CJK letter-spacing, so all negative values snap to
      normal (0). ALL-CAPS short labels use wider/widest (+5–10%
-     tracking). 1px absolute → widest (0.1em ≈ 1.3px @ 13px). */
+     tracking). 1px absolute → widest (0.1em ≈ 1.4px at the body tier). */
   --tracking-normal: 0;
   --tracking-wide: 0.025em;
   --tracking-wider: 0.05em;

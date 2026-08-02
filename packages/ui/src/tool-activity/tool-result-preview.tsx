@@ -21,7 +21,7 @@ import { isSandboxDeniedToolResult } from './sandbox-denial.js';
 /**
  * Shared Codex-like tool output well — one surface for live and settled
  * mono/command output. Tokens only: foreground-3 + border + radius-surface.
- * Body type uses font-size-base (13px), not caption.
+ * Body type uses font-size-base (the body tier), not caption.
  */
 export const TOOL_OUTPUT_PANEL_CLASS =
   'maka-tool-output-panel';
