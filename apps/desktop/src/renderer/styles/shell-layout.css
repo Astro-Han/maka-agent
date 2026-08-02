@@ -124,14 +124,6 @@
   box-sizing: border-box;
 }
 
-/* Continuous Collapse: footer hairline + soft canvas wash only make sense on
-   a distinct canvas column. On the unified session plate they read as a 48px
-   orphan rule at the bottom of the rail. */
-.appFrame[data-sidebar-state="collapsed"] .maka-session-panel-footer {
-  border-top-color: transparent;
-  background: transparent;
-}
-
 .maka-panel {
   min-width: 0;
   min-height: 0;

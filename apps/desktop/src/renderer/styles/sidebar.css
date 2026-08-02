@@ -48,6 +48,17 @@
   background: transparent;
 }
 
+/* Continuous Collapse: the hairline separates the history column from the
+ * footer. At 48px there is no column left to separate — it reads as an orphan
+ * rule floating above the Settings icon, on a rail that is otherwise ink-only.
+ * Scoped here rather than in shell-layout.css because this rule owns the
+ * border; the collapsed state only decides whether to draw it. */
+.appFrame[data-sidebar-state="collapsed"]
+  .astryx-side-nav.maka-session-panel
+  > div:has(> .maka-session-panel-footer) {
+  border-top-color: transparent;
+}
+
 /* Empty footerRow still mounts when hasButton:false; hide so it cannot
  * reserve flex gap under Settings. */
 .astryx-side-nav.maka-session-panel > div:has(> .maka-session-panel-footer) > div:empty {
