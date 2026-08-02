@@ -331,9 +331,14 @@ export const Composer = forwardRef<
   const [text, setText] = useState('');
   const textRef = useRef('');
   function applyText(next: string) {
-    // Any new value cancels a redraw owed to an older one. Typing reaches here
-    // too, which is what keeps a half-typed `/skill:` from seizing into a chip
-    // under the user's caret while a redraw is still owed.
+    // Every value passes through here, which makes this the one place an
+    // external write can be defined against: whatever the last write owed, a
+    // newer value cancels. `textPort.setValue` re-arms both flags right after.
+    // Without the clear, a `setValue` React bails out of (the new draft equals
+    // the old one, so no commit and no effect) leaves them armed until some
+    // unrelated later render — where the caret jumps to the end mid-word, and a
+    // half-typed `/skill:` seizes into a chip under it.
+    caretToEndRef.current = false;
     redrawPendingRef.current = false;
     textRef.current = next;
     setText(next);
@@ -433,22 +438,25 @@ export const Composer = forwardRef<
    *
    * Three preconditions, all cheap, all necessary:
    *
-   * - Only for an external write. `redrawPendingRef` is set by `textPort.setValue`,
-   *   the sole funnel for draft swap, history recall and the imperative handle,
-   *   and cleared by any later `applyText` — which is where typing lands. Typed
-   *   text must stay text, or a user part-way through `/skill:` would watch it
-   *   seize into a chip under the caret.
+   * - Only for an external write. `redrawPendingRef` is set by `textPort.setValue`
+   *   — the sole funnel for draft swap, history recall and the imperative handle
+   *   — and cleared by `applyText`, so a user who has taken the draft back never
+   *   watches a half-typed `/skill:` seize into a chip under the caret.
    * - Only on the DOM shape that write produces: exactly one text node equal to
    *   the draft. Anything else means upstream skipped the rewrite (the chips are
    *   still there) or the editor is in a shape whose offsets we cannot trust.
    * - Never mid-composition. The rewrite already broke the IME's composition;
    *   moving the selection on top of that makes it worse.
    *
-   * The flag is a flag rather than a same-tick call because the two inputs do
-   * not arrive together: switching sessions swaps the draft immediately and the
-   * Skill catalog for the newly active session lands a render or two later. The
-   * redraw waits for the catalog rather than deciding, against an empty one,
-   * that every token is unresolvable.
+   * A pending redraw survives a failed attempt, and that is the whole reason it
+   * is a flag rather than a call at the write. The two inputs do not arrive
+   * together: switching sessions swaps the draft on the spot while the Skill
+   * catalog for the newly active session lands a render or two later, still
+   * holding the previous session's Skills. Clearing on the first attempt would
+   * read that stale catalog as proof the token is unresolvable and give up for
+   * good. Retrying costs one regex over a short draft on renders where a write
+   * is outstanding, and every other precondition — mid-composition, an
+   * unexpected DOM — gets the same second chance for free.
    *
    * Back to front, because `Range.deleteContents` inside a text node leaves the
    * original node holding the text before the range: earlier offsets stay valid,
@@ -519,9 +527,9 @@ export const Composer = forwardRef<
   useEffect(() => {
     let restoreCaret = caretToEndRef.current;
     caretToEndRef.current = false;
-    if (redrawPendingRef.current && props.mentionSkills?.length) {
+    if (redrawPendingRef.current && redrawSkillTokens()) {
       redrawPendingRef.current = false;
-      restoreCaret = redrawSkillTokens() || restoreCaret;
+      restoreCaret = true;
     }
     if (restoreCaret) caretToContentEnd();
   });
