@@ -431,7 +431,7 @@
     --astryx-section-padding: var(--spacing-3);
   }
 
-  .astryx-app-shell-sidenav {
+  .astryx-app-shell-sidenav.elevated {
     border-inline-end-width: 1px;
     border-inline-end-style: solid;
     border-inline-end-color: var(--border);

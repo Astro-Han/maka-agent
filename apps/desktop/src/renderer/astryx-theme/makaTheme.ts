@@ -119,10 +119,12 @@ export const makaTheme = defineTheme({
   // as a product override so the shell keeps one paint authority — this emits
   // `.astryx-app-shell-sidenav { border-inline-end }` inside the theme's own
   // @scope. --border is the product's hairline, same product → Astryx direction
-  // as the materials above.
+  // as the materials above. Keyed on the variant, not `base`: the edge belongs
+  // to the elevated treatment, so a future variant change re-decides it instead
+  // of inheriting a line that no longer matches the columns.
   components: {
     'app-shell-sidenav': {
-      base: {
+      'variant:elevated': {
         borderInlineEndWidth: '1px',
         borderInlineEndStyle: 'solid',
         borderInlineEndColor: 'var(--border)',
