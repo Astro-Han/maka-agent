@@ -211,19 +211,6 @@ const COMPONENT_OWNED = [
   '.maka-sidebar-update-button',
 ] as const;
 
-/** Pinned, but to a literal rather than to the ruler. The invariant #1879 is
- * about — the box does not come from the line box — already holds; only the
- * vocabulary differs, and each has a reason the ruler cannot express.
- * Asserted as "is pinned", so losing the literal fails rather than passing as
- * a box with no height at all.
- *
- * Currently empty: its one member was the Skills trigger's corner count badge,
- * and #1912 deleted the whole multi-select panel it rode on — ＋ now opens the
- * same `/` menu the keyboard does. The group stays because the reasoning it
- * encodes — pinned, but to a literal the ruler cannot express — outlives that
- * one chip. */
-const PINNED_OFF_RULER: readonly string[] = [];
-
 /** Pinned boxes whose flex display comes from a BASE rule, not from the
  * modifier that pins them. `mergeBySelector` keys on literal selector text, so
  * `.maka-quote-chip-collapsed` cannot see the `display: inline-flex` its
@@ -235,7 +222,7 @@ const CENTRED_BY_A_BASE_RULE: ReadonlyArray<readonly [string, string]> = [
   ['.maka-quote-chip-collapsed', '.maka-quote-chip'],
 ];
 
-const NOT_ON_THE_RULER = new Set<string>([...WRAPS, ...COMPONENT_OWNED, ...PINNED_OFF_RULER]);
+const NOT_ON_THE_RULER = new Set<string>([...WRAPS, ...COMPONENT_OWNED]);
 
 const RENDERER = resolve(REPO_ROOT, 'apps/desktop/src/renderer');
 
@@ -546,7 +533,7 @@ describe('type scale contracts', () => {
     assert.deepEqual(
       offenders,
       [],
-      `every chip must take its height from --h-control-*, or be named in one of WRAPS / COMPONENT_OWNED / PINNED_OFF_RULER with a measured reason:\n${offenders.join('\n')}`,
+      `every chip must take its height from --h-control-*, or be named in one of WRAPS / COMPONENT_OWNED with a measured reason:\n${offenders.join('\n')}`,
     );
   });
 
@@ -577,25 +564,6 @@ describe('type scale contracts', () => {
         body,
         CONSTRAINS_BLOCK_SIZE,
         `${selector} is excused because its Astryx component sizes it; declaring any block size here is the override #1879 removed`,
-      );
-    }
-
-    for (const selector of PINNED_OFF_RULER) {
-      // The EFFECTIVE height, not "constrains its block size somehow".
-      // `CONSTRAINS_BLOCK_SIZE` answers the must-not question above and is the
-      // wrong instrument here: measured, rewriting this group's `height: 16px`
-      // as `min-height: 16px` left the line box free to grow the chip again —
-      // the exact defect #1879 is about — and the exemption stayed green,
-      // because a min-height does constrain a block size. The two vocabularies
-      // are documented apart at the top of this file for this reason.
-      const height = effectiveHeight(anyCondition.get(selector) ?? '')?.trim();
-      assert.ok(
-        height !== undefined && height !== '' && !CONTENT_DRIVEN.test(height),
-        `${selector} is excused because it is already pinned to a literal; its effective height is ${height ?? 'unset'}, which hands the box back to the line box`,
-      );
-      assert.ok(
-        !pinnedToRuler(merged.get(selector) ?? '', rungs),
-        `${selector} now takes a ruler tier — drop it from PINNED_OFF_RULER rather than carrying a stale reason`,
       );
     }
   });

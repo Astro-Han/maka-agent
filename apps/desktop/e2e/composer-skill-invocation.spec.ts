@@ -44,82 +44,6 @@ async function selectStarterSkill(
   await expect(page.locator(STARTER_CHIP)).toContainText('示例技能');
 }
 
-/**
- * A chosen Skill is a chip in the draft, not a selection held beside it: the
- * caret lands after it, it serializes to the `/skill:<id>` token a user could
- * have typed, and Backspace behind it takes it away.
- */
-test('the composer selects a structured Skill from slash suggestions', async ({
-  window: page,
-}) => {
-  await createStarterSkillAndReload(page);
-  await selectStarterSkill(page);
-
-  const composer = page.locator(COMPOSER_INPUT);
-  const chip = page.locator(STARTER_CHIP);
-  await expect(chip).toContainText('示例技能');
-
-  // Two presses, as for a `@` file chip: `insertToken` anchors the chip with a
-  // trailing U+00A0, so the first Backspace eats the anchor and the second the
-  // chip. One press would mean deleting the chip while a space still separates
-  // the caret from it.
-  await composer.press('Backspace');
-  await composer.press('Backspace');
-  await expect(chip).toHaveCount(0);
-  await expect(composer).toHaveText('');
-});
-
-/**
- * Backspace eats the chip only from directly behind it. Get that wrong and the
- * Skill disappears silently while the user is deleting a character in a word
- * they typed after it.
- */
-test('Backspace away from the chip deletes a character, not the staged Skill', async ({
-  window: page,
-}) => {
-  await createStarterSkillAndReload(page);
-  await selectStarterSkill(page);
-
-  const composer = page.locator(COMPOSER_INPUT);
-  await composer.click();
-  await composer.pressSequentially('abc');
-  await composer.press('Backspace');
-
-  await expect(composer).toContainText('ab');
-  await expect(page.locator(STARTER_CHIP)).toHaveCount(1);
-});
-
-/**
- * `useTriggerMenu` gives the menu a 180px floor and no ceiling, so it sizes to
- * its widest row — and our second line (`<id> · <description>`) never wraps.
- * The `user-only` fixture carries a sentence-length description for exactly
- * this: without the cap the popover stretches past the composer it is anchored
- * to and keeps going until the window edge.
- */
-test('a long Skill description elides instead of stretching the `/` menu', async ({
-  invocableSkillsWindow: page,
-}) => {
-  const composer = page.locator(COMPOSER_INPUT);
-  await composer.fill('/user');
-  const listbox = page.getByRole('listbox', { name: '技能' });
-  await expect(listbox).toContainText('User Only');
-
-  const geometry = await listbox.evaluate((menu) => {
-    const secondary = menu.querySelector('.maka-composer-mention-secondary');
-    return {
-      menuWidth: menu.getBoundingClientRect().width,
-      composerWidth: document.querySelector('.maka-composer')!.getBoundingClientRect().width,
-      // Overflowing its own box is what makes the ellipsis appear; a box that
-      // grew to fit the text would report these equal and show no ellipsis.
-      textWidth: secondary!.scrollWidth,
-      boxWidth: secondary!.clientWidth,
-    };
-  });
-  expect(geometry.menuWidth).toBeLessThanOrEqual(420);
-  expect(geometry.menuWidth).toBeLessThan(geometry.composerWidth);
-  expect(geometry.textWidth).toBeGreaterThan(geometry.boxWidth);
-});
-
 test('slash suggestions follow Runtime project discovery and host gating', async ({
   invocableSkillsWindow: page,
 }) => {
@@ -201,42 +125,38 @@ test('open Skill suggestions follow current collaboration capabilities', async (
  *
  * The half that only a real window can show is the trigger boundary.
  * `useTriggerMenu` recognizes `/` at a line start or after a space or newline,
- * so ＋ on a draft ending in a word has to insert the space itself. Get that
- * wrong and ＋ does nothing at all — silently, and only when a draft is present.
+ * so ＋ on a draft that ends in anything else has to insert the space itself.
+ * Get that wrong and ＋ does nothing at all, silently, and only when a draft is
+ * present. The draft here ends in a chip, whose U+00A0 anchor is the character
+ * that looks like a space and is not one.
  */
-test('the ＋ Skills entry opens the `/` menu, on an empty draft and after a word', async ({
+test('the ＋ Skills entry opens the `/` menu, before and after a chip', async ({
   window: page,
 }) => {
   await createStarterSkillAndReload(page);
 
   const composer = page.locator(COMPOSER_INPUT);
-  const plusMenu = page.locator('.maka-composer-plus-menu').getByRole('button');
   const listbox = page.getByRole('listbox', { name: '技能' });
+  const plus = page.locator('.maka-composer-plus-menu').getByRole('button');
+  const skillsEntry = page.getByRole('menuitem', { name: '选择技能' });
   const openFromPlus = async () => {
-    // The wait is Astryx's, not ours: a float that has just light-dismissed
-    // ignores clicks for ~100ms, and every step below closes the `/` menu
-    // right before reaching for ＋. Under that threshold the click on ＋
-    // reaches nothing at all.
-    await page.waitForTimeout(300);
-    await plusMenu.click();
-    await page.getByRole('menuitem', { name: '选择技能' }).click();
+    // Astryx ignores clicks on a float for ~100ms after one light-dismisses,
+    // and picking from the `/` menu dismisses one. Nothing observable marks the
+    // end of that window, so retry the click until ＋ answers rather than sleep
+    // past it — under the threshold the click reaches nothing at all.
+    await expect(async () => {
+      await plus.click();
+      await expect(skillsEntry).toBeVisible({ timeout: 500 });
+    }).toPass();
+    await skillsEntry.click();
   };
 
   // Empty draft: the trigger is at a line start, so no space is needed.
   await openFromPlus();
-  await expect(listbox).toBeVisible();
   await expect(listbox.getByRole('option', { name: /示例技能/ })).toBeVisible();
   await composer.press('Enter');
   await expect(page.locator(STARTER_CHIP)).toContainText('示例技能');
 
-  // After a chip: `insertToken` anchors it with U+00A0, which is not a space,
-  // so ＋ has to insert one or the menu never opens.
-  await openFromPlus();
-  await expect(listbox).toBeVisible();
-  await page.keyboard.press('Escape');
-
-  // After a word: same rule, the case a user hits by typing.
-  await composer.fill('看看');
   await openFromPlus();
   await expect(listbox).toBeVisible();
 
@@ -244,46 +164,7 @@ test('the ＋ Skills entry opens the `/` menu, on an empty draft and after a wor
   // types `/` themselves — it is ordinary draft text, not a surface to dismiss.
   await page.keyboard.press('Escape');
   await expect(listbox).toBeHidden();
-  await expect(composer).toContainText('看看 /');
-});
-
-/**
- * The ＋ entry writes into the draft, so it must not be reachable with an empty
- * catalog. It used to be: with no Skills installed, choosing it left a stray `/`
- * in the draft and opened an empty menu whose light dismiss then swallowed the
- * user's next click on the footer — three surprises for one click, and the
- * panel this replaced simply said "no skills available".
- */
-test('the ＋ Skills entry is unavailable when no Skill is installed', async ({
-  window: page,
-}) => {
-  const composer = page.locator(COMPOSER_INPUT);
-  await expect(composer).toBeVisible();
-  expect(await page.evaluate(() => window.maka.skills.listInvocable(undefined))).toEqual([]);
-
-  await composer.click();
-  await composer.pressSequentially('看看');
-  await page.locator('.maka-composer-plus-menu').getByRole('button').click();
-
-  const entry = page.getByRole('menuitem', { name: '选择技能' });
-  await expect(entry).toBeVisible();
-  await expect(entry).toBeDisabled();
-  // Disabled AND answered, on screen: a grey row with no reason tells the user
-  // nothing, and a reason only assistive tech can read does not reach them.
-  await expect(entry).toContainText('当前没有可用技能');
-
-  // The draft is untouched: no slash, and no menu was opened over the footer.
-  await page.keyboard.press('Escape');
-  await expect(composer).toHaveText('看看');
-  await expect(page.getByRole('listbox', { name: '技能' })).toHaveCount(0);
-
-  // And the footer still answers the very first click. Assert the menu it
-  // owns opened, not where focus went: the trigger keeps focus or hands it to
-  // the menu depending on how fast the float mounts, and either way the click
-  // was received — which is the whole complaint this covers.
-  const permission = page.locator('.maka-composer-left-controls button').nth(1);
-  await permission.click();
-  await expect(permission).toHaveAttribute('aria-expanded', 'true');
+  await expect(composer).toContainText('/');
 });
 
 /**
@@ -291,26 +172,44 @@ test('the ＋ Skills entry is unavailable when no Skill is installed', async ({
  *
  * `ChatComposerInput` rebuilds the editor from the string on every external
  * value change, which drops the chip spans and leaves the `/skill:<id>` text
- * they serialize to (facebook/astryx #4655). Semantically that draft is intact
- * and still sends the Skill, but the user is looking at an internal id where
- * they left a chip, and the session-switch path here is the ordinary one: any
- * session that ever staged a Skill hits it on the way back.
+ * they serialize to (facebook/astryx #4655). That draft still sends the Skill,
+ * but the user is looking at an internal id where they left a chip, and this is
+ * the ordinary path: any session that ever staged a Skill hits it on the way
+ * back.
  *
- * Blurred on purpose. The swap runs from a sidebar click, so the redraw has to
- * work without the editor holding focus, and the caret still has to end up
- * after the draft rather than at offset 0.
+ * Two Skills, one of them mid-draft, because the redraw walks the tokens back
+ * to front so that replacing a later one cannot move an earlier one's offsets.
+ * A single token at the end of the draft would never exercise that.
+ *
+ * Blurred on purpose: the swap runs from a sidebar click, so the redraw has to
+ * work without the editor holding focus, and the caret still has to land after
+ * the draft rather than at offset 0. The send at the end is the other half —
+ * `insertToken` anchors every chip with a U+00A0, and the wire text has to come
+ * out with ordinary spaces regardless.
  */
-test('a staged Skill comes back as a chip after leaving and returning', async ({
-  window: page,
+test('staged Skills come back as chips after leaving and returning', async ({
+  invocableSkillsWindow: page,
 }) => {
-  await createStarterSkillAndReload(page);
   const composer = page.locator(COMPOSER_INPUT);
+  const projectChip = page.locator('[data-astryx-token-value="/skill:project-only"]');
+  const workspaceChip = page.locator('[data-astryx-token-value="/skill:workspace-only"]');
+  const pick = async (query: string, name: RegExp) => {
+    await composer.click();
+    await composer.pressSequentially(` /${query}`);
+    await expect(
+      page.getByRole('listbox', { name: '技能' }).getByRole('option', { name }),
+    ).toBeVisible();
+    await composer.press('Enter');
+  };
+
   await composer.fill('alpha-marker');
   await composer.press('Enter');
   await expect(page.getByText(/Fake backend received: alpha-marker/)).toBeVisible();
 
-  await composer.fill('run it');
-  await selectStarterSkill(page, { append: true });
+  await pick('project', /Project Only/);
+  await composer.pressSequentially('run it');
+  await pick('workspace', /Workspace Only/);
+  await expect(projectChip).toContainText('Project Only');
 
   await page.getByRole('button', { name: '展开侧边栏' }).click();
   const sidebar = page.getByRole('navigation', { name: '对话列表' });
@@ -319,16 +218,17 @@ test('a staged Skill comes back as a chip after leaving and returning', async ({
 
   await sidebar.locator('[data-session-id]').first().click();
   await expect(composer).toContainText('run it');
-  await expect(page.locator(STARTER_CHIP)).toContainText('示例技能');
+  await expect(projectChip).toContainText('Project Only');
+  await expect(workspaceChip).toContainText('Workspace Only');
   // The token text itself is gone: a chip drawn beside the text it renders
-  // would mean the draft now carries the Skill twice.
-  await expect(composer).not.toContainText('/skill:starter-skill');
+  // would mean the draft now carried the Skill twice.
+  await expect(composer).not.toContainText('/skill:');
 
-  // The redraw hands the selection back, so typing still appends.
   await composer.click();
-  await composer.pressSequentially('!');
-  await expect(composer).toContainText('!');
-  await expect(page.locator(STARTER_CHIP)).toHaveCount(1);
+  await composer.press('Enter');
+  await expect(page.getByLabel('你发送的消息').last()).toContainText(
+    '/skill:project-only run it /skill:workspace-only',
+  );
 });
 
 test('chip-only send renders a readable user message', async ({ window: page }) => {

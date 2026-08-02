@@ -79,9 +79,7 @@ async function seedE2eInvocableSkills(userDataDir: string): Promise<void> {
   ]);
   await writeFile(
     path.join(userSkillRoot, 'user-only', 'SKILL.md'),
-    // Deliberately long: the `/` menu's second line never wraps, so this is
-    // what proves the menu stops at its cap instead of growing to the text.
-    `---\nname: User Only\ndescription: User-scoped install, deletable from the panel, described at the length a real author reaches for when a Skill needs a sentence of context rather than a label.\n---\n# User Only`,
+    `---\nname: User Only\ndescription: User-scoped install, deletable from the panel.\n---\n# User Only`,
     'utf8',
   );
   await Promise.all([

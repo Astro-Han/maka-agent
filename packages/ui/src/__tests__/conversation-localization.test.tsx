@@ -196,12 +196,23 @@ describe('localized conversation journey', () => {
     assert.match(markup, /maka-composer-plus-menu/);
     assert.match(markup, /aria-label="添加上下文"/);
     assert.doesNotMatch(markup, /maka-composer-upload-button/);
-    assert.doesNotMatch(markup, /maka-composer-skill-trigger/);
     assert.doesNotMatch(markup, /maka-composer-modes-menu/);
     // Menu contents are in the SSR tree for the open popover host.
     // Modes are single menuitemcheckbox rows (not nested Switch controls).
     assert.match(markup, /添加文件或目录/);
     assert.match(markup, /选择技能/);
+
+    // The Skills entry writes `/` into the draft, so with nothing to write it is
+    // disabled — and answered on screen. A grey row with no reason tells the
+    // user nothing, and a reason only assistive tech can read does not reach
+    // them. It used to be reachable: choosing it left a stray `/` behind and
+    // opened an empty menu whose light dismiss then ate the next footer click.
+    const noSkills = render(
+      'zh',
+      <Composer onSend={() => {}} onStop={() => {}} mentionSkills={[]} />,
+    );
+    assert.match(noSkills, /当前没有可用技能/);
+    assert.match(noSkills, /aria-disabled="true"[^>]*role="menuitem"/);
     assert.match(markup, /role="menuitemcheckbox"/);
     assert.match(markup, /aria-checked="false"/);
     assert.doesNotMatch(markup, /role="switch"/);

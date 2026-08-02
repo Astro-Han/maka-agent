@@ -155,14 +155,6 @@ describe('app shell revision actions', () => {
     }
   });
 
-  /**
-   * The submitted draft used to be read back off the composer AFTER
-   * `reviseBeforeTurn()` resolved, so an edit landing during that await could
-   * migrate a newer selection than the one the user actually sent. Staged
-   * Skills ride inside the `text` parameter now — captured before the first
-   * await, by the same argument that carries the words — so there is no
-   * second read to race. This is the test that used to guard that race.
-   */
   it('refuses source and retained attachment history before creating a lossy revision', () => {
     const attachment = {
       kind: 'image' as const,

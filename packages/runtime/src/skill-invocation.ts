@@ -20,10 +20,12 @@ const MAX_SKILL_INVOCATION_REQUESTS = 50;
 
 /**
  * Explicit skill invocation (issue #1148): the shared, client-agnostic
- * contract behind the TUI and Desktop `/skill:<name>` tokens. This module
- * owns the shared token syntax, lists what can be invoked, resolves refs/ids/
- * names against one scan, and composes the final user message with the
- * loaded instructions injected. UI rendering stays client-local.
+ * contract behind the TUI and Desktop `/skill:<name>` tokens. The token
+ * grammar itself is `SKILL_INVOCATION_TOKEN_SOURCE` in `@maka/core`, shared
+ * with the clients that render a draft; this module parses against it, lists
+ * what can be invoked, resolves refs/ids/names against one scan, and composes
+ * the final user message with the loaded instructions injected. UI rendering
+ * stays client-local.
  *
  * The trust model matches the always-on skill catalog: skill instructions
  * are user-provided content, lower priority than system/developer/safety/

@@ -6,17 +6,21 @@
    plus the one surface dimension upstream leaves open. */
 
 /* `useTriggerMenu` gives the menu a 180px floor and no ceiling, so it sizes to
-   its widest row — and our rows carry a second line (`<id> · <description>`
-   for a Skill, the full path for a file) that never wraps. A long description
-   therefore stretches the popover past the composer it is anchored to, with
-   nothing to stop it at the window edge.
+   its widest row — and our rows carry a second line (a Skill's description, a
+   file's full path) that never wraps. A long one therefore stretches the
+   popover past the composer it is anchored to, with nothing to stop it at the
+   window edge.
 
    Cap it here rather than upstream: the row content is ours, and its two lines
    already carry `overflow: hidden` + `text-overflow: ellipsis` waiting for a
    constraint to act on. 420px matches the model switcher above it — the other
    composer-anchored control that had to choose a width — so the two floats
-   over this footer agree. `.astryx-trigger-menu` is the component's stable
-   theming hook (`themeProps`), not an internal class. */
+   over this footer agree.
+
+   Deliberately unscoped. `.astryx-trigger-menu` is the component's stable
+   theming hook (`themeProps`), not an internal class, and every trigger menu
+   in the app is this one: the composer's `@` and `/` are its only mounts, and
+   a future one would want the same ceiling for the same reason. */
 .astryx-trigger-menu {
   max-width: min(420px, calc(100vw - var(--space-6)));
 }
