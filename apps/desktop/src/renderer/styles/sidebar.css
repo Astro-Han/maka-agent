@@ -38,17 +38,23 @@
  * title is already semibold against the rows' medium, and secondary against
  * their primary foreground.
  *
- * Rebinding Astryx's own tier variables on the section, rather than pinning
- * font-size on the title span: the size then still flows through Astryx's rule
- * (title AND subtitle stay in step, and an upgrade that restructures the header
- * keeps working), and the override cannot reach past the section header into
- * row metadata that is supposed to stay small.
+ * Rebinding Astryx's own tier variables, rather than pinning font-size on the
+ * title span: the size still flows through Astryx's rule, so title and subtitle
+ * stay in step and an upgrade that restructures the header keeps working.
+ *
+ * Bound on the header, NOT on the section root. SideNavSection wraps the whole
+ * list body — every row, badge, and pill — in the same element as its title
+ * (session-history-list.tsx), and custom properties inherit, so a rebind on the
+ * root reaches all of it: measured live, the project session-count Badge went
+ * 12px → 14px, and `.maka-list-row-stale-pill` would have taken a 17.14px line
+ * box on its 12px font. The header is SideNavSection's first child and holds
+ * exactly the title and subtitle.
  *
  * Both halves of the tier move together. Size alone would leave the supporting
  * leading multiplier on a larger font and land the line box at 23.33px, off the
  * 4px grid e2e/type-scale.spec.ts holds the whole app to.
  */
-.maka-session-panel .astryx-side-nav-section {
+.maka-session-panel .astryx-side-nav-section > :first-child {
   --text-supporting-size: var(--text-label-size);
   --text-supporting-leading: var(--text-label-leading);
 }
@@ -61,7 +67,15 @@
  * The rail's two hairlines: nav chrome above the history, footer below it. Both
  * are drawn the same way, on the sticky shell that owns the zone rather than as
  * an element inside it, so they are the same 1px at the same alpha and both run
- * the full panel width.
+ * the full panel width. One custom property carries the line so "the same" is a
+ * fact about the code rather than something a test has to keep checking; the
+ * collapsed state then hides both by retuning that one value.
+ *
+ * Astryx 0.2.0 has no seam for this — SideNav's five zone wrappers carry no
+ * border and no `hasDivider`, and they are the only elements in its tree that
+ * `themeProps()` never labels, so the product both draws the line and reaches
+ * the zone by structure. `sidebar-geometry.spec.ts` is what turns an upgrade
+ * that reshapes those wrappers into a loud failure instead of a silent one.
  *
  * The top one used to be an Astryx <Divider> placed as the last child of
  * `topContent`, which made it a different line in every respect: --color-border
@@ -78,33 +92,29 @@
  * paddingBlock, so Settings sat tight under the line and airy above the window
  * edge.
  */
+.maka-session-panel {
+  --maka-rail-hairline: oklch(from var(--foreground) l c h / 0.05);
+}
+
+/* Continuous Collapse: the hairlines separate the history column from the
+ * chrome above and the footer below. At 48px there is no column left to
+ * separate — they read as orphan rules floating on a rail that is otherwise
+ * ink-only. Retuning the shared value rather than nulling each border keeps the
+ * two lines a single decision in the collapsed state too. */
+.appFrame[data-sidebar-state="collapsed"] .maka-session-panel {
+  --maka-rail-hairline: transparent;
+}
+
 .astryx-side-nav.maka-session-panel > div:has(.maka-session-panel-top) {
-  border-bottom: var(--border-width-hairline) solid oklch(from var(--foreground) l c h / 0.05);
+  border-bottom: var(--border-width-hairline) solid var(--maka-rail-hairline);
 }
 
 .astryx-side-nav.maka-session-panel > div:has(> .maka-session-panel-footer) {
   /* !important: StyleX stickyBottom is unlayered. */
   padding-block: var(--space-2) !important;
   gap: 0 !important;
-  border-top: var(--border-width-hairline) solid oklch(from var(--foreground) l c h / 0.05);
+  border-top: var(--border-width-hairline) solid var(--maka-rail-hairline);
   background: transparent;
-}
-
-/* Continuous Collapse: the hairlines separate the history column from the
- * chrome above and the footer below. At 48px there is no column left to
- * separate — they read as orphan rules floating on a rail that is otherwise
- * ink-only. Scoped here rather than in shell-layout.css because these rules own
- * the borders; the collapsed state only decides whether to draw them. */
-.appFrame[data-sidebar-state="collapsed"]
-  .astryx-side-nav.maka-session-panel
-  > div:has(.maka-session-panel-top) {
-  border-bottom-color: transparent;
-}
-
-.appFrame[data-sidebar-state="collapsed"]
-  .astryx-side-nav.maka-session-panel
-  > div:has(> .maka-session-panel-footer) {
-  border-top-color: transparent;
 }
 
 /* Empty footerRow still mounts when hasButton:false; hide so it cannot

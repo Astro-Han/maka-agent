@@ -119,9 +119,13 @@
    and after and its width really does animate.
 
    The wrapper is therefore the width authority while the ease runs, and its
-   child must follow rather than assert its own: `width: 100% !important` is
-   load-bearing, because SideNav sets an inline px width when expanded and
-   inline style outranks any layered rule without it.
+   child must follow rather than assert its own. `width: 100% !important` is
+   load-bearing in the COLLAPSED direction: SideNav's `rootCollapsed` is a
+   StyleX atom padded to specificity 0-4-0 (`.xhgvbfk:not(#\#)` four times over)
+   against this rule's 0-2-0, so without the flag the nav would snap to 48px
+   while the wrapper was still easing toward it. Expanded, SideNav's inline
+   width sits on the <nav>, which is wrapped one level deeper by the resize
+   handle's container, so it is never what this rule is competing with.
 
    Only a pointer drag suppresses the ease. A standing transition would catch the
    width the resize handle feeds back on every pointer move, restarting the ease
@@ -130,20 +134,9 @@
    and clears it on pointer-up. The handle is a descendant of the wrapper (it is
    the nav's sibling one level in), so plain `:has()` reads it.
 
-   Separator FOCUS is deliberately not part of the gate, though it was: `:focus`
-   answers "the handle was used at some point", not "the handle is being used
-   now", so it left the ease dead for every later collapse until something else
-   took focus — measured, transition-duration 0s at the toggle. The keyboard path
-   it was meant to cover does not need it: at a 60ms key repeat, four times
-   faster than the 280ms ease, the rendered width trails the target by at most
-   13px and lands exactly on it.
-
-   Deliberately not a React flag either: the predecessor set `data-easing` on
-   collapse and cleared it on `transitionend`, which never fires when no
-   transition runs — reduced motion, or the E2E fixture that caps every duration
-   to 0.01ms — so the flag stuck on and every later drag animated, the exact
-   fault it existed to prevent. Derived from the DOM, the condition cannot
-   desynchronize. */
+   Separator focus is deliberately NOT part of the gate — it was, and it left
+   the ease dead for every collapse after the handle had once been touched.
+   `sidebar-geometry.spec.ts` holds that as an executable assertion. */
 .maka-shell-astryx .maka-sidenav-motion {
   display: flex;
   min-width: 0;
@@ -158,8 +151,10 @@
 }
 
 /* Same source as Astryx's own `rootCollapsed` width, so the rail cannot drift
-   from the value SideNav lands on when the ease finishes. */
-.maka-shell-astryx .maka-sidenav-motion[data-collapsed='true'] {
+   from the value SideNav lands on when the ease finishes. Keyed off the shell's
+   own collapsed flag — the wrapper carried a second copy of it until this rule
+   read the one `.appFrame` already publishes and the hairlines already use. */
+.appFrame[data-sidebar-state='collapsed'] .maka-sidenav-motion {
   width: var(--spacing-12);
 }
 

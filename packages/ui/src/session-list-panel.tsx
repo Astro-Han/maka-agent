@@ -72,7 +72,6 @@ export function SessionListPanel(props: {
   // in?" and then answered it with a radio dot.
   const groupingSwitch = onViewModeChange ? (
     <SegmentedControl
-      className="maka-session-grouping"
       value={viewMode}
       onChange={(mode) => onViewModeChange(mode as SessionViewMode)}
       label={copy.groupingAriaLabel}
@@ -105,13 +104,11 @@ export function SessionListPanel(props: {
     // SideNav mounted inside to match.
     <div
       className="maka-sidenav-motion"
-      data-collapsed={collapsed ? 'true' : 'false'}
       style={{ '--maka-sidenav-width': `${width}px` } as CSSProperties}
     >
       <SideNav
         handleRef={props.collapseHandleRef}
         className="maka-session-panel agents-sidebar"
-        data-collapsed={collapsed ? 'true' : 'false'}
         aria-label={copy.listAriaLabel}
         collapsible={{
           isCollapsed: collapsed,

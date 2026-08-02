@@ -290,6 +290,17 @@ test('titlebar restores the chosen SideNav width across a collapse round trip', 
   await handle.press('ArrowRight');
   await expect.poll(panelWidth).toBe(chosenWidth);
 
+  // Brand the node the ease is declared on. A CSS transition interpolates only
+  // when the SAME element holds a previously-rendered value, and the whole
+  // reason `.maka-sidenav-motion` exists is that SideNav's own root does not
+  // qualify: it swaps element type across the toggle (`showResizeHandle =
+  // isResizable && !collapsed`), so React remounts that subtree. Survival is
+  // therefore the invariant — a declared `transition-property` proves nothing,
+  // because the nav on main declared it too and still snapped.
+  await motion.evaluate((element) => {
+    (element as HTMLElement & { __motionBrand?: number }).__motionBrand = 1;
+  });
+
   await page.getByRole('button', { name: '收起侧边栏' }).click();
   await expect(shell).toHaveAttribute('data-sidebar-state', 'collapsed');
 
@@ -297,23 +308,44 @@ test('titlebar restores the chosen SideNav width across a collapse round trip', 
   // cosmetic: the column edge is dropped in this state precisely BECAUSE the
   // traffic lights (~62px) are wider than the rail, so an edge there would cut
   // through the light cluster. A wider rail silently invalidates that argument.
-  // Astryx owns the value (`rootCollapsed` → --spacing-12); this asserts what it
-  // renders, so the lock survives the product not naming the number anywhere.
-  // Polled: the width eases, so the first sample is mid-interpolation.
+  // Astryx owns the value (`rootCollapsed` → --spacing-12); the product's own
+  // collapsed rule reads the same token, so this asserts they agree.
   await expect.poll(panelWidth).toBe(48);
+
+  // At 48px there is no history column left for the two hairlines to separate,
+  // so both go transparent. Asserted here because this is the only test that
+  // stands in the collapsed state; the rhythm test below owns them expanded.
+  await expect
+    .poll(() =>
+      panel.evaluate((nav) => {
+        const topHost = [...nav.children].find((child) =>
+          child.querySelector('.maka-session-panel-top'),
+        );
+        const footHost = nav.querySelector('.maka-session-panel-footer')?.parentElement;
+        if (!topHost || !footHost) return null;
+        return [
+          getComputedStyle(topHost).borderBottomColor,
+          getComputedStyle(footHost).borderTopColor,
+        ];
+      }),
+    )
+    .toEqual(['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)']);
 
   await page.getByRole('button', { name: '展开侧边栏' }).click();
   await expect(shell).toHaveAttribute('data-sidebar-state', 'expanded');
   await expect.poll(panelWidth).toBe(chosenWidth);
   expect(chosenWidth).toBeGreaterThanOrEqual(180);
 
-  // The ease lives on `.maka-sidenav-motion`, not on the nav: SideNav swaps its
-  // own root element type across the collapse (`showResizeHandle = isResizable
-  // && !collapsed`), so React remounts that subtree and a transition declared
-  // there has no start value to interpolate from. Assert the property is
-  // declared on the element that actually survives the toggle — the two states
-  // above already prove the endpoints, and this is what makes them a slide
-  // rather than a jump.
+  // Same node, both toggles later. Moving the class back inside SideNav, or
+  // hanging it off the nav, loses the brand here while every width assertion
+  // above still passes — which is exactly the shipped defect.
+  expect(
+    await motion.evaluate(
+      (element) => (element as HTMLElement & { __motionBrand?: number }).__motionBrand,
+    ),
+  ).toBe(1);
+
+  // And the ease is declared on that surviving node.
   await expect
     .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
     .toBe('width');
@@ -342,6 +374,51 @@ test('titlebar restores the chosen SideNav width across a collapse round trip', 
   await expect
     .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
     .toBe('width');
+});
+
+/**
+ * The rail actually animates.
+ *
+ * Everything above runs on `sidebarLongSessionsWindow`, an e2e-fixture window —
+ * and `base.css` caps every transition there to 0.01ms so screenshots and
+ * geometry are deterministic. Nothing in that window can prove an ease runs; a
+ * declared `transition-property` survives a zeroed duration, a suppressed gate,
+ * and a remounted node alike. This is the one place with the product's real
+ * durations, so it is where the animation itself gets locked.
+ *
+ * `getAnimations()` is the discriminating probe rather than sampling widths:
+ * the browser creates a CSSTransition object only when a real interpolation
+ * starts on that element between two different used values. A zero duration, a
+ * `transition: none` gate, or a fresh node with no before-change style each
+ * produce no object at all — which is exactly the set of ways this has broken.
+ */
+test('collapsing the rail starts a real width transition', async ({ window: page }) => {
+  const shell = page.locator('.appFrame');
+  const motion = page.locator('.maka-sidenav-motion');
+
+  await page.getByRole('button', { name: '展开侧边栏' }).click();
+  await expect(shell).toHaveAttribute('data-sidebar-state', 'expanded');
+  // Let the expand settle, so the collapse below starts from a resting width
+  // and the transition it creates is unambiguously its own.
+  await expect
+    .poll(() => motion.evaluate((element) => element.getAnimations().length))
+    .toBe(0);
+
+  await page.getByRole('button', { name: '收起侧边栏' }).click();
+
+  const running = await motion.evaluate((element) =>
+    element.getAnimations().map((animation) => ({
+      property: (animation as CSSTransition).transitionProperty,
+      duration: Number(animation.effect?.getTiming().duration ?? 0),
+    })),
+  );
+  expect(running, JSON.stringify(running)).toContainEqual(
+    expect.objectContaining({ property: 'width' }),
+  );
+  expect(
+    running.find((animation) => animation.property === 'width')!.duration,
+    'a capped or zeroed duration is not an ease',
+  ).toBeGreaterThan(50);
 });
 
 /**
@@ -467,7 +544,9 @@ test('the sidebar rail keeps its hairlines and group labels on one rhythm', asyn
   expect(top.color).toBe(foot.color);
   expect(top.clearance).toBe(foot.clearance);
   // Full-bleed: a line inset from the panel edge reads as a box border rather
-  // than a separator, which is exactly how the Divider version read.
+  // than a separator, which is exactly how the Divider version read. Drawing
+  // both on their zone shells makes this structural, so the assertion is a
+  // regression guard against the line moving back inside a padded element.
   expect(top.width).toBe(panelWidth);
   expect(foot.width).toBe(panelWidth);
 
@@ -477,7 +556,11 @@ test('the sidebar rail keeps its hairlines and group labels on one rhythm', asyn
     const read = (element: Element | null) => {
       if (!element) return null;
       const style = getComputedStyle(element);
-      return { size: style.fontSize, weight: Number(style.fontWeight) };
+      return {
+        size: style.fontSize,
+        leading: style.lineHeight,
+        weight: Number(style.fontWeight),
+      };
     };
     const label = nav.querySelector('.maka-session-group [id$="-title"]');
     const row = nav.querySelector('.maka-session-row .astryx-side-nav-item span');
@@ -486,5 +569,21 @@ test('the sidebar rail keeps its hairlines and group labels on one rhythm', asyn
   expect(type.label, 'a group label must render').not.toBeNull();
   expect(type.row, 'a session row must render').not.toBeNull();
   expect(type.label!.size).toBe(type.row!.size);
+  // Both halves of the tier, not just size: leaving the supporting multiplier
+  // on a 14px font lands the line box at 23.33px, off the 4px grid.
+  expect(type.label!.leading).toBe(type.row!.leading);
   expect(type.label!.weight).toBeGreaterThan(type.row!.weight);
+
+  // The tier is rebound for the section HEADER, and must stop there.
+  // SideNavSection wraps the whole list body in the same element as its title,
+  // and custom properties inherit, so binding it on the section root instead
+  // pulls row metadata up with it — measured live, this badge went 12px → 14px.
+  // Project grouping is where that metadata renders.
+  await page.getByRole('radio', { name: '按项目' }).click();
+  const badge = sidebar.locator('.astryx-badge').first();
+  await expect(badge).toBeVisible();
+  const badgeSize = await badge.evaluate((element) => getComputedStyle(element).fontSize);
+  expect(Number.parseFloat(badgeSize), 'the tier must not reach row metadata').toBeLessThan(
+    Number.parseFloat(type.row!.size),
+  );
 });

@@ -102,28 +102,43 @@ test('long session opens pinned to bottom and stays pinned while geometry settle
 });
 
 test('the composer card rests above the window edge at every window height', async ({ longTranscriptWindow: page }) => {
-  // The dock's bottom gutter comes from ChatLayout's density, not from any
-  // product rule, so it is invisible to a CSS read — and it is the only thing
-  // holding the composer card's rounded bottom edge off the frame. It must not
-  // depend on how tall the window is: the dock is sticky-bottom, so a short
-  // window is exactly where a wrong flex or min-height contract would let the
-  // card slide into the edge.
+  // Which density tier the dock runs at is a unit contract
+  // (`chat-surface-layout.test.tsx`); the px it resolves to belongs to Astryx.
+  // What only a live window can answer is whether the card stays inside the
+  // frame: the dock is sticky-bottom, so a short window is exactly where a
+  // wrong flex or min-height contract lets it render past the edge — and the
+  // gutter alone cannot see that, because it is measured against the layout
+  // box that would be overflowing.
+  const probe = () =>
+    page.evaluate(() => {
+      const composer = document.querySelector<HTMLElement>('.maka-composer');
+      const layout = composer?.closest<HTMLElement>('.maka-chat-layout');
+      if (!composer || !layout) return null;
+      const card = composer.getBoundingClientRect().bottom;
+      return {
+        gutter: Math.round(layout.getBoundingClientRect().bottom - card),
+        belowWindowEdge: Math.round(card - window.innerHeight),
+      };
+    });
+
+  const gutters: number[] = [];
   for (const height of [860, 617, 500]) {
     await page.setViewportSize({ width: 915, height });
+    // Wait for the renderer to have laid out against the new viewport before
+    // reading geometry, or the first sample is the previous height's.
+    await expect.poll(() => page.evaluate(() => window.innerHeight)).toBe(height);
     await expect
-      .poll(async () =>
-        page.evaluate(() => {
-          const composer = document.querySelector<HTMLElement>('.maka-composer');
-          const layout = composer?.closest<HTMLElement>('.maka-chat-layout');
-          if (!composer || !layout) throw new Error('Expected the composer inside the chat layout');
-          return Math.round(
-            layout.getBoundingClientRect().bottom - composer.getBoundingClientRect().bottom,
-          );
-        }),
-      )
-      // spacing-3 — Astryx `balanced`. `compact` would read 8.
-      .toBe(12);
+      .poll(async () => (await probe())?.belowWindowEdge)
+      // Zero or less: the card is inside the window, not merely inside a layout
+      // box that has itself overflowed.
+      .toBeLessThanOrEqual(0);
+    const reading = await probe();
+    // Positive, so the card's rounded bottom edge never touches the frame.
+    expect(reading!.gutter, `gutter at ${height}px`).toBeGreaterThan(0);
+    gutters.push(reading!.gutter);
   }
+  // Height-invariant: the gutter is the dock's own padding, so all three agree.
+  expect(new Set(gutters).size, JSON.stringify(gutters)).toBe(1);
 });
 
 test('graph status stays docked above the composer while transcript history scrolls', async ({ longTranscriptWindow: page }) => {
