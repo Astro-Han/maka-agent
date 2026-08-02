@@ -87,12 +87,9 @@
 /* Product-owned collapse width motion. Astryx SideNav has no transition and
    drops its inline width when collapsed (class-only 48px), which cannot
    interpolate. `.maka-sidenav-motion` always has an explicit px width from
-   React; the resizable host + nav fill that box so the shell eases.
-
-   Do not blanket `min-width:0 !important` / `max-width:none` on the panel in a
-   way that leaves session-list grid tracks sizing to max-content (~2× rail)
-   while this shell clips overflow — that hid row end actions (CDP: row ~425px
-   inside a ~220px rail). */
+   React; the resizable host + nav fill that box so the shell eases. This shell
+   clips overflow, so anything inside must stay width-constrained — a row that
+   sizes to its content instead of the rail loses its end actions to the clip. */
 .maka-sidenav-motion {
   display: flex;
   flex-direction: column;
