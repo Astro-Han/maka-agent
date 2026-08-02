@@ -9,6 +9,19 @@ function render(children: ReactNode): string {
   return renderToStaticMarkup(<LocaleProvider locale="zh">{children}</LocaleProvider>);
 }
 
+/**
+ * The one mode mark's own `<button>` tag and its contents, bounded by its
+ * closing tag. Assertions scoped to this cannot be satisfied by a later
+ * control that happens to carry the same attribute.
+ */
+function markPast(markup: string, mode: string): string {
+  const at = markup.indexOf(`data-mode="${mode}"`);
+  if (at < 0) return '';
+  const open = markup.lastIndexOf('<button', at);
+  const close = markup.indexOf('</button>', at);
+  return markup.slice(open, close < 0 ? undefined : close + '</button>'.length);
+}
+
 describe('composer quiet chrome', () => {
   it('keeps resting chrome to permission icon, plus menu, model, and send', () => {
     const markup = render(
@@ -101,6 +114,8 @@ describe('composer quiet chrome', () => {
         onPlanModeChange={() => {}}
         swarmModeActive
         onSwarmModeChange={() => {}}
+        graphModeActive
+        onGraphModeChange={() => {}}
         modelLabel="demo"
         modelChoices={[]}
         newChatThinkingLevels={['off', 'high']}
@@ -112,24 +127,35 @@ describe('composer quiet chrome', () => {
     const leftControls = markup.match(
       /maka-composer-left-controls[\s\S]*?maka-composer-right-controls/,
     )?.[0] ?? '';
-    assert.match(leftControls, /maka-composer-mode-indicator[^>]*data-mode="plan"/);
-    assert.match(leftControls, /maka-composer-mode-indicator[^>]*data-mode="swarm"/);
+    // All three modes read off the same slot — graph is not a special case.
+    for (const mode of ['plan', 'swarm', 'graph']) {
+      assert.match(leftControls, new RegExp(`data-mode="${mode}"`), `${mode} must mark the footer`);
+    }
     // Modes trail the model + thinking pair so toggling one never shifts them.
     const modelIdx = leftControls.indexOf('maka-model-selection-controls');
-    const modeIdx = leftControls.indexOf('maka-composer-mode-indicator');
+    const modeIdx = leftControls.indexOf('data-mode="plan"');
     assert.ok(modelIdx >= 0 && modeIdx > modelIdx, 'modes must follow the model pair');
     // The mark is the same ghost icon button as ＋ and permission, named by
-    // its mode and identified by its icon — never by a hue.
-    const planMark = leftControls.slice(
-      leftControls.indexOf('data-mode="plan"'),
-      leftControls.indexOf('data-mode="swarm"'),
-    );
+    // its mode and identified by its icon — never by a hue. Bound the slice to
+    // this one button so a later mark cannot satisfy it.
+    const planMark = markPast(leftControls, 'plan');
+    assert.match(planMark, /^<button/, 'the mark is the button itself, not a wrapper');
+    assert.match(planMark, /data-variant="ghost"/, 'same ghost variant as ＋ and permission');
     assert.match(planMark, /lucide-list-todo/, 'the icon says which mode it is');
     assert.match(planMark, /aria-label="Plan"/, 'the button is named for the mode');
-    assert.match(planMark, /maka-composer-mode-button/, 'the way out stays reachable');
+    assert.match(planMark, /maka-composer-mode-button/, 'the accent rule has a target');
     assert.doesNotMatch(planMark, /astryx-token/, 'a mode is not a coloured pill');
     // Modes alone stage nothing for the next send, so no drawer mounts.
     assert.doesNotMatch(markup, /maka-composer-context-drawer/);
+  });
+
+  it('drops a mode mark the host gave no way to switch off', () => {
+    // An active mode with no change handler would otherwise render a focusable,
+    // tooltipped button whose click is a silent no-op.
+    const markup = render(
+      <Composer onSend={() => true} onStop={() => {}} planModeActive modelLabel="demo" />,
+    );
+    assert.doesNotMatch(markup, /data-mode="plan"/);
   });
 
   it('counts only send-consumed context in the drawer badge, never modes', () => {
@@ -141,6 +167,8 @@ describe('composer quiet chrome', () => {
         onPlanModeChange={() => {}}
         swarmModeActive
         onSwarmModeChange={() => {}}
+        graphModeActive
+        onGraphModeChange={() => {}}
         pendingAttachments={[{ displayName: 'notes.md', kind: 'doc', size: 12 }]}
         onRemoveAttachment={() => {}}
         modelLabel="demo"
@@ -148,12 +176,19 @@ describe('composer quiet chrome', () => {
     );
 
     assert.match(markup, /maka-composer-context-drawer/);
-    // One attachment staged, two modes on — the badge reads 1.
-    const badge = markup.match(/astryx-badge[\s\S]*?<\/span>/)?.[0] ?? '';
-    assert.match(badge, />1</, `drawer badge must exclude modes, got: ${badge}`);
-    // The drawer itself carries no mode marks any more.
-    const drawer = markup.match(/maka-composer-context-drawer[\s\S]*?<\/div>/)?.[0] ?? '';
-    assert.doesNotMatch(drawer, /maka-composer-mode-indicator/);
+    // One attachment staged, three modes on — the badge reads 1. Match the
+    // badge's own text node, not the first badge-ish substring in the document.
+    const badge = /astryx-badge[^>]*>(\d+)</.exec(markup);
+    assert.ok(badge, 'the drawer must render a count badge');
+    assert.equal(badge![1], '1', 'the drawer badge must exclude modes');
+    // The drawer itself carries no mode marks any more. Bound the slice by the
+    // next footer landmark, not by the first </div>, which any card-shaped
+    // drawer item would end early.
+    const drawer = markup.slice(
+      markup.indexOf('maka-composer-context-drawer'),
+      markup.indexOf('maka-composer-left-controls'),
+    );
+    assert.doesNotMatch(drawer, /data-mode=/);
   });
 
   it('shows a single voice control only when the host wires capture', () => {

@@ -948,52 +948,56 @@ export const Composer = forwardRef<
    * status is on the same file's Don't list.
    */
   const modes: ReadonlyArray<{
-    id: string;
+    id: 'plan' | 'swarm' | 'graph';
     active: boolean;
     icon: ReactNode;
     label: string;
     onTitle: string;
-    pending: boolean;
+    isDisabled: boolean;
     disabledReason: string | undefined;
     onDeactivate(): void;
   }> = [
     {
       id: 'plan',
-      active: props.planModeActive === true,
-      icon: <ListTodo size={13} aria-hidden="true" />,
+      active: props.planModeActive === true && props.onPlanModeChange !== undefined,
+      icon: <ListTodo size={15} aria-hidden="true" />,
       label: copy.planModeLabel,
       onTitle: copy.planModeOnTitle,
-      pending: props.planModePending === true,
+      isDisabled:
+        props.disabled === true
+        || props.planModePending === true
+        || Boolean(props.planModeDisabledReason),
       disabledReason: props.planModeDisabledReason,
       onDeactivate: () => { void props.onPlanModeChange?.(false); },
     },
     {
       id: 'swarm',
-      active: props.swarmModeActive === true,
-      icon: <Network size={13} aria-hidden="true" />,
+      active: props.swarmModeActive === true && props.onSwarmModeChange !== undefined,
+      icon: <Network size={15} aria-hidden="true" />,
       label: copy.swarmModeLabel,
       onTitle: copy.swarmModeOnTitle,
-      pending: props.swarmModePending === true,
+      isDisabled:
+        props.disabled === true
+        || props.swarmModePending === true
+        || Boolean(props.swarmModeDisabledReason),
       disabledReason: props.swarmModeDisabledReason,
       onDeactivate: () => { void props.onSwarmModeChange?.(false); },
     },
     {
       id: 'graph',
-      active: props.graphModeActive === true,
-      icon: <Workflow size={13} aria-hidden="true" />,
+      active: props.graphModeActive === true && props.onGraphModeChange !== undefined,
+      icon: <Workflow size={15} aria-hidden="true" />,
       label: copy.graphModeLabel,
       onTitle: copy.graphModeOnTitle,
-      pending: props.graphModePending === true,
+      isDisabled:
+        props.disabled === true
+        || props.graphModePending === true
+        || Boolean(props.graphModeDisabledReason),
       disabledReason: props.graphModeDisabledReason,
       onDeactivate: () => { void props.onGraphModeChange?.(false); },
     },
   ];
-  const activeModes = modes
-    .filter((mode) => mode.active)
-    .map((mode) => ({
-      ...mode,
-      isDisabled: props.disabled === true || mode.pending || Boolean(mode.disabledReason),
-    }));
+  const activeModes = modes.filter((mode) => mode.active);
   const showPlusMenu = Boolean(
     props.onPickAttachments
     || props.mentionSkills
@@ -1312,25 +1316,27 @@ export const Composer = forwardRef<
                   or off never nudges the model and thinking pickers (#1897).
                   Same ghost icon button as ＋ and permission two slots left —
                   a mode is state on this toolbar, not a coloured pill, and the
-                  icon carries which mode it is. Clicking it leaves the mode. */}
+                  icon carries which mode it is. Clicking it leaves the mode,
+                  which unmounts this button, so focus is handed back to the
+                  input exactly as removing a Skill token does; otherwise a
+                  keyboard user is dropped on `document.body`. */}
               {activeModes.map((mode) => (
-                <span
+                <IconButton
                   key={mode.id}
-                  className="maka-composer-mode-indicator"
+                  variant="ghost"
+                  type="button"
+                  size="sm"
+                  className="maka-composer-mode-button"
                   data-mode={mode.id}
-                >
-                  <IconButton
-                    variant="ghost"
-                    type="button"
-                    size="sm"
-                    className="maka-composer-mode-button"
-                    label={mode.label}
-                    tooltip={mode.disabledReason ?? mode.onTitle}
-                    isDisabled={mode.isDisabled}
-                    onClick={mode.onDeactivate}
-                    icon={mode.icon}
-                  />
-                </span>
+                  label={mode.label}
+                  tooltip={mode.disabledReason ?? mode.onTitle}
+                  isDisabled={mode.isDisabled}
+                  onClick={() => {
+                    mode.onDeactivate();
+                    window.requestAnimationFrame(() => focusInput());
+                  }}
+                  icon={mode.icon}
+                />
               ))}
               {props.mentionSkills ? (
                 <ComposerSkillPicker

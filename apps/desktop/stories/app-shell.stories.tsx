@@ -749,8 +749,9 @@ export const PlanModeOn: Story = {
   render: () => <ComposedShell composer={{ planModeActive: true }} />,
 };
 
-// Real path: the same for the orchestration side. Swarm carries its own colour
-// and icon, so the two modes stay distinguishable at icon size.
+// Real path: the same for the orchestration side. All marks share the one
+// product accent, so the icon is what has to keep the modes distinguishable —
+// this story is where that carries its own weight.
 export const SwarmModeOn: Story = {
   render: () => <ComposedShell composer={{ swarmModeActive: true }} />,
 };

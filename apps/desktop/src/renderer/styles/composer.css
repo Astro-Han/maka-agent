@@ -102,14 +102,19 @@
   justify-content: flex-end;
 }
 
+/* `background-color`, never the `background` shorthand: these rules sit in the
+   last cascade layer (cascade-layers.css), and the shorthand's implicit
+   `background-image: none` would beat the ghost button's own :hover / :active
+   overlay gradients from `astryx-components`, leaving the control with no
+   pointer feedback at all. */
 .maka-composer-voice-button[data-state="recording"] {
   color: var(--status-danger, var(--destructive));
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 .maka-composer-voice-button[data-state="native_ready"] {
   color: var(--status-running);
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 /* Quiet footer: ＋ and permission are both ghost icon buttons. */
@@ -159,25 +164,21 @@
 
 /* Mode ON marks sit at the tail of the footer's left controls (#1897) —
    session state, not context staged for the next send, so they no longer live
-   in the drawer. They are the same ghost icon button as ＋ and permission, so
-   the toolbar reads as one row of controls rather than a row of controls plus
-   two coloured pills. The wrapper only carries data-mode for E2E; keep it a
-   real box (not display:contents) so Playwright visibility still works, and
-   never let a long model name compress the mark away. */
-.maka-composer-mode-indicator {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  min-width: 0;
-}
+   in the drawer.
 
-/* Maka blue is the single product accent (DESIGN.md), and it is exactly what
-   this is: an active state. Which mode it is comes from the icon, not a hue,
-   so all three marks share the one accent. The wash is derived from
-   currentColor, so a disabled mark dims both layers together. */
+   Maka blue is the single product accent (DESIGN.md), and an active mode is
+   exactly what it is for; which mode a mark is comes from its icon, not a hue,
+   so all three share the one accent. The wash derives from currentColor so a
+   disabled mark dims both layers together.
+
+   `background-color`, never the `background` shorthand — see the voice button
+   above: the shorthand would suppress the ghost button's hover and active
+   overlays and leave the one way out of a mode with no pointer feedback.
+   `flex: 0 0 auto` keeps a long model name from compressing the mark away. */
 .maka-composer-mode-button {
+  flex: 0 0 auto;
   color: var(--accent);
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  background-color: color-mix(in srgb, currentColor 10%, transparent);
 }
 /* Model + thinking pair lives in left-controls (after permission), not send. */
 .maka-composer-left-controls .maka-model-selection-controls {
