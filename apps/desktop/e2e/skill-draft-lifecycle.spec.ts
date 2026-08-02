@@ -50,10 +50,10 @@ async function failStarterSkillRevision(page: Page): Promise<void> {
   const composer = page.locator(COMPOSER_INPUT);
   await composer.press('Enter');
   await expect(page.getByText('Skill 调用失败，消息未发送')).toBeVisible();
-  // The draft survives the rejection whole. Creating the revision branch
-  // migrated it through one controlled write, which rebuilds the editor from
-  // the serialized text — so the Skill reads as its `/skill:<id>` token here
-  // rather than as a rendered chip. Same draft, and the retry below sends it.
+  // The draft survives the rejection whole, and reads as the token rather than
+  // as a chip: the Skill was just disabled, so it is gone from the catalog the
+  // composer draws chips from. A chip here would promise a Skill that no longer
+  // resolves — the text is the honest rendering, and re-enabling it below sends.
   await expect(composer).toContainText('edited with skill');
   await expect(composer).toContainText('/skill:starter-skill');
 }
@@ -98,9 +98,10 @@ test('cancelling a failed revision restores the complete pre-edit draft', async 
 
   await expect(page.locator('[data-revision-notice="true"]')).toHaveCount(0);
   // Restored through a single controlled write, which rebuilds the editor from
-  // the serialized draft — so the Skill comes back as the token it serializes
-  // to rather than as a rendered chip. Same draft, same send, same as a `@`
-  // file mention after any external draft write.
+  // the serialized draft; the Skill comes back as a chip because the composer
+  // redraws it from that text, not because anything carried it separately.
   await expect(composer).toContainText('previous unsent draft');
-  await expect(composer).toContainText('/skill:workspace-only');
+  await expect(
+    page.locator('[data-astryx-token-value="/skill:workspace-only"]'),
+  ).toContainText('Workspace Only');
 });

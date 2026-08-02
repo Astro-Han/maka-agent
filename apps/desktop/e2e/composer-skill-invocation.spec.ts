@@ -286,6 +286,51 @@ test('the ＋ Skills entry is unavailable when no Skill is installed', async ({
   await expect(permission).toHaveAttribute('aria-expanded', 'true');
 });
 
+/**
+ * The staged Skill has to still look staged after the draft comes back.
+ *
+ * `ChatComposerInput` rebuilds the editor from the string on every external
+ * value change, which drops the chip spans and leaves the `/skill:<id>` text
+ * they serialize to (facebook/astryx #4655). Semantically that draft is intact
+ * and still sends the Skill, but the user is looking at an internal id where
+ * they left a chip, and the session-switch path here is the ordinary one: any
+ * session that ever staged a Skill hits it on the way back.
+ *
+ * Blurred on purpose. The swap runs from a sidebar click, so the redraw has to
+ * work without the editor holding focus, and the caret still has to end up
+ * after the draft rather than at offset 0.
+ */
+test('a staged Skill comes back as a chip after leaving and returning', async ({
+  window: page,
+}) => {
+  await createStarterSkillAndReload(page);
+  const composer = page.locator(COMPOSER_INPUT);
+  await composer.fill('alpha-marker');
+  await composer.press('Enter');
+  await expect(page.getByText(/Fake backend received: alpha-marker/)).toBeVisible();
+
+  await composer.fill('run it');
+  await selectStarterSkill(page, { append: true });
+
+  await page.getByRole('button', { name: '展开侧边栏' }).click();
+  const sidebar = page.getByRole('navigation', { name: '对话列表' });
+  await sidebar.getByRole('button', { name: '新任务', exact: true }).click();
+  await expect(composer).toHaveText('');
+
+  await sidebar.locator('[data-session-id]').first().click();
+  await expect(composer).toContainText('run it');
+  await expect(page.locator(STARTER_CHIP)).toContainText('示例技能');
+  // The token text itself is gone: a chip drawn beside the text it renders
+  // would mean the draft now carries the Skill twice.
+  await expect(composer).not.toContainText('/skill:starter-skill');
+
+  // The redraw hands the selection back, so typing still appends.
+  await composer.click();
+  await composer.pressSequentially('!');
+  await expect(composer).toContainText('!');
+  await expect(page.locator(STARTER_CHIP)).toHaveCount(1);
+});
+
 test('chip-only send renders a readable user message', async ({ window: page }) => {
   await createStarterSkillAndReload(page);
   await selectStarterSkill(page);

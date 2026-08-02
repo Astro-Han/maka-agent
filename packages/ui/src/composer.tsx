@@ -48,6 +48,7 @@ import {
   type ComposerTextPort,
 } from './chat-input-behavior.js';
 import { ComposerWorkspaceRow, type ComposerBranchPicker, type ComposerWorkspacePicker } from './composer-workspace-row.js';
+import { SKILL_INVOCATION_TOKEN_SOURCE } from '@maka/core';
 import type { AttachmentRef, PermissionMode, ProviderType, QuoteRef, SessionSummary } from '@maka/core';
 import {
   Button as UiButton,
@@ -81,7 +82,7 @@ export interface ComposerSkillOption {
 
 /**
  * The draft text a chosen Skill becomes. This is the product-wide invocation
- * grammar (`SKILL_INVOCATION_TOKEN_SOURCE` in `@maka/runtime`), the same one
+ * grammar (`SKILL_INVOCATION_TOKEN_SOURCE` in `@maka/core`), the same one
  * the TUI submits and the same one a user can type by hand — the chip is a
  * rendering of it, not a second channel beside it.
  *
@@ -93,11 +94,10 @@ export interface ComposerSkillOption {
  * stale than an id, it is only differently stale, and resolving at send time is
  * what `/skill:` means everywhere else in the product.
  *
- * The chip survives every edit the draft survives, but not an external rewrite:
- * a controlled `value` set rebuilds the editor from the string, so a draft
- * restored by session switch, prompt history, or revision rollback comes back
- * with this token as plain text. It still reads, still sends, and still means
- * the same thing — the same degradation `@` file chips already have.
+ * A controlled `value` set rebuilds the editor from this string and drops the
+ * chip spans with it; `redrawSkillTokens` puts them back, so a draft restored
+ * by session switch, prompt history or revision rollback reads the same as the
+ * one that was staged.
  */
 function skillTokenValue(id: string): string {
   return `/skill:${id}`;
@@ -331,6 +331,10 @@ export const Composer = forwardRef<
   const [text, setText] = useState('');
   const textRef = useRef('');
   function applyText(next: string) {
+    // Any new value cancels a redraw owed to an older one. Typing reaches here
+    // too, which is what keeps a half-typed `/skill:` from seizing into a chip
+    // under the user's caret while a redraw is still owed.
+    redrawPendingRef.current = false;
     textRef.current = next;
     setText(next);
   }
@@ -339,6 +343,7 @@ export const Composer = forwardRef<
    * identity so neither hook re-runs an effect when the draft changes.
    */
   const caretToEndRef = useRef(false);
+  const redrawPendingRef = useRef(false);
   const textPortRef = useRef<ComposerTextPort>(null);
   if (!textPortRef.current) {
     textPortRef.current = {
@@ -346,6 +351,7 @@ export const Composer = forwardRef<
       setValue: (value: string) => {
         applyText(value);
         caretToEndRef.current = true;
+        redrawPendingRef.current = true;
       },
     };
   }
@@ -411,17 +417,113 @@ export const Composer = forwardRef<
     });
   }
   /**
+   * Redraw the chips a controlled write flattened.
+   *
+   * `ChatComposerInput` rebuilds the editor from the string on every external
+   * value change (`editable.textContent = controlledValue`), which is correct
+   * for text and lossy for tokens: the chip spans go, and the draft comes back
+   * as the `/skill:<id>` text they serialize to. Upstream declares a
+   * `deserialize` hook for exactly this and never calls it (facebook/astryx
+   * #4655), so until it does, we re-insert the chips ourselves.
+   *
+   * Nothing is recovered here that was not already in the string — the draft
+   * stays the single source of truth, and this only restores its rendering.
+   * That is what keeps it deletable in one piece: when upstream deserializes,
+   * this function and its one call site go, and no state goes with them.
+   *
+   * Three preconditions, all cheap, all necessary:
+   *
+   * - Only for an external write. `redrawPendingRef` is set by `textPort.setValue`,
+   *   the sole funnel for draft swap, history recall and the imperative handle,
+   *   and cleared by any later `applyText` — which is where typing lands. Typed
+   *   text must stay text, or a user part-way through `/skill:` would watch it
+   *   seize into a chip under the caret.
+   * - Only on the DOM shape that write produces: exactly one text node equal to
+   *   the draft. Anything else means upstream skipped the rewrite (the chips are
+   *   still there) or the editor is in a shape whose offsets we cannot trust.
+   * - Never mid-composition. The rewrite already broke the IME's composition;
+   *   moving the selection on top of that makes it worse.
+   *
+   * The flag is a flag rather than a same-tick call because the two inputs do
+   * not arrive together: switching sessions swaps the draft immediately and the
+   * Skill catalog for the newly active session lands a render or two later. The
+   * redraw waits for the catalog rather than deciding, against an empty one,
+   * that every token is unresolvable.
+   *
+   * Back to front, because `Range.deleteContents` inside a text node leaves the
+   * original node holding the text before the range: earlier offsets stay valid,
+   * later ones would not. The token's own matched text becomes the chip value,
+   * not a value rebuilt from the catalog id, so a differently-cased token comes
+   * back spelled the way the draft spells it.
+   *
+   * `insertToken` anchors each chip with a U+00A0, so we take the following
+   * space into the replaced range to keep one separator rather than two. The
+   * draft therefore serializes with U+00A0 where it had a space, and with one
+   * extra U+00A0 when a token ends the draft. That is the same text a chip
+   * picked from the `/` menu produces, `composerWireText` normalizes it on send,
+   * and upstream's sync effect is keyed on the controlled value rather than on
+   * the serialization, so the difference cannot loop back as a rewrite.
+   *
+   * A token whose id is not in the live catalog stays text: no chip should claim
+   * a Skill that will not resolve.
+   */
+  function redrawSkillTokens(): boolean {
+    if (compositionActiveRef.current) return false;
+    const skills = props.mentionSkills;
+    if (!skills?.length) return false;
+    const draft = textRef.current;
+    if (!draft.includes('/skill:')) return false;
+    const editable = editableNode();
+    const node = editable?.firstChild;
+    if (!editable || editable.childNodes.length !== 1) return false;
+    if (!(node instanceof Text) || node.data !== draft) return false;
+    const byId = new Map(skills.map((skill) => [skill.id.toLowerCase(), skill]));
+    const matches = [...draft.matchAll(new RegExp(SKILL_INVOCATION_TOKEN_SOURCE, 'g'))];
+    const selection = document.getSelection();
+    if (!selection) return false;
+    let redrew = false;
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const match = matches[i];
+      const skill = byId.get(match[1].toLowerCase());
+      if (!skill) continue;
+      const start = match.index;
+      let end = start + match[0].length;
+      const next = draft[end];
+      if (next === ' ' || next === '\u00A0') end += 1;
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      inputHandleRef.current?.insertToken({
+        value: match[0],
+        label: skill.name,
+        icon: <Sparkles size={12} aria-hidden="true" />,
+      });
+      redrew = true;
+    }
+    return redrew;
+  }
+  /**
    * Every port write lands the caret at the end, which is what the textarea's
    * `setSelectionRange(end, end)` did unconditionally on the same two paths
    * (draft swap, prompt-history recall). Upstream only restores the caret when
    * the update hits a *focused* editor, so without this a draft restored while
    * the composer was blurred — switching sessions from the sidebar — left the
    * caret at offset 0 and the next keystroke prepended to the draft.
+   *
+   * The redraw gets the same treatment for the same reason, and can land a
+   * render later than the write that owed it: `insertToken` parks the selection
+   * after the last chip it wrote, so the caret has to be collected again.
    */
   useEffect(() => {
-    if (!caretToEndRef.current) return;
+    let restoreCaret = caretToEndRef.current;
     caretToEndRef.current = false;
-    caretToContentEnd();
+    if (redrawPendingRef.current && props.mentionSkills?.length) {
+      redrawPendingRef.current = false;
+      restoreCaret = redrawSkillTokens() || restoreCaret;
+    }
+    if (restoreCaret) caretToContentEnd();
   });
   // Draft persistence + prompt-history navigation live in dedicated hooks
   // (issue #1044). `resetPromptHistoryNavigation` is a hoisted wrapper so the
