@@ -178,8 +178,11 @@ describe('sidebar subtraction', () => {
     assert.match(markup, /maka-session-heading-section/);
     assert.match(markup, /aria-label="会话分组方式"/);
     assert.doesNotMatch(markup, />按状态</);
-    assert.match(markup, /role="menuitemradio"[\s\S]*>按项目</);
-    assert.doesNotMatch(markup, /maka-segmented/);
+    // Both axes are on screen as an exclusive switch, not behind a menu: the
+    // group is a radiogroup and each segment names itself through aria-label,
+    // since the label is visually hidden behind the icon.
+    assert.match(markup, /role="radiogroup"[\s\S]*aria-label="按项目"/);
+    assert.doesNotMatch(markup, /role="menuitemradio"/);
   });
 
   it('keeps conversation view controls visible while an extension module is selected', () => {

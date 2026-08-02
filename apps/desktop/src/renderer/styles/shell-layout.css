@@ -109,35 +109,61 @@
   box-sizing: border-box;
 }
 
-/* The one thing Astryx SideNav does not bring to collapse/expand: a transition.
-   It already owns both widths — inline px from its resizable state when
-   expanded, the 48px `rootCollapsed` class when not — and both are computed px
-   lengths, so width interpolates across the swap on its own once a transition
-   exists. This used to be a wrapper div that mirrored the width and then needed
-   `width: 100% !important` to beat the nav's own inline value; the nav was
-   always the element that knew its width.
+/* Collapse/expand easing. The declaration has to sit on an element that lives
+   across the toggle, and SideNav's own root is not one: expanded it wraps the
+   <nav> in a div for the overlay resize handle, collapsed it renders the bare
+   <nav>, so React unmounts and remounts that subtree. A transition on the nav
+   has nothing to interpolate from — measured live, the very first frame after
+   the click is already 48px across all 144 sampled frames. `.maka-sidenav-motion`
+   is the product's own wrapper outside SideNav, so it is the same node before
+   and after and its width really does animate.
+
+   The wrapper is therefore the width authority while the ease runs, and its
+   child must follow rather than assert its own: `width: 100% !important` is
+   load-bearing, because SideNav sets an inline px width when expanded and
+   inline style outranks any layered rule without it.
 
    Only collapse/expand eases. A standing transition would also catch the width
-   updates the resize handle feeds back on every pointer move, restarting the
-   ease each time so the rail trails the cursor. The gate asks the component
-   that owns the answer: Astryx marks its handle `data-resizing` while a drag is
-   in flight and clears it on pointer-up, and the handle is the nav's SIBLING
-   inside SideNav's resizable container, so `:has(~ ...)` reads it. Focus covers
-   the keyboard path, where ArrowRight repeats faster than the ease.
+   the resize handle feeds back on every pointer move, restarting the ease each
+   time so the rail trails the cursor. The gate asks the component that owns the
+   answer: Astryx marks its handle `data-resizing` while a drag is in flight and
+   clears it on pointer-up. The handle is a descendant of the wrapper (it is the
+   nav's sibling one level in), so plain `:has()` reads it. Focus covers the
+   keyboard path, where ArrowRight repeats faster than the ease.
 
-   This replaced a React `data-easing` flag that was set on collapse and cleared
-   on `transitionend`. That never clears when no transition runs — reduced
-   motion, or the E2E fixture that zeroes durations — leaving the flag stuck on
-   and every later drag animated, the exact fault it existed to prevent. State
-   that is only correct while an animation actually fires is worse than no state:
-   here the condition is derived, so it cannot desynchronize. */
-.maka-shell-astryx .maka-session-panel {
+   Deliberately not a React flag: the predecessor set `data-easing` on collapse
+   and cleared it on `transitionend`, which never fires when no transition runs —
+   reduced motion, or the E2E fixture that caps every duration to 0.01ms — so the
+   flag stuck on and every later drag animated, the exact fault it existed to
+   prevent. Derived from the DOM, the condition cannot desynchronize. */
+.maka-shell-astryx .maka-sidenav-motion {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  /* The nav sizes itself against a definite height (`.maka-session-panel`
+     is `height: 100%`); without one here the wrapper grows to the unclipped
+     content and the footer leaves the window — the geometry
+     e2e/sidebar-geometry.spec.ts locks. */
+  height: 100%;
+  width: var(--maka-sidenav-width);
   transition: width var(--duration-large) var(--ease-out-strong);
 }
 
-.maka-shell-astryx .maka-session-panel:has(~ [data-resizing]),
-.maka-shell-astryx .maka-session-panel:has(~ [role='separator']:focus) {
+/* Same source as Astryx's own `rootCollapsed` width, so the rail cannot drift
+   from the value SideNav lands on when the ease finishes. */
+.maka-shell-astryx .maka-sidenav-motion[data-collapsed='true'] {
+  width: var(--spacing-12);
+}
+
+.maka-shell-astryx .maka-sidenav-motion:has([data-resizing]),
+.maka-shell-astryx .maka-sidenav-motion:has([role='separator']:focus) {
   transition: none;
+}
+
+.maka-shell-astryx .maka-sidenav-motion > * {
+  /* !important: beats SideNav's inline width — see the note above. */
+  width: 100% !important;
+  min-width: 0;
 }
 
 .maka-panel {

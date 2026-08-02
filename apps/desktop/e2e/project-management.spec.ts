@@ -22,8 +22,7 @@ test('project picker can create an unassigned task and surfaces it under project
 
   await page.getByRole('button', { name: '展开侧边栏' }).click();
   const sidebar = page.locator('.maka-session-panel');
-  await sidebar.getByRole('button', { name: '会话分组方式' }).click();
-  await page.getByRole('menuitemradio', { name: '按项目' }).click();
+  await sidebar.getByRole('radio', { name: '按项目' }).click();
   // Project groups are collapsible SideNav items, not the retired heading class.
   await expect(sidebar.locator('[data-project-id]').filter({ hasText: '未归属项目' })).toBeVisible();
 });

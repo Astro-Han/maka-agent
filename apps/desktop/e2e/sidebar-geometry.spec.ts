@@ -279,6 +279,7 @@ test('titlebar restores the chosen SideNav width across a collapse round trip', 
 }) => {
   const shell = page.locator('.appFrame');
   const panel = page.locator('.maka-session-panel');
+  const motion = page.locator('.maka-sidenav-motion');
   const handle = page.getByTestId('astryx-sidenav-resize-handle');
   const panelWidth = () => panel.evaluate((element) => element.getBoundingClientRect().width);
 
@@ -306,15 +307,26 @@ test('titlebar restores the chosen SideNav width across a collapse round trip', 
   await expect.poll(panelWidth).toBe(chosenWidth);
   expect(chosenWidth).toBeGreaterThanOrEqual(180);
 
-  // The width transition is suppressed while the user is driving the width
-  // themselves, so a drag does not trail the cursor by one 280ms ease per
-  // pointer-move. The suppression is derived from the handle's own state
-  // (`data-resizing`, and focus for the keyboard path) rather than stored, which
-  // is what this asserts: with the handle focused — the state the keyboard
-  // resize above leaves behind — the nav must not be animating.
+  // The ease lives on `.maka-sidenav-motion`, not on the nav: SideNav swaps its
+  // own root element type across the collapse (`showResizeHandle = isResizable
+  // && !collapsed`), so React remounts that subtree and a transition declared
+  // there has no start value to interpolate from. Assert the property is
+  // declared on the element that actually survives the toggle — the two states
+  // above already prove the endpoints, and this is what makes them a slide
+  // rather than a jump.
+  await expect
+    .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
+    .toBe('width');
+
+  // ...and that it is suppressed while the user drives the width themselves, so
+  // a drag does not trail the cursor by one 280ms ease per pointer-move. The
+  // suppression is derived from the handle's own state (`data-resizing`, and
+  // focus for the keyboard path) rather than stored, which is what this
+  // asserts: with the handle focused — the state the keyboard resize above
+  // leaves behind — the wrapper must not be animating.
   await handle.focus();
   await expect
-    .poll(() => panel.evaluate((element) => getComputedStyle(element).transitionProperty))
+    .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
     .toBe('none');
 });
 
@@ -379,4 +391,57 @@ test('the session column carries an edge expanded and drops it collapsed', async
     .poll(async () => (await edge()).background === (await contentBackground()))
     .toBe(true);
   await expect.poll(async () => (await edge()).borderColor).toBe('rgba(0, 0, 0, 0)');
+});
+
+/**
+ * Rail rhythm: the two hairlines in the sidebar must read as the same component,
+ * and its group labels as peers of the rows they label.
+ *
+ * Both were off in the shipped rail. The rule under 定时任务 sat flush against it
+ * (nav item bottom 140, rule top 140) while the footer's rule cleared its icon by
+ * 9px, because the footer line is drawn on the sticky-bottom host — which owns
+ * padding — and this one is the last child of `topContent`, whose wrapper is a
+ * bare block with neither gap nor padding. And SideNavSection titles came from
+ * Astryx's `supporting` tier, a step below the rows they label, which at Maka's
+ * 14px body reads as a caption rather than a heading.
+ *
+ * Neither has a static gate that would bite: a CSS grep passes on a margin that
+ * never reaches the element (the rule is an Astryx Divider whose own StyleX
+ * margin is unlayered), and the type tier is resolved through two levels of
+ * custom property. Measure what rendered.
+ */
+test('the sidebar rail keeps its hairlines and group labels on one rhythm', async ({
+  sidebarLongSessionsWindow: page,
+}) => {
+  const sidebar = page.getByRole('navigation', { name: '对话列表' });
+  await expect(sidebar).toBeVisible();
+
+  const gapAboveRule = await sidebar.evaluate((nav) => {
+    const items = nav.querySelectorAll('.maka-session-panel-top .astryx-side-nav-item');
+    const last = items[items.length - 1];
+    const rule = nav.querySelector('.maka-session-panel-rule');
+    if (!last || !rule) return null;
+    return Math.round(rule.getBoundingClientRect().top - last.getBoundingClientRect().bottom);
+  });
+  // Flush against 定时任务 is the defect; the footer's own line clears its icon
+  // by ~9px, so anything under half of that reads as a different component.
+  expect(gapAboveRule).not.toBeNull();
+  expect(gapAboveRule!).toBeGreaterThanOrEqual(6);
+
+  // 会话 / 最近 sit on the same step as the rows beneath them, with weight and
+  // color carrying the hierarchy instead of size.
+  const type = await sidebar.evaluate((nav) => {
+    const read = (element: Element | null) => {
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return { size: style.fontSize, weight: Number(style.fontWeight) };
+    };
+    const label = nav.querySelector('.maka-session-group [id$="-title"]');
+    const row = nav.querySelector('.maka-session-row .astryx-side-nav-item span');
+    return { label: read(label), row: read(row) };
+  });
+  expect(type.label, 'a group label must render').not.toBeNull();
+  expect(type.row, 'a session row must render').not.toBeNull();
+  expect(type.label!.size).toBe(type.row!.size);
+  expect(type.label!.weight).toBeGreaterThan(type.row!.weight);
 });

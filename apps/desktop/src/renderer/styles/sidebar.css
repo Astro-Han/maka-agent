@@ -21,12 +21,49 @@
   transform: none !important;
 }
 
+/*
+ * The rule under 定时任务 sat flush against it (measured: nav item bottom 140,
+ * rule top 140) while the footer's rule cleared its icon by 9px, so the two
+ * hairlines in the same rail read as different components. The footer's line is
+ * drawn on the sticky-bottom host, which owns padding; this one is the last
+ * child of `topContent`, whose wrapper is a bare block with neither gap nor
+ * padding. Give it its own breathing room. The sticky shell already adds 8px
+ * below, so only the top side is short.
+ */
+.maka-session-panel-rule {
+  margin-block-start: var(--space-2);
+}
+
 .maka-session-list {
   min-width: 0;
   max-width: 100%;
   width: 100%;
   box-sizing: border-box;
   position: relative;
+}
+
+/*
+ * One type size for the whole rail. SideNavSection draws its title from the
+ * `supporting` tier (12px), one step below the session rows it labels; against
+ * Maka's 14px body that reads as a caption rather than a peer of the list, and
+ * CJK loses more apparent size at 12px than Latin does. Put 会话 / 最近 / 置顶
+ * on the rows' 14px and let weight and color carry the hierarchy instead — the
+ * title is already semibold against the rows' medium, and secondary against
+ * their primary foreground.
+ *
+ * Rebinding Astryx's own tier variables on the section, rather than pinning
+ * font-size on the title span: the size then still flows through Astryx's rule
+ * (title AND subtitle stay in step, and an upgrade that restructures the header
+ * keeps working), and the override cannot reach past the section header into
+ * row metadata that is supposed to stay small.
+ *
+ * Both halves of the tier move together. Size alone would leave the supporting
+ * leading multiplier on a larger font and land the line box at 23.33px, off the
+ * 4px grid e2e/type-scale.spec.ts holds the whole app to.
+ */
+.maka-session-panel .astryx-side-nav-section {
+  --text-supporting-size: var(--text-label-size);
+  --text-supporting-leading: var(--text-label-leading);
 }
 
 .maka-session-group {
