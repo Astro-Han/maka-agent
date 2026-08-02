@@ -3,7 +3,6 @@ import {
   SegmentedControl,
   SegmentedControlItem,
 } from '@astryxdesign/core/SegmentedControl';
-import { Divider } from '@astryxdesign/core/Divider';
 import {
   SideNav,
   type SideNavImperativeCollapseHandle,
@@ -129,18 +128,15 @@ export function SessionListPanel(props: {
         // scrolls in children (Astryx five-zone model). Not a titled section —
         // the rail landmark already names the whole panel.
         topContent={
-          <>
-            <div className="maka-session-panel-top">
-              <SessionSidebarNav
-                selection={props.selection}
-                planReminders={props.planReminders}
-                moduleMemory={props.moduleMemory}
-                onSelect={props.onSelect}
-                onNew={props.onNew}
-              />
-            </div>
-            {!collapsed ? <Divider className="maka-session-panel-rule" /> : null}
-          </>
+          <div className="maka-session-panel-top">
+            <SessionSidebarNav
+              selection={props.selection}
+              planReminders={props.planReminders}
+              moduleMemory={props.moduleMemory}
+              onSelect={props.onSelect}
+              onNew={props.onNew}
+            />
+          </div>
         }
         footer={
           <SessionSidebarFooter

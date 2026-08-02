@@ -21,19 +21,6 @@
   transform: none !important;
 }
 
-/*
- * The rule under 定时任务 sat flush against it (measured: nav item bottom 140,
- * rule top 140) while the footer's rule cleared its icon by 9px, so the two
- * hairlines in the same rail read as different components. The footer's line is
- * drawn on the sticky-bottom host, which owns padding; this one is the last
- * child of `topContent`, whose wrapper is a bare block with neither gap nor
- * padding. Give it its own breathing room. The sticky shell already adds 8px
- * below, so only the top side is short.
- */
-.maka-session-panel-rule {
-  margin-block-start: var(--space-2);
-}
-
 .maka-session-list {
   min-width: 0;
   max-width: 100%;
@@ -71,12 +58,30 @@
 }
 
 /*
- * Footer is a SideNavSection (shell-side-nav). Sticky bottom already owns
- * padding; Astryx defaults are asymmetric (spacing-1 top / spacing-2 bottom)
- * and the section adds another paddingBlock, so Settings sat tight under the
- * hairline and airy above the window edge. Equalize on the sticky shell and
- * kill the section's own padding so hover never kisses the divider.
+ * The rail's two hairlines: nav chrome above the history, footer below it. Both
+ * are drawn the same way, on the sticky shell that owns the zone rather than as
+ * an element inside it, so they are the same 1px at the same alpha and both run
+ * the full panel width.
+ *
+ * The top one used to be an Astryx <Divider> placed as the last child of
+ * `topContent`, which made it a different line in every respect: --color-border
+ * is twice the alpha of the footer's rule, and the divider sat inside the
+ * sticky shell's 8px inline padding, so it stopped 8px short at each end
+ * (measured x=8 w=244 against the footer's x=0 w=260). Read together, one was a
+ * separator and the other a box edge. Drawing it as this zone's border-bottom
+ * also drops an element and a component from the tree, and the sticky padding
+ * that the footer rule already relies on becomes the breathing room the divider
+ * needed a margin for.
+ *
+ * The footer half additionally equalizes padding: Astryx defaults are
+ * asymmetric (spacing-1 top / spacing-2 bottom) and the section adds another
+ * paddingBlock, so Settings sat tight under the line and airy above the window
+ * edge.
  */
+.astryx-side-nav.maka-session-panel > div:has(.maka-session-panel-top) {
+  border-bottom: var(--border-width-hairline) solid oklch(from var(--foreground) l c h / 0.05);
+}
+
 .astryx-side-nav.maka-session-panel > div:has(> .maka-session-panel-footer) {
   /* !important: StyleX stickyBottom is unlayered. */
   padding-block: var(--space-2) !important;
@@ -85,11 +90,17 @@
   background: transparent;
 }
 
-/* Continuous Collapse: the hairline separates the history column from the
- * footer. At 48px there is no column left to separate — it reads as an orphan
- * rule floating above the Settings icon, on a rail that is otherwise ink-only.
- * Scoped here rather than in shell-layout.css because this rule owns the
- * border; the collapsed state only decides whether to draw it. */
+/* Continuous Collapse: the hairlines separate the history column from the
+ * chrome above and the footer below. At 48px there is no column left to
+ * separate — they read as orphan rules floating on a rail that is otherwise
+ * ink-only. Scoped here rather than in shell-layout.css because these rules own
+ * the borders; the collapsed state only decides whether to draw them. */
+.appFrame[data-sidebar-state="collapsed"]
+  .astryx-side-nav.maka-session-panel
+  > div:has(.maka-session-panel-top) {
+  border-bottom-color: transparent;
+}
+
 .appFrame[data-sidebar-state="collapsed"]
   .astryx-side-nav.maka-session-panel
   > div:has(> .maka-session-panel-footer) {

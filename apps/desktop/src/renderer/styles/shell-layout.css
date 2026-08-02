@@ -123,19 +123,27 @@
    load-bearing, because SideNav sets an inline px width when expanded and
    inline style outranks any layered rule without it.
 
-   Only collapse/expand eases. A standing transition would also catch the width
-   the resize handle feeds back on every pointer move, restarting the ease each
-   time so the rail trails the cursor. The gate asks the component that owns the
-   answer: Astryx marks its handle `data-resizing` while a drag is in flight and
-   clears it on pointer-up. The handle is a descendant of the wrapper (it is the
-   nav's sibling one level in), so plain `:has()` reads it. Focus covers the
-   keyboard path, where ArrowRight repeats faster than the ease.
+   Only a pointer drag suppresses the ease. A standing transition would catch the
+   width the resize handle feeds back on every pointer move, restarting the ease
+   each time so the rail trails the cursor. The gate asks the component that owns
+   the answer: Astryx marks its handle `data-resizing` while a drag is in flight
+   and clears it on pointer-up. The handle is a descendant of the wrapper (it is
+   the nav's sibling one level in), so plain `:has()` reads it.
 
-   Deliberately not a React flag: the predecessor set `data-easing` on collapse
-   and cleared it on `transitionend`, which never fires when no transition runs —
-   reduced motion, or the E2E fixture that caps every duration to 0.01ms — so the
-   flag stuck on and every later drag animated, the exact fault it existed to
-   prevent. Derived from the DOM, the condition cannot desynchronize. */
+   Separator FOCUS is deliberately not part of the gate, though it was: `:focus`
+   answers "the handle was used at some point", not "the handle is being used
+   now", so it left the ease dead for every later collapse until something else
+   took focus — measured, transition-duration 0s at the toggle. The keyboard path
+   it was meant to cover does not need it: at a 60ms key repeat, four times
+   faster than the 280ms ease, the rendered width trails the target by at most
+   13px and lands exactly on it.
+
+   Deliberately not a React flag either: the predecessor set `data-easing` on
+   collapse and cleared it on `transitionend`, which never fires when no
+   transition runs — reduced motion, or the E2E fixture that caps every duration
+   to 0.01ms — so the flag stuck on and every later drag animated, the exact
+   fault it existed to prevent. Derived from the DOM, the condition cannot
+   desynchronize. */
 .maka-shell-astryx .maka-sidenav-motion {
   display: flex;
   min-width: 0;
@@ -155,8 +163,7 @@
   width: var(--spacing-12);
 }
 
-.maka-shell-astryx .maka-sidenav-motion:has([data-resizing]),
-.maka-shell-astryx .maka-sidenav-motion:has([role='separator']:focus) {
+.maka-shell-astryx .maka-sidenav-motion:has([data-resizing]) {
   transition: none;
 }
 

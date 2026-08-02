@@ -318,16 +318,30 @@ test('titlebar restores the chosen SideNav width across a collapse round trip', 
     .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
     .toBe('width');
 
-  // ...and that it is suppressed while the user drives the width themselves, so
-  // a drag does not trail the cursor by one 280ms ease per pointer-move. The
-  // suppression is derived from the handle's own state (`data-resizing`, and
-  // focus for the keyboard path) rather than stored, which is what this
-  // asserts: with the handle focused — the state the keyboard resize above
-  // leaves behind — the wrapper must not be animating.
-  await handle.focus();
+  // ...and that a pointer drag suppresses it, so the rail does not trail the
+  // cursor by one 280ms ease per pointer-move. The suppression is derived from
+  // the handle's own `data-resizing` rather than stored in React, so it is
+  // asserted by setting exactly the attribute Astryx sets while dragging.
+  // Driving a real drag is not available: since the Astryx 0.2.0 upgrade the
+  // handle ignores synthesised pointer input (see the round-trip test above),
+  // so this pins the CSS contract the drag depends on.
+  await handle.evaluate((element) => element.setAttribute('data-resizing', 'true'));
   await expect
     .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
     .toBe('none');
+  await handle.evaluate((element) => element.removeAttribute('data-resizing'));
+  await expect
+    .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
+    .toBe('width');
+
+  // Focus alone must NOT suppress it. `:focus` answers "the handle was used at
+  // some point", not "is being used now", so gating on it left the ease dead for
+  // every later collapse until something else took focus.
+  await handle.focus();
+  await expect(handle).toBeFocused();
+  await expect
+    .poll(() => motion.evaluate((element) => getComputedStyle(element).transitionProperty))
+    .toBe('width');
 });
 
 /**
@@ -394,21 +408,22 @@ test('the session column carries an edge expanded and drops it collapsed', async
 });
 
 /**
- * Rail rhythm: the two hairlines in the sidebar must read as the same component,
- * and its group labels as peers of the rows they label.
+ * Rail rhythm: the two hairlines that bracket the session history must read as
+ * one component, and the group labels as peers of the rows they label.
  *
- * Both were off in the shipped rail. The rule under 定时任务 sat flush against it
- * (nav item bottom 140, rule top 140) while the footer's rule cleared its icon by
- * 9px, because the footer line is drawn on the sticky-bottom host — which owns
- * padding — and this one is the last child of `topContent`, whose wrapper is a
- * bare block with neither gap nor padding. And SideNavSection titles came from
- * Astryx's `supporting` tier, a step below the rows they label, which at Maka's
- * 14px body reads as a caption rather than a heading.
+ * Both were off in the shipped rail. The top line was an Astryx <Divider> placed
+ * inside `topContent`, so it drew at --color-border — twice the footer rule's
+ * alpha — and sat inside the sticky shell's inline padding, stopping 8px short at
+ * each end (x=8 w=244 against the footer's x=0 w=260); it also sat flush against
+ * 定时任务 while the footer's line cleared its icon by 9px. And SideNavSection
+ * titles came from Astryx's `supporting` tier, a step below the rows they label,
+ * which at Maka's 14px body reads as a caption rather than a heading.
  *
- * Neither has a static gate that would bite: a CSS grep passes on a margin that
- * never reaches the element (the rule is an Astryx Divider whose own StyleX
- * margin is unlayered), and the type tier is resolved through two levels of
- * custom property. Measure what rendered.
+ * Neither has a static gate that would bite: a CSS grep passes on declarations
+ * that never reach the element, and the type tier resolves through two levels of
+ * custom property. Measure what rendered, and measure the two lines AGAINST EACH
+ * OTHER rather than against fixed numbers — the invariant is that they match,
+ * not what they match at.
  */
 test('the sidebar rail keeps its hairlines and group labels on one rhythm', async ({
   sidebarLongSessionsWindow: page,
@@ -416,17 +431,45 @@ test('the sidebar rail keeps its hairlines and group labels on one rhythm', asyn
   const sidebar = page.getByRole('navigation', { name: '对话列表' });
   await expect(sidebar).toBeVisible();
 
-  const gapAboveRule = await sidebar.evaluate((nav) => {
-    const items = nav.querySelectorAll('.maka-session-panel-top .astryx-side-nav-item');
-    const last = items[items.length - 1];
-    const rule = nav.querySelector('.maka-session-panel-rule');
-    if (!last || !rule) return null;
-    return Math.round(rule.getBoundingClientRect().top - last.getBoundingClientRect().bottom);
+  const lines = await sidebar.evaluate((nav) => {
+    const topHost = [...nav.children].find((child) =>
+      child.querySelector('.maka-session-panel-top'),
+    );
+    const footHost = nav.querySelector('.maka-session-panel-footer')?.parentElement;
+    if (!topHost || !footHost) return null;
+    const topStyle = getComputedStyle(topHost);
+    const footStyle = getComputedStyle(footHost);
+    const items = topHost.querySelectorAll('.astryx-side-nav-item');
+    const lastNavItem = items[items.length - 1];
+    const settings = footHost.querySelector('.astryx-side-nav-item');
+    const rect = (element: Element) => element.getBoundingClientRect();
+    return {
+      top: {
+        width: rect(topHost).width,
+        thickness: topStyle.borderBottomWidth,
+        color: topStyle.borderBottomColor,
+        // Distance from the line to the control it separates.
+        clearance: Math.round(rect(topHost).bottom - rect(lastNavItem).bottom),
+      },
+      foot: {
+        width: rect(footHost).width,
+        thickness: footStyle.borderTopWidth,
+        color: footStyle.borderTopColor,
+        clearance: settings ? Math.round(rect(settings).top - rect(footHost).top) : -1,
+      },
+      panelWidth: rect(nav).width,
+    };
   });
-  // Flush against 定时任务 is the defect; the footer's own line clears its icon
-  // by ~9px, so anything under half of that reads as a different component.
-  expect(gapAboveRule).not.toBeNull();
-  expect(gapAboveRule!).toBeGreaterThanOrEqual(6);
+
+  expect(lines, 'both sticky zones must render').not.toBeNull();
+  const { top, foot, panelWidth } = lines!;
+  expect(top.thickness).toBe(foot.thickness);
+  expect(top.color).toBe(foot.color);
+  expect(top.clearance).toBe(foot.clearance);
+  // Full-bleed: a line inset from the panel edge reads as a box border rather
+  // than a separator, which is exactly how the Divider version read.
+  expect(top.width).toBe(panelWidth);
+  expect(foot.width).toBe(panelWidth);
 
   // 会话 / 最近 sit on the same step as the rows beneath them, with weight and
   // color carrying the hierarchy instead of size.

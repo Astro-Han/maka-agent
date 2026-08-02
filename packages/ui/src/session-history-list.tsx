@@ -13,10 +13,18 @@ import type { ProjectRecord, SessionSummary, UiLocale } from '@maka/core';
 import { formatCompactTimestamp } from '@maka/core';
 import {
   AlertTriangle,
+  Archive,
+  ArchiveRestore,
   Bot,
   FolderGit2,
   FolderOpen,
   MessageSquare,
+  Pencil,
+  Pin,
+  PinOff,
+  Plug,
+  SquarePen,
+  Trash2,
 } from './icons.js';
 import { Badge } from '@astryxdesign/core/Badge';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
@@ -560,6 +568,7 @@ function ProjectItemEndContent(props: {
       ? [
           {
             label: copy.projectRestore,
+            icon: ArchiveRestore,
             onClick: () => runProjectAction('restore', () => actions.onRestore(project.id)),
           },
         ]
@@ -568,23 +577,27 @@ function ProjectItemEndContent(props: {
             ? [
                 {
                   label: copy.projectNewTask,
+                  icon: SquarePen,
                   onClick: () => runProjectAction('new', () => actions.onNew(project.id)),
                 },
               ]
             : [
                 {
                   label: copy.projectRelink,
+                  icon: Plug,
                   onClick: () => runProjectAction('relink', () => actions.onRelink(project.id)),
                 },
               ]),
           {
             label: copy.projectRename,
+            icon: Pencil,
             onClick: () => {
               pendingMenuIntentRef.current = props.onStartRename;
             },
           },
           {
             label: copy.projectArchive,
+            icon: Archive,
             onClick: () => runProjectAction('archive', () => actions.onArchive(project.id)),
           },
         ]
@@ -712,6 +725,7 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
             items={[
               {
                 label: props.session.isFlagged ? copy.unpin : copy.pin,
+                icon: props.session.isFlagged ? PinOff : Pin,
                 onClick: () =>
                   runRowAction('flag', () =>
                     actions.onToggleFlag(props.session.id, !props.session.isFlagged),
@@ -719,6 +733,7 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
               },
               {
                 label: copy.rename,
+                icon: Pencil,
                 onClick: () => {
                   pendingMenuIntentRef.current = () =>
                     props.setEditingSessionId(props.session.id);
@@ -726,6 +741,7 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
               },
               {
                 label: props.session.isArchived ? copy.unarchive : copy.archive,
+                icon: props.session.isArchived ? ArchiveRestore : Archive,
                 onClick: () =>
                   runRowAction('archive', () =>
                     props.session.isArchived
@@ -736,6 +752,7 @@ const SessionItemEndContent = memo(function SessionItemEndContent(props: {
               { type: 'divider' },
               {
                 label: copy.delete,
+                icon: Trash2,
                 onClick: () => {
                   pendingMenuIntentRef.current = () =>
                     runRowAction('delete', () => actions.onDelete(props.session.id));
