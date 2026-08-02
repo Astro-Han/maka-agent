@@ -39,6 +39,28 @@ test('the composer selects a structured Skill from slash suggestions', async ({
   await expect(token).toHaveCount(0);
 });
 
+/**
+ * Backspace eats the staged Skill only from the very start of the draft. On a
+ * textarea that was `selectionStart === 0`; on a contentEditable it is a Range
+ * comparison, and getting it wrong is silent — the Skill disappears while the
+ * user is deleting a character in the middle of a word.
+ */
+test('Backspace away from the start deletes a character, not the staged Skill', async ({
+  window: page,
+}) => {
+  await createStarterSkillAndReload(page);
+  await selectStarterSkill(page);
+
+  const composer = page.locator(COMPOSER_INPUT);
+  const token = page.locator('.maka-composer-skill-token');
+  await composer.click();
+  await composer.pressSequentially('abc');
+  await composer.press('Backspace');
+
+  await expect(composer).toHaveText('ab');
+  await expect(token).toHaveCount(1);
+});
+
 test('slash suggestions follow Runtime project discovery and host gating', async ({
   invocableSkillsWindow: page,
 }) => {

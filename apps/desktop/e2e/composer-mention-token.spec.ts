@@ -31,12 +31,15 @@ test('a picked file mention becomes an inline token and sends as its path', asyn
   expect(tokenWidth).toBeLessThan(lineWidth / 2);
 
   await composer.press('Enter');
-  // Exact, and with an ASCII space after the token: ChatComposerInput anchors
-  // the chip with a NO-BREAK SPACE, and an unnormalized draft sends U+00A0
-  // into the message — invisible in the transcript, wrong on the wire.
-  await expect(
-    page.getByText('Fake backend received: 看一下 @.maka/skills/agent-write/SKILL.md 里的说明'),
-  ).toBeVisible();
+  const bubble = page.getByLabel('你发送的消息').first();
+  await expect(bubble).toBeVisible();
+  // Read the raw text, never a text matcher: Playwright normalizes whitespace,
+  // so `getByText` and `toHaveText` match a U+00A0 against a plain space and
+  // cannot see the character this asserts. The chip is anchored with a NO-BREAK
+  // SPACE, and an unnormalized draft carries it to the backend.
+  const wire = await bubble.evaluate((element) => element.textContent ?? '');
+  expect(wire).toContain('看一下 @.maka/skills/agent-write/SKILL.md 里的说明');
+  expect(wire).not.toContain('\u00a0');
 });
 
 /**
@@ -84,9 +87,32 @@ test('Enter with an open, empty trigger menu withholds one send, not every send'
   await composer.fill('@zzzznomatchzzzz');
   await expect(page.getByRole('listbox', { name: '工作区文件' })).toBeVisible();
 
+  // A leaked send is asynchronous, so `toHaveCount(0)` here would pass before
+  // it lands — and a second Enter sending the same text would then hide it.
+  // Withhold, retype into something distinguishable, and pin the total.
   await composer.press('Enter');
-  await expect(page.getByText(/Fake backend received/)).toHaveCount(0);
-
   await composer.press('Enter');
   await expect(page.getByText('Fake backend received: @zzzznomatchzzzz')).toBeVisible();
+  await expect(page.getByLabel('你发送的消息')).toHaveCount(1);
+});
+
+/**
+ * The menu has to follow the caret, not just the text. Astryx recomputes the
+ * active trigger only on `input`, so an arrow key off the query used to leave
+ * the menu open over a trigger no longer under the cursor — and the next Enter
+ * spliced a token in at the stale offset instead of sending.
+ */
+test('moving the caret off the query closes the trigger menu', async ({
+  invocableSkillsWindow: page,
+}) => {
+  const composer = page.locator(COMPOSER_INPUT);
+  await composer.fill('看一下 @agent');
+  await expect(page.getByRole('listbox', { name: '工作区文件' })).toBeVisible();
+
+  for (let index = 0; index < 6; index += 1) await composer.press('ArrowLeft');
+  await expect.poll(() => composer.getAttribute('aria-expanded')).toBe('false');
+
+  await composer.press('Enter');
+  await expect(page.getByText('Fake backend received: 看一下 @agent')).toBeVisible();
+  await expect(composer.locator('[data-astryx-token]')).toHaveCount(0);
 });

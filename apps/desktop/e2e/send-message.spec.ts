@@ -65,12 +65,17 @@ for (const modifier of ['Shift', 'Alt'] as const) {
     await composer.press(`${modifier}+Enter`);
     await composer.pressSequentially('line two');
 
-    // Assert the break's position, not just that both lines survived: the
-    // failure mode this pins put the newline at the end of the draft.
-    await expect(composer).toHaveText('line one\nline two');
-    await expect(page.getByText(/Fake backend received/)).toHaveCount(0);
+    // Read the raw text: `toHaveText` normalizes whitespace, so it matches a
+    // newline against a plain space and cannot tell a real break from one that
+    // silently became a space. Assert the character and its position.
+    await expect
+      .poll(() => composer.evaluate((element) => element.textContent ?? ''))
+      .toBe('line one\nline two');
     await composer.press('Enter');
-    await expect(page.getByText('Fake backend received: line one\nline two')).toBeVisible();
+    const bubble = page.getByLabel('你发送的消息').first();
+    await expect(bubble).toBeVisible();
+    const wire = await bubble.evaluate((element) => element.textContent ?? '');
+    expect(wire).toContain('line one\nline two');
   });
 }
 

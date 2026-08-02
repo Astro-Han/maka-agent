@@ -13,6 +13,56 @@ export function isChatInputComposing(
     || ('isComposing' in native && native.isComposing === true);
 }
 
+/**
+ * The draft text as the backend should receive it.
+ *
+ * `ChatComposerInput` anchors an inline token to what follows it with a
+ * NO-BREAK SPACE, and its own backspace-eats-the-token check keys on that exact
+ * codepoint — so the editor has to keep it and only the wire is normalized.
+ * Without this, every message written after a mention carries a U+00A0 where
+ * the user typed an ordinary space: invisible in the transcript, and a
+ * character no tool splitting a path on ASCII whitespace will match.
+ */
+export function composerWireText(draft: string): string {
+  return draft.replace(/ /g, ' ').trim();
+}
+
+/**
+ * Wraps an async lookup into the shape Astryx's trigger menu expects, adding
+ * the two things `useTriggerMenu` assumes a `SearchSource` provides.
+ *
+ * `searchItems` probes the source with `search('')` once per keystroke purely
+ * to learn whether it is async — it reads nothing but `instanceof Promise` and
+ * discards the value — and it calls `cancel()` immediately before, and only
+ * before, each real search. So the probe is answered from a resolved constant
+ * and never reaches the network, every real search runs fresh, and a search
+ * superseded by a newer one is abandoned rather than allowed to race its stale
+ * results into an open menu.
+ */
+export function createTriggerSearchSource<Item>(
+  run: (query: string) => Promise<Item[]>,
+): { bootstrap(): Promise<Item[]>; search(query: string): Promise<Item[]>; cancel(): void } {
+  const probeAnswer = Promise.resolve<Item[]>([]);
+  /** Never settles, so a superseded search can never write to the menu. */
+  const abandoned = (): Promise<Item[]> => new Promise<Item[]>(() => {});
+  let generation = 0;
+  let armed = false;
+  return {
+    bootstrap: () => run('').catch(() => []),
+    search(query) {
+      if (!armed) return probeAnswer;
+      armed = false;
+      const ownGeneration = generation;
+      const fresh = (items: Item[]) => (ownGeneration === generation ? items : abandoned());
+      return run(query).then(fresh, () => fresh([]));
+    },
+    cancel() {
+      generation += 1;
+      armed = true;
+    },
+  };
+}
+
 export function fileTransferContainsFiles(types: Iterable<string>, fileCount: number): boolean {
   return fileCount > 0 || Array.from(types).includes('Files');
 }

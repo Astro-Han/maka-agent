@@ -41,7 +41,9 @@ import {
   type ComposerSkillSelection,
 } from './use-composer-skill-draft.js';
 import {
+  composerWireText,
   createChatInputActionOwner,
+  createTriggerSearchSource,
   fileTransferContainsFiles,
   isCaretAtContentStart,
   isChatInputComposing,
@@ -75,9 +77,11 @@ import { PermissionModeSelect } from './permission-mode-menu.js';
 import { ComposerSkillPicker, type ComposerSkillOption } from './composer-skill-picker.js';
 
 /**
- * Rows the input grows to before it scrolls. `ChatComposerInput` sizes itself
- * from `maxRows × 22px`, which lands on the 240px cap the hand-rolled textarea
- * auto-resize used to enforce.
+ * Rows the input grows to before it scrolls. `ChatComposerInput` prices this in
+ * its own hardcoded 22px line, so the cap is 220px — one line under the 240px
+ * the hand-rolled textarea auto-resize enforced. Our type override sets a
+ * shorter line than 22px, so the editor shows slightly more than `maxRows`
+ * rows before it scrolls; rows, not pixels, is the knob upstream exposes.
  */
 const COMPOSER_MAX_ROWS = 10;
 
@@ -320,22 +324,60 @@ export const Composer = forwardRef<
    * The two operations the draft / history hooks need from the input. Stable
    * identity so neither hook re-runs an effect when the draft changes.
    */
+  const caretToEndRef = useRef(false);
   const textPortRef = useRef<ComposerTextPort>(null);
   if (!textPortRef.current) {
     textPortRef.current = {
       getValue: () => textRef.current,
-      setValue: (value: string) => applyText(value),
+      setValue: (value: string) => {
+        applyText(value);
+        caretToEndRef.current = true;
+      },
     };
   }
   const textPort = textPortRef.current;
   /**
    * ChatComposerInput restores the caret to the end of the content when a
-   * controlled update lands on a focused editor, so callers that want the old
+   * controlled update lands on a *focused* editor, so callers that want the old
    * "focus at end" behavior focus first, then set the value.
+   *
+   * A draft that was rewritten while the editor was blurred never got that
+   * restore — switching sessions from the sidebar swaps the draft with focus
+   * elsewhere, and the next programmatic focus (Esc out of the artifact pane,
+   * say) then landed the caret at offset 0, so typing prepended to the restored
+   * draft. Collapse to the end here when the editor holds no selection of its
+   * own, which is what the retired `focusTextInputAtEnd` did unconditionally.
    */
+  function caretToContentEnd() {
+    const editable = editableNode();
+    if (!editable) return;
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editable);
+    range.collapse(false);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
   function focusInput() {
     inputHandleRef.current?.focus();
+    const editable = editableNode();
+    const selection = document.getSelection();
+    if (!editable || (selection?.anchorNode && editable.contains(selection.anchorNode))) return;
+    caretToContentEnd();
   }
+  /**
+   * Every port write lands the caret at the end, which is what the textarea's
+   * `setSelectionRange(end, end)` did unconditionally on the same two paths
+   * (draft swap, prompt-history recall). Upstream only restores the caret when
+   * the update hits a *focused* editor, so without this a draft restored while
+   * the composer was blurred — switching sessions from the sidebar — left the
+   * caret at offset 0 and the next keystroke prepended to the draft.
+   */
+  useEffect(() => {
+    if (!caretToEndRef.current) return;
+    caretToEndRef.current = false;
+    caretToContentEnd();
+  });
   // Draft persistence + prompt-history navigation live in dedicated hooks
   // (issue #1044). `resetPromptHistoryNavigation` is a hoisted wrapper so the
   // draft hook's swap effect can reset history navigation even though the
@@ -395,14 +437,20 @@ export const Composer = forwardRef<
   }, []);
 
   /**
-   * A multi-line insert has to survive serialization, and Chrome's answer
-   * doesn't: it wraps each line in a `<div>`, while Astryx's serializer only
-   * emits a newline for text nodes and `<br>`, so the blocks flatten the draft
-   * into one line on send. Replay the insert as the browser's own line-break
-   * command, which produces the `<br>` the serializer does understand — and,
-   * unlike a scripted Range insertion, keeps the caret and the undo stack
-   * intact. Typed line breaks don't come through here; `onInputKeyDown` owns
-   * Enter, and `insertLineBreak` already serializes correctly.
+   * A multi-line insert has to survive the editor, and Chrome's answer doesn't:
+   * an `insertText` carrying newlines lands as one text node with the newlines
+   * dropped outright. Measured, not inferred — with this listener disabled,
+   * inserting `one\ntwo\nthree` yields `onetwothree`. Replay it as the
+   * browser's own line-break command, which produces the `<br>` Astryx's
+   * serializer does understand and which the controlled round trip then stores
+   * as a real newline; unlike a scripted Range insertion it also keeps the
+   * caret and the undo stack intact. Typed line breaks don't come through here;
+   * `onInputKeyDown` owns Enter, and `insertLineBreak` already serializes
+   * correctly.
+   *
+   * Reached by any programmatic multi-line insert: dictation and IME block
+   * commits in the product, and `fill()` in the E2E suite (which is what the
+   * Markdown code-paste journey exercises).
    *
    * Listen on the component root, not the editable: `beforeinput` bubbles, and
    * a host that mounts the composer disabled renders `contenteditable="false"`,
@@ -448,8 +496,6 @@ export const Composer = forwardRef<
 
   const searchSourcesRef = useRef<{ files: SearchSource; skills: SearchSource }>(null);
   if (!searchSourcesRef.current) {
-    let probeSource: unknown;
-    let probe: Promise<SearchableItem[]> | null = null;
     const runFileSearch = (query: string): Promise<SearchableItem[]> => {
       const search = mentionSourceRef.current.onSearchMentionFiles;
       return (search ? search(query) : Promise.resolve([])).then((files) =>
@@ -459,28 +505,7 @@ export const Composer = forwardRef<
           .map((file) => ({ id: file.relativePath, label: file.relativePath })),
       );
     };
-    const searchFiles = (query: string): Promise<SearchableItem[]> => {
-      if (query !== '') {
-        // Fail soft: an IPC error just yields an empty list (未找到文件).
-        return runFileSearch(query).catch(() => []);
-      }
-      // `useTriggerMenu` calls `search('')` once per keystroke purely to learn
-      // whether this source is async, and discards the result — so answer the
-      // probe, and the real bare-`@` listing, from one cached promise. It is
-      // keyed by the search callback, which changes with the session, so it
-      // can never hand another workspace's files to the menu. Every other
-      // query stays uncached: the menu debounces, and a stale listing here
-      // would outlive files the user creates while composing.
-      const search = mentionSourceRef.current.onSearchMentionFiles;
-      if (!probe || probeSource !== search) {
-        probeSource = search;
-        probe = runFileSearch('').catch(() => {
-          probe = null;
-          return [];
-        });
-      }
-      return probe;
-    };
+    const files = createTriggerSearchSource<SearchableItem>(runFileSearch);
     const listSkills = (rawQuery: string): SearchableItem[] => {
       const skills = mentionSourceRef.current.mentionSkills ?? [];
       const query = skillMentionQuery(rawQuery);
@@ -498,7 +523,7 @@ export const Composer = forwardRef<
     // `bootstrap` is required by SearchSource but never called by
     // `useTriggerMenu`; the menu opens straight into `search`.
     searchSourcesRef.current = {
-      files: { bootstrap: () => searchFiles(''), search: searchFiles },
+      files,
       skills: { bootstrap: () => listSkills(''), search: listSkills },
     };
   }
@@ -526,10 +551,15 @@ export const Composer = forwardRef<
         ),
         // The token serializes back to `@<path>`, so the mention reaches the
         // model exactly as the plain-text popup used to splice it in — it just
-        // reads as a chip while the draft is being composed. One difference:
-        // `insertToken` follows the token with a non-breaking space rather
-        // than a plain one. Nothing downstream parses `@<path>`, and the skill
-        // token grammar's `\s` boundary matches U+00A0.
+        // reads as a chip while the draft is being composed.
+        //
+        // One difference, and it is not free: `insertToken` anchors the token
+        // with U+00A0 rather than a plain space. `composerWireText` normalizes
+        // that away on send, and the skill token grammar's `\s` boundary
+        // matches it either way — but `findActiveTrigger` accepts only ' ' and
+        // '\n' as a trigger boundary, so typing `@` directly after a chip
+        // opens no menu until the user types a space. That boundary set is
+        // internal to `useTriggerMenu`; the fix belongs upstream.
         onSelect: (item): ChatComposerToken => ({ value: `@${item.id}`, label: fileBasename(item.id) }),
       });
     }
@@ -580,6 +610,31 @@ export const Composer = forwardRef<
     if (editable?.getAttribute('aria-expanded') !== 'true') return;
     editable.dispatchEvent(new Event('input', { bubbles: true }));
   }, [props.mentionSkills]);
+
+  /**
+   * An open menu must follow the caret, not just the text. `useTriggerMenu`
+   * recomputes the active trigger only from `input`, so moving the caret off
+   * the query with an arrow key left the menu open over a trigger that is no
+   * longer under the cursor — and the next Enter then "accepted" a suggestion,
+   * splicing a token in at the stale offset and swallowing the send. The
+   * retired popup tracked this with its own `selectionchange` listener; this is
+   * the same listener, replaying one input event so upstream re-derives the
+   * trigger (and closes the menu when there is none) from its own grammar.
+   *
+   * Only while a menu is open, and only for a caret inside this editor: the
+   * event fires document-wide for every selection change on the page.
+   */
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const editable = editableNode();
+      if (editable?.getAttribute('aria-expanded') !== 'true') return;
+      const anchor = document.getSelection()?.anchorNode;
+      if (!anchor || !editable.contains(anchor)) return;
+      editable.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, []);
 
   /**
    * Reference-sized pastes never flood the input. When the host stages quotes
@@ -666,12 +721,7 @@ export const Composer = forwardRef<
 
   async function sendCurrent() {
     if (props.disabled || sendPendingRef.current || importActionOwnerRef.current?.pending) return;
-    // ChatComposerInput separates an inline token from what follows with a
-    // NO-BREAK SPACE, and its own backspace-eats-the-token check keys on that
-    // exact character — so the editor keeps it, and only the wire is
-    // normalized. Otherwise every message written after a mention reaches the
-    // backend with a U+00A0 where the user typed a space.
-    const text = textPort.getValue().replace(/ /g, ' ').trim();
+    const text = composerWireText(textPort.getValue());
     // `skillIds` is the legacy wire field name. New selections submit the
     // stable scope-aware ref so send-time re-resolution cannot drift to a
     // same-id skill discovered at a different precedence.
