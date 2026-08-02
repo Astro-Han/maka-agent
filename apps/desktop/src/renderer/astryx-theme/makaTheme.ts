@@ -109,4 +109,24 @@ export const makaTheme = defineTheme({
     '--color-background-surface': 'var(--background)',
     '--color-background-body': 'var(--surface-canvas)',
   },
+  // The column edge itself. Astryx draws a divider only on
+  // `AppShell variant="section"`, which is a hardcoded `variant === 'section'`
+  // in AppShell.tsx and pairs the line with no wash at all. Cursor and Codex
+  // both do the opposite of one-or-the-other: a 1px rule AND a wash, with the
+  // wash pulled far back (measured off their windows, sidebar→content ΔL 0.025
+  // and ~0.010 against Maka's 0.045). The line states the boundary; the wash
+  // only says the two columns are different material. Authored here rather than
+  // as a product override so the shell keeps one paint authority — this emits
+  // `.astryx-app-shell-sidenav { border-inline-end }` inside the theme's own
+  // @scope. --border is the product's hairline, same product → Astryx direction
+  // as the materials above.
+  components: {
+    'app-shell-sidenav': {
+      base: {
+        borderInlineEndWidth: '1px',
+        borderInlineEndStyle: 'solid',
+        borderInlineEndColor: 'var(--border)',
+      },
+    },
+  },
 });

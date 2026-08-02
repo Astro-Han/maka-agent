@@ -62,16 +62,14 @@
      override --background and never this token, so a hardcoded zinc plate
      survived every palette switch).
 
-     The step size is the entire column boundary. Nothing draws a line between
-     the session rail and the content column: Astryx ships a divider only on
-     `AppShell variant="section"` and Maka runs "surface", so this
-     plate-vs-card lightness difference is what separates the two columns.
-     At 0.024 it did not read as a second material — 37% of Maka's own
-     dark-mode step, and about half the surface→body step Astryx ships
-     (#ffffff L1.000 → #f1f1f1 L0.958). 0.045 puts light mode on that anchor.
-     PR-UI-FRAME-4's point stands and is not what changed here: the plate is a
-     near-white wash that depth builds on, not a gray slab. */
-  --surface-canvas: oklch(from var(--background) calc(l - 0.045) c h);
+     The step says "different material"; it does not carry the boundary on its
+     own — makaTheme.ts draws a 1px rule on the nav column for that. Sampled off
+     Cursor and Codex, both split their columns this way and keep the wash far
+     back: sidebar→content ΔL 0.025 and ~0.010, with a 1px line at each seam.
+     A wash wide enough to be the whole boundary reads as a gray slab pasted
+     next to the content rather than a second panel, which is the note
+     PR-UI-FRAME-4 left here and the reason this lands at 0.025 and not higher. */
+  --surface-canvas: oklch(from var(--background) calc(l - 0.025) c h);
   /* PR-GRAY-CARD-LIFT-3 (WAWQAQ msg `053ca971`): in the new
      gray-plate / white-card hierarchy, "elevated" cards live on the
      same pure white as base content cards — the lift comes from the
@@ -657,12 +655,13 @@
    * (hue 0, no chroma) hierarchy. Lightness anchors keep existing
    * contrast tuning. */
   --background: oklch(0.205 0.004 286);
-  /* PALETTE-LEAK-0: derived (see light-mode note). Same 0.045 step as light:
-     0.065 was never seen on the shell — Astryx painted its own surface over the
-     frame plate until this branch handed the columns their materials — and
-     against the product's #171719 content it rendered a near-black #09090b
-     rail. Measured in Storybook at both steps. */
-  --surface-canvas: oklch(from var(--background) calc(l - 0.045) c h);
+  /* PALETTE-LEAK-0: derived (see light-mode note). Same 0.025 step as light —
+     the hairline carries the boundary in both modes, so neither needs a wash
+     wide enough to do it alone. The 0.065 this carried before was never seen on
+     the shell (Astryx painted its own surface over the frame plate until this
+     branch handed the columns their materials); against the product's #171719
+     content it rendered a near-black #09090b rail. */
+  --surface-canvas: oklch(from var(--background) calc(l - 0.025) c h);
   --background-elevated: color-mix(in srgb, var(--foreground) 2%, var(--background));
   --foreground: oklch(0.92 0.004 286);
 

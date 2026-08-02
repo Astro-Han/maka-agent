@@ -44,18 +44,22 @@
 }
 
 /* Continuous Collapse: at 48px the rail is icons and nothing else, and the
-   traffic lights are wider than it is — a wash boundary there would run a seam
-   straight through the light cluster. Collapsed, the rail takes the content
-   material so the lights sit on one surface; expanded, AppShell's wash marks
-   the column. This is the only rule that overrides a column's material, and it
-   is the reason the ease exists.
+   traffic lights are wider than it is (measured ~62px) — a column edge there
+   would run straight through the light cluster. Collapsed, the rail drops both
+   halves of that edge, the wash and the hairline, so the lights sit on one
+   surface; expanded, the theme's border and AppShell's wash mark the column.
+   This is the only rule that overrides a column's material, and it is the
+   reason the ease exists.
    !important: StyleX paints navAreaWash unlayered. */
 .maka-shell-astryx .astryx-app-shell-sidenav {
-  transition: background-color var(--duration-base) var(--ease-out-strong);
+  transition:
+    background-color var(--duration-base) var(--ease-out-strong),
+    border-color var(--duration-base) var(--ease-out-strong);
 }
 
 .maka-shell-astryx[data-sidebar-state="collapsed"] .astryx-app-shell-sidenav {
   background: var(--color-background-surface) !important;
+  border-inline-end-color: transparent;
 }
 
 .maka-shell-astryx .maka-panel-detail {
