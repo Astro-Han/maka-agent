@@ -58,14 +58,20 @@
      white). --surface-canvas is what `.appFrame` paints behind everything;
      --background is what cards paint. */
   --background: oklch(1.000 0 0);
-  /* PR-UI-FRAME-4 (2026-06-22): pull back from the heavy gray plate.
-     参考实现's sidebar is a light glass-like near-white gradient, with
-     depth coming from translucent overlays and active rows, not a dark slab. */
-  /* PALETTE-LEAK-0: derive from --background instead of hardcoding zinc
-     h286 — palettes never override this token, so the sidebar/shell plate
-     stayed zinc after a palette switch. Default background (l=1.0)
-     resolves to the same 0.976 plate. */
-  --surface-canvas: oklch(from var(--background) calc(l - 0.024) c h);
+  /* Derived from --background, not hardcoded (PALETTE-LEAK-0: palettes
+     override --background and never this token, so a hardcoded zinc plate
+     survived every palette switch).
+
+     The step size is the entire column boundary. Nothing draws a line between
+     the session rail and the content column: Astryx ships a divider only on
+     `AppShell variant="section"` and Maka runs "surface", so this
+     plate-vs-card lightness difference is what separates the two columns.
+     At 0.024 it did not read as a second material — 37% of Maka's own
+     dark-mode step, and about half the surface→body step Astryx ships
+     (#ffffff L1.000 → #f1f1f1 L0.958). 0.045 puts light mode on that anchor.
+     PR-UI-FRAME-4's point stands and is not what changed here: the plate is a
+     near-white wash that depth builds on, not a gray slab. */
+  --surface-canvas: oklch(from var(--background) calc(l - 0.045) c h);
   /* PR-GRAY-CARD-LIFT-3 (WAWQAQ msg `053ca971`): in the new
      gray-plate / white-card hierarchy, "elevated" cards live on the
      same pure white as base content cards — the lift comes from the
@@ -652,7 +658,9 @@
    * contrast tuning. */
   --background: oklch(0.205 0.004 286);
   /* PALETTE-LEAK-0: derived (see light-mode note) — default background
-     (l=0.205) resolves to the same 0.14 shell. */
+     (l=0.205) resolves to the same 0.14 shell. Deeper than light mode's 0.045
+     on purpose: this step was tuned against a dark plate and reads, and the
+     column boundary people could not see was the light one. */
   --surface-canvas: oklch(from var(--background) calc(l - 0.065) c h);
   --background-elevated: color-mix(in srgb, var(--foreground) 2%, var(--background));
   --foreground: oklch(0.92 0.004 286);
