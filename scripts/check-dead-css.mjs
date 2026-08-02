@@ -73,9 +73,6 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   'astryx-button',
   'astryx-badge',
   'astryx-resize-handle-pill',
-  // Icon size class from renderIconSlot; styles/astryx-mount.css pins the
-  // rem-based Astryx scale to px so it does not shrink under the 13px root.
-  'astryx-icon',
   // AppShell's sidenav slot (AppShell.tsx themeProps); shell-layout.css clears
   // its top so the column runs under the transparent titlebar.
   'astryx-app-shell-sidenav',

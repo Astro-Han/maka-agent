@@ -33,40 +33,6 @@
   font-family: inherit;
 }
 
-/* Astryx sizes icons in rem so they track the root font-size, and documents the
-   scale as the px-equivalents at a 16px root: 12 / 16 / 20 / 24. Maka's root is
-   13px, so every Astryx icon lands at 81% of that scale — 13px next to the 16px
-   lucide icons the product hands to Astryx slots by absolute size. The product
-   type scale is deliberately 13px; the icon scale is not meant to follow it, so
-   restate Astryx's own intent in px rather than pull the whole rem base.
-
-   Selector is class-on-class (0-2-0) against StyleX's single-class rules, so no
-   !important is needed. Scoped to the renderer mounts for the same reason as
-   the block above. */
-:is(#root, #storybook-root) .astryx-icon.xsm {
-  width: 12px;
-  height: 12px;
-  font-size: 12px;
-}
-
-:is(#root, #storybook-root) .astryx-icon.sm {
-  width: 16px;
-  height: 16px;
-  font-size: 16px;
-}
-
-:is(#root, #storybook-root) .astryx-icon.md {
-  width: 20px;
-  height: 20px;
-  font-size: 20px;
-}
-
-:is(#root, #storybook-root) .astryx-icon.lg {
-  width: 24px;
-  height: 24px;
-  font-size: 24px;
-}
-
 /* Astryx tooltips are text popovers with no interactive content, but they leave
    pointer-events at auto, so the popover is a hit target for as long as it is
    open. Anchored to a control in the titlebar there is no room above it, so the
