@@ -608,6 +608,17 @@ export const Composer = forwardRef<
         menuLabel: mentionCopy.skillsAriaLabel,
         emptySearchResultsText: mentionCopy.noSkills,
         loadingText: mentionCopy.loading,
+        // Name over description, and no id: the second line is one line wide,
+        // and the id spent a dozen characters of it on a string nobody types
+        // here — the menu is how you avoid typing it. It stays searchable
+        // (`listSkills` matches against it) and it is still what the chip
+        // serializes to; it just no longer crowds out the sentence that tells
+        // two Skills apart.
+        //
+        // Visible, not a tooltip: every menu item in Astryx — dropdown, radio,
+        // checkbox, submenu — carries its explanation as a `description` line,
+        // and none carries one on hover. A `/` menu is driven with ↑↓, so a
+        // hover-only description would be invisible to the way it is used.
         renderItem: (item) => {
           const skill = item.auxiliaryData as ComposerSkillOption;
           return (
@@ -615,10 +626,7 @@ export const Composer = forwardRef<
               <Sparkles size={14} aria-hidden="true" className="maka-composer-mention-icon" />
               <span className="maka-composer-mention-text">
                 <span className="maka-composer-mention-name">{skill.name}</span>
-                <span className="maka-composer-mention-secondary">
-                  {skill.id}
-                  {skill.description ? ` · ${skill.description}` : ''}
-                </span>
+                <span className="maka-composer-mention-secondary">{skill.description}</span>
               </span>
             </>
           );
