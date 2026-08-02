@@ -49,19 +49,45 @@
    halves of that edge, the wash and the hairline, so the lights sit on one
    surface; expanded, the theme's border and AppShell's wash mark the column.
    This is the only rule that overrides a column's material, and it is the
-   reason the ease exists.
-   !important: StyleX paints navAreaWash unlayered. */
-.maka-shell-astryx .astryx-app-shell-sidenav {
-  transition:
-    background-color var(--duration-base) var(--ease-out-strong),
-    border-color var(--duration-base) var(--ease-out-strong);
-}
+   reason the ease (makaTheme.ts, app-shell-sidenav `base`) exists.
 
-.maka-shell-astryx[data-sidebar-state="collapsed"] .astryx-app-shell-sidenav {
-  background: var(--color-background-surface) !important;
+   It has to live in product CSS rather than the theme: AppShell only forwards
+   `variant` to themeProps and has no notion of the product's collapsed state.
+   No `!important` though — Astryx's StyleX sheet is wrapped in
+   `@layer astryx-base` and imported into `astryx-components`, which this file's
+   `components` layer outranks outright; the specificity padding StyleX emits
+   does not survive a layer boundary. The border override on the next line never
+   carried the flag and has always worked, which is the same evidence read from
+   the other side.
+
+   Painting with --color-background-surface rather than --background is
+   deliberate: the rail is taking the CONTENT COLUMN's material, and that token
+   is what AppShell paints the content column with. Naming the value instead
+   would fork the mapping the moment makaTheme.ts changes it. */
+.appFrame[data-sidebar-state="collapsed"] .astryx-app-shell-sidenav {
+  background: var(--color-background-surface);
   border-inline-end-color: transparent;
 }
 
+/* The column resize handle is the one control positioned against the column BOX
+   rather than flowing inside it (Astryx gives it `position:absolute; top:0;
+   inset-block-end:0`), so the columns' `padding-top` clearance does not move it
+   and its top 36px lands under the chrome strip. The strip is the topmost hit
+   surface across the whole band, so that part of the handle cannot be grabbed at
+   all — pointer-down there reaches the OS as a window drag instead. Start the
+   handle below the strip; `inset-block-end: 0` still takes it to the bottom.
+   Locked by the offenders sweep in e2e/window-titlebar.spec.ts. */
+.maka-shell-astryx .astryx-resize-handle {
+  top: var(--h-titlebar);
+}
+
+/* Layout only. The content column's MATERIAL belongs to AppShell, which paints
+   --color-background-surface onto its own `.astryx-layout-content` under
+   `variant="elevated"`; this panel is the product's content box inside it.
+   Declaring a background here too resolved to the same color and so looked
+   harmless, but it made the panel a second paint authority that would silently
+   win over any future theme change — and the column-material E2E sampled THIS
+   element, so it was reading the product's copy rather than the shell's paint. */
 .maka-shell-astryx .maka-panel-detail {
   width: 100%;
   height: 100%;
@@ -69,9 +95,9 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--background);
-  /* Clear the absolute chrome strip; padding still paints --background so
-     the session color extends under the transparent titleband. */
+  /* Clear the absolute chrome strip; AppShell's surface shows through the
+     padding, so the session color still extends under the transparent
+     titleband. */
   padding-top: var(--h-titlebar);
   box-sizing: border-box;
 }
@@ -83,44 +109,35 @@
   box-sizing: border-box;
 }
 
-/* Product-owned collapse width motion. Astryx SideNav has no transition and
-   drops its inline width when collapsed (class-only 48px), which cannot
-   interpolate. `.maka-sidenav-motion` always has an explicit px width from
-   React; the resizable host + nav fill that box so the shell eases. This shell
-   clips overflow, so anything inside must stay width-constrained — a row that
-   sizes to its content instead of the rail loses its end actions to the clip. */
-.maka-sidenav-motion {
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  box-sizing: border-box;
-}
+/* The one thing Astryx SideNav does not bring to collapse/expand: a transition.
+   It already owns both widths — inline px from its resizable state when
+   expanded, the 48px `rootCollapsed` class when not — and both are computed px
+   lengths, so width interpolates across the swap on its own once a transition
+   exists. This used to be a wrapper div that mirrored the width and then needed
+   `width: 100% !important` to beat the nav's own inline value; the nav was
+   always the element that knew its width.
 
-/* Only collapse/expand eases. A standing width transition would also catch the
-   per-pointer-move width updates from the resize handle and make the drag lag. */
-.maka-sidenav-motion[data-easing='true'] {
+   Only collapse/expand eases. A standing transition would also catch the width
+   updates the resize handle feeds back on every pointer move, restarting the
+   ease each time so the rail trails the cursor. The gate asks the component
+   that owns the answer: Astryx marks its handle `data-resizing` while a drag is
+   in flight and clears it on pointer-up, and the handle is the nav's SIBLING
+   inside SideNav's resizable container, so `:has(~ ...)` reads it. Focus covers
+   the keyboard path, where ArrowRight repeats faster than the ease.
+
+   This replaced a React `data-easing` flag that was set on collapse and cleared
+   on `transitionend`. That never clears when no transition runs — reduced
+   motion, or the E2E fixture that zeroes durations — leaving the flag stuck on
+   and every later drag animated, the exact fault it existed to prevent. State
+   that is only correct while an animation actually fires is worse than no state:
+   here the condition is derived, so it cannot desynchronize. */
+.maka-shell-astryx .maka-session-panel {
   transition: width var(--duration-large) var(--ease-out-strong);
 }
 
-.maka-sidenav-motion > * {
-  flex: 1 1 auto;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  box-sizing: border-box;
-}
-
-/* Beat SideNav's inline expanded width so the nav tracks the motion shell. */
-.maka-sidenav-motion .maka-session-panel {
-  width: 100% !important;
-  max-width: 100%;
-  height: 100%;
-  box-sizing: border-box;
+.maka-shell-astryx .maka-session-panel:has(~ [data-resizing]),
+.maka-shell-astryx .maka-session-panel:has(~ [role='separator']:focus) {
+  transition: none;
 }
 
 .maka-panel {
@@ -227,15 +244,15 @@
   color: var(--foreground-secondary);
 }
 
-/* Titlebar chrome buttons: StyleX ghost uses primary text. Glyphs use Astryx
-   Icon `color="secondary"` (same as SideNavItem); keep the button chrome from
-   recoloring them to primary. !important: StyleX injects unlayered color. */
-.maka-shell-topbar-rail .astryx-button,
-.maka-workspace-top-actions .astryx-button {
-  color: var(--color-icon-secondary, var(--foreground-secondary)) !important;
-}
+/* Titlebar chrome glyph ink is set where the glyph is: `ChromeIcon`
+   (app-shell-chrome-actions.tsx) renders Astryx Icon with `color="secondary"`,
+   and Icon puts `color: var(--color-icon-secondary)` on the svg ITSELF. A
+   button-level rule cannot reach past that — a child's own `color` always beats
+   an inherited one — so the ghost variant's primary text never applied to these
+   glyphs and the override that used to sit here corrected nothing. It also
+   over-reached onto button label text, which these buttons happen not to have.
 
-/* `.maka-titlebar-action` needs no `no-drag` of its own: every one of these
+   `.maka-titlebar-action` needs no `no-drag` of its own: every one of these
    buttons lives inside `.maka-shell-topbar-rail` or
    `.maka-workspace-top-actions`, and each of those carves out a rect covering
    its children. A per-button rule (plus a `*` descendant rule for the icons)

@@ -73,6 +73,10 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   'astryx-button',
   'astryx-badge',
   'astryx-resize-handle-pill',
+  // The column resize handle's hit area (Resizable/ResizeHandle themeProps).
+  // shell-layout.css starts it below the chrome strip so its top 36px is not
+  // swallowed by the window drag rect.
+  'astryx-resize-handle',
   // AppShell's sidenav slot (AppShell.tsx themeProps); shell-layout.css clears
   // its top so the column runs under the transparent titlebar.
   'astryx-app-shell-sidenav',

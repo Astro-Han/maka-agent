@@ -2056,6 +2056,12 @@ function AppShellContent({
     <div
       className="appFrame agents-layout-root"
       data-agents-page
+      /* The single writer for sidebar state in the DOM. It sits on the frame,
+         above both the chrome strip and the shell, so every rule that keys on
+         it (shell-layout.css, sidebar.css) reaches its target as a descendant.
+         Copies on the shell and the detail panel bought nothing — one had no
+         readers at all — and three writers of the same value is three chances
+         for them to disagree. */
       data-sidebar-state={sessionListCollapsed ? 'collapsed' : 'expanded'}
     >
       {/* Window chrome is frame-level hit-test only (not AppShell topNav): a
@@ -2096,8 +2102,6 @@ function AppShellContent({
         mobileNav={{ breakpoint: 'none', hasToggle: false }}
         aria-hidden={hasModalOpen ? 'true' : undefined}
         inert={hasModalOpen ? true : undefined}
-        data-modal-background-hidden={hasModalOpen ? 'true' : undefined}
-        data-sidebar-state={sessionListCollapsed ? 'collapsed' : 'expanded'}
         sideNav={
           <SessionListPanel
             collapseHandleRef={sessionSideNavHandleRef}
@@ -2132,10 +2136,7 @@ function AppShellContent({
           />
         }
       >
-        <AppShellDetailPanel
-          data-sidebar-state={sessionListCollapsed ? 'collapsed' : 'expanded'}
-          agentsView={agentsView}
-        >
+        <AppShellDetailPanel agentsView={agentsView}>
           {/* PR-UI-RENDER-2: install the internal-URI dispatcher
               for any Markdown rendered inside ChatView (assistant
               answers, thinking panels, streaming bubbles). Wrapping

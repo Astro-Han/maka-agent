@@ -208,11 +208,21 @@ const baseComposerProps: ComposerProps = {
   },
 };
 
-function ShellFrame(props: { children: ReactNode; motionEnabled?: boolean }) {
+function ShellFrame(props: {
+  children: ReactNode;
+  motionEnabled?: boolean;
+  sidebarCollapsed?: boolean;
+}) {
   return (
     <div
       className="appFrame agents-layout-root"
       data-maka-e2e-fixture={props.motionEnabled ? undefined : 'true'}
+      /* Production writes this on the frame and keys collapsed-state rules off
+         it (app-shell.tsx). Without it here the story renders a state the app
+         does not have — the collapsed rail kept its footer hairline in
+         Storybook while the app dropped it — and these stories are the pixel
+         review surface, so the drift lands exactly where it is trusted. */
+      data-sidebar-state={props.sidebarCollapsed ? 'collapsed' : 'expanded'}
       style={{ height: '100%', minHeight: 640 }}
     >
       {props.children}
@@ -295,7 +305,7 @@ function ComposedShell(props: {
   }));
 
   return (
-    <ShellFrame motionEnabled={props.motionEnabled}>
+    <ShellFrame motionEnabled={props.motionEnabled} sidebarCollapsed={collapsed}>
       <header className="maka-window-titlebar">
         <AppShellTopbarActions
           sidebarCollapsed={collapsed}
@@ -322,7 +332,6 @@ function ComposedShell(props: {
         height="fill"
         contentPadding={0}
         mobileNav={{ breakpoint: 'none', hasToggle: false }}
-        data-sidebar-state={collapsed ? 'collapsed' : 'expanded'}
         sideNav={
           <SessionListPanel
             collapseHandleRef={sidebarHandleRef}
@@ -350,10 +359,7 @@ function ComposedShell(props: {
           />
         }
       >
-        <AppShellDetailPanel
-          data-sidebar-state={collapsed ? 'collapsed' : 'expanded'}
-          agentsView="im_hub"
-        >
+        <AppShellDetailPanel agentsView="im_hub">
           {props.detailChildren ?? (
             // Same two wrappers the renderer puts between the detail panel and
             // the chat column (app-shell.tsx). `.mainColumn` owns composer

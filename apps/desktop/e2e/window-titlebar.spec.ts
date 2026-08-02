@@ -30,11 +30,25 @@ import type { Page } from '@playwright/test';
  *   (a) the titlebar precedes column surfaces in document order, so every
  *       `no-drag` below it can be subtracted from it;
  *   (b) it keeps a resize corridor on the top, left, and right window edges;
- *   (c) column surfaces may extend under the transparent strip (color
- *       continuity); interactive hits under the strip still resolve to no-drag;
+ *   (c) column surfaces extend under the transparent strip, for color
+ *       continuity only — no CONTROL may sit under it;
  *   (d) every interactive element REACHABLE inside it resolves to `no-drag` — via
  *       an ancestor whose own rect actually covers the intersection — and sits
  *       after it in document order.
+ *
+ * (c) and (d) split along one line: is the element inside the strip's own
+ * subtree or beneath it. The strip is an absolute overlay with default
+ * `pointer-events`, so it is the topmost hit surface at EVERY point of the
+ * band. Its own children are reachable and are judged by the app-region rules
+ * in (d); anything beneath it is not reachable at all — the click lands on the
+ * strip and the OS reads a window drag — so its presence there is the defect,
+ * and no app-region annotation can rescue it.
+ *
+ * That distinction is why the sweep probes with `elementsFromPoint` and drops
+ * the strip's subtree from the stack. A plain `elementFromPoint` returns the
+ * strip for every point in the band, so every element underneath silently
+ * fails the "is this reachable" precondition and is skipped — which made this
+ * spec pass while real controls sat dead under the strip.
  *
  * It sweeps the states where the titlebar's neighbours change: both sidebar
  * states, the chat and module surfaces, a viewport narrow enough to cross the
@@ -145,6 +159,25 @@ async function readTitlebar(page: Page, interactiveSelector: string): Promise<Ti
       return points;
     };
 
+    const inTitlebar = (node: Element): boolean => node === titlebar || titlebar.contains(node);
+
+    /**
+     * What the user would reach at a point if the chrome strip were not there.
+     *
+     * The strip is a transparent absolute overlay that never sets
+     * `pointer-events: none`, so it is the topmost hit at every point of the
+     * band and `elementFromPoint` returns it and nothing else. Walking the full
+     * stack and dropping its subtree keeps the browser's own clipping and
+     * occlusion answers — which is why this is a probe and not a re-derivation
+     * of layout — while seeing past the one occluder the band is made of.
+     */
+    const hitBeneathTitlebarAt = (x: number, y: number): Element | null => {
+      for (const node of document.elementsFromPoint(x, y)) {
+        if (!inTitlebar(node)) return node;
+      }
+      return null;
+    };
+
     const describe = (el: Element): string => {
       const classes =
         typeof el.className === 'string' && el.className
@@ -180,13 +213,29 @@ async function readTitlebar(page: Page, interactiveSelector: string): Promise<Ti
       const afterTitlebar = Boolean(
         titlebar.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
       );
+      const ownedByTitlebar = inTitlebar(el);
       let failure: { region: string; reason: string } | null = null;
       for (const [x, y] of samplePoints(intersection)) {
+        const at = `at ${Math.round(x)},${Math.round(y)}`;
+
+        // Beneath the strip: reachability is judged with the strip removed from
+        // the stack, and any hit at all is the defect. `no-drag` cannot save it
+        // — that property only shapes the OS drag rect, while the click is lost
+        // one layer earlier, to the strip's own hit-testing.
+        if (!ownedByTitlebar) {
+          const probe = hitBeneathTitlebarAt(x, y);
+          if (!probe || !(probe === el || el.contains(probe))) continue;
+          failure = {
+            region: resolveRegionAt(el, x, y).region,
+            reason: `sits under the chrome strip ${at}: the strip is the topmost hit surface across the whole band, so this control cannot be clicked there at all and the point reaches the OS as a window drag`,
+          };
+          break;
+        }
+
         const probe = document.elementFromPoint(x, y);
         if (!probe || !(probe === el || el.contains(probe))) continue;
 
         const { region, covered } = resolveRegionAt(el, x, y);
-        const at = `at ${Math.round(x)},${Math.round(y)}`;
         if (!region.startsWith('no-drag')) {
           failure = { region, reason: `resolves to ${region}, not no-drag, ${at}` };
         } else if (!covered) {
@@ -277,10 +326,12 @@ async function assertTitlebarIsWellFormed(page: Page, label: string): Promise<vo
   // visible design change rather than the silent geometry drift this spec exists
   // to catch.
 
-  // Column surfaces intentionally extend under the transparent chrome strip so
-  // sidebar canvas and session --background paint to the window top. Interactive
-  // hits under the band are still gated by the offenders check below (no-drag +
-  // document order), not by forcing content below the strip.
+  // Column SURFACES extend under the transparent chrome strip so sidebar canvas
+  // and session --background paint to the window top. This asserts that colour
+  // continuity and nothing else — it says where the columns' paint starts, not
+  // what is safe to put there. Controls under the strip are the offenders check
+  // below; the two are independent, and reading this one as a hit-test guard is
+  // what let real controls sit dead under the band while this spec stayed green.
   expect(
     report.contentTop,
     `${label}: the shell must render session/detail columns for this check to mean anything`,
@@ -292,13 +343,14 @@ async function assertTitlebarIsWellFormed(page: Page, label: string): Promise<vo
 
   // Scope, stated honestly: semantically interactive elements matching
   // INTERACTIVE_SELECTOR, judged at the sampled points of their overlap with the
-  // drag rect that the browser reports as reachable. A custom control that is
-  // neither a button, a link, a form field, nor role/tabindex/contenteditable
-  // annotated is invisible to this check — and would be a hit-testing bug of its
-  // own.
+  // drag rect that the browser reports as reachable — with the strip's own
+  // subtree removed from the stack, so elements beneath it are visible to this
+  // check rather than skipped as unreachable. A custom control that is neither a
+  // button, a link, a form field, nor role/tabindex/contenteditable annotated is
+  // invisible here — and would be a hit-testing bug of its own.
   expect(
     report.offenders,
-    `${label}: at every reachable sampled point inside the titlebar, an interactive element must resolve to \`-webkit-app-region: no-drag\` through an ancestor whose rect covers that point, AND sit after the titlebar in document order. Offenders lose that part of their hit area to a window drag`,
+    `${label}: no interactive element may be reachable inside the titlebar band unless it belongs to the titlebar itself and resolves to \`-webkit-app-region: no-drag\` through an ancestor whose rect covers that point, after the titlebar in document order. Controls beneath the strip cannot be clicked at all; controls inside it lose that part of their hit area to a window drag`,
   ).toEqual([]);
 }
 

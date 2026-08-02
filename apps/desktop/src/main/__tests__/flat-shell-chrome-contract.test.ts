@@ -51,7 +51,12 @@ describe('flat shell chrome CSS contract', () => {
     assert.ok(detail, '.maka-shell-astryx .maka-panel-detail rule must exist');
     assert.match(detail!, /min-width:\s*0/);
     assert.match(detail!, /min-height:\s*0/);
-    assert.match(detail!, /background:\s*var\(--background\)/);
+    // Same rule as the host above, one level in: AppShell paints the content
+    // column, so the product's box inside it declares layout and nothing else.
+    // The rendered material is asserted in e2e/sidebar-geometry.spec.ts against
+    // AppShell's own element, which is the only place it can be measured
+    // honestly.
+    assert.doesNotMatch(detail!, /background\s*:/);
     assert.match(detail!, /padding-top:\s*var\(--h-titlebar\)/);
     assert.doesNotMatch(detail!, /background-image\s*:/);
     assert.doesNotMatch(detail!, /box-shadow\s*:/);
