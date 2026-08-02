@@ -123,9 +123,18 @@
   display: none;
 }
 
+/* Both nav groups are SideNavSections, so both bring the section's own
+ * paddingBlock; the sticky zone shells above already own the rail's clearance,
+ * and leaving the section copy in place makes the two hairlines sit at
+ * different distances from the rows they separate (measured 9px vs 13px, which
+ * `sidebar-geometry.spec.ts` fails on).
+ * !important: SideNavSection paddingBlock is StyleX/unlayered. */
+.maka-session-panel-top,
 .maka-session-panel-footer {
-  /* !important: SideNavSection paddingBlock is StyleX/unlayered. */
   padding: 0 !important;
+}
+
+.maka-session-panel-footer {
   border-top: 0 !important;
   background: transparent;
 }

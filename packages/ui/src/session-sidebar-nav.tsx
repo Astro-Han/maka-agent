@@ -26,8 +26,16 @@ export function SessionSidebarNav(props: {
   // Always SideNavItem — expanded and collapsed. Astryx collapse context turns
   // these into icon-only slots without remounting a different control recipe
   // (which read as a squeeze when the rail previously swapped to IconButton).
+  //
+  // SideNavSection, like the footer below, rather than a bare fragment in a
+  // product div: the section is what owns the space BETWEEN nav rows
+  // (`items` → --spacing-0-5). Handed to `topContent` as a plain div these three
+  // were the only group on the rail outside that authority, so they stacked
+  // edge to edge — invisible expanded, where the label separates the rows, and
+  // plainly three-icons-as-one-slab at 48px. The header is hidden because the
+  // rail landmark already names the panel; the title stays for a11y.
   return (
-    <>
+    <SideNavSection title={copy.mainLabel} isHeaderHidden className="maka-session-panel-top">
       <SideNavItem
         label={copy.newTask}
         icon={SquarePen}
@@ -51,7 +59,7 @@ export function SessionSidebarNav(props: {
         isSelected={automationsActive}
         onClick={() => props.onSelect({ section: 'automations', module: moduleMemory.automations })}
       />
-    </>
+    </SideNavSection>
   );
 }
 
