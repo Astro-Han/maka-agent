@@ -148,8 +148,8 @@
   --bot-brand-default: var(--accent);
   /* PALETTE-LEAK-0: semantic alias for informational system banners (the
      plan-reminders 系统提醒 banner) — component CSS derives its tint family
-     from this instead of referencing var(--accent) directly (governance
-     contract #406 bans raw accent outside token blocks). */
+     from this instead of referencing var(--accent) directly, so a palette
+     retune moves the banner with it (#406). Convention, not enforced. */
   --system-alert-accent: var(--accent);
 
   /* === text variants (mixed toward foreground for better contrast) === */
@@ -450,8 +450,8 @@
      illustrated itself with an input in the middle row of the search
      modal — 57px below the shell's top edge, 12px in from its sides,
      touching no corner at all. The rule's only worked example was its
-     only misuse, and a contract test pinned the result. Adjacency is
-     the whole rule; state it or the rule licenses nonsense.
+     only misuse. Adjacency is the whole rule; state it or the rule
+     licenses nonsense.
 
      A legitimate form in this codebase is
        `calc(var(--radius-*) - 1px)`, the border inset — a ::before
@@ -486,7 +486,7 @@
      (hairline, not a spacing beat). Deliberately absent: 14/18/22/26/28/
      30/34/36/52/56 — snapped to the nearest scale value to kill magic
      numbers. Spacing has no single-property anchor like border-radius,
-     so the contract scopes to padding/margin/gap only (not width/height/
+     so the scale governs padding/margin/gap only (not width/height/
      inset/grid), per the adversarial review in #430. */
   --spacing: 4px;              /* base step — the single ruler */
   --space-0: 0;
@@ -523,10 +523,17 @@
        --duration-emphasized — stronger hover/focus/status feedback
        --duration-large      — reserved structural motion, not default mount
 
-     Anything outside this scale needs a justifying comment. The
-     `motion-token-converge-contract.test.ts` enforces this by banning
-     bare `cubic-bezier(0.16, 1, 0.3, 1)` (must use --ease-out-strong)
-     and `transition: all` (must enumerate properties). */
+     Anything outside this scale needs a justifying comment. Two standing
+     rules, held by convention and review since the source-scanning guards
+     came out in #1724: no bare `cubic-bezier(0.16, 1, 0.3, 1)` (use
+     --ease-out-strong) and no `transition: all` (enumerate properties).
+
+     Astryx ships its own --duration-fast/medium/slow on the Theme wrapper
+     for its components' internals. Product CSS stays on the scale below,
+     with one standing exception: motion that has to stay in lockstep with
+     an adjacent Astryx component follows that component's token instead
+     (styles/chat-message.css does this for the tool detail row). Copy the
+     neighbour, or use this scale — never split the difference by hand. */
    --ease-out-strong: cubic-bezier(0.16, 1, 0.3, 1);
    --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
@@ -565,7 +572,7 @@
 
    /* === transform amplitude (motion) ===
       Tokenize the geometric magnitude of press/hover feedback so the
-      motion contract covers amplitude, not just duration/easing. Press
+      motion scale covers amplitude, not just duration/easing. Press
       scale (active 缩小), hover scale (悬停放大), hover lift (上浮). Reset
       transform: translate(0)/scale(1) uses literal 0/1. Decorative
       scale(1.1), strong lift -3px, sidebar slide translateX, and rotate
@@ -1374,9 +1381,9 @@ html[data-os="darwin"].dark {
 .maka-stream-fade {
   /* --duration-large (280ms) is the fade window; FADE_MS in stream-fade.ts is
      pinned to the same 280 so the negative animation-delay (= -age) lands at
-     the right point in the curve. Motion durations must come from a
-     var(--duration-*) token (motion-token-converge contract), so the window is
-     retuned there, not with a bare ms here. */
+     the right point in the curve. Motion durations come from a
+     var(--duration-*) token, so the window is retuned there, not with a bare
+     ms here. */
   animation: maka-stream-fade-in var(--duration-large) var(--ease-out-strong) both;
 }
 
@@ -1402,10 +1409,11 @@ html[data-os="darwin"].dark {
    usages, plus the lucide default of 2 wherever unspecified — the
    classic "can't say why it looks unpolished" tell. One CSS rule beats
    every SVG presentation attribute, so all lucide glyphs render at a
-   single weight without touching call sites. Width/height stay
-   per-call-site by contract (icon-system-contract forbids a global
-   size hammer). If a surface ever needs a heavier stroke, scope a more
-   specific selector with a comment.
+   single weight without touching call sites. Stroke is the only thing
+   hammered globally: width/height stay per call site, because a global
+   size rule would also catch the Astryx-slot icons that styles/
+   astryx-mount.css sizes by class. If a surface ever needs a heavier
+   stroke, scope a more specific selector with a comment.
 ============================================================================= */
 svg.lucide {
   stroke-width: 1.75;

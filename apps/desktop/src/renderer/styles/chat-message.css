@@ -146,7 +146,15 @@
   height: 10px;
 }
 
-/* Row detail open: same 0fr→1fr medium motion as group/reasoning. */
+/* Row detail open: same 0fr→1fr medium motion as group/reasoning.
+
+   The Astryx duration/ease below are deliberate, not a leak of the product
+   scale. Astryx ChatToolCalls animates its own group open with
+   `grid-template-rows --duration-medium --ease-standard`; a detail row that
+   expands beside one has to share that clock or the two disclosures visibly
+   desync. Product motion belongs on the maka-tokens scale — this is the
+   exception that follows a neighbouring Astryx component, so retune it only
+   when ChatToolCalls moves. */
 @keyframes maka-chat-tool-detail-open {
   from { grid-template-rows: 0fr; }
   to { grid-template-rows: 1fr; }
