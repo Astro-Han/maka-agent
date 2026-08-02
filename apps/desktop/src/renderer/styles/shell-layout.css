@@ -16,51 +16,46 @@
      frame always spans the window regardless of inner content's
      max-content. The preload centering is unaffected (it's the only
      child at that point and still centers). */
-  /* Keep the shell/backplate flat and neutral; the detail panel paints the
-     content surface. */
+  /* The backplate under the preload skeleton and behind the shell before it
+     mounts. AppShell paints both columns over this, so it is not a shell
+     surface — it is what the window shows when there is no shell yet. */
   background: var(--surface-canvas);
   color: var(--foreground);
   font-size: var(--font-size-base);
   line-height: var(--text-body-leading);
   box-sizing: border-box;
-  /* Continuous Collapse: rail is transparent and inherits this plate. Flip
-     plate color with sidebar state so expand/collapse does not flash. */
-  transition: background-color var(--duration-base) var(--ease-out-strong);
-}
-
-/* Continuous Collapse: when the SideNav is the 48px icon rail, do not keep a
-   second canvas surface under the traffic lights. The rail stays in flow at
-   48px but paints as ink-only on the session plate — one material under the
-   lights (column-through without widening the rail or a fake titleband).
-   Authority: sidebar/sidenav backgrounds are transparent; this is the only
-   place that decides which surface the rail sits on. */
-.appFrame[data-sidebar-state="collapsed"] {
-  background: var(--background);
 }
 
 .app {
   height: 100%;
 }
 
-/* Astryx AppShell owns the column layout (sideNav + content). Window chrome
-   is a transparent absolute hit-test overlay on the frame — not an AppShell
-   topNav row — so sidebar canvas and session --background both paint to the
-   window top (Codex / Claude Desktop / Cursor). Keep the shell host from
-   introducing a third surface over the frame plate. */
+/* Astryx AppShell owns the column layout AND the column materials: on
+   `variant="elevated"` it paints the nav column --color-background-body and the
+   content column --color-background-surface, both of which makaTheme.ts points
+   back at the product palette. Window chrome is a transparent absolute
+   hit-test overlay on the frame — not an AppShell topNav row — so both columns
+   paint to the window top (Codex / Claude Desktop / Cursor). */
 .maka-shell-astryx {
   width: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  /* StyleX AppShell variant paints an opaque root; columns must show the
-     frame canvas (sidebar) or their own surface (detail). */
-  background: transparent !important;
 }
 
-/* SideNav slot inherits AppShell surface fill; force transparency so the
-   frame plate reads through (same intent as .agents-sidebar). */
+/* Continuous Collapse: at 48px the rail is icons and nothing else, and the
+   traffic lights are wider than it is — a wash boundary there would run a seam
+   straight through the light cluster. Collapsed, the rail takes the content
+   material so the lights sit on one surface; expanded, AppShell's wash marks
+   the column. This is the only rule that overrides a column's material, and it
+   is the reason the ease exists.
+   !important: StyleX paints navAreaWash unlayered. */
 .maka-shell-astryx .astryx-app-shell-sidenav {
-  background: transparent !important;
+  transition: background-color var(--duration-base) var(--ease-out-strong);
+}
+
+.maka-shell-astryx[data-sidebar-state="collapsed"] .astryx-app-shell-sidenav {
+  background: var(--color-background-surface) !important;
 }
 
 .maka-shell-astryx .maka-panel-detail {

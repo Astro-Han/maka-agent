@@ -657,11 +657,12 @@
    * (hue 0, no chroma) hierarchy. Lightness anchors keep existing
    * contrast tuning. */
   --background: oklch(0.205 0.004 286);
-  /* PALETTE-LEAK-0: derived (see light-mode note) — default background
-     (l=0.205) resolves to the same 0.14 shell. Deeper than light mode's 0.045
-     on purpose: this step was tuned against a dark plate and reads, and the
-     column boundary people could not see was the light one. */
-  --surface-canvas: oklch(from var(--background) calc(l - 0.065) c h);
+  /* PALETTE-LEAK-0: derived (see light-mode note). Same 0.045 step as light:
+     0.065 was never seen on the shell — Astryx painted its own surface over the
+     frame plate until this branch handed the columns their materials — and
+     against the product's #171719 content it rendered a near-black #09090b
+     rail. Measured in Storybook at both steps. */
+  --surface-canvas: oklch(from var(--background) calc(l - 0.045) c h);
   --background-elevated: color-mix(in srgb, var(--foreground) 2%, var(--background));
   --foreground: oklch(0.92 0.004 286);
 

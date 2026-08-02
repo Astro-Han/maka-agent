@@ -39,9 +39,10 @@ describe('flat shell chrome CSS contract', () => {
     assert.match(host!, /min-width:\s*0/);
     assert.match(host!, /min-height:\s*0/);
     assert.match(host!, /overflow:\s*hidden/);
-    // Transparent host so frame canvas + detail surface own paint; the absolute
-    // titleband does not introduce a third chrome color.
-    assert.match(host!, /background:\s*transparent\s*!important/);
+    // AppShell paints the columns from its own variant materials. The host must
+    // not declare a background at all: repainting it — transparent included —
+    // means the product is deciding a column surface behind the shell's back.
+    assert.doesNotMatch(host!, /background\s*:/);
     assert.doesNotMatch(host!, /background-image\s*:/);
     assert.doesNotMatch(host!, /box-shadow\s*:/);
     assert.doesNotMatch(host!, /filter\s*:/);

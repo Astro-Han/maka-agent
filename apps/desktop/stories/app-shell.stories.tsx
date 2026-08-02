@@ -314,7 +314,11 @@ function ComposedShell(props: {
       </header>
       <AstryxAppShell
         className="app maka-shell-astryx agents-layout-body"
-        variant="surface"
+        /* Astryx's default: nav column takes --color-background-body, content takes
+           --color-background-surface. Both point at the product palette through
+           makaTheme.ts, so the shell follows a palette switch. Declared rather
+           than defaulted — it decides what separates the two columns. */
+        variant="elevated"
         height="fill"
         contentPadding={0}
         mobileNav={{ breakpoint: 'none', hasToggle: false }}
