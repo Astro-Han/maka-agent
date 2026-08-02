@@ -369,8 +369,18 @@
   /* === line-height ===
      PR-LEADING-CONVERGE-0 (issue #520 PR1):
      four-tier scale for single-line, heading, dense UI, and body copy.
-     relaxed/loose had zero sites and were dropped; all consumers share
-     these semantic custom properties as their single source.
+     relaxed/loose had zero sites and were dropped.
+
+     NOT yet single-source, and deliberately left that way by the type-scale
+     convergence. Leading now has three vocabularies: these semantic tiers,
+     Astryx's role tiers (--text-body-leading 1.4286, --text-supporting-leading
+     1.6667, …), and --maka-line-body above. Two of them disagree about body
+     copy: --leading-normal is 1.5, which at the 14px body tier is 21px and off
+     the 4px grid, while Astryx computes 20px. The transcript is internally
+     consistent because it reads Astryx's; the rest of the product chrome sits
+     1px looser. Converging them moves 66 --leading-normal sites at once, which
+     is a relayout, not a token change — it wants its own PR with its own
+     before/after, and it gets easier now that the size ladder has one source.
 
      Snug is the one tier that can't be cut: 40 sites at 1.3-1.4 (small-
      title / UI text in small-text dense zones) collapse to tight
