@@ -52,6 +52,18 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(workbar).toHaveCSS('width', '431px');
   await expect(page.locator('body')).toHaveCSS('user-select', 'auto');
 
+  // Which key the width lands on is the load-bearing decision of #1861 and the
+  // one thing every assertion above stays green through: `useResizable`'s
+  // `autoSaveId` writes synchronously on each committed size (~90 writes per
+  // drag), so the width stays on Maka's debounced key instead. Switching to
+  // `autoSaveId` would orphan the user's stored width silently.
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('maka-session-workbar-width-v1')))
+    .toBe('431');
+  expect(
+    await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('astryx-resizable:'))),
+  ).toEqual([]);
+
   // Keyboard-driven disclosure, observed through what the user can read: a
   // collapsed section hides its rows, and Enter on the trigger reveals them.
   const recent = workbar.getByRole('button', { name: /最近结束/ });
