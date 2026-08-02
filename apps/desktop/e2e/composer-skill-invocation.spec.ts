@@ -179,6 +179,42 @@ test('the ＋ Skills entry opens the `/` menu, on an empty draft and after a wor
   await expect(composer).toHaveText('看看 /');
 });
 
+/**
+ * The ＋ entry writes into the draft, so it must not be reachable with an empty
+ * catalog. It used to be: with no Skills installed, choosing it left a stray `/`
+ * in the draft and opened an empty menu whose light dismiss then swallowed the
+ * user's next click on the footer — three surprises for one click, and the
+ * panel this replaced simply said "no skills available".
+ */
+test('the ＋ Skills entry is unavailable when no Skill is installed', async ({
+  window: page,
+}) => {
+  const composer = page.locator(COMPOSER_INPUT);
+  await expect(composer).toBeVisible();
+  expect(await page.evaluate(() => window.maka.skills.listInvocable(undefined))).toEqual([]);
+
+  await composer.click();
+  await composer.pressSequentially('看看');
+  await page.locator('.maka-composer-plus-menu').getByRole('button').click();
+
+  const entry = page.getByRole('menuitem', { name: '选择技能' });
+  await expect(entry).toBeVisible();
+  await expect(entry).toBeDisabled();
+  // Disabled AND answered, on screen: a grey row with no reason tells the user
+  // nothing, and a reason only assistive tech can read does not reach them.
+  await expect(entry).toContainText('当前没有可用技能');
+
+  // The draft is untouched: no slash, and no menu was opened over the footer.
+  await page.keyboard.press('Escape');
+  await expect(composer).toHaveText('看看');
+  await expect(page.getByRole('listbox', { name: '技能' })).toHaveCount(0);
+
+  // And the footer still answers the very first click.
+  const permission = page.locator('.maka-composer-left-controls button').nth(1);
+  await permission.click();
+  await expect(permission).toBeFocused();
+});
+
 test('chip-only send renders a readable user message', async ({ window: page }) => {
   await createStarterSkillAndReload(page);
   await selectStarterSkill(page);

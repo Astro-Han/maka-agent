@@ -1225,7 +1225,16 @@ export const Composer = forwardRef<
                       <DropdownMenuItem
                         label={copy.chooseSkill}
                         icon={<Sparkles size={15} aria-hidden="true" />}
-                        isDisabled={props.disabled}
+                        // Nothing to choose from means nothing to open. The
+                        // entry types `/` into the draft, so an enabled item
+                        // with an empty catalog spends the user's click writing
+                        // a stray slash and popping an empty menu. Say why it is
+                        // unavailable: the panel this replaced showed "no skills
+                        // available", and a silent grey row answers nothing.
+                        isDisabled={props.disabled || props.mentionSkills.length === 0}
+                        description={
+                          props.mentionSkills.length === 0 ? copy.noSkillsAvailable : undefined
+                        }
                         onClick={openSkillMenu}
                       />
                     ) : null}
