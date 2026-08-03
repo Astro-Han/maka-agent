@@ -425,6 +425,24 @@ describe('tool activity presentation', () => {
     assert.match(truncated, /tail only/);
     assert.match(truncated, /输出已截断/);
   });
+
+  // The bug this replaced: a running command rendered in a bespoke trow and
+  // switched to Astryx chrome the moment it settled. Crossing a status
+  // boundary must not change which component draws the row.
+  it('draws every status through the same Astryx row', () => {
+    const base = {
+      toolUseId: 'tool-status-sweep',
+      toolName: 'Bash',
+      activityKind: 'command' as const,
+      intent: '运行测试',
+      args: { command: 'npm test' },
+    };
+    for (const status of ['pending', 'running', 'completed', 'errored', 'interrupted'] as const) {
+      const markup = renderTool({ ...base, status });
+      assert.match(markup, /astryx-chat-tool-calls/, `${status} renders through Astryx`);
+      assert.doesNotMatch(markup, /maka-tool-trow/, `${status} has no bespoke trow`);
+    }
+  });
 });
 
 function pipeOutput(stdout = '', stderr = '') {
