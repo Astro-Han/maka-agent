@@ -250,10 +250,13 @@ describe('unfinished tools take their status from the turn', () => {
 });
 
 describe('live tool status over persisted', () => {
+  // Runtime appends turn_state when the turn opens, before any tool_call, so a
+  // turn that can have a live projection always has one on disk.
   test('keeps a still-running tool running when persisted has no result yet', () => {
     const settled = materializeTurns([
       userMsg('t1', 1, 'run it'),
-      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 2, toolName: 'Bash', args: { command: 'sleep 60' } },
+      { type: 'turn_state', id: 's1', turnId: 't1', ts: 2, status: 'running', partialOutputRetained: false },
+      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 3, toolName: 'Bash', args: { command: 'sleep 60' } },
     ]);
     const turns = overlayLiveTurn(settled, {
       turnId: 't1',
@@ -261,6 +264,65 @@ describe('live tool status over persisted', () => {
       steps: [{
         stepId: 'a1',
         tools: [{ toolUseId: 'bash-1', toolName: 'Bash', stepId: 'a1', status: 'running', args: { command: 'sleep 60' } }],
+      }],
+    });
+    const tools = turns.find((turn) => turn.turnId === 't1')?.timeline
+      .find((item: TurnTimelineItem) => item.kind === 'tools');
+    assert.equal(tools?.kind === 'tools' ? tools.items[0]?.status : undefined, 'running');
+  });
+
+  // Only the active session is subscribed and events do not replay, so a turn
+  // that ends while the user is looking elsewhere leaves the projection frozen
+  // mid-run; reconcileTerminalLiveTurn hands a tool off only once it is
+  // interrupted or has a result, so a frozen `running` never clears itself. A
+  // recorded terminal turn_state is what breaks the tie.
+  for (const turnStatus of ['aborted', 'failed', 'completed'] as const) {
+    test(`a stale live running loses to a ${turnStatus} turn`, () => {
+      const settled = materializeTurns([
+        userMsg('t1', 1, 'run it'),
+        { type: 'turn_state', id: 's1', turnId: 't1', ts: 2, status: turnStatus, partialOutputRetained: false },
+        { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 3, toolName: 'Bash', args: { command: 'sleep 60' } },
+      ]);
+      const turns = overlayLiveTurn(settled, {
+        turnId: 't1',
+        phase: 'streamed',
+        steps: [{
+          stepId: 'a1',
+          tools: [{
+            toolUseId: 'bash-1',
+            toolName: 'Bash',
+            stepId: 'a1',
+            status: 'running',
+            args: { command: 'sleep 60' },
+            outputChunks: [{ seq: 0, stream: 'stdout', text: 'partial output', redacted: false, createdAt: 4 }],
+          }],
+        }],
+      });
+      const tools = turns.find((turn) => turn.turnId === 't1')?.timeline
+        .find((item: TurnTimelineItem) => item.kind === 'tools');
+      const tool = tools?.kind === 'tools' ? tools.items[0] : undefined;
+      assert.equal(tool?.status, 'interrupted');
+      // The tail the user was watching still belongs to live — only the status
+      // is taken back.
+      assert.equal(tool?.outputChunks?.length, 1);
+    });
+  }
+
+  // A legacy turn has no turn_state, so `status` falls back to an inferred
+  // `completed`. That is a guess about old data, not evidence this turn ended,
+  // and must not be allowed to take a status away from live.
+  test('an inferred legacy status never overrides live', () => {
+    const settled = materializeTurns([
+      userMsg('t1', 1, 'run it'),
+      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 2, toolName: 'Bash', args: { command: 'sleep 60' } },
+    ]);
+    assert.equal(settled[0]?.recordedStatus, undefined);
+    const turns = overlayLiveTurn(settled, {
+      turnId: 't1',
+      phase: 'streamed',
+      steps: [{
+        stepId: 'a1',
+        tools: [{ toolUseId: 'bash-1', toolName: 'Bash', stepId: 'a1', status: 'running', args: {} }],
       }],
     });
     const tools = turns.find((turn) => turn.turnId === 't1')?.timeline

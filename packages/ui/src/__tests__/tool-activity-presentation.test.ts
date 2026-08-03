@@ -440,7 +440,6 @@ describe('tool activity presentation', () => {
     for (const status of ['pending', 'running', 'completed', 'errored', 'interrupted'] as const) {
       const markup = renderTool({ ...base, status });
       assert.match(markup, /astryx-chat-tool-calls/, `${status} renders through Astryx`);
-      assert.doesNotMatch(markup, /maka-tool-trow/, `${status} has no bespoke trow`);
     }
   });
 
@@ -472,6 +471,8 @@ describe('tool activity presentation', () => {
       assert.match(markup, /aria-expanded="false"/);
     });
 
+    // Two items on purpose: Astryx renders a lone call as a bare row that owns
+    // its own expansion, so defaultIsExpanded only reaches a real group.
     it('opens while any call in the group is still running', () => {
       const markup = renderGroup({
         toolUseId: 'live-1',

@@ -139,7 +139,9 @@ export function materializeSession(messages: readonly StoredMessage[]): SessionV
  * Build a ToolActivityItem from a (ToolCallMessage, ToolResultMessage?) pair.
  *
  * - Missing result, turn still running → 'running' (the call is in flight)
- * - Missing result, turn ended or unrecorded → 'interrupted' (orphan from crash)
+ * - Missing result, turn ended → 'interrupted' (orphan from crash). Sessions
+ *   written before `turn_state` fall back to `inferLegacyTurnStatus`, which
+ *   never returns 'running', so they land here too.
  * - Cancelled shell / aborted explore → 'interrupted' (not failure)
  * - Result with isError === true → 'errored' (includes permission deny/block)
  * - Result with isError === false → 'completed'

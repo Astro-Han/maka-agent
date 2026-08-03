@@ -1,4 +1,4 @@
-import type { ToolActivityKind, UiCatalog, UiLocale } from '@maka/core';
+import type { UiCatalog, UiLocale } from '@maka/core';
 
 type BackgroundTerminalStatus = 'running' | 'completed' | 'failed' | 'timed_out' | 'cancelled' | 'orphaned';
 type WebCredentialCopyKey = 'env' | 'settings' | 'missing' | 'unknown';

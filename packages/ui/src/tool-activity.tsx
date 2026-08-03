@@ -291,10 +291,11 @@ export function ToolTrow({ items }: { items: ToolActivityItem[] }) {
     ),
   }));
 
-  // A group opens while something in it runs, and otherwise follows Astryx: the
-  // collapsed header projects the last call alone, so an earlier failure sits
-  // one click away rather than in the header. That is Astryx's own density
-  // trade-off, and the row does not override it.
+  // Only reaches a group of two or more: Astryx renders a lone call as a bare
+  // row that owns its own expansion. For a real group this opens it while
+  // something inside runs, and otherwise leaves Astryx's density trade-off
+  // alone — the collapsed header projects the last call, so an earlier failure
+  // sits one click away rather than in the header.
   return (
     <ChatToolCalls
       calls={calls}
