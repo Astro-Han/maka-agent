@@ -1,10 +1,13 @@
 import { mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { UiLocale, E2eFixtureScenario, E2eFixtureState } from '@maka/core';
 import { resolveStorageRoot } from '@maka/storage/root-authority';
 import type { CredentialStore } from './credential-store.js';
 import {
   ARTIFACT_SESSION_ID,
   ERROR_SESSION_ID,
+  LONG_SIDEBAR_PROJECT_ID,
+  LONG_SIDEBAR_PROJECT_NAME,
   LONG_SIDEBAR_SCENARIOS,
   LONG_SIDEBAR_SESSION_PREFIX,
   LONG_TRANSCRIPT_SESSION_ID,
@@ -19,6 +22,7 @@ import {
   TURN_SESSION_ID,
   E2E_FIXTURE_NOW,
   WORKSTATION_RUNNING_SESSION_ID,
+  writeJson,
   writeSession,
 } from './e2e-fixture/seed-helpers.js';
 import {
@@ -737,6 +741,24 @@ export async function seedE2eFixture(input: {
     for (const seed of longSidebarSessions(now)) {
       await writeSession(input.workspaceRoot, seed.header, seed.messages);
     }
+    // Deterministic project record (see LONG_SIDEBAR_PROJECT_ID in
+    // seed-helpers): the 按项目 grouping must not depend on the app's async
+    // workspace self-registration. The location points at the live
+    // workspace root so the catalog presents it as available.
+    await writeJson(join(input.workspaceRoot, 'projects.json'), {
+      schemaVersion: 1,
+      projects: [
+        {
+          id: LONG_SIDEBAR_PROJECT_ID,
+          name: LONG_SIDEBAR_PROJECT_NAME,
+          identity: `folder:${input.workspaceRoot}`,
+          locations: [
+            { path: input.workspaceRoot, isWorktree: false, lastUsedAt: now },
+          ],
+          lastUsedAt: now,
+        },
+      ],
+    });
   }
   if (input.fixture.scenario === 'plan-reminders') {
     await writePlanReminders(input.workspaceRoot, now);
