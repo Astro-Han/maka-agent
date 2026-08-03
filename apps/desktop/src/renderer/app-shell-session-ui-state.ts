@@ -5,11 +5,6 @@ import type { ShellRunUpdatesBySession } from './shell-run-update-state.js';
 
 type StateUpdater<T> = (updater: (current: T) => T) => void;
 
-// Event-stream health is deliberately absent: it is observation-only bookkeeping
-// (`checkedAt` advances on every probe) that nothing renders, so the controller
-// keeps it in a ref instead — see `sessionEventHealthBySessionRef` below. Putting
-// it here would make each probe force a full AppShell render for no visible
-// change (#1979).
 export interface AppShellSessionUiState {
   messageLoadErrorBySession: Record<string, string>;
   messageRetryPendingBySession: Record<string, boolean>;
@@ -41,10 +36,11 @@ void allSessionUiMapsAreListed;
 // `useSettledSessionTransientReconcile` heals a session whose turn ended while
 // its SessionEvent stream wasn't being followed, and must drop only the live
 // projection. The independently-scoped maps (message load error / retry, pending
-// permission-mode / model toggles, the permission queue, event-stream health,
-// stop-pending) each have their own lifecycle and must survive a mere turn
-// settle — a full `clearAppShellSessionUiStateForSession` (session deletion)
-// would wipe them too.
+// permission-mode / model toggles, the permission queue, stop-pending) each have
+// their own lifecycle and must survive a mere turn settle — a full
+// `clearAppShellSessionUiStateForSession` (session deletion) would wipe them too.
+// Event-stream health is scoped the same way but lives outside this state; see
+// `sessionEventHealthBySessionRef`.
 const TURN_TRANSIENT_MAP_KEYS = [
   'liveTurnBySession',
 ] as const satisfies readonly AppShellSessionUiStateMapKey[];
@@ -53,7 +49,7 @@ export function createInitialAppShellSessionUiState(): AppShellSessionUiState {
   return Object.fromEntries(SESSION_UI_MAP_KEYS.map((key) => [key, {}])) as unknown as AppShellSessionUiState;
 }
 
-function omitSessionKey<T extends object>(current: T, sessionId: string): T {
+function omitSessionKey<T extends Record<string, unknown>>(current: T, sessionId: string): T {
   if (!(sessionId in current)) return current;
   const next = { ...current };
   delete (next as Record<string, unknown>)[sessionId];
