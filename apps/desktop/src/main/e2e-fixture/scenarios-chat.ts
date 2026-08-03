@@ -456,7 +456,7 @@ export function sandboxBoundaryLiveTurns(): NonNullable<E2eFixtureState['liveTur
           toolName: 'request_sandbox_boundary',
           displayName: '扩展沙箱边界',
           intent: '写入工作区外的构建产物目录',
-          status: 'waiting_permission',
+          status: 'running',
           args: { path: '/outside/dist', access: 'write', scope: 'subtree' },
         }],
       }],

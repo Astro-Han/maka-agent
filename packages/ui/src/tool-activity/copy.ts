@@ -5,16 +5,10 @@ type WebCredentialCopyKey = 'env' | 'settings' | 'missing' | 'unknown';
 type WebGuidanceKey = 'env' | 'settings' | 'rate_limited' | 'not_configured' | 'timed_out' | 'privacy_mode' | 'unknown';
 
 export interface ToolActivityCopy {
+  /** The two outcomes a tool row spells out next to its name. */
   status: {
-    pending: string;
-    running: string;
-    waitingPermission: string;
-    completed: string;
-    failed: string;
     sandboxBlocked: string;
     interrupted: string;
-    cancelled: string;
-    timedOut: string;
   };
   output: {
     redacted: string;
@@ -141,7 +135,7 @@ export interface ToolActivityCopy {
 
 const TOOL_ACTIVITY_COPY = {
   zh: {
-    status: { pending: '排队中', running: '运行中', waitingPermission: '等待权限', completed: '已完成', failed: '失败', sandboxBlocked: '可能被沙箱阻止', interrupted: '已中断', cancelled: '已取消', timedOut: '已超时' },
+    status: { sandboxBlocked: '可能被沙箱阻止', interrupted: '已中断' },
     output: { redacted: '[已脱敏]', redactedAriaLabel: '已脱敏', truncated: '输出已截断', close: '关闭', closeAriaLabel: '关闭预览' },
     copy: { idle: '复制', pending: '复制中…', copied: '已复制', failed: '复制失败' },
     sandboxBlocked: { title: '操作可能被沙箱阻止', description: '沙箱可能阻止了该调用中的至少一项操作。失败前可能已经产生部分结果，请检查输出和工作区状态后再决定是否重试。', copyAriaLabel: (label) => `${label}沙箱诊断信息` },
@@ -166,7 +160,7 @@ const TOOL_ACTIVITY_COPY = {
     },
   },
   en: {
-    status: { pending: 'Pending', running: 'Running', waitingPermission: 'Waiting for permission', completed: 'Completed', failed: 'Failed', sandboxBlocked: 'Possibly blocked by sandbox', interrupted: 'Interrupted', cancelled: 'Cancelled', timedOut: 'Timed out' },
+    status: { sandboxBlocked: 'Possibly blocked by sandbox', interrupted: 'Interrupted' },
     output: { redacted: '[Redacted]', redactedAriaLabel: 'Redacted', truncated: 'Output truncated', close: 'Close', closeAriaLabel: 'Close preview' },
     copy: { idle: 'Copy', pending: 'Copying…', copied: 'Copied', failed: 'Copy failed' },
     sandboxBlocked: { title: 'Operation may have been blocked by sandbox', description: 'The sandbox may have blocked at least one action in this call. Some effects may have occurred before it failed; check the output and workspace state before retrying.', copyAriaLabel: (label) => `${label} sandbox diagnostics` },

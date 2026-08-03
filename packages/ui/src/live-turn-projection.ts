@@ -43,7 +43,7 @@ function terminalizeLiveSteps(steps: readonly LiveTurnStepProjection[]): LiveTur
     ...(step.thinking ? { thinking: { ...step.thinking, complete: true } } : {}),
     ...(step.text ? { text: { ...step.text, complete: true } } : {}),
     tools: step.tools.map((tool) => (
-      tool.status === 'pending' || tool.status === 'running' || tool.status === 'waiting_permission'
+      tool.status === 'pending' || tool.status === 'running'
         ? { ...tool, status: 'interrupted' as const }
         : tool
     )),

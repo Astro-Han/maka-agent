@@ -302,7 +302,7 @@ describe('e2e-fixture mode', () => {
     assert.equal(liveTurns?.['e2e-fixture-streaming']?.turnId, 'turn-streaming');
     assert.equal(liveTurns?.['e2e-fixture-streaming']?.steps[0]?.tools[0]?.status, 'running');
     assert.equal(liveTurns?.['e2e-fixture-permission']?.turnId, 'turn-sandbox-boundary');
-    assert.equal(liveTurns?.['e2e-fixture-permission']?.steps[0]?.tools[0]?.status, 'waiting_permission');
+    assert.equal(liveTurns?.['e2e-fixture-permission']?.steps[0]?.tools[0]?.status, 'running');
     const request = state?.sandboxBoundaryBySession?.['e2e-fixture-permission'];
     assert.ok(request);
     assert.deepEqual(request.expansion.filesystem?.entries, [

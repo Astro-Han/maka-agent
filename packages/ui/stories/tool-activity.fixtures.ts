@@ -248,7 +248,7 @@ export const statusOverviewItems = [
     toolName: 'bash',
     displayName: 'Shell command',
     intent: 'Run a command that needs permission.',
-    status: 'waiting_permission',
+    status: 'running',
     args: { cmd: 'npm run typecheck' },
   }),
   toolItem({
@@ -362,7 +362,7 @@ export const subagentAndExploreItems = [
     toolName: 'spawn_subagent',
     displayName: 'Subagent permission',
     intent: 'Wait for a child-agent permission decision.',
-    status: 'waiting_permission',
+    status: 'running',
     args: { agentName: subagentWaitingResult.agentName, permissionMode: subagentWaitingResult.permissionMode },
     result: subagentWaitingResult,
     durationMs: 4_000,

@@ -340,7 +340,7 @@ describe('applyAppendedMessage', () => {
 describe('setToolStatus', () => {
   test('updates by toolUseId without duplicating', () => {
     const items = applyAppendedMessage([], toolCall('t', 'Read')).items;
-    const stage1 = setToolStatus(items, 't', { status: 'waiting_permission' });
+    const stage1 = setToolStatus(items, 't', { status: 'running' });
     const stage2 = setToolStatus(stage1, 't', { status: 'running' });
     expect(stage2).toHaveLength(1);
     const item = stage2[0];
