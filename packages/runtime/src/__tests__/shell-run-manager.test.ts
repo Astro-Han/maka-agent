@@ -1639,7 +1639,9 @@ describe('ShellRunProcessManager', () => {
         setInterval(() => {}, 1000);
       `),
         pty: true,
-        timeoutMs: 5_000,
+        // Far past the test's own waits: a run timeout would finalize the record and
+        // advance the revision the assertions below pin.
+        timeoutMs: 120_000,
       }),
     );
     assert.equal(initial.kind, 'shell_run');

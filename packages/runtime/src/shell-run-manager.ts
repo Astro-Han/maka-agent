@@ -937,15 +937,16 @@ export class ShellRunProcessManager
       }
       return;
     }
+    // Real elapsed time, not the injected `now()`: this paces flushes against the wall
+    // clock, while `now()` only stamps records and is a plain counter under test.
     const elapsed = Date.now() - live.lastSnapshotWallTime;
-    const delay = Math.max(0, this.flushIntervalMs - elapsed);
-    if (delay === 0) this.queueAutomaticFlush(live);
-    else {
-      live.cancelFlush = this.scheduleFlush(() => {
+    live.cancelFlush = this.scheduleFlush(
+      () => {
         live.cancelFlush = undefined;
         this.queueAutomaticFlush(live);
-      }, delay);
-    }
+      },
+      Math.max(0, this.flushIntervalMs - elapsed),
+    );
   }
 
   private queueAutomaticFlush(live: LiveShellRun): void {
