@@ -407,16 +407,10 @@ async function smokeStory(page, baseUrl, job, options = {}) {
             ) {
               failures.push('completed plan reminder row is missing its lifecycle state');
             }
-            for (const selector of [
-              '.maka-plan-list-row-title',
-              '.maka-plan-list-row-meta',
-            ]) {
+            for (const selector of ['.maka-plan-list-row-title', '.maka-plan-list-row-meta']) {
               checkElement(row.querySelector(selector), selector);
             }
-            for (const selector of [
-              '.maka-plan-status',
-              '.maka-plan-list-row-countdown',
-            ]) {
+            for (const selector of ['.maka-plan-status', '.maka-plan-list-row-countdown']) {
               const element = row.querySelector(selector);
               if (element) checkElement(element, selector);
             }
@@ -424,7 +418,9 @@ async function smokeStory(page, baseUrl, job, options = {}) {
           // The margin loop above runs zero times if countdowns stop rendering,
           // which would make the spacing contract pass by vacancy. Rows with a
           // scheduled next run are exactly the ones that must show one.
-          const scheduledRows = rows.filter((row) => row.getAttribute('data-status') === 'scheduled');
+          const scheduledRows = rows.filter(
+            (row) => row.getAttribute('data-status') === 'scheduled',
+          );
           if (
             scheduledRows.length > 0 &&
             !rows.some((row) => row.querySelector('.maka-plan-list-row-countdown'))
@@ -441,8 +437,9 @@ async function smokeStory(page, baseUrl, job, options = {}) {
               failures.push('plan reminder wide row must lay out as a flex row');
             }
             const countdownRights = rows
-              .map((row) =>
-                row.querySelector('.maka-plan-list-row-countdown')?.getBoundingClientRect().right,
+              .map(
+                (row) =>
+                  row.querySelector('.maka-plan-list-row-countdown')?.getBoundingClientRect().right,
               )
               .filter((right) => typeof right === 'number')
               .map((right) => Math.round(right));
