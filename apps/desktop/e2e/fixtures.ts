@@ -403,7 +403,7 @@ export const test = base.extend<{
     await withE2eWindow(
       {
         seed: false,
-        readinessSelector: '.maka-plan-card',
+        readinessSelector: '.maka-plan-list-row',
         e2eFixtureScenario: 'plan-reminders',
         locale: 'zh',
       },
