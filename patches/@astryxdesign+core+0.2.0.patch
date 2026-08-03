@@ -1,8 +1,16 @@
 diff --git a/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js b/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js
-index 0b4cd16..c174163 100644
+index 0b4cd16..293fa05 100644
 --- a/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js
 +++ b/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js
-@@ -35,6 +35,21 @@ function mergeIds(...ids) {
+@@ -15,6 +15,7 @@
+  */
+ import React, { useCallback, useRef } from 'react';
+ import { useIsomorphicLayoutEffect } from "../hooks/useIsomorphicLayoutEffect.js";
++import { addAnchorName, removeAnchorName } from "../Layer/anchorName.js";
+ import * as stylex from '@stylexjs/stylex';
+ import { useTooltip } from "./useTooltip.js";
+ import "../theme/tokens.stylex.js";
+@@ -35,6 +36,34 @@ function mergeIds(...ids) {
    return filtered.length > 0 ? filtered.join(' ') : undefined;
  }
  
@@ -21,10 +29,23 @@ index 0b4cd16..c174163 100644
 +  return rest.length > 0 ? rest.join(' ') : undefined;
 +}
 +
++/**
++ * Whether an ARIA ID list already contains one id.
++ *
++ * `aria-describedby` is a value invariant, not an element-identity one: the
++ * trigger element can stay put while somebody else rewrites the attribute.
++ */
++function hasId(value, id) {
++  if (!value || !id) {
++    return false;
++  }
++  return value.split(/\s+/).includes(id);
++}
++
  /**
   * Tooltip component for displaying informative text on hover/focus.
   *
-@@ -90,65 +105,102 @@ export function Tooltip({
+@@ -90,65 +119,104 @@ export function Tooltip({
      onHide: handleHide
    });
  
@@ -34,14 +55,15 @@ index 0b4cd16..c174163 100644
 +  // A tooltip attaches two different kinds of state to its trigger, and they
 +  // are keyed differently:
 +  //
-+  //  - `positionRef` (inline `anchor-name`) and `aria-describedby` describe the
-+  //    ELEMENT. Applying them twice to the same element is a no-op, so they are
-+  //    keyed on element identity and skipped entirely when nothing moved.
++  //  - the inline `anchor-name` and `aria-describedby` describe the ELEMENT, so
++  //    they are bookkept against element identity and skipped entirely when the
++  //    trigger has not moved. This is the entire per-render cost.
 +  //  - `interactionRef` installs event listeners that close over the current
 +  //    props (`isEnabled`, `delay`, `hideDelay`, `focusTrigger`,
 +  //    `onOpenChange`). `removeEventListener` only matches the exact function
-+  //    that was added, so these are keyed on the CLOSURE that installed them and
-+  //    must be removed through that same closure.
++  //    that was added, so these are bound and unbound through React's own
++  //    per-render effect cleanup, which runs the cleanup that the *previous*
++  //    render created before the next render's effect body.
 +  //
 +  // The two effects this replaces keyed both on `tooltip.ref` and listed it as a
 +  // dependency while never listing the element they actually read
@@ -54,14 +76,15 @@ index 0b4cd16..c174163 100644
 +  // both halves right.
 +  const attachedRef = useRef(null);
 +  const attachedIdRef = useRef(null);
-+  const boundRef = useRef(null);
 +
-+  // The unmount cleanup below closes over the render that mounted it, so the
-+  // position ref is read through a ref to reach the current one. Its identity
-+  // does not matter (it removes the anchor name by id), unlike the interaction
-+  // ref, which is tracked per binding in `boundRef`.
-+  const positionRefRef = useRef(tooltip.positionRef);
-+  positionRefRef.current = tooltip.positionRef;
++  // Anchor names are added and removed directly rather than through
++  // `tooltip.positionRef`. `useLayer`'s ref does two things at once: it adds
++  // this layer's anchor id to the element handed in, and it removes that id from
++  // whatever element `useLayer` itself last held. Only the first half belongs to
++  // this component; the second half is the bookkeeping being replaced here, and
++  // going through it detaches the wrong element whenever the JSX ref has already
++  // moved `useLayer`'s trigger (element children replaced by text children).
++  const anchorId = tooltip.anchorId;
 +  function detachPosition() {
 +    const previous = attachedRef.current;
 +    if (!previous) {
@@ -69,25 +92,16 @@ index 0b4cd16..c174163 100644
      }
 -    const el = anchorRef.current;
 -    if (!el) {
-+    positionRefRef.current(null);
+-      return;
++    removeAnchorName(previous, anchorId);
 +    const remaining = removeId(previous.getAttribute('aria-describedby'), attachedIdRef.current);
 +    if (remaining) {
 +      previous.setAttribute('aria-describedby', remaining);
 +    } else {
 +      previous.removeAttribute('aria-describedby');
-+    }
+     }
 +    attachedRef.current = null;
 +    attachedIdRef.current = null;
-+  }
-+  function detachInteraction() {
-+    const bound = boundRef.current;
-+    if (!bound) {
-       return;
-     }
-+    // Through the very closure that added the listeners, so the function
-+    // identities handed to `removeEventListener` match the ones added.
-+    bound.detach(null);
-+    boundRef.current = null;
 +  }
  
 -    // Use combined ref for position + interaction
@@ -107,9 +121,10 @@ index 0b4cd16..c174163 100644
 -  }, [anchorRef, tooltip.ref, tooltip.describedBy]);
 -
 -  // For element children with display:contents, attach ref to first child
-+  // Runs on every render (no dependency array) and returns without writing
-+  // anything unless the element it resolves, or the closure holding the
-+  // listeners, actually differs from what it already holds.
++  // Runs on every render (no dependency array). The element-keyed half returns
++  // without writing anything unless the trigger actually moved or somebody else
++  // overwrote `aria-describedby`; the listener half is bound and released by
++  // React itself, one cleanup per render.
    useIsomorphicLayoutEffect(() => {
 -    if (anchorRef) {
 -      return;
@@ -117,79 +132,85 @@ index 0b4cd16..c174163 100644
 -    if (textOnly) {
 -      return;
 -    } // Skip for text-only (ref is on wrapper)
--
--    const wrapper = wrapperRef.current;
--    if (!wrapper) {
--      return;
--    }
--    const firstChild = wrapper.firstElementChild;
--    if (!firstChild) {
--      return;
 +    // Text-only children carry the ref and `aria-describedby` through JSX, so
 +    // there is nothing to attach imperatively. `anchorRef` wins over children:
 +    // that is sibling mode.
 +    const target = anchorRef ? anchorRef.current : textOnly ? null : wrapperRef.current?.firstElementChild ?? null;
-+
+ 
+-    const wrapper = wrapperRef.current;
+-    if (!wrapper) {
+-      return;
 +    // Element-keyed: anchor name and `aria-describedby`.
 +    if (target !== attachedRef.current) {
 +      detachPosition();
 +      if (target) {
-+        positionRefRef.current(target);
++        addAnchorName(target, anchorId);
 +        target.setAttribute('aria-describedby', mergeIds(target.getAttribute('aria-describedby'), tooltip.describedBy) ?? '');
 +        attachedRef.current = target;
 +        attachedIdRef.current = tooltip.describedBy ?? null;
 +      }
++    } else if (target && attachedIdRef.current) {
++      // `aria-describedby` is a VALUE invariant, not an element-identity one.
++      // The element can stay put while the application rewrites the attribute
++      // from its own props, dropping this tooltip's id and silently breaking the
++      // description. Re-assert it — reading the attribute is free, so a steady
++      // state where nobody else writes still costs zero writes.
++      const current = target.getAttribute('aria-describedby');
++      if (!hasId(current, attachedIdRef.current)) {
++        target.setAttribute('aria-describedby', mergeIds(current, attachedIdRef.current) ?? '');
++      }
      }
- 
+-    const firstChild = wrapper.firstElementChild;
+-    if (!firstChild) {
++
++    // Closure-keyed: event listeners. React runs the cleanup a render created
++    // before the next render's effect body, so `detach` is always the same
++    // closure that added the listeners — which is the only thing
++    // `removeEventListener` matches on.
++    if (!target) {
+       return;
+     }
+-
 -    // Use combined ref for position + interaction
 -    tooltip.ref(firstChild);
 -
 -    // Set aria-describedby, merging with existing
 -    const existingDescribedBy = firstChild.getAttribute('aria-describedby');
 -    firstChild.setAttribute('aria-describedby', mergeIds(existingDescribedBy, tooltip.describedBy) ?? '');
--    return () => {
++    const detach = tooltip.interactionRef;
++    detach(target);
+     return () => {
 -      tooltip.ref(null);
 -      if (existingDescribedBy) {
 -        firstChild.setAttribute('aria-describedby', existingDescribedBy);
 -      } else {
 -        firstChild.removeAttribute('aria-describedby');
-+    // Closure-keyed: event listeners.
-+    const bound = boundRef.current;
-+    if (!bound || bound.el !== target || bound.detach !== tooltip.interactionRef) {
-+      detachInteraction();
-+      if (target) {
-+        tooltip.interactionRef(target);
-+        boundRef.current = {
-+          el: target,
-+          detach: tooltip.interactionRef
-+        };
-       }
--    };
+-      }
++      detach(null);
+     };
 -  }, [anchorRef, textOnly, tooltip.ref, tooltip.describedBy]);
-+    }
 +  });
 +
 +  // Detaching while the tooltip lives is the hand-off above; this is unmount.
-+  useIsomorphicLayoutEffect(() => () => {
-+    detachPosition();
-+    detachInteraction();
-+  }, []);
++  // The listeners come off through the per-render cleanup, so only the
++  // element-keyed half is left to undo here.
++  useIsomorphicLayoutEffect(() => () => detachPosition(), []);
  
    // Sibling mode: render only the tooltip (no wrapper needed)
    if (anchorRef && children == null) {
 diff --git a/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx b/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx
-index ca65847..b438a49 100644
+index ca65847..2fc0aad 100644
 --- a/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx
 +++ b/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx
-@@ -19,6 +19,7 @@ import React, {
-   useRef,
-   type ReactElement,
+@@ -21,6 +21,7 @@ import React, {
    type ReactNode,
-+  type RefCallback,
  } from 'react';
  import {useIsomorphicLayoutEffect} from '../hooks/useIsomorphicLayoutEffect';
++import {addAnchorName, removeAnchorName} from '../Layer/anchorName';
  import * as stylex from '@stylexjs/stylex';
-@@ -153,6 +154,26 @@ function mergeIds(...ids: (string | undefined | null)[]): string | undefined {
+ import {useTooltip, type TooltipFocusTrigger} from './useTooltip';
+ import type {LayerAlignment, LayerPlacement} from '../Layer/useLayer';
+@@ -153,6 +154,39 @@ function mergeIds(...ids: (string | undefined | null)[]): string | undefined {
    return filtered.length > 0 ? filtered.join(' ') : undefined;
  }
  
@@ -213,10 +234,23 @@ index ca65847..b438a49 100644
 +  return rest.length > 0 ? rest.join(' ') : undefined;
 +}
 +
++/**
++ * Whether an ARIA ID list already contains one id.
++ *
++ * `aria-describedby` is a value invariant, not an element-identity one: the
++ * trigger element can stay put while somebody else rewrites the attribute.
++ */
++function hasId(value: string | null, id: string | null | undefined): boolean {
++  if (!value || !id) {
++    return false;
++  }
++  return value.split(/\s+/).includes(id);
++}
++
  /**
   * Tooltip component for displaying informative text on hover/focus.
   *
-@@ -211,75 +232,126 @@ export function Tooltip({
+@@ -211,75 +245,122 @@ export function Tooltip({
      onHide: handleHide,
    });
  
@@ -226,14 +260,15 @@ index ca65847..b438a49 100644
 +  // A tooltip attaches two different kinds of state to its trigger, and they
 +  // are keyed differently:
 +  //
-+  //  - `positionRef` (inline `anchor-name`) and `aria-describedby` describe the
-+  //    ELEMENT. Applying them twice to the same element is a no-op, so they are
-+  //    keyed on element identity and skipped entirely when nothing moved.
++  //  - the inline `anchor-name` and `aria-describedby` describe the ELEMENT, so
++  //    they are bookkept against element identity and skipped entirely when the
++  //    trigger has not moved. This is the entire per-render cost.
 +  //  - `interactionRef` installs event listeners that close over the current
 +  //    props (`isEnabled`, `delay`, `hideDelay`, `focusTrigger`,
 +  //    `onOpenChange`). `removeEventListener` only matches the exact function
-+  //    that was added, so these are keyed on the CLOSURE that installed them and
-+  //    must be removed through that same closure.
++  //    that was added, so these are bound and unbound through React's own
++  //    per-render effect cleanup, which runs the cleanup that the *previous*
++  //    render created before the next render's effect body.
 +  //
 +  // The two effects this replaces keyed both on `tooltip.ref` and listed it as a
 +  // dependency while never listing the element they actually read
@@ -246,17 +281,15 @@ index ca65847..b438a49 100644
 +  // both halves right.
 +  const attachedRef = useRef<HTMLElement | null>(null);
 +  const attachedIdRef = useRef<string | null>(null);
-+  const boundRef = useRef<{
-+    el: HTMLElement;
-+    detach: RefCallback<HTMLElement>;
-+  } | null>(null);
 +
-+  // The unmount cleanup below closes over the render that mounted it, so the
-+  // position ref is read through a ref to reach the current one. Its identity
-+  // does not matter (it removes the anchor name by id), unlike the interaction
-+  // ref, which is tracked per binding in `boundRef`.
-+  const positionRefRef = useRef(tooltip.positionRef);
-+  positionRefRef.current = tooltip.positionRef;
++  // Anchor names are added and removed directly rather than through
++  // `tooltip.positionRef`. `useLayer`'s ref does two things at once: it adds
++  // this layer's anchor id to the element handed in, and it removes that id from
++  // whatever element `useLayer` itself last held. Only the first half belongs to
++  // this component; the second half is the bookkeeping being replaced here, and
++  // going through it detaches the wrong element whenever the JSX ref has already
++  // moved `useLayer`'s trigger (element children replaced by text children).
++  const anchorId = tooltip.anchorId;
 +
 +  function detachPosition(): void {
 +    const previous = attachedRef.current;
@@ -267,33 +300,25 @@ index ca65847..b438a49 100644
 -    const el = anchorRef.current;
 -    if (!el) {
 -      return;
-+    positionRefRef.current(null);
-+    const remaining = removeId(
-+      previous.getAttribute('aria-describedby'),
-+      attachedIdRef.current,
-+    );
-+    if (remaining) {
-+      previous.setAttribute('aria-describedby', remaining);
-+    } else {
-+      previous.removeAttribute('aria-describedby');
-     }
- 
+-    }
+-
 -    // Use combined ref for position + interaction
 -    tooltip.ref(el);
-+    attachedRef.current = null;
-+    attachedIdRef.current = null;
-+  }
- 
+-
 -    // Set aria-describedby, merging with existing
 -    const existingDescribedBy = el.getAttribute('aria-describedby');
 -    el.setAttribute(
 -      'aria-describedby',
 -      mergeIds(existingDescribedBy, tooltip.describedBy) ?? '',
--    );
-+  function detachInteraction(): void {
-+    const bound = boundRef.current;
-+    if (!bound) {
-+      return;
++    removeAnchorName(previous, anchorId);
++    const remaining = removeId(
++      previous.getAttribute('aria-describedby'),
++      attachedIdRef.current,
+     );
++    if (remaining) {
++      previous.setAttribute('aria-describedby', remaining);
++    } else {
++      previous.removeAttribute('aria-describedby');
 +    }
  
 -    return () => {
@@ -305,16 +330,15 @@ index ca65847..b438a49 100644
 -      }
 -    };
 -  }, [anchorRef, tooltip.ref, tooltip.describedBy]);
-+    // Through the very closure that added the listeners, so the function
-+    // identities handed to `removeEventListener` match the ones added.
-+    bound.detach(null);
-+    boundRef.current = null;
++    attachedRef.current = null;
++    attachedIdRef.current = null;
 +  }
  
 -  // For element children with display:contents, attach ref to first child
-+  // Runs on every render (no dependency array) and returns without writing
-+  // anything unless the element it resolves, or the closure holding the
-+  // listeners, actually differs from what it already holds.
++  // Runs on every render (no dependency array). The element-keyed half returns
++  // without writing anything unless the trigger actually moved or somebody else
++  // overwrote `aria-describedby`; the listener half is bound and released by
++  // React itself, one cleanup per render.
    useIsomorphicLayoutEffect(() => {
 -    if (anchorRef) {
 -      return;
@@ -340,7 +364,7 @@ index ca65847..b438a49 100644
 +    if (target !== attachedRef.current) {
 +      detachPosition();
 +      if (target) {
-+        positionRefRef.current(target);
++        addAnchorName(target, anchorId);
 +        target.setAttribute(
 +          'aria-describedby',
 +          mergeIds(target.getAttribute('aria-describedby'), tooltip.describedBy) ??
@@ -349,26 +373,31 @@ index ca65847..b438a49 100644
 +        attachedRef.current = target;
 +        attachedIdRef.current = tooltip.describedBy ?? null;
 +      }
++    } else if (target && attachedIdRef.current) {
++      // `aria-describedby` is a VALUE invariant, not an element-identity one.
++      // The element can stay put while the application rewrites the attribute
++      // from its own props, dropping this tooltip's id and silently breaking the
++      // description. Re-assert it — reading the attribute is free, so a steady
++      // state where nobody else writes still costs zero writes.
++      const current = target.getAttribute('aria-describedby');
++      if (!hasId(current, attachedIdRef.current)) {
++        target.setAttribute(
++          'aria-describedby',
++          mergeIds(current, attachedIdRef.current) ?? '',
++        );
++      }
      }
  
 -    const firstChild = wrapper.firstElementChild as HTMLElement | null;
 -    if (!firstChild) {
--      return;
-+    // Closure-keyed: event listeners.
-+    const bound = boundRef.current;
-+    if (
-+      !bound ||
-+      bound.el !== target ||
-+      bound.detach !== tooltip.interactionRef
-+    ) {
-+      detachInteraction();
-+      if (target) {
-+        tooltip.interactionRef(target);
-+        boundRef.current = {el: target, detach: tooltip.interactionRef};
-+      }
++    // Closure-keyed: event listeners. React runs the cleanup a render created
++    // before the next render's effect body, so `detach` is always the same
++    // closure that added the listeners — which is the only thing
++    // `removeEventListener` matches on.
++    if (!target) {
+       return;
      }
-+  });
- 
+-
 -    // Use combined ref for position + interaction
 -    tooltip.ref(firstChild);
 -
@@ -379,23 +408,24 @@ index ca65847..b438a49 100644
 -      mergeIds(existingDescribedBy, tooltip.describedBy) ?? '',
 -    );
 -
--    return () => {
++    const detach = tooltip.interactionRef;
++    detach(target);
+     return () => {
 -      tooltip.ref(null);
 -      if (existingDescribedBy) {
 -        firstChild.setAttribute('aria-describedby', existingDescribedBy);
 -      } else {
 -        firstChild.removeAttribute('aria-describedby');
 -      }
--    };
++      detach(null);
+     };
 -  }, [anchorRef, textOnly, tooltip.ref, tooltip.describedBy]);
++  });
++
 +  // Detaching while the tooltip lives is the hand-off above; this is unmount.
-+  useIsomorphicLayoutEffect(
-+    () => () => {
-+      detachPosition();
-+      detachInteraction();
-+    },
-+    [],
-+  );
++  // The listeners come off through the per-render cleanup, so only the
++  // element-keyed half is left to undo here.
++  useIsomorphicLayoutEffect(() => () => detachPosition(), []);
  
    // Sibling mode: render only the tooltip (no wrapper needed)
    if (anchorRef && children == null) {

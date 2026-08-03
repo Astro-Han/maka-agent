@@ -162,8 +162,75 @@ describe('Astryx tooltip trigger stability', () => {
       'the text-only trigger carries aria-describedby through JSX',
     );
     assert.ok(
+      // The fake trigger reports 3 of the 5: `isFocusable` reads `tabIndex`,
+      // which this DOM does not synthesise from the `tabIndex` prop, so the two
+      // focus listeners a real browser binds here are not observable. See the
+      // harness fidelity note above `class FakeElement`.
       span.boundTypes().length > 0,
       'the text-only trigger still gets its interaction listeners',
+    );
+  });
+
+  // The mode switch, and the one place a detach routed through `useLayer`'s own
+  // ref gets wrong: by the time the layout effect runs, the text-only `<span>`'s
+  // JSX ref has already pointed `useLayer` at the span, so `positionRef(null)`
+  // would strip the anchor name off the element that just acquired it, and the
+  // outgoing button would keep the listeners it can never fire.
+  it('hands over cleanly when element children become text children', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'element child', trigger: 'button' }));
+    const button = findTrigger(container, 'BUTTON');
+    assert.ok(button, 'the element child must mount');
+    assert.ok(anchorNameOf(button), 'the element child must carry the anchor name');
+
+    await render(root, harness({ label: 'text child', trigger: 'text' }));
+    const span = findTrigger(container, 'SPAN');
+    assert.ok(span, 'the text child must mount its span');
+
+    assert.ok(
+      anchorNameOf(span),
+      'the span that now owns the layer must keep its anchor name',
+    );
+    assert.equal(
+      anchorNameOf(button) ?? '',
+      '',
+      'the outgoing element child must lose the anchor name',
+    );
+    assert.equal(
+      button.getAttribute('aria-describedby'),
+      null,
+      'the outgoing element child must stop being described',
+    );
+    assert.deepEqual(
+      button.boundTypes(),
+      [],
+      'the outgoing element child must keep no listeners',
+    );
+  });
+
+  // `aria-describedby` is a VALUE invariant, not an element-identity one. An
+  // element-keyed attachment sees the same element and skips, so an application
+  // that rewrites the attribute from its own props silently drops the tooltip's
+  // id and the description never comes back.
+  it('re-asserts its own id when the application rewrites aria-describedby', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'note 1', describedBy: 'note-1' }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+    const initial = trigger.getAttribute('aria-describedby')?.split(' ') ?? [];
+    assert.ok(initial.includes('note-1'), 'the app id must be preserved');
+    const tooltipId = initial.find((id) => id !== 'note-1');
+    assert.ok(tooltipId, 'the tooltip must add its own id');
+
+    await render(root, harness({ label: 'note 2', describedBy: 'note-2' }));
+
+    const rewritten = trigger.getAttribute('aria-describedby')?.split(' ') ?? [];
+    assert.ok(rewritten.includes('note-2'), 'the new app id must apply');
+    assert.ok(
+      rewritten.includes(tooltipId),
+      'the tooltip must still describe a trigger whose describedby was rewritten',
     );
   });
 });
@@ -315,6 +382,42 @@ describe('Astryx tooltip sibling-mode detachment', () => {
     );
   });
 
+  // The other way a snapshot goes stale, and the one a still-mounted sibling
+  // cannot heal: the application itself rewrites `aria-describedby` while the
+  // tooltip is attached. Restoring the attach-time snapshot on unmount would
+  // resurrect the value the app has already replaced.
+  it('leaves the value the application last wrote, not the one it found', async () => {
+    const { root, container } = installReactRenderer();
+    const anchor = { current: null as unknown as FakeElement | null };
+
+    await render(
+      root,
+      siblingHarness({ label: 'note 1', anchor, mounted: true, describedBy: 'note-1' }),
+    );
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+
+    await render(
+      root,
+      siblingHarness({ label: 'note 2', anchor, mounted: true, describedBy: 'note-2' }),
+    );
+    assert.ok(
+      trigger.getAttribute('aria-describedby')?.includes('note-2'),
+      'the new app id must apply',
+    );
+
+    await render(
+      root,
+      siblingHarness({ label: 'unmounted', anchor, mounted: false, describedBy: 'note-2' }),
+    );
+
+    assert.equal(
+      trigger.getAttribute('aria-describedby'),
+      'note-2',
+      'unmounting must remove only the tooltip id, leaving the current app value',
+    );
+  });
+
   // Detaching by restoring the `aria-describedby` snapshot taken at attach time
   // passes as long as tooltips unmount in reverse order. Unmount the one that
   // attached FIRST and the snapshot is stale: it predates the second tooltip's
@@ -382,6 +485,7 @@ function harness(options: {
   trigger?: 'button' | 'a' | 'text' | 'none';
   isOpen?: boolean;
   isEnabled?: boolean;
+  describedBy?: string;
   onOpenChange?: (open: boolean) => void;
 }): ReactElement {
   const trigger = options.trigger ?? 'button';
@@ -400,7 +504,11 @@ function harness(options: {
           ? null
           : trigger === 'text'
             ? 'Copy'
-            : createElement(trigger, {}, 'Copy'),
+            : createElement(
+                trigger,
+                options.describedBy ? { 'aria-describedby': options.describedBy } : {},
+                'Copy',
+              ),
     }),
   );
 }
@@ -411,6 +519,7 @@ function siblingHarness(options: {
   label: string;
   anchor: { current: FakeElement | null };
   mounted: boolean;
+  describedBy?: string;
 }): ReactElement {
   return createElement(
     'div',
@@ -422,7 +531,7 @@ function siblingHarness(options: {
         ref: (el: unknown) => {
           options.anchor.current = el as FakeElement | null;
         },
-        'aria-describedby': 'external-note',
+        'aria-describedby': options.describedBy ?? 'external-note',
       },
       'Copy',
     ),
@@ -575,6 +684,22 @@ function createFakeDocument(): Document {
   return fakeDocument as unknown as Document;
 }
 
+// What this DOM deliberately does NOT model, and therefore what these tests do
+// not cover. Each is a gap in reach, not a known failure:
+//
+//  - no `showPopover`/`hidePopover`, so `useLayer.show()` always takes the
+//    Safari<17 `style.display` fallback. The native popover path and the
+//    `toggle` listener it drives are never exercised.
+//  - `document.addEventListener` is a no-op, so Escape-to-dismiss (WCAG 1.4.13)
+//    cannot be reached.
+//  - `matches(':focus-visible')` always answers true, so the focus gate is never
+//    verified in the negative.
+//  - no `tabIndex` property, so `isFocusable` sees a `<span tabIndex={0}>` as
+//    unfocusable and binds 3 of the 5 listeners a real browser would.
+//
+// None of them touch what the patch changes — which element is written to, and
+// which closure removes the listeners — which is why they are recorded rather
+// than filled in.
 class FakeElement {
   readonly attributes = new Map<string, string>();
   readonly childNodes: Array<FakeElement | FakeText> = [];
