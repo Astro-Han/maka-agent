@@ -10887,6 +10887,46 @@ describe('AiSdkBackend concurrent turns', () => {
     assert.equal(backendInternals(backend).activeTurns.size, 0);
   });
 
+  // A scope that reaches activeTurns must always leave it. Setup runs before the
+  // provider pump exists, and a throw there used to strand the scope forever:
+  // nothing overwrites a Set entry, and stop()/dispose() only iterate.
+  test('a send that throws during setup leaves no scope registered', async () => {
+    const backend = createTestAiSdkBackend({
+      sessionId: 'session-1',
+      header: header(),
+      appendMessage: async () => {},
+      connection: connection(),
+      apiKey: 'sk-test',
+      modelId: 'mock-model-id',
+      modelFactory: () => completionModel(),
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    await assert.rejects(
+      drain(
+        backend.send({
+          turnId: 'turn-1',
+          text: 'hi',
+          context: [],
+          // A hosted Interaction Run for a different turn: beginTurn refuses it,
+          // and it throws before anything installs the turn's own cleanup.
+          hostedInteraction: {
+            sessionId: 'session-1',
+            turnId: 'a-different-turn',
+          } as never,
+        }),
+      ),
+      /mismatched hosted Interaction Run/,
+    );
+
+    assert.equal(backendInternals(backend).activeTurns.size, 0);
+    // And the backend is still usable: a leaked scope would pin dispose() to the
+    // stop path and broadcast endTurn to a dead runtime forever.
+    await backend.dispose();
+  });
+
   // A broadcast stop must reach every turn even when one of them cannot close.
   // `endTurn` rejects when a durable sandbox denial cannot be written, and it is
   // also the ONLY thing that rejects a tool parked on askUserQuestion — an abort

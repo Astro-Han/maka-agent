@@ -710,8 +710,24 @@ export class AiSdkBackend implements AgentBackend {
   }
 
   async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
-    const turnId = input.turnId;
+    // Registration and deregistration live in ONE frame, so a scope that made it
+    // into activeTurns is always removed exactly once — including when setup
+    // throws before the provider pump exists (a mismatched hosted Interaction
+    // Run, an unreadable attachment). A leaked scope would be permanent: nothing
+    // overwrites a Set entry, and stop()/dispose() only iterate it.
     const scope = this.openTurnScope(input);
+    try {
+      yield* this.sendWithinScope(scope, input);
+    } finally {
+      await this.cleanupAfterTurn(scope);
+    }
+  }
+
+  private async *sendWithinScope(
+    scope: TurnScope,
+    input: BackendSendInput,
+  ): AsyncIterable<SessionEvent> {
+    const turnId = input.turnId;
     const toolRuntime = scope.toolRuntime;
     toolRuntime.beginTurn(turnId, input.hostedInteraction);
     const turnAbortController = scope.abortController;
@@ -899,7 +915,6 @@ export class AiSdkBackend implements AgentBackend {
         stopReason: 'error',
       } satisfies CompleteEvent);
       queue.close();
-      await this.cleanupAfterTurn(scope);
       yield* this.drain(queue);
       return;
     }
@@ -960,7 +975,6 @@ export class AiSdkBackend implements AgentBackend {
         stopReason: 'error',
       } satisfies CompleteEvent);
       queue.close();
-      await this.cleanupAfterTurn(scope);
       yield* this.drain(queue);
       return;
     }
@@ -1997,7 +2011,6 @@ export class AiSdkBackend implements AgentBackend {
     } finally {
       if (!drainedNormally) turnAbortController.abort();
       await pumpDone.catch(() => {});
-      await this.cleanupAfterTurn(scope);
     }
   }
 
