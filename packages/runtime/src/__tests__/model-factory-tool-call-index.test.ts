@@ -545,6 +545,58 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
     });
   }
 
+  // A late alias is not just tolerated, it is recorded — the record learns it, so the call
+  // stays reachable by it afterwards. Here the third delta binds `late` to the first call and
+  // the fourth carries nothing else; without the binding the id resolves to no record, and
+  // with another call open the bare-delta fallback does not apply either, so the turn dies.
+  test('reaches a call again by an id it only learned from a later delta', async () => {
+    const { parts, failure } = await collectDeltas([
+      { index: 0, type: 'function', function: { name: 'read_file', arguments: '{"pa' } },
+      {
+        index: 1,
+        id: 'call_b',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{}' },
+      },
+      { index: 0, id: 'late', function: { arguments: 'th"' } },
+      { id: 'late', function: { arguments: ':"a"}' } },
+    ]);
+
+    assert.equal(failure, undefined, 'a learned alias must keep addressing its call');
+    assertCallsSeparable(parts);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolName, input }) => ({ toolName, input })),
+      [
+        { toolName: 'read_file', input: '{"path":"a"}' },
+        { toolName: 'write_file', input: '{}' },
+      ],
+    );
+  });
+
+  // The same binding decides ordering. Every call here ends up with a unique index, but one of
+  // them only supplies it on a continuation: without recording it, `flush()` sees an absent
+  // index, abandons index order, and emits the calls in arrival order — reversing the execution
+  // order the gateway asked for.
+  test('orders by an index a call only supplied on a later delta', async () => {
+    const { parts, failure } = await collectDeltas([
+      { id: 'call_second', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+      {
+        index: 0,
+        id: 'call_first',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{}' },
+      },
+      { index: 1, id: 'call_second', function: { arguments: '' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assertCallsSeparable(parts);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolCallId }) => toolCallId),
+      ['call_first', 'call_second'],
+    );
+  });
+
   test('does not restart a call whose index arrives only on a later delta', async () => {
     const { parts, failure } = await collectDeltas([
       { id: 'call_a', type: 'function', function: { name: 'read_file', arguments: '{"path"' } },

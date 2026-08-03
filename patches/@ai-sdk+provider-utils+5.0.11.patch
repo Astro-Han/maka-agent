@@ -1,8 +1,8 @@
 diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.js b/node_modules/@ai-sdk/provider-utils/dist/index.js
-index 851fce4..f896bbe 100644
+index 851fce4..d62e598 100644
 --- a/node_modules/@ai-sdk/provider-utils/dist/index.js
 +++ b/node_modules/@ai-sdk/provider-utils/dist/index.js
-@@ -3553,26 +3553,71 @@ var StreamingToolCallTracker = class {
+@@ -3553,26 +3553,77 @@ var StreamingToolCallTracker = class {
     * events as appropriate.
     */
    processDelta(toolCallDelta) {
@@ -10,6 +10,8 @@ index 851fce4..f896bbe 100644
 -    const index = (_a2 = toolCallDelta.index) != null ? _a2 : this.toolCalls.length;
 -    if (this.toolCalls[index] == null) {
 -      this.processNewToolCall(index, toolCallDelta);
+-    } else {
+-      this.processExistingToolCall(index, toolCallDelta);
 +    var _a2, _b2;
 +    const wireId = toolCallDelta.id == null || toolCallDelta.id === "" ? void 0 : toolCallDelta.id;
 +    const wireIndex = toolCallDelta.index != null ? toolCallDelta.index : void 0;
@@ -23,10 +25,15 @@ index 851fce4..f896bbe 100644
 +    }
 +    if (toolCall == null) {
 +      this.processNewToolCall(toolCallDelta, wireId, wireIndex);
-     } else {
--      this.processExistingToolCall(index, toolCallDelta);
-+      this.processExistingToolCall(toolCall, toolCallDelta);
++      return;
 +    }
++    if (toolCall.wireId === void 0 && wireId !== void 0) {
++      toolCall.wireId = wireId;
++    }
++    if (toolCall.index === void 0 && wireIndex !== void 0) {
++      toolCall.index = wireIndex;
++    }
++    this.processExistingToolCall(toolCall, toolCallDelta);
 +  }
 +  /**
 +   * The most recent tool call every alias this delta carries agrees with. An alias the
@@ -81,7 +88,7 @@ index 851fce4..f896bbe 100644
      var _a2, _b2, _c;
      if (this.typeValidation === "required") {
        if (toolCallDelta.type !== "function") {
-@@ -3589,35 +3634,32 @@ var StreamingToolCallTracker = class {
+@@ -3589,35 +3640,32 @@ var StreamingToolCallTracker = class {
          });
        }
      }
@@ -125,7 +132,7 @@ index 851fce4..f896bbe 100644
      if (toolCall.function.arguments.length > 0) {
        this.controller.enqueue({
          type: "tool-input-delta",
-@@ -3626,9 +3668,8 @@ var StreamingToolCallTracker = class {
+@@ -3626,9 +3674,8 @@ var StreamingToolCallTracker = class {
        });
      }
    }
