@@ -10815,16 +10815,22 @@ describe('AiSdkBackend concurrent turns', () => {
     ]);
     const preparedRunIds: Array<string | undefined> = [];
     const executions: string[] = [];
-    // The overlapping turn reaches its tool only after the other turn is fully
-    // torn down — the exact interleaving that produced the crash.
+    // The overlapping turn must reach its tool AFTER the other turn is fully
+    // torn down: run identity was read at dispatch, so that is the window the
+    // crash lived in. Holding the provider stream (not the tool body) is what
+    // puts the tool call on the far side of the other turn's cleanup.
     const firstTurnDone = makeGate();
-    const toolReached = makeGate();
+    const overlappingStreamStarted = makeGate();
 
     let servedToolCall = false;
     const model = new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         const servesOverlappingTurn = !servedToolCall && JSON.stringify(prompt).includes('second');
-        if (servesOverlappingTurn) servedToolCall = true;
+        if (servesOverlappingTurn) {
+          servedToolCall = true;
+          overlappingStreamStarted.release();
+          await firstTurnDone.promise;
+        }
         const chunks: LanguageModelV4StreamPart[] = servesOverlappingTurn
           ? [
               { type: 'stream-start', warnings: [] },
@@ -10879,8 +10885,6 @@ describe('AiSdkBackend concurrent turns', () => {
         {
           ...testTool('Read', z.object({ path: z.string() })),
           impl: async ({ path }: { path: string }) => {
-            toolReached.release();
-            await firstTurnDone.promise;
             executions.push(path);
             return { body: path };
           },
@@ -10903,9 +10907,9 @@ describe('AiSdkBackend concurrent turns', () => {
       backend.send(second.input({ runId: 'run-b', invocationId: 'invocation-b' })),
       second,
     );
-    // Let the overlapping turn park inside its tool, then run the other turn to
-    // completion on the SAME backend.
-    await toolReached.promise;
+    // Let the overlapping turn park mid-stream, run the other turn to completion
+    // on the SAME backend, then release the tool call into that aftermath.
+    await overlappingStreamStarted.promise;
     await drainDurably(
       backend.send(first.input({ runId: 'run-a', invocationId: 'invocation-a' })),
       first,
