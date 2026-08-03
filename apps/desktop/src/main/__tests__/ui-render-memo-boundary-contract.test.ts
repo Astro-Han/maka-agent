@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
-import type { SessionEvent, SessionSummary } from '@maka/core';
+import type { SessionEvent, SessionSummary, StoredMessage } from '@maka/core';
 import type { LiveTurnProjection, TurnViewModel } from '@maka/ui';
 import { applyLiveTurnEvent, armLiveTurn } from '@maka/ui';
 import { build } from 'esbuild';
@@ -43,6 +43,8 @@ type UiRenderModule = {
       onStreamingSettled?(messageId?: string): void;
     };
   }): ReactElement;
+  ChatSurfaceLayout(props: { children: ReactElement }): ReactElement;
+  ChatView(props: Record<string, unknown>): ReactElement;
 };
 type RendererWindow = Window & typeof globalThis;
 type MemoTestGlobal = typeof globalThis & {
@@ -345,6 +347,167 @@ describe('live-turn snapshot', () => {
   });
 });
 
+/**
+ * #2030: the transcript projection keeps a settled turn's object identity
+ * across deltas and refreshes, but that only reaches the DOM if every prop the
+ * memoized TurnView reads is stable too. Testing the projection alone leaves
+ * the wiring between it and the renderer untested — a pass added downstream of
+ * the projection (a `.map(turn => ({ ...turn }))`, a missing sessionId) restores
+ * the original defect while every projection test stays green. This measures
+ * the real ChatView.
+ */
+describe('ChatView transcript render boundary', () => {
+  const SESSION_ID = 'session-chat';
+
+  it('re-renders only the tail turn while an answer streams', async () => {
+    const { LocaleProvider, ChatSurfaceLayout, ChatView } = await importUiRenderModule();
+    const { root } = installReactRenderer();
+    const messages = transcriptMessages();
+    const footerActions = countedFooterActions(['turn-1', 'turn-2', 'turn-3']);
+
+    const renderAt = (text: string) => render(root, createElement(LocaleProvider, {
+      locale: 'zh',
+      children: createElement(ChatSurfaceLayout, {
+        children: createElement(ChatView, {
+          messages,
+          activeSession: chatSession(SESSION_ID),
+          liveTurn: streamingLiveTurn(text),
+          shellRunUpdates: SHELL_RUN_UPDATES,
+          turnFooterActionsByTurn: footerActions.byTurn,
+          onNew: () => {},
+        }),
+      }),
+    }));
+
+    await renderAt('he');
+    const baseline = footerActions.readCounts();
+    assert.ok(baseline['turn-1']! > 0, 'a settled turn must render its footer at least once');
+
+    // Only the live text moves. `messages` and `shellRunUpdates` keep identity,
+    // exactly as they do between two deltas in the app.
+    for (const text of ['hel', 'hell', 'hello']) await renderAt(text);
+
+    const after = footerActions.readCounts();
+    assert.equal(after['turn-1'], baseline['turn-1'], 'turn-1 owns the background Bash and must not re-render');
+    assert.equal(after['turn-2'], baseline['turn-2'], 'an unrelated settled turn must not re-render');
+  });
+
+  it('shows the newly selected session on the first render after a switch', async () => {
+    const { LocaleProvider, ChatSurfaceLayout, ChatView } = await importUiRenderModule();
+    const { root, container } = installReactRenderer();
+
+    const renderSession = (sessionId: string, answer: string) => render(root, createElement(LocaleProvider, {
+      locale: 'zh',
+      children: createElement(ChatSurfaceLayout, {
+        children: createElement(ChatView, {
+          // Same turn and message ids, different content — what a revision
+          // lineage actually produces.
+          messages: transcriptMessages(answer),
+          activeSession: chatSession(sessionId),
+          onNew: () => {},
+        }),
+      }),
+    }));
+
+    await renderSession(SESSION_ID, 'answer from the first session');
+    assert.match(container.textContent, /answer from the first session/);
+
+    await renderSession('session-other', 'answer from the second session');
+    assert.match(container.textContent, /answer from the second session/);
+    assert.doesNotMatch(container.textContent, /answer from the first session/);
+  });
+});
+
+const SHELL_RUN_UPDATES = [{
+  sessionId: 'session-chat',
+  ownership: { kind: 'local' as const },
+  sourceTurnId: 'turn-1',
+  sourceToolCallId: 'bash-1',
+  result: chatShellRun(9),
+}];
+
+/** A transcript whose first turn owns a background Bash the store leads. */
+function transcriptMessages(answer = 'first answer'): StoredMessage[] {
+  return [
+    { type: 'user', id: 'user-1', turnId: 'turn-1', ts: 1, text: 'run a job' },
+    { type: 'tool_call', id: 'bash-1', turnId: 'turn-1', ts: 2, toolName: 'Bash', args: { command: 'job', pty: true } },
+    { type: 'tool_result', id: 'result-1', turnId: 'turn-1', ts: 3, toolUseId: 'bash-1', isError: false, content: chatShellRun(1) },
+    { type: 'assistant', id: 'assistant-1', turnId: 'turn-1', ts: 4, text: answer, modelId: 'model-1' },
+    { type: 'turn_state', id: 'state-1', turnId: 'turn-1', ts: 5, status: 'completed', partialOutputRetained: false },
+    { type: 'user', id: 'user-2', turnId: 'turn-2', ts: 6, text: 'second' },
+    { type: 'assistant', id: 'assistant-2', turnId: 'turn-2', ts: 7, text: 'second answer', modelId: 'model-1' },
+    { type: 'turn_state', id: 'state-2', turnId: 'turn-2', ts: 8, status: 'completed', partialOutputRetained: false },
+    { type: 'user', id: 'user-3', turnId: 'turn-3', ts: 9, text: 'third' },
+  ];
+}
+
+function chatShellRun(revision: number) {
+  return {
+    kind: 'shell_run' as const,
+    ref: 'maka://runtime/background-tasks/pty-1',
+    mode: 'pty' as const,
+    status: 'running' as const,
+    cwd: '/repo',
+    cmd: 'job',
+    startedAt: 1,
+    updatedAt: revision,
+    revision,
+    output: {
+      mode: 'pty' as const,
+      screen: 'ready',
+      scrollback: '',
+      cols: 80,
+      rows: 24,
+      cursor: { x: 5, y: 0, visible: true },
+      alternateScreen: false,
+      truncated: false,
+      redacted: false,
+    },
+  };
+}
+
+function chatSession(id: string): SessionSummary {
+  return { ...createSession(id, 'Chat'), lastMessageAt: 1 };
+}
+
+function streamingLiveTurn(text: string): LiveTurnProjection {
+  return {
+    turnId: 'turn-3',
+    phase: 'streamed',
+    steps: [{
+      stepId: 'step-1',
+      contentOrder: ['text'],
+      text: { text, truncated: false, complete: false },
+      tools: [],
+    }],
+  };
+}
+
+/**
+ * One counting array per turn. `TurnFooterActions` maps over the array, so an
+ * index read is a render of that turn — the same measurement idiom as
+ * `CountedTimestamp`, applied to a prop the test owns rather than to the turn,
+ * which ChatView builds itself.
+ */
+function countedFooterActions(turnIds: readonly string[]): {
+  byTurn: Record<string, readonly unknown[]>;
+  readCounts(): Record<string, number>;
+} {
+  const counts: Record<string, number> = {};
+  const byTurn: Record<string, readonly unknown[]> = {};
+  for (const turnId of turnIds) {
+    counts[turnId] = 0;
+    const actions = [{ id: 'copy' as const, label: '复制', enabled: true }];
+    byTurn[turnId] = new Proxy(actions, {
+      get(target, property, receiver) {
+        if (property === '0') counts[turnId] = (counts[turnId] ?? 0) + 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+  }
+  return { byTurn, readCounts: () => ({ ...counts }) };
+}
+
 const LIVE_SESSION_ID = 'session-live';
 
 const selectTestProjection = (state: AppShellSessionUiState, sessionId: string) =>
@@ -467,6 +630,8 @@ async function importUiRenderModule(): Promise<UiRenderModule> {
         "export { SessionHistoryList } from './packages/ui/dist/session-history-list.js';",
         "export { LocaleProvider } from './packages/ui/dist/locale-context.js';",
         "export { TurnView } from './packages/ui/dist/chat-turn.js';",
+        "export { ChatView } from './packages/ui/dist/chat-view.js';",
+        "export { ChatSurfaceLayout } from './packages/ui/dist/chat-surface-layout.js';",
       ].join('\n'),
       resolveDir: REPO_ROOT,
       sourcefile: 'ui-render-contract.entry.mjs',
@@ -543,6 +708,21 @@ function installFakeDom(): void {
   globalThis.HTMLIFrameElement = fakeWindow.HTMLIFrameElement;
   globalThis.requestAnimationFrame = () => 0;
   globalThis.cancelAnimationFrame = () => {};
+  // The transcript surface observes geometry and escapes turn ids into
+  // selectors. None of it can measure anything here; these exist so the render
+  // completes and the memo boundaries stay the thing under test.
+  const previousResizeObserver = globalThis.ResizeObserver;
+  const previousIntersectionObserver = globalThis.IntersectionObserver;
+  const previousCss = (globalThis as { CSS?: unknown }).CSS;
+  class NoopObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+    takeRecords(): [] { return []; }
+  }
+  globalThis.ResizeObserver = NoopObserver as unknown as typeof ResizeObserver;
+  globalThis.IntersectionObserver = NoopObserver as unknown as typeof IntersectionObserver;
+  (globalThis as { CSS?: unknown }).CSS = { escape: (value: string) => value, supports: () => false };
   (globalThis as MemoTestGlobal).IS_REACT_ACT_ENVIRONMENT = true;
   cleanupTasks.push(() => {
     globalThis.document = previousDocument;
@@ -551,6 +731,9 @@ function installFakeDom(): void {
     globalThis.cancelAnimationFrame = previousCancelAnimationFrame;
     globalThis.HTMLElement = previousHTMLElement;
     globalThis.HTMLIFrameElement = previousHTMLIFrameElement;
+    globalThis.ResizeObserver = previousResizeObserver;
+    globalThis.IntersectionObserver = previousIntersectionObserver;
+    (globalThis as { CSS?: unknown }).CSS = previousCss;
     (globalThis as MemoTestGlobal).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
   });
 }
@@ -605,6 +788,38 @@ class FakeElement {
   }
 
   addEventListener(): void {}
+
+  querySelector(): FakeElement | null {
+    return null;
+  }
+
+  querySelectorAll(): FakeElement[] {
+    return [];
+  }
+
+  getElementsByClassName(): FakeElement[] {
+    return [];
+  }
+
+  getElementsByTagName(): FakeElement[] {
+    return [];
+  }
+
+  contains(): boolean {
+    return false;
+  }
+
+  closest(): FakeElement | null {
+    return null;
+  }
+
+  hasAttribute(name: string): boolean {
+    return this.attributes.has(name);
+  }
+
+  getBoundingClientRect(): { top: number; bottom: number; height: number; left: number; right: number; width: number } {
+    return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0 };
+  }
 
   getAttribute(name: string): string | null {
     return this.attributes.get(name) ?? null;
