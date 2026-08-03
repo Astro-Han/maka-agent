@@ -14,11 +14,6 @@ export function WorkspaceInstructionsSection(props: {
   onCreate(file: string): void | Promise<void>;
 }) {
   if (!props.state) return null;
-  /* Was a nested gray box inside the section ("no Cards in Cards") with the
-     detected-count heading, the char-limit note, and per-file chip buttons all
-     crammed on one line. Now: one summary row plus one row per instruction
-     file, sharing the group's divider rhythm; the open/create affordance is a
-     quiet ghost action on the row it belongs to. */
   return (
     <>
       <SettingsRow
@@ -65,10 +60,6 @@ export function MemoryPromptPreviewSection(props: {
   copyPending: boolean;
   onCopy(): void | Promise<void>;
 }) {
-  /* Was a muted card holding a bordered <pre> — a container in a container in
-     the page ("no Cards in Cards"). Now a first-class section: the will/won't
-     inject state reads as quiet header-adjacent text, the copy affordance is
-     the section's one action, and the <pre> is the single owned surface. */
   return (
     <SettingsSection
       title={props.copy.text.promptPreview}

@@ -432,6 +432,7 @@ function SettingsPage(props: {
           connections={props.connections}
           defaultSlug={props.defaultSlug}
           onUpdate={props.onUpdateSettings}
+          onReloadSettings={props.onReloadSettings}
           onRefreshConnections={props.onRefreshConnections}
         />
       );

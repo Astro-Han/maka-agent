@@ -82,12 +82,6 @@
     color: var(--muted-foreground);
     font-size: var(--font-size-caption);
   }
-.settingsMemoryBackupState {
-    color: var(--foreground-secondary);
-  }
-.settingsMemoryBackupState[data-empty="true"] {
-    color: var(--muted-foreground);
-  }
 .settingsMemoryBackupList {
     display: grid;
     /* #1363 review follow-up: same explicit column as the preview card. */
@@ -299,21 +293,6 @@
   gap: var(--space-2);
 }
 
-.settingsMemoryManualAddHeader {
-  display: grid;
-  gap: var(--space-0-5);
-}
-
-.settingsMemoryManualAddHeader strong {
-  color: var(--foreground);
-  font-size: var(--font-size-ui);
-}
-
-.settingsMemoryManualAddHeader small {
-  color: var(--muted-foreground);
-  font-size: var(--font-size-caption);
-}
-
 .settingsMemoryDraftWarning {
   display: grid;
   gap: var(--space-1);
@@ -333,31 +312,6 @@
   font-size: var(--font-size-caption);
   line-height: var(--leading-snug);
 }
-
-/* Memory page meta row — relocated from connection.css — issue #546 PR1. */
-/* Memory page meta row: the absolute MEMORY.md path used to render
-     full-width mono text that shoved the sibling status words into a
-     cramped vertical stack. Give the path its own full row with
-     head-side ellipsis (RTL trick keeps the meaningful .../MEMORY.md
-     tail visible; title= carries the full path on hover). */
-.settingsMemoryMeta {
-    flex-wrap: wrap;
-    row-gap: var(--space-1);
-    /* Open idiom: the meta lives as a quiet row inside the section's divider
-       rhythm — flush text, no filled strip (the strip was one more nested
-       container on a page that had too many). */
-  }
-.settingsMemoryPath {
-    /* The component already shortens the path for display
-       (displayMemoryPath); this is just the safety net so an
-       unexpectedly long tail can never shove the status words into a
-       cramped stack again. */
-    flex: 1 1 100%;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
 
 .settingsMemoryBackupCandidate > span {
   min-width: 0;

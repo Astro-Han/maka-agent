@@ -1,24 +1,23 @@
+import { useState } from 'react';
 import type { AppSettings, UpdateAppSettingsResult } from '@maka/core';
 
 import {
-  Badge,
   Button,
   FormLayout,
   MoreMenu,
-  TextInput,
   RelativeTime,
+  StatusDot,
   Switch,
   TextArea,
+  TextInput,
   useUiLocale,
-  Banner,
 } from '@maka/ui';
 import { getMemorySettingsCopy } from '../locales/settings-memory-copy';
 import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
 import { SettingsActions, SettingsField, SettingsRow, SettingsSection } from './settings-section';
 import { MemoryEntryList } from './memory-entry-list';
-import { MemoryPromptPreviewSection, WorkspaceInstructionsSection } from './memory-settings-sections';
+import { MemoryPromptPreviewSection } from './memory-settings-sections';
 import { useMemoryDocumentController } from './use-memory-settings-controller';
-import { useWorkspaceInstructionsController } from './use-workspace-instructions-controller';
 import {
   displayMemoryPath,
   localMemoryBackupKindLabel,
@@ -26,7 +25,7 @@ import {
   memoryStatusLabel,
   memoryStatusTone,
 } from './memory-settings-labels';
-import { statusBadgeVariant } from './settings-status-badge';
+import { statusDotVariant } from './settings-status-badge';
 
 export function MemorySettingsPage(props: {
   settings: AppSettings;
@@ -36,6 +35,7 @@ export function MemorySettingsPage(props: {
   const locale = useUiLocale();
   const copy = getMemorySettingsCopy(locale);
   const sharedCopy = getSettingsSharedCopy(locale);
+  const [addFormOpen, setAddFormOpen] = useState(false);
   const {
     draft,
     setDraft,
@@ -82,18 +82,14 @@ export function MemorySettingsPage(props: {
     promptPreviewWillInject,
     localMemoryPromptPreviewBudgetLabel,
     memoryDraftHasSensitiveFields,
-    memoryControlsDisabled: memoryDocumentControlsDisabled,
+    memoryControlsDisabled,
     isMemoryActionPending,
     copyLocalMemoryPromptPreview,
   } = useMemoryDocumentController({
     settings: props.settings,
     onReloadSettings: props.onReloadSettings,
   });
-  const workspaceInstructions = useWorkspaceInstructionsController({
-    onUpdate: props.onUpdate,
-    onReloadSettings: props.onReloadSettings,
-  });
-  const memoryControlsDisabled = memoryDocumentControlsDisabled || workspaceInstructions.busy;
+  const entryActionsBlocked = memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled;
 
   return (
     <div className="settingsStructuredPage">
@@ -106,10 +102,13 @@ export function MemorySettingsPage(props: {
           description={copy.text.localFileHelp}
           end={(
             <span className="settingsFormRowControlCluster">
-              <Badge
-                variant={statusBadgeVariant(memoryStatusTone(effective.status))}
-                label={memoryStatusLabel(effective.status, copy)}
-              />
+              <span className="settingsHealthSignalStatus">
+                <StatusDot
+                  variant={statusDotVariant(memoryStatusTone(effective.status))}
+                  label={memoryStatusLabel(effective.status, copy)}
+                />
+                <span>{memoryStatusLabel(effective.status, copy)}</span>
+              </span>
               <Switch
                 label={copy.text.enableLocalFile}
                 isLabelHidden
@@ -120,7 +119,6 @@ export function MemorySettingsPage(props: {
             </span>
           )}
         />
-
         <SettingsRow
           label={copy.text.agentReadable}
           description={copy.text.agentReadableHelp}
@@ -132,165 +130,281 @@ export function MemorySettingsPage(props: {
             onChange={(enabled) => void setAgentReadEnabled(enabled)}
           />}
         />
-
-        <SettingsRow
-          label={copy.text.instructions}
-          description={copy.text.instructionsHelp}
-          end={<Switch
-            label={copy.text.enableInstructions}
-            isLabelHidden
-            value={props.settings.workspaceInstructions.enabled}
-            isDisabled={memoryControlsDisabled}
-            onChange={(enabled) => void workspaceInstructions.setEnabled(enabled)}
-          />}
-        />
-        <WorkspaceInstructionsSection
-          copy={copy}
-          state={workspaceInstructions.state}
-          disabled={memoryControlsDisabled}
-          isActionPending={workspaceInstructions.isActionPending}
-          onOpen={workspaceInstructions.openFile}
-          onCreate={workspaceInstructions.createFile}
-        />
       </SettingsSection>
-      {/* Detail audit: everything from here down floated as loose blocks on
-          the page background — the only settings page whose body had no
-          section rhythm. Same grouped vocabulary as every other page now:
-          文件与备份 owns the document, its meta, its backups and the editor;
-          记忆条目 owns the per-entry review and the manual draft form. */}
+
+      <SettingsSection
+        title={sharedCopy.groups.memoryEntries}
+        description={sharedCopy.groups.memoryEntriesHelp}
+        action={(
+          <Button
+            variant="secondary"
+            size="sm"
+            isDisabled={entryActionsBlocked}
+            aria-expanded={addFormOpen}
+            onClick={() => setAddFormOpen((open) => !open)}
+            label={copy.text.manualAdd}
+          />
+        )}
+      >
+        {memoryEntryPreviewBlockedReason && (
+          <SettingsField>
+            <div className="settingsMemoryEntryPreviewNotice" role="status">
+              <strong>{copy.text.previewPaused}</strong>
+              <small>{memoryEntryPreviewBlockedReason}</small>
+            </div>
+          </SettingsField>
+        )}
+        {addFormOpen && (
+          <SettingsField>
+            <div className="settingsMemoryManualAdd" role="group" aria-label={copy.text.manualAddAria}>
+              <small className="settingsQuietStatus">{copy.text.manualAddHelp}</small>
+              <FormLayout>
+                <TextInput
+                  type="text"
+                  value={newMemoryTitle}
+                  onChange={setNewMemoryTitle}
+                  label={copy.text.title}
+                  placeholder={copy.text.titlePlaceholder}
+                  isDisabled={entryActionsBlocked}
+                  width="100%"
+                />
+                <TextInput
+                  type="text"
+                  value={newMemoryTags}
+                  onChange={setNewMemoryTags}
+                  label={copy.text.tags}
+                  placeholder={copy.text.tagsPlaceholder}
+                  isDisabled={entryActionsBlocked}
+                  width="100%"
+                />
+                <TextArea
+                  value={newMemoryContent}
+                  onChange={setNewMemoryContent}
+                  label={copy.text.content}
+                  placeholder={copy.text.contentPlaceholder}
+                  rows={3}
+                  isDisabled={entryActionsBlocked}
+                  width="100%"
+                />
+              </FormLayout>
+              <SettingsActions>
+                <Button
+                  variant="primary"
+                  isDisabled={entryActionsBlocked}
+                  onClick={addManualMemoryDraftEntry}
+                  label={copy.text.addDraft}
+                />
+                <Button
+                  variant="ghost"
+                  onClick={() => setAddFormOpen(false)}
+                  label={sharedCopy.cancel}
+                />
+              </SettingsActions>
+            </div>
+          </SettingsField>
+        )}
+        {memoryDraftHasSensitiveFields && (
+          <SettingsField>
+            <div className="settingsMemoryDraftWarning" role="status">
+              <strong>{copy.text.sensitiveDraft}</strong>
+              <small>{copy.text.sensitiveDraftHelp}</small>
+            </div>
+          </SettingsField>
+        )}
+        {visibleMemoryEntries.entries.length > 0 ? (
+          <>
+            <SettingsField>
+              <div className="settingsMemoryFilter">
+                <TextInput
+                  type="text"
+                  value={memoryEntryQuery}
+                  onChange={setMemoryEntryQuery}
+                  label={copy.text.filterAria}
+                  isLabelHidden
+                  placeholder={copy.text.filterPlaceholder}
+                  width="100%"
+                />
+                {normalizedMemoryEntryQuery ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setMemoryEntryQuery('')}
+                    label={copy.text.clear}
+                  />
+                ) : null}
+                <small>
+                  {normalizedMemoryEntryQuery
+                    ? copy.countMatches(filteredEntryCount, visibleMemoryEntries.entries.length)
+                    : copy.countEntries(visibleMemoryEntries.entries.length)}
+                </small>
+              </div>
+            </SettingsField>
+            {normalizedMemoryEntryQuery && filteredEntryCount === 0 ? (
+              <SettingsField>
+                <div className="settingsMemoryFilterEmpty" role="status">
+                  <strong>{copy.text.filterEmpty}</strong>
+                  <small>{copy.text.filterEmptyHelp}</small>
+                </div>
+              </SettingsField>
+            ) : (
+              <SettingsField>
+                <div className="settingsMemoryEntryGroups">
+                  <MemoryEntryList
+                    title={copy.text.activeMemories}
+                    copy={copy}
+                    entries={filteredActiveEntries}
+                    filtered={normalizedMemoryEntryQuery.length > 0}
+                    draftDirty={memoryDraftDirty}
+                    busy={entryActionsBlocked}
+                    pendingCopyIds={pendingMemoryActions}
+                    onCopyReference={copyMemoryEntryReference}
+                    onFocusDraft={focusMemoryEntryInDraft}
+                    onStatusChange={updateMemoryEntryStatus}
+                  />
+                  {visibleMemoryEntries.archivedEntries.length > 0 && (
+                    <MemoryEntryList
+                      title={copy.text.archivedMemories}
+                      copy={copy}
+                      entries={filteredArchivedEntries}
+                      filtered={normalizedMemoryEntryQuery.length > 0}
+                      archived
+                      draftDirty={memoryDraftDirty}
+                      busy={entryActionsBlocked}
+                      pendingCopyIds={pendingMemoryActions}
+                      onCopyReference={copyMemoryEntryReference}
+                      onFocusDraft={focusMemoryEntryInDraft}
+                      onStatusChange={updateMemoryEntryStatus}
+                    />
+                  )}
+                </div>
+              </SettingsField>
+            )}
+          </>
+        ) : !memoryEntryPreviewBlockedReason ? (
+          <SettingsField>
+            <div className="settingsMemoryListEmpty" role="status">
+              <strong>{copy.text.waitingEntry}</strong>
+              <small>{copy.text.waitingEntryHelp}</small>
+            </div>
+          </SettingsField>
+        ) : null}
+      </SettingsSection>
+
       <SettingsSection
         title={sharedCopy.groups.memoryDocument}
         description={sharedCopy.groups.memoryDocumentHelp}
       >
-      <SettingsField>
-      <div className="settingsConnectionMeta settingsMemoryMeta">
-        <span className="settingsMemoryPath" title={effective.path || undefined}>
-          {effective.path ? displayMemoryPath(effective.path) : copy.text.waitingFile}
-        </span>
-        {effective.latestBackup ? (
-          <span className="settingsMemoryBackupState">
-            {copy.text.openPrevious} · {localMemoryBackupKindLabel(effective.latestBackup.kind, copy)} · {localMemoryBackupSummary(effective.latestBackup, copy)} · <RelativeTime ts={effective.latestBackup.updatedAt} />
-          </span>
-        ) : (
-          <span className="settingsMemoryBackupState" data-empty="true">{copy.text.waitingBackup}</span>
-        )}
-        <span className="settingsMemoryDirtyState" data-dirty={memoryDraftDirty ? 'true' : 'false'}>
-          {memoryDraftDirty ? copy.text.dirty : copy.text.savedDraft}
-        </span>
-        <span>
-          {copy.countActive(visibleMemoryEntries.activeEntries.length, memoryDraftDirty)}
-        </span>
-        {visibleMemoryEntries.archivedEntries.length > 0 && (
-          <span>
-            {copy.countArchived(visibleMemoryEntries.archivedEntries.length, memoryDraftDirty)}
-          </span>
-        )}
-      </div>
-      </SettingsField>
-      {effective.backups && effective.backups.length > 1 && (
-        <SettingsField>
-        <div className="settingsMemoryBackupList" role="status">
-          <strong>{copy.text.backupCandidates}</strong>
-          {/* PR-MEMORY-BACKUP-LIST-A11Y-0 (round 16/30): same
-              fix as round-7 daily-review archive list. Was
-              `<div role="list">` with `<span role="listitem">`
-              children — invalid layering (a span is not a list,
-              and a listitem on a span has no list context to
-              attach to). Switched to semantic <ul>/<li> so
-              screen readers get the relationship from the
-              elements themselves. */}
-          <ul className="settingsMemoryBackupCandidates" aria-label={copy.text.backupCandidatesAria}>
-            {effective.backups.map((backup) => {
-              const backupCandidateLabel = `${localMemoryBackupKindLabel(backup.kind, copy)} · ${localMemoryBackupSummary(backup, copy)}`;
-              return (
-                <li key={`${backup.kind}:${backup.path}`} className="settingsMemoryBackupCandidate">
-                  <span>{backupCandidateLabel} · <RelativeTime ts={backup.updatedAt} /></span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={copy.openBackupAria(backupCandidateLabel)}
-                    isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending(`backup:${backup.kind}:open`)}
-                    onClick={() => void openBackupCandidate(backup)}
-                    label={isMemoryActionPending(`backup:${backup.kind}:open`) ? copy.text.opening : copy.text.open}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={copy.restoreBackupAria(backupCandidateLabel)}
-                    isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending(`backup:${backup.kind}:restore`)}
-                    onClick={() => void restoreBackupCandidate(backup)}
-                    label={isMemoryActionPending(`backup:${backup.kind}:restore`) ? copy.text.restoring : copy.text.restore}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={copy.copyBackupAria(backupCandidateLabel)}
-                    isDisabled={isMemoryActionPending(`backup:${backup.kind}:copy`)}
-                    onClick={() => void copyBackupReference(backup)}
-                    label={isMemoryActionPending(`backup:${backup.kind}:copy`) ? copy.text.copying : copy.text.copyReference}
-                  />
-                </li>
-              );
-            })}
-          </ul>
-          <small>{copy.text.backupHelp}</small>
-        </div>
-        </SettingsField>
-      )}
-      {lastSaveSummary && !memoryDraftDirty && (
-        <SettingsField>
-        <div className="settingsMemorySaveSummary" role="status">
-          <strong>{lastSaveSummary.title}</strong>
-          <small className="settingsMemorySaveSummaryTime">
-            {copy.text.savedAt}<RelativeTime ts={lastSaveSummary.savedAt} />
-          </small>
-          <small>{lastSaveSummary.detail}</small>
-        </div>
-        </SettingsField>
-      )}
-      <SettingsField>
-      <TextArea
-        ref={editorRef}
-        value={draft}
-        onChange={(value) => setDraft(value)}
-        isDisabled={memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled}
-        rows={12}
-        hasSpellCheck={false}
-        label={copy.text.fileContent}
-        width="100%"
-      />
-      </SettingsField>
-      {effective.reason && (
-        <SettingsField>
-          <Banner status="info" role="status" title={effective.reason} />
-        </SettingsField>
-      )}
-      {/* Was nine side-by-side text buttons wrapping onto two lines — no
-          hierarchy, every action shouting equally. The row keeps the three
-          actions that belong to the editing loop (save / open / reload);
-          everything else — folder, previous version, copy refs, reset,
-          restore — is folded into a MoreMenu, the library's own overflow
-          idiom for secondary actions. */}
-      <SettingsActions role="group" aria-label={copy.text.fileActionsAria}>
-        <Button variant="primary" className="settingsActionWidthXs" isDisabled={memoryControlsDisabled || !effective.enabled || !memoryDraftDirty} onClick={() => void save()} label={pendingMemoryWriteAction === 'save' ? copy.text.saving : memoryDraftDirty ? copy.text.save : copy.text.saved} />
-        <Button variant="ghost" isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending('memory:file:open')} onClick={() => void openFile()} label={isMemoryActionPending('memory:file:open') ? copy.text.opening : copy.text.openFile} />
-        <Button variant="ghost" isDisabled={memoryControlsDisabled || !effective.enabled} onClick={() => void reloadDraftFromDisk()} label={pendingMemoryWriteAction === 'reload' ? copy.text.loading : copy.text.reload} />
-        <MoreMenu
-          label={copy.text.fileActionsAria}
-          size="sm"
-          items={[
-            { label: copy.text.openFolder, isDisabled: memoryControlsDisabled || !effective.enabled, onClick: () => void openFolder() },
-            { label: copy.text.copyPath, isDisabled: !effective.path, onClick: () => void copyPath() },
-            { type: 'divider' },
-            { label: copy.text.openPrevious, isDisabled: memoryControlsDisabled || !effective.enabled || !effective.latestBackup, onClick: () => void openLatestBackup() },
-            { label: copy.text.copyPrevious, isDisabled: !effective.latestBackup, onClick: () => void copyLatestBackupReference() },
-            { label: copy.text.restorePrevious, isDisabled: memoryControlsDisabled || !effective.enabled || !effective.latestBackup, onClick: () => void restoreLatestBackup() },
-            { type: 'divider' },
-            { label: copy.text.resetBackup, isDisabled: memoryControlsDisabled || !effective.enabled, onClick: () => void reset() },
-          ]}
+        <SettingsRow
+          align="start"
+          label={effective.path ? displayMemoryPath(effective.path) : copy.text.waitingFile}
+          description={(
+            <>
+              {effective.latestBackup ? (
+                <span>
+                  {localMemoryBackupKindLabel(effective.latestBackup.kind, copy)} · {localMemoryBackupSummary(effective.latestBackup, copy)} · <RelativeTime ts={effective.latestBackup.updatedAt} />
+                </span>
+              ) : (
+                <span>{copy.text.waitingBackup}</span>
+              )}
+            </>
+          )}
+          end={(
+            <span className="settingsMemoryDirtyState" data-dirty={memoryDraftDirty ? 'true' : 'false'}>
+              {memoryDraftDirty ? copy.text.dirty : copy.text.savedDraft}
+            </span>
+          )}
         />
-      </SettingsActions>
+        {effective.backups && effective.backups.length > 1 && (
+          <SettingsField>
+            <div className="settingsMemoryBackupList" role="status">
+              <strong>{copy.text.backupCandidates}</strong>
+              <ul className="settingsMemoryBackupCandidates" aria-label={copy.text.backupCandidatesAria}>
+                {effective.backups.map((backup) => {
+                  const backupCandidateLabel = `${localMemoryBackupKindLabel(backup.kind, copy)} · ${localMemoryBackupSummary(backup, copy)}`;
+                  return (
+                    <li key={`${backup.kind}:${backup.path}`} className="settingsMemoryBackupCandidate">
+                      <span>{backupCandidateLabel} · <RelativeTime ts={backup.updatedAt} /></span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={copy.openBackupAria(backupCandidateLabel)}
+                        isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending(`backup:${backup.kind}:open`)}
+                        onClick={() => void openBackupCandidate(backup)}
+                        label={isMemoryActionPending(`backup:${backup.kind}:open`) ? copy.text.opening : copy.text.open}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={copy.restoreBackupAria(backupCandidateLabel)}
+                        isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending(`backup:${backup.kind}:restore`)}
+                        onClick={() => void restoreBackupCandidate(backup)}
+                        label={isMemoryActionPending(`backup:${backup.kind}:restore`) ? copy.text.restoring : copy.text.restore}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={copy.copyBackupAria(backupCandidateLabel)}
+                        isDisabled={isMemoryActionPending(`backup:${backup.kind}:copy`)}
+                        onClick={() => void copyBackupReference(backup)}
+                        label={isMemoryActionPending(`backup:${backup.kind}:copy`) ? copy.text.copying : copy.text.copyReference}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+              <small>{copy.text.backupHelp}</small>
+            </div>
+          </SettingsField>
+        )}
+        {lastSaveSummary && !memoryDraftDirty && (
+          <SettingsField>
+            <div className="settingsMemorySaveSummary" role="status">
+              <strong>{lastSaveSummary.title}</strong>
+              <small className="settingsMemorySaveSummaryTime">
+                {copy.text.savedAt}<RelativeTime ts={lastSaveSummary.savedAt} />
+              </small>
+              <small>{lastSaveSummary.detail}</small>
+            </div>
+          </SettingsField>
+        )}
+        <SettingsField>
+          <TextArea
+            ref={editorRef}
+            value={draft}
+            onChange={setDraft}
+            isDisabled={entryActionsBlocked}
+            rows={12}
+            hasSpellCheck={false}
+            label={copy.text.fileContent}
+            width="100%"
+          />
+        </SettingsField>
+        {effective.reason && (
+          <SettingsField>
+            <p className="settingsQuietStatus" role="status">{effective.reason}</p>
+          </SettingsField>
+        )}
+        <SettingsActions role="group" aria-label={copy.text.fileActionsAria}>
+          <Button variant="primary" className="settingsActionWidthXs" isDisabled={memoryControlsDisabled || !effective.enabled || !memoryDraftDirty} onClick={() => void save()} label={pendingMemoryWriteAction === 'save' ? copy.text.saving : memoryDraftDirty ? copy.text.save : copy.text.saved} />
+          <Button variant="ghost" isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending('memory:file:open')} onClick={() => void openFile()} label={isMemoryActionPending('memory:file:open') ? copy.text.opening : copy.text.openFile} />
+          <Button variant="ghost" isDisabled={memoryControlsDisabled || !effective.enabled} onClick={() => void reloadDraftFromDisk()} label={pendingMemoryWriteAction === 'reload' ? copy.text.loading : copy.text.reload} />
+          <MoreMenu
+            label={copy.text.fileActionsAria}
+            size="sm"
+            items={[
+              { label: copy.text.openFolder, isDisabled: memoryControlsDisabled || !effective.enabled, onClick: () => void openFolder() },
+              { label: copy.text.copyPath, isDisabled: !effective.path, onClick: () => void copyPath() },
+              { type: 'divider' },
+              { label: copy.text.openPrevious, isDisabled: memoryControlsDisabled || !effective.enabled || !effective.latestBackup, onClick: () => void openLatestBackup() },
+              { label: copy.text.copyPrevious, isDisabled: !effective.latestBackup, onClick: () => void copyLatestBackupReference() },
+              { label: copy.text.restorePrevious, isDisabled: memoryControlsDisabled || !effective.enabled || !effective.latestBackup, onClick: () => void restoreLatestBackup() },
+              { type: 'divider' },
+              { label: copy.text.resetBackup, isDisabled: memoryControlsDisabled || !effective.enabled, onClick: () => void reset() },
+            ]}
+          />
+        </SettingsActions>
       </SettingsSection>
+
       <MemoryPromptPreviewSection
         copy={copy}
         active={promptPreviewWillInject}
@@ -301,148 +415,6 @@ export function MemorySettingsPage(props: {
         copyPending={isMemoryActionPending('memory:prompt-preview:copy')}
         onCopy={copyLocalMemoryPromptPreview}
       />
-      <SettingsSection
-        title={sharedCopy.groups.memoryEntries}
-        description={sharedCopy.groups.memoryEntriesHelp}
-      >
-      {memoryEntryPreviewBlockedReason && (
-        <SettingsField>
-        <div className="settingsMemoryEntryPreviewNotice" role="status">
-          <strong>{copy.text.previewPaused}</strong>
-          <small>{memoryEntryPreviewBlockedReason}</small>
-        </div>
-        </SettingsField>
-      )}
-      {visibleMemoryEntries.entries.length > 0 && (
-        <>
-          <SettingsField>
-          <div className="settingsMemoryFilter">
-            <TextInput
-              type="text"
-              value={memoryEntryQuery}
-              onChange={(value) => setMemoryEntryQuery(value)}
-              label={copy.text.filterAria}
-              isLabelHidden
-              placeholder={copy.text.filterPlaceholder}
-              width="100%"
-            />
-            {normalizedMemoryEntryQuery ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setMemoryEntryQuery('')}
-                label={copy.text.clear}
-              />
-            ) : null}
-            <small>
-              {normalizedMemoryEntryQuery
-                ? copy.countMatches(filteredEntryCount, visibleMemoryEntries.entries.length)
-                : copy.countEntries(visibleMemoryEntries.entries.length)}
-            </small>
-          </div>
-          </SettingsField>
-          {normalizedMemoryEntryQuery && filteredEntryCount === 0 ? (
-            <SettingsField>
-            <div className="settingsMemoryFilterEmpty" role="status">
-              <strong>{copy.text.filterEmpty}</strong>
-              <small>{copy.text.filterEmptyHelp}</small>
-            </div>
-            </SettingsField>
-          ) : (
-            <SettingsField>
-            <div className="settingsMemoryEntryGroups">
-              <MemoryEntryList
-                title={copy.text.activeMemories}
-                copy={copy}
-                entries={filteredActiveEntries}
-                filtered={normalizedMemoryEntryQuery.length > 0}
-                draftDirty={memoryDraftDirty}
-                busy={memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled}
-                pendingCopyIds={pendingMemoryActions}
-                onCopyReference={copyMemoryEntryReference}
-                onFocusDraft={focusMemoryEntryInDraft}
-                onStatusChange={updateMemoryEntryStatus}
-              />
-              {visibleMemoryEntries.archivedEntries.length > 0 && (
-                <MemoryEntryList
-                  title={copy.text.archivedMemories}
-                  copy={copy}
-                  entries={filteredArchivedEntries}
-                  filtered={normalizedMemoryEntryQuery.length > 0}
-                  archived
-                  draftDirty={memoryDraftDirty}
-                  busy={memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled}
-                  pendingCopyIds={pendingMemoryActions}
-                  onCopyReference={copyMemoryEntryReference}
-                  onFocusDraft={focusMemoryEntryInDraft}
-                  onStatusChange={updateMemoryEntryStatus}
-                />
-              )}
-            </div>
-            </SettingsField>
-          )}
-        </>
-      )}
-      {visibleMemoryEntries.entries.length === 0 && !memoryEntryPreviewBlockedReason && (
-        <SettingsField>
-        <div className="settingsMemoryListEmpty" role="status">
-          <strong>{copy.text.waitingEntry}</strong>
-          <small>{copy.text.waitingEntryHelp}</small>
-        </div>
-        </SettingsField>
-      )}
-      <SettingsField>
-      <div className="settingsMemoryManualAdd" role="group" aria-label={copy.text.manualAddAria}>
-        <div className="settingsMemoryManualAddHeader">
-          <strong>{copy.text.manualAdd}</strong>
-          <small>{copy.text.manualAddHelp}</small>
-        </div>
-        <FormLayout>
-          <TextInput
-            type="text"
-            value={newMemoryTitle}
-            onChange={(value) => setNewMemoryTitle(value)}
-            label={copy.text.title}
-            placeholder={copy.text.titlePlaceholder}
-            isDisabled={memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled}
-            width="100%"
-          />
-          <TextInput
-            type="text"
-            value={newMemoryTags}
-            onChange={(value) => setNewMemoryTags(value)}
-            label={copy.text.tags}
-            placeholder={copy.text.tagsPlaceholder}
-            isDisabled={memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled}
-            width="100%"
-          />
-          <TextArea
-            value={newMemoryContent}
-            onChange={(value) => setNewMemoryContent(value)}
-            label={copy.text.content}
-            placeholder={copy.text.contentPlaceholder}
-            rows={3}
-            isDisabled={memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled}
-            width="100%"
-          />
-        </FormLayout>
-        <Button
-          variant="secondary"
-          isDisabled={memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled}
-          onClick={addManualMemoryDraftEntry}
-          label={copy.text.addDraft}
-        />
-      </div>
-      </SettingsField>
-      {memoryDraftHasSensitiveFields && (
-        <SettingsField>
-        <div className="settingsMemoryDraftWarning" role="status">
-          <strong>{copy.text.sensitiveDraft}</strong>
-          <small>{copy.text.sensitiveDraftHelp}</small>
-        </div>
-        </SettingsField>
-      )}
-      </SettingsSection>
     </div>
   );
 }

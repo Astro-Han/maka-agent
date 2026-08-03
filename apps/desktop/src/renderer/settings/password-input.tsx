@@ -85,12 +85,8 @@ export function PasswordInput(props: {
     }
   }
   return (
-    /* The group label deliberately does NOT receive `isRequired`: Astryx's
-       FieldLabel hardcodes an untranslatable English "· Required" indicator
-       (FieldLabel.js: `isRequired ? 'Required' : null`), and our credential
-       labels already carry the localized 「（必填）」 suffix. The `required`
-       input semantic lives on the inner TextInput, whose own label is
-       visually hidden. */
+    // No isRequired on the group label: Astryx hardcodes an English "· Required"
+    // and our labels already carry 「（必填）」; the semantic lives on the inner input.
     <InputGroup
       label={props.label}
       description={props.description}
@@ -111,10 +107,7 @@ export function PasswordInput(props: {
         status={props.status ? { type: props.status.type } : undefined}
         hasAutoFocus={props.hasAutoFocus}
       />
-      {/* InputGroupText is the group's sanctioned addon segment — bare
-          IconButtons as group children get no segment styling, which left
-          the input with a naked flat right edge and the eye floating outside
-          the border. Wrapping them in the addon joins the caps correctly. */}
+      {/* InputGroupText: the sanctioned addon segment — bare IconButtons break the group's caps. */}
       <InputGroupText>
         {props.value && !props.isDisabled && (
           <IconButton

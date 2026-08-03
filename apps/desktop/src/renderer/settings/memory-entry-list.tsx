@@ -52,10 +52,6 @@ export function MemoryEntryList(props: {
               : undefined;
             return (
               <li key={entry.id}>
-                {/* Row, not card: entries are dense scannable data — the open
-                    idiom's edge-to-edge rows with dividers ("no Card-wrapped
-                    list items"). Active/archived reads from the group header
-                    and the group's dimmed state. */}
                 <article className="settingsMemoryEntryRow">
                 <strong>{entry.title}</strong>
                 <small className="settingsMemoryEntryMeta">

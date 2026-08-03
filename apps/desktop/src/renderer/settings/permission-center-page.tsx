@@ -182,9 +182,6 @@ export function PermissionCenterPage() {
 
           Both lines were duplicates, so what is left is the freshness readout
           and its action. */}
-      {/* The freshness readout + re-detect action ride the first section's
-          header, and the four colored StatTiles condensed onto one quiet
-          tabular count line — a settings page is not a dashboard. */}
       <SettingsSection
         variant="bare"
         title={copy.osSection}

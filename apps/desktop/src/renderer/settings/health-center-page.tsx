@@ -26,13 +26,7 @@ import { statusBadgeVariant } from './settings-status-badge';
  *
  * Read-only boundary: no test buttons, no repair flows. Test/repair entries
  * will be wired in PR-HC-2 once typed actions are exposed.
- *
- * Astryx alignment pass: the five colored StatTiles and the standalone
- * red/yellow blocker pills condensed onto the section vocabulary — counts
- * read as one quiet tabular line, blockers as one Banner (color is a
- * signal, not texture), and per-signal status is a StatusDot + text
- * instead of a colored Badge per row ("no decorative Badge").
- */
+*/
 export function HealthCenterPage() {
   const locale = useUiLocale();
   const copy = getHealthCenterCopy(locale);
