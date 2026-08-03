@@ -6,7 +6,8 @@ import { describe, test } from 'node:test';
 import type { HarborCellOutput } from '../cell-output.js';
 import type { TaskRunner } from '../fixed-prompt-controller.js';
 import { assertHarnessAbReportCompleted, buildHarnessAbReport } from '../harness-ab-report.js';
-import { runHarnessAbComparison } from '../harness-ab-run.js';
+import { runHarnessAbComparison, runHarnessArmCohort } from '../harness-ab-run.js';
+import type { HarnessAbArmId } from '../harness-ab-manifest.js';
 import { HarborInfraError } from '../harbor-task-runner.js';
 import { hashHeadlessSystemPrompt } from '../system-prompts.js';
 import { tokenSummary } from './helpers/cell-output-fixtures.js';
@@ -436,7 +437,64 @@ describe('runHarnessAbComparison', () => {
   });
 });
 
-function harnessArm(id: 'maka' | 'opencode', calls: string[], beforeRun?: () => Promise<void>) {
+describe('runHarnessArmCohort', () => {
+  test('reports all pairwise projections from one three-arm cohort', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maka-harness-cohort-'));
+    try {
+      const promptPath = join(dir, 'empty-system-prompt.txt');
+      await writeFile(promptPath, '', 'utf8');
+      const calls: string[] = [];
+      const summary = await runHarnessArmCohort({
+        runId: 'deepseek-three-way',
+        runRoot: dir,
+        resultsJsonlPath: join(dir, 'results.jsonl'),
+        systemPromptPath: promptPath,
+        resumeFingerprint: 'sha256:manifest',
+        evaluationTasks: [
+          { id: 'a', path: '/tasks/a' },
+          { id: 'b', path: '/tasks/b' },
+        ],
+        arms: [
+          harnessArm('maka', calls),
+          harnessArm('codex', calls),
+          harnessArm('claude-code', calls),
+        ],
+        pairConcurrency: 1,
+        armExecution: 'sequential',
+      });
+
+      assert.deepEqual(summary.armIds, ['maka', 'codex', 'claude-code']);
+      assert.deepEqual(summary.commonCohort, {
+        groups: 2,
+        comparableGroups: 2,
+        excludedGroupIds: [],
+      });
+      assert.deepEqual(
+        summary.pairwise.map(({ baselineArmId, candidateArmId }) => [
+          baselineArmId,
+          candidateArmId,
+        ]),
+        [
+          ['maka', 'codex'],
+          ['maka', 'claude-code'],
+          ['codex', 'claude-code'],
+        ],
+      );
+      assert.deepEqual(calls, [
+        'a:maka',
+        'a:codex',
+        'a:claude-code',
+        'b:codex',
+        'b:claude-code',
+        'b:maka',
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+function harnessArm(id: HarnessAbArmId, calls: string[], beforeRun?: () => Promise<void>) {
   const config = {
     id: `harness-${id}`,
     backend: 'ai-sdk' as const,

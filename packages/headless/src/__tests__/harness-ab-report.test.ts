@@ -5,6 +5,9 @@ import type { FixedPromptTaskInfraFailedEvent } from '../fixed-prompt-controller
 import {
   assertHarnessAbReportCompleted,
   buildHarnessAbReport,
+  buildHarnessCohortReport,
+  renderHarnessCohortReportCsv,
+  renderHarnessCohortReportMarkdown,
   renderHarnessAbReportCsv,
   renderHarnessAbReportMarkdown,
 } from '../harness-ab-report.js';
@@ -56,8 +59,51 @@ describe('harness A/B report', () => {
     } as Pick<HarnessAbRunManifest, 'arms'>;
     assert.throws(
       () => buildHarnessAbReport(summary, undefined, 'metered', partialManifest),
-      /execution placement must be declared for both arms/,
+      /execution placement must be declared for every arm/,
     );
+  });
+
+  test('renders a three-arm common cohort with native protocol disclosure', () => {
+    const events = {
+      maka: [usage('a', true, 100, 20, 25, 0.001)],
+      codex: [usage('a', false, 120, 30, 30, 0.002)],
+      'claude-code': [usage('a', true, 110, 10, 28, 0.0015)],
+    };
+    const comparison = (baselineArmId: keyof typeof events, candidateArmId: keyof typeof events) =>
+      summarizeAbComparison({
+        runId: 'deepseek-three-way',
+        roundId: `${baselineArmId}-vs-${candidateArmId}`,
+        baselineArmId,
+        candidateArmId,
+        evaluationTaskIds: ['a'],
+        baselineRuns: [events[baselineArmId]],
+        candidateRuns: [events[candidateArmId]],
+      });
+    const report = buildHarnessCohortReport({
+      runId: 'deepseek-three-way',
+      armIds: ['maka', 'codex', 'claude-code'],
+      taskCount: 1,
+      commonCohort: { groups: 1, comparableGroups: 1, excludedGroupIds: [] },
+      pairwise: [
+        comparison('maka', 'codex'),
+        comparison('maka', 'claude-code'),
+        comparison('codex', 'claude-code'),
+      ],
+    });
+
+    assert.equal(report.arms.length, 3);
+    assert.deepEqual(report.measurement.protocolByArm, {
+      maka: 'openai-chat',
+      codex: 'openai-responses',
+      'claude-code': 'anthropic-messages',
+    });
+    assert.deepEqual(report.tasks[0]?.arms, [
+      { armId: 'maka', observed: 1, valid: 1, passed: 1 },
+      { armId: 'codex', observed: 1, valid: 1, passed: 0 },
+      { armId: 'claude-code', observed: 1, valid: 1, passed: 1 },
+    ]);
+    assert.match(renderHarnessCohortReportMarkdown(report), /Common cohort: 1\/1/);
+    assert.match(renderHarnessCohortReportCsv(report), /claude-code,1,1,1/);
   });
 
   test('keeps effectiveness and economy as separate reproducible axes', () => {

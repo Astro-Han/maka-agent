@@ -682,6 +682,49 @@ test('harness A/B composition defaults preserve existing routes and reject unsup
   );
 });
 
+test('harness CLI freezes the synchronized DeepSeek three-way composition', async () => {
+  const {
+    buildHarnessAbManifest,
+    resolveHarnessAbRunId,
+    resolveHarnessComposition,
+    resolveHarnessCompetitorToolchain,
+  } = await import(new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href);
+  const composition = resolveHarnessComposition({ competitors: 'codex,claude-code' });
+  assert.equal(composition.runtimeProfile.id, 'deepseek-v4-flash-max');
+  assert.deepEqual(
+    composition.competitorProfiles.map((profile: { id: string }) => profile.id),
+    ['codex', 'claude-code'],
+  );
+  assert.equal(
+    resolveHarnessAbRunId(composition),
+    'deepseek-v4-flash-maka-vs-codex-vs-claude-code-tbench-2.1-full-v1',
+  );
+  const manifest = buildHarnessAbManifest({
+    subjectFingerprint: 'subject',
+    taskSourceFingerprint: 'tasks',
+    toolchainFingerprint: 'tools',
+    composition,
+    taskIds: ['a', 'b', 'c', 'd', 'e'],
+    pairConcurrency: 2,
+    armExecution: 'parallel',
+  });
+  assert.deepEqual(
+    manifest.arms.map((arm: { id: string }) => arm.id),
+    ['maka', 'codex', 'claude-code'],
+  );
+  assert.match(
+    String(manifest.arms[1]?.metadata?.config.modelCatalogFingerprint),
+    /^sha256:[a-f0-9]{64}$/,
+  );
+  assert.equal(manifest.maxConcurrentAttempts, 6);
+  assert.equal(
+    resolveHarnessCompetitorToolchain('/run', composition.competitorProfiles[1], {
+      MAKA_HARNESS_AB_CLAUDE_CODE_TOOLCHAIN: '/prepared/claude-code',
+    }).path,
+    '/prepared/claude-code',
+  );
+});
+
 test('harness composition preserves historical manifest fingerprints', async () => {
   const { buildHarnessAbManifest, resolveHarnessComposition } = await import(
     new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href

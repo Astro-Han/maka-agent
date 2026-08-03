@@ -4,6 +4,7 @@ import type {
   HarnessOracleAnnotationState,
 } from './harness-oracle-registry.js';
 import type { HarnessAbRunManifest } from './harness-ab-manifest.js';
+import type { HarnessArmCohortSummary } from './harness-ab-run.js';
 
 export interface HarnessAbArmEffectiveness {
   armId: string;
@@ -91,7 +92,7 @@ export interface HarnessAbReport {
     candidate: HarnessAbArmEconomy;
   };
   execution?: {
-    arms: [{ armId: string; placement: string }, { armId: string; placement: string }];
+    arms: Array<{ armId: string; placement: string }>;
   };
   oracleEvidence?: {
     snapshotFingerprint?: string;
@@ -105,6 +106,166 @@ export interface HarnessAbOracleEvidenceReportInput {
   snapshotFingerprint?: string;
   annotations: readonly HarnessOracleAnnotation[];
   warnings: readonly string[];
+}
+
+export interface HarnessCohortReport {
+  schemaVersion: 'maka.harness_cohort.report.v1';
+  runId: string;
+  runStatus: HarnessAbReport['runStatus'];
+  stopReason?: NonNullable<AbComparisonSummary['stopReason']>;
+  taskCount: number;
+  commonCohort: HarnessArmCohortSummary['commonCohort'];
+  arms: Array<{
+    armId: string;
+    passed: number;
+    evaluated: number;
+    passRate: number | null;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    meanDurationMs: number | null;
+    infraFailed: number;
+  }>;
+  pairwise: HarnessAbReport[];
+  tasks: Array<{
+    taskId: string;
+    arms: Array<{ armId: string; observed: number; valid: number; passed: number }>;
+  }>;
+  measurement: {
+    protocolByArm: Record<string, 'openai-chat' | 'openai-responses' | 'anthropic-messages'>;
+    cacheSemantics: string;
+  };
+}
+
+export function buildHarnessCohortReport(
+  summary: HarnessArmCohortSummary,
+  billingMode: HarnessAbReport['billingMode'] = 'metered',
+  manifest?: Pick<HarnessAbRunManifest, 'arms'>,
+): HarnessCohortReport {
+  const pairwise = summary.pairwise.map((comparison) =>
+    buildHarnessAbReport(comparison, undefined, billingMode, manifest),
+  );
+  const armSummary = (armId: string) => {
+    for (const comparison of summary.pairwise) {
+      if (comparison.baselineArmId === armId) {
+        return {
+          arm: comparison.baseline,
+          tokens: comparison.baseline.tokenCostSummary,
+        };
+      }
+      if (comparison.candidateArmId === armId) {
+        return {
+          arm: comparison.candidate,
+          tokens: comparison.candidate.tokenCostSummary,
+        };
+      }
+    }
+    throw new Error(`harness cohort has no summary for arm ${armId}`);
+  };
+  const taskArm = (taskId: string, armId: string) => {
+    for (const comparison of summary.pairwise) {
+      const task = comparison.taskLevel.tasks.find((candidate) => candidate.taskId === taskId);
+      if (!task) continue;
+      if (comparison.baselineArmId === armId) return task.baseline;
+      if (comparison.candidateArmId === armId) return task.candidate;
+    }
+    throw new Error(`harness cohort has no task summary for ${armId}/${taskId}`);
+  };
+  const runStatus: HarnessAbReport['runStatus'] = summary.stopReason
+    ? 'stopped'
+    : pairwise.some((report) => report.runStatus === 'incomplete')
+      ? 'incomplete'
+      : pairwise.some((report) => report.runStatus === 'completed_with_gaps')
+        ? 'completed_with_gaps'
+        : 'completed';
+  return {
+    schemaVersion: 'maka.harness_cohort.report.v1',
+    runId: summary.runId,
+    runStatus,
+    ...(summary.stopReason ? { stopReason: summary.stopReason } : {}),
+    taskCount: summary.taskCount,
+    commonCohort: summary.commonCohort,
+    arms: summary.armIds.map((armId) => {
+      const { arm, tokens } = armSummary(armId);
+      return {
+        armId,
+        passed: arm.passed,
+        evaluated: arm.valid,
+        passRate: arm.passRate,
+        inputTokens: tokens.input,
+        cachedInputTokens: tokens.cachedInput,
+        outputTokens: tokens.output,
+        costUsd: tokens.costUsd,
+        meanDurationMs: arm.meanDurationMs,
+        infraFailed: arm.infraFailed,
+      };
+    }),
+    pairwise,
+    tasks: summary.pairwise[0]!.taskLevel.tasks.map(({ taskId }) => ({
+      taskId,
+      arms: summary.armIds.map((armId) => {
+        const task = taskArm(taskId, armId);
+        return { armId, observed: task.observed, valid: task.valid, passed: task.passed };
+      }),
+    })),
+    measurement: {
+      protocolByArm: Object.fromEntries(
+        summary.armIds.map((armId) => [
+          armId,
+          armId === 'codex'
+            ? 'openai-responses'
+            : armId === 'claude-code'
+              ? 'anthropic-messages'
+              : 'openai-chat',
+        ]),
+      ),
+      cacheSemantics:
+        'Cached input is recorded from each native protocol field; cache creation is distinct only where the provider protocol reports it, so cache columns are comparable usage evidence rather than identical client-side cache behavior.',
+    },
+  };
+}
+
+export function renderHarnessCohortReportMarkdown(report: HarnessCohortReport): string {
+  return [
+    '# Harness cohort report',
+    '',
+    `Run: ${report.runId}`,
+    `Status: ${report.runStatus}`,
+    `Common cohort: ${report.commonCohort.comparableGroups}/${report.commonCohort.groups}`,
+    '',
+    '| Arm | Pass@1 | Passed / evaluated | Input | Cached input | Output | Cost USD | Mean duration ms | Infra failures |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    ...report.arms.map(
+      (arm) =>
+        `| ${arm.armId} | ${arm.passRate === null ? '' : arm.passRate.toFixed(4)} | ${arm.passed} / ${arm.evaluated} | ${arm.inputTokens} | ${arm.cachedInputTokens} | ${arm.outputTokens} | ${arm.costUsd.toFixed(6)} | ${arm.meanDurationMs ?? ''} | ${arm.infraFailed} |`,
+    ),
+    '',
+    `Measurement boundary: ${report.measurement.cacheSemantics}`,
+    '',
+  ].join('\n');
+}
+
+export function renderHarnessCohortReportCsv(report: HarnessCohortReport): string {
+  const header =
+    'arm_id,passed,evaluated,pass_rate,input_tokens,cached_input_tokens,output_tokens,cost_usd,mean_duration_ms,infra_failed';
+  return `${[
+    header,
+    ...report.arms.map((arm) =>
+      [
+        arm.armId,
+        arm.passed,
+        arm.evaluated,
+        arm.passRate ?? '',
+        arm.inputTokens,
+        arm.cachedInputTokens,
+        arm.outputTokens,
+        arm.costUsd,
+        arm.meanDurationMs ?? '',
+        arm.infraFailed,
+      ].join(','),
+    ),
+  ].join('\n')}\n`;
 }
 
 export function buildHarnessAbReport(
@@ -451,7 +612,7 @@ function manifestExecution(
   });
   if (placements.every((placement) => placement === undefined)) return undefined;
   if (placements.some((placement) => placement === undefined)) {
-    throw new Error('harness report execution placement must be declared for both arms');
+    throw new Error('harness report execution placement must be declared for every arm');
   }
   return { arms: placements as NonNullable<HarnessAbReport['execution']>['arms'] };
 }
