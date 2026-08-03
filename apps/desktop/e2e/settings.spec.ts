@@ -60,6 +60,10 @@ test('subagent presets can be reviewed and edited in desktop settings', async ({
   // and the back affordance is the only way out.
   await settings.getByRole('button', { name: '配置“E2E 快速阅读”' }).click();
   await expect(settings.getByRole('heading', { name: 'E2E 快速阅读', exact: true })).toBeVisible();
+  // The level owns the whole preset, so it carries the two things the list
+  // row deliberately does not: the settled id, and deletion.
+  await expect(settings.getByText('e2e-fast-reader', { exact: true })).toBeVisible();
+  await expect(settings.getByRole('button', { name: '删除', exact: true })).toBeVisible();
   await settings.getByRole('textbox', { name: '适用场景' }).fill('快速阅读代码，并总结关键调用链。');
   await settings.getByRole('button', { name: '保存', exact: true }).click();
 

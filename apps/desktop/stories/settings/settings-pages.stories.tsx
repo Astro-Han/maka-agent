@@ -913,21 +913,6 @@ export const Subagents: Story = {
   render: () => <SettingsStory section="subagents" />,
 };
 
-// Real path: 设置 → 子 Agent → 配置一个已有的实现类 Profile. One story for the
-// editor level, on the preset that exercises the most of it: the settled
-// read-only subagent_id, the implementation capability warning, and the
-// delete section. The create form is this form minus those three.
-export const SubagentEditor: Story = {
-  decorators: [withSubagentSettingsBridge],
-  render: () => <SettingsStory section="subagents" />,
-  play: async ({ canvasElement }) => {
-    const button = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.getAttribute('aria-label') === '配置“实现与验证”',
-    );
-    await userEvent.click(button);
-  },
-};
 // Real path: 设置 → 通用.
 export const General: Story = {
   decorators: [withSettingsBridge],
