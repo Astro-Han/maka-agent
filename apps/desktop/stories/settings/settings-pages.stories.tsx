@@ -792,11 +792,17 @@ function SettingsStory(props: {
 
   return (
     <ToastProvider>
+      {/* `100dvh`, not `100%`: `SettingsSurface` is a `Layout height="fill"`,
+          which needs a bounded ancestor to hand its content pane a scroll
+          box. Under Storybook's fullscreen body a percentage height resolves
+          against an auto-height parent, so every page taller than the
+          viewport stretched the whole surface instead of scrolling inside it
+          — 权限与能力 reached 1942px in a 720px frame with no way down. */}
       <div
         data-maka-e2e-fixture="true"
         style={{
           background: 'var(--surface-canvas)',
-          height: '100%',
+          height: '100dvh',
           minHeight: 640,
         }}
       >
@@ -907,30 +913,11 @@ export const Subagents: Story = {
   render: () => <SettingsStory section="subagents" />,
 };
 
-// Real path: Settings → Subagents at the minimum supported window width.
-export const SubagentsNarrow: Story = {
-  ...Subagents,
-  parameters: { viewport: { defaultViewport: 'mobile2' } },
-};
-
-// Real path: 设置 → 子 Agent → 添加子 Agent. The editor is a route level, so
-// this story shows the whole page swapped for the create form.
-export const SubagentEditorOpen: Story = {
-  decorators: [withSubagentSettingsBridge],
-  render: () => <SettingsStory section="subagents" />,
-  play: async ({ canvasElement }) => {
-    const button = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.textContent?.trim() === '添加子 Agent',
-    );
-    await userEvent.click(button);
-  },
-};
-
-// Real path: 设置 → 子 Agent → 配置一个已有的实现类 Profile. Covers the three
-// states the create form has no way to show: the settled read-only
-// subagent_id, the implementation capability warning, and the delete section.
-export const SubagentEditorExisting: Story = {
+// Real path: 设置 → 子 Agent → 配置一个已有的实现类 Profile. One story for the
+// editor level, on the preset that exercises the most of it: the settled
+// read-only subagent_id, the implementation capability warning, and the
+// delete section. The create form is this form minus those three.
+export const SubagentEditor: Story = {
   decorators: [withSubagentSettingsBridge],
   render: () => <SettingsStory section="subagents" />,
   play: async ({ canvasElement }) => {
