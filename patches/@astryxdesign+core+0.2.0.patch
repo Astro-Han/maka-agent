@@ -1,532 +1,99 @@
-diff --git a/node_modules/@astryxdesign/core/dist/Layer/useLayer.js b/node_modules/@astryxdesign/core/dist/Layer/useLayer.js
-index f41f7e5..e43d620 100644
---- a/node_modules/@astryxdesign/core/dist/Layer/useLayer.js
-+++ b/node_modules/@astryxdesign/core/dist/Layer/useLayer.js
-@@ -13,7 +13,7 @@
-  * - /packages/core/src/Layer/useLayer.test.tsx
-  * - /packages/core/src/Layer/index.ts
-  */
--import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
- import * as stylex from '@stylexjs/stylex';
- import { addAnchorName, removeAnchorName } from "./anchorName.js";
- import "../theme/tokens.stylex.js";
-@@ -208,8 +208,14 @@ export function useLayer(options) {
-     }
-   }, [onHide]);
- 
--  // Ref for trigger element (context mode only)
--  const ref = mode === 'context' ? el => {
-+  // Ref for trigger element (context mode only).
-+  //
-+  // Identity is stable across renders: consumers put this ref (and the refs
-+  // composed from it) in effect dependency arrays, so a fresh closure per
-+  // render makes every unrelated re-render tear down and re-run those effects,
-+  // rewriting `anchor-name` and `aria-describedby` on triggers whose state
-+  // never changed.
-+  const contextRef = useCallback(el => {
-     // Remove only THIS layer's anchor name from the previous element so
-     // other layers sharing the same trigger keep their anchors.
-     if (triggerRef.current && triggerRef.current !== el) {
-@@ -219,7 +225,7 @@ export function useLayer(options) {
-       addAnchorName(el, anchorId);
-     }
-     triggerRef.current = el;
--  } : undefined;
-+  }, [anchorId]);
- 
-   // Reconcile browser-initiated closes (light-dismiss, popover="auto" stack
-   // eviction). These are the only cases where the DOM mutates without going
-@@ -360,23 +366,27 @@ export function useLayer(options) {
-       children: children
-     });
-   }, [popoverRefCallback, id, lightDismiss]);
--  if (mode === 'context') {
--    return {
--      ref: ref,
--      anchorId,
--      show,
--      hide,
--      isOpen,
--      id,
--      render: renderContext
--    };
--  }
--  return {
-+  // The returned object is memoized for the same reason the ref is: consumers
-+  // spread it into dependency arrays (`useTooltip` composes `layer.ref`, and
-+  // its own effects depend on `layer`). A fresh object per render propagates
-+  // that instability outward. It still changes when something a consumer must
-+  // observe changes — `isOpen` above all.
-+  const contextLayer = useMemo(() => ({
-+    ref: contextRef,
-+    anchorId,
-+    show,
-+    hide,
-+    isOpen,
-+    id,
-+    render: renderContext
-+  }), [contextRef, anchorId, show, hide, isOpen, id, renderContext]);
-+  const fixedLayer = useMemo(() => ({
-     ref: undefined,
-     show,
-     hide,
-     isOpen,
-     id,
-     render: renderFixed
--  };
-+  }), [show, hide, isOpen, id, renderFixed]);
-+  return mode === 'context' ? contextLayer : fixedLayer;
- }
-\ No newline at end of file
-diff --git a/node_modules/@astryxdesign/core/dist/Layer/useLayer.js.orig b/node_modules/@astryxdesign/core/dist/Layer/useLayer.js.orig
-new file mode 100644
-index 0000000..e43d620
---- /dev/null
-+++ b/node_modules/@astryxdesign/core/dist/Layer/useLayer.js.orig
-@@ -0,0 +1,392 @@
-+// Copyright (c) Meta Platforms, Inc. and affiliates.
-+
-+'use client';
-+
-+/**
-+ * @file useLayer.tsx
-+ * @input Uses React hooks, Popover API, CSS anchor positioning, typography tokens
-+ * @output Exports useLayer hook for layer positioning and visibility
-+ * @position Core layer utility; used by useHoverCard, useTooltip, etc.
-+ *
-+ * SYNC: When modified, update:
-+ * - /packages/core/src/Layer/useLayer.doc.mjs
-+ * - /packages/core/src/Layer/useLayer.test.tsx
-+ * - /packages/core/src/Layer/index.ts
-+ */
-+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-+import * as stylex from '@stylexjs/stylex';
-+import { addAnchorName, removeAnchorName } from "./anchorName.js";
-+import "../theme/tokens.stylex.js";
-+import { typographyVars } from "../theme/tokens.stylex.js";
-+import { jsx as _jsx } from "react/jsx-runtime";
-+const styles = {
-+  base: {
-+    keoZOQ: "xdj266r",
-+    k1K539: "xat24cr",
-+    keTefX: "x1lziwak",
-+    k71WvV: "x14z9mp",
-+    kLKAdn: "xexx8yu",
-+    kGO01o: "x18d9i69",
-+    kZCmMZ: "x1c1uobl",
-+    kwRFfy: "xyri2b",
-+    kMzoRj: "xc342km",
-+    ksu8eU: "xng3xce",
-+    kVQacm: "x1rea2x4",
-+    kMv6JI: "x9ynric",
-+    kWkggS: "xjbqb8w",
-+    $$css: true
-+  },
-+  fixed: {
-+    kVAEAm: "xixxii4",
-+    $$css: true
-+  }
-+};
-+
-+/**
-+ * Position placement relative to anchor.
-+ * Logical: start/end resolve against the popover's own inherited direction
-+ * via CSS (RTL contexts mirror automatically, no JS involved).
-+ */
-+
-+/**
-+ * Alignment along the placement axis
-+ */
-+
-+/**
-+ * Render props for context mode (anchor positioning)
-+ */
-+
-+/**
-+ * Render props for fixed mode (manual coordinates)
-+ */
-+
-+/**
-+ * Base options shared by both modes
-+ */
-+
-+/**
-+ * Options for context mode (CSS anchor positioning)
-+ */
-+
-+/**
-+ * Options for fixed mode (manual positioning)
-+ */
-+
-+/**
-+ * Return type for context mode
-+ */
-+
-+/**
-+ * Return type for fixed mode
-+ */
-+
-+/**
-+ * Map logical placement/alignment to a CSS position-area value.
-+ *
-+ * Uses the self-* logical keyword family: the inline axis resolves against
-+ * the popover's own inherited direction (the layer renders inside the
-+ * trigger's subtree, so it inherits `direction` and mirrors in RTL with no
-+ * JS). The block axis is direction-neutral but must come from the same
-+ * keyword family — mixing physical `top` with `self-inline-*` produces an
-+ * invalid position-area (computes to `none`, which pins the popover to the
-+ * viewport corner because styles.base zeroes the UA margins).
-+ *
-+ * Note the plain logical family (`inline-start`, no `self-`) is NOT a
-+ * substitute: it resolves against the containing block — the page root for
-+ * a top-layer popover — so it ignores `direction` set on a subtree, which
-+ * is exactly #3389's repro.
-+ */
-+function getPositionArea(placement = 'above', alignment = 'center') {
-+  if (placement === 'above' || placement === 'below') {
-+    const block = placement === 'above' ? 'self-block-start' : 'self-block-end';
-+    if (alignment === 'start') {
-+      return `${block} span-self-inline-end`;
-+    }
-+    if (alignment === 'end') {
-+      return `${block} span-self-inline-start`;
-+    }
-+    return block; // center
-+  }
-+  const inline = placement === 'start' ? 'self-inline-start' : 'self-inline-end';
-+  if (alignment === 'start') {
-+    return `${inline} span-self-block-end`;
-+  }
-+  if (alignment === 'end') {
-+    return `${inline} span-self-block-start`;
-+  }
-+  return inline; // center
-+}
-+
-+/**
-+ * Compute the `position-try-fallbacks` list for a placement/alignment pair.
-+ *
-+ * Flips alone cannot rescue a centered layer — flipping along the alignment
-+ * axis maps center → center, so overflow on that axis renders clipped
-+ * (#3671). Centered alignments therefore append span-based fallbacks letting
-+ * the browser slide the layer along the alignment axis as a last resort
-+ * (same-side spans first). Flips already resolve non-centered alignments.
-+ */
-+export function getPositionTryFallbacks(placement = 'above', alignment = 'center') {
-+  const flips = 'flip-block, flip-inline, flip-block flip-inline';
-+  if (alignment !== 'center') {
-+    return flips;
-+  }
-+  if (placement === 'above' || placement === 'below') {
-+    const [same, opposite] = placement === 'above' ? ['top', 'bottom'] : ['bottom', 'top'];
-+    return `${flips}, ${same} span-left, ${same} span-right, ${opposite} span-left, ${opposite} span-right`;
-+  }
-+  const [same, opposite] = placement === 'start' ? ['left', 'right'] : ['right', 'left'];
-+  return `${flips}, ${same} span-top, ${same} span-bottom, ${opposite} span-top, ${opposite} span-bottom`;
-+}
-+
-+/**
-+ * Core layer hook that handles popover behavior and positioning.
-+ *
-+ * Supports two positioning modes with type-safe render props:
-+ * - `context`: CSS anchor positioning relative to a trigger element
-+ * - `fixed`: Fixed positioning at specified coordinates
-+ *
-+ * @example
-+ * ```
-+ * const layer = useLayer({ mode: 'context' });
-+ * <button ref={layer.ref}>Trigger</button>
-+ * {layer.render(<Content />, { placement: 'above', alignment: 'center' })}
-+ * ```
-+ */
-+
-+export function useLayer(options) {
-+  const {
-+    mode,
-+    onShow,
-+    onHide,
-+    lightDismiss = false
-+  } = options;
-+  const id = useId();
-+  const anchorId = `--astryx-layer-${id.replace(/:/g, '')}`;
-+  const [isOpen, setIsOpen] = useState(false);
-+  const popoverRef = useRef(null);
-+  const triggerRef = useRef(null);
-+
-+  // Ref mirrors isOpen for synchronous reads inside show/hide.
-+  // State drives re-renders; the ref lets the imperative calls avoid
-+  // stale-closure reads of the previous isOpen value.
-+  const isOpenRef = useRef(false);
-+  const show = useCallback(() => {
-+    const popover = popoverRef.current;
-+    if (popover && !isOpenRef.current) {
-+      // Finding infra-4: the Popover API is unsupported on Safari <17 and
-+      // Firefox <125. On those browsers `showPopover` does not exist, so
-+      // calling it unconditionally throws a TypeError and the layer never
-+      // opens. Guard behind a feature check; when the API is missing, fall
-+      // back to plain visibility (the [popover] attribute is inert there, so
-+      // the element sits in normal flow) so the layer still becomes visible.
-+      if (typeof popover.showPopover === 'function') {
-+        popover.showPopover();
-+      } else {
-+        popover.style.display = 'block';
-+      }
-+      isOpenRef.current = true;
-+      setIsOpen(true);
-+      onShow?.();
-+    }
-+  }, [onShow]);
-+  const hide = useCallback(() => {
-+    if (isOpenRef.current) {
-+      const el = popoverRef.current;
-+      // See finding infra-4 note in `show`: mirror the same guard on hide so
-+      // unsupported browsers degrade gracefully instead of throwing.
-+      if (el) {
-+        if (typeof el.hidePopover === 'function') {
-+          el.hidePopover();
-+        } else {
-+          el.style.display = 'none';
-+        }
-+      }
-+      isOpenRef.current = false;
-+      setIsOpen(false);
-+      onHide?.();
-+    }
-+  }, [onHide]);
-+
-+  // Ref for trigger element (context mode only).
-+  //
-+  // Identity is stable across renders: consumers put this ref (and the refs
-+  // composed from it) in effect dependency arrays, so a fresh closure per
-+  // render makes every unrelated re-render tear down and re-run those effects,
-+  // rewriting `anchor-name` and `aria-describedby` on triggers whose state
-+  // never changed.
-+  const contextRef = useCallback(el => {
-+    // Remove only THIS layer's anchor name from the previous element so
-+    // other layers sharing the same trigger keep their anchors.
-+    if (triggerRef.current && triggerRef.current !== el) {
-+      removeAnchorName(triggerRef.current, anchorId);
-+    }
-+    if (el) {
-+      addAnchorName(el, anchorId);
-+    }
-+    triggerRef.current = el;
-+  }, [anchorId]);
-+
-+  // Reconcile browser-initiated closes (light-dismiss, popover="auto" stack
-+  // eviction). These are the only cases where the DOM mutates without going
-+  // through our show/hide — we sync React state back to match.
-+  //
-+  // No "open" case: the browser never spontaneously opens a popover. Opens
-+  // only happen via showPopover() which we always call from show().
-+  //
-+  // The isOpenRef guard prevents double-firing: when our hide() already set
-+  // the ref to false, the subsequent toggle event (which the browser fires
-+  // as a side-effect of hidePopover) sees false and skips.
-+  const handleToggle = useCallback(e => {
-+    const toggleEvent = e;
-+    if (toggleEvent.newState === 'closed' && isOpenRef.current) {
-+      isOpenRef.current = false;
-+      setIsOpen(false);
-+      onHide?.();
-+    }
-+  }, [onHide]);
-+
-+  // Ref callback for popover element — sets up the `toggle` listener.
-+  // Tracks the element + handler currently bound so the listener is removed
-+  // when the element detaches or when `handleToggle`'s identity changes (a new
-+  // `onHide` prop), preventing stale-closure listeners from accumulating on the
-+  // same element (infra-10).
-+  const listenedElRef = useRef(null);
-+  const listenedHandlerRef = useRef(null);
-+  const bindToggleListener = useCallback((el, handler) => {
-+    if (listenedElRef.current && listenedHandlerRef.current && (listenedElRef.current !== el || listenedHandlerRef.current !== handler)) {
-+      listenedElRef.current.removeEventListener('toggle', listenedHandlerRef.current);
-+      listenedElRef.current = null;
-+      listenedHandlerRef.current = null;
-+    }
-+    if (el && listenedElRef.current !== el) {
-+      el.addEventListener('toggle', handler);
-+      listenedElRef.current = el;
-+      listenedHandlerRef.current = handler;
-+    }
-+  }, []);
-+  const popoverRefCallback = useCallback(el => {
-+    popoverRef.current = el;
-+    bindToggleListener(el, handleToggle);
-+  }, [handleToggle, bindToggleListener]);
-+
-+  // Re-bind when the handler identity changes while the element stays mounted,
-+  // and detach on unmount.
-+  useEffect(() => {
-+    if (popoverRef.current) {
-+      bindToggleListener(popoverRef.current, handleToggle);
-+    }
-+    return () => {
-+      if (listenedElRef.current && listenedHandlerRef.current) {
-+        listenedElRef.current.removeEventListener('toggle', listenedHandlerRef.current);
-+        listenedElRef.current = null;
-+        listenedHandlerRef.current = null;
-+      }
-+    };
-+  }, [handleToggle, bindToggleListener]);
-+
-+  // Render function for context mode
-+  const renderContext = useCallback((children, props) => {
-+    const {
-+      placement = 'above',
-+      alignment = 'center',
-+      positioning = 'anchor',
-+      role,
-+      'aria-label': ariaLabel,
-+      xstyle,
-+      className: extraClassName,
-+      style: extraStyle,
-+      as: Container = 'div',
-+      onMouseEnter,
-+      onMouseLeave
-+    } = props || {};
-+
-+    // CSS anchor positioning (dynamic, not in StyleX)
-+    const anchorStyle = positioning === 'custom' ?
-+    // Consumer authors its own position styles via `style` — keep
-+    // only the anchor wiring, derive nothing from placement.
-+    {
-+      positionAnchor: anchorId
-+    } : {
-+      positionAnchor: anchorId,
-+      positionArea: getPositionArea(placement, alignment),
-+      positionTryFallbacks: getPositionTryFallbacks(placement, alignment)
-+    };
-+    const stylexResult = stylex.props(styles.base, xstyle);
-+    const combinedClassName = extraClassName ? `${extraClassName} ${stylexResult.className ?? ''}` : stylexResult.className;
-+
-+    // Render as the requested tag. A `span` keeps the layer phrasing content
-+    // so it is valid (and stays put on hydration) inside inline contexts like
-+    // a `<p>`; `div` remains the default for block layers.
-+    return /*#__PURE__*/_jsx(Container, {
-+      ref: popoverRefCallback,
-+      id: id,
-+      role: role,
-+      "aria-label": ariaLabel,
-+      popover: lightDismiss ? 'auto' : 'manual',
-+      className: combinedClassName,
-+      style: {
-+        ...stylexResult.style,
-+        ...anchorStyle,
-+        ...extraStyle
-+      },
-+      onMouseEnter: onMouseEnter,
-+      onMouseLeave: onMouseLeave,
-+      children: children
-+    });
-+  }, [anchorId, id, lightDismiss, popoverRefCallback]);
-+
-+  // Render function for fixed mode
-+  const renderFixed = useCallback((children, props) => {
-+    const {
-+      x,
-+      y,
-+      xstyle,
-+      className: extraClassName,
-+      style: extraStyle
-+    } = props;
-+
-+    // Dynamic position values
-+    const positionStyle = {
-+      top: y,
-+      left: x
-+    };
-+    const stylexResult = stylex.props(styles.base, styles.fixed, xstyle);
-+    const combinedClassName = extraClassName ? `${extraClassName} ${stylexResult.className ?? ''}` : stylexResult.className;
-+    return /*#__PURE__*/_jsx("div", {
-+      ref: popoverRefCallback,
-+      id: id,
-+      popover: lightDismiss ? 'auto' : 'manual',
-+      className: combinedClassName,
-+      style: {
-+        ...stylexResult.style,
-+        ...positionStyle,
-+        ...extraStyle
-+      },
-+      children: children
-+    });
-+  }, [popoverRefCallback, id, lightDismiss]);
-+  // The returned object is memoized for the same reason the ref is: consumers
-+  // spread it into dependency arrays (`useTooltip` composes `layer.ref`, and
-+  // its own effects depend on `layer`). A fresh object per render propagates
-+  // that instability outward. It still changes when something a consumer must
-+  // observe changes — `isOpen` above all.
-+  const contextLayer = useMemo(() => ({
-+    ref: contextRef,
-+    anchorId,
-+    show,
-+    hide,
-+    isOpen,
-+    id,
-+    render: renderContext
-+  }), [contextRef, anchorId, show, hide, isOpen, id, renderContext]);
-+  const fixedLayer = useMemo(() => ({
-+    ref: undefined,
-+    show,
-+    hide,
-+    isOpen,
-+    id,
-+    render: renderFixed
-+  }), [show, hide, isOpen, id, renderFixed]);
-+  return mode === 'context' ? contextLayer : fixedLayer;
-+}
-\ No newline at end of file
 diff --git a/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js b/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js
-index 0b4cd16..00b8cd3 100644
+index 0b4cd16..c174163 100644
 --- a/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js
 +++ b/node_modules/@astryxdesign/core/dist/Tooltip/Tooltip.js
-@@ -90,65 +90,66 @@ export function Tooltip({
+@@ -35,6 +35,21 @@ function mergeIds(...ids) {
+   return filtered.length > 0 ? filtered.join(' ') : undefined;
+ }
+ 
++/**
++ * Remove one ARIA ID, leaving every other ID in place.
++ *
++ * The inverse of `mergeIds` for a single id. Detaching by restoring a snapshot
++ * taken at attach time would clobber whatever else wrote to the attribute in
++ * between — another Tooltip sharing the same trigger, or the application.
++ */
++function removeId(value, id) {
++  if (!value) {
++    return undefined;
++  }
++  const rest = value.split(/\s+/).filter(token => token !== '' && token !== id);
++  return rest.length > 0 ? rest.join(' ') : undefined;
++}
++
+ /**
+  * Tooltip component for displaying informative text on hover/focus.
+  *
+@@ -90,65 +105,102 @@ export function Tooltip({
      onHide: handleHide
    });
  
 -  // Sibling mode: attach to external anchorRef
-+  // The trigger this tooltip is currently attached to, and what its
-+  // `aria-describedby` said before we touched it.
-+  const attachedRef = useRef(null);
-+  const restoreRef = useRef(null);
-+  // Holds the newest `tooltip.ref` for the unmount cleanup below, which would
-+  // otherwise close over the identity from the render that mounted it.
-+  const attachRef = useRef(tooltip.ref);
-+  attachRef.current = tooltip.ref;
-+
-+  // Attachment is keyed on the trigger ELEMENT, not on a callback identity.
-+  //
-+  // Both of the effects this replaces listed `tooltip.ref` as a dependency and
-+  // never listed the element they actually read, so they re-attached whenever
-+  // React handed them a new callback and never when the trigger itself changed.
-+  // That was only ever correct because the ref changed on every render. With a
-+  // stable ref it would miss a swapped or late-arriving child entirely, so the
-+  // effect now runs every render (no dependency array) and does nothing unless
-+  // the element it resolves differs from the one it holds — no write when
-+  // nothing moved, and a correct hand-off when something did.
-   useIsomorphicLayoutEffect(() => {
+-  useIsomorphicLayoutEffect(() => {
 -    if (!anchorRef) {
-+    // Text-only children carry the ref and `aria-describedby` through JSX, so
-+    // there is nothing to attach imperatively. `anchorRef` wins over children:
-+    // that is sibling mode.
-+    const target = anchorRef ? anchorRef.current : textOnly ? null : wrapperRef.current?.firstElementChild ?? null;
-+    if (target === attachedRef.current) {
++  // A tooltip attaches two different kinds of state to its trigger, and they
++  // are keyed differently:
++  //
++  //  - `positionRef` (inline `anchor-name`) and `aria-describedby` describe the
++  //    ELEMENT. Applying them twice to the same element is a no-op, so they are
++  //    keyed on element identity and skipped entirely when nothing moved.
++  //  - `interactionRef` installs event listeners that close over the current
++  //    props (`isEnabled`, `delay`, `hideDelay`, `focusTrigger`,
++  //    `onOpenChange`). `removeEventListener` only matches the exact function
++  //    that was added, so these are keyed on the CLOSURE that installed them and
++  //    must be removed through that same closure.
++  //
++  // The two effects this replaces keyed both on `tooltip.ref` and listed it as a
++  // dependency while never listing the element they actually read
++  // (`anchorRef.current`, or `wrapper.firstElementChild`). That was only ever
++  // correct by accident: the combined ref changed on every render, so every
++  // render happened to rescan the DOM (correct, and the whole cost) and happened
++  // to rebind listeners with fresh closures (correct, and cheap). Keying both on
++  // the element drops the cost but freezes the listeners; keying both on the
++  // callback keeps the listeners fresh but keeps the cost. Splitting them keeps
++  // both halves right.
++  const attachedRef = useRef(null);
++  const attachedIdRef = useRef(null);
++  const boundRef = useRef(null);
++
++  // The unmount cleanup below closes over the render that mounted it, so the
++  // position ref is read through a ref to reach the current one. Its identity
++  // does not matter (it removes the anchor name by id), unlike the interaction
++  // ref, which is tracked per binding in `boundRef`.
++  const positionRefRef = useRef(tooltip.positionRef);
++  positionRefRef.current = tooltip.positionRef;
++  function detachPosition() {
++    const previous = attachedRef.current;
++    if (!previous) {
        return;
      }
 -    const el = anchorRef.current;
 -    if (!el) {
-+    detachTrigger();
-+    if (!target) {
++    positionRefRef.current(null);
++    const remaining = removeId(previous.getAttribute('aria-describedby'), attachedIdRef.current);
++    if (remaining) {
++      previous.setAttribute('aria-describedby', remaining);
++    } else {
++      previous.removeAttribute('aria-describedby');
++    }
++    attachedRef.current = null;
++    attachedIdRef.current = null;
++  }
++  function detachInteraction() {
++    const bound = boundRef.current;
++    if (!bound) {
        return;
      }
++    // Through the very closure that added the listeners, so the function
++    // identities handed to `removeEventListener` match the ones added.
++    bound.detach(null);
++    boundRef.current = null;
++  }
  
-     // Use combined ref for position + interaction
+-    // Use combined ref for position + interaction
 -    tooltip.ref(el);
-+    attachRef.current(target);
- 
-     // Set aria-describedby, merging with existing
+-
+-    // Set aria-describedby, merging with existing
 -    const existingDescribedBy = el.getAttribute('aria-describedby');
 -    el.setAttribute('aria-describedby', mergeIds(existingDescribedBy, tooltip.describedBy) ?? '');
 -    return () => {
@@ -538,41 +105,42 @@ index 0b4cd16..00b8cd3 100644
 -      }
 -    };
 -  }, [anchorRef, tooltip.ref, tooltip.describedBy]);
-+    const existingDescribedBy = target.getAttribute('aria-describedby');
-+    restoreRef.current = existingDescribedBy;
-+    target.setAttribute('aria-describedby', mergeIds(existingDescribedBy, tooltip.describedBy) ?? '');
-+    attachedRef.current = target;
-+  });
- 
+-
 -  // For element children with display:contents, attach ref to first child
--  useIsomorphicLayoutEffect(() => {
++  // Runs on every render (no dependency array) and returns without writing
++  // anything unless the element it resolves, or the closure holding the
++  // listeners, actually differs from what it already holds.
+   useIsomorphicLayoutEffect(() => {
 -    if (anchorRef) {
 -      return;
 -    } // Skip if using anchorRef mode
 -    if (textOnly) {
 -      return;
 -    } // Skip for text-only (ref is on wrapper)
-+  // Detaching is now the unmount's job alone; the effect above hands off
-+  // between elements while the tooltip lives.
-+  useIsomorphicLayoutEffect(() => detachTrigger, []);
- 
+-
 -    const wrapper = wrapperRef.current;
 -    if (!wrapper) {
-+  function detachTrigger() {
-+    const previous = attachedRef.current;
-+    if (!previous) {
-       return;
-     }
+-      return;
+-    }
 -    const firstChild = wrapper.firstElementChild;
 -    if (!firstChild) {
 -      return;
-+    attachRef.current(null);
-+    if (restoreRef.current) {
-+      previous.setAttribute('aria-describedby', restoreRef.current);
-+    } else {
-+      previous.removeAttribute('aria-describedby');
++    // Text-only children carry the ref and `aria-describedby` through JSX, so
++    // there is nothing to attach imperatively. `anchorRef` wins over children:
++    // that is sibling mode.
++    const target = anchorRef ? anchorRef.current : textOnly ? null : wrapperRef.current?.firstElementChild ?? null;
++
++    // Element-keyed: anchor name and `aria-describedby`.
++    if (target !== attachedRef.current) {
++      detachPosition();
++      if (target) {
++        positionRefRef.current(target);
++        target.setAttribute('aria-describedby', mergeIds(target.getAttribute('aria-describedby'), tooltip.describedBy) ?? '');
++        attachedRef.current = target;
++        attachedIdRef.current = tooltip.describedBy ?? null;
++      }
      }
--
+ 
 -    // Use combined ref for position + interaction
 -    tooltip.ref(firstChild);
 -
@@ -585,189 +153,148 @@ index 0b4cd16..00b8cd3 100644
 -        firstChild.setAttribute('aria-describedby', existingDescribedBy);
 -      } else {
 -        firstChild.removeAttribute('aria-describedby');
--      }
++    // Closure-keyed: event listeners.
++    const bound = boundRef.current;
++    if (!bound || bound.el !== target || bound.detach !== tooltip.interactionRef) {
++      detachInteraction();
++      if (target) {
++        tooltip.interactionRef(target);
++        boundRef.current = {
++          el: target,
++          detach: tooltip.interactionRef
++        };
+       }
 -    };
 -  }, [anchorRef, textOnly, tooltip.ref, tooltip.describedBy]);
-+    restoreRef.current = null;
-+    attachedRef.current = null;
-+  }
++    }
++  });
++
++  // Detaching while the tooltip lives is the hand-off above; this is unmount.
++  useIsomorphicLayoutEffect(() => () => {
++    detachPosition();
++    detachInteraction();
++  }, []);
  
    // Sibling mode: render only the tooltip (no wrapper needed)
    if (anchorRef && children == null) {
-diff --git a/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx b/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx
-index 024f628..416df47 100644
---- a/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx
-+++ b/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx
-@@ -18,6 +18,7 @@ import React, {
-   useCallback,
-   useEffect,
-   useId,
-+  useMemo,
-   useRef,
-   useState,
-   type ReactNode,
-@@ -426,23 +427,29 @@ export function useLayer(
-     }
-   }, [onHide]);
- 
--  // Ref for trigger element (context mode only)
--  const ref: RefCallback<HTMLElement> | undefined =
--    mode === 'context'
--      ? (el: HTMLElement | null) => {
--          // Remove only THIS layer's anchor name from the previous element so
--          // other layers sharing the same trigger keep their anchors.
--          if (triggerRef.current && triggerRef.current !== el) {
--            removeAnchorName(triggerRef.current, anchorId);
--          }
--
--          if (el) {
--            addAnchorName(el, anchorId);
--          }
--
--          triggerRef.current = el;
--        }
--      : undefined;
-+  // Ref for trigger element (context mode only).
-+  //
-+  // Identity is stable across renders: consumers put this ref (and the refs
-+  // composed from it) in effect dependency arrays, so a fresh closure per
-+  // render makes every unrelated re-render tear down and re-run those effects,
-+  // rewriting `anchor-name` and `aria-describedby` on triggers whose state
-+  // never changed.
-+  const contextRef: RefCallback<HTMLElement> = useCallback(
-+    (el: HTMLElement | null) => {
-+      // Remove only THIS layer's anchor name from the previous element so
-+      // other layers sharing the same trigger keep their anchors.
-+      if (triggerRef.current && triggerRef.current !== el) {
-+        removeAnchorName(triggerRef.current, anchorId);
-+      }
-+
-+      if (el) {
-+        addAnchorName(el, anchorId);
-+      }
-+
-+      triggerRef.current = el;
-+    },
-+    [anchorId],
-+  );
- 
-   // Reconcile browser-initiated closes (light-dismiss, popover="auto" stack
-   // eviction). These are the only cases where the DOM mutates without going
-@@ -617,24 +624,35 @@ export function useLayer(
-     [popoverRefCallback, id, lightDismiss],
-   );
- 
--  if (mode === 'context') {
--    return {
--      ref: ref as RefCallback<HTMLElement>,
-+  // The returned object is memoized for the same reason the ref is: consumers
-+  // spread it into dependency arrays (`useTooltip` composes `layer.ref`, and
-+  // its own effects depend on `layer`). A fresh object per render propagates
-+  // that instability outward. It still changes when something a consumer must
-+  // observe changes — `isOpen` above all.
-+  const contextLayer: ContextLayerReturn = useMemo(
-+    () => ({
-+      ref: contextRef,
-       anchorId,
-       show,
-       hide,
-       isOpen,
-       id,
-       render: renderContext,
--    };
--  }
-+    }),
-+    [contextRef, anchorId, show, hide, isOpen, id, renderContext],
-+  );
-+
-+  const fixedLayer: FixedLayerReturn = useMemo(
-+    () => ({
-+      ref: undefined,
-+      show,
-+      hide,
-+      isOpen,
-+      id,
-+      render: renderFixed,
-+    }),
-+    [show, hide, isOpen, id, renderFixed],
-+  );
- 
--  return {
--    ref: undefined,
--    show,
--    hide,
--    isOpen,
--    id,
--    render: renderFixed,
--  };
-+  return mode === 'context' ? contextLayer : fixedLayer;
- }
 diff --git a/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx b/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx
-index ca65847..55b4b3a 100644
+index ca65847..b438a49 100644
 --- a/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx
 +++ b/node_modules/@astryxdesign/core/src/Tooltip/Tooltip.tsx
-@@ -211,75 +211,77 @@ export function Tooltip({
+@@ -19,6 +19,7 @@ import React, {
+   useRef,
+   type ReactElement,
+   type ReactNode,
++  type RefCallback,
+ } from 'react';
+ import {useIsomorphicLayoutEffect} from '../hooks/useIsomorphicLayoutEffect';
+ import * as stylex from '@stylexjs/stylex';
+@@ -153,6 +154,26 @@ function mergeIds(...ids: (string | undefined | null)[]): string | undefined {
+   return filtered.length > 0 ? filtered.join(' ') : undefined;
+ }
+ 
++/**
++ * Remove one ARIA ID, leaving every other ID in place.
++ *
++ * The inverse of `mergeIds` for a single id. Detaching by restoring a snapshot
++ * taken at attach time would clobber whatever else wrote to the attribute in
++ * between — another Tooltip sharing the same trigger, or the application.
++ */
++function removeId(
++  value: string | null,
++  id: string | null | undefined,
++): string | undefined {
++  if (!value) {
++    return undefined;
++  }
++  const rest = value
++    .split(/\s+/)
++    .filter((token) => token !== '' && token !== id);
++  return rest.length > 0 ? rest.join(' ') : undefined;
++}
++
+ /**
+  * Tooltip component for displaying informative text on hover/focus.
+  *
+@@ -211,75 +232,126 @@ export function Tooltip({
      onHide: handleHide,
    });
  
 -  // Sibling mode: attach to external anchorRef
-+  // The trigger this tooltip is currently attached to, and what its
-+  // `aria-describedby` said before we touched it.
-+  const attachedRef = useRef<HTMLElement | null>(null);
-+  const restoreRef = useRef<string | null>(null);
-+  // Holds the newest `tooltip.ref` for the unmount cleanup below, which would
-+  // otherwise close over the identity from the render that mounted it.
-+  const attachRef = useRef(tooltip.ref);
-+  attachRef.current = tooltip.ref;
-+
-+  // Attachment is keyed on the trigger ELEMENT, not on a callback identity.
-+  //
-+  // Both of the effects this replaces listed `tooltip.ref` as a dependency and
-+  // never listed the element they actually read, so they re-attached whenever
-+  // React handed them a new callback and never when the trigger itself changed.
-+  // That was only ever correct because the ref changed on every render. With a
-+  // stable ref it would miss a swapped or late-arriving child entirely, so the
-+  // effect now runs every render (no dependency array) and does nothing unless
-+  // the element it resolves differs from the one it holds — no write when
-+  // nothing moved, and a correct hand-off when something did.
-   useIsomorphicLayoutEffect(() => {
+-  useIsomorphicLayoutEffect(() => {
 -    if (!anchorRef) {
-+    // Text-only children carry the ref and `aria-describedby` through JSX, so
-+    // there is nothing to attach imperatively. `anchorRef` wins over children:
-+    // that is sibling mode.
-+    const target: HTMLElement | null = anchorRef
-+      ? anchorRef.current
-+      : textOnly
-+        ? null
-+        : ((wrapperRef.current?.firstElementChild as HTMLElement | null) ??
-+          null);
++  // A tooltip attaches two different kinds of state to its trigger, and they
++  // are keyed differently:
++  //
++  //  - `positionRef` (inline `anchor-name`) and `aria-describedby` describe the
++  //    ELEMENT. Applying them twice to the same element is a no-op, so they are
++  //    keyed on element identity and skipped entirely when nothing moved.
++  //  - `interactionRef` installs event listeners that close over the current
++  //    props (`isEnabled`, `delay`, `hideDelay`, `focusTrigger`,
++  //    `onOpenChange`). `removeEventListener` only matches the exact function
++  //    that was added, so these are keyed on the CLOSURE that installed them and
++  //    must be removed through that same closure.
++  //
++  // The two effects this replaces keyed both on `tooltip.ref` and listed it as a
++  // dependency while never listing the element they actually read
++  // (`anchorRef.current`, or `wrapper.firstElementChild`). That was only ever
++  // correct by accident: the combined ref changed on every render, so every
++  // render happened to rescan the DOM (correct, and the whole cost) and happened
++  // to rebind listeners with fresh closures (correct, and cheap). Keying both on
++  // the element drops the cost but freezes the listeners; keying both on the
++  // callback keeps the listeners fresh but keeps the cost. Splitting them keeps
++  // both halves right.
++  const attachedRef = useRef<HTMLElement | null>(null);
++  const attachedIdRef = useRef<string | null>(null);
++  const boundRef = useRef<{
++    el: HTMLElement;
++    detach: RefCallback<HTMLElement>;
++  } | null>(null);
 +
-+    if (target === attachedRef.current) {
++  // The unmount cleanup below closes over the render that mounted it, so the
++  // position ref is read through a ref to reach the current one. Its identity
++  // does not matter (it removes the anchor name by id), unlike the interaction
++  // ref, which is tracked per binding in `boundRef`.
++  const positionRefRef = useRef(tooltip.positionRef);
++  positionRefRef.current = tooltip.positionRef;
++
++  function detachPosition(): void {
++    const previous = attachedRef.current;
++    if (!previous) {
        return;
      }
  
 -    const el = anchorRef.current;
 -    if (!el) {
-+    detachTrigger();
-+    if (!target) {
-       return;
+-      return;
++    positionRefRef.current(null);
++    const remaining = removeId(
++      previous.getAttribute('aria-describedby'),
++      attachedIdRef.current,
++    );
++    if (remaining) {
++      previous.setAttribute('aria-describedby', remaining);
++    } else {
++      previous.removeAttribute('aria-describedby');
      }
  
-     // Use combined ref for position + interaction
+-    // Use combined ref for position + interaction
 -    tooltip.ref(el);
-+    attachRef.current(target);
++    attachedRef.current = null;
++    attachedIdRef.current = null;
++  }
  
-     // Set aria-describedby, merging with existing
+-    // Set aria-describedby, merging with existing
 -    const existingDescribedBy = el.getAttribute('aria-describedby');
 -    el.setAttribute(
-+    const existingDescribedBy = target.getAttribute('aria-describedby');
-+    restoreRef.current = existingDescribedBy;
-+    target.setAttribute(
-       'aria-describedby',
-       mergeIds(existingDescribedBy, tooltip.describedBy) ?? '',
-     );
-+    attachedRef.current = target;
-+  });
+-      'aria-describedby',
+-      mergeIds(existingDescribedBy, tooltip.describedBy) ?? '',
+-    );
++  function detachInteraction(): void {
++    const bound = boundRef.current;
++    if (!bound) {
++      return;
++    }
  
 -    return () => {
 -      tooltip.ref(null);
@@ -778,37 +305,70 @@ index ca65847..55b4b3a 100644
 -      }
 -    };
 -  }, [anchorRef, tooltip.ref, tooltip.describedBy]);
--
++    // Through the very closure that added the listeners, so the function
++    // identities handed to `removeEventListener` match the ones added.
++    bound.detach(null);
++    boundRef.current = null;
++  }
+ 
 -  // For element children with display:contents, attach ref to first child
--  useIsomorphicLayoutEffect(() => {
++  // Runs on every render (no dependency array) and returns without writing
++  // anything unless the element it resolves, or the closure holding the
++  // listeners, actually differs from what it already holds.
+   useIsomorphicLayoutEffect(() => {
 -    if (anchorRef) {
 -      return;
 -    } // Skip if using anchorRef mode
 -    if (textOnly) {
 -      return;
 -    } // Skip for text-only (ref is on wrapper)
-+  // Detaching is now the unmount's job alone; the effect above hands off
-+  // between elements while the tooltip lives.
-+  useIsomorphicLayoutEffect(() => detachTrigger, []);
- 
+-
 -    const wrapper = wrapperRef.current;
 -    if (!wrapper) {
-+  function detachTrigger(): void {
-+    const previous = attachedRef.current;
-+    if (!previous) {
-       return;
+-      return;
++    // Text-only children carry the ref and `aria-describedby` through JSX, so
++    // there is nothing to attach imperatively. `anchorRef` wins over children:
++    // that is sibling mode.
++    const target: HTMLElement | null = anchorRef
++      ? anchorRef.current
++      : textOnly
++        ? null
++        : ((wrapperRef.current?.firstElementChild as HTMLElement | null) ??
++          null);
++
++    // Element-keyed: anchor name and `aria-describedby`.
++    if (target !== attachedRef.current) {
++      detachPosition();
++      if (target) {
++        positionRefRef.current(target);
++        target.setAttribute(
++          'aria-describedby',
++          mergeIds(target.getAttribute('aria-describedby'), tooltip.describedBy) ??
++            '',
++        );
++        attachedRef.current = target;
++        attachedIdRef.current = tooltip.describedBy ?? null;
++      }
      }
  
 -    const firstChild = wrapper.firstElementChild as HTMLElement | null;
 -    if (!firstChild) {
 -      return;
-+    attachRef.current(null);
-+    if (restoreRef.current) {
-+      previous.setAttribute('aria-describedby', restoreRef.current);
-+    } else {
-+      previous.removeAttribute('aria-describedby');
++    // Closure-keyed: event listeners.
++    const bound = boundRef.current;
++    if (
++      !bound ||
++      bound.el !== target ||
++      bound.detach !== tooltip.interactionRef
++    ) {
++      detachInteraction();
++      if (target) {
++        tooltip.interactionRef(target);
++        boundRef.current = {el: target, detach: tooltip.interactionRef};
++      }
      }
--
++  });
+ 
 -    // Use combined ref for position + interaction
 -    tooltip.ref(firstChild);
 -
@@ -828,9 +388,14 @@ index ca65847..55b4b3a 100644
 -      }
 -    };
 -  }, [anchorRef, textOnly, tooltip.ref, tooltip.describedBy]);
-+    restoreRef.current = null;
-+    attachedRef.current = null;
-+  }
++  // Detaching while the tooltip lives is the hand-off above; this is unmount.
++  useIsomorphicLayoutEffect(
++    () => () => {
++      detachPosition();
++      detachInteraction();
++    },
++    [],
++  );
  
    // Sibling mode: render only the tooltip (no wrapper needed)
    if (anchorRef && children == null) {

@@ -1,25 +1,37 @@
 import { strict as assert } from 'node:assert';
-import { afterEach, describe, it } from 'node:test';
-import { Tooltip } from '@astryxdesign/core/Tooltip';
-import { act, createElement, type ReactElement } from 'react';
+import { afterEach, before, describe, it } from 'node:test';
+import { act, createElement, StrictMode, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 // #2030: every footer action in the transcript (chat-turn.tsx) wraps its button
 // in an Astryx `Tooltip`. Astryx builds the trigger ref from a fresh closure and
-// a fresh layer object on every render, and `Tooltip`'s layout effect depends on
+// a fresh layer object on every render, and `Tooltip`'s layout effects depend on
 // that ref — so one parent re-render rewrote `aria-describedby` and the inline
 // `anchor-name` on every tooltip trigger on the page, whether or not the tooltip
 // itself had changed. During a streamed answer that is thousands of attribute
 // writes per turn against untouched history.
 //
-// `patches/@astryxdesign+core+0.2.0.patch` stabilizes both identities. This
-// test drives the real component through a DOM that records writes, so it goes
-// red the moment the patch stops applying.
+// `patches/@astryxdesign+core+0.2.0.patch` splits attachment in two: the anchor
+// name and `aria-describedby` are keyed on the trigger ELEMENT (idempotent, so
+// an unchanged element is skipped), while the event listeners stay keyed on the
+// CLOSURE that installed them (so they keep seeing current props, and can be
+// removed with the same function identities that added them).
+//
+// This test drives the real component through a DOM that records attribute
+// writes, style writes, and listener bindings, so it goes red the moment the
+// patch stops applying or regresses either half.
 
 type WriteLog = { attributes: string[]; styles: string[] };
 type ActGlobal = typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+type FakeDom = {
+  document: Document;
+  window: Window & typeof globalThis;
+};
 
 const cleanupTasks: Array<() => void> = [];
+
+// Bound at the bottom of this file, once a `window` exists. See the note there.
+let Tooltip: typeof import('@astryxdesign/core/Tooltip').Tooltip;
 
 afterEach(() => {
   while (cleanupTasks.length > 0) cleanupTasks.pop()?.();
@@ -138,12 +150,239 @@ describe('Astryx tooltip trigger stability', () => {
       'the open layer must still describe its trigger',
     );
   });
+
+  it('renders the trigger inline and describes it through JSX for text-only children', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'text child', trigger: 'text' }));
+    const span = findTrigger(container, 'SPAN');
+    assert.ok(span, 'a text-only child must be wrapped in a span trigger');
+    assert.ok(
+      span.getAttribute('aria-describedby'),
+      'the text-only trigger carries aria-describedby through JSX',
+    );
+    assert.ok(
+      span.boundTypes().length > 0,
+      'the text-only trigger still gets its interaction listeners',
+    );
+  });
+});
+
+// The listeners are the half that an element-keyed attachment silently drops:
+// nothing about `anchor-name` or `aria-describedby` would fail, and the tooltip
+// would simply never open in a real browser. Assert them directly.
+describe('Astryx tooltip trigger listeners', () => {
+  const expected = ['mouseenter', 'mouseleave', 'pointerdown', 'focusin', 'focusout'];
+
+  it('binds the full hover and focus set to the trigger', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'first render' }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+    assert.deepEqual(
+      trigger.boundTypes(),
+      expected,
+      'a focusable trigger must carry every hover and focus listener',
+    );
+  });
+
+  it('does not accumulate listeners across unrelated re-renders', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'first render' }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+
+    await render(root, harness({ label: 'second render' }));
+    await render(root, harness({ label: 'third render' }));
+
+    assert.deepEqual(
+      trigger.boundTypes(),
+      expected,
+      'a re-render may rebind listeners, but the net bound set must not grow',
+    );
+  });
+
+  it('moves every listener when the trigger element is replaced', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'button trigger', trigger: 'button' }));
+    const replaced = findTrigger(container, 'BUTTON');
+    assert.ok(replaced);
+
+    await render(root, harness({ label: 'link trigger', trigger: 'a' }));
+    const adopted = findTrigger(container, 'A');
+    assert.ok(adopted);
+
+    assert.deepEqual(replaced.boundTypes(), [], 'the detached trigger must keep no listeners');
+    assert.deepEqual(
+      adopted.boundTypes(),
+      expected,
+      'the replacement trigger must carry every listener',
+    );
+  });
+
+  // The listeners close over `isEnabled`, `delay`, `hideDelay`, `focusTrigger`
+  // and `onOpenChange`. Keying them on the trigger element alone freezes the
+  // closure from the mounting render, so a prop change stops taking effect and
+  // a disabled tooltip keeps opening on hover.
+  it('honours a prop change that only the listener closure can see', async () => {
+    const { root, container } = installReactRenderer();
+    const opened: boolean[] = [];
+    const onOpenChange = (next: boolean): void => {
+      opened.push(next);
+    };
+
+    await render(root, harness({ label: 'enabled', isEnabled: true, onOpenChange }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+
+    await render(root, harness({ label: 'disabled', isEnabled: false, onOpenChange }));
+
+    await hover(trigger);
+    assert.deepEqual(
+      opened,
+      [],
+      'a tooltip disabled after mount must not open on hover',
+    );
+
+    await render(root, harness({ label: 're-enabled', isEnabled: true, onOpenChange }));
+    await hover(trigger);
+    assert.deepEqual(
+      opened,
+      [true],
+      'a tooltip re-enabled after mount must open on hover again',
+    );
+  });
+
+  // `removeEventListener` only matches the exact function that was added, so the
+  // unmount cleanup has to run through the same closure that bound them. Holding
+  // only the newest ref makes every removal a silent no-op.
+  it('removes every listener it added when the tooltip unmounts', async () => {
+    const { root, container } = installReactRenderer();
+    const anchor = { current: null as unknown as FakeElement | null };
+
+    await render(root, siblingHarness({ label: 'mounted', anchor, mounted: true }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+    assert.deepEqual(trigger.boundTypes(), expected, 'the sibling trigger must be bound');
+
+    // Several re-renders first: each one hands `Tooltip` a fresh interaction
+    // closure, so the cleanup must track which one actually holds the listeners.
+    await render(root, siblingHarness({ label: 'churn 1', anchor, mounted: true }));
+    await render(root, siblingHarness({ label: 'churn 2', anchor, mounted: true }));
+
+    await render(root, siblingHarness({ label: 'unmounted', anchor, mounted: false }));
+
+    assert.ok(findTrigger(container, 'BUTTON'), 'the external trigger must outlive the tooltip');
+    assert.deepEqual(
+      trigger.boundTypes(),
+      [],
+      'unmounting the tooltip must leave no listener behind on a trigger it does not own',
+    );
+  });
+});
+
+// Sibling mode (`anchorRef`) attaches to an element the tooltip does not render
+// and therefore does not unmount. Everything it wrote has to come back off, and
+// nothing anybody else wrote may come off with it.
+describe('Astryx tooltip sibling-mode detachment', () => {
+  it('leaves an external trigger exactly as it found it', async () => {
+    const { root, container } = installReactRenderer();
+    const anchor = { current: null as unknown as FakeElement | null };
+
+    await render(root, siblingHarness({ label: 'mounted', anchor, mounted: true }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+    const describedBy = trigger.getAttribute('aria-describedby');
+    assert.ok(describedBy?.includes('external-note'), 'the app id must be preserved');
+    assert.notEqual(describedBy, 'external-note', 'the tooltip must add its own id');
+    assert.ok(anchorNameOf(trigger), 'the external trigger must carry the anchor name');
+
+    await render(root, siblingHarness({ label: 'unmounted', anchor, mounted: false }));
+
+    assert.ok(findTrigger(container, 'BUTTON'), 'the external trigger must outlive the tooltip');
+    assert.equal(
+      trigger.getAttribute('aria-describedby'),
+      'external-note',
+      'unmounting must remove only the tooltip id, leaving the app id in place',
+    );
+    assert.equal(
+      anchorNameOf(trigger),
+      '',
+      'unmounting must take the anchor name off an element it does not own',
+    );
+  });
+
+  // Detaching by restoring the `aria-describedby` snapshot taken at attach time
+  // passes as long as tooltips unmount in reverse order. Unmount the one that
+  // attached FIRST and the snapshot is stale: it predates the second tooltip's
+  // id, so restoring it silently un-describes a tooltip that is still mounted.
+  it('keeps a sibling tooltip described when the tooltip that attached first unmounts', async () => {
+    const { root, container } = installReactRenderer();
+    const anchor = { current: null as unknown as FakeElement | null };
+
+    await render(root, sharedTriggerHarness({ anchor, first: true }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger);
+    const both = trigger.getAttribute('aria-describedby')?.split(' ') ?? [];
+    assert.equal(both.length, 3, 'both tooltips plus the app id must describe the trigger');
+    assert.equal(both[0], 'external-note', 'the app id must come first');
+    const survivingId = both[2] as string;
+
+    await render(root, sharedTriggerHarness({ anchor, first: false }));
+
+    const remaining = trigger.getAttribute('aria-describedby')?.split(' ') ?? [];
+    assert.ok(remaining.includes('external-note'), 'the app id must survive');
+    assert.ok(
+      remaining.includes(survivingId),
+      'the still-mounted tooltip must still describe the trigger',
+    );
+    assert.equal(
+      remaining.length,
+      2,
+      'unmounting one tooltip must drop only its own id',
+    );
+  });
+});
+
+// The renderer mounts under StrictMode (apps/desktop/src/renderer/app.tsx), which
+// double-invokes mount effects: every effect is run, cleaned up, and run again.
+// An attachment that is not idempotent under that survives every other test here.
+describe('Astryx tooltip under StrictMode', () => {
+  it('ends a double-invoked mount fully attached exactly once', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(
+      root,
+      createElement(StrictMode, null, harness({ label: 'strict mount' })),
+    );
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger, 'the trigger must mount under StrictMode');
+
+    assert.deepEqual(
+      trigger.boundTypes(),
+      ['mouseenter', 'mouseleave', 'pointerdown', 'focusin', 'focusout'],
+      'a double-invoked mount must leave exactly one set of listeners',
+    );
+    const describedBy = trigger.getAttribute('aria-describedby');
+    assert.ok(describedBy, 'the trigger must be described under StrictMode');
+    assert.equal(
+      describedBy.split(' ').length,
+      1,
+      'a double-invoked mount must not describe the trigger twice',
+    );
+    assert.ok(anchorNameOf(trigger), 'the trigger must carry the anchor name under StrictMode');
+  });
 });
 
 function harness(options: {
   label: string;
-  trigger?: 'button' | 'a' | 'none';
+  trigger?: 'button' | 'a' | 'text' | 'none';
   isOpen?: boolean;
+  isEnabled?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }): ReactElement {
   const trigger = options.trigger ?? 'button';
   return createElement(
@@ -153,9 +392,94 @@ function harness(options: {
     createElement(Tooltip, {
       content: 'Copy',
       isOpen: options.isOpen,
-      children: trigger === 'none' ? null : createElement(trigger, {}, 'Copy'),
+      isEnabled: options.isEnabled,
+      delay: 0,
+      onOpenChange: options.onOpenChange,
+      children:
+        trigger === 'none'
+          ? null
+          : trigger === 'text'
+            ? 'Copy'
+            : createElement(trigger, {}, 'Copy'),
     }),
   );
+}
+
+// Sibling mode: the trigger is rendered by the app, and the tooltip attaches to
+// it through `anchorRef`. The tooltip can unmount while the trigger lives on.
+function siblingHarness(options: {
+  label: string;
+  anchor: { current: FakeElement | null };
+  mounted: boolean;
+}): ReactElement {
+  return createElement(
+    'div',
+    null,
+    createElement('p', null, options.label),
+    createElement(
+      'button',
+      {
+        ref: (el: unknown) => {
+          options.anchor.current = el as FakeElement | null;
+        },
+        'aria-describedby': 'external-note',
+      },
+      'Copy',
+    ),
+    options.mounted
+      ? createElement(Tooltip, {
+          content: 'Copy',
+          delay: 0,
+          anchorRef: options.anchor as never,
+        })
+      : null,
+  );
+}
+
+// Two tooltips on one external trigger. `first` is the one that attached first,
+// so its `aria-describedby` snapshot predates the second one's id — unmounting
+// it is what tells a snapshot-restore apart from a remove-my-own-id.
+function sharedTriggerHarness(options: {
+  anchor: { current: FakeElement | null };
+  first: boolean;
+}): ReactElement {
+  return createElement(
+    'div',
+    null,
+    createElement(
+      'button',
+      {
+        ref: (el: unknown) => {
+          options.anchor.current = el as FakeElement | null;
+        },
+        'aria-describedby': 'external-note',
+      },
+      'Copy',
+    ),
+    options.first
+      ? createElement(Tooltip, {
+          key: 'first',
+          content: 'Copy',
+          delay: 0,
+          anchorRef: options.anchor as never,
+        })
+      : null,
+    createElement(Tooltip, {
+      key: 'second',
+      content: 'Also copy',
+      delay: 0,
+      anchorRef: options.anchor as never,
+    }),
+  );
+}
+
+// Drive a real hover through the listeners the trigger actually carries, then
+// let the (zero) show delay elapse.
+async function hover(trigger: FakeElement): Promise<void> {
+  await act(async () => {
+    trigger.dispatch('mouseenter');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
 }
 
 function anchorNameOf(element: FakeElement): string | undefined {
@@ -194,6 +518,25 @@ function installFakeDom(): void {
   const previousHTMLElement = globalThis.HTMLElement;
   const previousHTMLIFrameElement = globalThis.HTMLIFrameElement;
   const previousActEnvironment = (globalThis as ActGlobal).IS_REACT_ACT_ENVIRONMENT;
+  applyFakeDom(createFakeDom());
+  (globalThis as ActGlobal).IS_REACT_ACT_ENVIRONMENT = true;
+  cleanupTasks.push(() => {
+    globalThis.document = previousDocument;
+    globalThis.window = previousWindow;
+    globalThis.HTMLElement = previousHTMLElement;
+    globalThis.HTMLIFrameElement = previousHTMLIFrameElement;
+    (globalThis as ActGlobal).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  });
+}
+
+function applyFakeDom(dom: FakeDom): void {
+  globalThis.document = dom.document;
+  globalThis.window = dom.window;
+  globalThis.HTMLElement = FakeElement as unknown as typeof HTMLElement;
+  globalThis.HTMLIFrameElement = dom.window.HTMLIFrameElement;
+}
+
+function createFakeDom(): FakeDom {
   const fakeDocument = createFakeDocument();
   const fakeWindow = {
     document: fakeDocument,
@@ -208,18 +551,7 @@ function installFakeDom(): void {
     clearTimeout: (handle: NodeJS.Timeout) => clearTimeout(handle),
   } as unknown as Window & typeof globalThis;
   Object.defineProperty(fakeDocument, 'defaultView', { value: fakeWindow });
-  globalThis.document = fakeDocument;
-  globalThis.window = fakeWindow;
-  globalThis.HTMLElement = FakeElement as unknown as typeof HTMLElement;
-  globalThis.HTMLIFrameElement = fakeWindow.HTMLIFrameElement;
-  (globalThis as ActGlobal).IS_REACT_ACT_ENVIRONMENT = true;
-  cleanupTasks.push(() => {
-    globalThis.document = previousDocument;
-    globalThis.window = previousWindow;
-    globalThis.HTMLElement = previousHTMLElement;
-    globalThis.HTMLIFrameElement = previousHTMLIFrameElement;
-    (globalThis as ActGlobal).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
-  });
+  return { document: fakeDocument, window: fakeWindow };
 }
 
 function createFakeDocument(): Document {
@@ -253,6 +585,10 @@ class FakeElement {
   readonly style: CSSStyleDeclaration;
   readonly tagName: string;
   readonly writes: WriteLog = { attributes: [], styles: [] };
+  // Listeners are tracked as (type, handler) pairs, matching the only thing
+  // `removeEventListener` matches on. A cleanup that passes a different function
+  // identity leaves the entry behind here exactly as it would in a browser.
+  private readonly listeners: Array<{ type: string; handler: unknown }> = [];
   parentNode: FakeElement | null = null;
 
   constructor(tagName: string, readonly ownerDocument: Document) {
@@ -293,7 +629,34 @@ class FakeElement {
     if (value !== '') this.appendChild(new FakeText(value, this.ownerDocument));
   }
 
-  addEventListener(): void {}
+  addEventListener(type: string, handler: unknown): void {
+    this.listeners.push({ type, handler });
+  }
+
+  removeEventListener(type: string, handler: unknown): void {
+    const index = this.listeners.findIndex(
+      (entry) => entry.type === type && entry.handler === handler,
+    );
+    if (index >= 0) this.listeners.splice(index, 1);
+  }
+
+  /** The event types currently bound, in binding order, for assertions. */
+  boundTypes(): string[] {
+    return this.listeners.map((entry) => entry.type);
+  }
+
+  /** Invoke every handler bound for `type`, the way a dispatched event would. */
+  dispatch(type: string): void {
+    const event = { type, target: this } as unknown as Event;
+    for (const entry of [...this.listeners]) {
+      if (entry.type === type) (entry.handler as (e: Event) => void)(event);
+    }
+  }
+
+  matches(selector: string): boolean {
+    // The only selector Astryx tests against a trigger is ':focus-visible'.
+    return selector === ':focus-visible';
+  }
 
   appendChild<T extends FakeElement | FakeText>(node: T): T {
     this.childNodes.push(node);
@@ -329,8 +692,6 @@ class FakeElement {
     return node;
   }
 
-  removeEventListener(): void {}
-
   setAttribute(name: string, value: string): void {
     this.writes.attributes.push(name);
     this.attributes.set(name, value);
@@ -352,3 +713,24 @@ class FakeText {
     this.nodeValue = value;
   }
 }
+
+// A `window` MUST exist before `@astryxdesign/core` is first imported, which is
+// why the import is dynamic, and why it runs from `before` rather than at module
+// scope: `node:test` starts the first test as soon as module evaluation yields,
+// so a top-level `await import()` would lose the race.
+//
+// `useIsomorphicLayoutEffect` resolves ONCE, at module evaluation:
+//
+//   export const useIsomorphicLayoutEffect =
+//     typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+//
+// A static `import {Tooltip}` is hoisted above every statement in this file, so
+// it would evaluate against a bare Node global with no `window` and silently
+// bind `useEffect`. The patch's mechanism is a dependency-array-free *layout*
+// effect, so exercising it under `useEffect` validates the wrong timing:
+// passive effects flush after paint and in a different order relative to ref
+// callbacks and child cleanup, which is exactly where an attachment bug hides.
+before(async () => {
+  applyFakeDom(createFakeDom());
+  ({ Tooltip } = await import('@astryxdesign/core/Tooltip'));
+});
