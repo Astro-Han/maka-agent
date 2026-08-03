@@ -214,7 +214,7 @@ describe('materializeSession', () => {
     expect(item.item.status).toBe('completed');
   });
 
-  test('orphan tool_call (no matching result) → interrupted', () => {
+  test('orphan tool_call (no matching result, no turn record) → interrupted', () => {
     const vm = materializeSession([toolCall('t-orphan', 'Bash')]);
     expect(vm.items).toHaveLength(1);
     const item = vm.items[0];
@@ -222,6 +222,33 @@ describe('materializeSession', () => {
     expect(item.item.status).toBe('interrupted');
     expect(item.item.result).toBeUndefined();
   });
+
+  // A missing result is the absence of evidence, not evidence of a terminal
+  // state. Only a turn that has itself ended makes it mean "never finished" —
+  // while the turn runs, so does the call.
+  for (const [turnStatus, expected] of [
+    ['running', 'running'],
+    ['aborted', 'interrupted'],
+    ['failed', 'interrupted'],
+    ['completed', 'interrupted'],
+  ] as const) {
+    test(`resultless tool_call in a ${turnStatus} turn → ${expected}`, () => {
+      const vm = materializeSession([
+        {
+          type: 'turn_state',
+          id: `state-${turnStatus}`,
+          turnId,
+          ts,
+          status: turnStatus,
+          partialOutputRetained: false,
+        },
+        toolCall('t-inflight', 'Bash'),
+      ]);
+      const item = vm.items[0];
+      if (item?.kind !== 'tool') throw new Error('wrong kind');
+      expect(item.item.status).toBe(expected);
+    });
+  }
 
   test('permission decision folded into tool ChatItem', () => {
     const vm = materializeSession([

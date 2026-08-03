@@ -7,6 +7,7 @@ import {
   overlayLiveTurn,
   type TurnTimelineItem,
 } from '../materialize.js';
+import { applyLiveTurnEvent, armLiveTurn } from '../live-turn-projection.js';
 
 const imageAttachment: AttachmentRef = {
   kind: 'image',
@@ -208,12 +209,47 @@ describe('flat timeline under tool projection (#1307 P1 regression)', () => {
   });
 });
 
+describe('unfinished tools take their status from the turn', () => {
+  // A missing tool_result is the absence of evidence, not evidence of a
+  // terminal state. The turn record says which: a running turn means the call
+  // is still in flight. This is the persisted-only path — no live projection —
+  // which is what a reader sees after a renderer reload or when it re-attaches
+  // to a session running in the background.
+  test('reads an unfinished call in a running turn as running', () => {
+    const [turn] = materializeTurns([
+      userMsg('t1', 1, 'run it'),
+      { type: 'turn_state', id: 's1', turnId: 't1', ts: 2, status: 'running', partialOutputRetained: false },
+      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 3, toolName: 'Bash', args: { command: 'sleep 600' } },
+    ]);
+    assert.equal(turn?.status, 'running');
+    assert.equal(turn?.tools[0]?.status, 'running');
+  });
+
+  // Only a turn that has itself ended makes the missing result mean the tool
+  // never finished.
+  for (const turnStatus of ['aborted', 'failed', 'completed'] as const) {
+    test(`reads an unfinished call in a ${turnStatus} turn as interrupted`, () => {
+      const [turn] = materializeTurns([
+        userMsg('t1', 1, 'run it'),
+        { type: 'turn_state', id: 's1', turnId: 't1', ts: 2, status: turnStatus, partialOutputRetained: false },
+        { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 3, toolName: 'Bash', args: { command: 'sleep 600' } },
+      ]);
+      assert.equal(turn?.tools[0]?.status, 'interrupted');
+    });
+  }
+
+  // Sessions written before turn_state carry no record at all, so they keep
+  // reading as interrupted rather than stranding old rows on a spinner.
+  test('reads an unfinished call with no turn record as interrupted', () => {
+    const [turn] = materializeTurns([
+      userMsg('t1', 1, 'run it'),
+      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 2, toolName: 'Bash', args: { command: 'sleep 600' } },
+    ]);
+    assert.equal(turn?.tools[0]?.status, 'interrupted');
+  });
+});
+
 describe('live tool status over persisted', () => {
-  // A tool_call with no tool_result yet is indistinguishable, in JSONL alone,
-  // from an aborted one — materializeTools reads the gap as `interrupted`
-  // because a replayed turn is always over. A LIVE turn is the counter-
-  // evidence: while the turn still runs, `running` is the truth, and a long
-  // command must not paint as interrupted for its whole duration.
   test('keeps a still-running tool running when persisted has no result yet', () => {
     const settled = materializeTurns([
       userMsg('t1', 1, 'run it'),
@@ -232,23 +268,49 @@ describe('live tool status over persisted', () => {
     assert.equal(tools?.kind === 'tools' ? tools.items[0]?.status : undefined, 'running');
   });
 
-  // Abort/error/complete all run terminalizeLiveSteps, so the live side carries
-  // its own interrupted signal — no persisted fallback needed to keep it.
-  test('keeps an interrupted live tool interrupted', () => {
+  // Deleting the merge exception rests entirely on the live side carrying its
+  // own interrupted signal, so drive the real chain — a tool_start followed by
+  // an abort — rather than hand-building an already-interrupted projection,
+  // which would pass on the spread alone.
+  test('an aborted turn interrupts its in-flight tool through the live chain', () => {
     const settled = materializeTurns([
       userMsg('t1', 1, 'run it'),
-      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 2, toolName: 'Bash', args: { command: 'sleep 60' } },
+      { type: 'turn_state', id: 's1', turnId: 't1', ts: 2, status: 'running', partialOutputRetained: false },
+      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 3, toolName: 'Bash', args: { command: 'sleep 60' } },
     ]);
-    const turns = overlayLiveTurn(settled, {
+    const started = applyLiveTurnEvent(armLiveTurn('t1'), {
+      type: 'tool_start',
+      id: 'event-1',
       turnId: 't1',
-      phase: 'streamed',
-      terminal: true,
-      steps: [{
-        stepId: 'a1',
-        tools: [{ toolUseId: 'bash-1', toolName: 'Bash', stepId: 'a1', status: 'interrupted', args: { command: 'sleep 60' } }],
-      }],
+      toolUseId: 'bash-1',
+      toolName: 'Bash',
+      args: { command: 'sleep 60' },
+      ts: 4,
     });
-    const tools = turns.find((turn) => turn.turnId === 't1')?.timeline
+    const running = applyLiveTurnEvent(started, {
+      type: 'tool_output_delta',
+      id: 'event-2',
+      turnId: 't1',
+      sessionId: 's',
+      toolCallId: 'bash-1',
+      toolUseId: 'bash-1',
+      seq: 0,
+      stream: 'stdout',
+      chunk: 'still going\n',
+      redacted: false,
+      createdAt: 5,
+      ts: 5,
+    });
+    assert.equal(running?.steps[0]?.tools[0]?.status, 'running');
+
+    const aborted = applyLiveTurnEvent(running, {
+      type: 'abort',
+      id: 'event-3',
+      turnId: 't1',
+      reason: 'user_stop',
+      ts: 6,
+    });
+    const tools = overlayLiveTurn(settled, aborted!).find((turn) => turn.turnId === 't1')?.timeline
       .find((item: TurnTimelineItem) => item.kind === 'tools');
     assert.equal(tools?.kind === 'tools' ? tools.items[0]?.status : undefined, 'interrupted');
   });

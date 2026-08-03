@@ -18,8 +18,9 @@ import type {
   SystemNoteMessage,
   ToolActivityKind,
   ToolResultContent,
+  TurnStatus,
 } from '@maka/core';
-import { projectToolActivityArgs } from '@maka/core';
+import { deriveTurnRecords, projectToolActivityArgs } from '@maka/core';
 import { toolResultActivityStatus } from '@maka/core';
 
 // ============================================================================
@@ -58,10 +59,10 @@ export interface SessionViewModel {
 /**
  * Convert StoredMessage[] (raw JSONL) into a ChatItem[] for rendering.
  *
- * Orphan ToolCallMessage (no matching ToolResultMessage by toolUseId) is
- * rendered as ToolActivityItem.status === 'interrupted'. Storage never
- * synthesizes a fake ToolResultMessage — that's our
- * job here.
+ * A ToolCallMessage with no matching ToolResultMessage is read against its
+ * turn: still `running` means the call is in flight, anything else makes it
+ * `interrupted`. Storage never synthesizes a fake ToolResultMessage — that's
+ * our job here.
  */
 export function materializeSession(messages: readonly StoredMessage[]): SessionViewModel {
   const items: ChatItem[] = [];
@@ -73,6 +74,9 @@ export function materializeSession(messages: readonly StoredMessage[]): SessionV
   // Index for tool correlation. ToolCallMessage.id === toolUseId, by §4.2.
   const resultsByToolUseId = new Map<string, ToolResultMessage>();
   const decisionsByToolUseId = new Map<string, PermissionDecisionMessage>();
+  const turnStatusById = new Map(
+    deriveTurnRecords(messages).map((turn) => [turn.turnId, turn.status]),
+  );
 
   // First pass: index results + decisions.
   for (const m of messages) {
@@ -98,7 +102,7 @@ export function materializeSession(messages: readonly StoredMessage[]): SessionV
         const decision = decisionsByToolUseId.get(m.id);
         items.push({
           kind: 'tool',
-          item: toolActivityFromPair(m, result),
+          item: toolActivityFromPair(m, result, turnStatusById.get(m.turnId)),
           decision,
         });
         break;
@@ -134,7 +138,8 @@ export function materializeSession(messages: readonly StoredMessage[]): SessionV
 /**
  * Build a ToolActivityItem from a (ToolCallMessage, ToolResultMessage?) pair.
  *
- * - Missing result → status 'interrupted' (orphan from crash)
+ * - Missing result, turn still running → 'running' (the call is in flight)
+ * - Missing result, turn ended or unrecorded → 'interrupted' (orphan from crash)
  * - Cancelled shell / aborted explore → 'interrupted' (not failure)
  * - Result with isError === true → 'errored' (includes permission deny/block)
  * - Result with isError === false → 'completed'
@@ -142,6 +147,7 @@ export function materializeSession(messages: readonly StoredMessage[]): SessionV
 function toolActivityFromPair(
   call: ToolCallMessage,
   result: ToolResultMessage | undefined,
+  turnStatus: TurnStatus | undefined,
 ): ToolActivityItem {
   if (result === undefined) {
     return {
@@ -150,7 +156,7 @@ function toolActivityFromPair(
       ...(call.activityKind !== undefined ? { activityKind: call.activityKind } : {}),
       ...(call.displayName !== undefined ? { displayName: call.displayName } : {}),
       ...(call.intent !== undefined ? { intent: call.intent } : {}),
-      status: 'interrupted',
+      status: turnStatus === 'running' ? 'running' : 'interrupted',
       args: projectToolActivityArgs(call.toolName, call.args),
       ts: call.ts,
     };

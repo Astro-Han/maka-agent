@@ -138,6 +138,7 @@ export function materializeChat(messages: StoredMessage[]): ChatItem[] {
 
 export function materializeTools(messages: StoredMessage[]): ToolActivityItem[] {
   const results = new Map(messages.filter((message) => message.type === 'tool_result').map((message) => [message.toolUseId, message]));
+  const turnStatusById = new Map(deriveTurnRecords(messages).map((turn) => [turn.turnId, turn.status]));
   return messages
     .filter((message) => message.type === 'tool_call')
     .map((call) => {
@@ -149,12 +150,26 @@ export function materializeTools(messages: StoredMessage[]): ToolActivityItem[] 
         displayName: call.displayName,
         intent: call.intent,
         ...(call.stepId !== undefined ? { stepId: call.stepId } : {}),
-        status: result ? materializeToolResultStatus(result) : 'interrupted',
+        status: result
+          ? materializeToolResultStatus(result)
+          : unfinishedToolStatus(turnStatusById.get(call.turnId)),
         args: projectToolActivityArgs(call.toolName, call.args),
         result: result?.content,
         durationMs: result?.durationMs,
       };
     });
+}
+
+/**
+ * A `tool_call` with no `tool_result` is not evidence of a terminal state — it
+ * is the absence of evidence. The turn says which: while the turn is still
+ * `running` the tool is running too, and only a turn that has itself ended
+ * makes the missing result mean the tool never finished. Sessions written
+ * before `turn_state` carry no record, and `deriveTurnRecords` reports nothing
+ * for them, so they keep reading as `interrupted`.
+ */
+function unfinishedToolStatus(turnStatus: TurnStatus | undefined): ToolActivityItem['status'] {
+  return turnStatus === 'running' ? 'running' : 'interrupted';
 }
 
 function materializeToolResultStatus(
@@ -168,10 +183,9 @@ function materializeToolResultStatus(
  * arrive faster than the persisted JSONL refresh and represent the most
  * current status — including `interrupted`, which `terminalizeLiveSteps`
  * stamps onto every in-flight tool when the turn aborts, errors, or
- * completes. Persisted status must not override it: a `tool_call` with no
- * `tool_result` yet reads as `interrupted` (materializeTools has no way to
- * tell "never finished" from "not finished yet"), and preferring that over a
- * live `running` painted every long command as interrupted until it exited.
+ * completes. Persisted status must not override it: the persisted side is a
+ * whole JSONL refresh behind, so preferring it over live painted every long
+ * command as interrupted until it exited.
  *
  * Live `outputChunks` always come from live — persisted JSONL doesn't
  * store them (PR-REAL-4 contract: chunks are transient UI).
