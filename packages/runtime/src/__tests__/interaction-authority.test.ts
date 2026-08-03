@@ -519,7 +519,7 @@ function authority(
   };
 }
 
-function toolRuntime(events: SessionEvent[], runId: string | undefined = RUN.runId): ToolRuntime {
+function toolRuntime(events: SessionEvent[]): ToolRuntime {
   let id = 0;
   return createTestToolRuntime({
     sessionId: RUN.sessionId,
@@ -530,7 +530,7 @@ function toolRuntime(events: SessionEvent[], runId: string | undefined = RUN.run
     newId: () => `runtime-${++id}`,
     now: () => 1,
     getPermissionPauseTarget: () => null,
-    ...(runId ? { runId } : {}),
+    runId: RUN.runId,
     recordToolInvocation: () => void events,
   });
 }

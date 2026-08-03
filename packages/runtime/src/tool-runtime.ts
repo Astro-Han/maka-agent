@@ -42,7 +42,6 @@ import type {
 import { computerUseModelCallArgs } from '@maka/core';
 import type { SessionHeader } from '@maka/core/session';
 import type { ToolInvocationRecord } from '@maka/core/usage-stats/types';
-import type { EffectiveOrchestration } from '@maka/core/orchestration';
 import { redactSecrets } from '@maka/core/redaction';
 import { TOOL_BOUNDARY_PROTOCOL_V1, type RuntimeEvent } from '@maka/core';
 
@@ -312,8 +311,6 @@ export interface ToolRuntimeInput {
     toolCallId: string;
     output: unknown;
   }) => ToolResultOutput | PromiseLike<ToolResultOutput>;
-  /** Effective orchestration for the active send; undefined between turns. */
-  getCurrentOrchestration?: () => EffectiveOrchestration | undefined;
   spawnChildAgent?: (input: {
     parentRunId: string;
     spec: AgentSpec;

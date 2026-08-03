@@ -48,7 +48,7 @@ import {
 } from './history-compact-checkpoint.js';
 
 import { createHash } from 'node:crypto';
-import type { ModelMessage, ProviderImageBudget, ProviderRequestOrigin } from './model-protocol.js';
+import type { ModelMessage } from './model-protocol.js';
 import type { ModelAdapter } from './model-adapter.js';
 import type {
   RequestProjection,
@@ -91,6 +91,32 @@ import {
 } from './mid-turn-capacity-compact.js';
 import { resolveSelectedModelContextWindow } from './context-budget-policy.js';
 
+/**
+ * Image byte allowance for one turn, accumulated across its provider steps.
+ *
+ * Charged while a request's content is materialized, so it belongs to the turn
+ * issuing that request — never to the backend, which serves several turns.
+ */
+export interface ProviderImageBudget {
+  used: number;
+  decisions: Map<string, boolean>;
+}
+
+/**
+ * The turn a provider request is being built for.
+ *
+ * Compaction runs inside someone's turn but is owned by a Session-scoped
+ * collaborator, so the issuing turn states its identity explicitly instead of
+ * the collaborator reading back a shared "current" run — which, with
+ * overlapping turns on one backend, can be a different run (#1990). The
+ * backend's own TurnScope satisfies this structurally; nothing constructs a
+ * separate origin object.
+ */
+export interface ProviderRequestOrigin {
+  runId: string | undefined;
+  imageBudget: ProviderImageBudget;
+}
+
 /** Constructor dependencies for AiSdkCompaction. */
 export interface AiSdkCompactionDeps {
   input: AiSdkCompactionCapabilities;
@@ -106,7 +132,7 @@ export interface AiSdkCompactionDeps {
     turnId: string;
     callKind: ModelCallKind;
     modelId: string;
-    runId?: string;
+    runId: string | undefined;
   }) => ProviderRequestTracker | undefined;
   /**
    * Materialize a replay plan. The image budget belongs to the turn whose
@@ -115,7 +141,7 @@ export interface AiSdkCompactionDeps {
    */
   materializeRuntimeReplayPlan: (
     plan: RuntimeEventModelReplayPlan,
-    imageBudget: ProviderImageBudget | null | undefined,
+    imageBudget: ProviderImageBudget,
   ) => Promise<ModelMessage[]>;
   canReplayProviderNative: (plan: RuntimeEventModelReplayPlan) => boolean;
   appendTurnTailPrompt: (
@@ -133,11 +159,11 @@ export class AiSdkCompaction {
     turnId: string;
     callKind: ModelCallKind;
     modelId: string;
-    runId?: string;
+    runId: string | undefined;
   }) => ProviderRequestTracker | undefined;
   private readonly materializeRuntimeReplayPlan: (
     plan: RuntimeEventModelReplayPlan,
-    imageBudget: ProviderImageBudget | null | undefined,
+    imageBudget: ProviderImageBudget,
   ) => Promise<ModelMessage[]>;
   private readonly canReplayProviderNative: (plan: RuntimeEventModelReplayPlan) => boolean;
   private readonly appendTurnTailPrompt: (
@@ -398,9 +424,10 @@ export class AiSdkCompaction {
     /**
      * The run this summarization is billed to. Always stated by the caller:
      * mid-send the backend cannot resolve it, because one backend instance
-     * serves several concurrent runs (#1990).
+     * serves several concurrent runs (#1990). Required-but-nullable so a call
+     * site cannot drop attribution by omission.
      */
-    runId?: string;
+    runId: string | undefined;
     contextBudget: ContextBudgetPolicy;
     priorRuntimeContext: readonly RuntimeEvent[];
     draftBlock: HistoryCompactBlock;
@@ -418,7 +445,7 @@ export class AiSdkCompaction {
       turnId: input.turnId,
       callKind: 'history_compact',
       modelId: this.input.modelId,
-      ...(input.runId ? { runId: input.runId } : {}),
+      runId: input.runId,
     });
     const foldedIds = new Set(input.draftBlock.coverage.runtimeEventIds);
     const foldedRuntimeEvents = input.priorRuntimeContext.filter((event) =>
@@ -1039,7 +1066,7 @@ export class AiSdkCompaction {
           turnId,
           callKind: 'semantic_compact',
           modelId: summarizerModelId,
-          ...(origin.runId ? { runId: origin.runId } : {}),
+          runId: origin.runId,
         });
       }
       return summaryTracker;
@@ -1482,7 +1509,7 @@ export class AiSdkCompaction {
       turnId,
       callKind: 'history_compact',
       modelId: this.input.modelId,
-      ...(input.origin.runId ? { runId: input.origin.runId } : {}),
+      runId: input.origin.runId,
     });
     const recorder = this.input.recordHistoryCompactCheckpoint!;
     const loadTurnRuntimeEvents = this.input.loadTurnRuntimeEvents!;

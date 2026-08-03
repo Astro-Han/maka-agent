@@ -10054,7 +10054,7 @@ describe('AiSdkBackend RunTrace', () => {
       newId: idGenerator(),
       now: monotonicClock(),
     });
-    turnScopeTrace(backend, 'turn-1').runTrace = {
+    turnScope(backend, 'turn-1').runTrace = {
       abortRequested: (reason: string) => {
         trace.push({
           id: 'trace-1',
@@ -10067,7 +10067,7 @@ describe('AiSdkBackend RunTrace', () => {
           data: { reason },
         });
       },
-    };
+    } as unknown as RunTrace;
 
     await backend.stop('redirect');
 
@@ -10752,49 +10752,6 @@ describe('AiSdkBackend tool-call repair', () => {
   });
 });
 
-describe('AiSdkBackend loop-gate turn wiring', () => {
-  test('send() resets ToolRuntime per turn (at turn start and at cleanup)', async () => {
-    const model = completionModel();
-    const backend = createTestAiSdkBackend({
-      sessionId: 'session-1',
-      header: header(),
-      appendMessage: async () => {},
-      connection: connection(),
-      apiKey: 'sk-test',
-      modelId: 'mock-model-id',
-      modelFactory: () => model,
-      tools: [],
-      newId: idGenerator(),
-      now: monotonicClock(),
-    });
-
-    const internals = backend as unknown as {
-      activeTurns: Map<string, TestTurnScope>;
-      openTurnScope(input: { turnId: string; text: string; context: [] }): TestTurnScope;
-    };
-    const opened: TestTurnScope[] = [];
-    const openTurnScope = internals.openTurnScope.bind(internals);
-    internals.openTurnScope = (input) => {
-      const scope = openTurnScope(input);
-      opened.push(scope);
-      return scope;
-    };
-
-    await drain(backend.send({ turnId: 'turn-1', text: 'hi', context: [] }));
-    await drain(backend.send({ turnId: 'turn-2', text: 'hi again', context: [] }));
-
-    // Per-turn ToolRuntime state — the loop-gate failure streak, subagent count,
-    // gating, durable attempts — cannot carry over because each turn gets its
-    // own ToolRuntime. That is stronger than resetting a shared one: a turn
-    // overlapping this backend can neither observe nor clear another turn's
-    // state (#1990).
-    assert.equal(opened.length, 2);
-    assert.notEqual(opened[0]!.toolRuntime, opened[1]!.toolRuntime);
-    // And a finished turn leaves nothing behind for the next one to inherit.
-    assert.equal(internals.activeTurns.size, 0);
-  });
-});
-
 describe('AiSdkBackend concurrent turns', () => {
   // #1990: RuntimeKernel reuses one backend per Session and lets one generation
   // hold several concurrent runs. A finishing turn used to clear the backend's
@@ -10925,6 +10882,90 @@ describe('AiSdkBackend concurrent turns', () => {
       'the overlapping turn must not fail when a sibling turn finishes',
     );
     assert.equal(events.find((event) => event.type === 'complete')?.stopReason, 'end_turn');
+    // Both turns are done, so neither left a scope behind for a later turn to
+    // inherit — the leak that would reintroduce shared per-turn state.
+    assert.equal(backendInternals(backend).activeTurns.size, 0);
+  });
+
+  // A broadcast stop must reach every turn even when one of them cannot close.
+  // `endTurn` rejects when a durable sandbox denial cannot be written, and it is
+  // also the ONLY thing that rejects a tool parked on askUserQuestion — an abort
+  // signal does not wake the registry. So a stop that bails on the first failure
+  // parks the sibling forever: that turn's own send() cleanup is itself waiting
+  // on the tool the skipped endTurn was supposed to reject.
+  test('stop() closes every turn even when one turn fails to close', async () => {
+    const backend = createTestAiSdkBackend({
+      sessionId: 'session-1',
+      header: header(),
+      appendMessage: async () => {},
+      connection: connection(),
+      apiKey: 'sk-test',
+      modelId: 'mock-model-id',
+      modelFactory: () => completionModel(),
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    const aborted: string[] = [];
+    const endedTurns: string[] = [];
+    for (const turnId of ['turn-a', 'turn-b']) {
+      const scope = turnScope(backend, turnId);
+      scope.toolRuntime.beginTurn(turnId);
+      scope.runTrace = {
+        emit: () => {},
+        abortRequested: () => aborted.push(turnId),
+      } as unknown as RunTrace;
+    }
+    // The first turn cannot complete teardown; the second parks on a question
+    // that only its own endTurn can reject.
+    const failing = turnScope(backend, 'turn-a');
+    const endFailingTurn = failing.toolRuntime.endTurn.bind(failing.toolRuntime);
+    failing.toolRuntime.endTurn = async (turnId, reason) => {
+      endedTurns.push(turnId);
+      await endFailingTurn(turnId, reason);
+      throw new Error('Could not durably deny every sandbox boundary request');
+    };
+    const parked = turnScope(backend, 'turn-b');
+    const endParkedTurn = parked.toolRuntime.endTurn.bind(parked.toolRuntime);
+    parked.toolRuntime.endTurn = async (turnId, reason) => {
+      endedTurns.push(turnId);
+      await endParkedTurn(turnId, reason);
+    };
+
+    const events: SessionEvent[] = [];
+    const questionCall = runtimeExecute(
+      backend,
+      {
+        ...testTool('Ask', z.object({})),
+        impl: async (
+          _input: unknown,
+          ctx: { askUserQuestion: (questions: unknown[]) => Promise<unknown> },
+        ) => ctx.askUserQuestion([{ question: 'Continue?', options: ['yes', 'no'] }]),
+      } as MakaTool,
+      'turn-b',
+      { push: (event: SessionEvent) => events.push(event) },
+    )({}, { toolCallId: 'tool-b', abortSignal: new AbortController().signal });
+    await waitFor(() => events.some((event) => event.type === 'user_question_request'));
+
+    await assert.rejects(backend.stop('user_stop'), /Could not durably deny/);
+
+    // The failing turn's error still surfaces, and the sibling is closed anyway:
+    // its parked question is rejected rather than left waiting forever.
+    assert.deepEqual(endedTurns, ['turn-a', 'turn-b']);
+    assert.deepEqual(aborted, ['turn-a', 'turn-b']);
+    // settleToolCall reports a failed tool rather than rejecting, so what
+    // matters is that it settles at all instead of parking forever.
+    assert.equal(
+      await Promise.race([
+        questionCall.then(
+          () => 'settled',
+          () => 'settled',
+        ),
+        new Promise((resolve) => setTimeout(() => resolve('parked'), 50)),
+      ]),
+      'settled',
+    );
   });
 });
 
@@ -13767,29 +13808,27 @@ async function waitFor(predicate: () => boolean): Promise<void> {
  * they exercise the real per-turn wiring instead of a backend-wide singleton.
  */
 interface TestTurnScope {
+  turnId: string;
   toolRuntime: ToolRuntime;
   watchdog: { pause(): void; resume(): void } | null;
   runTrace: RunTrace | null;
 }
 
-/** Scope accessor for tests that inject a partial RunTrace stub. */
-function turnScopeTrace(
-  backend: AiSdkBackend,
-  turnId: string,
-): { runTrace: { abortRequested(reason: string): void } | null } {
-  return turnScope(backend, turnId) as unknown as {
-    runTrace: { abortRequested(reason: string): void } | null;
+function backendInternals(backend: AiSdkBackend): {
+  activeTurns: Set<TestTurnScope>;
+  openTurnScope(input: { turnId: string; text: string; context: [] }): TestTurnScope;
+} {
+  return backend as unknown as {
+    activeTurns: Set<TestTurnScope>;
+    openTurnScope(input: { turnId: string; text: string; context: [] }): TestTurnScope;
   };
 }
 
+/** The live scope for a turn, opening one when the test drives a turn directly. */
 function turnScope(backend: AiSdkBackend, turnId: string): TestTurnScope {
-  const internals = backend as unknown as {
-    activeTurns: Map<string, TestTurnScope>;
-    openTurnScope(input: { turnId: string; text: string; context: [] }): TestTurnScope;
-  };
-  return (
-    internals.activeTurns.get(turnId) ?? internals.openTurnScope({ turnId, text: '', context: [] })
-  );
+  const internals = backendInternals(backend);
+  for (const scope of internals.activeTurns) if (scope.turnId === turnId) return scope;
+  return internals.openTurnScope({ turnId, text: '', context: [] });
 }
 
 function runtimeExecute(
