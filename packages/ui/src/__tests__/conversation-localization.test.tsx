@@ -14,7 +14,6 @@ import { LocaleProvider } from '../locale-context.js';
 import { SessionHistoryList } from '../session-history-list.js';
 import { SandboxBoundaryPrompt } from '../sandbox-boundary-prompt.js';
 import { ToolTrow } from '../tool-activity.js';
-import { summarizeTrowTools } from '../tool-activity/trow-summary.js';
 import { UserQuestionPrompt } from '../user-question-prompt.js';
 import { ModelProviderRetryIndicator, TurnView } from '../chat-turn.js';
 
@@ -412,12 +411,6 @@ describe('localized conversation journey', () => {
     const zh = render('zh', <ToolTrow items={[tool]} />);
     const en = render('en', <ToolTrow items={[tool]} />);
 
-    const summaryItems = [
-      { toolUseId: 'read-1', toolName: 'Read', status: 'running' as const, args: {} },
-      { toolUseId: 'read-2', toolName: 'Read', status: 'completed' as const, args: {} },
-    ];
-    assert.match(summarizeTrowTools(summaryItems, { live: true, locale: 'zh' }), /^正在/);
-    assert.match(summarizeTrowTools(summaryItems, { live: true, locale: 'en' }), /^Working:/);
     assert.match(zh, /RAW_INTENT_中文/);
     assert.match(en, /RAW_INTENT_中文/);
   });

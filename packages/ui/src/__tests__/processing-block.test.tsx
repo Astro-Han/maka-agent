@@ -62,15 +62,15 @@ describe('ProcessingBlock disclosure wiring (#1307)', () => {
     assert.match(markup, /深度思考/);
   });
 
-  it('keeps waiting permission in the product-owned disclosure without a processing wrapper', () => {
+  it('keeps an unsettled group in the same Astryx rows, expanded, without a processing wrapper', () => {
     const markup = renderToStaticMarkup(createElement(TurnView, {
       turn: turnWithTools([
         { toolUseId: 'b1', toolName: 'Bash', activityKind: 'command', status: 'completed', args: {} },
-        { toolUseId: 'w1', toolName: 'Write', activityKind: 'edit', status: 'waiting_permission', args: {}, intent: '写入配置' },
+        { toolUseId: 'w1', toolName: 'Write', activityKind: 'edit', status: 'running', args: {}, intent: '写入配置' },
       ]),
     }));
     assert.doesNotMatch(markup, /data-processing="block"/);
-    assert.match(markup, /data-trow="group"/);
+    assert.match(markup, /class="[^"]*astryx-chat-tool-calls[^"]*"/);
     assert.match(markup, /aria-expanded="true"/);
     assert.match(markup, /写入配置/);
   });

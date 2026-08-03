@@ -163,22 +163,7 @@
  margin: 0; }
 .maka-web-result-error-message { color: var(--destructive); }
 .maka-web-result-repair { color: var(--muted-foreground); }
-.maka-tool-header-full { width: 100%; }
-.maka-tool-card-body { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.maka-tool-settle-fade { animation: maka-stream-fade-in var(--duration-emphasized) var(--ease-out-strong) both; }
-.maka-tool-tone-destructive { color: var(--destructive); }
-.maka-tool-tone-warning { color: var(--warning-text, var(--info-text)); }
-.maka-tool-tone-muted { color: var(--muted-foreground); }
-.maka-tool-trow { display: flex; flex-direction: column; }
-.maka-tool-trow-trigger { display: flex; min-width: 0; align-items: center; gap: var(--spacing-1-5, 6px); padding-block: 2px; }
-.maka-tool-trow-icon { flex: 0 0 auto; }
-.maka-tool-trow-summary {
-  font: var(--maka-text-supporting);
- min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.maka-tool-trow-children { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--border); }
-.maka-tool-trow-duration {
-  font: var(--maka-text-supporting);
- flex: 0 0 auto; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.maka-tool-call-detail { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .maka-tool-output-chunk { display: contents; }
 .maka-tool-output-chunk-stderr { color: var(--destructive); }
 .maka-tool-output-chunk-redacted { opacity: 0.65; }
@@ -335,105 +320,6 @@
   .maka-text-shimmer-sweep { opacity: 0; animation: none; }
 }
 
-.maka-tool-container {
-  width: min(680px, 100%);
-  margin: var(--space-0-5) auto 0;
-  padding-inline: var(--space-4);
-}
-.maka-tool-container-header {
-  font: var(--maka-text-supporting);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-0-5);
-  color: var(--muted-foreground);
-}
-.maka-tool-count {
-  font: var(--maka-text-supporting);
-  display: inline-flex;
-  min-width: 22px;
-  /* #1879: was a bare 18px, below the 20px line box it renders. */
-  height: var(--h-control-xs);
-  align-items: center;
-  white-space: nowrap;
-  justify-content: center;
-  padding-inline: var(--space-1-5);
-  border-radius: var(--radius-pill);
-  background: var(--foreground-5);
-  color: var(--foreground-secondary);
-  font-variant-numeric: tabular-nums;
-}
-.maka-tool-item {
-  font: var(--maka-text-supporting);
-  margin-top: var(--space-2);
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-surface);
-  background: var(--foreground-2);
-  box-shadow: var(--shadow-minimal-flat);
-  color: var(--foreground-secondary);
-}
-.maka-tool-item[data-status="waiting_permission"] { border-color: oklch(from var(--info) l c h / 0.4); }
-.maka-tool-item[data-status="running"] { border-color: oklch(from var(--status-running) l c h / 0.4); }
-.maka-tool-item[data-status="completed"] { border-color: var(--border); }
-.maka-tool-item[data-status="blocked"] {
-  border-color: oklch(from var(--warning) l c h / 0.4);
-  background: oklch(from var(--warning) l c h / 0.04);
-}
-.maka-tool-item[data-status="errored"] {
-  border-color: oklch(from var(--destructive) l c h / 0.4);
-  background: oklch(from var(--destructive) l c h / 0.04);
-}
-.maka-tool-item[data-status="interrupted"] {
-  border-color: var(--border);
-  background: var(--foreground-3);
-  opacity: 0.7;
-}
-.maka-tool-header {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-2-5);
-  padding: var(--space-2) var(--space-3);
-  color: var(--foreground-secondary);
-  list-style: none;
-}
-.maka-tool-status-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: var(--radius-pill);
-  background: var(--muted-foreground);
-}
-.maka-tool-status-dot[data-status="waiting_permission"] { background: var(--info); }
-.maka-tool-status-dot[data-status="running"] {
-  background: var(--status-running);
-  box-shadow: 0 0 0 3px oklch(from var(--status-running) l c h / 0.15);
-  animation: maka-tool-pulse 1.5s ease-in-out infinite;
-}
-.maka-tool-status-dot[data-status="completed"] { background: var(--success); }
-.maka-tool-status-dot[data-status="blocked"] { background: var(--warning); }
-.maka-tool-status-dot[data-status="errored"] { background: var(--destructive); }
-.maka-tool-status-dot[data-status="interrupted"] { background: var(--muted-foreground); }
-.maka-tool-name {
-  font: var(--maka-text-heading-3);
-  min-width: 0;
-  overflow: hidden;
-  color: var(--foreground);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.maka-tool-meta {
-  font: var(--maka-text-heading-5);
- display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted-foreground); }
-.maka-tool-duration { font-variant-numeric: tabular-nums; }
-.maka-tool-status-label { color: var(--foreground-secondary); }
-.maka-tool-body { padding: var(--space-2-5) var(--space-3) var(--space-3); }
-.maka-tool-intent {
-  font: var(--maka-text-supporting);
- margin: 0 0 var(--space-2); color: var(--foreground-secondary); }
-.maka-tool-args { max-height: 110px; margin: 0; overflow: auto; }
 
 .maka-overlay-preview {
   font: var(--maka-text-supporting);

@@ -1,7 +1,7 @@
 import { isShellOutput, type UiLocale } from '@maka/core';
 import type { ToolActivityItem } from '../materialize.js';
 import { formatQuietJsonValue } from './builtin-preview.js';
-import { isConnectorTool } from './presentation.js';
+import { isConnectorTool } from './display-name.js';
 import { getToolActivityCopy } from './copy.js';
 import { isSandboxDeniedTool } from './sandbox-denial.js';
 

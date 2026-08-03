@@ -1422,30 +1422,6 @@ html[data-os="darwin"].dark {
 
   /* ---- Tool activity ---------------------------------------------- */
 
-  /* The tool-activity card shell (the inline section + count pill, the
-     Collapsible card, its trigger header row, the body / intent, and the
-     args `<pre>` override) moved onto the `@maka/ui` chat substrate's
-     `toolVariants` literalize table (issue #332 PR3b —
-     packages/ui/src/primitives/chat.tsx). What stays here is the irreducible
-     residue that escapes the computed-style proof, re-keyed on the governed
-     `[data-slot="tool"]` hook instead of the retired `.maka-tool` class.
-     The running status dot's `@keyframes maka-tool-pulse` (below) likewise stays
-     because it is a functional status animation. */
-  [data-slot="tool"] {
-    opacity: 1;
-    transform: translateY(0);
-    transition: border-color var(--duration-base) var(--ease-out-strong);
-  }
-  /* The Collapsible trigger is the header row (laid out by
-     `toolVariants({ part: 'header' })`); as a real <button> it has no native
-     disclosure marker, so the marker-reset rules the native <summary> needed
-     are gone. */
-
-  @keyframes maka-tool-pulse {
-    0%, 100% { box-shadow: 0 0 0 3px oklch(from var(--status-running) l c h / 0.15); }
-    50%      { box-shadow: 0 0 0 5px oklch(from var(--status-running) l c h / 0.06); }
-  }
-
   /* ---- Composer --------------------------------------------------- */
 
   .maka-composer[data-drag-active="true"] .maka-composer-astryx {
