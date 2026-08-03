@@ -7,8 +7,28 @@ export function SettingRow(props: { title: string; detail: string; value: string
   // code element group, saying it in the markup is also what makes it render
   // monospaced. The layout rule (break-all, start) selects the same element,
   // so there is no second name for it: `code.settingsReadOnlyValue`.
-  const Value = props.mono ? 'code' : 'span';
-  const value = <Value className="settingsReadOnlyValue">{props.value}</Value>;
+  //
+  // Layout differs by kind: a short human value rides the row's end slot,
+  // but machine text (an absolute workspace path) squeezed into a
+  // right-anchored 320px box wrapped into a ragged four-line block — the
+  // audit's least readable row. Mono values render as a full-width line
+  // under the description instead, where break-all reads as intended.
+  if (props.mono) {
+    return (
+      <SettingsRow
+        label={props.title}
+        align="start"
+        description={(
+          <>
+            {props.detail ? <span>{props.detail}</span> : null}
+            <code className="settingsReadOnlyValue" data-mono="true">{props.value}</code>
+          </>
+        )}
+        end={props.action ?? undefined}
+      />
+    );
+  }
+  const value = <span className="settingsReadOnlyValue">{props.value}</span>;
   return (
     <SettingsRow
       label={props.title}

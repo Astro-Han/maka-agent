@@ -234,7 +234,12 @@ export function DataSettingsPage() {
           The three-line advisory is body copy, so it moves to `description`
           and the title states what the advisory is about — previously the
           whole paragraph printed as bold blue with no heading. */}
-      <Banner status="info" title={copy.backupTitle} description={copy.backupNotice} />
+      {/* Guidance, not an alert — a full blue Banner between sections was
+          color as texture. Quiet titled prose keeps the same content. */}
+      <div className="settingsQuietCallout">
+        <strong>{copy.backupTitle}</strong>
+        <p>{copy.backupNotice}</p>
+      </div>
       {infoError && (
         <Banner status="info" role="alert" title={copy.pathLoadFailed(infoError)} />
       )}

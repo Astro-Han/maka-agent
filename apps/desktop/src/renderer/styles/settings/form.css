@@ -62,11 +62,6 @@
 }
 
 .settingsActionWidthXs { min-width: 46px; }
-.settingsActionWidthSm { min-width: 52px; }
-.settingsActionWidthMd { min-width: 65px; }
-.settingsActionWidthLg { min-width: 78px; }
-.settingsActionWidthXl { min-width: 91px; }
-.settingsActionWidth2Xl { min-width: 98px; }
 
 .settingsSubheading {
   font: var(--maka-text-heading-4);
@@ -74,4 +69,31 @@
   color: var(--foreground-secondary);
   letter-spacing: var(--tracking-wider);
   text-transform: uppercase;
+}
+
+/* Quiet informational voice — replaces the info Banner where content is
+   guidance, not an alert (Signal-Not-Texture: blue never becomes ambient
+   explanatory wash). */
+.settingsQuietStatus {
+  margin: 0;
+  color: var(--foreground-secondary);
+  font-size: var(--font-size-ui);
+  line-height: var(--leading-normal);
+}
+
+.settingsQuietCallout {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.settingsQuietCallout strong {
+  color: var(--foreground);
+  font-size: var(--font-size-ui);
+}
+
+.settingsQuietCallout p {
+  margin: 0;
+  color: var(--foreground-secondary);
+  font-size: var(--font-size-ui);
+  line-height: var(--leading-normal);
 }

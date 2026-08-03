@@ -1,7 +1,7 @@
 h1. Maka Proposal 中文 Review 版
 
 {quote}
-Apache Incubator — New Podling Proposal · Draft v0.9
+Apache Incubator — New Podling Proposal · Draft v0.11
 
 本文件仅供中文 review；正式提交版本以英文原文为准。
 {quote}
@@ -60,7 +60,7 @@ h3. Core Developers
 * *Yuhan Lei（Astro-Han）* — 负责 runtime、evaluation、benchmarking 和 desktop development，同时也是 OpenCLI contributor。
 * *Kun Li（likun666661）* — 负责 runtime event-log architecture、headless task loop 和 completion verification。
 
-其他 module owners 和持续贡献者包括 Haoqing Wang（hqhq1025，computer-use）、Zhanghan Gao（YayoiNanoka）、sunheyi6、Nyvo-io、Yongtao Wang（M4n5ter）、Colafornia、GabrielDrapor、MicroGrey、zhiiw 等。
+其他 module owners 和持续贡献者包括 Haoqing Wang（hqhq1025，computer-use）、Zhanghan Gao（YayoiNanoka）、sunheyi6、Nyvo-io、Yongtao Wang（M4n5ter）、Colafornia、GabrielDrapor、MicroGery、zhiiw 等。
 
 h3. Alignment
 
@@ -401,7 +401,7 @@ h4. License 和 Release 处理（License and Release Treatment）
 
 *macOS 可选依赖*
 
-macOS 的 computer-use 可选功能使用 {{cua-driver}}，它基于采用 MIT license 的 {{trycua/cua}} 项目。其 Rust dependency tree 包含 215 个 crates，其中 {{resvg}} 和 {{usvg}} 采用 MPL-2.0，属于 ASF Category B；另有 10 个 crates 还需要补齐完整 license text。在 license notice 和 build provenance 完成之前，{{cua-driver}} 不会进入 Apache release。如果这些工作未完成，release 将关闭这个可选功能。
+macOS 的 computer-use 可选功能使用 {{cua-driver}}，它基于采用 MIT license 的 {{trycua/cua}} 项目。{{cua-driver}} executable 及其 Rust crates 均不包含在 Maka 的 source distribution 或 binary distribution 中。Apache release 固定关闭这个 backend，因此 {{cua-driver}} 不属于上面的 release dependency inventory。
 
 h3. Cryptography
 
@@ -445,7 +445,7 @@ Proposal 提交前，必须确认每个人的 ICLA status。
 * Haoqing Wang (hqhq1025) — hqeric1025@qq.com
 * Zhanghan Gao (YayoiNanoka) — yayoinanoka37@gmail.com
 * Yongtao Wang (M4n5ter) — m4n5terrr@gmail.com
-* Yuhang Chang (MicroGrey) — changyuhang@outlook.com
+* Yuhang Chang (MicroGery) — changyuhang@outlook.com
 
 h2. Affiliations
 
@@ -454,7 +454,7 @@ h2. Affiliations
 * likun666661 / Kun Li — likun666661@outlook.com — Shanghai Geshu Zhizhi Technology Co., Ltd.
 * YayoiNanoka / Zhanghan Gao — yayoinanoka37@gmail.com — South China University of Technology
 * hqhq1025 / Haoqing Wang — hqeric1025@qq.com — Beijing University of Posts and Telecommunications
-* MicroGrey / Yuhang Chang — changyuhang@outlook.com — Shenzhen Morphi Intelligence Technology Co., Ltd.
+* MicroGery / Yuhang Chang — changyuhang@outlook.com — Shenzhen Morphi Intelligence Technology Co., Ltd.
 * M4n5ter / Yongtao Wang — m4n5terrr@gmail.com — Individual
 
 h2. Sponsors

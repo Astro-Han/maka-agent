@@ -3,6 +3,7 @@ import { Check, Copy, Eye, EyeOff } from '@maka/ui/icons';
 import {
   IconButton,
   InputGroup,
+  InputGroupText,
   type InputGroupProps,
   TextInput,
   useMountedRef,
@@ -84,11 +85,16 @@ export function PasswordInput(props: {
     }
   }
   return (
+    /* The group label deliberately does NOT receive `isRequired`: Astryx's
+       FieldLabel hardcodes an untranslatable English "· Required" indicator
+       (FieldLabel.js: `isRequired ? 'Required' : null`), and our credential
+       labels already carry the localized 「（必填）」 suffix. The `required`
+       input semantic lives on the inner TextInput, whose own label is
+       visually hidden. */
     <InputGroup
       label={props.label}
       description={props.description}
       isLabelHidden={props.isLabelHidden}
-      isRequired={props.isRequired}
       isDisabled={props.isDisabled}
       status={props.status}
     >
@@ -105,27 +111,33 @@ export function PasswordInput(props: {
         status={props.status ? { type: props.status.type } : undefined}
         hasAutoFocus={props.hasAutoFocus}
       />
-      {props.value && !props.isDisabled && (
+      {/* InputGroupText is the group's sanctioned addon segment — bare
+          IconButtons as group children get no segment styling, which left
+          the input with a naked flat right edge and the eye floating outside
+          the border. Wrapping them in the addon joins the caps correctly. */}
+      <InputGroupText>
+        {props.value && !props.isDisabled && (
+          <IconButton
+            variant="ghost"
+            size="sm"
+            isDisabled={copying}
+            onClick={() => void copyValue()}
+            label={copying ? copy.copying : justCopied ? copy.copied : copy.copy}
+            icon={justCopied
+              ? <Check size={16} aria-hidden="true" />
+              : <Copy size={16} aria-hidden="true" />}
+          />
+        )}
         <IconButton
           variant="ghost"
           size="sm"
-          isDisabled={copying}
-          onClick={() => void copyValue()}
-          label={copying ? copy.copying : justCopied ? copy.copied : copy.copy}
-          icon={justCopied
-            ? <Check size={16} aria-hidden="true" />
-            : <Copy size={16} aria-hidden="true" />}
+          onClick={() => setVisible((current) => !current)}
+          isDisabled={props.isDisabled}
+          label={visible ? copy.hide : copy.show}
+          aria-pressed={visible}
+          icon={visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
         />
-      )}
-      <IconButton
-        variant="ghost"
-        size="sm"
-        onClick={() => setVisible((current) => !current)}
-        isDisabled={props.isDisabled}
-        label={visible ? copy.hide : copy.show}
-        aria-pressed={visible}
-        icon={visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-      />
+      </InputGroupText>
     </InputGroup>
   );
 }

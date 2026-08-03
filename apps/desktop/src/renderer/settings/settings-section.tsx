@@ -16,14 +16,16 @@
 // so a page becomes a flat list of sections and stops inventing layout.
 //
 // `variant`:
-//   'rows' (default) — the body is the shared `.settingsRows` card, the single
-//     card primitive on the settings surface. Rows are Astryx `Item`s.
+//   'rows' (default) — the body is the shared `.settingsRows` open row group:
+//     edge-to-edge rows split by hairlines, no card chrome. This is the Astryx
+//     settings idiom (see the CLI's settings/settings-dialog templates and
+//     `astryx docs layout`: "no stacked full-width Cards as page structure";
+//     rows are "edge-to-edge, dividers"). Cards remain for genuine callouts.
 //   'bare' — the body is a plain block, for groups whose content is not a row
 //     list (the 外观 option grids, a form layout, a chart). The section still
-//     contributes its header and its share of the page rhythm, which is the
-//     point: 'bare' opts out of the CARD, never out of the vocabulary.
+//     contributes its header, anchor divider, and page rhythm.
 import type { ReactNode } from 'react';
-import { Card, Heading, HStack, Item, Text, VStack } from '@astryxdesign/core';
+import { Divider, Heading, HStack, Item, Text, VStack } from '@astryxdesign/core';
 import { cn } from '@maka/ui';
 
 export function SettingsSection(props: {
@@ -61,12 +63,13 @@ export function SettingsSection(props: {
           {props.action != null ? <div>{props.action}</div> : null}
         </HStack>
       ) : null}
+      {hasHeader ? <Divider /> : null}
       {props.variant === 'bare' ? (
         <div className={cn('settingsSectionBody', props.bodyClassName)}>{props.children}</div>
       ) : (
-        <Card padding={0} className={cn('settingsRows', props.bodyClassName)}>
+        <div className={cn('settingsRows', props.bodyClassName)}>
           {props.children}
-        </Card>
+        </div>
       )}
     </section>
   );
@@ -90,9 +93,9 @@ export function SettingsSection(props: {
  *    `.settingsRowEnd` caps it and lets the container query in rows.css
  *    stack it under the label on narrow cards.
  *
- * `density="spacious"` (12px block+inline) is the library's own inset that
- * matches `.settingsFieldRow` padding, so Item rows and form rows in the
- * same card share one left edge.
+ * `density="balanced"` (8px block, flush inline) keeps rows edge-aligned
+ * with the section header text — the open idiom has no card inset, so rows
+ * must not indent relative to their heading.
  */
 export function SettingsRow(props: {
   label: ReactNode;
@@ -104,7 +107,7 @@ export function SettingsRow(props: {
 }) {
   return (
     <Item
-      density="spacious"
+      density="balanced"
       align={props.align}
       label={props.label}
       description={props.description == null ? undefined : <>{props.description}</>}

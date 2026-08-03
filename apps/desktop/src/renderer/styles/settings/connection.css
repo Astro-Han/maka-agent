@@ -109,11 +109,6 @@
     gap: var(--space-3);
     color: var(--muted-foreground);
   }
-.settingsInlineFileState {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1-5);
-  }
 .settingsConnectionActions {
     display: flex;
     flex-wrap: wrap;

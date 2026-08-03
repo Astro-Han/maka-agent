@@ -18,11 +18,8 @@ import type {
 } from '@maka/core';
 import { isDragGrantPermissionId, OS_PERMISSION_IDS } from '@maka/core';
 import {
-  Badge,
   Banner,
   Button,
-  Card,
-  Grid,
   HStack,
   List,
   ListItem,
@@ -31,11 +28,11 @@ import {
   Text,
   VStack,
 } from '@astryxdesign/core';
-import { RelativeTime, StatTile, useMountedRef, useToast, useUiLocale } from '@maka/ui';
+import { RelativeTime, StatusDot, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { SettingsSection } from './settings-section';
 import { getPermissionCenterCopy, type PermissionCenterCopy } from '../locales/permission-center-copy';
 import { settingsActionErrorMessage } from './settings-error-copy';
-import { statusBadgeVariant } from './settings-status-badge';
+import { statusDotVariant } from './settings-status-badge';
 import { SettingsSkeletonStack } from './settings-skeleton';
 import { useActionGuard } from './use-action-guard';
 
@@ -185,38 +182,34 @@ export function PermissionCenterPage() {
 
           Both lines were duplicates, so what is left is the freshness readout
           and its action. */}
-      <HStack gap={2} align="center" justify="end">
-        <Text type="supporting" size="sm" color="secondary">
-          {copy.lastRead}<RelativeTime ts={checkedAtMs} className="settingsHelpInlineTime" />
-        </Text>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => setRefreshTick((tick) => tick + 1)}
-          label={copy.detectAgain}
-        />
-      </HStack>
-
-      <Grid columns={{ minWidth: 130 }} gap={2} aria-label={copy.summaryAria}>
-        <PermissionSummaryTile label={copy.granted} value={counts.granted} tone="neutral" />
-        <PermissionSummaryTile label={copy.pending} value={counts.pending} tone="warning" />
-        <PermissionSummaryTile label={copy.denied} value={counts.denied} tone="destructive" />
-        <PermissionSummaryTile label={copy.other} value={counts.other} tone="neutral" />
-      </Grid>
-
-      {/* Both lists are Card + List(hasDividers) + Item — the same row language
-          the rest of Settings uses. They were two bespoke `<ul>` recipes
-          (.settingsOsPermissionList / .settingsCapabilityList) that each
-          re-derived the card border, the radius, the per-row top hairline and a
-          grid for icon / body / actions, which is exactly what Item's
-          startContent / label / description / endContent slots lay out. */}
+      {/* The freshness readout + re-detect action ride the first section's
+          header, and the four colored StatTiles condensed onto one quiet
+          tabular count line — a settings page is not a dashboard. */}
       <SettingsSection
         variant="bare"
         title={copy.osSection}
         description={copy.osSectionHelp}
+        action={(
+          <div className="settingsFormRowControlCluster">
+            <Text type="supporting" size="sm" color="secondary">
+              {copy.lastRead}<RelativeTime ts={checkedAtMs} className="settingsHelpInlineTime" />
+            </Text>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setRefreshTick((tick) => tick + 1)}
+              label={copy.detectAgain}
+            />
+          </div>
+        )}
       >
-        <Card padding={0}>
-          <List hasDividers aria-label={copy.osListAria}>
+        <p className="settingsHealthSummaryLine" aria-label={copy.summaryAria}>
+          <span data-tone="neutral">{copy.granted} {counts.granted}</span>
+          <span data-tone={counts.pending > 0 ? 'warning' : 'neutral'}>{copy.pending} {counts.pending}</span>
+          <span data-tone={counts.denied > 0 ? 'destructive' : 'neutral'}>{copy.denied} {counts.denied}</span>
+          <span data-tone="neutral">{copy.other} {counts.other}</span>
+        </p>
+        <List hasDividers aria-label={copy.osListAria}>
             {OS_PERMISSION_IDS.map((id) => (
               <OsPermissionRow
                 key={id}
@@ -239,7 +232,6 @@ export function PermissionCenterPage() {
               />
             ))}
           </List>
-        </Card>
       </SettingsSection>
 
       <SettingsSection
@@ -256,8 +248,7 @@ export function PermissionCenterPage() {
           />
         )}
       >
-        <Card padding={0}>
-          <List hasDividers aria-label={copy.capabilityListAria}>
+        <List hasDividers aria-label={copy.capabilityListAria}>
             {capabilities.capabilities.map((capability) => (
               <CapabilityRow
                 key={capability.id}
@@ -267,28 +258,11 @@ export function PermissionCenterPage() {
                 diagnosticsOpen={diagnosticsOpen}
               />
             ))}
-          </List>
-        </Card>
+        </List>
       </SettingsSection>
 
       <Text type="supporting" size="sm" color="secondary">{copy.footnote}</Text>
     </VStack>
-  );
-}
-
-function PermissionSummaryTile(props: {
-  label: string;
-  value: number;
-  tone: 'success' | 'warning' | 'destructive' | 'neutral';
-}) {
-  // Convergence R4: StatTile owns the recipe (incl. the zero-is-not-an-
-  // exception tone gate this tile pioneered).
-  return (
-    <StatTile
-      label={props.label}
-      value={props.value}
-      tone={props.tone}
-    />
   );
 }
 
@@ -401,7 +375,10 @@ function CapabilityRow(props: {
       label={(
         <HStack gap={2} align="center">
           <Text type="label" size="sm">{capabilityLabel}</Text>
-          <Badge variant={statusBadgeVariant(readinessCopy.tone)} label={readinessCopy.label} />
+          <span className="settingsHealthSignalStatus">
+            <StatusDot variant={statusDotVariant(readinessCopy.tone)} label={readinessCopy.label} />
+            <span>{readinessCopy.label}</span>
+          </span>
         </HStack>
       )}
       description={(
@@ -444,10 +421,10 @@ function CapabilityRow(props: {
                 >
                   {capability.osPermissions.map((req) => (
                     <MetadataListItem key={req.id} label={copy.osPermissions[req.id]?.label ?? req.id}>
-                      <Badge
-                        variant={statusBadgeVariant(copy.osStates[req.status].tone)}
-                        label={copy.osStates[req.status].label}
-                      />
+                      <span className="settingsHealthSignalStatus">
+                        <StatusDot variant={statusDotVariant(copy.osStates[req.status].tone)} label={copy.osStates[req.status].label} />
+                        <span>{copy.osStates[req.status].label}</span>
+                      </span>
                     </MetadataListItem>
                   ))}
                 </MetadataList>
@@ -590,7 +567,10 @@ function OsPermissionRow(props: {
       label={(
         <HStack gap={2} align="center">
           <Text type="label" size="sm">{label}</Text>
-          <Badge variant={statusBadgeVariant(stateCopy.tone)} label={stateCopy.label} />
+          <span className="settingsHealthSignalStatus">
+            <StatusDot variant={statusDotVariant(stateCopy.tone)} label={stateCopy.label} />
+            <span>{stateCopy.label}</span>
+          </span>
         </HStack>
       )}
       description={(

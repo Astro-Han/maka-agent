@@ -189,8 +189,10 @@
   grid-template-columns: minmax(0, 1fr);
   /* Sections carry titles now (see settings-section.tsx), so the between-group
      gap has to out-measure the title-to-body gap inside a section or the two
-     rhythms read as one flat stack. 24px outside / 8px inside. */
-  gap: var(--space-6);
+     rhythms read as one flat stack. The open row idiom (no card chrome) needs
+     the larger step: 32px outside / 8px inside — the Astryx settings-dialog
+     template's own section rhythm. */
+  gap: var(--space-8);
   background: transparent;
 }
 
@@ -198,7 +200,7 @@
    sub-pages, each wrapping in their own `.settingsStructuredPage`):
    the inner one just passes through. */
 .settingsStructuredPage .settingsStructuredPage {
-  gap: var(--space-6);
+  gap: var(--space-8);
 }
 
 /* ---- The section unit (settings-section.tsx) ---------------------------

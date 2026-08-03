@@ -480,8 +480,10 @@ export function VoiceModelsSettingsPage(props: {
           }}
           label={copy.editRecognitionConnection}
         />
+        {/* A diagnostic, not the page's committed action — it stays
+            secondary so the page keeps zero standing primaries. */}
         <Button
-          variant="primary"
+          variant="secondary"
           type="button"
           isDisabled={saving || isBusy || recognitionTesting}
           onClick={() => void runRecognitionTest()}
@@ -575,7 +577,7 @@ export function VoiceModelsSettingsPage(props: {
         </div>
         <SettingsActions>
           <Button
-            variant="primary"
+            variant="secondary"
             onClick={() => void runCaptureSmoke()}
             isDisabled={isBusy}
             aria-busy={isBusy}
@@ -585,11 +587,20 @@ export function VoiceModelsSettingsPage(props: {
           />
         </SettingsActions>
         <SettingsField>
-          <Banner
-            status={smoke.status === 'error' ? 'error' : smoke.status === 'ok' ? 'success' : 'info'}
-            id={smokeStatusId}
-            role="status"
-            title={voiceSmokeMessage(smoke, copy)} />
+          {/* Blue is a signal, not texture: the idle "waiting for the
+              self-check" state is quiet supporting text; the Banner only
+              appears once the check has an actual outcome. */}
+          {smoke.status === 'ok' || smoke.status === 'error' ? (
+            <Banner
+              status={smoke.status === 'error' ? 'error' : 'success'}
+              id={smokeStatusId}
+              role="status"
+              title={voiceSmokeMessage(smoke, copy)} />
+          ) : (
+            <p className="settingsQuietStatus" id={smokeStatusId} role="status">
+              {voiceSmokeMessage(smoke, copy)}
+            </p>
+          )}
         </SettingsField>
       </SettingsSection>
       <SettingsSection variant="bare" title={copy.boundary} description={copy.subtitle}>

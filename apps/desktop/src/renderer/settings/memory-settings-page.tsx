@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   FormLayout,
+  MoreMenu,
   TextInput,
   RelativeTime,
   Switch,
@@ -205,27 +206,24 @@ export function MemorySettingsPage(props: {
                 <li key={`${backup.kind}:${backup.path}`} className="settingsMemoryBackupCandidate">
                   <span>{backupCandidateLabel} · <RelativeTime ts={backup.updatedAt} /></span>
                   <Button
-                    variant="secondary"
+                    variant="ghost"
                     size="sm"
-                    className="settingsActionWidthSm"
                     aria-label={copy.openBackupAria(backupCandidateLabel)}
                     isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending(`backup:${backup.kind}:open`)}
                     onClick={() => void openBackupCandidate(backup)}
                     label={isMemoryActionPending(`backup:${backup.kind}:open`) ? copy.text.opening : copy.text.open}
                   />
                   <Button
-                    variant="secondary"
+                    variant="ghost"
                     size="sm"
-                    className="settingsActionWidthSm"
                     aria-label={copy.restoreBackupAria(backupCandidateLabel)}
                     isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending(`backup:${backup.kind}:restore`)}
                     onClick={() => void restoreBackupCandidate(backup)}
                     label={isMemoryActionPending(`backup:${backup.kind}:restore`) ? copy.text.restoring : copy.text.restore}
                   />
                   <Button
-                    variant="secondary"
+                    variant="ghost"
                     size="sm"
-                    className="settingsActionWidthSm"
                     aria-label={copy.copyBackupAria(backupCandidateLabel)}
                     isDisabled={isMemoryActionPending(`backup:${backup.kind}:copy`)}
                     onClick={() => void copyBackupReference(backup)}
@@ -267,16 +265,30 @@ export function MemorySettingsPage(props: {
           <Banner status="info" role="status" title={effective.reason} />
         </SettingsField>
       )}
+      {/* Was nine side-by-side text buttons wrapping onto two lines — no
+          hierarchy, every action shouting equally. The row keeps the three
+          actions that belong to the editing loop (save / open / reload);
+          everything else — folder, previous version, copy refs, reset,
+          restore — is folded into a MoreMenu, the library's own overflow
+          idiom for secondary actions. */}
       <SettingsActions role="group" aria-label={copy.text.fileActionsAria}>
         <Button variant="primary" className="settingsActionWidthXs" isDisabled={memoryControlsDisabled || !effective.enabled || !memoryDraftDirty} onClick={() => void save()} label={pendingMemoryWriteAction === 'save' ? copy.text.saving : memoryDraftDirty ? copy.text.save : copy.text.saved} />
-        <Button variant="ghost" className="settingsActionWidth2Xl" isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending('memory:file:open')} onClick={() => void openFile()} label={isMemoryActionPending('memory:file:open') ? copy.text.opening : copy.text.openFile} />
-        <Button variant="ghost" className="settingsActionWidthLg" isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending('memory:folder:open')} onClick={() => void openFolder()} label={isMemoryActionPending('memory:folder:open') ? copy.text.opening : copy.text.openFolder} />
-        <Button variant="ghost" className="settingsActionWidthSm" isDisabled={memoryControlsDisabled || !effective.enabled} onClick={() => void reloadDraftFromDisk()} label={pendingMemoryWriteAction === 'reload' ? copy.text.loading : copy.text.reload} />
-        <Button variant="ghost" className="settingsActionWidthMd" isDisabled={memoryControlsDisabled || !effective.enabled || !effective.latestBackup || isMemoryActionPending('backup:latest:open')} onClick={() => void openLatestBackup()} label={isMemoryActionPending('backup:latest:open') ? copy.text.opening : copy.text.openPrevious} />
-        <Button variant="ghost" className="settingsActionWidthSm" isDisabled={!effective.path || isMemoryActionPending('memory:path:copy')} onClick={() => void copyPath()} label={isMemoryActionPending('memory:path:copy') ? copy.text.copying : copy.text.copyPath} />
-        <Button variant="ghost" className="settingsActionWidthXl" isDisabled={!effective.latestBackup || (effective.latestBackup ? isMemoryActionPending(`backup:${effective.latestBackup.kind}:copy`) : false)} onClick={() => void copyLatestBackupReference()} label={effective.latestBackup && isMemoryActionPending(`backup:${effective.latestBackup.kind}:copy`) ? copy.text.copying : copy.text.copyPrevious} />
-        <Button variant="ghost" className="settingsActionWidthMd" isDisabled={memoryControlsDisabled || !effective.enabled} onClick={() => void reset()} label={pendingMemoryWriteAction === 'reset' ? copy.text.resetting : copy.text.resetBackup} />
-        <Button variant="ghost" className="settingsActionWidthMd" isDisabled={memoryControlsDisabled || !effective.enabled || !effective.latestBackup || isMemoryActionPending('backup:latest:restore')} onClick={() => void restoreLatestBackup()} label={isMemoryActionPending('backup:latest:restore') ? copy.text.restoring : copy.text.restorePrevious} />
+        <Button variant="ghost" isDisabled={memoryControlsDisabled || !effective.enabled || isMemoryActionPending('memory:file:open')} onClick={() => void openFile()} label={isMemoryActionPending('memory:file:open') ? copy.text.opening : copy.text.openFile} />
+        <Button variant="ghost" isDisabled={memoryControlsDisabled || !effective.enabled} onClick={() => void reloadDraftFromDisk()} label={pendingMemoryWriteAction === 'reload' ? copy.text.loading : copy.text.reload} />
+        <MoreMenu
+          label={copy.text.fileActionsAria}
+          size="sm"
+          items={[
+            { label: copy.text.openFolder, isDisabled: memoryControlsDisabled || !effective.enabled, onClick: () => void openFolder() },
+            { label: copy.text.copyPath, isDisabled: !effective.path, onClick: () => void copyPath() },
+            { type: 'divider' },
+            { label: copy.text.openPrevious, isDisabled: memoryControlsDisabled || !effective.enabled || !effective.latestBackup, onClick: () => void openLatestBackup() },
+            { label: copy.text.copyPrevious, isDisabled: !effective.latestBackup, onClick: () => void copyLatestBackupReference() },
+            { label: copy.text.restorePrevious, isDisabled: memoryControlsDisabled || !effective.enabled || !effective.latestBackup, onClick: () => void restoreLatestBackup() },
+            { type: 'divider' },
+            { label: copy.text.resetBackup, isDisabled: memoryControlsDisabled || !effective.enabled, onClick: () => void reset() },
+          ]}
+        />
       </SettingsActions>
       </SettingsSection>
       <MemoryPromptPreviewSection

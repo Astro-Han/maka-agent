@@ -1,5 +1,5 @@
 import type { LocalMemoryState } from '@maka/core';
-import { Badge, Button, RelativeTime } from '@maka/ui';
+import { Button, RelativeTime } from '@maka/ui';
 import { memoryOriginLabel } from './memory-settings-labels';
 import type { MemorySettingsCopy } from '../locales/settings-memory-copy';
 
@@ -52,7 +52,11 @@ export function MemoryEntryList(props: {
               : undefined;
             return (
               <li key={entry.id}>
-                <article className="settingsMemoryEntryCard">
+                {/* Row, not card: entries are dense scannable data — the open
+                    idiom's edge-to-edge rows with dividers ("no Card-wrapped
+                    list items"). Active/archived reads from the group header
+                    and the group's dimmed state. */}
+                <article className="settingsMemoryEntryRow">
                 <strong>{entry.title}</strong>
                 <small className="settingsMemoryEntryMeta">
                   {memoryOriginLabel(entry.origin, props.copy)}
@@ -71,22 +75,13 @@ export function MemoryEntryList(props: {
                     </span>
                   )}
                 </small>
-                <Badge
-                  className="settingsMemoryPromptScope"
-                  /* `blue`, not `info`: Astryx's semantic archive is solid
-                     fills and its colour archive is tints, and the wash this
-                     replaced was `--state-selected-bg`. */
-                  variant={props.archived ? 'neutral' : 'blue'}
-                  label={props.archived ? props.copy.text.archivedNoPrompt : props.copy.text.activePrompt}
-                />
                 <p>{entry.content}</p>
                 {(props.onCopyReference || props.onFocusDraft || props.onStatusChange) && (
                   <div className="settingsMemoryEntryActions" role="group" aria-label={props.copy.entryActionsAria(entry.title)}>
                     {props.onCopyReference && (
                       <Button
-                        variant="secondary"
+                        variant="ghost"
                         size="sm"
-                        className="settingsActionWidthSm"
                         isDisabled={copyPending}
                         onClick={() => void props.onCopyReference?.(entry)}
                         label={copyPending ? props.copy.text.copying : props.copy.text.copyReference}
@@ -94,7 +89,7 @@ export function MemoryEntryList(props: {
                     )}
                     {props.onFocusDraft && (
                       <Button
-                        variant="secondary"
+                        variant="ghost"
                         size="sm"
                         onClick={() => void props.onFocusDraft?.(entry)}
                         label={props.copy.text.locateDraft}
@@ -102,9 +97,8 @@ export function MemoryEntryList(props: {
                     )}
                     {props.onStatusChange && (
                       <Button
-                        variant="secondary"
+                        variant="ghost"
                         size="sm"
-                        className="settingsActionWidthMd"
                         aria-label={statusActionAriaLabel}
                         isDisabled={props.busy}
                         onClick={() => void props.onStatusChange?.(entry, props.archived ? 'active' : 'archived')}

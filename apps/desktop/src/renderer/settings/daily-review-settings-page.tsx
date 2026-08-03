@@ -5,7 +5,7 @@ import { Selector, Switch, TextInput, useMountedRef, useToast, useUiLocale } fro
 import { buildCatalogDailyReviewModelOptions } from '../model-catalog-choices';
 import { getDailyReviewSettingsCopy, type DailyReviewSettingsCopy } from '../locales/settings-daily-review-copy';
 import { settingsActionErrorMessage } from './settings-error-copy';
-import { SettingsField, SettingsRow, SettingsSection } from './settings-section';
+import { SettingsRow, SettingsSection } from './settings-section';
 import { useActionGuard } from './use-action-guard';
 
 const DAILY_REVIEW_DEFAULT_MODEL_VALUE = '__maka_daily_review_default_model__';
@@ -111,14 +111,16 @@ export function DailyReviewSettingsPage(props: { connections: readonly LlmConnec
             />
           }
         />
-        <SettingsField>
-          <TextInput
+        <SettingsRow
+          label={copy.executeTime}
+          description={copy.executeTimeHelp}
+          end={<TextInput
             label={copy.executeTime}
-            description={copy.executeTimeHelp}
+            isLabelHidden
             value={executeTimeDraft}
             isDisabled={scheduleDisabled}
             placeholder={copy.executeTimePlaceholder}
-            width="100%"
+            width={110}
             status={executeTimeInvalid ? { type: 'error', message: copy.executeTimeInvalid } : undefined}
             onChange={(executeTime) => {
               setExecuteTimeDraft(executeTime);
@@ -131,24 +133,25 @@ export function DailyReviewSettingsPage(props: { connections: readonly LlmConnec
                 void patchConfig('executeTime', { executeTime: executeTimeDraft });
               }
             }}
-          />
-        </SettingsField>
+          />}
+        />
       </SettingsSection>
 
       <SettingsSection title={copy.analysisTitle} description={copy.analysisDescription}>
-        <SettingsField>
-          <Selector
+        <SettingsRow
+          label={copy.model}
+          description={copy.modelHelp}
+          end={<Selector
             value={selectedModelValue}
             label={copy.model}
-            description={copy.modelHelp}
+            isLabelHidden
             options={modelOptions}
             isDisabled={formDisabled || modelOptions.length === 0}
-            width="100%"
             onChange={(value) => void patchConfig('modelKey', {
               modelKey: value === DAILY_REVIEW_DEFAULT_MODEL_VALUE ? '' : value,
             })}
-          />
-        </SettingsField>
+          />}
+        />
       </SettingsSection>
     </VStack>
   );

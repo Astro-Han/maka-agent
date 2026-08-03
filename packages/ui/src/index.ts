@@ -92,6 +92,8 @@ export * from './astryx-i18n.js';
 // @maka/ui surface intact; the mechanical atom cut follows separately.
 export {
   Button,
+  MoreMenu,
+  type MoreMenuProps,
   type ButtonProps,
   type ButtonVariant,
   type ButtonSize,
@@ -132,6 +134,9 @@ export {
   type NumberInputProps,
   InputGroup,
   type InputGroupProps,
+  InputGroupText,
+  StatusDot,
+  type StatusDotVariant,
   Switch,
   type SwitchProps,
   CheckboxInput,
