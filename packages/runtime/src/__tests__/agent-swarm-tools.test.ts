@@ -28,6 +28,7 @@ import type { SpawnChildAgentResult } from '../session-manager.js';
 import type { RunTraceLike } from '../run-trace.js';
 import {
   MAX_ACTIVE_CHILD_AGENT_RUNS_PER_TURN,
+  MAX_ACTIVE_SUBAGENT_TOOLS_PER_TURN,
   ToolRuntime,
   type MakaTool,
   type MakaToolContext,
@@ -1161,11 +1162,11 @@ describe('AgentSwarm adapter', () => {
       { traceEvents },
     );
     const tool = singleChildProbeTool();
-    const pending = Array.from({ length: MAX_ACTIVE_CHILD_AGENT_RUNS_PER_TURN + 1 }, (_, index) =>
+    const pending = Array.from({ length: MAX_ACTIVE_SUBAGENT_TOOLS_PER_TURN + 1 }, (_, index) =>
       executeTool(runtime, tool, {}, new AbortController(), [], `tool-admission-${index}`),
     );
 
-    await waitFor(() => starts === MAX_ACTIVE_CHILD_AGENT_RUNS_PER_TURN);
+    await waitFor(() => starts === MAX_ACTIVE_SUBAGENT_TOOLS_PER_TURN);
     assert.deepEqual(await pending.at(-1), {
       error: '只读探索并发过多：同一轮最多 5 个子代理。请等待已有探索完成后再继续。',
     });
