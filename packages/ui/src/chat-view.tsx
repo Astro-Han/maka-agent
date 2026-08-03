@@ -19,7 +19,8 @@ import { isDeepResearchSession } from '@maka/core';
 import { Button, ButtonGroup, ChatMessage, ChatMessageList, EmptyState } from '@astryxdesign/core';
 import { useChatLayoutContext } from '@astryxdesign/core/Chat';
 import { useLayer } from '@astryxdesign/core/Layer';
-import { materializeChat, materializeTurns, overlayLiveTurn, overlayShellRunUpdates } from './materialize.js';
+import { materializeChat } from './materialize.js';
+import { useTranscriptProjection } from './use-transcript-projection.js';
 import type { LiveTurnProjection } from './live-turn-projection.js';
 import {
   ModelContinuingIndicator,
@@ -206,12 +207,8 @@ export function ChatView(props: {
   onAskAboutSelection?(input: { text: string; turnId?: string }): void;
 }) {
   const copy = getConversationCopy(useUiLocale()).chat;
-  // chat + storedTools survive for the empty-state and streaming-bubble
-  // paths; the main message log is now driven by `turns` (per @kenji UI-04
-  // turn-grouping projection).
-  // Persisted history and the live overlay are separate projections. Plain-text
-  // deltas only clone the active turn; settled turn identities stay stable so
-  // memoized TurnViews skip reconciliation on the hottest update path.
+  // chat survives for the empty-state path; the main message log is driven by
+  // `turns` (per @kenji UI-04 turn-grouping projection).
   const drainingMessageIdsKey = JSON.stringify(
     props.liveTurn?.steps.flatMap((step) => step.text ? [step.stepId] : []) ?? [],
   );
@@ -226,18 +223,16 @@ export function ChatView(props: {
     [drainingMessageIds, props.messages],
   );
   const chat = useMemo(() => materializeChat(visibleMessages), [visibleMessages]);
-  const settledTurns = useMemo(
-    () => materializeTurns(visibleMessages),
-    [visibleMessages],
-  );
-  const liveTurns = useMemo(
-    () => overlayLiveTurn(settledTurns, props.liveTurn),
-    [settledTurns, props.liveTurn],
-  );
-  const turns = useMemo(
-    () => overlayShellRunUpdates(liveTurns, props.shellRunUpdates ?? []),
-    [liveTurns, props.shellRunUpdates],
-  );
+  // The projection owns the derived turns and reports which ones an update
+  // actually touched, so a turn nothing said anything about keeps its object
+  // identity and its memoized TurnView skips — across deltas AND across the
+  // message refreshes that fire at every step/tool boundary (#2030).
+  const { turns } = useTranscriptProjection({
+    sessionId: props.activeSession?.id,
+    messages: visibleMessages,
+    liveTurn: props.liveTurn,
+    shellRunUpdates: props.shellRunUpdates,
+  });
   // #642 single render path: the in-flight answer is injected into the tail
   // turn's TurnView (the SAME node as the eventual committed turn) instead of a
   // separate streaming <section>, so live→settled is a data-source swap, not an
@@ -246,7 +241,9 @@ export function ChatView(props: {
   // starts, so `materializeTurns` already emits it — with an empty assistant
   // timeline — as `turns[last]`. Only the tail TurnView gets a fresh
   // `liveStreaming` object per delta (→ it alone re-renders); every sibling
-  // gets a stable `undefined` and its memo skips (the plain-text perf path).
+  // gets a stable `undefined` and its memo skips. That the sibling's `turn`
+  // prop is also stable is the projection's tested contract, not a property
+  // inferred from a chain of pure derivations (#2030).
   // A turn is "still live" — and must keep its non-actionable footer placeholder
   // instead of a clickable regenerate/branch — while ANY of text, thinking, OR a
   // tool is in flight. Deriving liveness from streamingText/thinkingText alone
@@ -285,17 +282,34 @@ export function ChatView(props: {
     ),
     [props.messages],
   );
-  const promptRailTurns = useMemo(
-    () =>
-      turns
-        .filter((turn) => (turn.user?.text ?? '').trim().length > 0)
-        .map((turn) => ({
-          turnId: turn.turnId,
-          label: turn.user?.text ?? '',
-          reply: turn.assistant?.text ?? '',
-        })),
-    [turns],
-  );
+  // The rail's entries change only when a turn's persisted prompt/answer text
+  // does, but `turns` gets a new array on every delta. Handing the previous
+  // array back when nothing it reads moved keeps the memoized rail — and its
+  // transcript-wide IntersectionObserver — out of the streaming path. The
+  // per-entry comparison is O(1) per turn because an unaffected turn keeps its
+  // object identity, so its text is the same string reference.
+  const promptRailTurnsRef = useRef<ReadonlyArray<{ turnId: string; label: string; reply: string }>>([]);
+  const promptRailTurns = useMemo(() => {
+    const next = turns
+      .filter((turn) => (turn.user?.text ?? '').trim().length > 0)
+      .map((turn) => ({
+        turnId: turn.turnId,
+        label: turn.user?.text ?? '',
+        reply: turn.assistant?.text ?? '',
+      }));
+    const previous = promptRailTurnsRef.current;
+    if (
+      previous.length === next.length
+      && next.every((entry, index) => {
+        const prior = previous[index]!;
+        return prior.turnId === entry.turnId && prior.label === entry.label && prior.reply === entry.reply;
+      })
+    ) {
+      return previous;
+    }
+    promptRailTurnsRef.current = next;
+    return next;
+  }, [turns]);
   // Stable event wrappers (advanced-use-latest): parent handlers are
   // recreated per render upstream; routing through refs keeps the
   // memoized TurnView's function props identity-stable without

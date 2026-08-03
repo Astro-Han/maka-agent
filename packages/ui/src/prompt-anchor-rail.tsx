@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { useUiLocale } from './locale-context.js';
 import { getConversationCopy } from './conversation-copy.js';
 
@@ -11,7 +11,7 @@ export interface PromptAnchorRailTurn {
 }
 
 export interface PromptAnchorRailProps {
-  turns: PromptAnchorRailTurn[];
+  turns: readonly PromptAnchorRailTurn[];
   /** The scroll container that holds the `[data-turn-id]` turn sections. */
   scrollRef: RefObject<HTMLElement | null>;
 }
@@ -23,18 +23,25 @@ export interface PromptAnchorRailProps {
  * scrolls the target turn into view; an IntersectionObserver highlights the
  * tick whose turn is currently at the top of the viewport.
  */
-export function PromptAnchorRail({ turns, scrollRef }: PromptAnchorRailProps): React.ReactElement | null {
+export const PromptAnchorRail = memo(function PromptAnchorRail({ turns, scrollRef }: PromptAnchorRailProps): React.ReactElement | null {
   const copy = getConversationCopy(useUiLocale()).sessions;
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  // Which turns exist is the only thing the observer set depends on. The
+  // preview text changes on every streamed token, so keying the effect on the
+  // turns array itself tore down and rebuilt an observer over the whole
+  // transcript per delta — one querySelector + observe per turn (#2030).
+  const turnIdKey = turns.map((turn) => turn.turnId).join('\u0000');
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
 
   useEffect(() => {
     const root = scrollRef.current;
-    if (!root || turns.length === 0) return;
+    if (!root || turnIdKey.length === 0) return;
 
     const idByElement = new Map<Element, string>();
-    for (const turn of turns) {
-      const el = root.querySelector(`[data-turn-id="${CSS.escape(turn.turnId)}"]`);
-      if (el) idByElement.set(el, turn.turnId);
+    for (const turnId of turnIdKey.split('\u0000')) {
+      const el = root.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`);
+      if (el) idByElement.set(el, turnId);
     }
     if (idByElement.size === 0) return;
 
@@ -48,7 +55,7 @@ export function PromptAnchorRail({ turns, scrollRef }: PromptAnchorRailProps): R
           else visible.delete(id);
         }
         // The topmost prompt still in view is the "current" one.
-        const firstVisible = turns.find((turn) => visible.has(turn.turnId));
+        const firstVisible = turnsRef.current.find((turn) => visible.has(turn.turnId));
         if (firstVisible) setActiveTurnId(firstVisible.turnId);
       },
       // Only count a turn as active once it reaches the top third of the
@@ -57,7 +64,7 @@ export function PromptAnchorRail({ turns, scrollRef }: PromptAnchorRailProps): R
     );
     for (const el of idByElement.keys()) observer.observe(el);
     return () => observer.disconnect();
-  }, [scrollRef, turns]);
+  }, [scrollRef, turnIdKey]);
 
   function jumpTo(turnId: string): void {
     const el = scrollRef.current?.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`);
@@ -97,4 +104,4 @@ export function PromptAnchorRail({ turns, scrollRef }: PromptAnchorRailProps): R
       })}
     </nav>
   );
-}
+});
