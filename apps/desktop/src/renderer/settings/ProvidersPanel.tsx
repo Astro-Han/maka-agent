@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -100,6 +100,7 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
   // Which row the user left the list from, so returning puts focus back where
   // they were rather than on the page's primary action.
   const listReturnFocusRef = useRef<string | null>(null);
+  const detailTitleId = useId();
   const locale = useUiLocale();
   const providerCopy = getProviderSettingsCopy(locale);
   const copy = providerCopy.panel;
@@ -201,20 +202,27 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
 
   useSettingsRouteFocus({
     level,
-    listLevel: 'list',
     routeKey: route,
     isReady: !loading,
-    focusSelectors: (current) => current === 'detail'
-      // The region, not its back button: an IconButton opens its tooltip on
-      // focus, so focusing one on arrival would pop a tooltip at every mouse
-      // user who merely clicked a row.
-      ? ['[data-maka-contract="connection-detail"]']
-      : current === 'catalog'
-        ? ['[data-maka-contract="provider-catalog"] input']
-        : ['[data-maka-contract="provider-setup"] input', '[data-maka-contract="provider-setup"]'],
-    listReturnFocusRef,
-    listReturnSelector: (slug) => `[data-connection-slug="${slug}"] button`,
-    listFallbackRef: addButtonRef,
+    resolveTarget: (current) => {
+      const find = (selector: string) => document.querySelector<HTMLElement>(selector);
+      if (current === 'catalog') return find('[data-maka-contract="provider-catalog"] input');
+      if (current === 'setup') {
+        return find('[data-maka-contract="provider-setup"] input')
+          ?? find('[data-maka-contract="provider-setup"]');
+      }
+      // The region rather than its back button, so a screen reader announces
+      // the level the user landed in instead of the way out of it.
+      if (current === 'detail') return find('[data-maka-contract="connection-detail"]');
+      // Consumed here and only here: the ref is set on the way down and has to
+      // survive the levels in between. The row the user came from may be gone —
+      // that is exactly what a deletion does — so the primary action is the
+      // fallback, not the default.
+      const returnToSlug = listReturnFocusRef.current;
+      listReturnFocusRef.current = null;
+      return (returnToSlug ? find(`[data-connection-slug="${returnToSlug}"] button`) : null)
+        ?? addButtonRef.current;
+    },
   });
 
   if (loading) {
@@ -237,11 +245,12 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
         // tabIndex -1 so a route change can land focus on the level itself —
         // the standard SPA answer to "where does focus go when the page
         // swaps", and it draws no ring.
-        <VStack gap={5} tabIndex={-1} className="settingsRouteLevel" data-maka-contract="connection-detail">
+        <VStack gap={5} tabIndex={-1} role="region" aria-labelledby={detailTitleId} className="settingsRouteLevel" data-maka-contract="connection-detail">
           <SettingsRouteHeader
             onBack={goToList}
             backLabel={copy.backToList}
             logo={<ProviderLogo type={selected.providerType} compact />}
+            titleId={detailTitleId}
             title={selected.name}
             badge={selected.slug === defaultSlug ? <Badge variant="neutral" label={copy.default} /> : null}
             subtitle={connectionSubtitle(selected, locale)}

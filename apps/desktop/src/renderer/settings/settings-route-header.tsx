@@ -1,8 +1,6 @@
 // The header of a settings sub-level: back affordance, title, and one quiet
 // line of context.
 //
-// A settings page that owns more than one level needs exactly one way back.
-//
 // Deliberately a `Toolbar` with everything in `startContent`: the back button,
 // the optional logo, and the title block read as one left-aligned cluster, so
 // the title sits where the list's rows started and the eye does not travel.
@@ -16,6 +14,8 @@ import { ArrowLeft } from '@maka/ui/icons';
 export function SettingsRouteHeader(props: {
   onBack(): void;
   backLabel: string;
+  /** True while a write is in flight: leaving would discard the draft. */
+  isBackDisabled?: boolean;
   logo?: ReactNode;
   title: string;
   /** Wire the level's `aria-labelledby` to this heading, so it is announced. */
@@ -34,6 +34,7 @@ export function SettingsRouteHeader(props: {
             label={props.backLabel}
             tooltip={props.backLabel}
             icon={<ArrowLeft size={16} aria-hidden="true" />}
+            isDisabled={props.isBackDisabled}
             onClick={props.onBack}
           />
           {props.logo}

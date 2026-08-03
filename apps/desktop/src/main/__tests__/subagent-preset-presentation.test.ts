@@ -125,10 +125,10 @@ describe('resolveSubagentRoute', () => {
   });
 
   it('renders the list for an edit route whose preset is gone', () => {
-    // The whole reason this is a function: a preset deleted from under an open
-    // editor used to leave `preset` null while the editor still rendered, which
-    // is its create branch — so saving appended a SECOND preset instead of
-    // updating one. Nothing on screen said so.
+    // The whole reason this is a function: `preset: null` is what the editor
+    // reads as "new", so an edit level that kept rendering with a vanished
+    // preset would be its create branch — and saving appends rather than
+    // updates. Falling back to the list is what keeps those two apart.
     assert.deepEqual(resolveSubagentRoute({ kind: 'edit', presetId: 'gone' }, [fastReader]), {
       level: 'list',
       preset: null,

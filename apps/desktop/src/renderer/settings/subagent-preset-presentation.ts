@@ -18,9 +18,9 @@ export type SubagentPageRoute =
 /**
  * An edit route whose preset vanished (deleted, or removed by an external
  * settings write) is an unsatisfiable route, not a state to correct: the list
- * is what it renders as. Resolving it here rather than in the component keeps
- * the rule testable — inlined, the only way to reach it was to delete a preset
- * from under an open editor, and nothing did.
+ * is what it renders as. It lives here rather than inside the component
+ * because the only way to reach it there is to delete a preset from under an
+ * open editor — a state a unit test can hand it directly.
  */
 export function resolveSubagentRoute(
   route: SubagentPageRoute,

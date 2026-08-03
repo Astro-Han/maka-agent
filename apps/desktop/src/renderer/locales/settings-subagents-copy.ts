@@ -57,7 +57,7 @@ export type SubagentSettingsCopy = {
     noConnection: string;
     noModel: string;
     requiredName: string;
-    invalidId: string;
+    invalidId(max: number): string;
     duplicateId: string;
     invalidConnection: string;
     invalidModel: string;
@@ -128,7 +128,7 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       noConnection: '请先在“模型”页启用一个模型连接。',
       noModel: '所选连接没有已启用的模型。',
       requiredName: '请输入显示名称。',
-      invalidId: '只能使用字母、数字、点、下划线、冒号和连字符，最多 128 个字符。',
+      invalidId: (max) => `只能使用字母、数字、点、下划线、冒号和连字符，最多 ${max} 个字符。`,
       duplicateId: '这个 subagent_id 已经存在。',
       invalidConnection: '请选择一个已启用的模型连接。',
       invalidModel: '请选择一个已启用的模型。',
@@ -209,7 +209,7 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       noConnection: 'Enable a model connection on the Models page first.',
       noModel: 'The selected connection has no enabled models.',
       requiredName: 'Enter a display name.',
-      invalidId: 'Use only letters, numbers, dots, underscores, colons, and hyphens, up to 128 characters.',
+      invalidId: (max) => `Use only letters, numbers, dots, underscores, colons, and hyphens, up to ${max} characters.`,
       duplicateId: 'That subagent_id already exists.',
       invalidConnection: 'Select an enabled model connection.',
       invalidModel: 'Select an enabled model.',

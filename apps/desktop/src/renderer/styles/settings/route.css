@@ -1,7 +1,4 @@
-/* Shared by every settings page that owns more than one level (providers,
-   subagents), which is why this is not in a page's own stylesheet.
-
-   A route level takes focus when it lands, so a keyboard user does not get
+/* A route level takes focus when it lands, so a keyboard user does not get
    dropped on document.body every time the page navigates. It is a landing
    target, not a control — the ring belongs to whatever they Tab to next.
    Astryx draws its focus ring with box-shadow, not outline, so both are
