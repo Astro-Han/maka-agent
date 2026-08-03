@@ -36,7 +36,7 @@ import {
 } from './plan-reminder-helpers.js';
 import {
   Button as UiButton,
-  FormLayout,
+  Field,
   Selector,
   TextInput,
 } from '@astryxdesign/core';
@@ -81,6 +81,9 @@ export function PlanReminderFormDialog(props: {
   const [deliveryChatId, setDeliveryChatId] = useState(props.seed.deliveryChatId);
   const [editingId, setEditingId] = useState<string | null>(props.seed.editingId);
   const [submitPending, setSubmitPending] = useState(false);
+  // The empty form is invalid by definition; showing the title error before
+  // the user has typed anything reads as a scolding. Gate it on first input.
+  const [titleTouched, setTitleTouched] = useState(false);
   const planReminderMountedRef = useMountedRef();
   const submitPendingRef = useRef(false);
   const parsedRunAt = Date.parse(runAtLocal);
@@ -120,6 +123,7 @@ export function PlanReminderFormDialog(props: {
     setDeliveryChatId('');
     setRunAtLocal(toPlanReminderLocalDateTimeValue(Date.now() + 60 * 60 * 1000));
     setEditingId(null);
+    setTitleTouched(false);
   }
 
   function closeReminderDialog() {
@@ -194,12 +198,14 @@ export function PlanReminderFormDialog(props: {
       <Layout
         content={
           <LayoutContent padding={0}>
+        {/* Redesign (WAWQAQ msg `67d21f99`): the form reads like the reference
+            scheduled-task panels now — a quiet kicker, a large borderless
+            title, a bare description field, then label-left / control-right
+            hairline rows in two labeled groups. All state, validation and
+            submit invariants are unchanged; only the presentation moved. */}
         <form className="maka-plan-form" onSubmit={submit} aria-busy={submitPending ? 'true' : undefined}>
           <header className="maka-plan-form-header">
-            <div>
-              <p className="maka-plan-eyebrow">{copy.eyebrow}</p>
-              <h3 id="maka-plan-dialog-title" className="maka-plan-form-title">{isEditing ? copy.editTitle : copy.createTitle}</h3>
-            </div>
+            <h3 id="maka-plan-dialog-title" className="maka-plan-form-kicker">{isEditing ? copy.editTitle : copy.createTitle}</h3>
             <div className="maka-plan-form-header-actions">
               {!isEditing && (
                 <DropdownMenu
@@ -232,127 +238,172 @@ export function PlanReminderFormDialog(props: {
               />
             </div>
           </header>
-          <FormLayout direction="horizontal">
-            <TextInput
-              hasAutoFocus
-              label={copy.field.title}
+          <Field
+            label={copy.field.title}
+            inputID="maka-plan-title"
+            isLabelHidden
+            isDisabled={formInteractionDisabled}
+            status={titleTouched && validation?.field === 'title'
+              ? { type: 'error', message: validation.message }
+              : undefined}
+            statusVariant="detached"
+          >
+            <input
+              id="maka-plan-title"
+              className="maka-plan-title-input"
               value={title}
-              onChange={(value) => setTitle(value.slice(0, 120))}
-              data-maka-plan-title-input="true"
+              autoFocus
+              onChange={(event) => {
+                setTitleTouched(true);
+                setTitle(event.target.value.slice(0, 120));
+              }}
               placeholder={copy.titlePlaceholder}
-              isDisabled={formInteractionDisabled}
-              isRequired
-              status={validation?.field === 'title'
-                ? { type: 'error', message: validation.message }
-                : undefined}
+              disabled={formInteractionDisabled}
+              data-maka-plan-title-input="true"
             />
-            <TextInput
-              label={copy.field.time}
-              value={runAtLocal}
-              onChange={setRunAtLocal}
-              placeholder={copy.timePlaceholder}
-              isDisabled={formInteractionDisabled}
-              isRequired
-              status={validation?.field === 'time'
-                ? { type: 'error', message: validation.message }
-                : undefined}
-            />
-          </FormLayout>
-          <div className="maka-plan-presets" aria-label={copy.presetsAriaLabel}>
-            {copy.presets.map(([preset, label]) => (
-              <UiButton
-                key={preset}
-                variant="secondary"
-                size="sm"
-                className="maka-plan-preset"
-                onClick={() => applyRunAtPreset(preset)}
-                isDisabled={formInteractionDisabled}
-                label={label}
-              />
-            ))}
-          </div>
-          <FormLayout direction="horizontal">
-            <Selector
-              value={recurrence}
-              onChange={(value) => setRecurrence(value as PlanReminderRecurrence)}
-              isDisabled={formInteractionDisabled}
-              label={copy.field.recurrence}
-              width="100%"
-              options={copy.recurrenceOptions.map(([value, label]) => ({ value, label }))}
-            />
-            <Selector
-              value={deliveryChannel}
-              onChange={(value) => setDeliveryChannel(value as PlanReminderDeliveryTarget['channel'])}
-              isDisabled={formInteractionDisabled}
-              label={copy.field.delivery}
-              width="100%"
-              options={copy.deliveryOptions.map(([value, label]) => ({ value, label }))}
-            />
-          </FormLayout>
-          {recurrence === 'cron' && (
-            <TextInput
-              label={copy.field.cron}
-              value={cronExpression}
-              onChange={(value) => setCronExpression(value.slice(0, 80))}
-              placeholder={copy.cronPlaceholder}
-              isDisabled={formInteractionDisabled}
-              isRequired
-              status={validation?.field === 'cron'
-                ? { type: 'error', message: validation.message }
-                : undefined}
-            />
-          )}
-          {deliveryChannel === 'bot' && (
-            <>
-              <FormLayout direction="horizontal">
-                <Selector
-                  value={deliveryPlatform}
-                  onChange={(value) => setDeliveryPlatform(value as BotProvider)}
-                  isDisabled={formInteractionDisabled}
-                  label={copy.field.platform}
-                  width="100%"
-                  options={BOT_DELIVERY_PROVIDERS.map((provider) => {
-                    const icon = (
-                      <BotBrandLogo
-                        provider={provider}
-                        width="100%"
-                        height="100%"
-                        aria-hidden="true"
-                      />
-                    );
-                    return {
-                      value: provider,
-                      label: botDisplayLabel(provider),
-                      icon,
-                    };
-                  })}
-                />
-                <TextInput
-                  label={copy.field.chatId}
-                  value={deliveryChatId}
-                  onChange={(value) => setDeliveryChatId(value.slice(0, 160))}
-                  placeholder={copy.chatIdPlaceholder}
-                  isDisabled={formInteractionDisabled}
-                  isRequired
-                  status={validation?.field === 'chatId'
-                    ? { type: 'error', message: validation.message }
-                    : undefined}
-                />
-              </FormLayout>
-              <p className="maka-plan-delivery-help">
-                {copy.deliveryHelp(formatPlanDeliveryProviderList())}
-              </p>
-            </>
-          )}
+          </Field>
           <UiTextarea
             label={copy.field.note}
+            isLabelHidden
             value={note}
             onChange={(value) => setNote(value.slice(0, 1000))}
             maxLength={1000}
-            rows={5}
+            rows={3}
             placeholder={copy.notePlaceholder}
             isDisabled={formInteractionDisabled}
           />
+          <section className="maka-plan-group" aria-label={copy.groupSchedule}>
+            <p className="maka-plan-group-label">{copy.groupSchedule}</p>
+            <div className="maka-plan-rows">
+              <div className="maka-plan-row">
+                <span className="maka-plan-row-label">{copy.field.recurrence}</span>
+                <Selector
+                  value={recurrence}
+                  onChange={(value) => setRecurrence(value as PlanReminderRecurrence)}
+                  isDisabled={formInteractionDisabled}
+                  label={copy.field.recurrence}
+                  isLabelHidden
+                  width={220}
+                  options={copy.recurrenceOptions.map(([value, label]) => ({ value, label }))}
+                />
+              </div>
+              <div className="maka-plan-row">
+                <span className="maka-plan-row-label">{copy.field.at}</span>
+                <TextInput
+                  label={copy.field.time}
+                  isLabelHidden
+                  value={runAtLocal}
+                  onChange={setRunAtLocal}
+                  placeholder={copy.timePlaceholder}
+                  isDisabled={formInteractionDisabled}
+                  isRequired
+                  width={220}
+                  status={validation?.field === 'time'
+                    ? { type: 'error', message: validation.message }
+                    : undefined}
+                />
+              </div>
+              {recurrence === 'cron' && (
+                <div className="maka-plan-row">
+                  <span className="maka-plan-row-label">{copy.field.cron}</span>
+                  <TextInput
+                    label={copy.field.cron}
+                    isLabelHidden
+                    value={cronExpression}
+                    onChange={(value) => setCronExpression(value.slice(0, 80))}
+                    placeholder={copy.cronPlaceholder}
+                    isDisabled={formInteractionDisabled}
+                    isRequired
+                    width={220}
+                    status={validation?.field === 'cron'
+                      ? { type: 'error', message: validation.message }
+                      : undefined}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="maka-plan-presets" aria-label={copy.presetsAriaLabel}>
+              {copy.presets.map(([preset, label]) => (
+                <UiButton
+                  key={preset}
+                  variant="ghost"
+                  size="sm"
+                  className="maka-plan-preset"
+                  onClick={() => applyRunAtPreset(preset)}
+                  isDisabled={formInteractionDisabled}
+                  label={label}
+                />
+              ))}
+            </div>
+          </section>
+          <section className="maka-plan-group" aria-label={copy.groupDelivery}>
+            <p className="maka-plan-group-label">{copy.groupDelivery}</p>
+            <div className="maka-plan-rows">
+              <div className="maka-plan-row">
+                <span className="maka-plan-row-label">{copy.field.channel}</span>
+                <Selector
+                  value={deliveryChannel}
+                  onChange={(value) => setDeliveryChannel(value as PlanReminderDeliveryTarget['channel'])}
+                  isDisabled={formInteractionDisabled}
+                  label={copy.field.delivery}
+                  isLabelHidden
+                  width={220}
+                  options={copy.deliveryOptions.map(([value, label]) => ({ value, label }))}
+                />
+              </div>
+              {deliveryChannel === 'bot' && (
+                <>
+                  <div className="maka-plan-row">
+                    <span className="maka-plan-row-label">{copy.field.platform}</span>
+                    <Selector
+                      value={deliveryPlatform}
+                      onChange={(value) => setDeliveryPlatform(value as BotProvider)}
+                      isDisabled={formInteractionDisabled}
+                      label={copy.field.platform}
+                      isLabelHidden
+                      width={220}
+                      options={BOT_DELIVERY_PROVIDERS.map((provider) => {
+                        const icon = (
+                          <BotBrandLogo
+                            provider={provider}
+                            width="100%"
+                            height="100%"
+                            aria-hidden="true"
+                          />
+                        );
+                        return {
+                          value: provider,
+                          label: botDisplayLabel(provider),
+                          icon,
+                        };
+                      })}
+                    />
+                  </div>
+                  <div className="maka-plan-row">
+                    <span className="maka-plan-row-label">{copy.field.chatId}</span>
+                    <TextInput
+                      label={copy.field.chatId}
+                      isLabelHidden
+                      value={deliveryChatId}
+                      onChange={(value) => setDeliveryChatId(value.slice(0, 160))}
+                      placeholder={copy.chatIdPlaceholder}
+                      isDisabled={formInteractionDisabled}
+                      isRequired
+                      width={220}
+                      status={validation?.field === 'chatId'
+                        ? { type: 'error', message: validation.message }
+                        : undefined}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            {deliveryChannel === 'bot' && (
+              <p className="maka-plan-delivery-help">
+                {copy.deliveryHelp(formatPlanDeliveryProviderList())}
+              </p>
+            )}
+          </section>
           <footer className="maka-plan-form-footer">
             <UiButton
               variant="secondary"
