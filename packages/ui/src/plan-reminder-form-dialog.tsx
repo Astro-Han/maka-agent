@@ -252,7 +252,12 @@ export function PlanReminderFormDialog(props: {
               id="maka-plan-title"
               className="maka-plan-title-input"
               value={title}
-              autoFocus
+              // Not React's `autoFocus`: it runs during commit, before the
+              // dialog's showModal() makes the field visible, so the focus
+              // silently fails. Astryx's Dialog focuses `[data-autofocus]`
+              // after opening — the same seam TextInput's `hasAutoFocus`
+              // emits, which this bare input replaced.
+              data-autofocus
               onChange={(event) => {
                 setTitleTouched(true);
                 setTitle(event.target.value.slice(0, 120));
