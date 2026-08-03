@@ -151,7 +151,7 @@ describe('getAIModel: OpenAI-compatible streamed tool_calls index', () => {
  * shape cannot express.
  */
 interface ToolCallDelta {
-  index?: number;
+  index?: number | null;
   id?: string;
   type?: 'function';
   function?: { name?: string; arguments?: string };
@@ -256,6 +256,8 @@ function assertToolCallIdsUsable(parts: LanguageModelV4StreamPart[]): void {
  * still green, which is exactly the state this replaced.
  */
 function assertEventLifecycle(parts: LanguageModelV4StreamPart[]): void {
+  // Derived rather than passed in, so no case can opt out of the stricter rule by omission.
+  const failed = parts.at(-1)?.type !== 'finish';
   const letters = new Map([
     ['tool-input-start', 's'],
     ['tool-input-delta', 'd'],
@@ -270,17 +272,28 @@ function assertEventLifecycle(parts: LanguageModelV4StreamPart[]): void {
     sequences.set(id, `${sequences.get(id) ?? ''}${letter}`);
   }
   for (const [id, sequence] of sequences) {
-    // A turn that fails mid-stream leaves its open calls unfinished; what must never happen
-    // is an event under an id the final `tool-call` does not use, or an end before a start.
-    const expected = sequence.includes('c') ? /^sd*ec$/ : /^sd*$/;
+    // Only a turn that failed mid-stream may leave a call unfinished. Accepting `sd*`
+    // unconditionally would let a silently dropped call — started, never finished, never
+    // emitted — pass as well formed, which is the exact shape a lost call takes.
+    const expected = failed ? /^(sd*ec|sd*)$/ : /^sd*ec$/;
     assert.match(sequence, expected, `tool call ${JSON.stringify(id)} events out of order`);
   }
-  for (const { toolCallId, input } of toolCallsOf(parts)) {
+  for (const { toolCallId, toolName, input } of toolCallsOf(parts)) {
     const streamed = parts
       .filter((part) => part.type === 'tool-input-delta' && part.id === toolCallId)
       .map((part) => (part as { delta: string }).delta)
       .join('');
     assert.equal(streamed, input, `deltas streamed for ${toolCallId} must reconstruct its input`);
+    // The start carries the tool name a renderer commits to before any argument arrives; if
+    // it disagrees with the call that follows, the user watched the wrong tool run.
+    const started = parts.find(
+      (part) => part.type === 'tool-input-start' && part.id === toolCallId,
+    );
+    assert.equal(
+      started === undefined ? undefined : (started as { toolName: string }).toolName,
+      toolName,
+      `the start announced for ${toolCallId} must name the tool the call runs`,
+    );
   }
 }
 
@@ -481,6 +494,160 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
 
     assert.notEqual(failure, undefined, 'an unnamed new identity must not pass silently');
     assertCallsSeparable(parts);
+  });
+
+  // The Ollama shape at its full width: THREE calls all labelled index 0, with the tool name
+  // repeating. Two calls were not enough to catch this. Resolution walks the records newest
+  // first; when a name mismatch merely SKIPPED a candidate instead of rejecting the delta, the
+  // scan ran past `write_file` — the current claimant of index 0 — and reached the superseded
+  // `read_file` record, filing a complete new call as its continuation. Result: two calls, one
+  // with concatenated unparsable arguments, the third silently gone. Verbatim #1976, still open
+  // after three rounds of fixing it, because every case until now used two distinct names.
+  for (const providerType of ['openai-compatible', 'openai'] as const) {
+    test(`keeps three calls distinct when index 0 is reused and a name repeats (${providerType})`, async () => {
+      const { parts, failure } = await collectDeltas(
+        [
+          {
+            index: 0,
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"p0"}' },
+          },
+          {
+            index: 0,
+            type: 'function',
+            function: { name: 'write_file', arguments: '{"path":"p1"}' },
+          },
+          {
+            index: 0,
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"p2"}' },
+          },
+        ],
+        providerType,
+      );
+
+      assert.equal(failure, undefined);
+      assertCallsSeparable(parts);
+      assert.deepEqual(
+        toolCallsOf(parts).map(({ toolName, input }) => ({ toolName, input })),
+        [
+          { toolName: 'read_file', input: '{"path":"p0"}' },
+          { toolName: 'write_file', input: '{"path":"p1"}' },
+          { toolName: 'read_file', input: '{"path":"p2"}' },
+        ],
+      );
+    });
+  }
+
+  // `index` may also be the alias that arrives late, with nothing else on the continuation.
+  // Upstream resolved this by slot; failing it would make the patch worse than the code it
+  // replaces. The single open call has no index of its own, so `index: 0` cannot contradict
+  // it — which is what distinguishes this from an index another call has already claimed.
+  test('continues the only open call when an index arrives with nothing else', async () => {
+    const { parts, failure } = await collectDeltas([
+      { id: 'call_a', type: 'function', function: { name: 'read_file', arguments: '{"path"' } },
+      { index: 0, function: { arguments: ':"a"}' } },
+    ]);
+
+    assert.equal(failure, undefined, 'this shape must not regress against unpatched upstream');
+    assertCallsSeparable(parts);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+    ]);
+  });
+
+  // That fallback must still respect the name. Without the agreement check a differently named
+  // call arriving with no alias at all is absorbed into the open one and lost.
+  test('does not absorb a differently named call into the only open one', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{}' },
+      },
+      { type: 'function', function: { name: 'write_file', arguments: '{"path":"b"}' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assertCallsSeparable(parts);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolName, input }) => ({ toolName, input })),
+      [
+        { toolName: 'read_file', input: '{}' },
+        { toolName: 'write_file', input: '{"path":"b"}' },
+      ],
+    );
+  });
+
+  // The fallback is for aliases the open call has not claimed, not for aliases that disagree
+  // with it. Dropping either condition turns "one call is open" into a licence to absorb any
+  // delta at all, which is the misattribution this whole file exists to prevent.
+  for (const [alias, delta] of [
+    ['an id', { id: 'call_zzz', function: { arguments: '{"path":"x"}' } }],
+    ['an index', { index: 5, function: { arguments: '{"path":"x"}' } }],
+  ] satisfies [string, ToolCallDelta][]) {
+    test(`refuses ${alias} that disagrees with the only open call`, async () => {
+      const { parts, failure } = await collectDeltas([
+        {
+          index: 0,
+          id: 'call_a',
+          type: 'function',
+          function: { name: 'read_file', arguments: '{}' },
+        },
+        delta,
+      ]);
+
+      assert.notEqual(failure, undefined, 'a single open call is not a licence to absorb');
+      assertCallsSeparable(parts);
+    });
+  }
+
+  // `index: null` must be absent for ordering too, not a zero. Read as a number it satisfies
+  // the presence guard in `flush()` and then sorts ahead of every real index, silently moving
+  // a later call to the front of the turn.
+  test('does not let a null index reorder the turn', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 1,
+        id: 'call_first',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{}' },
+      },
+      {
+        index: null,
+        id: 'call_second',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{}' },
+      },
+    ]);
+
+    assert.equal(failure, undefined);
+    assertCallsSeparable(parts);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolCallId }) => toolCallId),
+      ['call_first', 'call_second'],
+    );
+  });
+
+  // `@ai-sdk/openai-compatible` declares `index: z.number().nullish()`, so an explicit null is
+  // legal wire, not a malformed shape. Read literally it is neither absent nor a number.
+  test('treats an explicit null index as absent', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: null,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"pa' },
+      },
+      { index: null, id: 'call_a', function: { arguments: 'th":"a"}' } },
+    ]);
+
+    assert.equal(failure, undefined, 'a null index is legal and must not fail the turn');
+    assertCallsSeparable(parts);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+    ]);
   });
 
   // A duplicated wire `id` echoed on every continuation. The call that had to mint an id
@@ -875,6 +1042,10 @@ describe('getAIModel: streamed tool call shapes that cannot be demultiplexed', (
       { index: 0, function: { arguments: ':"a"}' } },
       { index: 0, function: { arguments: ':"b"}' } },
     ],
+    'a shared id and a shared name with no index to separate them': [
+      { id: 'dup', type: 'function', function: { name: 'read_file', arguments: '{"path":"p0"}' } },
+      { id: 'dup', type: 'function', function: { name: 'read_file', arguments: '{"path":"p1"}' } },
+    ],
     'a duplicated id as the only alias on a continuation': [
       {
         index: 0,
@@ -893,8 +1064,19 @@ describe('getAIModel: streamed tool call shapes that cannot be demultiplexed', (
     ],
   } satisfies Record<string, ToolCallDelta[]>;
 
+  // What survives differs by shape, so each states its own guarantee rather than sharing one.
+  // The first two keep both calls and misplace only argument text. The third does not: with the
+  // id, the name, and the absence of an index all shared, there is nothing left to distinguish
+  // a second call from a continuation of the first, and one call is lost. Recorded because the
+  // README names "every call is emitted once" as a guarantee, and for this family it is false.
+  const emitted = {
+    'an index shared by two open calls, continued by index only': ['read_file', 'write_file'],
+    'a shared id and a shared name with no index to separate them': ['read_file'],
+    'a duplicated id as the only alias on a continuation': ['read_file', 'write_file'],
+  } satisfies Record<keyof typeof boundaries, string[]>;
+
   for (const [shape, deltas] of Object.entries(boundaries)) {
-    test(`still emits both calls separately for ${shape}`, async () => {
+    test(`emits what is still decidable for ${shape}`, async () => {
       const { parts, failure } = await collectDeltas(deltas);
 
       assert.equal(failure, undefined);
@@ -902,7 +1084,7 @@ describe('getAIModel: streamed tool call shapes that cannot be demultiplexed', (
       assertEventLifecycle(parts);
       assert.deepEqual(
         toolCallsOf(parts).map(({ toolName }) => toolName),
-        ['read_file', 'write_file'],
+        emitted[shape as keyof typeof emitted],
       );
     });
   }

@@ -1,8 +1,8 @@
 diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.js b/node_modules/@ai-sdk/provider-utils/dist/index.js
-index 851fce4..d62e598 100644
+index 851fce4..1974b50 100644
 --- a/node_modules/@ai-sdk/provider-utils/dist/index.js
 +++ b/node_modules/@ai-sdk/provider-utils/dist/index.js
-@@ -3553,26 +3553,77 @@ var StreamingToolCallTracker = class {
+@@ -3553,26 +3553,75 @@ var StreamingToolCallTracker = class {
     * events as appropriate.
     */
    processDelta(toolCallDelta) {
@@ -17,10 +17,10 @@ index 851fce4..d62e598 100644
 +    const wireIndex = toolCallDelta.index != null ? toolCallDelta.index : void 0;
 +    const wireName = (_b2 = (_a2 = toolCallDelta.function) == null ? void 0 : _a2.name) != null ? _b2 : void 0;
 +    let toolCall = this.findByAlias(wireId, wireIndex, wireName);
-+    if (toolCall == null && wireId === void 0 && wireIndex === void 0) {
-+      const open = this.toolCalls.filter((candidate) => !candidate.hasFinished);
-+      if (open.length === 1 && (wireName === void 0 || open[0].function.name === wireName)) {
-+        toolCall = open[0];
++    if (toolCall == null && this.toolCalls.length === 1) {
++      const only = this.toolCalls[0];
++      if ((wireName === void 0 || only.function.name === wireName) && (wireId === void 0 || only.wireId === void 0) && (wireIndex === void 0 || only.index === void 0)) {
++        toolCall = only;
 +      }
 +    }
 +    if (toolCall == null) {
@@ -29,27 +29,25 @@ index 851fce4..d62e598 100644
 +    }
 +    if (toolCall.wireId === void 0 && wireId !== void 0) {
 +      toolCall.wireId = wireId;
-+    }
+     }
 +    if (toolCall.index === void 0 && wireIndex !== void 0) {
 +      toolCall.index = wireIndex;
 +    }
 +    this.processExistingToolCall(toolCall, toolCallDelta);
 +  }
 +  /**
-+   * The most recent tool call every alias this delta carries agrees with. An alias the
-+   * candidate has not seen yet cannot disagree, so it neither matches nor rejects; at
-+   * least one alias must actually match, which is why a delta carrying only arguments
-+   * never resolves here.
++   * The most recent tool call this delta's aliases claim. An alias the candidate has not
++   * seen yet cannot disagree, so it neither matches nor rejects; at least one alias must
++   * actually match, which is why a delta carrying only arguments never resolves here.
++   *
++   * Scanning stops at the first call an alias claims, and a `function.name` that disagrees
++   * with that call rejects the delta rather than letting the scan continue. Continuing past
++   * it reaches a call whose claim on the alias a later call has already superseded, which
++   * files a whole new call as a continuation of one two positions back.
 +   */
 +  findByAlias(wireId, wireIndex, wireName) {
-+    if (wireId === void 0 && wireIndex === void 0) {
-+      return void 0;
-+    }
 +    for (let position = this.toolCalls.length - 1; position >= 0; position--) {
 +      const candidate = this.toolCalls[position];
-+      if (wireName !== void 0 && candidate.function.name !== wireName) {
-+        continue;
-+      }
 +      let matched = false;
 +      if (wireIndex !== void 0 && candidate.index !== void 0) {
 +        if (candidate.index !== wireIndex) {
@@ -64,9 +62,9 @@ index 851fce4..d62e598 100644
 +        matched = true;
 +      }
 +      if (matched) {
-+        return candidate;
++        return wireName !== void 0 && candidate.function.name !== wireName ? void 0 : candidate;
 +      }
-     }
++    }
 +    return void 0;
    }
    /**
@@ -88,7 +86,7 @@ index 851fce4..d62e598 100644
      var _a2, _b2, _c;
      if (this.typeValidation === "required") {
        if (toolCallDelta.type !== "function") {
-@@ -3589,35 +3640,32 @@ var StreamingToolCallTracker = class {
+@@ -3589,35 +3638,32 @@ var StreamingToolCallTracker = class {
          });
        }
      }
@@ -132,7 +130,7 @@ index 851fce4..d62e598 100644
      if (toolCall.function.arguments.length > 0) {
        this.controller.enqueue({
          type: "tool-input-delta",
-@@ -3626,9 +3674,8 @@ var StreamingToolCallTracker = class {
+@@ -3626,9 +3672,8 @@ var StreamingToolCallTracker = class {
        });
      }
    }
