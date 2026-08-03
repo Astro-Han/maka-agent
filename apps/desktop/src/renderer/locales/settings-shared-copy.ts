@@ -19,6 +19,31 @@ export type SettingsSharedCopy = {
   unknownError: string;
   unavailablePage: string;
   ready: string;
+  /**
+   * SettingsSection group titles for pages whose own copy module has no
+   * suitable label. Group titles live together (here, and in
+   * settings-preferences-copy's `sections`) rather than beside each control's
+   * copy: a group names a SET of settings, and keeping the set names adjacent
+   * is what makes an inconsistent grouping visible when someone edits one.
+   */
+  groups: {
+    memorySources: string;
+    memorySourcesHelp: string;
+    searchProvider: string;
+    searchProviderHelp: string;
+    searchBehavior: string;
+    searchBehaviorHelp: string;
+    dataLocation: string;
+    dataLocationHelp: string;
+    memoryDocument: string;
+    memoryDocumentHelp: string;
+    memoryEntries: string;
+    memoryEntriesHelp: string;
+    reviewSchedule: string;
+    reviewScheduleHelp: string;
+    buildInfo: string;
+    buildInfoHelp: string;
+  };
 };
 
 const SETTINGS_SHARED_COPY_BY_LOCALE = {
@@ -41,6 +66,24 @@ const SETTINGS_SHARED_COPY_BY_LOCALE = {
     unknownError: '出现错误，请稍后重试。',
     unavailablePage: '该设置页已纳入 Maka 设置树，会随对应 runtime 能力一起工作。',
     ready: '就绪',
+    groups: {
+      memorySources: '记忆来源',
+      memorySourcesHelp: '哪些本地文件可以被读取，以及是否进入模型上下文。',
+      memoryDocument: '记忆文件与备份',
+      memoryDocumentHelp: '本机 MEMORY.md 的正文、路径与备份候选。',
+      memoryEntries: '记忆条目',
+      memoryEntriesHelp: '按条查看生效与已归档的记忆，或手动添加草稿。',
+      searchProvider: '搜索服务商',
+      searchProviderHelp: '联网搜索使用的服务商与凭据。',
+      searchBehavior: '搜索行为',
+      searchBehaviorHelp: '什么时候发起搜索，以及每次取回多少结果。',
+      dataLocation: '数据位置',
+      dataLocationHelp: '会话、设置与凭据在本机的存放位置。',
+      reviewSchedule: '回顾计划',
+      reviewScheduleHelp: '每日回顾的生成时间与使用的模型。',
+      buildInfo: '版本信息',
+      buildInfoHelp: '当前构建、运行时与平台。',
+    },
   },
   en: {
     modalLabel: 'Settings',
@@ -61,6 +104,24 @@ const SETTINGS_SHARED_COPY_BY_LOCALE = {
     unknownError: 'Something went wrong. Try again.',
     unavailablePage: 'This page is part of the Maka settings tree and will activate with its runtime capability.',
     ready: 'Ready',
+    groups: {
+      memorySources: 'Memory sources',
+      memorySourcesHelp: 'Which local files may be read, and whether they enter model context.',
+      memoryDocument: 'Memory file and backups',
+      memoryDocumentHelp: 'The local MEMORY.md body, its path, and backup candidates.',
+      memoryEntries: 'Memory entries',
+      memoryEntriesHelp: 'Review active and archived memories entry by entry, or add a draft manually.',
+      searchProvider: 'Search provider',
+      searchProviderHelp: 'The provider and credentials web search uses.',
+      searchBehavior: 'Search behavior',
+      searchBehaviorHelp: 'When a search runs, and how many results it returns.',
+      dataLocation: 'Data location',
+      dataLocationHelp: 'Where conversations, settings, and credentials live on this machine.',
+      reviewSchedule: 'Review schedule',
+      reviewScheduleHelp: 'When the daily review runs, and which model writes it.',
+      buildInfo: 'Build info',
+      buildInfoHelp: 'The current build, runtime, and platform.',
+    },
   },
 } satisfies UiCatalog<SettingsSharedCopy>;
 

@@ -735,6 +735,12 @@ function SettingsStory(props: {
 }) {
   const initialFocusRef = useRef<HTMLButtonElement>(null);
   const [uiLocaleUpdateGate] = useState(createUiLocaleUpdateGate);
+  // Fidelity: the theme and palette pickers are the 外观 page's whole content,
+  // and with static props + noop handlers the selection could never move — the
+  // story showed a picker that looked interactive and wasn't. The real app
+  // holds both in AppShell state and applies them optimistically on click.
+  const [themePref, setThemePref] = useState<ThemePreference>('auto');
+  const [themePalette, setThemePalette] = useState<ThemePalette>('default');
 
   return (
     <ToastProvider>
@@ -751,10 +757,10 @@ function SettingsStory(props: {
           defaultSlug={props.defaultSlug === undefined ? 'zai-live' : props.defaultSlug}
           onRefresh={async () => undefined}
           onClose={noop}
-          themePref={'auto' as ThemePreference}
-          onThemeChange={noop}
-          themePalette={'default' as ThemePalette}
-          onThemePaletteChange={noop}
+          themePref={themePref}
+          onThemeChange={setThemePref}
+          themePalette={themePalette}
+          onThemePaletteChange={setThemePalette}
           onUiLocalePreferenceChange={noop}
           uiLocaleUpdateGate={uiLocaleUpdateGate}
           requestedSection={props.section}
@@ -978,9 +984,7 @@ export const PermissionCenterDiagnosticsExpanded: Story = {
     toggle.click();
     await waitForStoryCondition(
       () =>
-        canvasElement
-          .querySelector('.settingsCapabilityList')
-          ?.getAttribute('data-diagnostics-open') === 'true',
+        canvasElement.querySelector('[data-diagnostics="open"]') !== null,
       'Permission Center story did not expand the capability diagnostics',
     );
   },

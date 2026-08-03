@@ -18,17 +18,18 @@
     background: var(--foreground-3);
   }
 .settingsMemoryPreview strong {
-    font: var(--maka-text-heading-4);
+    font-size: var(--font-size-ui);
     color: var(--foreground);
   }
 .settingsMemoryPreview small {
-    font: var(--maka-text-supporting);
+    font-size: var(--font-size-caption);
     color: var(--muted-foreground);
   }
 .settingsMemoryPreview p {
-    font: var(--maka-text-body);
     margin: 0;
     color: var(--foreground-secondary);
+    font-size: var(--font-size-ui);
+    line-height: var(--leading-normal);
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -55,8 +56,8 @@
     gap: var(--space-3);
   }
 .settingsMemoryPromptPreviewHeader strong {
-    font: var(--maka-text-heading-4);
     color: var(--foreground);
+    font-size: var(--font-size-ui);
   }
 .settingsMemoryPromptPreviewHeader div {
     display: inline-flex;
@@ -64,23 +65,23 @@
     gap: var(--space-2-5);
   }
 .settingsMemoryPromptPreviewHeader span {
-    font: var(--maka-text-supporting);
     flex-shrink: 0;
     color: var(--foreground-secondary);
+    font-size: var(--font-size-caption);
   }
 .settingsMemoryPromptPreview[data-active="true"] .settingsMemoryPromptPreviewHeader span {
     color: var(--foreground);
   }
 .settingsMemoryPromptPreview small {
-    font: var(--maka-text-supporting);
     color: var(--muted-foreground);
+    font-size: var(--font-size-caption);
+    line-height: var(--leading-snug);
   }
 .settingsMemoryPromptPreviewBudget {
-    font: var(--maka-text-supporting);
+    font-family: var(--font-mono);
     color: var(--foreground-secondary);
   }
 .settingsMemoryPromptPreview pre {
-    font: var(--maka-text-supporting);
     max-height: 220px;
     margin: 0;
     padding: var(--space-2-5);
@@ -89,13 +90,17 @@
     border-radius: var(--radius-control);
     background: var(--background);
     color: var(--foreground-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-caption);
+    line-height: var(--leading-normal);
     white-space: pre-wrap;
     word-break: break-word;
   }
 .settingsMemoryPromptPreview p {
-    font: var(--maka-text-body);
     margin: 0;
     color: var(--foreground-secondary);
+    font-size: var(--font-size-ui);
+    line-height: var(--leading-normal);
   }
 .settingsMemoryEntryPreviewNotice {
     display: grid;
@@ -106,12 +111,13 @@
     background: oklch(from var(--warning) l c h / 0.08);
   }
 .settingsMemoryEntryPreviewNotice strong {
-    font: var(--maka-text-heading-4);
     color: var(--foreground);
+    font-size: var(--font-size-ui);
   }
 .settingsMemoryEntryPreviewNotice small {
-    font: var(--maka-text-supporting);
     color: var(--foreground-secondary);
+    font-size: var(--font-size-caption);
+    line-height: var(--leading-snug);
   }
 .settingsMemorySaveSummary {
     display: grid;
@@ -122,16 +128,16 @@
     background: var(--foreground-3);
   }
 .settingsMemorySaveSummary strong {
-    font: var(--maka-text-heading-4);
     color: var(--foreground);
+    font-size: var(--font-size-ui);
   }
 .settingsMemorySaveSummary small {
-    font: var(--maka-text-body);
     color: var(--foreground-secondary);
+    font-size: var(--font-size-ui);
   }
 .settingsMemorySaveSummaryTime {
-    font: var(--maka-text-supporting);
     color: var(--muted-foreground);
+    font-size: var(--font-size-caption);
   }
 .settingsMemoryBackupState {
     color: var(--foreground-secondary);
@@ -144,14 +150,13 @@
     /* #1363 review follow-up: same explicit column as the preview card. */
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1-5);
-    padding: var(--space-2) var(--space-2-5);
-    border: var(--border-width-hairline) solid var(--foreground-10);
-    border-radius: var(--radius-surface);
-    background: var(--foreground-3);
+    /* The box border/fill is gone: the block sits inside the 记忆文件与备份
+       card now (SettingsField), which already owns the surface — a second
+       bordered fill made it a card-in-card. */
   }
 .settingsMemoryBackupList strong {
-    font: var(--maka-text-heading-4);
     color: var(--foreground);
+    font-size: var(--font-size-ui);
   }
 /* PR-MEMORY-BACKUP-LIST-A11Y-0 (round 16/30): selector
      targeted the old `<div role="list">`. Container is now a
@@ -162,37 +167,34 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1-5);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
   }
 .settingsMemoryBackupCandidates > li {
     margin: 0;
     padding: 0;
   }
 .settingsMemoryBackupList small {
-    font: var(--maka-text-supporting);
     color: var(--muted-foreground);
+    font-size: var(--font-size-caption);
+    line-height: var(--leading-snug);
   }
-/* #1879 leaves this pill unpinned on purpose. It carries the chip chrome the
-   sweep looks for, but `flex-wrap: wrap` below is load-bearing — the buttons
-   flow to a second line INSIDE the pill on the floor column — so a pinned
-   height would clip them. Same call as `.maka-plan-card-run`: wrapping
-   capability is what disqualifies a box from the single-line family. */
 .settingsMemoryBackupCandidate {
-    font: var(--maka-text-supporting);
-    display: inline-flex;
+    /* Was a bordered pill per candidate — pills inside a box inside the
+       card. A candidate is a row: description left, actions right, wrapping
+       under on the narrow floor. */
+    display: flex;
     align-items: center;
-    /* #1363 review follow-up: text + three action buttons are ~218px
-       intrinsically — on the floor column the buttons flow to a second
-       line inside the pill instead of bleeding out of it. */
+    justify-content: space-between;
     flex-wrap: wrap;
     gap: var(--space-1-5);
-    padding: var(--space-0-5) var(--space-1-5);
-    border: var(--border-width-hairline) solid var(--foreground-10);
-    border-radius: var(--radius-pill);
-    background: var(--background);
     color: var(--foreground-secondary);
+    font-size: var(--font-size-ui);
+  }
+.settingsMemoryBackupCandidate > span {
+    flex: 1 1 220px;
+    min-width: 0;
   }
 
 .settingsMemoryEntryGroups {
@@ -210,28 +212,29 @@
   }
 
 .settingsMemoryEntryGroupHeader {
-    font: var(--maka-text-body);
     font-variant-numeric: tabular-nums;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
+    font-size: var(--font-size-ui);
     color: var(--foreground-secondary);
   }
 
 .settingsMemoryEntryGroupHeader strong {
-    font: var(--maka-text-heading-4);
     color: var(--foreground);
+    font-size: var(--font-size-ui);
   }
 
 .settingsMemoryEntryDraftNotice {
-    font: var(--maka-text-body);
     margin: 0;
     padding: var(--space-1-5) var(--space-2);
     border: var(--border-width-hairline) solid oklch(from var(--warning) l c h / 0.30);
     border-radius: var(--radius-surface);
     background: oklch(from var(--warning) l c h / 0.08);
     color: var(--foreground-secondary);
+    font-size: var(--font-size-ui);
+    line-height: var(--leading-normal);
   }
 
 .settingsMemoryEntryList {
@@ -282,12 +285,12 @@
   }
 
 .settingsMemoryEntryCard strong {
-    font: var(--maka-text-heading-4);
+    font-size: var(--font-size-ui);
     color: var(--foreground);
   }
 
 .settingsMemoryEntryCard small {
-    font: var(--maka-text-supporting);
+    font-size: var(--font-size-caption);
     color: var(--muted-foreground);
   }
 
@@ -301,31 +304,35 @@
     min-width: 0;
   }
 
-/* #1879: an Astryx `Badge` — the active/archived distinction it drew with a
-   border and a selected-state wash is `blue` vs `neutral`. It was also the one
-   chip left that the pill-radius scan could not see, and it has no rule to be
-   missed in now.
-
-   `width: max-content` is not redundant with `max-width`. The card above is
-   `display: grid`, so this Badge is a grid item: it is blockified (its
-   `inline-flex` computes to `flex`) and `justify-self` resolves to `stretch`,
-   which measured takes it to the full card width with its label centred.
-   `max-width` caps that; only `max-content` makes it hug its text. */
 .settingsMemoryPromptScope {
     width: max-content;
     max-width: 100%;
+    padding: var(--space-0-5) var(--space-1-5);
+    border: var(--border-width-hairline) solid var(--foreground-10);
+    border-radius: var(--radius-control);
+    background: var(--foreground-5);
+    color: var(--foreground-secondary);
+    font-size: var(--font-size-caption);
+    line-height: var(--leading-snug);
+  }
+
+.settingsMemoryPromptScope[data-active="true"] {
+    border-color: var(--border-strong);
+    background: var(--state-selected-bg);
+    color: var(--foreground-secondary);
   }
 
 .settingsMemoryDirtyState[data-dirty="true"] {
-    font: var(--maka-text-heading-4);
     color: var(--warning-text, var(--info-text));
+    font-weight: var(--font-weight-semibold);
   }
 
 .settingsMemoryEntryCard p,
   .settingsMemoryEntryEmpty {
-    font: var(--maka-text-body);
     margin: 0;
     color: var(--foreground-secondary);
+    font-size: var(--font-size-ui);
+    line-height: var(--leading-normal);
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -346,8 +353,8 @@
 }
 
 .settingsMemoryFilter small {
-  font: var(--maka-text-supporting);
   color: var(--muted-foreground);
+  font-size: var(--font-size-caption);
   white-space: nowrap;
 }
 
@@ -363,14 +370,15 @@
 
 .settingsMemoryFilterEmpty strong,
   .settingsMemoryListEmpty strong {
-    font: var(--maka-text-heading-4);
     color: var(--foreground);
+    font-size: var(--font-size-ui);
   }
 
 .settingsMemoryFilterEmpty small,
   .settingsMemoryListEmpty small {
-    font: var(--maka-text-body);
     color: var(--foreground-secondary);
+    font-size: var(--font-size-ui);
+    line-height: var(--leading-normal);
   }
 
 .settingsMemoryManualAdd {
@@ -388,13 +396,13 @@
 }
 
 .settingsMemoryManualAddHeader strong {
-  font: var(--maka-text-heading-4);
   color: var(--foreground);
+  font-size: var(--font-size-ui);
 }
 
 .settingsMemoryManualAddHeader small {
-  font: var(--maka-text-supporting);
   color: var(--muted-foreground);
+  font-size: var(--font-size-caption);
 }
 
 .settingsMemoryDraftWarning {
@@ -407,13 +415,14 @@
 }
 
 .settingsMemoryDraftWarning strong {
-  font: var(--maka-text-heading-4);
   color: var(--foreground);
+  font-size: var(--font-size-ui);
 }
 
 .settingsMemoryDraftWarning small {
-  font: var(--maka-text-supporting);
   color: var(--foreground-secondary);
+  font-size: var(--font-size-caption);
+  line-height: var(--leading-snug);
 }
 
 /* Memory page meta row — relocated from connection.css — issue #546 PR1. */

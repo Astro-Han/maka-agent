@@ -60,31 +60,4 @@
   color: var(--foreground-secondary);
 }
 
-/* Detail audit / polish wave: the retired `.settingsAboutPrivacy` dialect
-   (uppercase brand-blue h3 + brand-deep tinted card) was a fourth section-
-   header voice used by 关于's privacy card AND 数据's 配置导入导出 header.
-   Both converged onto the sanctioned language — SectionHeader for the
-   heading, Astryx Banner for the 关于 callout, plain flow for
-   数据's form — so these blocks are now just neutral gap containers. */
-.settingsPrivacyBlock {
-  display: grid;
-  gap: var(--space-2);
-}
 
-.settingsPrivacyPoints {
-  margin: 0;
-  padding: 0 0 0 var(--space-4);
-  display: grid;
-  gap: var(--space-1-5);
-}
-
-.settingsConfigSection {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.settingsConfigCategoryList {
-  display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
-}

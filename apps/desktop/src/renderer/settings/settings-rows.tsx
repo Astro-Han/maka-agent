@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Item } from '@astryxdesign/core';
+import { SettingsRow } from './settings-section';
 
 export function SettingRow(props: { title: string; detail: string; value: string; mono?: boolean; action?: ReactNode }) {
   // `mono` means the value is machine text — a path, an id, a key. That is a
@@ -10,13 +10,11 @@ export function SettingRow(props: { title: string; detail: string; value: string
   const Value = props.mono ? 'code' : 'span';
   const value = <Value className="settingsReadOnlyValue">{props.value}</Value>;
   return (
-    <Item
+    <SettingsRow
       label={props.title}
-      description={props.detail}
+      description={props.detail || undefined}
       align="start"
-      endContent={props.action
-        ? <span className="settingsReadOnlyValueGroup">{value}{props.action}</span>
-        : value}
+      end={props.action ? <>{value}{props.action}</> : value}
     />
   );
 }

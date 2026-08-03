@@ -36,6 +36,20 @@ const BASELINE_PATH = resolve(REPO_ROOT, 'scripts', 'check-dead-css-baseline.jso
 const RENDERER_ROOT = resolve(REPO_ROOT, 'apps', 'desktop', 'src', 'renderer');
 const STYLES_DIR = resolve(RENDERER_ROOT, 'styles');
 const EXTRA_STYLE_FILES = [resolve(RENDERER_ROOT, 'reference-shell.css')];
+/**
+ * The Astryx accent bridge in maka-tokens.css re-declares Astryx theme tokens
+ * (--color-accent and friends) whose var() reads live in the library's own
+ * stylesheet under node_modules, not in this repo. That stylesheet is a real
+ * consumer of the token sheet, so it joins the token sweep — and only the
+ * token sweep: it owns no product classes.
+ */
+const EXTRA_TOKEN_CONSUMER_FILES = [
+  resolve(REPO_ROOT, 'node_modules', '@astryxdesign', 'core', 'dist', 'astryx.css'),
+  // Astryx components read theme tokens through StyleX, so some var() reads
+  // (e.g. --color-icon-accent) only exist in the compiled token map, not in
+  // astryx.css.
+  resolve(REPO_ROOT, 'node_modules', '@astryxdesign', 'core', 'dist', 'theme', 'tokens.stylex.js'),
+];
 const TOKEN_FILE = resolve(RENDERER_ROOT, 'maka-tokens.css');
 const SOURCE_ROOTS = [
   resolve(REPO_ROOT, 'apps', 'desktop', 'src', 'renderer'),
@@ -245,7 +259,7 @@ async function main() {
   const tokenCss = await readFile(TOKEN_FILE, 'utf8');
   const definedTokens = collectTokenDefinitions(tokenCss);
   const referenced = collectTokenReferences(tokenCss);
-  const tokenCssFiles = [...EXTRA_STYLE_FILES];
+  const tokenCssFiles = [...EXTRA_STYLE_FILES, ...EXTRA_TOKEN_CONSUMER_FILES];
   for (const root of TOKEN_CONSUMER_ROOTS) {
     tokenCssFiles.push(...(await readCssFiles(root)));
   }

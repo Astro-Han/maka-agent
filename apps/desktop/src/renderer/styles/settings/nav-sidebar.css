@@ -187,7 +187,10 @@
      minmax(0, 1fr) the track is the content column, and the .settingsRows
      query containers below actually see narrow widths. */
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
+  /* Sections carry titles now (see settings-section.tsx), so the between-group
+     gap has to out-measure the title-to-body gap inside a section or the two
+     rhythms read as one flat stack. 24px outside / 8px inside. */
+  gap: var(--space-6);
   background: transparent;
 }
 
@@ -195,5 +198,24 @@
    sub-pages, each wrapping in their own `.settingsStructuredPage`):
    the inner one just passes through. */
 .settingsStructuredPage .settingsStructuredPage {
-  gap: var(--space-4);
+  gap: var(--space-6);
+}
+
+/* ---- The section unit (settings-section.tsx) ---------------------------
+   One labeled group: header, then either the `.settingsRows` card or a bare
+   body. Every settings page is a flat list of these. */
+.settingsSection {
+  display: grid;
+  align-content: start;
+  /* Same explicit column as the page above, for the same reason: a wide row
+     (a long mono path, a scrollable pre) must not widen the section. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.settingsSectionBody {
+  display: grid;
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
 }

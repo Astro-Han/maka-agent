@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Card, Item } from '@astryxdesign/core';
 import { PersonalizationSettingsPage } from './appearance-settings-page';
+import { SettingsActions, SettingsField, SettingsRow, SettingsSection } from './settings-section';
 import type {
   AppSettings,
   ChatDefaultPermissionMode,
@@ -44,6 +44,7 @@ export function GeneralSettingsPage(props: {
 }) {
   const locale = useUiLocale();
   const copy = getSettingsPreferencesCopy(locale).general;
+  const sections = getSettingsPreferencesCopy(locale).sections;
   const toast = useToast();
   return (
     <div className="settingsStructuredPage">
@@ -51,11 +52,11 @@ export function GeneralSettingsPage(props: {
           moved here from the 外观 page — they configure who you are to the
           app, not how the app looks. The component keeps its save flow. */}
       <PersonalizationSettingsPage settings={props.settings} onUpdate={props.onUpdate} />
-      <Card padding={0} className="settingsRows">
-        <Item
+      <SettingsSection title={sections.privacy} description={sections.privacyHelp}>
+        <SettingsRow
           label={copy.incognito}
           description={copy.incognitoHelp}
-          endContent={<Switch
+          end={<Switch
             label={copy.enableIncognito}
             isLabelHidden
             value={props.settings.privacy.incognitoActive}
@@ -66,10 +67,10 @@ export function GeneralSettingsPage(props: {
             }}
           />}
         />
-        <Item
+        <SettingsRow
           label={copy.notifications}
           description={copy.notificationsHelp}
-          endContent={<Switch
+          end={<Switch
             label={copy.notifications}
             isLabelHidden
             value={props.settings.notifications.runComplete}
@@ -80,7 +81,7 @@ export function GeneralSettingsPage(props: {
             }}
           />}
         />
-      </Card>
+      </SettingsSection>
       <GeneralDefaultsCard
         connections={props.connections}
         defaultSlug={props.defaultSlug}
@@ -88,9 +89,9 @@ export function GeneralSettingsPage(props: {
         permissionMode={props.settings.chatDefaults.permissionMode}
         onUpdate={props.onUpdate}
       />
-      <Card padding={0} className="settingsRows">
+      <SettingsSection title={sections.network} description={sections.networkHelp}>
         <NetworkProxySection settings={props.settings} onUpdate={props.onUpdate} />
-      </Card>
+      </SettingsSection>
     </div>
   );
 }
@@ -123,6 +124,7 @@ function GeneralDefaultsCard(props: {
 }) {
   const locale = useUiLocale();
   const copy = getSettingsPreferencesCopy(locale).general;
+  const sections = getSettingsPreferencesCopy(locale).sections;
   const boundaryCopy = getShellCopy(locale).sessionSettingsActions;
   const toast = useToast();
   const mountedRef = useMountedRef();
@@ -204,11 +206,11 @@ function GeneralDefaultsCard(props: {
   }
 
   return (
-    <Card padding={0} className="settingsRows">
-      <Item
+    <SettingsSection title={sections.chatDefaults} description={sections.chatDefaultsHelp}>
+      <SettingsRow
         label={copy.defaultModel}
         description={copy.defaultModelHelp}
-        endContent={(
+        end={(
           <ModelPicker
             groups={modelGroups}
             value={selectedValue}
@@ -222,10 +224,10 @@ function GeneralDefaultsCard(props: {
           />
         )}
       />
-      <Item
+      <SettingsRow
         label={copy.defaultPermission}
         description={copy.defaultPermissionHelp}
-        endContent={(
+        end={(
           <PermissionModeSelect
             activeMode={props.permissionMode}
             onSelect={(mode) => {
@@ -237,7 +239,7 @@ function GeneralDefaultsCard(props: {
           />
         )}
       />
-    </Card>
+    </SettingsSection>
   );
 }
 
@@ -291,10 +293,10 @@ function NetworkProxySection(props: {
 
   return (
     <>
-      <Item
+      <SettingsRow
         label={copy.proxy}
         description={copy.proxyHelp}
-        endContent={<Switch
+        end={<Switch
           label={copy.enableProxy}
           isLabelHidden
           value={proxyDraft.enabled}
@@ -303,7 +305,8 @@ function NetworkProxySection(props: {
       />
       {proxyDraft.enabled && (
         <>
-          <FormLayout className="settingsFormLayout" direction="horizontal">
+          <SettingsField>
+            <FormLayout direction="horizontal">
             <Selector
               value={proxyDraft.protocol}
               label={copy.proxyProtocol}
@@ -322,12 +325,13 @@ function NetworkProxySection(props: {
               label={copy.serverAddress}
             />
             <NumberInput label={copy.port} value={proxyDraft.port || null} isIntegerOnly onChange={(value) => void updateProxy({ port: value ?? 0 })} placeholder="7890" />
-          </FormLayout>
+            </FormLayout>
+          </SettingsField>
 
-          <Item
+          <SettingsRow
             label={copy.proxyAuth}
             description={copy.proxyAuthHelp}
-            endContent={<Switch
+            end={<Switch
               label={copy.enableProxyAuth}
               isLabelHidden
               value={proxyDraft.authEnabled}
@@ -336,7 +340,8 @@ function NetworkProxySection(props: {
           />
 
           {proxyDraft.authEnabled && (
-            <FormLayout className="settingsFormLayout" direction="horizontal">
+            <SettingsField>
+              <FormLayout direction="horizontal">
               <TextInput
                 value={proxyDraft.username}
                 onChange={(value) => void updateProxy({ username: value })}
@@ -347,10 +352,11 @@ function NetworkProxySection(props: {
                 onChange={(next) => void updateProxy({ password: next })}
                 label={copy.password}
               />
-            </FormLayout>
+              </FormLayout>
+            </SettingsField>
           )}
 
-          <div className="settingsProxyBypassField">
+          <SettingsField>
             <TextInput
               value={proxyDraft.bypassList.join(', ')}
               onChange={(value) => void updateProxy({ bypassList: csvList(value) })}
@@ -359,13 +365,15 @@ function NetworkProxySection(props: {
               description={copy.bypassHelp}
               width="100%"
             />
-          </div>
+          </SettingsField>
 
-          <Banner
-            status="info"
-            title={copy.autoBypass(proxyDraft.autoBypassDomains.length)} />
+          <SettingsField>
+            <Banner
+              status="info"
+              title={copy.autoBypass(proxyDraft.autoBypassDomains.length)} />
+          </SettingsField>
 
-          <div className="settingsActionRow">
+          <SettingsActions>
             <Button
               variant="primary"
               isDisabled={testing}
@@ -374,7 +382,7 @@ function NetworkProxySection(props: {
               onClick={() => void testProxy()}
               label={testing ? copy.testing : copy.testCurrent}
             />
-          </div>
+          </SettingsActions>
         </>
       )}
     </>

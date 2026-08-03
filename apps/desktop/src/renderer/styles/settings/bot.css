@@ -340,6 +340,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The requests table's 8 sized columns are wider than the content column at
+   narrow widths — it scrolls inside its own wrapper instead of clipping at
+   the card edge (page body never scrolls horizontally). */
+.settingsUsageTable {
+  overflow-x: auto;
+}
+
 /* Empty tab: the shared EmptyState card, nudged to the density of the
    stats surface rather than the full page hero. */
 .settingsUsageEmpty {

@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
-import { Card, Item } from '@astryxdesign/core';
 import type { AppSettings, UpdateAppSettingsResult, WebSearchCredentialStatus } from '@maka/core';
 import { normalizeSearchUrl, webSearchCredentialStatusFromResponse } from '@maka/core';
 import { Badge, Button, TextInput, RelativeTime, Switch, redactSecrets, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { getWebSearchSettingsCopy, type WebSearchSettingsCopy } from '../locales/settings-web-search-copy';
+import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
+import { SettingsActions, SettingsField, SettingsRow, SettingsSection } from './settings-section';
 import { PasswordInput } from './password-input';
 import { settingsActionErrorMessage } from './settings-error-copy';
 import { statusBadgeVariant } from './settings-status-badge';
@@ -28,6 +29,7 @@ export function WebSearchSettingsPage(props: {
 }) {
   const locale = useUiLocale();
   const copy = getWebSearchSettingsCopy(locale);
+  const sharedCopy = getSettingsSharedCopy(locale);
   const webSearch = props.settings.webSearch;
   const tavily = webSearch.providers.tavily;
   const tavilyKey = tavily.apiKey;
@@ -233,13 +235,15 @@ export function WebSearchSettingsPage(props: {
 
   return (
     <div className="settingsStructuredPage">
-      <Card padding={0} className="settingsRows settingsWebSearchCredentialCard">
-        <Item
-          className="settingsWebSearchEnableRow"
+      <SettingsSection
+        title={sharedCopy.groups.searchProvider}
+        description={sharedCopy.groups.searchProviderHelp}
+      >
+        <SettingsRow
           label={copy.enabled}
           description={copy.enabledHelp}
           align="start"
-          endContent={<div className="settingsWebSearchControlCluster">
+          end={<div className="settingsWebSearchControlCluster">
             <div className="settingsWebSearchStatusCluster" role="group" aria-label={copy.statusAria}>
               <Badge variant={statusBadgeVariant(statusCopy.tone)} label={statusCopy.label} />
               {hasCheckedAt && (
@@ -259,8 +263,7 @@ export function WebSearchSettingsPage(props: {
           </div>}
         />
 
-        <Item
-          className="settingsWebSearchKeyRow"
+        <SettingsRow
           label={copy.key}
           description={(
             <>
@@ -269,7 +272,7 @@ export function WebSearchSettingsPage(props: {
                 : <>{copy.savedKeyHelp} <a href="https://tavily.com" target="_blank" rel="noreferrer noopener">tavily.com</a></>}
             </>
           )}
-          endContent={<div className="settingsWebSearchKeyField">
+          end={<div className="settingsWebSearchKeyField">
             <PasswordInput
               value={draftKey}
               onChange={setDraftKey}
@@ -281,12 +284,11 @@ export function WebSearchSettingsPage(props: {
           </div>}
         />
 
-        <Item
-          className="settingsWebSearchCredentialActionRow"
+        <SettingsRow
           label={copy.actions}
           description={copy.actionsHelp}
           align="start"
-          endContent={<div className="settingsActionRow settingsWebSearchActionButtons">
+          end={<div className="settingsActionRow settingsWebSearchActionButtons">
             <Button
               variant="primary"
               isDisabled={credentialActionBusy || usingEnvKey || draftKey.length === 0}
@@ -309,41 +311,39 @@ export function WebSearchSettingsPage(props: {
             )}
           </div>}
         />
-      </Card>
+      </SettingsSection>
 
-      <Card padding={0} className="settingsRows settingsWebSearchQueryCard">
-        <Item
-          className="settingsWebSearchQueryIntroRow"
+      <SettingsSection
+        title={sharedCopy.groups.searchBehavior}
+        description={sharedCopy.groups.searchBehaviorHelp}
+      >
+        <SettingsRow
           label={copy.liveTitle}
           description={copy.liveHelp}
         />
-        <Item
-          className="settingsWebSearchQueryInputRow"
-          label={copy.query}
-          description={copy.queryHelp}
-          endContent={<div className="settingsWebSearchQueryField">
-            <TextInput
-              value={liveQuery}
-              onChange={(value) => updateLiveQuery(value)}
-              placeholder={copy.queryPlaceholder}
-              label={copy.queryAria}
-              isLabelHidden
-              width="100%"
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !liveQueryRunning) {
-                  event.preventDefault();
-                  void runLiveQuery();
-                }
-              }}
-            />
-          </div>}
-        />
-        <Item
-          className="settingsWebSearchSearchRow"
+        {/* The query deserves the full row width — it was squeezed into the
+            row's end slot before, an ~360px input for a real search query. */}
+        <SettingsField>
+          <TextInput
+            value={liveQuery}
+            onChange={(value) => updateLiveQuery(value)}
+            placeholder={copy.queryPlaceholder}
+            label={copy.query}
+            description={copy.queryHelp}
+            width="100%"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !liveQueryRunning) {
+                event.preventDefault();
+                void runLiveQuery();
+              }
+            }}
+          />
+        </SettingsField>
+        <SettingsRow
           label={copy.execute}
           description={copy.executeHelp}
           align="start"
-          endContent={<div className="settingsWebSearchSearchControls">
+          end={<div className="settingsWebSearchSearchControls">
             <Button
               variant="primary"
               isDisabled={liveQueryRunning || queryDisabledReason !== null}
@@ -357,7 +357,7 @@ export function WebSearchSettingsPage(props: {
             )}
           </div>}
         />
-      </Card>
+      </SettingsSection>
 
       {liveQueryError && (
         <div className="settingsConnectionMeta" role="alert">
