@@ -954,25 +954,31 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
     );
   });
 
-  // Some gateways blank an optional field on continuation deltas instead of omitting it. Read
-  // literally, `id: ''` is a new identity with no name, which kills the whole turn; `name: ''`
-  // is a name that disagrees with every open call, which files the arguments under a call
-  // named `""`. An empty string is how the wire omits a field, so both read as absent.
+  // Some gateways blank an optional field on continuation deltas instead of omitting it, and a
+  // blank field carries no information either way: an id that addresses nothing, or a name no
+  // tool can have. Read literally, though, each one is a claim. A blank `id` contradicts the
+  // call it belongs to, so the delta becomes a new identity with no name and kills the whole
+  // turn; a blank `name` disagrees with every open call, so the arguments land under a call
+  // named `" "`. Both are worse than the unpatched code, which emitted the call correctly by
+  // never consulting either field.
   //
-  // `name` is the one that matters most and the one this file kept missing: every earlier case
-  // varied which aliases a continuation carries, never what they contain, and `name` is the
-  // field that *rejects* a match. Blanking it was worse than the unpatched code, which emitted
-  // the call correctly. A phantom call named `""` reaches `repairMakaToolCall` as an unknown
-  // tool while the real call runs with empty input.
+  // This is the axis the file kept missing: every earlier case varied which aliases a
+  // continuation carries, never what they contain. It cost two rounds — first the empty string,
+  // then whitespace, found the same way and fixed the same way. Whitespace is not a convention
+  // the way `''` is, but the rule does not depend on one: `name` is the field that *rejects* a
+  // match rather than proposing one, so a value that cannot be a name must not be allowed to
+  // reject. A phantom call reaches `repairMakaToolCall` as an unknown tool while the real call
+  // runs with empty input.
   const blanked = {
-    id: { index: 0, id: '', function: { arguments: ':"a"}' } },
-    name: { index: 0, function: { name: '', arguments: ':"a"}' } },
-    'id and name': { index: 0, id: '', function: { name: '', arguments: ':"a"}' } },
+    'empty id': { index: 0, id: '', function: { arguments: ':"a"}' } },
+    'whitespace id': { index: 0, id: ' ', function: { arguments: ':"a"}' } },
+    'empty name': { index: 0, function: { name: '', arguments: ':"a"}' } },
+    'tab name': { index: 0, function: { name: '\t', arguments: ':"a"}' } },
   } satisfies Record<string, ToolCallDelta>;
 
   for (const [field, continuation] of Object.entries(blanked)) {
     for (const providerType of ['openai-compatible', 'openai'] as const) {
-      test(`treats a blank ${field} on a continuation as absent (${providerType})`, async () => {
+      test(`treats a ${field} on a continuation as absent (${providerType})`, async () => {
         const { parts, failure } = await collectDeltas(
           [
             {
@@ -995,17 +1001,19 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
     }
   }
 
-  // The same normalization has to reach the new-call path, or `''` and `null` diverge again in
-  // the other direction: a blank name would mint a call named `""` where an absent one throws.
-  // Upstream's rule is that a call nobody can name is a protocol violation, and a blank name is
-  // that same condition spelled differently.
-  test('refuses a new call whose name is blank rather than absent', async () => {
-    const { failure } = await collectDeltas([
-      { index: 3, id: '', type: 'function', function: { name: '', arguments: '{"x":1}' } },
-    ]);
+  // The same normalization has to reach the new-call path, or a blank name diverges from an
+  // absent one in the other direction: minting a call nobody can name where an absent name
+  // throws. Upstream's rule is that a call without a name is a protocol violation, and a blank
+  // one is that same condition spelled differently.
+  for (const name of ['', ' ']) {
+    test(`refuses a new call whose name is ${JSON.stringify(name)} rather than absent`, async () => {
+      const { failure } = await collectDeltas([
+        { index: 3, id: '', type: 'function', function: { name, arguments: '{"x":1}' } },
+      ]);
 
-    assert.notEqual(failure, undefined, 'a call named "" is not a call');
-  });
+      assert.notEqual(failure, undefined, 'a call nobody can name is not a call');
+    });
+  }
 
   // Minting scans every emitted id, not just the previous call's. A gateway that repeats one id
   // can put an unrelated call between the repeats, and comparing against the last one only lets

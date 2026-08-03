@@ -1,8 +1,18 @@
 diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.js b/node_modules/@ai-sdk/provider-utils/dist/index.js
-index 851fce4..df96804 100644
+index 851fce4..2e78ce1 100644
 --- a/node_modules/@ai-sdk/provider-utils/dist/index.js
 +++ b/node_modules/@ai-sdk/provider-utils/dist/index.js
-@@ -3554,26 +3554,75 @@ var StreamingToolCallTracker = class {
+@@ -3537,6 +3537,9 @@ function resolveSync(value) {
+ import {
+   InvalidResponseDataError
+ } from "@ai-sdk/provider";
++function absentIfBlank(value) {
++  return value != null && value.trim() !== "" ? value : void 0;
++}
+ var StreamingToolCallTracker = class {
+   constructor(controller, options = {}) {
+     this.toolCalls = [];
+@@ -3554,26 +3557,75 @@ var StreamingToolCallTracker = class {
     */
    processDelta(toolCallDelta) {
      var _a2;
@@ -11,9 +21,9 @@ index 851fce4..df96804 100644
 -      this.processNewToolCall(index, toolCallDelta);
 -    } else {
 -      this.processExistingToolCall(index, toolCallDelta);
-+    const wireId = toolCallDelta.id || void 0;
++    const wireId = absentIfBlank(toolCallDelta.id);
 +    const wireIndex = toolCallDelta.index != null ? toolCallDelta.index : void 0;
-+    const wireName = ((_a2 = toolCallDelta.function) == null ? void 0 : _a2.name) || void 0;
++    const wireName = absentIfBlank((_a2 = toolCallDelta.function) == null ? void 0 : _a2.name);
 +    let toolCall = this.findByAlias(wireId, wireIndex, wireName);
 +    if (toolCall == null && this.toolCalls.length === 1) {
 +      const only = this.toolCalls[0];
@@ -30,7 +40,7 @@ index 851fce4..df96804 100644
 +    }
 +    if (wireIndex !== void 0) {
 +      toolCall.index = wireIndex;
-+    }
+     }
 +    this.processExistingToolCall(toolCall, toolCallDelta);
 +  }
 +  /**
@@ -62,7 +72,7 @@ index 851fce4..df96804 100644
 +      if (matched) {
 +        return wireName !== void 0 && candidate.function.name !== wireName ? void 0 : candidate;
 +      }
-     }
++    }
 +    return void 0;
    }
    /**
@@ -86,7 +96,7 @@ index 851fce4..df96804 100644
      if (this.typeValidation === "required") {
        if (toolCallDelta.type !== "function") {
          throw new InvalidResponseDataError({
-@@ -3589,35 +3638,32 @@ var StreamingToolCallTracker = class {
+@@ -3589,35 +3641,32 @@ var StreamingToolCallTracker = class {
          });
        }
      }
@@ -135,7 +145,7 @@ index 851fce4..df96804 100644
      if (toolCall.function.arguments.length > 0) {
        this.controller.enqueue({
          type: "tool-input-delta",
-@@ -3626,9 +3672,8 @@ var StreamingToolCallTracker = class {
+@@ -3626,9 +3675,8 @@ var StreamingToolCallTracker = class {
        });
      }
    }
