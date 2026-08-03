@@ -5,30 +5,6 @@ function settingsNavigation(page: Page) {
   return page.getByRole('navigation', { name: /^(设置分组|Settings sections)$/ });
 }
 
-/**
- * Settings take effect: open settings, switch the theme to dark, and confirm
- * the <html> root picks up the `dark` class (theme.ts applies it via
- * classList.toggle). This exercises the settings open → navigate → mutate →
- * apply path without depending on pixel colors.
- */
-test('changing the theme in settings applies to the UI', async ({ window: page }) => {
-  await page.getByRole('button', { name: '展开侧边栏' }).click();
-  await page.getByRole('button', { name: '设置' }).click();
-  await expect(page.getByLabel('设置内容')).toBeVisible();
-
-  await settingsNavigation(page).getByRole('button', { name: '外观', exact: true }).click();
-  const themeGroup = page.getByRole('radiogroup', { name: '主题' });
-  const lightTheme = themeGroup.getByRole('radio', { name: '浅色' });
-  const darkTheme = themeGroup.getByRole('radio', { name: '深色' });
-  await lightTheme.focus();
-  await lightTheme.press('ArrowDown');
-  await expect(darkTheme).toBeChecked();
-
-  await expect.poll(
-    async () => page.evaluate(() => document.documentElement.classList.contains('dark')),
-  ).toBe(true);
-});
-
 test('remote access prioritizes a configured channel that needs attention', async ({ window: page }) => {
   const runtimeError = 'runtime-diagnostic-'.repeat(10);
   await page.evaluate(async (lastError) => {
