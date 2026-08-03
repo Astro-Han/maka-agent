@@ -75,6 +75,7 @@ const HANG_OBSERVE = process.env.MAKACU_MOCK_HANG_OBSERVE === '1';
 const TRUNCATED = process.env.MAKACU_MOCK_TRUNCATED === '1';
 const LAUNCH_TOOK_FOREGROUND = process.env.MAKACU_MOCK_LAUNCH_FOREGROUND === '1';
 const WINDOW_ORIGIN_Y = Number(process.env.MAKACU_MOCK_WINDOW_ORIGIN_Y || '25');
+const SELECTED_TEXT = process.env.MAKACU_MOCK_SELECTED_TEXT || '';
 const NONCE = crypto.randomBytes(16).toString('hex');
 // 1x1 transparent PNG.
 const PNG = Buffer.from(
@@ -149,7 +150,7 @@ function snapshot(includeImage) {
     },
     windowDigest: digest('window_' + snapshotSeq),
     focusedElementToken: 'el_2',
-    selectedText: null,
+    selectedText: SELECTED_TEXT ? { text: SELECTED_TEXT, truncated: true } : null,
     image: includeImage ? writeImage(id) : null,
     displays: [{
       displayId: '69732928',
@@ -346,6 +347,7 @@ function makeBackend(
     timeoutMs?: number;
     launchTookForeground?: boolean;
     windowOriginY?: number;
+    selectedText?: string;
     physicalInputRecentlyActive?: MakaCuBackendOptions['physicalInputRecentlyActive'];
     allowCompatibilityInputDispatch?: boolean;
     onTrace?: MakaCuBackendOptions['onTrace'];
@@ -377,6 +379,7 @@ function makeBackend(
   process.env.MAKACU_MOCK_TRUNCATED = opts.truncated ? '1' : '';
   process.env.MAKACU_MOCK_LAUNCH_FOREGROUND = opts.launchTookForeground ? '1' : '';
   process.env.MAKACU_MOCK_WINDOW_ORIGIN_Y = String(opts.windowOriginY ?? 25);
+  process.env.MAKACU_MOCK_SELECTED_TEXT = opts.selectedText ?? '';
   const backend = createMakaCuBackend({
     binaryPath: mockPath,
     imageDir,
@@ -1022,6 +1025,34 @@ describe('maka-cu backend', () => {
     assert.equal(prompted?.value, undefined);
     const plain = observation.elements.find((e) => e.role === 'AXWindow');
     assert.equal(plain?.placeholder, undefined, 'an element without one carries nothing');
+  });
+
+  it('carries which element is focused, from a declaration rather than a spread', async () => {
+    // It reached the observation through a spread into an object literal, the
+    // one construction TypeScript does not excess-property check, so no type
+    // declared it anywhere — it worked, and nothing held it to working.
+    const { backend } = makeBackend({});
+    const observation = await observeFixture(backend);
+    const focused = observation.elements.find((e) => e.focused === true);
+    assert.ok(focused, 'the fixture element the executor reports as focused reaches the model');
+    assert.equal(focused?.label, 'Send');
+    // Absent, not false: the renderer writes state only where it is the
+    // exception, and `focused: false` on every other line says nothing.
+    const plain = observation.elements.find((e) => e.role === 'AXWindow');
+    assert.equal(plain?.focused, undefined, 'an element that is not focused carries nothing');
+  });
+
+  it('carries the selected text in the shape the wire declares', async () => {
+    // Declared on the element as a bare string and assigned nowhere: the file's
+    // header listed it among the four things this backend carries and it
+    // carried none of it. The protocol puts it on the snapshot and says whether
+    // it was cut, which a bare string cannot.
+    const { backend } = makeBackend({ selectedText: 'the selected run' });
+    const observation = await observeFixture(backend);
+    assert.deepEqual(observation.selectedText, { text: 'the selected run', truncated: true });
+
+    const { backend: none } = makeBackend({});
+    assert.equal((await observeFixture(none)).selectedText, undefined);
   });
 
   it('says nothing about truncation when the tree was complete', async () => {

@@ -14,7 +14,8 @@
 // not exist as a signed artifact yet, so nothing may fall back to it silently.
 //
 // What the protocol declares and Maka's own types cannot yet carry: per-element
-// `truncated`, `actions`, `placeholder` and `selectedText`. They are read and validated here — a missing declared field is
+// `truncated`, `actions`, `placeholder`, `focused` and per-snapshot
+// `selectedText`. They are read and validated here — a missing declared field is
 // version skew the host must catch — but only the truncation flags reach
 // anywhere, through `onTrace`. Giving them a model-facing home means new fields
 // on `CuObservedElement`/`CuObservation`, which this change deliberately does
@@ -344,7 +345,17 @@ export type MakaCuObservedElement = CuObservedElement & {
   subrole?: string;
   placeholder?: string;
   actions?: string[];
-  selectedText?: string;
+  /**
+   * §5.2: where a key sent without an element_id lands.
+   *
+   * Declared because it is emitted. It was written into the element literal
+   * through a spread, which is the one form of object construction TypeScript
+   * does not excess-property check, so the field compiled with no declaration
+   * anywhere and no compile-time link to the layer that renders it. Every other
+   * field carried past the shared type is named here; this one was working by
+   * accident.
+   */
+  focused?: boolean;
 };
 
 export type MakaCuObservation = Omit<CuObservation, 'elements'> & {
@@ -354,6 +365,15 @@ export type MakaCuObservation = Omit<CuObservation, 'elements'> & {
   /** §5.8: the query the executor filtered the walk with. */
   query?: string;
   menu?: { opened?: string; truncated?: boolean };
+  /**
+   * §5.2: the text selected in the target window, and whether it was cut.
+   *
+   * Per snapshot, which is where the protocol puts it. It was declared on the
+   * element as a bare `string`, which is neither the shape the wire carries nor
+   * a place anything ever assigned — the file's own header listed it among the
+   * four things this backend carries, and it carried nothing.
+   */
+  selectedText?: { text: string; truncated: boolean };
   /** §4.x: what the executor found stacked over the target window. */
   obscuringRects?: ComputerUseRect[];
 };
@@ -1327,6 +1347,10 @@ export function createMakaCuBackend(opts: MakaCuBackendOptions): MakaCuBackend {
       // Reporting the host's own request as a truncation would tell the model
       // the machine had failed to show it something.
       ...(query ? { query } : {}),
+      // §5.2. Carried, not dropped: `select_text` names a range and this is the
+      // only account of what came out of it. Its shape is the protocol's — text
+      // and whether it was cut — because a bare string cannot say the second.
+      ...(snapshot.selectedText ? { selectedText: snapshot.selectedText } : {}),
       ...(snapshot.menu
         ? {
             menu: {

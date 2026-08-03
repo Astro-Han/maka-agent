@@ -8,8 +8,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  MAKA_CU_DISPATCH_PATHS,
   MakaCuProtocolViolation,
   parseMakaCuKeyChord,
+  readDispatchResult,
   readElement,
   readSnapshot,
   readWindow,
@@ -188,5 +190,94 @@ describe('maka-cu readers refuse rather than default', () => {
       delete broken[missing];
       assert.throws(() => readWindow('window.list', broken), MakaCuProtocolViolation, missing);
     }
+  });
+});
+
+describe('maka-cu dispatch results are held to their closed sets (§6.3/§6.5)', () => {
+  function dispatch(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ok: true,
+      toolCallId: 'call-1',
+      outcome: 'ok',
+      tier: 'ax',
+      path: 'ax_action',
+      effect: 'confirmed',
+      verification: { method: 'action_result', observedChange: true },
+      ...overrides,
+    };
+  }
+
+  it('reads a well-formed dispatch result', () => {
+    const result = readDispatchResult('input.dispatch', dispatch() as never, false);
+    assert.equal(result.path, 'ax_action');
+    assert.equal(result.tier, 'ax');
+    assert.equal(result.outcome, 'ok');
+  });
+
+  it('refuses a path that is not in the closed set', () => {
+    // The closed set is what decides, and it decides first: `path` is refused
+    // by name rather than by the tier pairing below it. That ordering is the
+    // assertion — replacing `requireMember` with an unchecked cast still
+    // refuses every one of these, because no non-member is in any tier's list,
+    // so the only thing that tells the two readers apart is which of them said
+    // no. A reader that names the field is what makes a maka-cu version bump
+    // that renames a path legible as version skew rather than as a tier
+    // mismatch that never happened.
+    for (const bad of ['ax_press', 'cg_event', 'AX_ACTION', '', 7, null, undefined]) {
+      assert.throws(
+        () => readDispatchResult('input.dispatch', dispatch({ path: bad }) as never, false),
+        (error: unknown) =>
+          error instanceof MakaCuProtocolViolation &&
+          /path is outside its closed set/.test(error.message),
+        String(bad),
+      );
+    }
+    // Every declared path is accepted by the same reader, so the set is what
+    // decides and not a list written out again here.
+    for (const path of MAKA_CU_DISPATCH_PATHS) {
+      const tier = path.startsWith('ax_') || path === 'none' ? 'ax' : 'coordinate-background';
+      const result = readDispatchResult(
+        'input.dispatch',
+        dispatch({ path, tier, effect: 'unverifiable' }) as never,
+        true,
+      );
+      assert.equal(result.path, path);
+    }
+  });
+
+  it('refuses a tier and an outcome outside their own closed sets', () => {
+    assert.throws(
+      () => readDispatchResult('input.dispatch', dispatch({ tier: 'ax-fast' }) as never, false),
+      MakaCuProtocolViolation,
+    );
+    assert.throws(
+      () => readDispatchResult('input.dispatch', dispatch({ outcome: 'denied' }) as never, false),
+      MakaCuProtocolViolation,
+    );
+  });
+
+  it('refuses a path its tier does not permit, and a global-pointer path that was not granted', () => {
+    assert.throws(
+      () =>
+        readDispatchResult(
+          'input.dispatch',
+          dispatch({ tier: 'ax', path: 'cg_event_pid' }) as never,
+          false,
+        ),
+      MakaCuProtocolViolation,
+    );
+    assert.throws(
+      () =>
+        readDispatchResult(
+          'input.dispatch',
+          dispatch({
+            tier: 'coordinate-background',
+            path: 'cg_event_global',
+            effect: 'unverifiable',
+          }) as never,
+          false,
+        ),
+      MakaCuProtocolViolation,
+    );
   });
 });
