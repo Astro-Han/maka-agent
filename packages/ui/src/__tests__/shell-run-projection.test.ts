@@ -64,7 +64,7 @@ describe('ShellRun UI projection', () => {
       { type: 'user', id: 'user-2', turnId: 'turn-2', ts: 3, text: 'next' },
     ];
     const projection = createTranscriptProjection();
-    const unrelatedTurn = projection.project({ messages }).turns[1];
+    const unrelatedTurn = projection.project({ messages })[1];
     const update: ShellRunUpdate = {
       sessionId: 'session-1',
       ownership: { kind: 'local' },
@@ -72,7 +72,7 @@ describe('ShellRun UI projection', () => {
       sourceToolCallId: 'bash-1',
       result: shellRunSnapshot(3, { status: 'completed', completedAt: 5, exitCode: 0 }),
     };
-    const durable = projection.project({ messages, shellRunUpdates: [update] }).turns;
+    const durable = projection.project({ messages, shellRunUpdates: [update] });
     assert.equal(durable[1], unrelatedTurn);
     assert.equal(durable[0]?.tools[0]?.status, 'completed');
 
@@ -91,7 +91,7 @@ describe('ShellRun UI projection', () => {
         }],
       }],
     };
-    const overlaid = projection.project({ messages, liveTurn: live, shellRunUpdates: [update] }).turns;
+    const overlaid = projection.project({ messages, liveTurn: live, shellRunUpdates: [update] });
     assert.equal(overlaid[1], unrelatedTurn, 'the live overlay must not disturb an unrelated turn');
     const result = overlaid[0]?.tools[0]?.result;
     assert.equal(result?.kind === 'shell_run' ? result.revision : undefined, 3);
@@ -122,7 +122,7 @@ describe('ShellRun UI projection', () => {
     };
 
     const turns = createTranscriptProjection()
-      .project({ messages: [], liveTurn: live, shellRunUpdates: [update] }).turns;
+      .project({ messages: [], liveTurn: live, shellRunUpdates: [update] });
     const result = turns[0]?.tools[0]?.result;
     assert.equal(result?.kind, 'shell_run');
     assert.equal(result?.kind === 'shell_run' ? result.output?.mode : undefined, 'pty');
@@ -149,7 +149,7 @@ describe('ShellRun UI projection', () => {
       sourceTurnId: 'turn-1',
       sourceToolCallId: 'bash-1',
       result: shellRunSnapshot(2),
-    }] }).turns;
+    }] });
 
     assert.equal(turns[0]?.tools[0]?.shellRunSource, 'owned');
     assert.equal(turns[0]?.tools[0]?.result?.kind === 'shell_run'
@@ -162,7 +162,7 @@ describe('ShellRun UI projection', () => {
       sourceTurnId: 'turn-1',
       sourceToolCallId: 'bash-1',
       result: shellRunSnapshot(2),
-    }] }).turns;
+    }] });
     assert.equal(unavailable[0]?.tools[0]?.shellRunSource, 'unavailable');
   });
 });

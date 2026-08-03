@@ -3,8 +3,8 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
 import type { SessionEvent, SessionSummary, StoredMessage } from '@maka/core';
-import type { LiveTurnProjection, TurnViewModel } from '@maka/ui';
-import { applyLiveTurnEvent, armLiveTurn } from '@maka/ui';
+import type { LiveTurnProjection, TurnPresentation, TurnViewModel } from '@maka/ui';
+import { applyLiveTurnEvent, armLiveTurn, createTranscriptProjection } from '@maka/ui';
 import { build } from 'esbuild';
 import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -16,6 +16,7 @@ import { deriveLiveTurnSnapshot } from '../../renderer/live-turn-snapshot.js';
 import { useAppShellSessionUiReads } from '../../renderer/use-app-shell-session-ui-reads.js';
 import { useAppShellSessionUiSelector } from '../../renderer/use-app-shell-session-ui-selector.js';
 import { useShellLiveTurn } from '../../renderer/use-shell-live-turn.js';
+import { useAppShellTurnPresentation } from '../../renderer/app-shell-turn-view-model.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
 const LUCIDE_REACT_PACKAGE = ['lucide', 'react'].join('-');
@@ -349,21 +350,21 @@ describe('live-turn snapshot', () => {
 
 /**
  * #2030: the transcript projection keeps a settled turn's object identity
- * across deltas and refreshes, but that only reaches the DOM if every prop the
- * memoized TurnView reads is stable too. Testing the projection alone leaves
- * the wiring between it and the renderer untested — a pass added downstream of
- * the projection (a `.map(turn => ({ ...turn }))`, a missing sessionId) restores
- * the original defect while every projection test stays green. This measures
- * the real ChatView.
+ * across deltas and refreshes, but that only reaches the DOM if the per-turn
+ * props are derived FROM those turns and stay stable too. Testing the
+ * projection alone leaves the wiring between it and the renderer untested — a
+ * pass added downstream of the projection (a `.map(turn => ({ ...turn }))`)
+ * restores the original defect while every projection test stays green. This
+ * measures the real ChatView.
  */
 describe('ChatView transcript render boundary', () => {
   const SESSION_ID = 'session-chat';
 
   it('re-renders only the tail turn while an answer streams', async () => {
     const { LocaleProvider, ChatSurfaceLayout, ChatView } = await importUiRenderModule();
-    const { root } = installReactRenderer();
+    const { root, container } = installReactRenderer();
     const messages = transcriptMessages();
-    const footerActions = countedFooterActions(['turn-1', 'turn-2', 'turn-3']);
+    const presentation = countingPresentation();
 
     const renderAt = (text: string) => render(root, createElement(LocaleProvider, {
       locale: 'zh',
@@ -373,23 +374,104 @@ describe('ChatView transcript render boundary', () => {
           activeSession: chatSession(SESSION_ID),
           liveTurn: streamingLiveTurn(text),
           shellRunUpdates: SHELL_RUN_UPDATES,
-          turnFooterActionsByTurn: footerActions.byTurn,
+          deriveTurnPresentation: presentation.derive,
           onNew: () => {},
         }),
       }),
     }));
 
     await renderAt('he');
-    const baseline = footerActions.readCounts();
+    const baseline = presentation.footerReads();
     assert.ok(baseline['turn-1']! > 0, 'a settled turn must render its footer at least once');
+    const observerBaseline = observerCounts();
+    assert.ok(observerBaseline.observe > 0, 'the prompt rail must have observed its turns at least once');
 
     // Only the live text moves. `messages` and `shellRunUpdates` keep identity,
     // exactly as they do between two deltas in the app.
     for (const text of ['hel', 'hell', 'hello']) await renderAt(text);
 
-    const after = footerActions.readCounts();
+    const after = presentation.footerReads();
     assert.equal(after['turn-1'], baseline['turn-1'], 'turn-1 owns the background Bash and must not re-render');
     assert.equal(after['turn-2'], baseline['turn-2'], 'an unrelated settled turn must not re-render');
+    // Positively: the tail turn DID advance and the text reached the DOM, so
+    // "nothing rendered at all" cannot pass this test.
+    assert.ok(after['turn-3']! > baseline['turn-3']!, 'the tail turn must re-render for its own delta');
+    assert.match(container.textContent, /hello/);
+    // A settled turn's presentation is derived once and answered from the turn
+    // identity after that.
+    assert.equal(presentation.derivations()['turn-1'], 1, 'a settled turn is derived once, not once per token');
+    assert.equal(presentation.derivations()['turn-2'], 1);
+    // The prompt rail's transcript-wide IntersectionObserver must not be torn
+    // down and rebuilt per token: which turns exist did not change.
+    assert.deepEqual(observerCounts(), observerBaseline, 'a delta must not rebuild the prompt rail observer');
+  });
+
+  it('re-renders nothing when a refresh republishes the same transcript', async () => {
+    // The other half of #2030, and the one the delta case cannot see:
+    // `refreshMessages` fires at every step and tool boundary and hands down a
+    // freshly deserialized array, so every message object is new and only the
+    // value comparison can recover identity.
+    const { LocaleProvider, ChatSurfaceLayout, ChatView } = await importUiRenderModule();
+    const { root } = installReactRenderer();
+    const presentation = countingPresentation();
+
+    const renderRefresh = () => render(root, createElement(LocaleProvider, {
+      locale: 'zh',
+      children: createElement(ChatSurfaceLayout, {
+        children: createElement(ChatView, {
+          messages: structuredClone(transcriptMessages()),
+          activeSession: chatSession(SESSION_ID),
+          shellRunUpdates: SHELL_RUN_UPDATES,
+          deriveTurnPresentation: presentation.derive,
+          onNew: () => {},
+        }),
+      }),
+    }));
+
+    await renderRefresh();
+    const baseline = presentation.footerReads();
+    assert.ok(baseline['turn-1']! > 0);
+
+    for (let index = 0; index < 3; index += 1) await renderRefresh();
+
+    const after = presentation.footerReads();
+    assert.deepEqual(after, baseline, 'a refresh that changed nothing must not re-render a single turn');
+    assert.deepEqual(
+      presentation.derivations(),
+      { 'turn-1': 1, 'turn-2': 1, 'turn-3': 1 },
+      'a refresh that changed nothing must not re-derive a single turn',
+    );
+  });
+
+  // The shell's half of the same seam: ChatView calls this back during render,
+  // so the cache it keys on the projected turns has to outlive the render that
+  // built it. A derivation rebuilt per render would answer every call from an
+  // empty cache and quietly restore the defect.
+  it('keeps one turn-presentation derivation across renders', async () => {
+    const { root } = installReactRenderer();
+    const turns = createTranscriptProjection().project({
+      sessionId: SESSION_ID,
+      messages: transcriptMessages(),
+    });
+    const seen: TurnPresentation[] = [];
+
+    function Reader(): null {
+      const derive = useAppShellTurnPresentation({
+        activeId: SESSION_ID,
+        pendingTurnActions: NO_PENDING_TURN_ACTIONS,
+        uiLocale: 'zh',
+        pendingKeyOf: (sessionId, turnId, actionId) => `${sessionId}:${turnId}:${actionId}`,
+      });
+      seen.push(derive(turns));
+      return null;
+    }
+
+    await render(root, createElement(Reader));
+    await render(root, createElement(Reader));
+
+    assert.ok(seen.length >= 2, 'the hook must have run on both renders');
+    assert.equal(seen.at(-1), seen[0], 'the second render must reuse the first derivation');
+    assert.ok(seen[0]!.footerActionsByTurn['turn-1'], 'the derivation must produce real footer actions');
   });
 
   it('shows the newly selected session on the first render after a switch', async () => {
@@ -470,6 +552,14 @@ function chatSession(id: string): SessionSummary {
   return { ...createSession(id, 'Chat'), lastMessageAt: 1 };
 }
 
+/**
+ * Each delta closes its text step. An open step is what production streams,
+ * but the assistant stream reveals an open step through a timer-driven
+ * typewriter this fake DOM cannot advance, so the text would never reach
+ * `textContent` and the positive half of the assertion could not be made. What
+ * is under test — which turns the projection moves and which TurnViews re-render
+ * — is the same either way.
+ */
 function streamingLiveTurn(text: string): LiveTurnProjection {
   return {
     turnId: 'turn-3',
@@ -477,35 +567,66 @@ function streamingLiveTurn(text: string): LiveTurnProjection {
     steps: [{
       stepId: 'step-1',
       contentOrder: ['text'],
-      text: { text, truncated: false, complete: false },
+      text: { text, truncated: false, complete: true },
       tools: [],
     }],
   };
 }
 
 /**
- * One counting array per turn. `TurnFooterActions` maps over the array, so an
+ * Stands in for the shell's real derivation (`app-shell-turn-view-model.ts`):
+ * it caches per turn OBJECT, which is the contract the projection exists to
+ * support, and counts both how often a turn had to be derived and how often
+ * its footer array was read. `TurnFooterActions` maps over the array, so an
  * index read is a render of that turn — the same measurement idiom as
  * `CountedTimestamp`, applied to a prop the test owns rather than to the turn,
  * which ChatView builds itself.
  */
-function countedFooterActions(turnIds: readonly string[]): {
-  byTurn: Record<string, readonly unknown[]>;
-  readCounts(): Record<string, number>;
+function countingPresentation(): {
+  derive(turns: readonly TurnViewModel[]): Record<string, unknown>;
+  derivations(): Record<string, number>;
+  footerReads(): Record<string, number>;
 } {
-  const counts: Record<string, number> = {};
-  const byTurn: Record<string, readonly unknown[]> = {};
-  for (const turnId of turnIds) {
-    counts[turnId] = 0;
-    const actions = [{ id: 'copy' as const, label: '复制', enabled: true }];
-    byTurn[turnId] = new Proxy(actions, {
-      get(target, property, receiver) {
-        if (property === '0') counts[turnId] = (counts[turnId] ?? 0) + 1;
-        return Reflect.get(target, property, receiver);
-      },
-    });
-  }
-  return { byTurn, readCounts: () => ({ ...counts }) };
+  const derivations: Record<string, number> = {};
+  const reads: Record<string, number> = {};
+  const cache = new WeakMap<TurnViewModel, readonly unknown[]>();
+  return {
+    derive(turns) {
+      const footerActionsByTurn: Record<string, readonly unknown[]> = {};
+      for (const turn of turns) {
+        let actions = cache.get(turn);
+        if (!actions) {
+          derivations[turn.turnId] = (derivations[turn.turnId] ?? 0) + 1;
+          reads[turn.turnId] ??= 0;
+          const list = [{ id: 'copy' as const, label: '复制', enabled: true }];
+          actions = new Proxy(list, {
+            get(target, property, receiver) {
+              if (property === '0') reads[turn.turnId] = (reads[turn.turnId] ?? 0) + 1;
+              return Reflect.get(target, property, receiver);
+            },
+          });
+          cache.set(turn, actions);
+        }
+        footerActionsByTurn[turn.turnId] = actions;
+      }
+      return {
+        footerActionsByTurn,
+        failedReasonLabels: {},
+        failedRecoveryLabels: {},
+        lineageBadgesByTurn: {},
+      };
+    },
+    derivations: () => ({ ...derivations }),
+    footerReads: () => ({ ...reads }),
+  };
+}
+
+const NO_PENDING_TURN_ACTIONS: ReadonlySet<string> = new Set<string>();
+
+const observerLifecycle = { observe: 0, disconnect: 0 };
+
+function observerCounts(): { observe: number; disconnect: number } {
+  return { ...observerLifecycle };
 }
 
 const LIVE_SESSION_ID = 'session-live';
@@ -709,17 +830,21 @@ function installFakeDom(): void {
   globalThis.requestAnimationFrame = () => 0;
   globalThis.cancelAnimationFrame = () => {};
   // The transcript surface observes geometry and escapes turn ids into
-  // selectors. None of it can measure anything here; these exist so the render
-  // completes and the memo boundaries stay the thing under test.
+  // selectors. Nothing can be measured here, but the observers count their own
+  // lifecycle: the prompt rail rebuilds a transcript-wide IntersectionObserver
+  // whenever its effect re-runs, which is exactly the per-token work #2030
+  // removed, and an observer that is never constructed cannot show that.
   const previousResizeObserver = globalThis.ResizeObserver;
   const previousIntersectionObserver = globalThis.IntersectionObserver;
   const previousCss = (globalThis as { CSS?: unknown }).CSS;
   class NoopObserver {
-    observe(): void {}
+    observe(): void { observerLifecycle.observe += 1; }
     unobserve(): void {}
-    disconnect(): void {}
+    disconnect(): void { observerLifecycle.disconnect += 1; }
     takeRecords(): [] { return []; }
   }
+  observerLifecycle.observe = 0;
+  observerLifecycle.disconnect = 0;
   globalThis.ResizeObserver = NoopObserver as unknown as typeof ResizeObserver;
   globalThis.IntersectionObserver = NoopObserver as unknown as typeof IntersectionObserver;
   (globalThis as { CSS?: unknown }).CSS = { escape: (value: string) => value, supports: () => false };
@@ -789,12 +914,30 @@ class FakeElement {
 
   addEventListener(): void {}
 
-  querySelector(): FakeElement | null {
-    return null;
+  /**
+   * Attribute-equality selectors only (`[name="value"]`), which is all the
+   * chat surface uses to find its `[data-turn-id]` anchors. Returning `null`
+   * unconditionally made the prompt rail's whole observer path unreachable, so
+   * three commits' worth of behaviour tested green against a DOM that could
+   * not express it.
+   */
+  querySelector(selector: string): FakeElement | null {
+    return this.querySelectorAll(selector)[0] ?? null;
   }
 
-  querySelectorAll(): FakeElement[] {
-    return [];
+  querySelectorAll(selector: string): FakeElement[] {
+    const match = /^\[([\w-]+)="(.*)"\]$/.exec(selector);
+    if (!match) return [];
+    const [, name, value] = match;
+    const found: FakeElement[] = [];
+    const visit = (node: FakeElement | FakeText): void => {
+      if (node.nodeType !== 1) return;
+      const element = node as FakeElement;
+      if (element.getAttribute(name!) === value) found.push(element);
+      for (const child of element.childNodes) visit(child);
+    };
+    for (const child of this.childNodes) visit(child);
+    return found;
   }
 
   getElementsByClassName(): FakeElement[] {

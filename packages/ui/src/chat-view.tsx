@@ -29,7 +29,7 @@ import {
   TurnView,
   type ReadAttachmentBytes,
   type TurnFooterActionMeta,
-  type TurnLineageBadge,
+  type TurnPresentationDeriver,
 } from './chat-turn.js';
 import { useChatScroll } from './use-chat-scroll.js';
 import { useUiLocale } from './locale-context.js';
@@ -116,13 +116,18 @@ export function ChatView(props: {
   messageLoadRetryPending?: boolean;
   onRetryMessages?(): void;
   /**
-   * PR109d-b: footer actions per turn, keyed by turnId. The renderer
-   * (apps/desktop/src/renderer/main.tsx) computes these from
-   * `deriveTurnFooterActions()` over each turn's `TurnStatus` + lineage
-   * state, then hands them in. Keeps the action policy with the
-   * consumer that has visibility into the full turn list.
+   * Per-turn presentation the consumer derives from the turns this view
+   * projected: footer actions, failed-turn labels, lineage badges, and which
+   * turn may be safely resumed. Action policy and enum-to-Chinese translation
+   * stay outside `@maka/ui`, but they read the SAME turn objects the transcript
+   * projection produced — so a turn the projection did not move can be answered
+   * from the consumer's cache, and the props a memoized `TurnView` compares
+   * keep identity for free rather than being interned afterwards (#2030).
+   *
+   * Called during render, once per projection step. It must be pure and
+   * idempotent for identical turns.
    */
-  turnFooterActionsByTurn?: Record<string, ReadonlyArray<TurnFooterActionMeta>>;
+  deriveTurnPresentation?: TurnPresentationDeriver;
   onTurnFooterAction?: (turnId: string, actionId: TurnFooterActionMeta['id']) => void;
   /**
    * Edit-and-resend for a user turn. Desktop owns revision draft creation
@@ -130,20 +135,15 @@ export function ChatView(props: {
    */
   onEditUserMessage?: (turnId: string) => void;
   /**
-   * PR109e-d/e: per-turn metadata for failed banner + lineage badges.
-   * Renderer computes from materialized turns + lineage map + the
-   * generalized error-class mapping (`describeTurnErrorClass()`),
-   * keeping enum-to-Chinese translation outside @maka/ui.
+   * The safe-resume affordance, minus its target: which turn may be resumed is
+   * `deriveTurnPresentation`'s answer, so the shell supplies only the state and
+   * the callback and this view pairs them with that turn.
    */
-  turnFailedReasonLabels?: Record<string, string>;
-  turnFailedRecoveryLabels?: Record<string, string>;
   safeResumeAction?: {
-    turnId: string;
     pending: boolean;
     detail?: string;
     onResume(): void;
   };
-  turnLineageBadgesByTurn?: Record<string, TurnLineageBadge[]>;
   onLineageBadgeClick?: (targetTurnId: string) => void;
   /**
    * Search-result navigation target. The desktop shell owns session
@@ -223,16 +223,23 @@ export function ChatView(props: {
     [drainingMessageIds, props.messages],
   );
   const chat = useMemo(() => materializeChat(visibleMessages), [visibleMessages]);
-  // The projection owns the derived turns and reports which ones an update
-  // actually touched, so a turn nothing said anything about keeps its object
-  // identity and its memoized TurnView skips — across deltas AND across the
-  // message refreshes that fire at every step/tool boundary (#2030).
-  const { turns } = useTranscriptProjection({
+  // The projection owns the derived turns, so a turn nothing said anything
+  // about keeps its object identity and its memoized TurnView skips — across
+  // deltas AND across the message refreshes that fire at every step/tool
+  // boundary (#2030).
+  const turns = useTranscriptProjection({
     sessionId: props.activeSession?.id,
     messages: visibleMessages,
     liveTurn: props.liveTurn,
     shellRunUpdates: props.shellRunUpdates,
   });
+  // Derived FROM the projected turns, not beside them: the consumer keys its
+  // cache on the turn objects above, so a turn the projection kept hands back
+  // the same footer/badge objects and the memoized TurnView skips on every
+  // prop at once (#2030). Deriving it from `messages` instead made the
+  // transcript a second, independent authority whose outputs then had to be
+  // interned by value to line up again.
+  const turnPresentation = props.deriveTurnPresentation?.(turns);
   // #642 single render path: the in-flight answer is injected into the tail
   // turn's TurnView (the SAME node as the eventual committed turn) instead of a
   // separate streaming <section>, so live→settled is a data-source swap, not an
@@ -480,19 +487,19 @@ export function ChatView(props: {
                     <TurnView
                       turn={turn}
                       userLabel={props.userLabel}
-                      footerActions={props.turnFooterActionsByTurn?.[turn.turnId]}
+                      footerActions={turnPresentation?.footerActionsByTurn[turn.turnId]}
                       onFooterAction={stableTurnFooterAction}
                       onEditUserMessage={props.onEditUserMessage ? stableEditUserMessage : undefined}
                       editUserMessageTransformed={transformedUserTurnIds.has(turn.turnId)}
                       editUserMessageDisabled={
                         streamingActive || props.activeSession?.status === 'running'
                       }
-                      failedReasonLabel={props.turnFailedReasonLabels?.[turn.turnId]}
-                      failedRecoveryLabel={props.turnFailedRecoveryLabels?.[turn.turnId]}
-                      safeResumeAction={props.safeResumeAction?.turnId === turn.turnId
+                      failedReasonLabel={turnPresentation?.failedReasonLabels[turn.turnId]}
+                      failedRecoveryLabel={turnPresentation?.failedRecoveryLabels[turn.turnId]}
+                      safeResumeAction={turnPresentation?.resumeCandidateTurnId === turn.turnId
                         ? props.safeResumeAction
                         : undefined}
-                      lineageBadges={props.turnLineageBadgesByTurn?.[turn.turnId]}
+                      lineageBadges={turnPresentation?.lineageBadgesByTurn[turn.turnId]}
                       onLineageBadgeClick={stableLineageBadgeClick}
                       onReadAttachmentBytes={props.onReadAttachmentBytes}
                       searchHighlighted={highlightedTurnId === turn.turnId}

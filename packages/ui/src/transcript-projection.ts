@@ -21,20 +21,14 @@ import {
  * derivations were not idempotent, so the guess was wrong on every token for
  * any session with background-command history.
  *
- * This layer owns the derived state instead of re-deriving it:
- *
- *  - it remembers the settled turns and reuses the previous object for any turn
- *    a message refresh did not actually change;
- *  - it remembers the result of applying each shell-run update to each tool, so
- *    a durable revision that permanently leads the persisted `tool_result`
- *    snapshot is merged once rather than on every render;
- *  - it reports `affectedTurnIds` — the turns whose object identity moved — so
- *    "what changed" is an answer this layer gives rather than one the renderer
- *    infers.
+ * This layer owns the derived state instead of re-deriving it: it remembers the
+ * settled turns and hands the previous object back for any turn a message
+ * refresh did not actually change, so "what changed" is decided by value here
+ * rather than guessed downstream from reference equality.
  *
  * Contract (mirrors `parseMarkdownIncremental`'s in `@astryxdesign/core`):
  * a turn keeps its object identity unless its projected value changed, and
- * projecting the same inputs twice returns the same result object, so calling
+ * projecting the same inputs twice returns the same result array, so calling
  * this during render stays safe under double-invocation.
  */
 export interface TranscriptProjectionInput {
@@ -50,39 +44,12 @@ export interface TranscriptProjectionInput {
   shellRunUpdates?: readonly ShellRunUpdate[];
 }
 
-export interface TranscriptProjectionResult {
-  turns: readonly TurnViewModel[];
-  /**
-   * Turn ids whose projected value moved in this step: added turns, turns whose
-   * content changed, and turns that disappeared. A semantically identical
-   * update yields an empty set, and the first projection reports every turn.
-   * Measured against the last projection that had DIFFERENT inputs: repeating
-   * one input returns the previous result whole, affected set included, which
-   * is what makes projecting during render safe under double invocation.
-   *
-   * Derived from this layer's own output, never from the turn an event names.
-   * A ShellRun result recorded under one turn folds into the Bash that owns its
-   * `ref`, which can live in an earlier turn (`foldShellRunToolActivities`), so
-   * a WriteStdin in turn-2 affects both turn-2 and turn-1. Only the projection
-   * knows that ownership graph.
-   */
-  affectedTurnIds: ReadonlySet<string>;
-}
-
 export interface TranscriptProjection {
-  project(input: TranscriptProjectionInput): TranscriptProjectionResult;
-  reset(): void;
+  project(input: TranscriptProjectionInput): readonly TurnViewModel[];
 }
 
 const NO_UPDATES: readonly ShellRunUpdate[] = [];
 const NO_TURNS: readonly TurnViewModel[] = [];
-const EMPTY_RESULT: TranscriptProjectionResult = { turns: NO_TURNS, affectedTurnIds: new Set() };
-
-interface AppliedOverlay {
-  tool: ToolActivityItem;
-  entry: ShellRunOverlayEntry;
-  out: ToolActivityItem;
-}
 
 export function createTranscriptProjection(): TranscriptProjection {
   let sessionId: string | undefined;
@@ -100,8 +67,7 @@ export function createTranscriptProjection(): TranscriptProjection {
   // settled projection untouched, which must not force the live overlay to run.
   let liveTurnsFrom: readonly TurnViewModel[] | undefined;
   let overlayEntries: ReadonlyMap<string, ShellRunOverlayEntry> = new Map();
-  const appliedByToolUseId = new Map<string, AppliedOverlay>();
-  let lastResult: TranscriptProjectionResult = EMPTY_RESULT;
+  let lastTurns: readonly TurnViewModel[] = NO_TURNS;
 
   function reset(): void {
     hasProjected = false;
@@ -112,11 +78,10 @@ export function createTranscriptProjection(): TranscriptProjection {
     liveTurns = NO_TURNS;
     liveTurnsFrom = undefined;
     overlayEntries = new Map();
-    appliedByToolUseId.clear();
-    lastResult = EMPTY_RESULT;
+    lastTurns = NO_TURNS;
   }
 
-  function project(input: TranscriptProjectionInput): TranscriptProjectionResult {
+  function project(input: TranscriptProjectionInput): readonly TurnViewModel[] {
     if (hasProjected && input.sessionId !== sessionId) reset();
     sessionId = input.sessionId;
     const updates = input.shellRunUpdates ?? NO_UPDATES;
@@ -128,15 +93,15 @@ export function createTranscriptProjection(): TranscriptProjection {
       || lastUpdates.length !== updates.length
       || updates.some((update, index) => update !== lastUpdates![index]);
 
-    // Same inputs, same answer — including the same affected set, so a
-    // double-invoked render never sees a step it did not cause.
+    // Same inputs, same answer, without advancing any owned state — which is
+    // what makes projecting during render safe under double invocation.
     if (
       hasProjected
       && input.messages === lastMessages
       && input.liveTurn === lastLiveTurn
       && !updatesMoved
     ) {
-      return lastResult;
+      return lastTurns;
     }
 
     if (input.messages !== lastMessages) {
@@ -149,68 +114,38 @@ export function createTranscriptProjection(): TranscriptProjection {
       lastLiveTurn = input.liveTurn;
     }
     if (updatesMoved) {
-      // Entry identity is made semantic here — an entry object survives a
-      // refold iff its value (ref, revision, status, output, ownership) is
-      // unchanged. That is what lets the per-tool memo below key on entry
-      // identity without keying on the caller's update objects, and it runs
-      // only when the store publishes, never per streamed token.
-      overlayEntries = reuseEqualEntries(overlayEntries, foldShellRunUpdates(updates));
+      overlayEntries = foldShellRunUpdates(updates);
       lastUpdates = [...updates];
     }
 
     // Final identity reconciliation against what we last published: a stage
     // that rewrote a turn without changing its value hands the previous object
-    // back, so "affected" means "the value moved", never "a pass ran".
+    // back, so identity moves only when the value did.
     const overlaid = applyShellRunOverlay(liveTurns);
-    const previousTurns = hasProjected ? lastResult.turns : NO_TURNS;
-    const turns = hasProjected ? reconcileTurnIdentities(previousTurns, overlaid) : overlaid;
+    lastTurns = hasProjected ? reconcileTurnIdentities(lastTurns, overlaid) : overlaid;
     hasProjected = true;
-    // Computed on read, not on projection. A streamed token would otherwise
-    // build a Map and a Set over the whole transcript for an answer nobody in
-    // the render path asks for.
-    let affectedTurnIds: ReadonlySet<string> | undefined;
-    lastResult = {
-      turns,
-      get affectedTurnIds() {
-        affectedTurnIds ??= diffAffectedTurnIds(previousTurns, turns);
-        return affectedTurnIds;
-      },
-    };
-    return lastResult;
+    return lastTurns;
   }
 
   /**
-   * Apply the folded shell-run updates to the turns' canonical tools, reusing
-   * the previously produced tool object whenever neither the tool nor its
-   * update moved. Without that memory the merge allocates on every call — a
-   * background command's durable revision permanently leads the persisted
-   * snapshot, so `changed` never goes false — and the owning turn is rebuilt
-   * on every streamed token.
+   * Apply the folded shell-run updates to the turns' canonical tools.
+   *
+   * A durable revision that permanently leads the persisted `tool_result`
+   * snapshot makes `applyShellRunOverlayEntry` allocate a fresh tool every
+   * time, so this pass cannot preserve identity on its own — the final
+   * `reconcileTurnIdentities` above is what hands the previous turn back.
    */
   function applyShellRunOverlay(turns: readonly TurnViewModel[]): readonly TurnViewModel[] {
     if (overlayEntries.size === 0) return turns;
     // Scoped per turn: only a turn that actually holds an overlaid tool is
-    // rebuilt. Projecting the whole transcript to discover that four turns
-    // moved costs more than the overlay itself, and a session with a
-    // background command reaches this on every streamed token.
+    // rebuilt, so the reconciliation above has a smaller set to walk.
     let anyTurnMoved = false;
     const overlaid = turns.map((turn) => {
       let turnMoved = false;
       const projected: ToolActivityItem[] = [];
       for (const tool of turn.tools) {
         const entry = overlayEntries.get(tool.toolUseId);
-        if (!entry) {
-          projected.push(tool);
-          continue;
-        }
-        const applied = appliedByToolUseId.get(tool.toolUseId);
-        let out: ToolActivityItem;
-        if (applied && applied.tool === tool && applied.entry === entry) {
-          out = applied.out;
-        } else {
-          out = applyShellRunOverlayEntry(tool, entry);
-          appliedByToolUseId.set(tool.toolUseId, { tool, entry, out });
-        }
+        const out = entry ? applyShellRunOverlayEntry(tool, entry) : tool;
         if (out !== tool) turnMoved = true;
         projected.push(out);
       }
@@ -221,19 +156,7 @@ export function createTranscriptProjection(): TranscriptProjection {
     return anyTurnMoved ? overlaid : turns;
   }
 
-  return { project, reset };
-}
-
-function reuseEqualEntries(
-  previous: ReadonlyMap<string, ShellRunOverlayEntry>,
-  next: ReadonlyMap<string, ShellRunOverlayEntry>,
-): ReadonlyMap<string, ShellRunOverlayEntry> {
-  const reconciled = new Map<string, ShellRunOverlayEntry>();
-  for (const [toolUseId, entry] of next) {
-    const prior = previous.get(toolUseId);
-    reconciled.set(toolUseId, prior && valuesEqual(prior, entry) ? prior : entry);
-  }
-  return reconciled;
+  return { project };
 }
 
 /**
@@ -257,28 +180,17 @@ export function reconcileTurnIdentities(
     : reconciled;
 }
 
-export function diffAffectedTurnIds(
-  previous: readonly TurnViewModel[],
-  next: readonly TurnViewModel[],
-): ReadonlySet<string> {
-  const affected = new Set<string>();
-  const previousById = new Map(previous.map((turn) => [turn.turnId, turn]));
-  const nextIds = new Set<string>();
-  for (const turn of next) {
-    nextIds.add(turn.turnId);
-    if (previousById.get(turn.turnId) !== turn) affected.add(turn.turnId);
-  }
-  for (const turn of previous) {
-    if (!nextIds.has(turn.turnId)) affected.add(turn.turnId);
-  }
-  return affected;
-}
-
 /**
  * Structural equality over projected view data. Everything a turn holds is
  * plain JSON-shaped data (`args` and tool results included), so a value walk is
  * the whole comparison — with an identity short circuit that makes the common
  * "only the tail turn moved" case cheap.
+ *
+ * Fail-closed outside that shape: anything that is not a plain object or an
+ * array (a Set, a Map, a Date, a class instance) compares unequal unless it is
+ * the same reference, because walking its own enumerable keys would silently
+ * call two different values equal. Reporting "changed" costs a re-render;
+ * reporting "unchanged" freezes the UI on a stale value.
  *
  * Exported because a turn's identity is only half of what a memoized TurnView
  * compares: every per-turn prop derived alongside it has to be interned by the
@@ -292,6 +204,7 @@ export function valuesEqual(a: unknown, b: unknown): boolean {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
     return a.every((item, index) => valuesEqual(item, b[index]));
   }
+  if (!isPlainObject(a) || !isPlainObject(b)) return false;
   const left = a as Record<string, unknown>;
   const right = b as Record<string, unknown>;
   const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
@@ -299,4 +212,9 @@ export function valuesEqual(a: unknown, b: unknown): boolean {
     if (!valuesEqual(left[key], right[key])) return false;
   }
   return true;
+}
+
+function isPlainObject(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }

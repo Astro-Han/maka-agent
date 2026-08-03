@@ -85,7 +85,7 @@ import { useShellSearch } from './use-shell-search';
 import { useSessionGoal } from './use-session-goal';
 import { deriveStaleSessionIds } from './stale-sessions';
 import { deriveProjectGroups, deriveWorktreeSessionIds } from './session-project-grouping';
-import { deriveAppShellTurnViewModel, type AppShellTurnViewModel } from './app-shell-turn-view-model';
+import { useAppShellTurnPresentation } from './app-shell-turn-view-model';
 import { readScrollMotionBehavior } from './scroll-motion-policy';
 import { deriveBranchBanner } from './branch-banner';
 import { readNavigationState, selectNavigation } from './nav-selection';
@@ -900,31 +900,16 @@ function AppShellContent({
     }
   }
 
-  // Every per-turn prop a memoized TurnView reads has to keep identity when its
-  // value does, or the stable turn from the transcript projection buys nothing
-  // and the whole transcript re-renders at every refresh anyway (#2030).
-  const turnViewModelRef = useRef<AppShellTurnViewModel | undefined>(undefined);
-  const {
-    turnFooterActionsByTurn,
-    turnFailedReasonLabels,
-    turnFailedRecoveryLabels,
-    turnLineageBadgesByTurn,
-    resumeCandidateTurnId,
-  } = useMemo(
-    () => {
-      const derived = deriveAppShellTurnViewModel({
-        activeId,
-        messages,
-        pendingTurnActions,
-        pendingKeyOf,
-        uiLocale,
-        previous: turnViewModelRef.current,
-      });
-      turnViewModelRef.current = derived;
-      return derived;
-    },
-    [activeId, messages, pendingTurnActions, uiLocale],
-  );
+  // Handed to ChatView, which calls it with the turns its transcript projection
+  // produced. The shell no longer materializes the transcript a second time to
+  // derive these props, so the turn objects the projection kept are also what
+  // keeps the props a memoized TurnView reads stable (#2030).
+  const deriveTurnPresentation = useAppShellTurnPresentation({
+    activeId,
+    pendingTurnActions,
+    pendingKeyOf,
+    uiLocale,
+  });
 
   // PR109e-e: click handler for lineage badge → scroll target turn into
   // view. Avoids pulling a separate ref-tracker: relies on the
@@ -2461,18 +2446,14 @@ function AppShellContent({
                 messageLoadError={activeId ? messageLoadErrorBySession[activeId] : undefined}
                 messageLoadRetryPending={activeId ? messageRetryPendingBySession[activeId] === true : false}
                 onRetryMessages={activeId ? () => void retryMessages(activeId) : undefined}
-                turnFooterActionsByTurn={turnFooterActionsByTurn}
+                deriveTurnPresentation={deriveTurnPresentation}
                 onTurnFooterAction={handleTurnFooterAction}
                 onEditUserMessage={(turnId) => { void beginEditUserMessage(turnId); }}
-                turnFailedReasonLabels={turnFailedReasonLabels}
-                turnFailedRecoveryLabels={turnFailedRecoveryLabels}
-                safeResumeAction={activeId && resumeCandidateTurnId ? {
-                  turnId: resumeCandidateTurnId,
+                safeResumeAction={activeId ? {
                   pending: resumePendingSessionId === activeId,
                   detail: resumeParkDescriptionBySession[activeId],
                   onResume: () => { void resumeInterruptedSession(); },
                 } : undefined}
-                turnLineageBadgesByTurn={turnLineageBadgesByTurn}
                 onLineageBadgeClick={handleLineageBadgeClick}
                 onReadAttachmentBytes={window.maka.attachments.readBytes}
                 scrollTargetTurn={

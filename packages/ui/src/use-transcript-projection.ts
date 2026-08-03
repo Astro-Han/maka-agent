@@ -1,9 +1,9 @@
 import { useRef } from 'react';
+import type { TurnViewModel } from './materialize.js';
 import {
   createTranscriptProjection,
   type TranscriptProjection,
   type TranscriptProjectionInput,
-  type TranscriptProjectionResult,
 } from './transcript-projection.js';
 
 /**
@@ -14,11 +14,11 @@ import {
  * graph — an effect would publish them a commit late and reintroduce the very
  * re-derivation this replaces. It is safe under React's double-invocation
  * because `project` is idempotent: identical inputs return the identical
- * result object without advancing any owned state.
+ * turns array without advancing any owned state.
  */
 export function useTranscriptProjection(
   input: TranscriptProjectionInput,
-): TranscriptProjectionResult {
+): readonly TurnViewModel[] {
   const projection = useRef<TranscriptProjection>(undefined);
   projection.current ??= createTranscriptProjection();
   return projection.current.project(input);

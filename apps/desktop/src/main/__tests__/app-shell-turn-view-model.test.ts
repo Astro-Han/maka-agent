@@ -1,18 +1,43 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import { SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS } from '@maka/core';
-import type { StoredMessage } from '@maka/core';
-import { deriveAppShellTurnViewModel } from '../../renderer/app-shell-turn-view-model.js';
+import type { StoredMessage, UiLocale } from '@maka/core';
+import { createTranscriptProjection, type TurnViewModel } from '@maka/ui';
+import {
+  createAppShellTurnPresentationDerivation,
+  deriveAppShellTurnPresentation,
+  type AppShellTurnPresentationContext,
+} from '../../renderer/app-shell-turn-view-model.js';
 import { latestInterruptedResumeTurnId } from '../../renderer/interrupted-resume.js';
 
-function derive(messages: StoredMessage[]) {
-  return deriveAppShellTurnViewModel({
-    activeId: 'session-1',
-    messages,
-    pendingTurnActions: new Set(),
-    uiLocale: 'zh',
+const SESSION = 'session-1';
+// The shell's pending-action set keeps its identity until an action actually
+// goes pending, so the fixture holds one too.
+const NO_PENDING_ACTIONS: ReadonlySet<string> = new Set<string>();
+
+function context(overrides: Partial<AppShellTurnPresentationContext> = {}): AppShellTurnPresentationContext {
+  return {
+    activeId: SESSION,
+    pendingTurnActions: NO_PENDING_ACTIONS,
+    uiLocale: 'zh' as UiLocale,
     pendingKeyOf: (sessionId, turnId, actionId) => `${sessionId}:${turnId}:${actionId}`,
-  });
+    ...overrides,
+  };
+}
+
+/**
+ * The production wiring: ChatView projects the transcript and hands the turns
+ * to the derivation. Driving both together is the point — the derivation's
+ * cache keys on the turn objects the projection produced, so testing it
+ * against hand-built turns would test a different mechanism than ships.
+ */
+function projector(): (messages: StoredMessage[]) => readonly TurnViewModel[] {
+  const projection = createTranscriptProjection();
+  return (messages) => projection.project({ sessionId: SESSION, messages });
+}
+
+function derive(messages: StoredMessage[]) {
+  return deriveAppShellTurnPresentation(projector()(messages), context());
 }
 
 function failedToolMessages(input: {
@@ -66,7 +91,7 @@ function failedToolMessages(input: {
   return messages;
 }
 
-describe('deriveAppShellTurnViewModel interrupted recovery', () => {
+describe('AppShell turn presentation interrupted recovery', () => {
   it('offers safe resume only for the latest app-restarted failed turn', () => {
     const turnId = latestInterruptedResumeTurnId([
       { turnId: 'turn-1', status: 'failed', errorClass: 'app_restarted' },
@@ -85,7 +110,7 @@ describe('deriveAppShellTurnViewModel interrupted recovery', () => {
   });
 
   it('explains a turn whose sandbox boundary request the restart closed (#1612)', () => {
-    const viewModel = derive([
+    const presentation = derive([
       { type: 'user', id: 'user-1', turnId: 'turn-1', ts: 1, text: 'build it' },
       {
         type: 'turn_state',
@@ -98,65 +123,80 @@ describe('deriveAppShellTurnViewModel interrupted recovery', () => {
       },
     ]);
 
-    assert.match(viewModel.turnFailedReasonLabels['turn-1'] ?? '', /「允许访问工作区以外的内容」请求已按拒绝关闭/);
-    assert.match(viewModel.turnFailedRecoveryLabels['turn-1'] ?? '', /重试本轮/);
+    assert.match(presentation.failedReasonLabels['turn-1'] ?? '', /「允许访问工作区以外的内容」请求已按拒绝关闭/);
+    assert.match(presentation.failedRecoveryLabels['turn-1'] ?? '', /重试本轮/);
     // Answering is impossible after the restart, so this turn must not be
     // offered as a safe-resume candidate the way a plain restart is.
-    assert.equal(viewModel.resumeCandidateTurnId, undefined);
+    assert.equal(presentation.resumeCandidateTurnId, undefined);
+  });
+
+  it('names the resume candidate so ChatView can pair it with the shell action', () => {
+    const presentation = derive([
+      { type: 'user', id: 'user-1', turnId: 'turn-1', ts: 1, text: 'build it' },
+      {
+        type: 'turn_state',
+        id: 'state-1',
+        turnId: 'turn-1',
+        ts: 2,
+        status: 'failed',
+        errorClass: 'app_restarted',
+        partialOutputRetained: false,
+      },
+    ]);
+
+    assert.equal(presentation.resumeCandidateTurnId, 'turn-1');
   });
 });
 
-describe('deriveAppShellTurnViewModel sandbox denial presentation', () => {
+describe('AppShell turn presentation sandbox denial', () => {
   it('omits the duplicate failed-turn banner for a sandbox-only tool failure', () => {
-    const viewModel = derive(failedToolMessages({
-      sandboxDenied: true,
-    }));
+    const presentation = derive(failedToolMessages({ sandboxDenied: true }));
 
-    assert.equal(viewModel.turnFailedReasonLabels['turn-1'], undefined);
-    assert.equal(viewModel.turnFailedRecoveryLabels['turn-1'], undefined);
+    assert.equal(presentation.failedReasonLabels['turn-1'], undefined);
+    assert.equal(presentation.failedRecoveryLabels['turn-1'], undefined);
   });
 
   it('keeps the failed-turn banner for an ordinary tool failure', () => {
-    const viewModel = derive(failedToolMessages({
+    const presentation = derive(failedToolMessages({
       sandboxDenied: false,
       errorClass: 'tool_failed',
     }));
 
-    assert.equal(typeof viewModel.turnFailedReasonLabels['turn-1'], 'string');
-    assert.equal(typeof viewModel.turnFailedRecoveryLabels['turn-1'], 'string');
+    assert.equal(typeof presentation.failedReasonLabels['turn-1'], 'string');
+    assert.equal(typeof presentation.failedRecoveryLabels['turn-1'], 'string');
   });
 
   it('keeps the failed-turn banner when a sandbox denial and ordinary failure coexist', () => {
-    const viewModel = derive(failedToolMessages({
+    const presentation = derive(failedToolMessages({
       sandboxDenied: true,
       includeOrdinaryFailure: true,
       errorClass: 'tool_failed',
     }));
 
-    assert.equal(typeof viewModel.turnFailedReasonLabels['turn-1'], 'string');
-    assert.equal(typeof viewModel.turnFailedRecoveryLabels['turn-1'], 'string');
+    assert.equal(typeof presentation.failedReasonLabels['turn-1'], 'string');
+    assert.equal(typeof presentation.failedRecoveryLabels['turn-1'], 'string');
   });
 
   it('keeps the failed-turn banner for a separate turn-level failure', () => {
-    const viewModel = derive(failedToolMessages({
+    const presentation = derive(failedToolMessages({
       sandboxDenied: true,
       errorClass: 'network',
     }));
 
-    assert.equal(typeof viewModel.turnFailedReasonLabels['turn-1'], 'string');
-    assert.equal(typeof viewModel.turnFailedRecoveryLabels['turn-1'], 'string');
+    assert.equal(typeof presentation.failedReasonLabels['turn-1'], 'string');
+    assert.equal(typeof presentation.failedRecoveryLabels['turn-1'], 'string');
   });
 });
 
 /**
- * A memoized `TurnView` compares every prop, not just `turn`. The incremental
- * transcript projection (#2030) keeps a turn's object identity across the
- * `refreshMessages` that fires at each step and tool boundary, but these
- * per-turn props are derived beside it from a freshly deserialized `messages`
- * array — so if they are rebuilt every time, the memo fails on the footer and
- * the whole transcript re-renders anyway, and the projection buys nothing.
+ * A memoized `TurnView` compares every prop, not just `turn`. These props are
+ * derived from the turns the transcript projection produced, so a turn the
+ * projection kept must cost nothing here and hand the SAME objects back — that
+ * is the whole reason the derivation moved off the raw message log (#2030).
+ * `refreshMessages` fires at every step and tool boundary, so this is the path
+ * a streaming answer actually takes.
  */
-describe('AppShell turn view model prop identity', () => {
+describe('AppShell turn presentation prop identity', () => {
   const transcript: StoredMessage[] = [
     { type: 'user', id: 'user-1', turnId: 'turn-1', ts: 1, text: 'first' },
     { type: 'assistant', id: 'assistant-1', turnId: 'turn-1', ts: 2, text: 'first answer', modelId: 'model-1' },
@@ -166,56 +206,132 @@ describe('AppShell turn view model prop identity', () => {
     { type: 'turn_state', id: 'state-2', turnId: 'turn-2', ts: 6, status: 'completed', partialOutputRetained: false },
   ];
 
-  function deriveWith(messages: StoredMessage[], previous?: ReturnType<typeof derive>) {
-    return deriveAppShellTurnViewModel({
-      activeId: 'session-1',
-      messages,
-      pendingTurnActions: new Set(),
-      uiLocale: 'zh',
-      pendingKeyOf: (sessionId, turnId, actionId) => `${sessionId}:${turnId}:${actionId}`,
-      ...(previous ? { previous } : {}),
-    });
+  /** turn-3 was regenerated from turn-1, so both ends carry a lineage badge. */
+  const regenerated: StoredMessage[] = [
+    ...transcript,
+    {
+      type: 'turn_state',
+      id: 'state-3',
+      turnId: 'turn-3',
+      ts: 7,
+      status: 'completed',
+      regeneratedFromTurnId: 'turn-1',
+      partialOutputRetained: false,
+    },
+    { type: 'user', id: 'user-3', turnId: 'turn-3', ts: 7, text: 'first, again' },
+    { type: 'assistant', id: 'assistant-3', turnId: 'turn-3', ts: 8, text: 'another answer', modelId: 'model-1' },
+  ];
+
+  function driver() {
+    const project = projector();
+    const derivation = createAppShellTurnPresentationDerivation();
+    return (messages: StoredMessage[], overrides?: Partial<AppShellTurnPresentationContext>) =>
+      derivation.derive(project(messages), context(overrides));
   }
 
   it('keeps every per-turn prop identical across a refresh that changed nothing', () => {
-    const before = deriveWith(transcript);
+    const drive = driver();
+    const before = drive(regenerated);
     // A refresh re-reads the ledger over IPC: same values, all-new objects.
-    const after = deriveWith(structuredClone(transcript), before);
+    const after = drive(structuredClone(regenerated));
 
-    assert.equal(after, before, 'a refresh that changed nothing must not move the view model at all');
-    for (const turnId of ['turn-1', 'turn-2']) {
+    assert.equal(after, before, 'a refresh that changed nothing must not move the presentation at all');
+    for (const turnId of ['turn-1', 'turn-2', 'turn-3']) {
       assert.equal(
-        after.turnFooterActionsByTurn[turnId],
-        before.turnFooterActionsByTurn[turnId],
+        after.footerActionsByTurn[turnId],
+        before.footerActionsByTurn[turnId],
         `${turnId} footer actions must keep identity`,
+      );
+    }
+    for (const turnId of ['turn-1', 'turn-3']) {
+      assert.ok(before.lineageBadgesByTurn[turnId], `${turnId} must have a lineage badge to pin`);
+      assert.equal(
+        after.lineageBadgesByTurn[turnId],
+        before.lineageBadgesByTurn[turnId],
+        `${turnId} lineage badges must keep identity`,
       );
     }
   });
 
   it('moves only the turn whose derived props actually changed', () => {
-    const before = deriveWith(transcript);
-    const after = deriveWith(
-      [
-        ...structuredClone(transcript),
-        { type: 'user', id: 'user-3', turnId: 'turn-3', ts: 7, text: 'third' },
-      ],
-      before,
-    );
+    const drive = driver();
+    const before = drive(transcript);
+    const after = drive([
+      ...structuredClone(transcript),
+      { type: 'user', id: 'user-3', turnId: 'turn-3', ts: 7, text: 'third' },
+    ]);
 
     assert.notEqual(after, before);
-    assert.equal(after.turnFooterActionsByTurn['turn-1'], before.turnFooterActionsByTurn['turn-1']);
-    assert.equal(after.turnFooterActionsByTurn['turn-2'], before.turnFooterActionsByTurn['turn-2']);
-    assert.ok(after.turnFooterActionsByTurn['turn-3'], 'the new turn gets its own footer actions');
+    assert.equal(after.footerActionsByTurn['turn-1'], before.footerActionsByTurn['turn-1']);
+    assert.equal(after.footerActionsByTurn['turn-2'], before.footerActionsByTurn['turn-2']);
+    assert.ok(after.footerActionsByTurn['turn-3'], 'the new turn gets its own footer actions');
   });
 
   it('moves a turn whose footer actions genuinely changed', () => {
-    const before = deriveWith(transcript);
+    const drive = driver();
+    const before = drive(transcript);
     // An answer that lost its text disables `copy` — a real footer change.
     const emptied = structuredClone(transcript);
     emptied[4] = { type: 'assistant', id: 'assistant-2', turnId: 'turn-2', ts: 5, text: '', modelId: 'model-1' };
-    const after = deriveWith(emptied, before);
+    const after = drive(emptied);
 
-    assert.equal(after.turnFooterActionsByTurn['turn-1'], before.turnFooterActionsByTurn['turn-1']);
-    assert.notEqual(after.turnFooterActionsByTurn['turn-2'], before.turnFooterActionsByTurn['turn-2']);
+    assert.equal(after.footerActionsByTurn['turn-1'], before.footerActionsByTurn['turn-1']);
+    assert.notEqual(after.footerActionsByTurn['turn-2'], before.footerActionsByTurn['turn-2']);
+  });
+
+  it('moves a turn whose lineage changed even though the turn itself did not', () => {
+    // The turn object is the cache key, but a later regeneration adds a reverse
+    // badge and an `alreadyRegenerated` tooltip to a turn whose own messages
+    // never moved. Keying on the turn alone would freeze both.
+    const drive = driver();
+    const before = drive(transcript);
+    assert.equal(before.lineageBadgesByTurn['turn-1'], undefined);
+
+    const after = drive(regenerated);
+    assert.ok(after.lineageBadgesByTurn['turn-1'], 'the regenerated-from turn gains a reverse badge');
+    assert.notEqual(
+      after.footerActionsByTurn['turn-1'],
+      before.footerActionsByTurn['turn-1'],
+      'its footer now says the answer was already regenerated',
+    );
+    assert.equal(after.footerActionsByTurn['turn-2'], before.footerActionsByTurn['turn-2']);
+  });
+
+  it('drops a forward badge when its target turn leaves the transcript', () => {
+    // turn-3's own messages are unchanged; only whether its origin still exists
+    // moved. A badge pointing at a turn that is gone is unclickable.
+    const drive = driver();
+    const before = drive(regenerated);
+    assert.ok(before.lineageBadgesByTurn['turn-3']?.some((badge) => badge.direction === 'forward'));
+
+    const after = drive(regenerated.filter((message) => message.turnId !== 'turn-1'));
+    assert.equal(
+      after.lineageBadgesByTurn['turn-3']?.some((badge) => badge.direction === 'forward') ?? false,
+      false,
+      'the forward badge must go with its target',
+    );
+  });
+
+  it('moves only the turn whose action went pending', () => {
+    const drive = driver();
+    const before = drive(transcript);
+    const after = drive(transcript, {
+      pendingTurnActions: new Set([`${SESSION}:turn-2:regenerate`]),
+    });
+
+    assert.equal(after.footerActionsByTurn['turn-1'], before.footerActionsByTurn['turn-1']);
+    assert.notEqual(after.footerActionsByTurn['turn-2'], before.footerActionsByTurn['turn-2']);
+  });
+
+  it('relabels everything when the locale changes', () => {
+    const drive = driver();
+    const before = drive(transcript);
+    const after = drive(transcript, { uiLocale: 'en' as UiLocale });
+
+    assert.notEqual(after.footerActionsByTurn['turn-1'], before.footerActionsByTurn['turn-1']);
+    assert.notDeepEqual(
+      after.footerActionsByTurn['turn-1']?.map((action) => action.label),
+      before.footerActionsByTurn['turn-1']?.map((action) => action.label),
+    );
   });
 });

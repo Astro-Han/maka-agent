@@ -396,8 +396,8 @@ export function overlayLiveTurn(
 /**
  * The display state a shell-run update contributes to its owning tool: the
  * merged result plus the ownership badge. Folded from the raw update list once
- * per update change, so the per-tool application below has an identity-stable
- * key to memoize against.
+ * per update change, so the per-tool application below sees one entry per tool
+ * rather than the whole update history.
  */
 export interface ShellRunOverlayEntry {
   result: Extract<ToolResultContent, { kind: 'shell_run' }>;
@@ -431,9 +431,9 @@ export function foldShellRunUpdates(
  * tell "nothing changed" from object identity.
  *
  * A durable update's revision permanently leads the `tool_result` snapshot
- * persisted in messages, so this returns a fresh object every time it is
- * called against the persisted tool. The caller must therefore remember the
- * result rather than re-derive it — see `createTranscriptProjection`.
+ * persisted in messages, so against the persisted tool this returns a fresh
+ * object every time. Identity for that case is re-established downstream by
+ * value — see `reconcileTurnIdentities`.
  */
 export function applyShellRunOverlayEntry(
   tool: ToolActivityItem,
