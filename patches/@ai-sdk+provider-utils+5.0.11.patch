@@ -1,5 +1,5 @@
 diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.js b/node_modules/@ai-sdk/provider-utils/dist/index.js
-index 851fce4..de929b5 100644
+index 851fce4..8d83b14 100644
 --- a/node_modules/@ai-sdk/provider-utils/dist/index.js
 +++ b/node_modules/@ai-sdk/provider-utils/dist/index.js
 @@ -3540,6 +3540,8 @@ import {
@@ -19,18 +19,18 @@ index 851fce4..de929b5 100644
 -    const index = (_a2 = toolCallDelta.index) != null ? _a2 : this.toolCalls.length;
 -    if (this.toolCalls[index] == null) {
 -      this.processNewToolCall(index, toolCallDelta);
++    var _a2, _b2;
 +    const deltaId = toolCallDelta.id == null || toolCallDelta.id === "" ? void 0 : toolCallDelta.id;
 +    const deltaIndex = toolCallDelta.index;
++    const deltaName = (_b2 = (_a2 = toolCallDelta.function) == null ? void 0 : _a2.name) != null ? _b2 : void 0;
++    const continues = (candidate) => candidate != null && (deltaId === void 0 || candidate.id === deltaId) && (deltaName === void 0 || candidate.function.name === deltaName) ? candidate : void 0;
 +    let toolCall;
 +    if (deltaIndex != null) {
-+      const atIndex = this.byIndex.get(deltaIndex);
-+      if (atIndex != null && (deltaId === void 0 || atIndex.id === deltaId)) {
-+        toolCall = atIndex;
-+      }
++      toolCall = continues(this.byIndex.get(deltaIndex));
 +    } else if (deltaId !== void 0) {
-+      toolCall = this.byId.get(deltaId);
++      toolCall = continues(this.byId.get(deltaId));
 +    } else if (this.toolCalls.length === 1) {
-+      toolCall = this.toolCalls[0];
++      toolCall = continues(this.toolCalls[0]);
 +    }
 +    if (toolCall == null) {
 +      toolCall = this.processNewToolCall(toolCallDelta);
@@ -43,12 +43,13 @@ index 851fce4..de929b5 100644
      }
    }
    /**
-@@ -3566,13 +3582,14 @@ var StreamingToolCallTracker = class {
+@@ -3566,13 +3582,15 @@ var StreamingToolCallTracker = class {
     * flush handler to ensure all tool calls are properly completed.
     */
    flush() {
 -    for (const toolCall of this.toolCalls) {
-+    const ordered = this.toolCalls.every((toolCall) => toolCall.createdIndex !== void 0) ? [...this.toolCalls].sort((a, b) => a.createdIndex - b.createdIndex) : this.toolCalls;
++    const indices = this.toolCalls.map((toolCall) => toolCall.createdIndex);
++    const ordered = indices.every((index) => index !== void 0) && new Set(indices).size === indices.length ? [...this.toolCalls].sort((a, b) => a.createdIndex - b.createdIndex) : this.toolCalls;
 +    for (const toolCall of ordered) {
        if (!toolCall.hasFinished) {
          this.finishToolCall(toolCall);
@@ -60,16 +61,37 @@ index 851fce4..de929b5 100644
      var _a2, _b2, _c;
      if (this.typeValidation === "required") {
        if (toolCallDelta.type !== "function") {
-@@ -3607,7 +3624,7 @@ var StreamingToolCallTracker = class {
+@@ -3589,35 +3607,32 @@ var StreamingToolCallTracker = class {
+         });
+       }
+     }
+-    if (toolCallDelta.id == null) {
+-      throw new InvalidResponseDataError({
+-        data: toolCallDelta,
+-        message: `Expected 'id' to be a string.`
+-      });
+-    }
+     if (((_a2 = toolCallDelta.function) == null ? void 0 : _a2.name) == null) {
+       throw new InvalidResponseDataError({
+         data: toolCallDelta,
+         message: `Expected 'function.name' to be a string.`
+       });
+     }
++    const mintedId = toolCallDelta.id == null || toolCallDelta.id === "" || this.byId.has(toolCallDelta.id) ? this._generateId() : toolCallDelta.id;
+     this.controller.enqueue({
+       type: "tool-input-start",
+-      id: toolCallDelta.id,
++      id: mintedId,
        toolName: toolCallDelta.function.name
      });
      const metadata = (_b2 = this.extractMetadata) == null ? void 0 : _b2.call(this, toolCallDelta);
 -    this.toolCalls[index] = {
+-      id: toolCallDelta.id,
 +    const toolCall = {
-       id: toolCallDelta.id,
++      id: mintedId,
        type: "function",
        function: {
-@@ -3615,9 +3632,11 @@ var StreamingToolCallTracker = class {
+         name: toolCallDelta.function.name,
          arguments: (_c = toolCallDelta.function.arguments) != null ? _c : ""
        },
        hasFinished: false,
@@ -83,7 +105,7 @@ index 851fce4..de929b5 100644
      if (toolCall.function.arguments.length > 0) {
        this.controller.enqueue({
          type: "tool-input-delta",
-@@ -3625,10 +3644,10 @@ var StreamingToolCallTracker = class {
+@@ -3625,10 +3640,10 @@ var StreamingToolCallTracker = class {
          delta: toolCall.function.arguments
        });
      }
@@ -93,154 +115,6 @@ index 851fce4..de929b5 100644
 +  processExistingToolCall(toolCall, toolCallDelta) {
      var _a2;
 -    const toolCall = this.toolCalls[index];
-     if (toolCall.hasFinished) {
-       return;
-     }
-diff --git a/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts b/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts
-index 37cbfc0..04530c6 100644
---- a/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts
-+++ b/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts
-@@ -59,6 +59,8 @@ interface TrackedToolCall {
-   function: { name: string; arguments: string };
-   hasFinished: boolean;
-   metadata?: SharedV4ProviderMetadata;
-+  /** The index this call was created at, when the gateway supplied one. Ordering only. */
-+  createdIndex?: number;
- }
- 
- type StreamingToolCallTrackerController = Pick<
-@@ -78,6 +80,14 @@ export class StreamingToolCallTracker<
-   DELTA extends StreamingToolCallDelta = StreamingToolCallDelta,
- > {
-   private toolCalls: TrackedToolCall[] = [];
-+  /**
-+   * Neither `index` nor `id` is trustworthy alone. A gateway may omit `index`, repeat it
-+   * across distinct calls, or number it freely; it may equally repeat an `id`, send an empty
-+   * one, or omit it on continuations. So neither is the storage location, and neither is
-+   * accepted as identity without the other agreeing — see `processDelta`.
-+   */
-+  private byId = new Map<string, TrackedToolCall>();
-+  private byIndex = new Map<number, TrackedToolCall>();
-   private readonly controller: StreamingToolCallTrackerController;
-   private readonly _generateId: () => string;
-   private readonly typeValidation: 'none' | 'if-present' | 'required';
-@@ -105,12 +115,44 @@ export class StreamingToolCallTracker<
-    * events as appropriate.
-    */
-   processDelta(toolCallDelta: DELTA): void {
--    const index = toolCallDelta.index ?? this.toolCalls.length;
-+    // An empty id is not an id. Gateways send `''` in place of omitting the field, and
-+    // trusting it either merges distinct calls under one blank key or routes a
-+    // continuation to a new-call path that then throws for a missing name.
-+    const id =
-+      toolCallDelta.id == null || toolCallDelta.id === ''
-+        ? undefined
-+        : toolCallDelta.id;
-+    const { index } = toolCallDelta;
- 
--    if (this.toolCalls[index] == null) {
--      this.processNewToolCall(index, toolCallDelta);
-+    let toolCall: TrackedToolCall | undefined;
-+
-+    if (index != null) {
-+      // The index says which slot; the id, when present, says whether that slot still holds
-+      // the same call. Requiring both to agree is what keeps a repeated id at a different
-+      // index from absorbing this delta, and a repeated index under a new id from merging.
-+      const atIndex = this.byIndex.get(index);
-+      if (atIndex != null && (id === undefined || atIndex.id === id)) {
-+        toolCall = atIndex;
-+      }
-+    } else if (id !== undefined) {
-+      toolCall = this.byId.get(id);
-+    } else if (this.toolCalls.length === 1) {
-+      // Neither field: the delta can only be attributed when there is nothing to confuse it
-+      // with. With several calls open this is undecidable, and guessing is what silently
-+      // handed one call's arguments to another. Fall through and fail on the absent id.
-+      toolCall = this.toolCalls[0];
-+    }
-+
-+    if (toolCall == null) {
-+      toolCall = this.processNewToolCall(toolCallDelta);
-     } else {
--      this.processExistingToolCall(index, toolCallDelta);
-+      this.processExistingToolCall(toolCall, toolCallDelta);
-+    }
-+
-+    // A new identity on an already-seen index takes the slot over from the call it
-+    // displaces, so later index-only continuations reach the new call.
-+    if (index != null) {
-+      this.byIndex.set(index, toolCall);
-     }
-   }
- 
-@@ -119,14 +161,27 @@ export class StreamingToolCallTracker<
-    * flush handler to ensure all tool calls are properly completed.
-    */
-   flush(): void {
--    for (const toolCall of this.toolCalls) {
-+    for (const toolCall of this.orderedToolCalls()) {
-       if (!toolCall.hasFinished) {
-         this.finishToolCall(toolCall);
-       }
-     }
-   }
- 
--  private processNewToolCall(index: number, toolCallDelta: DELTA): void {
-+  /**
-+   * An index every call supplied is a usable final array position, so honour it — a gateway
-+   * may stream a later slot first. Sorting is stable, so calls sharing a repeated index keep
-+   * arrival order, and a missing index anywhere means arrival order is the only real signal.
-+   */
-+  private orderedToolCalls(): readonly TrackedToolCall[] {
-+    return this.toolCalls.every((toolCall) => toolCall.createdIndex !== undefined)
-+      ? [...this.toolCalls].sort(
-+          (left, right) => left.createdIndex! - right.createdIndex!,
-+        )
-+      : this.toolCalls;
-+  }
-+
-+  private processNewToolCall(toolCallDelta: DELTA): TrackedToolCall {
-     if (this.typeValidation === 'required') {
-       if (toolCallDelta.type !== 'function') {
-         throw new InvalidResponseDataError({
-@@ -165,7 +220,7 @@ export class StreamingToolCallTracker<
- 
-     const metadata = this.extractMetadata?.(toolCallDelta);
- 
--    this.toolCalls[index] = {
-+    const toolCall: TrackedToolCall = {
-       id: toolCallDelta.id,
-       type: 'function',
-       function: {
-@@ -174,9 +229,13 @@ export class StreamingToolCallTracker<
-       },
-       hasFinished: false,
-       metadata,
-+      createdIndex: toolCallDelta.index ?? undefined,
-     };
- 
--    const toolCall = this.toolCalls[index];
-+    this.toolCalls.push(toolCall);
-+    this.byId.set(toolCall.id, toolCall);
-+    // `byIndex` is written by `processDelta` for every delta that carries an index,
-+    // including this one, so registering the alias here too would be redundant.
- 
-     // Emit initial delta if arguments already present
-     if (toolCall.function.arguments.length > 0) {
-@@ -191,11 +250,13 @@ export class StreamingToolCallTracker<
-     // argument buffer can still be the prefix of a longer argument string,
-     // so acting on it early would use truncated inputs (see #13137).
-     // Finalization happens in flush().
-+    return toolCall;
-   }
- 
--  private processExistingToolCall(index: number, toolCallDelta: DELTA): void {
--    const toolCall = this.toolCalls[index];
--
-+  private processExistingToolCall(
-+    toolCall: TrackedToolCall,
-+    toolCallDelta: DELTA,
-+  ): void {
      if (toolCall.hasFinished) {
        return;
      }

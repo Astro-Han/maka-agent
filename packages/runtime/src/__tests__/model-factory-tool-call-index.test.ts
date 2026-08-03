@@ -6,10 +6,8 @@ import { getAIModel } from '@maka/runtime';
 
 /**
  * Regression guard for #1967 and #1976. Both are the same modelling defect: the streamed
- * `tool_calls[].index` is an association label a gateway may omit, repeat, or number
- * freely, and it was being used as the storage slot, the identity, and the ordering all at
- * once. Identity actually lives in `id`; `index` only aliases it for argument deltas that
- * carry no `id`.
+ * `tool_calls[].index` is an association label a gateway may omit, repeat, or number freely,
+ * and it was being used as the storage slot, the identity, and the ordering all at once.
  *
  * #1967 — index as a storage slot. Anthropic→OpenAI translators reuse the Anthropic
  * content-block index, so the first tool call arrives as index 1 once a text block
@@ -20,6 +18,12 @@ import { getAIModel } from '@maka/runtime';
  * invalid JSON, the second `id` and `name` dropped, and no error anywhere. Also covered
  * here: deltas that omit `index` entirely, which used to pick a fresh slot per chunk and
  * throw `Expected 'id' to be a string.`
+ *
+ * The fix is not "identity lives in `id`" — that was tried, and `id` is equally untrustworthy:
+ * gateways repeat it across calls and send `''` for absent. A delta continues a call only when
+ * every identifying field it carries agrees, and a call whose wire id cannot address it gets a
+ * generated one. The shapes below are grouped by which of those rules they pin, and each is
+ * checked on both provider paths where both can express it.
  */
 
 const connection: RuntimeExecutionConnection = {
@@ -109,7 +113,7 @@ function assertStreamSucceeded(parts: LanguageModelV4StreamPart[]): void {
 }
 
 describe('getAIModel: OpenAI-compatible streamed tool_calls index', () => {
-  for (const index of [0, 1, 7]) {
+  for (const index of [0, 1]) {
     test(`emits the tool call when the gateway labels it index ${index}`, async () => {
       const parts = await collectStream([{ index, id: 'call_1', path: 'a.txt' }]);
 
@@ -219,6 +223,30 @@ function assertInputsSelfContained(parts: LanguageModelV4StreamPart[]): void {
       assert.fail(`tool call ${JSON.stringify(toolCallId)} input does not parse alone: ${input}`);
     }
   }
+}
+
+/**
+ * The second property: every emitted call is separately addressable. Splitting a merge into
+ * two calls that share one `toolCallId` only moves the failure downstream, where the id is
+ * the identity — `tool-runtime.ts` derives `operationId` from it, so a duplicate collides and
+ * the second `commitToolPrepared` is rejected *after* the first tool's side effects have run,
+ * and an empty one throws out of `runtime-commit-sink.ts` before the call is even recorded.
+ * Asserting only `toolName` and `input` hides all of that, which is how it went unnoticed.
+ */
+function assertToolCallIdsUsable(parts: LanguageModelV4StreamPart[]): void {
+  const ids = toolCallsOf(parts).map(({ toolCallId }) => toolCallId);
+  assert.deepEqual(
+    ids.filter((id) => id === ''),
+    [],
+    'an empty id cannot address a tool call downstream',
+  );
+  assert.equal(new Set(ids).size, ids.length, `tool call ids must be distinct, got ${ids}`);
+}
+
+/** Both properties, for the multi-call shapes where either could break. */
+function assertCallsSeparable(parts: LanguageModelV4StreamPart[]): void {
+  assertInputsSelfContained(parts);
+  assertToolCallIdsUsable(parts);
 }
 
 describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
@@ -379,31 +407,6 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
     );
   });
 
-  // A repeated index carries no ordering information, so arrival order is all that is
-  // left. Sorting by it anyway would let a malformed index reorder the turn.
-  test('emits in arrival order when the index is reused and cannot order anything', async () => {
-    const { parts, failure } = await collectDeltas([
-      {
-        index: 0,
-        id: 'call_first',
-        type: 'function',
-        function: { name: 'read_file', arguments: '{}' },
-      },
-      {
-        index: 0,
-        id: 'call_second',
-        type: 'function',
-        function: { name: 'write_file', arguments: '{}' },
-      },
-    ]);
-
-    assert.equal(failure, undefined);
-    assert.deepEqual(
-      toolCallsOf(parts).map(({ toolCallId }) => toolCallId),
-      ['call_first', 'call_second'],
-    );
-  });
-
   /**
    * Known boundary, deliberately locked in. `@ai-sdk/openai-compatible` keeps its own
    * index-keyed buffer in front of the tracker and forwards a delta as soon as it has a
@@ -432,10 +435,11 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
     assertInputsSelfContained(parts);
   });
 
-  // `id` is no more trustworthy than `index` was. A gateway that repeats one across distinct
-  // calls must not have them merged — the same defect as the reused index, with the two
-  // fields swapped. The index disagrees here, and that disagreement is what has to win.
-  for (const id of ['', 'dup']) {
+  // A repeated `id` at *different* indices must not merge. No delta here reaches the
+  // id-agreement comparison — index 1 has never been seen, so the lookup simply misses — which
+  // is exactly the point: this pins that resolution starts from `index`, not `id`. Keying on
+  // `id` first reproduced #1976 with the two fields swapped.
+  for (const id of ['dup']) {
     test(`keeps calls distinct when both reuse id ${JSON.stringify(id)} at different indices`, async () => {
       const { parts, failure } = await collectDeltas([
         { index: 0, id, type: 'function', function: { name: 'read_file', arguments: '{"path"' } },
@@ -455,6 +459,149 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
       );
     });
   }
+
+  // The intersection of the two shapes this file already treats as real: a gateway that both
+  // reuses one index AND repeats (or blanks) the id. Then `index` and `id` both agree, and
+  // `function.name` is the only discriminator left. Ignoring it merged the calls into
+  // concatenated invalid JSON on both provider paths — verbatim the #1976 symptom, still open
+  // after the first two attempts at this fix. Every alias a delta carries has to agree.
+  for (const id of ['', 'dup']) {
+    for (const providerType of ['openai-compatible', 'openai'] as const) {
+      test(`splits a reused index whose id ${JSON.stringify(id)} repeats under a new name (${providerType})`, async () => {
+        const { parts, failure } = await collectDeltas(
+          [
+            {
+              index: 0,
+              id,
+              type: 'function',
+              function: { name: 'read_file', arguments: '{"path":"a"}' },
+            },
+            {
+              index: 0,
+              id,
+              type: 'function',
+              function: { name: 'write_file', arguments: '{"path":"b"}' },
+            },
+          ],
+          providerType,
+        );
+
+        assert.equal(failure, undefined);
+        assertCallsSeparable(parts);
+        assert.deepEqual(
+          toolCallsOf(parts).map(({ toolName, input }) => ({ toolName, input })),
+          [
+            { toolName: 'read_file', input: '{"path":"a"}' },
+            { toolName: 'write_file', input: '{"path":"b"}' },
+          ],
+        );
+      });
+    }
+  }
+
+  // A wire id that cannot address a call — absent, empty, or already taken — is replaced with
+  // a generated one. Upstream already reaches for `_generateId()` when finalizing, but threw on
+  // an absent id before that could ever fire; minting here is what makes two calls that share a
+  // wire id separately addressable instead of merely separately stored.
+  test('mints a usable id when the wire cannot supply a distinct one', async () => {
+    const { parts, failure } = await collectDeltas([
+      { index: 0, type: 'function', function: { name: 'read_file', arguments: '{"path":"a"}' } },
+      {
+        index: 1,
+        id: '',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{"path":"b"}' },
+      },
+    ]);
+
+    assert.equal(failure, undefined, 'an unusable id is not a reason to fail the turn');
+    assertCallsSeparable(parts);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolName, input }) => ({ toolName, input })),
+      [
+        { toolName: 'read_file', input: '{"path":"a"}' },
+        { toolName: 'write_file', input: '{"path":"b"}' },
+      ],
+    );
+  });
+
+  // The `id`-only lookup: two calls open, neither carrying an index, each continued by id.
+  // Nothing else in this file reaches that branch — the single-call omit-index case falls
+  // through to the one-open-call fallback instead — so without this, deleting the `byId` map
+  // leaves the suite green while index-less multi-call turns die.
+  test('continues the right call by id when no delta carries an index', async () => {
+    const { parts, failure } = await collectDeltas([
+      { id: 'call_a', type: 'function', function: { name: 'read_file', arguments: '{"path"' } },
+      { id: 'call_b', type: 'function', function: { name: 'write_file', arguments: '{"path"' } },
+      { id: 'call_a', function: { arguments: ':"a"}' } },
+      { id: 'call_b', function: { arguments: ':"b"}' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assertCallsSeparable(parts);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+      { toolCallId: 'call_b', toolName: 'write_file', input: '{"path":"b"}' },
+    ]);
+  });
+
+  // Ordering needs three calls to tell a correct implementation from one that sorts
+  // unconditionally: with two calls sharing an index a stable sort is indistinguishable from no
+  // sort at all. A duplicate index means the index has stopped ordering anything, so arrival
+  // order is what is left. Sorting anyway would let a malformed index reorder tool execution.
+  test('keeps arrival order for three calls when an index is duplicated', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 1,
+        id: 'c_first',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{}' },
+      },
+      {
+        index: 0,
+        id: 'c_second',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{}' },
+      },
+      {
+        index: 1,
+        id: 'c_third',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{}' },
+      },
+    ]);
+
+    assert.equal(failure, undefined);
+    assertCallsSeparable(parts);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolCallId }) => toolCallId),
+      ['c_first', 'c_second', 'c_third'],
+    );
+  });
+
+  // Mixed index presence is the other half of that guard: sorting a set where one call has no
+  // index compares against `undefined`, and every such comparison is false, so the sort neither
+  // orders nor preserves — it scrambles. Five calls with arrival order deliberately unlike index
+  // order is the smallest shape where that is observable; with three, V8's insertion sort
+  // happens to leave them alone and the bug hides.
+  test('keeps arrival order when one call carries no index', async () => {
+    const indices = [3, 1, undefined, 0, 2];
+    const { parts, failure } = await collectDeltas(
+      indices.map((index, position) => ({
+        ...(index === undefined ? {} : { index }),
+        id: `c${position}`,
+        type: 'function' as const,
+        function: { name: 'read_file', arguments: '{}' },
+      })),
+    );
+
+    assert.equal(failure, undefined);
+    assertCallsSeparable(parts);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolCallId }) => toolCallId),
+      ['c0', 'c1', 'c2', 'c3', 'c4'],
+    );
+  });
 
   // Some gateways send `id: ''` on continuation deltas instead of omitting the field. Read
   // literally, that is a new identity with no name, which kills the whole turn.
