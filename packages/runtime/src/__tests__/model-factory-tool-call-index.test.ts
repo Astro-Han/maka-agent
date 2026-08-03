@@ -173,12 +173,21 @@ function deltaRelay(deltas: readonly ToolCallDelta[]): typeof globalThis.fetch {
     new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
-/** Collects a turn, capturing a mid-stream throw instead of failing the test on it. */
+/**
+ * Collects a turn, capturing a mid-stream throw instead of failing the test on it.
+ *
+ * `providerType` matters because `openai` and `openai-compatible` construct the same
+ * `StreamingToolCallTracker` but reach it differently: the compatible adapter keeps its own
+ * index-keyed buffer in front, and its chunk schema allows an absent `index`, while
+ * `openai`'s requires one. A defect in the shared tracker can therefore surface on one path
+ * and not the other, so the shapes both paths can express are checked on both.
+ */
 async function collectDeltas(
   deltas: readonly ToolCallDelta[],
+  providerType: 'openai-compatible' | 'openai' = 'openai-compatible',
 ): Promise<{ parts: LanguageModelV4StreamPart[]; failure: unknown }> {
   const model = getAIModel({
-    connection,
+    connection: { ...connection, providerType },
     apiKey: 'test-key',
     modelId: 'claude-opus-4-8',
     fetch: deltaRelay(deltas),
@@ -192,6 +201,24 @@ async function collectDeltas(
   }
   const errorPart = parts.find((part) => part.type === 'error');
   return { parts, failure: errorPart ? (errorPart as { error: unknown }).error : undefined };
+}
+
+/**
+ * The property that must hold for every shape in this file: an emitted input is either empty
+ * or parses on its own. Splicing two calls' arguments together always breaks this, including
+ * when the fragments interleave (`{"path"{"path":"a"}:"b"}`) rather than append cleanly, which
+ * a substring check for `}{` would miss. Asserted as a property so the file keeps catching
+ * the defect class rather than only the exact outputs these cases happen to produce.
+ */
+function assertInputsSelfContained(parts: LanguageModelV4StreamPart[]): void {
+  for (const { toolCallId, input } of toolCallsOf(parts)) {
+    if (input === '') continue;
+    try {
+      JSON.parse(input);
+    } catch {
+      assert.fail(`tool call ${JSON.stringify(toolCallId)} input does not parse alone: ${input}`);
+    }
+  }
 }
 
 describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
@@ -308,10 +335,10 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
     ]);
   });
 
-  // A bare delta carries no association at all, so it belongs to the call the stream last
-  // touched. "Last created" is the wrong answer: every call stays unfinished until flush,
-  // so an explicit `id` delta for an earlier call must move the attachment point back.
-  test('attaches a bare argument delta to the call the stream last touched', async () => {
+  // A delta with neither field can only be attributed when there is nothing to confuse it
+  // with. Guessing a target — "the last created call", "the call the stream last touched" —
+  // is how one call's arguments end up on another, which is the defect this file exists for.
+  test('refuses to guess a target for a bare delta while several calls are open', async () => {
     const { parts, failure } = await collectDeltas([
       { index: 0, id: 'call_a', type: 'function', function: { name: 'read_file', arguments: '' } },
       {
@@ -320,15 +347,11 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
         type: 'function',
         function: { name: 'write_file', arguments: '{}' },
       },
-      { id: 'call_a', function: { arguments: '{"path"' } },
-      { function: { arguments: ':"a"}' } },
+      { function: { arguments: '{"path":"a"}' } },
     ]);
 
-    assert.equal(failure, undefined);
-    assert.deepEqual(toolCallsOf(parts), [
-      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
-      { toolCallId: 'call_b', toolName: 'write_file', input: '{}' },
-    ]);
+    assert.notEqual(failure, undefined, 'an unattributable delta must not be absorbed');
+    assertInputsSelfContained(parts);
   });
 
   // When every call has its own index, that index is a usable final position and ordering
@@ -406,10 +429,112 @@ describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
     ]);
 
     assert.notEqual(failure, undefined, 'an unnamed new identity must not pass silently');
-    assert.deepEqual(
-      toolCallsOf(parts).filter(({ input }) => input.includes('}{')),
-      [],
-      'arguments from two distinct calls must never be concatenated',
-    );
+    assertInputsSelfContained(parts);
+  });
+
+  // `id` is no more trustworthy than `index` was. A gateway that repeats one across distinct
+  // calls must not have them merged — the same defect as the reused index, with the two
+  // fields swapped. The index disagrees here, and that disagreement is what has to win.
+  for (const id of ['', 'dup']) {
+    test(`keeps calls distinct when both reuse id ${JSON.stringify(id)} at different indices`, async () => {
+      const { parts, failure } = await collectDeltas([
+        { index: 0, id, type: 'function', function: { name: 'read_file', arguments: '{"path"' } },
+        { index: 1, id, type: 'function', function: { name: 'write_file', arguments: '{"path"' } },
+        { index: 0, function: { arguments: ':"a"}' } },
+        { index: 1, function: { arguments: ':"b"}' } },
+      ]);
+
+      assert.equal(failure, undefined);
+      assertInputsSelfContained(parts);
+      assert.deepEqual(
+        toolCallsOf(parts).map(({ toolName, input }) => ({ toolName, input })),
+        [
+          { toolName: 'read_file', input: '{"path":"a"}' },
+          { toolName: 'write_file', input: '{"path":"b"}' },
+        ],
+      );
+    });
+  }
+
+  // Some gateways send `id: ''` on continuation deltas instead of omitting the field. Read
+  // literally, that is a new identity with no name, which kills the whole turn.
+  test('treats an empty id on a continuation as absent rather than a new call', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path"' },
+      },
+      { index: 0, id: '', function: { arguments: ':"a"}' } },
+    ]);
+
+    assert.equal(failure, undefined, 'an empty id must not be read as a new identity');
+    assertInputsSelfContained(parts);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+    ]);
+  });
+
+  // The `openai` provider builds the same tracker with no buffer in front of it. Its chunk
+  // schema requires `index`, so it cannot express the index-omitted shapes, but it can
+  // express both reuse defects — and it is the path with no other coverage in this file.
+  describe('the openai provider shares this tracker', () => {
+    test('keeps two calls distinct when both are labelled index 0', async () => {
+      const { parts, failure } = await collectDeltas(
+        [
+          {
+            index: 0,
+            id: 'call_a',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"a"}' },
+          },
+          {
+            index: 0,
+            id: 'call_b',
+            type: 'function',
+            function: { name: 'write_file', arguments: '{"path":"b"}' },
+          },
+        ],
+        'openai',
+      );
+
+      assert.equal(failure, undefined);
+      assertInputsSelfContained(parts);
+      assert.deepEqual(toolCallsOf(parts), [
+        { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+        { toolCallId: 'call_b', toolName: 'write_file', input: '{"path":"b"}' },
+      ]);
+    });
+
+    test('keeps two calls distinct when both reuse one id at different indices', async () => {
+      const { parts, failure } = await collectDeltas(
+        [
+          {
+            index: 0,
+            id: 'dup',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"a"}' },
+          },
+          {
+            index: 1,
+            id: 'dup',
+            type: 'function',
+            function: { name: 'write_file', arguments: '{"path":"b"}' },
+          },
+        ],
+        'openai',
+      );
+
+      assert.equal(failure, undefined);
+      assertInputsSelfContained(parts);
+      assert.deepEqual(
+        toolCallsOf(parts).map(({ toolName, input }) => ({ toolName, input })),
+        [
+          { toolName: 'read_file', input: '{"path":"a"}' },
+          { toolName: 'write_file', input: '{"path":"b"}' },
+        ],
+      );
+    });
   });
 });
