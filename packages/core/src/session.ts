@@ -792,6 +792,15 @@ export interface TurnStateMessage {
 export interface TurnRecord {
   turnId: string;
   status: TurnStatus;
+  /**
+   * Whether `status` came from a `turn_state` message or was reconstructed by
+   * `inferLegacyTurnStatus` for a session written before them. Only a recorded
+   * status is evidence about this turn; an inferred one is a reading of old
+   * data, and callers reconciling against live state must not treat the two
+   * alike. Absent on hand-built records, which are treated as non-evidence;
+   * `deriveTurnRecords` is the only place that can know.
+   */
+  statusSource?: 'recorded' | 'inferred';
   parentTurnId?: string;
   retriedFromTurnId?: string;
   regeneratedFromTurnId?: string;
@@ -1154,6 +1163,7 @@ export function deriveTurnRecords(messages: readonly StoredMessage[]): TurnRecor
       return {
         turnId,
         status: latestState.status,
+        statusSource: 'recorded',
         ...(latestState.parentTurnId ? { parentTurnId: latestState.parentTurnId } : {}),
         ...(latestState.retriedFromTurnId
           ? { retriedFromTurnId: latestState.retriedFromTurnId }
@@ -1172,6 +1182,7 @@ export function deriveTurnRecords(messages: readonly StoredMessage[]): TurnRecor
     return {
       turnId,
       status: inferLegacyTurnStatus(bucket),
+      statusSource: 'inferred',
       partialOutputRetained,
     };
   });

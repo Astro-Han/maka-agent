@@ -316,7 +316,7 @@ describe('live tool status over persisted', () => {
       userMsg('t1', 1, 'run it'),
       { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 2, toolName: 'Bash', args: { command: 'sleep 60' } },
     ]);
-    assert.equal(settled[0]?.recordedStatus, undefined);
+    assert.equal(settled[0]?.statusSource, 'inferred');
     const turns = overlayLiveTurn(settled, {
       turnId: 't1',
       phase: 'streamed',

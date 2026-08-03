@@ -1,3 +1,4 @@
+import type { ToolActivityStatus } from './tool-result-status.js';
 import type { BotOnboardingProvider } from './bot-onboarding.js';
 import type { SandboxBoundaryRequestEvent, ToolOutputStream, ToolResultContent } from './events.js';
 import type { SettingsSection } from './settings.js';
@@ -147,7 +148,7 @@ export interface E2eFixtureLiveTool {
   stepId?: string;
   displayName?: string;
   intent?: string;
-  status: 'pending' | 'running' | 'completed' | 'errored' | 'interrupted';
+  status: ToolActivityStatus;
   args: unknown;
   result?: ToolResultContent;
   durationMs?: number;

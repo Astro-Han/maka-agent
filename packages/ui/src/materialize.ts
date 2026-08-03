@@ -1,15 +1,16 @@
 import {
   deriveTurnRecords,
+  isInFlightToolStatus,
   isActiveShellRunStatus,
   mergeShellRunStateWithDiagnostics,
   projectToolActivityArgs,
   STEP_LIMIT_NOTICE_TEXT,
   toolResultActivityStatus,
 } from '@maka/core';
-import type { AttachmentRef, InlineReference, QuoteRef, ShellRunUpdate, StoredMessage, ToolActivityKind, ToolResultContent, TurnRecord, TurnStatus, UserMessage } from '@maka/core';
+import type { AttachmentRef, ToolActivityStatus, InlineReference, QuoteRef, ShellRunUpdate, StoredMessage, ToolActivityKind, ToolResultContent, TurnRecord, TurnStatus, UserMessage } from '@maka/core';
 import type { LiveTurnProjection } from './live-turn-projection.js';
 
-export { isCancelledToolResultContent, toolResultActivityStatus } from '@maka/core';
+export { isCancelledToolResultContent, isInFlightToolStatus, toolResultActivityStatus } from '@maka/core';
 
 export interface ChatItem {
   id: string;
@@ -56,7 +57,7 @@ export interface ToolActivityItem {
    * legacy call with no step association.
    */
   stepId?: string;
-  status: 'pending' | 'running' | 'completed' | 'errored' | 'interrupted';
+  status: ToolActivityStatus;
   args: unknown;
   result?: ToolResultContent;
   durationMs?: number;
@@ -172,15 +173,6 @@ function unfinishedToolStatus(turnStatus: TurnStatus | undefined): ToolActivityI
   return turnStatus === 'running' ? 'running' : 'interrupted';
 }
 
-/**
- * A tool that has not settled. `pending` counts: `tool_start` opens a call
- * there and it only reaches `running` once output arrives, so a tool that
- * never streams stays `pending` for its whole life.
- */
-export function isInFlightStatus(status: ToolActivityItem['status']): boolean {
-  return status === 'pending' || status === 'running';
-}
-
 function materializeToolResultStatus(
   result: Extract<StoredMessage, { type: 'tool_result' }>,
 ): ToolActivityItem['status'] {
@@ -210,7 +202,10 @@ function mergeLiveOverPersisted(
   turnSettled: boolean,
 ): ToolActivityItem {
   const merged: ToolActivityItem = { ...persisted, ...live };
-  if (turnSettled && isInFlightStatus(live.status) && !isInFlightStatus(persisted.status)) {
+  // A settled turn always yields a settled persisted status — materializeTools
+  // only reads a tool as in-flight while the turn record says `running` — so
+  // this needs no guard on the persisted side.
+  if (turnSettled && isInFlightToolStatus(live.status)) {
     merged.status = persisted.status;
   }
   if (live.toolName === 'Tool') {
@@ -276,12 +271,10 @@ export interface TurnViewModel {
   turnId: string;
   status: TurnStatus;
   /**
-   * The status a `turn_state` message actually recorded, absent for sessions
-   * written before them. `status` covers that gap with `inferLegacyTurnStatus`,
-   * which is right for rendering a finished transcript but is a guess, not
-   * evidence that this turn ended — only `recordedStatus` is evidence.
+   * See `TurnRecord.statusSource` — whether `status` is evidence or a reading.
+   * Absent on hand-built view models, which are treated as non-evidence.
    */
-  recordedStatus?: TurnStatus;
+  statusSource?: TurnRecord['statusSource'];
   parentTurnId?: string;
   retriedFromTurnId?: string;
   regeneratedFromTurnId?: string;
@@ -348,7 +341,7 @@ export function overlayLiveTurn(
   // Only a recorded turn_state is evidence the turn ended; a legacy turn's
   // inferred `completed` is a guess, and such a turn cannot be live anyway.
   const turnRecordedAsEnded =
-    current.recordedStatus !== undefined && current.recordedStatus !== 'running';
+    current.statusSource === 'recorded' && current.status !== 'running';
   const tools = [...current.tools];
   const toolByUseId = new Map(tools.map((tool) => [tool.toolUseId, tool]));
   const liveToolIds = new Set<string>();
@@ -455,20 +448,6 @@ export function overlayShellRunUpdates(
 }
 
 /**
- * The latest `turn_state` status per turn, and only that. `deriveTurnRecords`
- * always yields a record — falling back to `inferLegacyTurnStatus` for sessions
- * written before `turn_state` — so it cannot answer "did this turn record that
- * it ended", which is what live/persisted reconciliation needs.
- */
-function recordedTurnStatuses(messages: readonly StoredMessage[]): Map<string, TurnStatus> {
-  const statuses = new Map<string, TurnStatus>();
-  for (const message of messages) {
-    if (message.type === 'turn_state') statuses.set(message.turnId, message.status);
-  }
-  return statuses;
-}
-
-/**
  * Group materialized chat + tool items by `turnId` into ordered turns. Items
  * without a turnId (e.g. fake-backend echo, or older sessions) fall into a
  * synthetic `__loose` bucket rendered first so they remain visible.
@@ -476,7 +455,6 @@ function recordedTurnStatuses(messages: readonly StoredMessage[]): Map<string, T
 export function materializeTurns(messages: StoredMessage[]): TurnViewModel[] {
   const turnRecords = deriveTurnRecords(messages);
   const turnRecordById = new Map(turnRecords.map((turn) => [turn.turnId, turn]));
-  const recordedStatusById = recordedTurnStatuses(messages);
   const turnsByMsg = new Map<string, string>();
   const order: string[] = [];
   const byId = new Map<string, TurnViewModel>();
@@ -489,11 +467,10 @@ export function materializeTurns(messages: StoredMessage[]): TurnViewModel[] {
     let turn = byId.get(turnId);
     if (!turn) {
       const record = turnRecordById.get(turnId);
-      const recordedStatus = recordedStatusById.get(turnId);
       turn = {
         turnId,
         status: record?.status ?? 'completed',
-        ...(recordedStatus ? { recordedStatus } : {}),
+        statusSource: record?.statusSource ?? 'inferred',
         ...(record?.parentTurnId ? { parentTurnId: record.parentTurnId } : {}),
         ...(record?.retriedFromTurnId ? { retriedFromTurnId: record.retriedFromTurnId } : {}),
         ...(record?.regeneratedFromTurnId ? { regeneratedFromTurnId: record.regeneratedFromTurnId } : {}),

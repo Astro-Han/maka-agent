@@ -1471,7 +1471,7 @@ html[data-os="darwin"].dark {
 
 /* Governance-level keyframe for the `TextShimmer` primitive (streaming UI
    rework). A named `@keyframes` is a global rule, not an element property, so
-   it lives here in the shared motion home like `maka-tool-pulse`, with the
+   it lives here in the shared motion home, with the
    shimmer's other declarations in the primitive stylesheet. Sweeps a clipped light band left→right
    across the glyph shape by translating `background-position`; the two-layer
    primitive keeps an opaque base underneath so the text stays readable. Frozen

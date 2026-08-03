@@ -8108,7 +8108,12 @@ describe('SessionManager permission mode updates', () => {
 
     expect(view.messages).toEqual(seeded.projectedMessages);
     expect(view.turns).toEqual([
-      { turnId: 'turn-1', status: 'completed', partialOutputRetained: true },
+      {
+        turnId: 'turn-1',
+        status: 'completed',
+        statusSource: 'recorded',
+        partialOutputRetained: true,
+      },
     ]);
     expect(view.terminalFacts.map((fact) => fact.runStatus)).toEqual(['completed']);
     expect(view.replayPlan.textMessages.map((message) => message.content)).toEqual([
@@ -10239,8 +10244,18 @@ describe('SessionManager permission mode updates', () => {
     const messages = await manager.getMessages(session.id);
     expect(messages).toEqual([...completed.projectedMessages, ...activeMessages]);
     expect(await manager.listTurns(session.id)).toEqual([
-      { turnId: 'turn-1', status: 'completed', partialOutputRetained: true },
-      { turnId: 'turn-2', status: 'running', partialOutputRetained: true },
+      {
+        turnId: 'turn-1',
+        status: 'completed',
+        statusSource: 'recorded',
+        partialOutputRetained: true,
+      },
+      {
+        turnId: 'turn-2',
+        status: 'running',
+        statusSource: 'recorded',
+        partialOutputRetained: true,
+      },
     ]);
 
     const view = await new RuntimeReadModel({
@@ -10546,6 +10561,7 @@ describe('SessionManager permission mode updates', () => {
       {
         turnId: 'turn-1',
         status: 'completed',
+        statusSource: 'recorded',
         partialOutputRetained: true,
       },
     ]);

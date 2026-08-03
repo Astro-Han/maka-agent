@@ -108,9 +108,14 @@ export {
 } from './events.js';
 
 // tool-result-status.ts — settled tool activity status from tool_result
-export type { SettledToolActivityStatus } from './tool-result-status.js';
+export type {
+  InFlightToolActivityStatus,
+  SettledToolActivityStatus,
+  ToolActivityStatus,
+} from './tool-result-status.js';
 export {
   isCancelledToolResultContent,
+  isInFlightToolStatus,
   toolResultActivityStatus,
 } from './tool-result-status.js';
 

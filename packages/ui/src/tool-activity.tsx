@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ComponentType } from 'react';
-import type { ToolResultContent, UiLocale } from '@maka/core';
+import { isInFlightToolStatus, type ToolResultContent, type UiLocale } from '@maka/core';
 import {
   Check,
   Clock,
@@ -10,11 +10,7 @@ import {
 } from './icons.js';
 import { useClipboardCopyFeedback } from './clipboard-feedback.js';
 import { useUiLocale } from './locale-context.js';
-import {
-  isInFlightStatus,
-  type ToolActivityItem,
-  type ToolOutputChunk,
-} from './materialize.js';
+import { type ToolActivityItem, type ToolOutputChunk } from './materialize.js';
 import { isConnectorTool, resolveToolDisplayName } from './tool-activity/display-name.js';
 import {
   extractErrorText,
@@ -299,13 +295,17 @@ export function ToolTrow({ items }: { items: ToolActivityItem[] }) {
   // row that owns its own expansion. A group opens while anything inside is
   // still in flight, because the collapsed header projects the last call alone
   // — with parallel calls the last one can settle first, and a collapsed green
-  // check would report the whole group done while a sibling still runs. Once
-  // everything has settled the group follows Astryx's density trade-off: an
-  // earlier failure sits one click away rather than in the header.
+  // check would report the whole group done while a sibling still runs.
+  //
+  // This seeds Astryx's initial state only; the group does not re-collapse when
+  // its tools settle, since the timeline key is deliberately stable so a
+  // disclosure survives mid-turn inserts (see timelineEntryKey). So a group
+  // watched live stays open, while the same turn reloaded renders collapsed —
+  // work in progress stays visible, history starts tidy.
   return (
     <ChatToolCalls
       calls={calls}
-      defaultIsExpanded={items.some((item) => isInFlightStatus(item.status))}
+      defaultIsExpanded={items.some((item) => isInFlightToolStatus(item.status))}
     />
   );
 }

@@ -1,6 +1,7 @@
 import type { ProviderRetryEvent, SessionEvent, StoredMessage, UiLocale } from '@maka/core';
 import { applyAssistantComplete, applyAssistantDelta } from './assistant-stream.js';
 import { projectToolActivityArgs, toolResultActivityStatus } from '@maka/core';
+import { isInFlightToolStatus } from '@maka/core';
 import type { ToolActivityItem } from './materialize.js';
 import { applyThinkingComplete, applyThinkingDelta } from './thinking-stream.js';
 import { applyToolOutputChunk } from './tool-output-stream.js';
@@ -43,9 +44,7 @@ function terminalizeLiveSteps(steps: readonly LiveTurnStepProjection[]): LiveTur
     ...(step.thinking ? { thinking: { ...step.thinking, complete: true } } : {}),
     ...(step.text ? { text: { ...step.text, complete: true } } : {}),
     tools: step.tools.map((tool) => (
-      tool.status === 'pending' || tool.status === 'running'
-        ? { ...tool, status: 'interrupted' as const }
-        : tool
+      isInFlightToolStatus(tool.status) ? { ...tool, status: 'interrupted' as const } : tool
     )),
   }));
 }

@@ -24,6 +24,7 @@ import { useStreamingText } from '@astryxdesign/core/hooks';
 import { ChatReasoning } from './astryx-chat-reasoning.js';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import {
+  isInFlightToolStatus,
   SKILL_INVOCATION_TOKEN_SOURCE,
   type AttachmentRef,
   type InlineReference,
@@ -387,7 +388,7 @@ export const TurnView = memo(function TurnView(props: {
       ? item.live === true
       : item.kind === 'text'
         ? item.live === true
-        : item.items.some((tool) => tool.status === 'pending' || tool.status === 'running'),
+        : item.items.some((tool) => isInFlightToolStatus(tool.status)),
   );
   // #1307: the collapsed "Processing" fold is derived at render time from the
   // flat timeline. Settled turn identities are stable (memoized projections),

@@ -17,6 +17,7 @@ import type {
   TokenUsageMessage,
   SystemNoteMessage,
   ToolActivityKind,
+  ToolActivityStatus,
   ToolResultContent,
   TurnStatus,
 } from '@maka/core';
@@ -33,7 +34,7 @@ export interface ToolActivityItem {
   activityKind?: ToolActivityKind;
   displayName?: string;
   intent?: string;
-  status: 'pending' | 'running' | 'completed' | 'errored' | 'interrupted';
+  status: ToolActivityStatus;
   args: unknown;
   result?: ToolResultContent;
   isError?: boolean;

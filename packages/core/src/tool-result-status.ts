@@ -6,6 +6,20 @@ import type { ToolResultContent } from './events.js';
 
 export type SettledToolActivityStatus = 'completed' | 'errored' | 'interrupted';
 
+/**
+ * A call that has not settled. `pending` is where `tool_start` opens one; it
+ * only reaches `running` once output arrives, so a tool that never streams
+ * stays `pending` for its whole life and both must read as in flight.
+ */
+export type InFlightToolActivityStatus = 'pending' | 'running';
+
+/** The whole tool-row status vocabulary, owned here so it is spelled once. */
+export type ToolActivityStatus = InFlightToolActivityStatus | SettledToolActivityStatus;
+
+export function isInFlightToolStatus(status: ToolActivityStatus): boolean {
+  return status === 'pending' || status === 'running';
+}
+
 /** Terminal / shell_run results whose runtime status is explicit cancel. */
 export function isCancelledToolResultContent(content: ToolResultContent | undefined): boolean {
   if (!content) return false;
