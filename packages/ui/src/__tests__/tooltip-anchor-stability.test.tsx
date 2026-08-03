@@ -29,8 +29,8 @@ describe('Astryx tooltip trigger stability', () => {
   it('writes nothing to the trigger when the parent re-renders for an unrelated reason', async () => {
     const { root, container } = installReactRenderer();
 
-    await render(root, harness('first render'));
-    const trigger = findTrigger(container);
+    await render(root, harness({ label: 'first render' }));
+    const trigger = findTrigger(container, 'BUTTON');
     assert.ok(trigger, 'the tooltip must attach to the button it wraps');
     assert.ok(
       trigger.getAttribute('aria-describedby'),
@@ -44,8 +44,8 @@ describe('Astryx tooltip trigger stability', () => {
     trigger.writes.attributes.length = 0;
     trigger.writes.styles.length = 0;
 
-    await render(root, harness('unrelated parent update'));
-    await render(root, harness('another unrelated parent update'));
+    await render(root, harness({ label: 'unrelated parent update' }));
+    await render(root, harness({ label: 'another unrelated parent update' }));
 
     assert.deepEqual(
       trigger.writes.attributes,
@@ -62,25 +62,111 @@ describe('Astryx tooltip trigger stability', () => {
       'the trigger must still be described after the re-renders',
     );
   });
+
+  // The other half of the contract, and the one a ref-identity-keyed effect
+  // gets wrong the moment the identity stops churning: when the trigger really
+  // does change, the tooltip has to follow it.
+  it('hands the anchor over when the trigger element is replaced', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'button trigger', trigger: 'button' }));
+    const replaced = findTrigger(container, 'BUTTON');
+    assert.ok(replaced, 'the first trigger must mount');
+
+    await render(root, harness({ label: 'link trigger', trigger: 'a' }));
+    const adopted = findTrigger(container, 'A');
+    assert.ok(adopted, 'the replacement trigger must mount');
+
+    assert.ok(
+      adopted.getAttribute('aria-describedby'),
+      'the replacement trigger must be described',
+    );
+    assert.ok(anchorNameOf(adopted), 'the replacement trigger must carry the anchor name');
+    assert.equal(
+      anchorNameOf(replaced),
+      '',
+      'the detached trigger must not keep an anchor name pointing at a live layer',
+    );
+    assert.equal(
+      replaced.getAttribute('aria-describedby'),
+      null,
+      'the detached trigger must be left as it was found',
+    );
+  });
+
+  it('attaches to a child that arrives after the first render', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'no trigger yet', trigger: 'none' }));
+    assert.equal(findTrigger(container, 'BUTTON'), undefined);
+
+    await render(root, harness({ label: 'trigger arrives', trigger: 'button' }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger, 'the late child must mount');
+    assert.ok(
+      trigger.getAttribute('aria-describedby'),
+      'a child that arrives late must still be described',
+    );
+    assert.ok(
+      anchorNameOf(trigger),
+      'a child that arrives late must still carry the anchor name',
+    );
+  });
+
+  // Opening the tooltip is a real state change, so `useLayer` hands consumers a
+  // new layer object — but the trigger element has not moved, so nothing on it
+  // may be rewritten, and its anchor must survive.
+  it('keeps the trigger untouched across a controlled open', async () => {
+    const { root, container } = installReactRenderer();
+
+    await render(root, harness({ label: 'closed', isOpen: false }));
+    const trigger = findTrigger(container, 'BUTTON');
+    assert.ok(trigger, 'the trigger must mount');
+    const anchorName = anchorNameOf(trigger);
+    assert.ok(anchorName, 'the trigger must carry an anchor name while closed');
+
+    trigger.writes.attributes.length = 0;
+    trigger.writes.styles.length = 0;
+
+    await render(root, harness({ label: 'open', isOpen: true }));
+
+    assert.deepEqual(trigger.writes.attributes, [], 'opening must not rewrite trigger attributes');
+    assert.deepEqual(trigger.writes.styles, [], 'opening must not rewrite the trigger anchor name');
+    assert.equal(anchorNameOf(trigger), anchorName, 'the open layer must still be anchored');
+    assert.ok(
+      trigger.getAttribute('aria-describedby'),
+      'the open layer must still describe its trigger',
+    );
+  });
 });
 
-function harness(label: string): ReactElement {
+function harness(options: {
+  label: string;
+  trigger?: 'button' | 'a' | 'none';
+  isOpen?: boolean;
+}): ReactElement {
+  const trigger = options.trigger ?? 'button';
   return createElement(
     'div',
     null,
-    createElement('p', null, label),
+    createElement('p', null, options.label),
     createElement(Tooltip, {
       content: 'Copy',
-      children: createElement('button', { type: 'button' }, 'Copy'),
+      isOpen: options.isOpen,
+      children: trigger === 'none' ? null : createElement(trigger, {}, 'Copy'),
     }),
   );
 }
 
-function findTrigger(node: FakeElement): FakeElement | undefined {
-  if (node.tagName === 'BUTTON') return node;
+function anchorNameOf(element: FakeElement): string | undefined {
+  return (element.style as unknown as Record<string, string | undefined>).anchorName;
+}
+
+function findTrigger(node: FakeElement, tagName: string): FakeElement | undefined {
+  if (node.tagName === tagName) return node;
   for (const child of node.childNodes) {
     if (!(child instanceof FakeElement)) continue;
-    const found = findTrigger(child);
+    const found = findTrigger(child, tagName);
     if (found) return found;
   }
   return undefined;
