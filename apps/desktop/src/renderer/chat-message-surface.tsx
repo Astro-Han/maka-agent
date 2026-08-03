@@ -8,8 +8,13 @@ import {
 } from '@maka/core';
 import { Banner, Button, ChatView, useUiLocale } from '@maka/ui';
 import { OnboardingHero } from './OnboardingHero';
-import type { AppShellSessionUiStateController } from './app-shell-session-ui-state';
+import type { AppShellSessionUiState, AppShellSessionUiStateController } from './app-shell-session-ui-state';
 import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
+
+const selectLiveTurn = (state: AppShellSessionUiState, sessionId: string | undefined) =>
+  sessionId ? state.liveTurnBySession[sessionId] : undefined;
+const selectShellRunRecord = (state: AppShellSessionUiState, sessionId: string | undefined) =>
+  sessionId ? state.shellRunUpdatesBySession[sessionId] : undefined;
 import type { SessionHealthNoticeView } from './use-shell-chat-model';
 import { getShellCopy } from './locales/shell-copy';
 import { useDeepResearchRun } from './use-deep-research-run';
@@ -75,15 +80,13 @@ export function ChatMessageSurface({
     activeSession?.id,
     isDeepResearchSession(activeSession?.labels),
   );
-  const liveTurn = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => (activeSessionId ? state.liveTurnBySession[activeSessionId] : undefined),
-  );
+  const liveTurn = useAppShellSessionUiSelector(sessionUiController, selectLiveTurn, activeSessionId);
   // Select the raw per-session record — building the array inside `getSnapshot`
   // would hand `useSyncExternalStore` a new identity on every read.
   const shellRunUpdateRecord = useAppShellSessionUiSelector(
     sessionUiController,
-    (state) => (activeSessionId ? state.shellRunUpdatesBySession[activeSessionId] : undefined),
+    selectShellRunRecord,
+    activeSessionId,
   );
   const shellRunUpdates = useMemo(
     () => Object.values(shellRunUpdateRecord ?? {}),

@@ -53,13 +53,7 @@ import { useKeyboardHelp } from './keyboard-help';
 import { useCommandPalette } from './command-palette';
 import { ChatMessageSurface } from './chat-message-surface';
 import { LiveTurnReconciler } from './live-turn-reconciler';
-import {
-  deriveLiveTurnSnapshot,
-  liveTurnSnapshotsEqual,
-  selectStreamingSessionIds,
-  sessionIdSetsEqual,
-} from './live-turn-snapshot';
-import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
+import { useAppShellSessionUiReads } from './use-app-shell-session-ui-reads';
 import { AgentGraphPanel } from './agent-graph-panel';
 import { ChatComposerRegion } from './chat-composer-region';
 import { ChatWorkbar } from './chat-workbar';
@@ -316,47 +310,18 @@ function AppShellContent({
     ));
   }, []);
   const navSelectionRef = useRef<NavSelection>(navSelection);
-  // #1985: one selection per map, each returning the store's own reference, so
-  // the shell re-renders only for the maps it actually reads. `liveTurnBySession`
-  // and `shellRunUpdatesBySession` are deliberately absent — they change per
-  // streamed token and belong to ChatMessageSurface, which subscribes to them
-  // itself. Adding either back here puts the whole shell on the token path.
-  const messageLoadErrorBySession = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => state.messageLoadErrorBySession,
-  );
-  const messageRetryPendingBySession = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => state.messageRetryPendingBySession,
-  );
-  const stopPendingBySession = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => state.stopPendingBySession,
-  );
-  const interactionBySession = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => state.interactionBySession,
-  );
-  const pendingPermissionModeBySession = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => state.pendingPermissionModeBySession,
-  );
-  const pendingSessionModelBySession = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => state.pendingSessionModelBySession,
-  );
-  const streamingSessionIds = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => selectStreamingSessionIds(state.liveTurnBySession),
-    sessionIdSetsEqual,
-  );
-  // The active turn as the shell reads it: phase and a few booleans, never the
-  // streamed buffers. Invariant across the deltas of one step.
-  const activeLiveTurnSnapshot = useAppShellSessionUiSelector(
-    sessionUiController,
-    (state) => deriveLiveTurnSnapshot(activeId ? state.liveTurnBySession[activeId] : undefined),
-    liveTurnSnapshotsEqual,
-  );
+  // #1985: the shell's complete read of session UI state. See the hook for why
+  // the two token-rate maps are absent.
+  const {
+    messageLoadErrorBySession,
+    messageRetryPendingBySession,
+    stopPendingBySession,
+    interactionBySession,
+    pendingPermissionModeBySession,
+    pendingSessionModelBySession,
+    streamingSessionIds,
+    activeLiveTurnSnapshot,
+  } = useAppShellSessionUiReads(sessionUiController, activeId);
   // PR-MEMORY-VISIBILITY-INDICATOR-0: session-context memory state (MEMORY.md
   // injected into the system prompt). State and the fire-and-forget refresh
   // live in `useShellMemoryPill`; recompute is triggered on mount (bootstrap

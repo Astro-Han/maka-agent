@@ -1,4 +1,4 @@
-import { useCallback, useRef, useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import type { AppShellSessionUiState, AppShellSessionUiStateController } from './app-shell-session-ui-state.js';
 
 /**
@@ -9,35 +9,36 @@ import type { AppShellSessionUiState, AppShellSessionUiStateController } from '.
  * speed. A component re-renders only when the value IT selects changes, so the
  * chat transcript can follow every delta while the shell around it stays still.
  *
- * `select` may be an inline arrow: it is read through a ref, so `getSnapshot`
- * keeps a stable identity and React never re-subscribes because of it.
+ * `select` must be a stable (module-level) function, and whatever it varies by
+ * — a session id, say — is passed as `arg` rather than captured. That is what
+ * lets the snapshot be memoized instead of published through a render-phase ref
+ * write, which React permits only for lazy initialization: a discarded
+ * concurrent render would otherwise hand its selector to the committed
+ * subscription. Changing `arg` rebuilds the cache, so the first render after
+ * switching sessions already reads the new one.
+ *
+ * `isEqual` is required for any selector that derives a fresh object.
+ * `useSyncExternalStore` demands a snapshot that keeps its identity while
+ * nothing it selects changed; without it such a selector does not merely
+ * over-render, it loops.
  */
-export function useAppShellSessionUiSelector<T>(
+export function useAppShellSessionUiSelector<T, A = undefined>(
   controller: AppShellSessionUiStateController,
-  select: (state: AppShellSessionUiState) => T,
+  select: (state: AppShellSessionUiState, arg: A) => T,
+  arg?: A,
   isEqual?: (a: T, b: T) => boolean,
 ): T {
-  const selectRef = useRef(select);
-  selectRef.current = select;
-  const isEqualRef = useRef(isEqual);
-  isEqualRef.current = isEqual;
-  const cacheRef = useRef<{ value: T } | null>(null);
-
-  // `useSyncExternalStore` requires a snapshot that keeps its identity while
-  // nothing it selects changed, or it loops. A selector that derives a fresh
-  // object therefore has to say what "unchanged" means for that object.
-  const getSnapshot = useCallback(() => {
-    const next = selectRef.current(controller.getState());
-    const cached = cacheRef.current;
-    if (cached && isSameSnapshot(cached.value, next, isEqualRef.current)) return cached.value;
-    cacheRef.current = { value: next };
-    return next;
-  }, [controller]);
+  const getSnapshot = useMemo(() => {
+    let cache: { value: T } | null = null;
+    return (): T => {
+      const next = select(controller.getState(), arg as A);
+      if (cache && (Object.is(cache.value, next) || isEqual?.(cache.value, next) === true)) {
+        return cache.value;
+      }
+      cache = { value: next };
+      return next;
+    };
+  }, [controller, select, arg, isEqual]);
 
   return useSyncExternalStore(controller.subscribe, getSnapshot, getSnapshot);
-}
-
-function isSameSnapshot<T>(previous: T, next: T, isEqual: ((a: T, b: T) => boolean) | undefined): boolean {
-  if (Object.is(previous, next)) return true;
-  return isEqual ? isEqual(previous, next) : false;
 }

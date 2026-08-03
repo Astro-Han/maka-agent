@@ -8,14 +8,16 @@ import { applyLiveTurnEvent, armLiveTurn } from '@maka/ui';
 import { build } from 'esbuild';
 import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { createAppShellSessionUiStateController } from '../../renderer/app-shell-session-ui-state.js';
+import {
+  createAppShellSessionUiStateController,
+  type AppShellSessionUiState,
+} from '../../renderer/app-shell-session-ui-state.js';
 import {
   deriveLiveTurnSnapshot,
   liveTurnSnapshotsEqual,
-  selectStreamingSessionIds,
-  sessionIdSetsEqual,
   type LiveTurnSnapshot,
 } from '../../renderer/live-turn-snapshot.js';
+import { useAppShellSessionUiReads } from '../../renderer/use-app-shell-session-ui-reads.js';
 import { useAppShellSessionUiSelector } from '../../renderer/use-app-shell-session-ui-selector.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
@@ -161,7 +163,8 @@ describe('AppShell session UI subscription boundary', () => {
     function SnapshotConsumer(): null {
       lastSnapshot = useAppShellSessionUiSelector(
         controller,
-        (state) => deriveLiveTurnSnapshot(state.liveTurnBySession[LIVE_SESSION_ID]),
+        selectTestSnapshot,
+        LIVE_SESSION_ID,
         liveTurnSnapshotsEqual,
       );
       snapshotRenders += 1;
@@ -169,7 +172,7 @@ describe('AppShell session UI subscription boundary', () => {
     }
 
     function ProjectionConsumer(): null {
-      useAppShellSessionUiSelector(controller, (state) => state.liveTurnBySession[LIVE_SESSION_ID]);
+      useAppShellSessionUiSelector(controller, selectTestProjection, LIVE_SESSION_ID);
       projectionRenders += 1;
       return null;
     }
@@ -215,32 +218,16 @@ describe('AppShell session UI subscription boundary', () => {
     );
   });
 
-  it('leaves a subscriber shaped like AppShell untouched through a whole stream', async () => {
+  // Drives `useAppShellSessionUiReads` — the shell's real read of the store, not
+  // a copy of its selector list. Adding a token-rate selection to that hook
+  // fails this test, which is the regression it exists to catch.
+  it('re-renders the shell for no delta after the first token', async () => {
     const controller = createAppShellSessionUiStateController();
     const { root } = installReactRenderer();
     let shellRenders = 0;
 
-    // The shell's complete read of session UI state: the low-frequency maps by
-    // raw reference, the live turn as a semantic snapshot, and the sidebar's
-    // pulse set by value. Anything added here that follows a delta puts the
-    // sidebar and composer back on the token path.
     function ShellReader(): null {
-      useAppShellSessionUiSelector(controller, (state) => state.messageLoadErrorBySession);
-      useAppShellSessionUiSelector(controller, (state) => state.messageRetryPendingBySession);
-      useAppShellSessionUiSelector(controller, (state) => state.stopPendingBySession);
-      useAppShellSessionUiSelector(controller, (state) => state.interactionBySession);
-      useAppShellSessionUiSelector(controller, (state) => state.pendingPermissionModeBySession);
-      useAppShellSessionUiSelector(controller, (state) => state.pendingSessionModelBySession);
-      useAppShellSessionUiSelector(
-        controller,
-        (state) => deriveLiveTurnSnapshot(state.liveTurnBySession[LIVE_SESSION_ID]),
-        liveTurnSnapshotsEqual,
-      );
-      useAppShellSessionUiSelector(
-        controller,
-        (state) => selectStreamingSessionIds(state.liveTurnBySession),
-        sessionIdSetsEqual,
-      );
+      useAppShellSessionUiReads(controller, LIVE_SESSION_ID);
       shellRenders += 1;
       return null;
     }
@@ -266,9 +253,36 @@ describe('AppShell session UI subscription boundary', () => {
       'no delta after the first may re-render the shell',
     );
   });
+
+  // The one branch where the snapshot cache must yield without the store moving.
+  it('follows the newly selected session when activeId changes under a still store', async () => {
+    const controller = createAppShellSessionUiStateController();
+    const { root } = installReactRenderer();
+    controller.setLiveTurnBySession(() => ({
+      [LIVE_SESSION_ID]: armLiveTurn('turn-a'),
+      other: { ...armLiveTurn('turn-b'), phase: 'streamed' as const },
+    }));
+    const seen: Array<string | undefined> = [];
+
+    function Reader(props: { activeId: string }): null {
+      seen.push(useAppShellSessionUiReads(controller, props.activeId).activeLiveTurnSnapshot.turnId);
+      return null;
+    }
+
+    await render(root, createElement(Reader, { activeId: LIVE_SESSION_ID }));
+    assert.equal(seen.at(-1), 'turn-a');
+
+    await render(root, createElement(Reader, { activeId: 'other' }));
+    assert.equal(seen.at(-1), 'turn-b', 'the first render after a switch must read the new session');
+  });
 });
 
 const LIVE_SESSION_ID = 'session-live';
+
+const selectTestSnapshot = (state: AppShellSessionUiState, sessionId: string) =>
+  deriveLiveTurnSnapshot(state.liveTurnBySession[sessionId]);
+const selectTestProjection = (state: AppShellSessionUiState, sessionId: string) =>
+  state.liveTurnBySession[sessionId];
 
 function streamLiveText(
   controller: ReturnType<typeof createAppShellSessionUiStateController>,
