@@ -19,6 +19,8 @@ export type SettingsSharedCopy = {
   unknownError: string;
   unavailablePage: string;
   ready: string;
+  showDetails: string;
+  hideDetails: string;
   /**
    * SettingsSection group titles for pages whose own copy module has no
    * suitable label. Group titles live together (here, and in
@@ -65,6 +67,8 @@ const SETTINGS_SHARED_COPY_BY_LOCALE = {
     usageLoadFailed: '载入使用统计失败',
     unknownError: '出现错误，请稍后重试。',
     unavailablePage: '该设置页已纳入 Maka 设置树，会随对应 runtime 能力一起工作。',
+    showDetails: '展开详情',
+    hideDetails: '收起详情',
     ready: '就绪',
     groups: {
       memorySources: '记忆',
@@ -103,6 +107,8 @@ const SETTINGS_SHARED_COPY_BY_LOCALE = {
     usageLoadFailed: 'Could not load usage statistics',
     unknownError: 'Something went wrong. Try again.',
     unavailablePage: 'This page is part of the Maka settings tree and will activate with its runtime capability.',
+    showDetails: 'Show details',
+    hideDetails: 'Hide details',
     ready: 'Ready',
     groups: {
       memorySources: 'Memory',

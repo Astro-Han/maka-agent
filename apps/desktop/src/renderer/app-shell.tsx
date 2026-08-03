@@ -2104,6 +2104,7 @@ function AppShellContent({
         <AppShellTopbarActions
           sidebarCollapsed={sessionListCollapsed}
           sidebarHandleRef={sessionSideNavHandleRef}
+          sidebarToggleHidden={settingsOpen}
           onOpenSearchModal={() => setSearchModalOpen(true)}
         />
         {!VIEWS_WITHOUT_WORKSPACE_ACTIONS.has(agentsView) && (

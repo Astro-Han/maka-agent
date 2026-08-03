@@ -89,7 +89,6 @@ export function HealthCenterPage() {
   return (
     <div className="settingsStructuredPage">
       <SettingsSection
-        title={copy.title}
         description={(
           <>
             {copy.subtitle} <strong>{copy.validationWarning}</strong>

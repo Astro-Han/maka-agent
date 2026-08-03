@@ -68,17 +68,6 @@
   border-inline-end-color: transparent;
 }
 
-/* Dark Restraint (DESIGN.md): dark mode separates planes by tone, never by
-   edge. In light mode the sidenav's canvas wash (L −0.025) plus a 10%-ink
-   hairline is imperceptible on white — the shell reads as one plane. The SAME
-   recipe in dark is loud: a 2.5% lightness step on L≈0.2 is a visible column,
-   and the hairline is 10% WHITE on near-black. So dark drops both halves of
-   the edge and takes the content column's material, exactly like the
-   collapsed rule above — matching what light mode already reads as. */
-.dark .astryx-app-shell-sidenav {
-  background: var(--color-background-surface);
-  border-inline-end-color: transparent;
-}
 
 /* The column resize handle is the one control positioned against the column BOX
    rather than flowing inside it (Astryx gives it `position:absolute; top:0;

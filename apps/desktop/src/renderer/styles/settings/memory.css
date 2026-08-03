@@ -163,17 +163,6 @@
     font-size: var(--font-size-ui);
   }
 
-.settingsMemoryEntryDraftNotice {
-    margin: 0;
-    padding: var(--space-1-5) var(--space-2);
-    border: var(--border-width-hairline) solid oklch(from var(--warning) l c h / 0.30);
-    border-radius: var(--radius-surface);
-    background: oklch(from var(--warning) l c h / 0.08);
-    color: var(--foreground-secondary);
-    font-size: var(--font-size-ui);
-    line-height: var(--leading-normal);
-  }
-
 .settingsMemoryEntryList {
     /* Semantic <ul>; open idiom — entries are edge-to-edge rows divided by
        hairlines, no bordered/filled list container. */

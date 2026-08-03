@@ -279,6 +279,11 @@ export function WebSearchSettingsPage(props: {
             label={copy.key}
             description={usingEnvKey ? copy.envKeyHelp : copy.savedKeyHelp}
           />
+          {!usingEnvKey && (
+            <small className="settingsQuietStatus">
+              <a href="https://tavily.com" target="_blank" rel="noreferrer noopener">tavily.com</a>
+            </small>
+          )}
         </SettingsField>
 
         <SettingsActions role="group" aria-label={copy.actions}>

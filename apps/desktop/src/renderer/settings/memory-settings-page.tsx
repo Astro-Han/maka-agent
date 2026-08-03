@@ -36,6 +36,7 @@ export function MemorySettingsPage(props: {
   const copy = getMemorySettingsCopy(locale);
   const sharedCopy = getSettingsSharedCopy(locale);
   const [addFormOpen, setAddFormOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const {
     draft,
     setDraft,
@@ -67,7 +68,7 @@ export function MemorySettingsPage(props: {
     copyLatestBackupReference,
     copyMemoryEntryReference,
     focusMemoryEntryInDraft,
-    addManualMemoryDraftEntry,
+    addManualMemoryEntry,
     updateMemoryEntryStatus,
     effective,
     memoryDraftDirty,
@@ -93,10 +94,7 @@ export function MemorySettingsPage(props: {
 
   return (
     <div className="settingsStructuredPage">
-      <SettingsSection
-        title={sharedCopy.groups.memorySources}
-        description={sharedCopy.groups.memorySourcesHelp}
-      >
+      <SettingsSection description={sharedCopy.groups.memorySourcesHelp}>
         <SettingsRow
           label={copy.text.localFile}
           description={copy.text.localFileHelp}
@@ -191,7 +189,7 @@ export function MemorySettingsPage(props: {
                 <Button
                   variant="primary"
                   isDisabled={entryActionsBlocked}
-                  onClick={addManualMemoryDraftEntry}
+                  onClick={() => void addManualMemoryEntry()}
                   label={copy.text.addDraft}
                 />
                 <Button
@@ -254,7 +252,6 @@ export function MemorySettingsPage(props: {
                     copy={copy}
                     entries={filteredActiveEntries}
                     filtered={normalizedMemoryEntryQuery.length > 0}
-                    draftDirty={memoryDraftDirty}
                     busy={entryActionsBlocked}
                     pendingCopyIds={pendingMemoryActions}
                     onCopyReference={copyMemoryEntryReference}
@@ -268,7 +265,6 @@ export function MemorySettingsPage(props: {
                       entries={filteredArchivedEntries}
                       filtered={normalizedMemoryEntryQuery.length > 0}
                       archived
-                      draftDirty={memoryDraftDirty}
                       busy={entryActionsBlocked}
                       pendingCopyIds={pendingMemoryActions}
                       onCopyReference={copyMemoryEntryReference}
@@ -293,6 +289,16 @@ export function MemorySettingsPage(props: {
       <SettingsSection
         title={sharedCopy.groups.memoryDocument}
         description={sharedCopy.groups.memoryDocumentHelp}
+        action={(
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((open) => !open)}
+            label={advancedOpen ? sharedCopy.hideDetails : sharedCopy.showDetails}
+          />
+        )}
+        bodyClassName={advancedOpen ? undefined : 'settingsSectionBodyHidden'}
       >
         <SettingsRow
           align="start"
@@ -405,7 +411,7 @@ export function MemorySettingsPage(props: {
         </SettingsActions>
       </SettingsSection>
 
-      <MemoryPromptPreviewSection
+      {advancedOpen && <MemoryPromptPreviewSection
         copy={copy}
         active={promptPreviewWillInject}
         preview={localMemoryPromptPreview}
@@ -414,7 +420,7 @@ export function MemorySettingsPage(props: {
         safeMode={effective.status === 'safe_mode'}
         copyPending={isMemoryActionPending('memory:prompt-preview:copy')}
         onCopy={copyLocalMemoryPromptPreview}
-      />
+      />}
     </div>
   );
 }

@@ -97,25 +97,18 @@
    and content were visibly misaligned. Drop the mainpane padding to
    thin top/bottom so the header + content can both share the centered
    column. */
-/* PR-SETTINGS-RESTORE-SURFACE-0 (WAWQAQ msg `32ed9490` correction):
-   previous PR over-corrected — I read "no seam" as "no plate", but
-   reference's content surface is still a lighter-bg plate vs the
-   sidebar. The seam-between rule is: no visible BORDER line between
-   sidebar and content, but the content does have its own background
-   plate + rounded corners + small floating margin. Restore the
-   surface; just no border. */
+/* Flat content surface, matching the chat shell: the chat content column
+   dropped its rounded floating plate, so Settings drops it too — same
+   surface token, no margin, no radius. */
 .settingsMainPane {
   position: relative;
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
-  width: calc(100% - var(--agents-content-area-gap));
-  height: calc(100% - 2 * var(--agents-content-area-gap));
-  margin: var(--agents-content-area-gap) var(--agents-content-area-gap) var(--agents-content-area-gap) 0;
+  width: 100%;
+  height: 100%;
   border: 0;
-  border-radius: var(--radius-modal);
   background: var(--agents-content-area-bg);
-  box-shadow: none;
   overflow: hidden;
 }
 
@@ -213,6 +206,10 @@
      (a long mono path, a scrollable pre) must not widen the section. */
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
+}
+
+.settingsSectionBodyHidden {
+  display: none;
 }
 
 .settingsSectionBody {
