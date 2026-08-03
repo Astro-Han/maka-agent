@@ -5,11 +5,21 @@ import type { RuntimeExecutionConnection } from '@maka/core';
 import { getAIModel } from '@maka/runtime';
 
 /**
- * Regression guard for #1967: OpenAI-compatible gateways are free to label streamed
- * `tool_calls[].index` with any stable number — the field identifies which tool call a
- * delta belongs to, it is not an array position. Anthropic→OpenAI translators commonly
- * reuse the Anthropic content-block index, so the first tool call arrives as index 1
- * once a text block consumed index 0. This must stream through like any other tool call.
+ * Regression guard for #1967 and #1976. Both are the same modelling defect: the streamed
+ * `tool_calls[].index` is an association label a gateway may omit, repeat, or number
+ * freely, and it was being used as the storage slot, the identity, and the ordering all at
+ * once. Identity actually lives in `id`; `index` only aliases it for argument deltas that
+ * carry no `id`.
+ *
+ * #1967 — index as a storage slot. Anthropic→OpenAI translators reuse the Anthropic
+ * content-block index, so the first tool call arrives as index 1 once a text block
+ * consumed index 0, leaving a hole that crashed the flush.
+ *
+ * #1976 — index as identity. Ollama labels every tool call in a turn with index 0
+ * (vercel/ai#14277), which merged distinct calls into one: arguments concatenated into
+ * invalid JSON, the second `id` and `name` dropped, and no error anywhere. Also covered
+ * here: deltas that omit `index` entirely, which used to pick a fresh slot per chunk and
+ * throw `Expected 'id' to be a string.`
  */
 
 const connection: RuntimeExecutionConnection = {
@@ -123,5 +133,283 @@ describe('getAIModel: OpenAI-compatible streamed tool_calls index', () => {
       { toolCallId: 'call_2', toolName: 'read_file', input: '{"path":"b.txt"}' },
     ]);
     assertStreamSucceeded(parts);
+  });
+});
+
+/**
+ * A streamed `tool_calls[]` delta exactly as a gateway may put it on the wire, including
+ * the shapes the OpenAI protocol does not allow. The tests below drive these directly
+ * because the defect lives in how deltas associate, which `streamingRelay`'s well-formed
+ * shape cannot express.
+ */
+interface ToolCallDelta {
+  index?: number;
+  id?: string;
+  type?: 'function';
+  function?: { name?: string; arguments?: string };
+}
+
+const twoTools: LanguageModelV4CallOptions['tools'] = [
+  {
+    type: 'function',
+    name: 'read_file',
+    inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+  },
+  {
+    type: 'function',
+    name: 'write_file',
+    inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+  },
+];
+
+/** A gateway turn that emits each delta in its own chunk, then finishes on `tool_calls`. */
+function deltaRelay(deltas: readonly ToolCallDelta[]): typeof globalThis.fetch {
+  const payloads = [
+    ...deltas.map((delta) => chunk({ tool_calls: [delta] })),
+    chunk({}, 'tool_calls'),
+  ];
+  const body = `${payloads.map((payload) => `data: ${JSON.stringify(payload)}\n\n`).join('')}data: [DONE]\n\n`;
+  return async () =>
+    new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+/** Collects a turn, capturing a mid-stream throw instead of failing the test on it. */
+async function collectDeltas(
+  deltas: readonly ToolCallDelta[],
+): Promise<{ parts: LanguageModelV4StreamPart[]; failure: unknown }> {
+  const model = getAIModel({
+    connection,
+    apiKey: 'test-key',
+    modelId: 'claude-opus-4-8',
+    fetch: deltaRelay(deltas),
+  });
+  const { stream } = await model.doStream({ prompt, tools: twoTools });
+  const parts: LanguageModelV4StreamPart[] = [];
+  try {
+    for await (const part of stream) parts.push(part);
+  } catch (error) {
+    return { parts, failure: error };
+  }
+  const errorPart = parts.find((part) => part.type === 'error');
+  return { parts, failure: errorPart ? (errorPart as { error: unknown }).error : undefined };
+}
+
+describe('getAIModel: streamed tool call identity is `id`, not `index`', () => {
+  // The Ollama shape (vercel/ai#14277): every call in the turn is labelled index 0, each
+  // arriving complete in one delta. This is the case that silently produced one call with
+  // concatenated invalid JSON arguments.
+  test('keeps two calls distinct when a gateway labels both index 0', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"a"}' },
+      },
+      {
+        index: 0,
+        id: 'call_b',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{"path":"b"}' },
+      },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+      { toolCallId: 'call_b', toolName: 'write_file', input: '{"path":"b"}' },
+    ]);
+  });
+
+  // The second call's `name` must survive too. Merging dropped it, so the second call ran
+  // under the first call's tool name whenever the concatenation happened to stay parsable.
+  test('keeps each call name when a reused index spreads arguments over chunks', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path"' },
+      },
+      { index: 0, function: { arguments: ':"a"}' } },
+      {
+        index: 0,
+        id: 'call_b',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{"path"' },
+      },
+      { index: 0, function: { arguments: ':"b"}' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+      { toolCallId: 'call_b', toolName: 'write_file', input: '{"path":"b"}' },
+    ]);
+  });
+
+  // The worst shape: the merge stays valid JSON, so nothing downstream can notice. The
+  // second call used to vanish with no error, no log, and a successful-looking turn.
+  test('does not swallow a reused-index call whose arguments are empty', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"a"}' },
+      },
+      { index: 0, id: 'call_b', type: 'function', function: { name: 'write_file', arguments: '' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+      { toolCallId: 'call_b', toolName: 'write_file', input: '' },
+    ]);
+  });
+
+  // Once an index has been reused, an argument-only delta belongs to the call that most
+  // recently claimed that index — the new one, not the one it displaced.
+  test('routes an index-only continuation to the call that last claimed the index', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"a"}' },
+      },
+      {
+        index: 0,
+        id: 'call_b',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{"path"' },
+      },
+      { index: 0, function: { arguments: ':"b"}' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+      { toolCallId: 'call_b', toolName: 'write_file', input: '{"path":"b"}' },
+    ]);
+  });
+
+  // Deltas with no `index` at all used to pick a fresh slot per chunk via the
+  // `?? toolCalls.length` fallback and throw `Expected 'id' to be a string.`
+  test('accumulates a call whose deltas omit index entirely', async () => {
+    const { parts, failure } = await collectDeltas([
+      { id: 'call_a', type: 'function', function: { name: 'read_file', arguments: '{"pa' } },
+      { function: { arguments: 'th":"a"}' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+    ]);
+  });
+
+  // A bare delta carries no association at all, so it belongs to the call the stream last
+  // touched. "Last created" is the wrong answer: every call stays unfinished until flush,
+  // so an explicit `id` delta for an earlier call must move the attachment point back.
+  test('attaches a bare argument delta to the call the stream last touched', async () => {
+    const { parts, failure } = await collectDeltas([
+      { index: 0, id: 'call_a', type: 'function', function: { name: 'read_file', arguments: '' } },
+      {
+        index: 1,
+        id: 'call_b',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{}' },
+      },
+      { id: 'call_a', function: { arguments: '{"path"' } },
+      { function: { arguments: ':"a"}' } },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(toolCallsOf(parts), [
+      { toolCallId: 'call_a', toolName: 'read_file', input: '{"path":"a"}' },
+      { toolCallId: 'call_b', toolName: 'write_file', input: '{}' },
+    ]);
+  });
+
+  // When every call has its own index, that index is a usable final position and ordering
+  // must follow it rather than arrival — a gateway may stream a later slot first.
+  test('emits in index order when out-of-order indices are unique', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 2,
+        id: 'call_second',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{}' },
+      },
+      {
+        index: 1,
+        id: 'call_first',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{}' },
+      },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolCallId }) => toolCallId),
+      ['call_first', 'call_second'],
+    );
+  });
+
+  // A repeated index carries no ordering information, so arrival order is all that is
+  // left. Sorting by it anyway would let a malformed index reorder the turn.
+  test('emits in arrival order when the index is reused and cannot order anything', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_first',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{}' },
+      },
+      {
+        index: 0,
+        id: 'call_second',
+        type: 'function',
+        function: { name: 'write_file', arguments: '{}' },
+      },
+    ]);
+
+    assert.equal(failure, undefined);
+    assert.deepEqual(
+      toolCallsOf(parts).map(({ toolCallId }) => toolCallId),
+      ['call_first', 'call_second'],
+    );
+  });
+
+  /**
+   * Known boundary, deliberately locked in. `@ai-sdk/openai-compatible` keeps its own
+   * index-keyed buffer in front of the tracker and forwards a delta as soon as it has a
+   * `name`; once an index has been forwarded, later deltas on it bypass that buffer. So a
+   * reused index whose new call has not sent its `name` yet reaches the tracker as an
+   * unnamed new identity and the turn fails.
+   *
+   * Failing is the point: the old behaviour appended those arguments to the previous call.
+   * Closing this properly means folding the adapter's buffer into the tracker so a call
+   * can stay pending until its name arrives, which is a rewrite of both layers rather than
+   * this fix. What must never come back is the silent merge.
+   */
+  test('fails loudly rather than merging when a reused index delays its name', async () => {
+    const { parts, failure } = await collectDeltas([
+      {
+        index: 0,
+        id: 'call_a',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"a"}' },
+      },
+      { index: 0, id: 'call_b', type: 'function', function: { arguments: '{"path"' } },
+      { index: 0, function: { name: 'write_file', arguments: ':"b"}' } },
+    ]);
+
+    assert.notEqual(failure, undefined, 'an unnamed new identity must not pass silently');
+    assert.deepEqual(
+      toolCallsOf(parts).filter(({ input }) => input.includes('}{')),
+      [],
+      'arguments from two distinct calls must never be concatenated',
+    );
   });
 });

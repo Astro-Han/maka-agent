@@ -1,14 +1,231 @@
 diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.js b/node_modules/@ai-sdk/provider-utils/dist/index.js
-index 851fce4..d16f64c 100644
+index 851fce4..73894d1 100644
 --- a/node_modules/@ai-sdk/provider-utils/dist/index.js
 +++ b/node_modules/@ai-sdk/provider-utils/dist/index.js
-@@ -3567,6 +3567,9 @@ var StreamingToolCallTracker = class {
+@@ -3540,6 +3540,9 @@ import {
+ var StreamingToolCallTracker = class {
+   constructor(controller, options = {}) {
+     this.toolCalls = [];
++    this.byId = /* @__PURE__ */ new Map();
++    this.byIndex = /* @__PURE__ */ new Map();
++    this.activeToolCall = void 0;
+     var _a2, _b2;
+     this.controller = controller;
+     this._generateId = (_a2 = options.generateId) != null ? _a2 : generateId;
+@@ -3553,26 +3556,38 @@ var StreamingToolCallTracker = class {
+    * events as appropriate.
+    */
+   processDelta(toolCallDelta) {
+-    var _a2;
+-    const index = (_a2 = toolCallDelta.index) != null ? _a2 : this.toolCalls.length;
+-    if (this.toolCalls[index] == null) {
+-      this.processNewToolCall(index, toolCallDelta);
++    const deltaId = toolCallDelta.id;
++    const deltaIndex = toolCallDelta.index;
++    let toolCall = deltaId != null ? this.byId.get(deltaId) : deltaIndex != null ? this.byIndex.get(deltaIndex) : this.activeToolCall;
++    if (toolCall == null) {
++      toolCall = this.processNewToolCall(toolCallDelta);
+     } else {
+-      this.processExistingToolCall(index, toolCallDelta);
++      this.processExistingToolCall(toolCall, toolCallDelta);
++    }
++    if (deltaIndex != null) {
++      this.byIndex.set(deltaIndex, toolCall);
+     }
++    this.activeToolCall = toolCall;
+   }
+   /**
+    * Finalize any unfinished tool calls. Should be called during the stream's
+    * flush handler to ensure all tool calls are properly completed.
     */
    flush() {
-     for (const toolCall of this.toolCalls) {
-+      if (toolCall == null) {
-+        continue;
+-    for (const toolCall of this.toolCalls) {
++    const indexOf = /* @__PURE__ */ new Map();
++    for (const [index, toolCall] of this.byIndex) {
++      if (!indexOf.has(toolCall)) {
++        indexOf.set(toolCall, index);
 +      }
++    }
++    const ordered = indexOf.size === this.toolCalls.length ? [...this.toolCalls].sort((a, b) => indexOf.get(a) - indexOf.get(b)) : this.toolCalls;
++    for (const toolCall of ordered) {
        if (!toolCall.hasFinished) {
          this.finishToolCall(toolCall);
        }
+     }
+   }
+-  processNewToolCall(index, toolCallDelta) {
++  processNewToolCall(toolCallDelta) {
+     var _a2, _b2, _c;
+     if (this.typeValidation === "required") {
+       if (toolCallDelta.type !== "function") {
+@@ -3607,7 +3622,7 @@ var StreamingToolCallTracker = class {
+       toolName: toolCallDelta.function.name
+     });
+     const metadata = (_b2 = this.extractMetadata) == null ? void 0 : _b2.call(this, toolCallDelta);
+-    this.toolCalls[index] = {
++    const toolCall = {
+       id: toolCallDelta.id,
+       type: "function",
+       function: {
+@@ -3617,7 +3632,11 @@ var StreamingToolCallTracker = class {
+       hasFinished: false,
+       metadata
+     };
+-    const toolCall = this.toolCalls[index];
++    this.toolCalls.push(toolCall);
++    this.byId.set(toolCall.id, toolCall);
++    if (toolCallDelta.index != null) {
++      this.byIndex.set(toolCallDelta.index, toolCall);
++    }
+     if (toolCall.function.arguments.length > 0) {
+       this.controller.enqueue({
+         type: "tool-input-delta",
+@@ -3625,10 +3644,10 @@ var StreamingToolCallTracker = class {
+         delta: toolCall.function.arguments
+       });
+     }
++    return toolCall;
+   }
+-  processExistingToolCall(index, toolCallDelta) {
++  processExistingToolCall(toolCall, toolCallDelta) {
+     var _a2;
+-    const toolCall = this.toolCalls[index];
+     if (toolCall.hasFinished) {
+       return;
+     }
+diff --git a/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts b/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts
+index 37cbfc0..0bf4402 100644
+--- a/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts
++++ b/node_modules/@ai-sdk/provider-utils/src/streaming-tool-call-tracker.ts
+@@ -78,6 +78,14 @@ export class StreamingToolCallTracker<
+   DELTA extends StreamingToolCallDelta = StreamingToolCallDelta,
+ > {
+   private toolCalls: TrackedToolCall[] = [];
++  /**
++   * `id` is a call's identity; `index` only aliases it for deltas that carry no `id`. A
++   * gateway may omit `index`, repeat it across distinct calls, or number it freely, so it
++   * can never be the storage location.
++   */
++  private byId = new Map<string, TrackedToolCall>();
++  private byIndex = new Map<number, TrackedToolCall>();
++  private activeToolCall: TrackedToolCall | undefined;
+   private readonly controller: StreamingToolCallTrackerController;
+   private readonly _generateId: () => string;
+   private readonly typeValidation: 'none' | 'if-present' | 'required';
+@@ -105,13 +113,32 @@ export class StreamingToolCallTracker<
+    * events as appropriate.
+    */
+   processDelta(toolCallDelta: DELTA): void {
+-    const index = toolCallDelta.index ?? this.toolCalls.length;
++    const { id, index } = toolCallDelta;
++
++    // An explicit id is the strongest claim. Failing that, index associates a continuation
++    // with a call. With neither, the delta belongs to whichever call the stream last
++    // touched — note this is not "the last created call": every call stays unfinished until
++    // flush, so an explicit id for an earlier call moves the attachment point back to it.
++    let toolCall =
++      id != null
++        ? this.byId.get(id)
++        : index != null
++          ? this.byIndex.get(index)
++          : this.activeToolCall;
+ 
+-    if (this.toolCalls[index] == null) {
+-      this.processNewToolCall(index, toolCallDelta);
++    if (toolCall == null) {
++      toolCall = this.processNewToolCall(toolCallDelta);
+     } else {
+-      this.processExistingToolCall(index, toolCallDelta);
++      this.processExistingToolCall(toolCall, toolCallDelta);
++    }
++
++    // A new identity on an already-seen index takes the alias over from the call it
++    // displaces, so later index-only continuations reach the new call.
++    if (index != null) {
++      this.byIndex.set(index, toolCall);
+     }
++
++    this.activeToolCall = toolCall;
+   }
+ 
+   /**
+@@ -119,14 +146,37 @@ export class StreamingToolCallTracker<
+    * flush handler to ensure all tool calls are properly completed.
+    */
+   flush(): void {
+-    for (const toolCall of this.toolCalls) {
++    for (const toolCall of this.orderedToolCalls()) {
+       if (!toolCall.hasFinished) {
+         this.finishToolCall(toolCall);
+       }
+     }
+   }
+ 
+-  private processNewToolCall(index: number, toolCallDelta: DELTA): void {
++  /**
++   * A unique index per call is a usable final array position, so honour it — a gateway may
++   * stream a later slot first. A repeated or missing index carries no ordering information,
++   * and sorting by it anyway would let a malformed index reorder the turn; arrival order is
++   * then the only real signal left.
++   */
++  private orderedToolCalls(): readonly TrackedToolCall[] {
++    const indexOf = new Map<TrackedToolCall, number>();
++    for (const [index, toolCall] of this.byIndex) {
++      if (!indexOf.has(toolCall)) {
++        indexOf.set(toolCall, index);
++      }
++    }
++
++    if (indexOf.size !== this.toolCalls.length) {
++      return this.toolCalls;
++    }
++
++    return [...this.toolCalls].sort(
++      (left, right) => indexOf.get(left)! - indexOf.get(right)!,
++    );
++  }
++
++  private processNewToolCall(toolCallDelta: DELTA): TrackedToolCall {
+     if (this.typeValidation === 'required') {
+       if (toolCallDelta.type !== 'function') {
+         throw new InvalidResponseDataError({
+@@ -165,7 +215,7 @@ export class StreamingToolCallTracker<
+ 
+     const metadata = this.extractMetadata?.(toolCallDelta);
+ 
+-    this.toolCalls[index] = {
++    const toolCall: TrackedToolCall = {
+       id: toolCallDelta.id,
+       type: 'function',
+       function: {
+@@ -176,7 +226,12 @@ export class StreamingToolCallTracker<
+       metadata,
+     };
+ 
+-    const toolCall = this.toolCalls[index];
++    this.toolCalls.push(toolCall);
++    this.byId.set(toolCall.id, toolCall);
++
++    if (toolCallDelta.index != null) {
++      this.byIndex.set(toolCallDelta.index, toolCall);
++    }
+ 
+     // Emit initial delta if arguments already present
+     if (toolCall.function.arguments.length > 0) {
+@@ -191,11 +246,13 @@ export class StreamingToolCallTracker<
+     // argument buffer can still be the prefix of a longer argument string,
+     // so acting on it early would use truncated inputs (see #13137).
+     // Finalization happens in flush().
++    return toolCall;
+   }
+ 
+-  private processExistingToolCall(index: number, toolCallDelta: DELTA): void {
+-    const toolCall = this.toolCalls[index];
+-
++  private processExistingToolCall(
++    toolCall: TrackedToolCall,
++    toolCallDelta: DELTA,
++  ): void {
+     if (toolCall.hasFinished) {
+       return;
+     }
