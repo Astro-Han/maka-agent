@@ -465,20 +465,18 @@ export function buildHarborCellContextBudgetBackendOptions(
     // Replay hydration addresses an archive by the originating runtime event, so
     // it verifies that identity on top of the shared artifact checks.
     readToolResultArchive: async (input) =>
-      readHarborCellArchivedToolResult(archiveDir, input, (record) =>
-        record.runtimeEventId !== input.runtimeEventId || record.toolCallId !== input.toolCallId
-          ? 'source_mismatch'
-          : undefined,
-      ),
+      readHarborCellArchivedToolResult(archiveDir, input, {
+        runtimeEventId: input.runtimeEventId,
+        toolCallId: input.toolCallId,
+      }),
   };
 }
 
 /**
- * Ref-addressed reader backing the `ArchiveRead` tool. It is gated on exactly the
- * same archive dir as the writer above, so a cell that archives tool results can
- * always read them back. Unlike replay hydration it has no runtime event identity
- * to check — a `maka://archive/...` ref only carries artifact id, hash, and size —
- * and it must never synthesize one to satisfy the stricter path.
+ * Ref-addressed reader backing the `ArchiveRead` tool. Unlike replay hydration it
+ * has no runtime event identity to check — a `maka://archive/...` ref only carries
+ * artifact id, hash, and size — and it must never synthesize one to satisfy the
+ * stricter path.
  */
 export function buildHarborCellToolResultArchiveResourceReader(
   env: RunHarborCellEnv = process.env,
@@ -499,11 +497,8 @@ async function readHarborCellArchivedToolResult(
     sessionId: string;
     bodySha256: string;
     originalBytes: number;
-    maxBytes?: number;
   },
-  verifyRecord?: (
-    record: HarborCellToolResultArchiveRecord,
-  ) => ToolResultArchiveReadFailureReason | undefined,
+  expectedSource?: { runtimeEventId: string; toolCallId: string },
 ): Promise<ToolResultArchiveReadResult> {
   if (!isSafeHarborCellArchiveArtifactId(input.artifactId))
     return { ok: false, reason: 'not_allowed' };
@@ -521,16 +516,18 @@ async function readHarborCellArchivedToolResult(
   }
   if (!isHarborCellToolResultArchiveRecord(parsed)) return { ok: false, reason: 'corrupt' };
   if (parsed.sessionId !== input.sessionId) return { ok: false, reason: 'session_mismatch' };
-  const identityFailure = verifyRecord?.(parsed);
-  if (identityFailure) return { ok: false, reason: identityFailure };
+  if (
+    expectedSource &&
+    (parsed.runtimeEventId !== expectedSource.runtimeEventId ||
+      parsed.toolCallId !== expectedSource.toolCallId)
+  )
+    return { ok: false, reason: 'source_mismatch' };
   if (parsed.originalBytes !== input.originalBytes) return { ok: false, reason: 'size_mismatch' };
   if (parsed.bodySha256 !== input.bodySha256) return { ok: false, reason: 'source_mismatch' };
   const actualSha = createHash('sha256').update(parsed.serializedResult).digest('hex');
   if (actualSha !== input.bodySha256) return { ok: false, reason: 'corrupt' };
   const actualBytes = Buffer.byteLength(parsed.serializedResult, 'utf8');
   if (actualBytes !== input.originalBytes) return { ok: false, reason: 'size_mismatch' };
-  if (input.maxBytes !== undefined && actualBytes > input.maxBytes)
-    return { ok: false, reason: 'too_large' };
   return { ok: true, serializedResult: parsed.serializedResult };
 }
 
@@ -838,7 +835,13 @@ function semanticCompactModeEnv(
   );
 }
 
+/**
+ * Sole authority for whether a cell archives tool results, and where. Both the
+ * writer and every reader derive from it, so the model can never be told to call
+ * `ArchiveRead` for a run that archives nothing — nor archive what it cannot read.
+ */
 function harborCellToolResultArchiveDir(env: RunHarborCellEnv): string | undefined {
+  if (env.MAKA_CONTEXT_BUDGET === 'off') return undefined;
   return (
     env.MAKA_CONTEXT_TOOL_RESULT_ARCHIVE_DIR ??
     env.MAKA_TOOL_RESULT_ARCHIVE_DIR ??
