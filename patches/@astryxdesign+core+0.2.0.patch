@@ -1,0 +1,189 @@
+diff --git a/node_modules/@astryxdesign/core/dist/Layer/useLayer.js b/node_modules/@astryxdesign/core/dist/Layer/useLayer.js
+index f41f7e5..e43d620 100644
+--- a/node_modules/@astryxdesign/core/dist/Layer/useLayer.js
++++ b/node_modules/@astryxdesign/core/dist/Layer/useLayer.js
+@@ -13,7 +13,7 @@
+  * - /packages/core/src/Layer/useLayer.test.tsx
+  * - /packages/core/src/Layer/index.ts
+  */
+-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
++import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+ import * as stylex from '@stylexjs/stylex';
+ import { addAnchorName, removeAnchorName } from "./anchorName.js";
+ import "../theme/tokens.stylex.js";
+@@ -208,8 +208,14 @@ export function useLayer(options) {
+     }
+   }, [onHide]);
+ 
+-  // Ref for trigger element (context mode only)
+-  const ref = mode === 'context' ? el => {
++  // Ref for trigger element (context mode only).
++  //
++  // Identity is stable across renders: consumers put this ref (and the refs
++  // composed from it) in effect dependency arrays, so a fresh closure per
++  // render makes every unrelated re-render tear down and re-run those effects,
++  // rewriting `anchor-name` and `aria-describedby` on triggers whose state
++  // never changed.
++  const contextRef = useCallback(el => {
+     // Remove only THIS layer's anchor name from the previous element so
+     // other layers sharing the same trigger keep their anchors.
+     if (triggerRef.current && triggerRef.current !== el) {
+@@ -219,7 +225,7 @@ export function useLayer(options) {
+       addAnchorName(el, anchorId);
+     }
+     triggerRef.current = el;
+-  } : undefined;
++  }, [anchorId]);
+ 
+   // Reconcile browser-initiated closes (light-dismiss, popover="auto" stack
+   // eviction). These are the only cases where the DOM mutates without going
+@@ -360,23 +366,27 @@ export function useLayer(options) {
+       children: children
+     });
+   }, [popoverRefCallback, id, lightDismiss]);
+-  if (mode === 'context') {
+-    return {
+-      ref: ref,
+-      anchorId,
+-      show,
+-      hide,
+-      isOpen,
+-      id,
+-      render: renderContext
+-    };
+-  }
+-  return {
++  // The returned object is memoized for the same reason the ref is: consumers
++  // spread it into dependency arrays (`useTooltip` composes `layer.ref`, and
++  // its own effects depend on `layer`). A fresh object per render propagates
++  // that instability outward. It still changes when something a consumer must
++  // observe changes — `isOpen` above all.
++  const contextLayer = useMemo(() => ({
++    ref: contextRef,
++    anchorId,
++    show,
++    hide,
++    isOpen,
++    id,
++    render: renderContext
++  }), [contextRef, anchorId, show, hide, isOpen, id, renderContext]);
++  const fixedLayer = useMemo(() => ({
+     ref: undefined,
+     show,
+     hide,
+     isOpen,
+     id,
+     render: renderFixed
+-  };
++  }), [show, hide, isOpen, id, renderFixed]);
++  return mode === 'context' ? contextLayer : fixedLayer;
+ }
+\ No newline at end of file
+diff --git a/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx b/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx
+index 024f628..416df47 100644
+--- a/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx
++++ b/node_modules/@astryxdesign/core/src/Layer/useLayer.tsx
+@@ -18,6 +18,7 @@ import React, {
+   useCallback,
+   useEffect,
+   useId,
++  useMemo,
+   useRef,
+   useState,
+   type ReactNode,
+@@ -426,23 +427,29 @@ export function useLayer(
+     }
+   }, [onHide]);
+ 
+-  // Ref for trigger element (context mode only)
+-  const ref: RefCallback<HTMLElement> | undefined =
+-    mode === 'context'
+-      ? (el: HTMLElement | null) => {
+-          // Remove only THIS layer's anchor name from the previous element so
+-          // other layers sharing the same trigger keep their anchors.
+-          if (triggerRef.current && triggerRef.current !== el) {
+-            removeAnchorName(triggerRef.current, anchorId);
+-          }
+-
+-          if (el) {
+-            addAnchorName(el, anchorId);
+-          }
+-
+-          triggerRef.current = el;
+-        }
+-      : undefined;
++  // Ref for trigger element (context mode only).
++  //
++  // Identity is stable across renders: consumers put this ref (and the refs
++  // composed from it) in effect dependency arrays, so a fresh closure per
++  // render makes every unrelated re-render tear down and re-run those effects,
++  // rewriting `anchor-name` and `aria-describedby` on triggers whose state
++  // never changed.
++  const contextRef: RefCallback<HTMLElement> = useCallback(
++    (el: HTMLElement | null) => {
++      // Remove only THIS layer's anchor name from the previous element so
++      // other layers sharing the same trigger keep their anchors.
++      if (triggerRef.current && triggerRef.current !== el) {
++        removeAnchorName(triggerRef.current, anchorId);
++      }
++
++      if (el) {
++        addAnchorName(el, anchorId);
++      }
++
++      triggerRef.current = el;
++    },
++    [anchorId],
++  );
+ 
+   // Reconcile browser-initiated closes (light-dismiss, popover="auto" stack
+   // eviction). These are the only cases where the DOM mutates without going
+@@ -617,24 +624,35 @@ export function useLayer(
+     [popoverRefCallback, id, lightDismiss],
+   );
+ 
+-  if (mode === 'context') {
+-    return {
+-      ref: ref as RefCallback<HTMLElement>,
++  // The returned object is memoized for the same reason the ref is: consumers
++  // spread it into dependency arrays (`useTooltip` composes `layer.ref`, and
++  // its own effects depend on `layer`). A fresh object per render propagates
++  // that instability outward. It still changes when something a consumer must
++  // observe changes — `isOpen` above all.
++  const contextLayer: ContextLayerReturn = useMemo(
++    () => ({
++      ref: contextRef,
+       anchorId,
+       show,
+       hide,
+       isOpen,
+       id,
+       render: renderContext,
+-    };
+-  }
++    }),
++    [contextRef, anchorId, show, hide, isOpen, id, renderContext],
++  );
++
++  const fixedLayer: FixedLayerReturn = useMemo(
++    () => ({
++      ref: undefined,
++      show,
++      hide,
++      isOpen,
++      id,
++      render: renderFixed,
++    }),
++    [show, hide, isOpen, id, renderFixed],
++  );
+ 
+-  return {
+-    ref: undefined,
+-    show,
+-    hide,
+-    isOpen,
+-    id,
+-    render: renderFixed,
+-  };
++  return mode === 'context' ? contextLayer : fixedLayer;
+ }
