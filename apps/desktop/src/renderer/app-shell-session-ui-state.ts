@@ -5,6 +5,11 @@ import type { ShellRunUpdatesBySession } from './shell-run-update-state.js';
 
 type StateUpdater<T> = (updater: (current: T) => T) => void;
 
+// Event-stream health is deliberately absent: it is observation-only bookkeeping
+// (`checkedAt` advances on every probe) that nothing renders, so the controller
+// keeps it in a ref instead — see `sessionEventHealthBySessionRef` below. Putting
+// it here would make each probe force a full AppShell render for no visible
+// change (#1979).
 export interface AppShellSessionUiState {
   messageLoadErrorBySession: Record<string, string>;
   messageRetryPendingBySession: Record<string, boolean>;
@@ -12,7 +17,6 @@ export interface AppShellSessionUiState {
   liveTurnBySession: Record<string, LiveTurnProjection>;
   shellRunUpdatesBySession: ShellRunUpdatesBySession;
   interactionBySession: InteractionQueues;
-  sessionEventHealthBySession: Record<string, SessionEventStreamSnapshot>;
   pendingPermissionModeBySession: Record<string, boolean>;
   pendingSessionModelBySession: Record<string, boolean>;
 }
@@ -26,7 +30,6 @@ const SESSION_UI_MAP_KEYS = [
   'liveTurnBySession',
   'shellRunUpdatesBySession',
   'interactionBySession',
-  'sessionEventHealthBySession',
   'pendingPermissionModeBySession',
   'pendingSessionModelBySession',
 ] as const satisfies readonly AppShellSessionUiStateMapKey[];
@@ -50,14 +53,11 @@ export function createInitialAppShellSessionUiState(): AppShellSessionUiState {
   return Object.fromEntries(SESSION_UI_MAP_KEYS.map((key) => [key, {}])) as unknown as AppShellSessionUiState;
 }
 
-function omitSessionKey<K extends AppShellSessionUiStateMapKey>(
-  current: AppShellSessionUiState[K],
-  sessionId: string,
-): AppShellSessionUiState[K] {
+function omitSessionKey<T extends object>(current: T, sessionId: string): T {
   if (!(sessionId in current)) return current;
   const next = { ...current };
   delete (next as Record<string, unknown>)[sessionId];
-  return next as AppShellSessionUiState[K];
+  return next;
 }
 
 function updateAppShellSessionUiStateMap<K extends AppShellSessionUiStateMapKey>(
@@ -107,13 +107,16 @@ export function createAppShellSessionUiStateController(
 ) {
   let currentState = initialState;
   const liveTurnBySessionRef = { current: currentState.liveTurnBySession };
-  const sessionEventHealthBySessionRef = { current: currentState.sessionEventHealthBySession };
+  // Written by the event-health probes and read back by them alone. Kept off
+  // `currentState` so a probe never notifies `onChange`.
+  const sessionEventHealthBySessionRef: { current: Record<string, SessionEventStreamSnapshot> } = {
+    current: {},
+  };
 
   function replaceState(next: AppShellSessionUiState): void {
     if (next === currentState) return;
     currentState = next;
     liveTurnBySessionRef.current = next.liveTurnBySession;
-    sessionEventHealthBySessionRef.current = next.sessionEventHealthBySession;
     onChange(next);
   }
 
@@ -141,10 +144,16 @@ export function createAppShellSessionUiStateController(
     setLiveTurnBySession: createMapSetter('liveTurnBySession'),
     setShellRunUpdatesBySession: createMapSetter('shellRunUpdatesBySession'),
     setInteractionBySession: createMapSetter('interactionBySession'),
-    setSessionEventHealthBySession: createMapSetter('sessionEventHealthBySession'),
+    setSessionEventHealthBySession: ((updater) => {
+      sessionEventHealthBySessionRef.current = updater(sessionEventHealthBySessionRef.current);
+    }) satisfies StateUpdater<Record<string, SessionEventStreamSnapshot>>,
     setPendingPermissionModeBySession: createMapSetter('pendingPermissionModeBySession'),
     setPendingSessionModelBySession: createMapSetter('pendingSessionModelBySession'),
     clearSessionUiState: (sessionId: string) => {
+      sessionEventHealthBySessionRef.current = omitSessionKey(
+        sessionEventHealthBySessionRef.current,
+        sessionId,
+      );
       replaceState(clearAppShellSessionUiStateForSession(currentState, sessionId));
     },
     clearTurnTransientState: (sessionId: string) => {

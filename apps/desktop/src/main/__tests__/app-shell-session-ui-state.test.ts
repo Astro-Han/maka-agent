@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { SandboxBoundaryRequestEvent, SessionSummary } from '@maka/core';
+import type { SandboxBoundaryRequestEvent, SessionEventStreamSnapshot, SessionSummary } from '@maka/core';
 import { armLiveTurn } from '@maka/ui';
 import { settledSessionTransientIds } from '../../renderer/settled-session-transients.js';
 import {
@@ -27,6 +27,10 @@ function boundaryRequest(requestId: string): SandboxBoundaryRequestEvent {
   };
 }
 
+function healthSnapshot(sessionId: string): SessionEventStreamSnapshot {
+  return { sessionId, status: 'connected', subscribedAt: 1, checkedAt: 1 };
+}
+
 function seededState(): AppShellSessionUiState {
   return {
     ...createInitialAppShellSessionUiState(),
@@ -37,10 +41,6 @@ function seededState(): AppShellSessionUiState {
     interactionBySession: {
       drop: [boundaryRequest('drop')],
       keep: [boundaryRequest('keep')],
-    },
-    sessionEventHealthBySession: {
-      drop: { sessionId: 'drop', status: 'connected', subscribedAt: 1, checkedAt: 1 },
-      keep: { sessionId: 'keep', status: 'stale', subscribedAt: 1, checkedAt: 2, staleSince: 2 },
     },
     pendingPermissionModeBySession: { drop: true, keep: true },
     pendingSessionModelBySession: { drop: true, keep: true },
@@ -72,7 +72,6 @@ describe('app shell session UI state controller', () => {
     assert.deepEqual(Object.keys(next.stopPendingBySession), ['keep']);
     assert.deepEqual(Object.keys(next.liveTurnBySession), ['keep']);
     assert.deepEqual(Object.keys(next.interactionBySession), ['keep']);
-    assert.deepEqual(Object.keys(next.sessionEventHealthBySession), ['keep']);
     assert.deepEqual(Object.keys(next.pendingPermissionModeBySession), ['keep']);
     assert.deepEqual(Object.keys(next.pendingSessionModelBySession), ['keep']);
   });
@@ -90,6 +89,35 @@ describe('app shell session UI state controller', () => {
     assert.deepEqual(next.messageLoadErrorBySession, { session: 'failed' });
     assert.equal(next.stopPendingBySession, state.stopPendingBySession);
     assert.equal(next.liveTurnBySession, state.liveTurnBySession);
+  });
+
+  it('records event-stream health without notifying render subscribers', () => {
+    let notifications = 0;
+    const controller = createAppShellSessionUiStateController(undefined, () => {
+      notifications += 1;
+    });
+    const snapshot = healthSnapshot('session');
+
+    controller.setSessionEventHealthBySession((current) => ({ ...current, session: snapshot }));
+
+    assert.equal(controller.sessionEventHealthBySessionRef.current.session, snapshot);
+    assert.equal(notifications, 0, 'stream health has no render consumer, so it must not force one');
+
+    controller.setMessageLoadErrorBySession((current) => ({ ...current, session: 'failed' }));
+
+    assert.equal(notifications, 1, 'maps that are rendered still notify');
+  });
+
+  it('drops event-stream health along with the rest of a cleared session', () => {
+    const controller = createAppShellSessionUiStateController();
+    controller.setSessionEventHealthBySession(() => ({
+      drop: healthSnapshot('drop'),
+      keep: healthSnapshot('keep'),
+    }));
+
+    controller.clearSessionUiState('drop');
+
+    assert.deepEqual(Object.keys(controller.sessionEventHealthBySessionRef.current), ['keep']);
   });
 
   it('keeps the synchronous live-turn ref aligned with reducer updates', () => {
