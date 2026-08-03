@@ -34,7 +34,7 @@ import {
   type HarborTaskPricing,
 } from './harbor-task-runner.js';
 import {
-  harnessAgentDefinition,
+  harnessAgentImportPath,
   providerProxyClientAuthMode,
   providerProxyUpstreamAuthMode,
   providerProxyUpstreamBaseUrl,
@@ -637,7 +637,7 @@ export interface BuildPierRunArgsInput {
 
 /** Assemble the `pier run` argv. Exported for deterministic unit tests. */
 export function buildPierRunArgs(input: BuildPierRunArgsInput): string[] {
-  const importPath = harnessAgentDefinition(input.agent).importPath;
+  const importPath = harnessAgentImportPath(input.agent);
   const args = [
     'run',
     '--agent-import-path',

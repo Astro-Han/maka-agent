@@ -41,7 +41,7 @@ import {
   type ProviderUpstreamCredentialResolver,
 } from './provider-auth-proxy.js';
 import {
-  harnessAgentDefinition,
+  harnessAgentImportPath,
   providerProxyClientAuthMode,
   providerProxyClientBaseUrl,
   providerProxyUpstreamAuthMode,
@@ -1131,7 +1131,7 @@ export function buildHarborJobConfig(
     agents: [
       {
         ...(adapter === 'maka' ? { name: adapter } : {}),
-        import_path: harnessAgentDefinition(adapter).importPath,
+        import_path: harnessAgentImportPath(adapter),
         model_name: agentModel,
         kwargs:
           adapter === 'maka'

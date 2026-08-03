@@ -87,7 +87,7 @@ import { envPath as parseEnvPath } from '#headless-run-env';
 import { buildSubjectFingerprint, buildToolchainFingerprint } from '#experiment-fingerprint';
 import { runExperiment } from '#experiment-engine';
 import { DEEPSEEK_V4_FLASH_PRICING } from '#deepseek-pricing';
-import { harnessAgentDefinition, providerProxyUsageProtocol } from '#harness-agent-registry';
+import { harnessAgentImportPath, providerProxyUsageProtocol } from '#harness-agent-registry';
 
 const execFileAsync = promisify(execFile);
 
@@ -820,7 +820,7 @@ export function buildHarnessAbManifest({
         id: 'maka',
         version: subjectFingerprint,
         config: {
-          adapter: harnessAgentDefinition('maka').importPath,
+          adapter: harnessAgentImportPath('maka'),
           ...(competitorProfiles.length > 1
             ? { transport: harnessMeasuredTransport('maka', execution.provider) }
             : {}),
@@ -845,7 +845,7 @@ export function buildHarnessAbManifest({
         id: profile.id,
         version: profile.version,
         config: {
-          adapter: harnessAgentDefinition(profile.id).importPath,
+          adapter: harnessAgentImportPath(profile.id),
           ...profile.config,
           ...(competitorProfiles.length > 1
             ? { transport: harnessMeasuredTransport(profile.id, execution.provider) }

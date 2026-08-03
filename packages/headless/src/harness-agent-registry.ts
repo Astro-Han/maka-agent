@@ -3,21 +3,16 @@ import type { ProviderAuthProxyMode, ProviderUsageProtocol } from './provider-au
 
 export type HarnessAgentId = 'maka' | 'opencode' | 'kimi-code' | 'codex' | 'claude-code';
 
-export interface HarnessAgentDefinition {
-  id: HarnessAgentId;
-  importPath: string;
-}
-
-export const HARNESS_AGENT_REGISTRY: Readonly<Record<HarnessAgentId, HarnessAgentDefinition>> = {
-  maka: { id: 'maka', importPath: 'maka_agent:MakaAgent' },
-  opencode: { id: 'opencode', importPath: 'opencode_agent:MakaOpenCodeAgent' },
-  'kimi-code': { id: 'kimi-code', importPath: 'kimi_code_agent:MakaKimiCodeAgent' },
-  codex: { id: 'codex', importPath: 'codex_agent:MakaCodexAgent' },
-  'claude-code': { id: 'claude-code', importPath: 'claude_code_agent:MakaClaudeCodeAgent' },
+const HARNESS_AGENT_IMPORT_PATHS: Readonly<Record<HarnessAgentId, string>> = {
+  maka: 'maka_agent:MakaAgent',
+  opencode: 'opencode_agent:MakaOpenCodeAgent',
+  'kimi-code': 'kimi_code_agent:MakaKimiCodeAgent',
+  codex: 'codex_agent:MakaCodexAgent',
+  'claude-code': 'claude_code_agent:MakaClaudeCodeAgent',
 };
 
-export function harnessAgentDefinition(agent: HarnessAgentId): HarnessAgentDefinition {
-  return HARNESS_AGENT_REGISTRY[agent];
+export function harnessAgentImportPath(agent: HarnessAgentId): string {
+  return HARNESS_AGENT_IMPORT_PATHS[agent];
 }
 
 export function providerProxyClientBaseUrl(
