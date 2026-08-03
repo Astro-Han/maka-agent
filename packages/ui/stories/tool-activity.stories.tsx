@@ -125,3 +125,16 @@ export const DenseMixedResults: Story = {
   args: { items: denseMixedResultItems },
   render: (args) => <ToolDetailBoard items={args.items} />,
 };
+
+// Real path: a contiguous run of tool calls in one turn — the grouped surface, where
+// Astryx's collapsed header shows only the last row. A group holding a failure or an
+// interrupted call must open on its own so that outcome is not hidden behind a
+// trailing success.
+export const ContiguousGroup: Story = {
+  args: { items: errorsAndPermissionDeniedItems },
+  render: (args) => (
+    <Board width={860}>
+      <ToolTrow items={args.items} />
+    </Board>
+  ),
+};

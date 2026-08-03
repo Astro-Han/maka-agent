@@ -43,9 +43,7 @@ import {
 } from './tool-activity/builtin-preview.js';
 import {
   TOOL_OUTPUT_BODY_CLASS,
-  TOOL_OUTPUT_COMMAND_CLASS,
   TOOL_OUTPUT_NOTE_CLASS,
-  TOOL_OUTPUT_PANEL_CLASS,
   ToolResultPreview,
 } from './tool-activity/tool-result-preview.js';
 import { getToolActivityCopy } from './tool-activity/copy.js';
@@ -293,12 +291,15 @@ export function ToolTrow({ items }: { items: ToolActivityItem[] }) {
     ),
   }));
 
-  return (
-    <ChatToolCalls
-      calls={calls}
-      defaultIsExpanded={items.some((item) => item.status === 'running')}
-    />
+  // Astryx's collapsed header projects only the last call, so an outcome word
+  // on any earlier row would be invisible behind a trailing success. Open the
+  // group when something in it still runs or needs a word — the two cases where
+  // the header alone would misreport the run.
+  const needsOpen = items.some(
+    (item) => item.status === 'running' || outcomeWord(item, locale) !== undefined,
   );
+
+  return <ChatToolCalls calls={calls} defaultIsExpanded={needsOpen} />;
 }
 
 function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {
@@ -311,9 +312,12 @@ function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {
   }
 }
 
-/** Full failure text: Astryx hangs it off the status icon and reads it out. */
+/**
+ * Full failure text: Astryx hangs it off the status icon and reads it out.
+ * `interrupted` says its piece through `stats` instead — routing it here too
+ * would make a screen reader announce the same word twice.
+ */
 function toolCallErrorMessage(item: ToolActivityItem, locale: UiLocale): string | undefined {
-  if (item.status === 'interrupted') return getToolActivityCopy(locale).status.interrupted;
   if (item.status !== 'errored') return undefined;
   return summarizeErrorText(formatUserVisibleToolText(
     redactSecrets(extractErrorText(item.result, locale)),
