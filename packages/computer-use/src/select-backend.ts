@@ -14,14 +14,15 @@ import type { MakaCuServiceSnapshot } from './maka-cu-service.js';
 /**
  * The executors a caller may ask for.
  *
- * `'cua-driver'` is first because it is the default, and it stays the default
- * until maka-cu has an artifact that a packaged build is allowed to spawn.
- * Nothing here picks maka-cu on its own: a caller names it, or gets cua-driver.
+ * `'maka-cu'` is first because it is now the default: a caller that names
+ * nothing gets maka-cu, and cua-driver is reached only by asking for it. That
+ * is the reverse of how this landed, and it is the whole of the behaviour
+ * change — everything either executor could already do, it still does.
  */
-export const CU_BACKEND_IDS = ['cua-driver', 'maka-cu'] as const;
+export const CU_BACKEND_IDS = ['maka-cu', 'cua-driver'] as const;
 export type CuBackendId = (typeof CU_BACKEND_IDS)[number];
 
-export const DEFAULT_CU_BACKEND_ID: CuBackendId = 'cua-driver';
+export const DEFAULT_CU_BACKEND_ID: CuBackendId = 'maka-cu';
 
 type DisposableBackend = CuDispatchBackend & {
   clearSession?: (sessionId: string) => void;
@@ -90,8 +91,8 @@ interface CommonSelection {
 }
 
 export interface CuaDriverSelection extends CommonSelection {
-  /** Omitted means the default; see `DEFAULT_CU_BACKEND_ID`. */
-  backendId?: 'cua-driver';
+  /** Required: cua-driver is no longer reached by leaving a field out. */
+  backendId: 'cua-driver';
   hostBundleId?: string;
   expectedServerName?: string;
   expectedServerVersion?: string;
@@ -101,8 +102,8 @@ export interface CuaDriverSelection extends CommonSelection {
 }
 
 export interface MakaCuSelection extends CommonSelection {
-  /** Required: maka-cu is never reached by leaving a field out. */
-  backendId: 'maka-cu';
+  /** Omitted means the default; see `DEFAULT_CU_BACKEND_ID`. */
+  backendId?: 'maka-cu';
   onTrace?: MakaCuBackendOptions['onTrace'];
   /**
    * Coordinate and key dispatch post synthetic events. Off unless a host policy
@@ -120,9 +121,12 @@ export type ComputerUseBackendSelection = CuaDriverSelection | MakaCuSelection;
  * a fresh object literal is being written against and gives its methods an
  * implicit `any` — which is how a host would silently stop being told that it
  * had wired a cua-driver option into the maka-cu factory.
+ *
+ * The default member comes first, so an object literal with no `backendId` is
+ * checked against maka-cu's options rather than the other executor's.
  */
-export function selectComputerUseBackend(deps?: CuaDriverSelection): SelectedComputerUseBackend;
-export function selectComputerUseBackend(deps: MakaCuSelection): SelectedComputerUseBackend;
+export function selectComputerUseBackend(deps?: MakaCuSelection): SelectedComputerUseBackend;
+export function selectComputerUseBackend(deps: CuaDriverSelection): SelectedComputerUseBackend;
 export function selectComputerUseBackend(
   deps?: ComputerUseBackendSelection,
 ): SelectedComputerUseBackend {
@@ -137,7 +141,10 @@ export function selectComputerUseBackend(
     };
     const backendId: CuBackendId = deps.backendId ?? DEFAULT_CU_BACKEND_ID;
     let backend: DisposableBackend;
-    if (deps.backendId === 'maka-cu') {
+    // Written as "not the other one" rather than as a test on `backendId`,
+    // because this is also what narrows the union: naming cua-driver is
+    // required, so everything else in the union is a maka-cu selection.
+    if (deps.backendId !== 'cua-driver') {
       backend = (deps.createBackend ?? createMakaCuBackend)({
         binaryPath,
         expectedBinarySha256,

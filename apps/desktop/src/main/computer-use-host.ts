@@ -10,7 +10,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CuaDriverRoleSnapshot } from '@maka/computer-use';
-import type { CuaDriverBackendOptions } from '@maka/computer-use';
+import type { MakaCuBackendOptions } from '@maka/computer-use';
 import type { MakaCuServiceSnapshot } from '@maka/computer-use';
 import {
   selectComputerUseBackend,
@@ -48,7 +48,7 @@ export function createComputerUseHost(input: {
   physicalInputRecentlyActive: () => boolean | Promise<boolean>;
   /** Whether the machine is locked; refuses every call while it is. */
   screenLocked?: (context: { sessionId: string }) => boolean | Promise<boolean>;
-  onTrace?: CuaDriverBackendOptions['onTrace'];
+  onTrace?: MakaCuBackendOptions['onTrace'];
   overlay?: CuOverlayHook;
 }): ComputerUseHostState {
   const manifestPath = input.manifestPath ?? (input.isPackaged
@@ -60,29 +60,24 @@ export function createComputerUseHost(input: {
         'bundled-tools.json',
       ));
   const binaryPath = input.binaryPath ?? (input.isPackaged
-    ? join(input.resourcesPath, 'bin', 'cua-driver')
+    ? join(input.resourcesPath, 'bin', 'maka-cu')
     : resolve(
         dirname(fileURLToPath(import.meta.url)),
         '..',
         '..',
         'resources',
         'bin',
-        'cua-driver',
+        'maka-cu',
       ));
   try {
     const manifest = JSON.parse(readRegularFile(manifestPath).toString('utf8')) as {
-      cuaDriver?: {
+      makaCu?: {
         binarySha256?: string;
         distributionReady?: boolean;
-        expectedVersion?: string;
-        expectedProtocolVersion?: string;
       };
     };
-    const expectedBinarySha256 = manifest.cuaDriver?.binarySha256;
-    const expectedServerVersion = manifest.cuaDriver?.expectedVersion;
-    const expectedProtocolVersion =
-      manifest.cuaDriver?.expectedProtocolVersion;
-    if (input.isPackaged && manifest.cuaDriver?.distributionReady !== true) {
+    const expectedBinarySha256 = manifest.makaCu?.binarySha256;
+    if (input.isPackaged && manifest.makaCu?.distributionReady !== true) {
       return { selected: selectComputerUseBackend() };
     }
     if (!expectedBinarySha256 || !/^[a-f0-9]{64}$/.test(expectedBinarySha256)) {
@@ -96,12 +91,12 @@ export function createComputerUseHost(input: {
       return { selected: selectComputerUseBackend() };
     }
     return {
+      // No `backendId`: the host takes whatever `DEFAULT_CU_BACKEND_ID` names,
+      // so "which executor ships" is one decision recorded in one place rather
+      // than a default and a host that could disagree about it.
       selected: selectComputerUseBackend({
         binaryPath,
         expectedBinarySha256,
-        expectedServerName: 'cua-driver',
-        ...(expectedServerVersion ? { expectedServerVersion } : {}),
-        ...(expectedProtocolVersion ? { expectedProtocolVersion } : {}),
         ...(input.compressFrame ? { compressFrame: input.compressFrame } : {}),
         physicalInputRecentlyActive: input.physicalInputRecentlyActive,
         ...(input.screenLocked ? { screenLocked: input.screenLocked } : {}),
