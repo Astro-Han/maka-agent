@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banner, VStack } from '@astryxdesign/core';
+import { Banner } from '@astryxdesign/core';
 import type { DailyReviewConfig, LlmConnection } from '@maka/core';
 import { Selector, Switch, TextInput, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { buildCatalogDailyReviewModelOptions } from '../model-catalog-choices';
 import { getDailyReviewSettingsCopy, type DailyReviewSettingsCopy } from '../locales/settings-daily-review-copy';
 import { settingsActionErrorMessage } from './settings-error-copy';
-import { SettingsRow, SettingsSection } from './settings-section';
+import { SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import { useActionGuard } from './use-action-guard';
 
 const DAILY_REVIEW_DEFAULT_MODEL_VALUE = '__maka_daily_review_default_model__';
@@ -93,7 +93,7 @@ export function DailyReviewSettingsPage(props: { connections: readonly LlmConnec
   const selectedModelValue = config?.modelKey.trim() || DAILY_REVIEW_DEFAULT_MODEL_VALUE;
 
   return (
-    <VStack className="settingsFormPage settingsStructuredPage" gap={6} aria-label={copy.aria}>
+    <SettingsPage aria-label={copy.aria}>
       {!hasConfigIpc ? <Banner status="info" title={copy.unavailable} /> : null}
       {loadError ? <Banner status="error" title={copy.loadFailed(loadError)} /> : null}
 
@@ -153,6 +153,6 @@ export function DailyReviewSettingsPage(props: { connections: readonly LlmConnec
           />}
         />
       </SettingsSection>
-    </VStack>
+    </SettingsPage>
   );
 }

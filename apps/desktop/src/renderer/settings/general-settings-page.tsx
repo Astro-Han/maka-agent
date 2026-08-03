@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { PersonalizationSettingsPage } from './appearance-settings-page';
-import { SettingsActions, SettingsField, SettingsRow, SettingsSection } from './settings-section';
+import { SettingsActions, SettingsField, SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import type {
   AppSettings,
   ChatDefaultPermissionMode,
@@ -56,7 +56,7 @@ export function GeneralSettingsPage(props: {
     onReloadSettings: props.onReloadSettings,
   });
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       {/* Designer audit P2-13: identity fields (显示名称/界面语言/语气偏好)
           moved here from the 外观 page — they configure who you are to the
           app, not how the app looks. The component keeps its save flow. */}
@@ -124,7 +124,7 @@ export function GeneralSettingsPage(props: {
       <SettingsSection title={sections.network} description={sections.networkHelp}>
         <NetworkProxySection settings={props.settings} onUpdate={props.onUpdate} />
       </SettingsSection>
-    </div>
+    </SettingsPage>
   );
 }
 

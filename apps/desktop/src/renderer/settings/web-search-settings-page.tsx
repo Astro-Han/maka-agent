@@ -4,7 +4,7 @@ import { normalizeSearchUrl, webSearchCredentialStatusFromResponse } from '@maka
 import { Button, StatusDot, TextInput, RelativeTime, Switch, redactSecrets, useMountedRef, useToast, useUiLocale } from '@maka/ui';
 import { getWebSearchSettingsCopy, type WebSearchSettingsCopy } from '../locales/settings-web-search-copy';
 import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
-import { SettingsActions, SettingsField, SettingsRow, SettingsSection } from './settings-section';
+import { SettingsActions, SettingsField, SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import { PasswordInput } from './password-input';
 import { settingsActionErrorMessage } from './settings-error-copy';
 import { statusDotVariant } from './settings-status-badge';
@@ -234,7 +234,7 @@ export function WebSearchSettingsPage(props: {
   const credentialActionBusy = pendingCredentialAction !== null || testing;
 
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       <SettingsSection
         title={sharedCopy.groups.searchProvider}
         description={sharedCopy.groups.searchProviderHelp}
@@ -406,7 +406,7 @@ export function WebSearchSettingsPage(props: {
         }
         return null;
       })()}
-    </div>
+    </SettingsPage>
   );
 }
 

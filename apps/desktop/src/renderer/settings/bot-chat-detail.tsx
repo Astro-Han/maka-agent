@@ -243,8 +243,8 @@ export function BotChatChannelDetail(props: {
           <dl className="settingsBotStatusGrid" aria-label={detailCopy.runtimeAria(providerPresentation.label)}>
             <div><dt>{detailCopy.identity}</dt><dd>{status?.identity?.username ?? status?.identity?.displayName ?? detailCopy.unknownIdentity}</dd></div>
             <div><dt>{detailCopy.connectionType}</dt><dd>{botConnectionLabel(status?.connection ?? 'none', locale)}</dd></div>
-            <div><dt>{detailCopy.lastEvent}</dt><dd>{status?.lastEventAt ? <RelativeTime ts={status.lastEventAt} className="settingsBotMetaTime" /> : detailCopy.noneYet}</dd></div>
-            <div><dt>{detailCopy.lastTest}</dt><dd>{channel.lastTestAt ? <RelativeTime ts={channel.lastTestAt} className="settingsBotMetaTime" /> : detailCopy.neverTested}</dd></div>
+            <div><dt>{detailCopy.lastEvent}</dt><dd>{status?.lastEventAt ? <RelativeTime ts={status.lastEventAt} /> : detailCopy.noneYet}</dd></div>
+            <div><dt>{detailCopy.lastTest}</dt><dd>{channel.lastTestAt ? <RelativeTime ts={channel.lastTestAt} /> : detailCopy.neverTested}</dd></div>
           </dl>
         </section>
 

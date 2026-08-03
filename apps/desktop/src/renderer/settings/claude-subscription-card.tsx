@@ -362,7 +362,7 @@ export function ClaudeSubscriptionCard() {
             />
           )}
           <Text type="supporting" color="secondary">
-            {copy.updated}<RelativeTime ts={state.quota.fetchedAt} className="settingsHelpInlineTime" />
+            {copy.updated}<RelativeTime ts={state.quota.fetchedAt} />
           </Text>
         </VStack>
       )}

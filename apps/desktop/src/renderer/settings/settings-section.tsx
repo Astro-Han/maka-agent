@@ -28,6 +28,35 @@ import type { ReactNode } from 'react';
 import { Divider, Heading, HStack, Item, Text, VStack } from '@astryxdesign/core';
 import { cn } from '@maka/ui';
 
+/**
+ * The ONE page-root container: a flat list of `SettingsSection`s at the open
+ * idiom's 32px rhythm. Pages used to reach for the bare
+ * `.settingsStructuredPage` class; the kit owns the container now, so a page
+ * never references page-layout CSS directly.
+ *
+ * Class is `settingsPageStack`, NOT `settingsPage` — `.settingsModal.settingsPage`
+ * is the pre-existing fullscreen-shell modifier and must not match this rule.
+ * Deliberately a `div` + kit-owned `.settingsPageStack` grid (nav-sidebar.css),
+ * NOT an Astryx `VStack`: the #1362 fix needs grid's `minmax(0, 1fr)`
+ * explicit column. In a flex stack a stretched child keeps its
+ * `min-width: auto` min-content floor, so one wide child (a scrollable
+ * `<pre>`, a long mono path) would poke past the content column again.
+ */
+export function SettingsPage(props: {
+  className?: string;
+  /** `section` when the page is a labeled landmark of a larger surface. */
+  as?: 'div' | 'section';
+  'aria-label'?: string;
+  children: ReactNode;
+}) {
+  const Tag = props.as ?? 'div';
+  return (
+    <Tag className={cn('settingsPageStack', props.className)} aria-label={props['aria-label']}>
+      {props.children}
+    </Tag>
+  );
+}
+
 export function SettingsSection(props: {
   /** Group label. Omit only for a page's single unlabeled lead group. */
   title?: ReactNode;

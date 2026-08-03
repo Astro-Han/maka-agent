@@ -4,55 +4,16 @@
   background: transparent;
 }
 
+/* Astryx convergence: the orphaned voice hero vocabulary
+   (.settingsFeatureStatusPage / Hero / Icon / HeroHeading) is deleted — the
+   voice page moved onto the SettingsSection kit and nothing consumed it.
+   .settingsFeatureStatusList below is still used by the voice 边界 list. */
+
 .settingsBackButton {
   justify-content: flex-start;
   -webkit-app-region: no-drag;
 }
 
-.settingsFeatureStatusPage {
-  display: grid;
-  align-content: start;
-  /* #1363: same explicit column as .settingsStructuredPage (#1362) — the
-     implicit `auto` track sizes to the widest child's max-content and lets
-     one wide child widen every card past the content column. */
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-2-5);
-}
-
-.settingsFeatureStatusHero {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-2-5);
-  padding: var(--space-2-5) var(--space-3);
-  border: var(--border-width-hairline) solid var(--border);
-  border-radius: var(--radius-surface);
-  background: var(--foreground-3);
-}
-
-.settingsFeatureStatusIcon {
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  /* Square icon plate — ratio-governed, see --radius-plate. */
-  border-radius: var(--radius-plate);
-  background: oklch(from var(--link) l c h / 0.08);
-  color: var(--link);
-}
-
-.settingsFeatureStatusHero h3 {
-  font: var(--maka-text-heading-4);
-  margin: 0 0 var(--space-0-5);
-  color: var(--foreground);
-}
-
-.settingsFeatureStatusHero p {
-  font: var(--maka-text-supporting);
-  margin: 0;
-  max-width: 56ch;
-  color: var(--foreground-secondary);
-}
 
 .settingsFeatureStatusList {
   font: var(--maka-text-supporting);
@@ -67,17 +28,6 @@
   color: var(--muted-foreground);
 }
 
-.settingsFeatureStatusHeroHeading {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-1-5);
-}
-
-.settingsFeatureStatusHeroHeading h3 {
-  margin: 0;
-}
 
 .settingsLoadingSkeleton {
   padding: var(--space-2) 0;
@@ -166,13 +116,14 @@
    settings `:active` rule below uses it directly. */
 
 /* PR-SETTINGS-NO-PANE-BORDER-0 (WAWQAQ msg `d0e7dfb3`): nested
-   card-in-card was the previous problem — `.settingsStructuredPage`
+   card-in-card was the previous problem — the page container
    was a card AND it contained grouped Astryx cards AND orphan
    `.settingsFormRow` direct children. Reference shows multiple
-   GROUPED cards stacked vertically. So `.settingsStructuredPage` is
+   GROUPED cards stacked vertically. So `.settingsPageStack` (owned by the
+   SettingsPage kit component in settings-section.tsx) is
    no longer a card — it's just the vertical container with gap, and
    `.settingsRows` is the ONLY card primitive. */
-.settingsStructuredPage {
+.settingsPageStack {
   display: grid;
   align-content: start;
   /* #1362: explicit column. The implicit `auto` track sizes to the widest
@@ -191,10 +142,10 @@
   background: transparent;
 }
 
-/* Nested `.settingsStructuredPage` (merged pages like 外观 stack two
-   sub-pages, each wrapping in their own `.settingsStructuredPage`):
+/* Nested `.settingsPageStack` (merged pages like 外观 stack two
+   sub-pages, each wrapping in their own SettingsPage):
    the inner one just passes through. */
-.settingsStructuredPage .settingsStructuredPage {
+.settingsPage .settingsPageStack {
   gap: var(--space-8);
 }
 

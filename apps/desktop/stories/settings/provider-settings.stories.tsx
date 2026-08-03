@@ -9,6 +9,7 @@ import type {
   ProviderType,
 } from '@maka/core';
 import { ProvidersPanel, type ConnectionsBridge } from '../../src/renderer/settings/ProvidersPanel';
+import { SettingsPage } from '../../src/renderer/settings/settings-section';
 
 const NOW = Date.parse('2026-07-01T08:00:00Z');
 
@@ -325,9 +326,9 @@ function ProviderStoryFrame(props: {
             )}
             content={(
               <LayoutContent padding={6}>
-                <div className="settingsStructuredPage settingsModelsPage">
+                <SettingsPage className="settingsModelsPage">
                   <ProvidersPanel bridge={props.bridge} />
-                </div>
+                </SettingsPage>
               </LayoutContent>
             )}
           />

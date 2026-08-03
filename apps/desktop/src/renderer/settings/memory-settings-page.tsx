@@ -14,7 +14,7 @@ import {
 } from '@maka/ui';
 import { getMemorySettingsCopy } from '../locales/settings-memory-copy';
 import { getSettingsSharedCopy } from '../locales/settings-shared-copy.js';
-import { SettingsActions, SettingsField, SettingsRow, SettingsSection } from './settings-section';
+import { SettingsActions, SettingsField, SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import { MemoryEntryList } from './memory-entry-list';
 import { MemoryPromptPreviewSection } from './memory-settings-sections';
 import { useMemoryDocumentController } from './use-memory-settings-controller';
@@ -93,7 +93,7 @@ export function MemorySettingsPage(props: {
   const entryActionsBlocked = memoryControlsDisabled || effective.status === 'incognito_blocked' || !effective.enabled;
 
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       <SettingsSection description={sharedCopy.groups.memorySourcesHelp}>
         <SettingsRow
           label={copy.text.localFile}
@@ -426,6 +426,6 @@ export function MemorySettingsPage(props: {
         copyPending={isMemoryActionPending('memory:prompt-preview:copy')}
         onCopy={copyLocalMemoryPromptPreview}
       />}
-    </div>
+    </SettingsPage>
   );
 }

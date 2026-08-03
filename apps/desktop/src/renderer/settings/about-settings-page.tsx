@@ -10,7 +10,7 @@ import {
   useUiLocale,
 } from '@maka/ui';
 import { SettingRow } from './settings-rows';
-import { SettingsActions, SettingsSection } from './settings-section';
+import { SettingsActions, SettingsPage, SettingsSection } from './settings-section';
 import { settingsActionErrorMessage } from './settings-error-copy';
 import { SettingsSkeletonStack } from './settings-skeleton';
 import { useActionGuard } from './use-action-guard';
@@ -73,13 +73,13 @@ export function AboutSettingsPage() {
 
   if (!info) {
     return (
-      <div className="settingsStructuredPage">
+      <SettingsPage>
         <Banner
           status="info"
           role="alert"
           title={copy.unavailable}
           description={infoError} />
-      </div>
+      </SettingsPage>
     );
   }
 
@@ -125,7 +125,7 @@ export function AboutSettingsPage() {
   }
 
   return (
-    <div className="settingsAboutPage">
+    <SettingsPage>
       <PageHeader
         as_wrapper="div"
         className="settingsAboutHero"
@@ -180,11 +180,11 @@ export function AboutSettingsPage() {
         />
         <SettingsActions>
           <Button variant="primary" isDisabled={copyingEnvSummary} aria-describedby={envSummaryHelpId} onClick={() => void copyEnvSummary()} label={copyingEnvSummary ? copy.copying : copy.copyEnvironment} />
-          <p id={envSummaryHelpId} className="settingsHelpText">
+          <p id={envSummaryHelpId}>
             {copy.copyHelp}
           </p>
         </SettingsActions>
       </SettingsSection>
-    </div>
+    </SettingsPage>
   );
 }

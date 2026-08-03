@@ -20,7 +20,7 @@ import {
 } from '@maka/ui';
 import { getVoiceSettingsCopy, type VoiceSettingsCopy } from '../locales/settings-voice-copy';
 import { SettingRow } from './settings-rows';
-import { SettingsActions, SettingsField, SettingsSection } from './settings-section';
+import { SettingsActions, SettingsField, SettingsPage, SettingsSection } from './settings-section';
 import { AddProviderForm } from './provider-add-form';
 import { ProviderConnectionDialog } from './provider-connection-dialog';
 import { providerPanelActionErrorMessage } from './provider-panel-shared';
@@ -409,7 +409,7 @@ export function VoiceModelsSettingsPage(props: {
        wrappers, loose FormLayouts and action rows on the page background.
        It is the same labeled-groups page as every other settings page now;
        the boundary subtitle keeps its copy as the 边界 section description. */
-    <section className="settingsStructuredPage" aria-label={copy.aria}>
+    <SettingsPage as="section" aria-label={copy.aria}>
       <SettingsSection title={copy.recognitionTitle}>
         <SettingsField>
         <FormLayout direction="horizontal">
@@ -608,7 +608,7 @@ export function VoiceModelsSettingsPage(props: {
           {copy.boundaries.map((boundary) => <li key={boundary}>{boundary}</li>)}
         </ul>
       </SettingsSection>
-    </section>
+    </SettingsPage>
   );
 }
 

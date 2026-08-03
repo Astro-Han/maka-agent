@@ -9,7 +9,7 @@ import { Text, VStack } from '@astryxdesign/core';
 import { Button, RelativeTime, StatusDot, useUiLocale, Banner } from '@maka/ui';
 import { getHealthCenterCopy, type HealthCenterCopy } from '../locales/settings-health-copy';
 import { settingsActionErrorMessage } from './settings-error-copy';
-import { SettingsRow, SettingsSection } from './settings-section';
+import { SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import { SettingsSkeletonStack } from './settings-skeleton';
 import { statusBadgeVariant } from './settings-status-badge';
 
@@ -65,13 +65,13 @@ export function HealthCenterPage() {
 
   if (error || !snapshot) {
     return (
-      <div className="settingsStructuredPage">
+      <SettingsPage>
         <Banner
           status="error"
           title={copy.readFailed}
           description={error ?? copy.noData}
           endContent={<Button variant="primary" onClick={() => setRefreshTick((tick) => tick + 1)} label={copy.readAgain} />} />
-      </div>
+      </SettingsPage>
     );
   }
 
@@ -88,7 +88,7 @@ export function HealthCenterPage() {
   ];
 
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       <SettingsSection
         description={(
           <>
@@ -98,7 +98,7 @@ export function HealthCenterPage() {
         action={(
           <div className="settingsFormRowControlCluster">
             <small className="settingsHealthMetaLabel">
-              {copy.lastRead}<RelativeTime ts={healthCheckedAtMs} className="settingsHelpInlineTime" />
+              {copy.lastRead}<RelativeTime ts={healthCheckedAtMs} />
             </small>
             <Button
               variant="secondary"
@@ -151,10 +151,8 @@ export function HealthCenterPage() {
         })}
       </SettingsSection>
 
-      <p className="settingsHealthFootnote">
-        {copy.footnote}
-      </p>
-    </div>
+      <Text as="p" type="supporting" size="sm" color="secondary">{copy.footnote}</Text>
+    </SettingsPage>
   );
 }
 
@@ -178,7 +176,7 @@ function HealthSignalRow(props: { signal: HealthSignal; copy: HealthCenterCopy }
           {detail && <small>{detail}</small>}
           <span className="settingsHealthSignalMeta">
             <span>{copy.source}{copy.sources[signal.source]}</span>
-            <span>{copy.checked}<RelativeTime ts={signal.checkedAt} className="settingsHelpInlineTime" /></span>
+            <span>{copy.checked}<RelativeTime ts={signal.checkedAt} /></span>
             {signal.blocksSend && <span data-tone="destructive">{copy.blocksSend}</span>}
             {signal.blocksCapability && <span data-tone="warning">{copy.blocksCapability}</span>}
           </span>

@@ -29,7 +29,7 @@ import {
   VStack,
 } from '@astryxdesign/core';
 import { RelativeTime, StatusDot, useMountedRef, useToast, useUiLocale } from '@maka/ui';
-import { SettingsSection } from './settings-section';
+import { SettingsPage, SettingsSection } from './settings-section';
 import { getPermissionCenterCopy, type PermissionCenterCopy } from '../locales/permission-center-copy';
 import { settingsActionErrorMessage } from './settings-error-copy';
 import { statusDotVariant } from './settings-status-badge';
@@ -173,7 +173,7 @@ export function PermissionCenterPage() {
   const counts = summarizePermissionStatuses(permissions);
 
   return (
-    <VStack gap={5} className="settingsStructuredPage">
+    <SettingsPage>
       {/* The page opened with a SectionHeader whose title was the page title
           VERBATIM (权限与能力 twice, ~40px apart) and whose subtitle restated
           the 系统权限 section's own help line below it. Worse, the refresh
@@ -189,7 +189,7 @@ export function PermissionCenterPage() {
         action={(
           <div className="settingsFormRowControlCluster">
             <Text type="supporting" size="sm" color="secondary">
-              {copy.lastRead}<RelativeTime ts={checkedAtMs} className="settingsHelpInlineTime" />
+              {copy.lastRead}<RelativeTime ts={checkedAtMs} />
             </Text>
             <Button
               variant="secondary"
@@ -259,7 +259,7 @@ export function PermissionCenterPage() {
       </SettingsSection>
 
       <Text type="supporting" size="sm" color="secondary">{copy.footnote}</Text>
-    </VStack>
+    </SettingsPage>
   );
 }
 

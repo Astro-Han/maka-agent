@@ -48,7 +48,7 @@ export function MemoryEntryList(props: {
                 <small className="settingsMemoryEntryFacts">
                   {entry.updatedAt !== undefined && (
                     <span>
-                      {props.copy.text.updated}<RelativeTime ts={entry.updatedAt} className="settingsHelpInlineTime" />
+                      {props.copy.text.updated}<RelativeTime ts={entry.updatedAt} />
                     </span>
                   )}
                 </small>

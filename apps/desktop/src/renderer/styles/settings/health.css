@@ -66,12 +66,6 @@
     color: var(--warning-text, var(--info-text));
   }
 
-/* StatusDot + label cluster in the row's end slot. */
-.settingsHealthFootnote {
-    font: var(--maka-text-supporting);
-    margin: 0;
-    color: var(--muted-foreground);
-  }
 
 .settingsHealthMetaLabel {
   font: var(--maka-text-supporting);

@@ -11,7 +11,7 @@ import {
   Banner,
 } from '@maka/ui';
 import { openPathFailureCopy, openPathActionLabel } from '../open-path';
-import { SettingsActions, SettingsField, SettingsSection } from './settings-section';
+import { SettingsActions, SettingsField, SettingsPage, SettingsSection } from './settings-section';
 import { SettingRow } from './settings-rows';
 import { settingsActionErrorMessage } from './settings-error-copy';
 import { useActionGuard } from './use-action-guard';
@@ -183,7 +183,7 @@ export function DataSettingsPage() {
   }
 
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       <SettingsSection
         title={sharedCopy.groups.dataLocation}
         description={sharedCopy.groups.dataLocationHelp}
@@ -299,6 +299,6 @@ export function DataSettingsPage() {
           <Button variant="secondary" isDisabled={configBusy !== null} onClick={() => void importConfig()} label={configBusy === 'import' ? copy.importing : copy.importConfig} />
         </SettingsActions>
       </SettingsSection>
-    </div>
+    </SettingsPage>
   );
 }

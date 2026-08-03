@@ -8,7 +8,7 @@ import {
   Text,
   VStack,
 } from '@astryxdesign/core';
-import { SettingsField, SettingsRow, SettingsSection } from './settings-section';
+import { SettingsField, SettingsPage, SettingsRow, SettingsSection } from './settings-section';
 import type {
   AppSettings,
   PersonalizationSettings,
@@ -36,7 +36,7 @@ export function AppearanceSettingsPage(props: {
   onThemePaletteChange(palette: ThemePalette): void;
 }) {
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       {/* Designer audit P2-13: 显示名称/界面语言/语气偏好 are identity, not
           appearance — PersonalizationSettingsPage now renders on the 通用
           page. The duplicated 主题 section heading is gone too: the page IS
@@ -49,7 +49,7 @@ export function AppearanceSettingsPage(props: {
         onThemeChange={props.onThemeChange}
         onThemePaletteChange={props.onThemePaletteChange}
       />
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -172,7 +172,7 @@ export function PersonalizationSettingsPage(props: {
   }
 
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       {/* These editable values stay in the same grouped Settings card as the
           neighboring preferences; the full-width tone field uses the vertical
           row variant. */}
@@ -232,7 +232,7 @@ export function PersonalizationSettingsPage(props: {
           />
         </SettingsField>
       </SettingsSection>
-    </div>
+    </SettingsPage>
   );
 }
 
@@ -346,7 +346,7 @@ function ThemeSettingsPage(props: {
   }
 
   return (
-    <div className="settingsStructuredPage">
+    <SettingsPage>
       {/* Both option grids are Astryx `Grid` + `SelectableCard`. SelectableCard
           is documented for exactly this ("plan pickers, filter chips, or option
           grids") and already owns the surface, the hover / pressed / focus
@@ -419,6 +419,6 @@ function ThemeSettingsPage(props: {
           </VStack>
         ))}
       </SettingsSection>
-    </div>
+    </SettingsPage>
   );
 }

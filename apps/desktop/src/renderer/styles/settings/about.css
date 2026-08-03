@@ -1,12 +1,7 @@
 /* About and data-portability settings. */
-.settingsAboutPage {
-  display: grid;
-  align-content: start;
-  /* #1363: same explicit column as .settingsStructuredPage (#1362) — stop
-     intrinsic max-content propagation through the implicit `auto` track. */
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4);
-}
+/* Astryx convergence: the page container is the kit's SettingsPage now —
+   the About-only `.settingsAboutPage` grid (16px rhythm, breaking the shared
+   32px page rhythm) is retired. */
 
 .settingsAboutHero {
   display: grid;
