@@ -39,8 +39,23 @@ import {
   type ProviderRequestTelemetry,
   type ProviderTokenUsage,
   type ProviderUpstreamCredentialResolver,
-  type ProviderUsageProtocol,
 } from './provider-auth-proxy.js';
+import {
+  harnessAgentDefinition,
+  providerProxyClientAuthMode,
+  providerProxyClientBaseUrl,
+  providerProxyUpstreamAuthMode,
+  providerProxyUpstreamBaseUrl,
+  providerProxyUsageProtocol,
+  type HarnessAgentId,
+} from './harness-agent-registry.js';
+export {
+  providerProxyClientAuthMode,
+  providerProxyClientBaseUrl,
+  providerProxyUpstreamAuthMode,
+  providerProxyUpstreamBaseUrl,
+  providerProxyUsageProtocol,
+} from './harness-agent-registry.js';
 import {
   isSensitiveEnvName,
   providerBaseUrlFromEnv,
@@ -141,7 +156,7 @@ export interface HarborTaskRunnerOptions {
   /** Host path to the maka repo, mounted read-only at /opt/maka-agent. */
   makaRepoPath: string;
   /** Harbor adapter under test (default: Maka). */
-  agent?: 'maka' | 'opencode' | 'kimi-code' | 'codex';
+  agent?: HarnessAgentId;
   /** Version passed to Harbor's installed-agent adapter. */
   agentVersion?: string;
   /** Prepared OpenCode toolchain mounted read-only into task containers. */
@@ -1093,14 +1108,7 @@ export function buildHarborJobConfig(
     agents: [
       {
         ...(adapter === 'maka' ? { name: adapter } : {}),
-        import_path:
-          adapter === 'opencode'
-            ? 'opencode_agent:MakaOpenCodeAgent'
-            : adapter === 'kimi-code'
-              ? 'kimi_code_agent:MakaKimiCodeAgent'
-              : adapter === 'codex'
-                ? 'codex_agent:MakaCodexAgent'
-                : 'maka_agent:MakaAgent',
+        import_path: harnessAgentDefinition(adapter).importPath,
         model_name: agentModel,
         kwargs:
           adapter === 'maka'
@@ -1211,7 +1219,8 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
       ...(resolveProviderCredential
         ? { resolveUpstreamCredential: resolveProviderCredential }
         : { apiKeyFile: apiKeyFile! }),
-      authMode: agent === 'kimi-code' ? 'bearer' : providerProxyAuthMode(provider, apiProtocol),
+      clientAuthMode: providerProxyClientAuthMode(agent, provider, apiProtocol),
+      upstreamAuthMode: providerProxyUpstreamAuthMode(agent, provider, apiProtocol),
       usageProtocol: providerProxyUsageProtocol(agent, provider, apiProtocol),
     });
     return {
@@ -1222,7 +1231,7 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
               MAKA_HOST_API_KEY: proxy.token,
             }
           : {
-              MAKA_PROVIDER_PROXY_URL: proxy.baseUrl,
+              MAKA_PROVIDER_PROXY_URL: providerProxyClientBaseUrl(proxy.baseUrl, agent, provider),
               MAKA_PROVIDER_PROXY_TOKEN: proxy.token,
             },
       usage: proxy.usage,
@@ -1246,7 +1255,7 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
 }
 
 function usesHostProviderProxy(agent: HarborTaskRunnerOptions['agent']): boolean {
-  return agent === 'opencode' || agent === 'kimi-code' || agent === 'codex';
+  return agent !== undefined && agent !== 'maka';
 }
 
 /** Shared cost math across runners: build the cell token summary from proxy-observed usage and per-1M pricing. */
@@ -1285,19 +1294,6 @@ export function providerProxyApiProtocol(
   return agentEnv?.MAKA_HOST_MODEL_API_PROTOCOL || agentEnv?.MAKA_MODEL_API_PROTOCOL || undefined;
 }
 
-/** OpenAI-compatible Kimi runtimes add /v1 to the advertised proxy base. */
-export function providerProxyUpstreamBaseUrl(
-  baseUrl: string,
-  provider: string,
-  apiProtocol?: string,
-): string {
-  if (provider !== 'kimi-coding-plan' || apiProtocol !== 'openai-chat') return baseUrl;
-  const upstream = new URL(baseUrl);
-  if (!/\/v1\/?$/i.test(upstream.pathname)) return baseUrl;
-  upstream.pathname = upstream.pathname.replace(/\/v1\/?$/i, '') || '/';
-  return upstream.toString();
-}
-
 /** Shared across runners: the selected Kimi protocol overrides its Anthropic registry default. */
 export function providerProxyAuthMode(
   provider: string,
@@ -1305,31 +1301,7 @@ export function providerProxyAuthMode(
 ): 'bearer' | 'x-api-key' {
   if (provider === 'kimi-coding-plan' && apiProtocol === 'openai-chat') return 'bearer';
   if (provider === 'kimi-coding-plan' && apiProtocol === 'anthropic-messages') return 'x-api-key';
-  const definition = (
-    PROVIDER_DEFAULTS as Partial<Record<string, (typeof PROVIDER_DEFAULTS)[ProviderType]>>
-  )[provider];
-  return definition?.runtimeAdapter.kind === 'anthropic' &&
-    definition.runtimeAdapter.auth === 'api-key'
-    ? 'x-api-key'
-    : 'bearer';
-}
-
-/** Shared across runners: adapter/provider registry drives the proxy's SSE usage parser. */
-export function providerProxyUsageProtocol(
-  agent: HarborTaskRunnerOptions['agent'],
-  provider: string,
-  apiProtocol?: string,
-): ProviderUsageProtocol | undefined {
-  if (agent === 'kimi-code') return 'openai-chat-sse';
-  if (provider === 'kimi-coding-plan' && apiProtocol === 'openai-chat') return 'openai-chat-sse';
-  if (provider === 'kimi-coding-plan' && apiProtocol === 'anthropic-messages')
-    return 'anthropic-sse';
-  const definition = (
-    PROVIDER_DEFAULTS as Partial<Record<string, (typeof PROVIDER_DEFAULTS)[ProviderType]>>
-  )[provider];
-  if (definition?.runtimeAdapter.kind === 'anthropic') return 'anthropic-sse';
-  if (definition?.runtimeAdapter.kind === 'openai-compatible') return 'openai-chat-sse';
-  return undefined;
+  return providerProxyUpstreamAuthMode('maka', provider, apiProtocol);
 }
 
 async function resolveGitHubCopilotHostCredential(

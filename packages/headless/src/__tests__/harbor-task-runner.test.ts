@@ -12,6 +12,10 @@ import {
   createHarborOracleQualifier,
   createHarborTaskRunner,
   HarborInfraError,
+  providerProxyClientAuthMode,
+  providerProxyClientBaseUrl,
+  providerProxyUpstreamAuthMode,
+  providerProxyUsageProtocol,
   type HarborProcessRunner,
   type HarborRunRequest,
   type HarborRunResult,
@@ -78,6 +82,18 @@ function copilotModelsResponse(): Response {
     ],
   });
 }
+
+test('DeepSeek routes each CLI through its native wire protocol', () => {
+  assert.equal(providerProxyUsageProtocol('codex', 'deepseek'), 'openai-responses-sse');
+  assert.equal(providerProxyUsageProtocol('claude-code', 'deepseek'), 'anthropic-sse');
+  assert.equal(providerProxyClientAuthMode('codex', 'deepseek'), 'bearer');
+  assert.equal(providerProxyClientAuthMode('claude-code', 'deepseek'), 'x-api-key');
+  assert.equal(providerProxyUpstreamAuthMode('claude-code', 'deepseek'), 'bearer');
+  assert.equal(
+    providerProxyClientBaseUrl('https://proxy.invalid/lease', 'claude-code', 'deepseek'),
+    'https://proxy.invalid/lease/anthropic',
+  );
+});
 
 interface FakeOptions {
   reward?: string;

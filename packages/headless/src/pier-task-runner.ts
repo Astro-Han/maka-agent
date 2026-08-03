@@ -21,7 +21,9 @@ import {
   mergeAgentEnv,
   modelIdForProvider,
   providerProxyApiProtocol,
-  providerProxyAuthMode,
+  providerProxyClientAuthMode,
+  providerProxyClientBaseUrl,
+  providerProxyUpstreamAuthMode,
   providerProxyUpstreamBaseUrl,
   providerProxyUsageProtocol,
   providerRequiresSecret,
@@ -36,6 +38,7 @@ import {
   modelForOpenCode,
   type HarborTaskPricing,
 } from './harbor-task-runner.js';
+import { harnessAgentDefinition, type HarnessAgentId } from './harness-agent-registry.js';
 import { lenientPositiveIntEnv } from './headless-run-env.js';
 import {
   CODEX_TOOLCHAIN_CONTAINER_PATH,
@@ -244,7 +247,7 @@ export interface PierRunResult {
 
 export type PierProcessRunner = (request: PierRunRequest) => Promise<PierRunResult>;
 
-export type PierAgent = 'maka' | 'kimi-code' | 'codex' | 'opencode';
+export type PierAgent = HarnessAgentId;
 
 interface PierProviderRuntime {
   /** Proxy-minted secret env delivered via `--env-file` (kept off argv). */
@@ -632,14 +635,7 @@ export interface BuildPierRunArgsInput {
 
 /** Assemble the `pier run` argv. Exported for deterministic unit tests. */
 export function buildPierRunArgs(input: BuildPierRunArgsInput): string[] {
-  const importPath =
-    input.agent === 'kimi-code'
-      ? 'kimi_code_agent:MakaKimiCodeAgent'
-      : input.agent === 'codex'
-        ? 'codex_agent:MakaCodexAgent'
-        : input.agent === 'opencode'
-          ? 'opencode_agent:MakaOpenCodeAgent'
-          : 'maka_agent:MakaAgent';
+  const importPath = harnessAgentDefinition(input.agent).importPath;
   const args = [
     'run',
     '--agent-import-path',
@@ -880,7 +876,8 @@ async function pierProviderRuntime(
     ...(options.resolveProviderCredential
       ? { resolveUpstreamCredential: options.resolveProviderCredential }
       : { apiKeyFile: options.apiKeyFile! }),
-    authMode: agent === 'kimi-code' ? 'bearer' : providerProxyAuthMode(provider, apiProtocol),
+    clientAuthMode: providerProxyClientAuthMode(agent, provider, apiProtocol),
+    upstreamAuthMode: providerProxyUpstreamAuthMode(agent, provider, apiProtocol),
     usageProtocol: providerProxyUsageProtocol(agent, provider, apiProtocol),
   };
   const proxy =
@@ -907,7 +904,10 @@ async function pierProviderRuntime(
               MAKA_HOST_BASE_URL: proxy.baseUrl,
               MAKA_HOST_API_KEY: proxy.token,
             }
-        : { MAKA_PROVIDER_PROXY_URL: proxy.baseUrl, MAKA_PROVIDER_PROXY_TOKEN: proxy.token },
+        : {
+            MAKA_PROVIDER_PROXY_URL: providerProxyClientBaseUrl(proxy.baseUrl, agent, provider),
+            MAKA_PROVIDER_PROXY_TOKEN: proxy.token,
+          },
     agentEnv: {},
     usage: proxy.usage,
     telemetry: proxy.telemetry,
