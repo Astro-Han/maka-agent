@@ -16,7 +16,7 @@ import { deriveLiveTurnSnapshot } from '../../renderer/live-turn-snapshot.js';
 import { useAppShellSessionUiReads } from '../../renderer/use-app-shell-session-ui-reads.js';
 import { useAppShellSessionUiSelector } from '../../renderer/use-app-shell-session-ui-selector.js';
 import { useShellLiveTurn } from '../../renderer/use-shell-live-turn.js';
-import { useAppShellTurnPresentation } from '../../renderer/app-shell-turn-view-model.js';
+import { deriveAppShellTurnPresentation, useAppShellTurnPresentation } from '../../renderer/app-shell-turn-view-model.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
 const LUCIDE_REACT_PACKAGE = ['lucide', 'react'].join('-');
@@ -384,7 +384,14 @@ describe('ChatView transcript render boundary', () => {
     const baseline = presentation.footerReads();
     assert.ok(baseline['turn-1']! > 0, 'a settled turn must render its footer at least once');
     const observerBaseline = observerCounts();
-    assert.ok(observerBaseline.observe > 0, 'the prompt rail must have observed its turns at least once');
+    // Exact, not `> 0`: the rail's observer becomes unreachable if the selector
+    // format or `CSS.escape` shifts, or if the rail stops rendering, and a
+    // loose guard would then assert nothing while still passing.
+    assert.deepEqual(
+      observerBaseline,
+      { construct: 1, observe: 3, disconnect: 0 },
+      'the prompt rail must build one observer over all three turns',
+    );
 
     // Only the live text moves. `messages` and `shellRunUpdates` keep identity,
     // exactly as they do between two deltas in the app.
@@ -474,6 +481,56 @@ describe('ChatView transcript render boundary', () => {
     assert.ok(seen[0]!.footerActionsByTurn['turn-1'], 'the derivation must produce real footer actions');
   });
 
+  it('renders every per-turn field the real derivation produces', async () => {
+    // The render-boundary tests above drive ChatView through a stand-in whose
+    // maps are empty apart from the footer actions, so the derivation and the
+    // rendering are only ever exercised in separate frames. Everything the
+    // presentation carries — failure copy, lineage badges, and which turn may
+    // offer the resume — reaches the DOM through wires nothing else walks.
+    const { LocaleProvider, ChatSurfaceLayout, ChatView } = await importUiRenderModule();
+    const { root, container } = installReactRenderer();
+    const messages = restartedLineageMessages();
+    const turns = createTranscriptProjection().project({ sessionId: SESSION_ID, messages });
+    const presentation = deriveAppShellTurnPresentation(turns, {
+      activeId: SESSION_ID,
+      pendingTurnActions: NO_PENDING_TURN_ACTIONS,
+      uiLocale: 'zh',
+      pendingKeyOf: (sessionId, turnId, actionId) => `${sessionId}:${turnId}:${actionId}`,
+    });
+
+    const reason = presentation.failedReasonLabels['turn-2'];
+    const recovery = presentation.failedRecoveryLabels['turn-2'];
+    const badge = presentation.lineageBadgesByTurn['turn-1']?.[0]?.label;
+    assert.ok(reason && recovery && badge, 'the fixture must exercise all three label maps');
+    assert.equal(presentation.resumeCandidateTurnId, 'turn-2');
+
+    const renderChat = (safeResumeAction?: { pending: boolean; detail?: string; onResume: () => void }) =>
+      render(root, createElement(LocaleProvider, {
+        locale: 'zh',
+        children: createElement(ChatSurfaceLayout, {
+          children: createElement(ChatView, {
+            messages,
+            activeSession: chatSession(SESSION_ID),
+            deriveTurnPresentation: () => presentation,
+            ...(safeResumeAction ? { safeResumeAction } : {}),
+            onNew: () => {},
+          }),
+        }),
+      }));
+
+    await renderChat({ pending: false, detail: 'RESUME-DETAIL', onResume: () => {} });
+    assert.ok(container.textContent.includes(reason), 'the failed reason must reach the DOM');
+    assert.ok(container.textContent.includes(badge), 'the lineage badge must reach the DOM');
+    // The shell hands one resume action to ChatView unconditionally; only the
+    // turn the derivation named may offer it.
+    assert.equal(container.textContent.split('RESUME-DETAIL').length - 1, 1);
+
+    // With no resume action the recovery hint takes that slot instead.
+    await renderChat();
+    assert.ok(container.textContent.includes(recovery), 'the recovery hint must reach the DOM');
+    assert.doesNotMatch(container.textContent, /RESUME-DETAIL/);
+  });
+
   it('shows the newly selected session on the first render after a switch', async () => {
     const { LocaleProvider, ChatSurfaceLayout, ChatView } = await importUiRenderModule();
     const { root, container } = installReactRenderer();
@@ -507,6 +564,40 @@ const SHELL_RUN_UPDATES = [{
   sourceToolCallId: 'bash-1',
   result: chatShellRun(9),
 }];
+
+/**
+ * A regenerated turn that died to an app restart: the lineage gives turn-1 a
+ * forward badge, and the failure makes turn-2 the one turn that may resume.
+ */
+function restartedLineageMessages(): StoredMessage[] {
+  return [
+    { type: 'user', id: 'user-1', turnId: 'turn-1', ts: 1, text: 'run a job' },
+    { type: 'assistant', id: 'assistant-1', turnId: 'turn-1', ts: 2, text: 'first answer', modelId: 'model-1' },
+    // Also failed, but not to a restart: it renders a failure banner of its own,
+    // so offering the resume on every failed turn is observable.
+    {
+      type: 'turn_state',
+      id: 'state-1',
+      turnId: 'turn-1',
+      ts: 3,
+      status: 'failed',
+      errorClass: 'tool_failed',
+      partialOutputRetained: true,
+    },
+    { type: 'user', id: 'user-2', turnId: 'turn-2', ts: 3, text: 'again' },
+    { type: 'assistant', id: 'assistant-2', turnId: 'turn-2', ts: 4, text: 'partial answer', modelId: 'model-1' },
+    {
+      type: 'turn_state',
+      id: 'state-2',
+      turnId: 'turn-2',
+      ts: 5,
+      status: 'failed',
+      errorClass: 'app_restarted',
+      regeneratedFromTurnId: 'turn-1',
+      partialOutputRetained: false,
+    },
+  ];
+}
 
 /** A transcript whose first turn owns a background Bash the store leads. */
 function transcriptMessages(answer = 'first answer'): StoredMessage[] {
@@ -623,10 +714,24 @@ function countingPresentation(): {
 
 const NO_PENDING_TURN_ACTIONS: ReadonlySet<string> = new Set<string>();
 
-const observerLifecycle = { observe: 0, disconnect: 0 };
+interface ObserverLifecycle {
+  construct: number;
+  observe: number;
+  disconnect: number;
+}
 
-function observerCounts(): { observe: number; disconnect: number } {
-  return { ...observerLifecycle };
+const intersectionLifecycle: ObserverLifecycle = { construct: 0, observe: 0, disconnect: 0 };
+const resizeLifecycle: ObserverLifecycle = { construct: 0, observe: 0, disconnect: 0 };
+
+function resetObserverLifecycle(lifecycle: ObserverLifecycle): void {
+  lifecycle.construct = 0;
+  lifecycle.observe = 0;
+  lifecycle.disconnect = 0;
+}
+
+/** The prompt rail's observer only — a ResizeObserver must not stand in for it. */
+function observerCounts(): ObserverLifecycle {
+  return { ...intersectionLifecycle };
 }
 
 const LIVE_SESSION_ID = 'session-live';
@@ -837,16 +942,20 @@ function installFakeDom(): void {
   const previousResizeObserver = globalThis.ResizeObserver;
   const previousIntersectionObserver = globalThis.IntersectionObserver;
   const previousCss = (globalThis as { CSS?: unknown }).CSS;
-  class NoopObserver {
-    observe(): void { observerLifecycle.observe += 1; }
+  // Counted per observer kind: sharing one tally let a ResizeObserver from
+  // anywhere in the tree satisfy an assertion about the prompt rail, so the
+  // guard stayed green even when the rail observed nothing at all.
+  const countingObserver = (lifecycle: ObserverLifecycle) => class {
+    constructor() { lifecycle.construct += 1; }
+    observe(): void { lifecycle.observe += 1; }
     unobserve(): void {}
-    disconnect(): void { observerLifecycle.disconnect += 1; }
+    disconnect(): void { lifecycle.disconnect += 1; }
     takeRecords(): [] { return []; }
-  }
-  observerLifecycle.observe = 0;
-  observerLifecycle.disconnect = 0;
-  globalThis.ResizeObserver = NoopObserver as unknown as typeof ResizeObserver;
-  globalThis.IntersectionObserver = NoopObserver as unknown as typeof IntersectionObserver;
+  };
+  resetObserverLifecycle(resizeLifecycle);
+  resetObserverLifecycle(intersectionLifecycle);
+  globalThis.ResizeObserver = countingObserver(resizeLifecycle) as unknown as typeof ResizeObserver;
+  globalThis.IntersectionObserver = countingObserver(intersectionLifecycle) as unknown as typeof IntersectionObserver;
   (globalThis as { CSS?: unknown }).CSS = { escape: (value: string) => value, supports: () => false };
   (globalThis as MemoTestGlobal).IS_REACT_ACT_ENVIRONMENT = true;
   cleanupTasks.push(() => {
