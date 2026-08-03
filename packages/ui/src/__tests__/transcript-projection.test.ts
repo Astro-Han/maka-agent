@@ -7,7 +7,7 @@ import type {
   StoredMessage,
 } from '@maka/core';
 import { createTranscriptProjection, valuesEqual } from '../transcript-projection.js';
-import { timelineTools, type TurnViewModel } from '../materialize.js';
+import { foldShellRunToolActivities, timelineTools, type ToolActivityItem, type TurnViewModel } from '../materialize.js';
 import type { LiveTurnProjection } from '../live-turn-projection.js';
 
 const REF = 'maka://runtime/background-tasks/pty-1';
@@ -362,6 +362,32 @@ describe('incremental transcript projection', () => {
     assert.strictEqual(after[1], before[1], 'the untouched turn keeps identity');
   });
 
+  test('folds a child that renders ahead of the Bash owning the run', () => {
+    // A turn's tools are a flattening of its timeline, and a live overlay moves
+    // that turn's tools to the end of it — which can order a child ahead of its
+    // parent. Folding must not depend on that order: scanning only what has
+    // been folded so far would leave the child as an orphan row and never take
+    // its revision into the parent.
+    const child: ToolActivityItem = {
+      toolUseId: 'stop-1',
+      toolName: 'StopBackgroundTask',
+      status: 'completed',
+      args: {},
+      result: shellRun(5),
+    };
+    const parent: ToolActivityItem = {
+      toolUseId: 'bash-1',
+      toolName: 'Bash',
+      status: 'running',
+      args: {},
+      result: shellRun(1),
+    };
+    const folded = foldShellRunToolActivities([child, parent]);
+    assert.deepEqual(folded.map((tool) => tool.toolUseId), ['bash-1']);
+    const result = folded[0]?.result;
+    assert.equal(result?.kind === 'shell_run' ? result.revision : undefined, 5);
+  });
+
   test('applies an update whose only target is a live-only tool', () => {
     // A durable update can arrive before the Bash tool_call is persisted, so
     // the canonical settled tool map has no target for it yet. The overlay runs
@@ -400,18 +426,30 @@ describe('incremental transcript projection', () => {
     assert.strictEqual(projection.project(input), first);
   });
 
-  test('turn.tools is exactly the tools its timeline renders', () => {
+  test('turn.tools is exactly the tools its timeline renders, order included', () => {
     const projection = createTranscriptProjection();
+    // Two tools on both the settled and the live path: with a single tool per
+    // turn a reversal or a de-dup between the two structures is invisible.
+    const messages: StoredMessage[] = [
+      { type: 'user', id: 'u1', turnId: 'turn-1', ts: 1, text: 'run a job' },
+      toolCall('bash-1', 'turn-1', 'Bash', { command: 'job', pty: true }, 2),
+      toolResult('bash-1', 'turn-1', shellRun(1), 3),
+      toolCall('grep-1', 'turn-1', 'Grep', { pattern: 'x' }, 4),
+      { type: 'assistant', id: 'a1', turnId: 'turn-1', ts: 5, text: 'started', modelId: 'model-1' },
+    ];
     const turns = projection.project({
       sessionId: SESSION,
-      messages: history(),
+      messages,
       liveTurn: {
-        turnId: 'turn-3',
+        turnId: 'turn-2',
         phase: 'streamed',
         steps: [{
           stepId: 'step-1',
           contentOrder: ['tools'],
-          tools: [{ toolUseId: 'live-1', toolName: 'Read', status: 'running', args: {} }],
+          tools: [
+            { toolUseId: 'live-1', toolName: 'Read', status: 'running', args: {} },
+            { toolUseId: 'live-2', toolName: 'Grep', status: 'running', args: {} },
+          ],
         }],
       },
       shellRunUpdates: [backgroundUpdate],
@@ -419,7 +457,8 @@ describe('incremental transcript projection', () => {
     for (const turn of turns) {
       assert.deepEqual(turn.tools, timelineTools(turn.timeline), `turn ${turn.turnId}`);
     }
-    assert.deepEqual(turns[2]?.tools.map((tool) => tool.toolUseId), ['live-1']);
+    assert.deepEqual(turns[0]?.tools.map((tool) => tool.toolUseId), ['bash-1', 'grep-1']);
+    assert.deepEqual(turns[1]?.tools.map((tool) => tool.toolUseId), ['live-1', 'live-2']);
   });
 });
 

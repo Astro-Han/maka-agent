@@ -8,7 +8,7 @@ import {
   toolResultActivityStatus,
   unfinishedToolActivityStatus,
 } from '@maka/core';
-import type { AttachmentRef, ToolActivityStatus, InlineReference, QuoteRef, ShellRunUpdate, StoredMessage, ToolActivityKind, ToolResultContent, TurnRecord, TurnStatus, UserMessage } from '@maka/core';
+import type { AttachmentRef, ToolActivityStatus, InlineReference, QuoteRef, ShellRunToolResult, ShellRunUpdate, StoredMessage, ToolActivityKind, ToolResultContent, TurnRecord, TurnStatus, UserMessage } from '@maka/core';
 import type { LiveTurnProjection } from './live-turn-projection.js';
 
 export { isCancelledToolResultContent, isInFlightToolStatus, toolResultActivityStatus } from '@maka/core';
@@ -595,33 +595,58 @@ export function materializeTurns(messages: readonly StoredMessage[]): TurnViewMo
   return order.map((turnId) => byId.get(turnId)!);
 }
 
+/**
+ * Fold a background command's child tools (its `Read`s and `StopBackgroundTask`)
+ * into the `Bash` that owns the run.
+ *
+ * Parent lookup is deliberately position-independent. A turn's tools are a
+ * flattening of its timeline, and a live overlay moves that turn's tools to the
+ * end of the timeline — which can order a child ahead of the `Bash` it belongs
+ * to. Scanning only what has been folded so far would silently stop folding
+ * there, leaving an orphan tool row and a parent that never took the child's
+ * revision.
+ */
 export function foldShellRunToolActivities(items: readonly ToolActivityItem[]): ToolActivityItem[] {
+  const ownedRefs = new Set<string>();
+  for (const item of items) {
+    if (item.toolName === 'Bash' && item.result?.kind === 'shell_run') ownedRefs.add(item.result.ref);
+  }
+
   const folded: ToolActivityItem[] = [];
+  const parentIndexByRef = new Map<string, number>();
+  const childResultsByRef = new Map<string, ShellRunToolResult[]>();
+
   for (const item of items) {
     const result = item.result?.kind === 'shell_run' ? item.result : undefined;
     if (!result || item.toolName === 'Bash') {
+      if (result) parentIndexByRef.set(result.ref, folded.length);
       folded.push(item);
       continue;
     }
-    const parentIndex = findShellRunParentIndex(folded, result.ref);
-    if (parentIndex >= 0) {
-      const parent = folded[parentIndex]!;
-      const current = parent.result?.kind === 'shell_run' ? parent.result : undefined;
-      const merged = mergeShellRunStateWithDiagnostics(
-        current,
-        result,
-        'ui.fold-shell-run-child',
-      );
-      if (merged.changed) {
-        folded[parentIndex] = {
-          ...parent,
-          result: merged.result,
-        };
-      }
+    if (ownedRefs.has(result.ref)) {
+      const pending = childResultsByRef.get(result.ref);
+      if (pending) pending.push(result);
+      else childResultsByRef.set(result.ref, [result]);
       if (item.toolName === 'Read' || item.toolName === 'StopBackgroundTask') continue;
     }
     folded.push(item);
   }
+
+  for (const [ref, results] of childResultsByRef) {
+    const index = parentIndexByRef.get(ref)!;
+    const parent = folded[index]!;
+    let current = parent.result?.kind === 'shell_run' ? parent.result : undefined;
+    let changed = false;
+    for (const result of results) {
+      const merged = mergeShellRunStateWithDiagnostics(current, result, 'ui.fold-shell-run-child');
+      if (merged.changed) {
+        current = merged.result;
+        changed = true;
+      }
+    }
+    if (changed && current) folded[index] = { ...parent, result: current };
+  }
+
   return folded;
 }
 
@@ -669,17 +694,6 @@ export function projectTurnTools(
   });
 }
 
-function findShellRunParentIndex(items: readonly ToolActivityItem[], ref: string): number {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const candidate = items[index];
-    if (
-      candidate?.toolName === 'Bash'
-      && candidate.result?.kind === 'shell_run'
-      && candidate.result.ref === ref
-    ) return index;
-  }
-  return -1;
-}
 
 /**
  * Rebuild a turn's render timeline from its storage-ordered messages.
