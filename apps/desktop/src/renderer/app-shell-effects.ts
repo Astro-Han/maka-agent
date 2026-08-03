@@ -10,7 +10,12 @@ import type {
   ThemePreference,
   UiLocale,
 } from '@maka/core';
-import { ShellRunUpdateBuffer, generalizedErrorMessageChinese, type ShellRunUpdate } from '@maka/core';
+import {
+  ShellRunUpdateBuffer,
+  generalizedErrorMessageChinese,
+  sessionExpectsEventStream,
+  type ShellRunUpdate,
+} from '@maka/core';
 import type { LiveTurnProjection, NavSelection } from '@maka/ui';
 import { messageReadErrorMessage } from './app-shell-copy';
 import { getDesktopConversationCopy } from './locales/conversation-copy.js';
@@ -556,7 +561,14 @@ export function useSessionEventHealthPolling(options: {
         void refreshMessages(activeId);
       }
     };
+    // One evaluate on every dep change records the transition itself — notably the
+    // one that lands `closed` when a session stops expecting a stream.
     evaluate();
+    // #1979: past that transition an unexpected stream has nothing left to observe
+    // (`deriveSessionEventStreamStatus` returns `closed` and never asks for a
+    // refresh), so polling it is a pure idle wakeup. Both inputs to `expected` are
+    // deps of this effect, so a session that starts running re-arms on its own.
+    if (!sessionExpectsEventStream(activeSession?.status, hasLiveActivity)) return;
     const interval = window.setInterval(evaluate, 5_000);
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') evaluate();

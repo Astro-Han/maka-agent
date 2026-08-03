@@ -8,6 +8,9 @@ import type {
   PlanReminder,
   ProjectRecord,
   SessionEvent,
+  SessionEventStreamSnapshot,
+  SessionStatus,
+  SessionSummary,
   StoredMessage,
 } from '@maka/core';
 import { build } from 'esbuild';
@@ -23,7 +26,7 @@ type RefBox<T> = { current: T };
 type RendererWindow = Window & typeof globalThis & { maka: RendererMakaStub };
 type AppShellEffectsModule = Pick<
   typeof AppShellEffects,
-  'useActiveSessionEvents' | 'useAppShellBootstrapSubscriptions'
+  'useActiveSessionEvents' | 'useAppShellBootstrapSubscriptions' | 'useSessionEventHealthPolling'
 >;
 type KeepSystemAwakeModule = Pick<typeof KeepSystemAwake, 'useKeepSystemAwake'>;
 type ProjectContextModule = Pick<typeof ProjectContext, 'useAppShellProjectContext'>;
@@ -76,6 +79,35 @@ type RendererMakaStub = {
     }): Promise<{ settings: { system: { keepSystemAwake: boolean } } }>;
   };
 };
+
+// The fake DOM drives the polling contract below: `useSessionEventHealthPolling`
+// arms `window.setInterval` and a `visibilitychange` listener, so both have to be
+// observable rather than silently swallowed by a no-op stub.
+type FakeClock = {
+  documentListeners: Map<string, Set<() => void>>;
+  intervals: Map<number, { callback: () => void; delayMs: number }>;
+  intervalsRegistered: number;
+  now: number;
+};
+
+let fakeClock: FakeClock = createFakeClock();
+
+function createFakeClock(): FakeClock {
+  return {
+    documentListeners: new Map(),
+    intervals: new Map(),
+    intervalsRegistered: 0,
+    now: 1_000,
+  };
+}
+
+function advanceFakeClock(byMs: number): void {
+  fakeClock.now += byMs;
+}
+
+function runFakeIntervals(): void {
+  for (const { callback } of [...fakeClock.intervals.values()]) callback();
+}
 
 const cleanupTasks: Array<() => void> = [];
 
@@ -272,6 +304,79 @@ describe('AppShell effect stability contract', () => {
     });
 
     assert.deepEqual(navSections, ['automations']);
+  });
+
+  it('does not arm event-health polling for an idle active session', async () => {
+    const effects = await appShellEffects;
+    const root = installReactRenderer(createCapturedSubscriptions());
+    const healthRef = createSessionHealthRef();
+    let writes = 0;
+
+    await render(
+      root,
+      createElement(SessionEventHealthPollingProbe, {
+        activeId: 'session-1',
+        effects,
+        healthRef,
+        onHealthWrite: () => {
+          writes += 1;
+        },
+        sessionStatus: 'active',
+      }),
+    );
+
+    assert.equal(fakeClock.intervalsRegistered, 0, 'an idle session must not arm a polling interval');
+    assert.equal(
+      fakeClock.documentListeners.get('visibilitychange')?.size ?? 0,
+      0,
+      'an idle session must not listen for visibility changes',
+    );
+    assert.equal(writes, 1, 'the one-off transition to a closed stream is still recorded');
+    assert.equal(healthRef.current['session-1']?.status, 'closed');
+
+    advanceFakeClock(60_000);
+    await act(async () => {
+      runFakeIntervals();
+    });
+
+    assert.equal(writes, 1, 'a settled idle session must not keep writing health snapshots');
+  });
+
+  it('keeps polling a running session and refreshes once its stream goes stale', async () => {
+    const effects = await appShellEffects;
+    const root = installReactRenderer(createCapturedSubscriptions());
+    const healthRef = createSessionHealthRef();
+    let refreshedMessages = 0;
+    let refreshedSessions = 0;
+
+    await render(
+      root,
+      createElement(SessionEventHealthPollingProbe, {
+        activeId: 'session-1',
+        effects,
+        healthRef,
+        onRefreshMessages: () => {
+          refreshedMessages += 1;
+        },
+        onRefreshSessions: () => {
+          refreshedSessions += 1;
+        },
+        sessionStatus: 'running',
+      }),
+    );
+
+    assert.equal(fakeClock.intervalsRegistered, 1, 'a running session must poll its event stream');
+    assert.equal(fakeClock.documentListeners.get('visibilitychange')?.size, 1);
+    assert.equal(healthRef.current['session-1']?.status, 'connected');
+
+    advanceFakeClock(16_000);
+    await act(async () => {
+      runFakeIntervals();
+    });
+
+    assert.equal(healthRef.current['session-1']?.status, 'stale');
+    assert.equal(refreshedSessions, 1);
+    assert.equal(refreshedMessages, 1);
   });
 
   it('preserves a known keep-awake snapshot when a later refresh fails', async () => {
@@ -492,6 +597,41 @@ function ActiveSessionEventProbe(props: {
   return null;
 }
 
+function SessionEventHealthPollingProbe(props: {
+  activeId?: string;
+  effects: AppShellEffectsModule;
+  healthRef: RefBox<Record<string, SessionEventStreamSnapshot>>;
+  onHealthWrite?(): void;
+  onRefreshMessages?(): void;
+  onRefreshSessions?(): void;
+  sessionStatus?: SessionStatus;
+}) {
+  props.effects.useSessionEventHealthPolling({
+    activeId: props.activeId,
+    activeInteraction: undefined,
+    activeSession: props.sessionStatus
+      ? ({ id: props.activeId, status: props.sessionStatus } as SessionSummary)
+      : undefined,
+    activeStreamingLive: false,
+    hasInFlightLiveTools: false,
+    refreshMessages: async () => {
+      props.onRefreshMessages?.();
+      return true;
+    },
+    refreshSessions: async () => {
+      props.onRefreshSessions?.();
+      return [];
+    },
+    sessionEventHealthBySessionRef: props.healthRef,
+    // Mirrors the real controller, which syncs the ref inside `replaceState`.
+    setSessionEventHealthBySession: (updater) => {
+      props.onHealthWrite?.();
+      props.healthRef.current = updater(props.healthRef.current);
+    },
+  });
+  return null;
+}
+
 function KeepSystemAwakeProbe(props: {
   controller: KeepSystemAwakeModule;
   onSnapshot(snapshot: boolean | undefined): void;
@@ -612,6 +752,19 @@ function createBootstrapRefs() {
   };
 }
 
+function createSessionHealthRef(): RefBox<Record<string, SessionEventStreamSnapshot>> {
+  return {
+    current: {
+      'session-1': {
+        sessionId: 'session-1',
+        status: 'connected',
+        subscribedAt: fakeClock.now,
+        checkedAt: fakeClock.now,
+      },
+    },
+  };
+}
+
 function createPlanReminder(): PlanReminder {
   return {
     id: 'reminder-1',
@@ -726,14 +879,30 @@ function installFakeDom(): void {
     IS_REACT_ACT_ENVIRONMENT?: boolean;
     }
   ).IS_REACT_ACT_ENVIRONMENT;
+  const previousDateNow = Date.now;
+  fakeClock = createFakeClock();
+  let nextIntervalId = 1;
   const fakeDocument = createFakeDocument();
   const fakeWindow = {
     document: fakeDocument,
     addEventListener: () => {},
     removeEventListener: () => {},
+    setInterval: (callback: () => void, delayMs: number) => {
+      const id = nextIntervalId++;
+      fakeClock.intervals.set(id, { callback, delayMs });
+      fakeClock.intervalsRegistered += 1;
+      return id;
+    },
+    clearInterval: (id: number) => {
+      fakeClock.intervals.delete(id);
+    },
     HTMLElement: class HTMLElement {},
     HTMLIFrameElement: class HTMLIFrameElement {},
   } as unknown as RendererWindow;
+  Date.now = () => fakeClock.now;
+  cleanupTasks.push(() => {
+    Date.now = previousDateNow;
+  });
   Object.defineProperty(fakeDocument, 'defaultView', { value: fakeWindow });
   globalThis.document = fakeDocument;
   globalThis.window = fakeWindow;
@@ -754,8 +923,15 @@ function installFakeDom(): void {
 function createFakeDocument(): Document {
   const fakeDocument = {
     nodeType: 9,
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    visibilityState: 'visible',
+    addEventListener(type: string, listener: () => void) {
+      const listeners = fakeClock.documentListeners.get(type) ?? new Set<() => void>();
+      listeners.add(listener);
+      fakeClock.documentListeners.set(type, listeners);
+    },
+    removeEventListener(type: string, listener: () => void) {
+      fakeClock.documentListeners.get(type)?.delete(listener);
+    },
     createElement(tagName: string) {
       return new FakeElement(tagName, fakeDocument as unknown as Document);
     },
