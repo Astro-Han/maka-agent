@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type RefObject } from 'react';
+import { memo, useEffect, useState, type RefObject } from 'react';
 import { useUiLocale } from './locale-context.js';
 import { getConversationCopy } from './conversation-copy.js';
 
@@ -26,22 +26,20 @@ export interface PromptAnchorRailProps {
 export const PromptAnchorRail = memo(function PromptAnchorRail({ turns, scrollRef }: PromptAnchorRailProps): React.ReactElement | null {
   const copy = getConversationCopy(useUiLocale()).sessions;
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
-  // Which turns exist is the only thing the observer set depends on. The
-  // preview text changes on every streamed token, so keying the effect on the
-  // turns array itself tore down and rebuilt an observer over the whole
-  // transcript per delta — one querySelector + observe per turn (#2030).
-  const turnIdKey = turns.map((turn) => turn.turnId).join('\u0000');
-  const turnsRef = useRef(turns);
-  turnsRef.current = turns;
-
+  // Rebuilding this observer costs one querySelector + observe per turn over
+  // the whole transcript, so it must not run per streamed token (#2030). What
+  // keeps it from running is the caller: ChatView hands back the same array
+  // while no rail-visible field moved. Keying the effect on that array is
+  // therefore both the cheap check and the thing that fails loudly if the
+  // caller ever stops reusing it.
   useEffect(() => {
     const root = scrollRef.current;
-    if (!root || turnIdKey.length === 0) return;
+    if (!root || turns.length === 0) return;
 
     const idByElement = new Map<Element, string>();
-    for (const turnId of turnIdKey.split('\u0000')) {
-      const el = root.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`);
-      if (el) idByElement.set(el, turnId);
+    for (const turn of turns) {
+      const el = root.querySelector(`[data-turn-id="${CSS.escape(turn.turnId)}"]`);
+      if (el) idByElement.set(el, turn.turnId);
     }
     if (idByElement.size === 0) return;
 
@@ -55,7 +53,7 @@ export const PromptAnchorRail = memo(function PromptAnchorRail({ turns, scrollRe
           else visible.delete(id);
         }
         // The topmost prompt still in view is the "current" one.
-        const firstVisible = turnsRef.current.find((turn) => visible.has(turn.turnId));
+        const firstVisible = turns.find((turn) => visible.has(turn.turnId));
         if (firstVisible) setActiveTurnId(firstVisible.turnId);
       },
       // Only count a turn as active once it reaches the top third of the
@@ -64,7 +62,7 @@ export const PromptAnchorRail = memo(function PromptAnchorRail({ turns, scrollRe
     );
     for (const el of idByElement.keys()) observer.observe(el);
     return () => observer.disconnect();
-  }, [scrollRef, turnIdKey]);
+  }, [scrollRef, turns]);
 
   function jumpTo(turnId: string): void {
     const el = scrollRef.current?.querySelector(`[data-turn-id="${CSS.escape(turnId)}"]`);
