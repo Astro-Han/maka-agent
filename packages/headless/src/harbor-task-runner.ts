@@ -77,6 +77,11 @@ import {
   CODEX_TOOLCHAIN_FINGERPRINT,
   CODEX_TOOLCHAIN_SPEC,
 } from './codex-toolchain.js';
+import {
+  CLAUDE_CODE_TOOLCHAIN_CONTAINER_PATH,
+  CLAUDE_CODE_TOOLCHAIN_FINGERPRINT,
+  CLAUDE_CODE_TOOLCHAIN_SPEC,
+} from './claude-code-toolchain.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -165,6 +170,8 @@ export interface HarborTaskRunnerOptions {
   kimiCodeToolchainPath?: string;
   /** Prepared Codex CLI toolchain mounted read-only into task containers. */
   codexToolchainPath?: string;
+  /** Prepared Claude Code native toolchain mounted read-only into task containers. */
+  claudeCodeToolchainPath?: string;
   /** Explicit Docker target platform shared by comparison arms. */
   dockerPlatform?: 'linux/amd64';
   /** Base directory under which each task gets an isolated per-task job dir. */
@@ -993,6 +1000,17 @@ export function buildHarborJobConfig(
       `Codex adapter version must match toolchain version ${CODEX_TOOLCHAIN_SPEC.codex.version}`,
     );
   }
+  if (adapter === 'claude-code' && !options.claudeCodeToolchainPath) {
+    throw new Error('claudeCodeToolchainPath is required for the Claude Code adapter');
+  }
+  if (
+    adapter === 'claude-code' &&
+    options.agentVersion !== CLAUDE_CODE_TOOLCHAIN_SPEC.claudeCode.version
+  ) {
+    throw new Error(
+      `Claude Code adapter version must match toolchain version ${CLAUDE_CODE_TOOLCHAIN_SPEC.claudeCode.version}`,
+    );
+  }
   const mounts: Array<Record<string, unknown>> = [
     { type: 'bind', source: options.makaRepoPath, target: CONTAINER_MAKA_REPO, read_only: true },
     ...(adapter === 'opencode'
@@ -1022,7 +1040,16 @@ export function buildHarborJobConfig(
                 read_only: true,
               },
             ]
-          : []),
+          : adapter === 'claude-code'
+            ? [
+                {
+                  type: 'bind',
+                  source: options.claudeCodeToolchainPath!,
+                  target: CLAUDE_CODE_TOOLCHAIN_CONTAINER_PATH,
+                  read_only: true,
+                },
+              ]
+            : []),
   ];
 
   const agentEnv: Record<string, string> = {
@@ -1046,6 +1073,9 @@ export function buildHarborJobConfig(
   }
   if (adapter === 'codex') {
     agentEnv.MAKA_CODEX_TOOLCHAIN_FINGERPRINT = CODEX_TOOLCHAIN_FINGERPRINT;
+  }
+  if (adapter === 'claude-code') {
+    agentEnv.MAKA_CLAUDE_CODE_TOOLCHAIN_FINGERPRINT = CLAUDE_CODE_TOOLCHAIN_FINGERPRINT;
   }
 
   if (options.pricing) {
@@ -1116,7 +1146,7 @@ export function buildHarborJobConfig(
             : options.agentVersion
               ? {
                   version: options.agentVersion,
-                  ...(adapter === 'codex' && options.reasoningEffort
+                  ...((adapter === 'codex' || adapter === 'claude-code') && options.reasoningEffort
                     ? { reasoning_effort: options.reasoningEffort }
                     : {}),
                 }

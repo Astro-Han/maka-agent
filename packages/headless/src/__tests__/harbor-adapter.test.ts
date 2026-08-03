@@ -556,6 +556,20 @@ describe('Harbor adapter contract', () => {
     assert.match(result.stdout, /codex adapter ok/);
   });
 
+  test('Codex DeepSeek catalog pins the official Flash model contract', async () => {
+    const catalog = JSON.parse(
+      await readFile(
+        resolve(repoRoot, 'packages/headless/harbor/deepseek-codex-models.json'),
+        'utf8',
+      ),
+    ) as { models: Array<Record<string, unknown>> };
+    assert.equal(catalog.models.length, 1);
+    assert.equal(catalog.models[0]?.slug, 'deepseek-v4-flash');
+    assert.equal(catalog.models[0]?.minimal_client_version, '0.144.0');
+    assert.equal(catalog.models[0]?.context_window, 1_048_576);
+    assert.ok(String(catalog.models[0]?.base_instructions).length > 1_000);
+  });
+
   test('trial_pricing.py validates explicit pricing env without Harbor installed', (t: TestContext) => {
     const result = spawnSync('python3', ['-c', pythonTrialPricingSmokeScript(repoRoot)], {
       cwd: repoRoot,
@@ -3970,6 +3984,19 @@ with tempfile.TemporaryDirectory() as tmp:
     assert 'base_url = "http://host.docker.internal:43210"' in http_provider_command, http_provider_command
     assert 'wire_api = "responses"' in http_provider_command, http_provider_command
     assert "ephemeral-token" not in http_provider_command, http_provider_command
+    deepseek_agent = MakaCodexAgent(
+        logs,
+        version="0.144.6",
+        model_name="deepseek-v4-flash",
+        extra_env={"MAKA_MODEL": "deepseek-v4-flash"},
+    )
+    asyncio.run(
+        deepseek_agent._write_http_provider_config(
+            environment, "http://host.docker.internal:43210"
+        )
+    )
+    deepseek_config_command = commands[-1][0]
+    assert 'model_catalog_json = "/opt/maka-agent/packages/headless/harbor/deepseek-codex-models.json"' in deepseek_config_command, deepseek_config_command
     assert len(agent.parent_calls) == 1, agent.parent_calls
     assert agent.parent_calls[0]["instruction"] == "templated: hi", agent.parent_calls
     assert agent.parent_calls[0]["api_key"] == "ephemeral-token", agent.parent_calls
