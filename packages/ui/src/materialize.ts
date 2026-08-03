@@ -108,7 +108,7 @@ const SYSTEM_NOTE_LABELS: Record<string, string> = {
   turn_aborted: 'Turn aborted',
 };
 
-export function materializeChat(messages: StoredMessage[]): ChatItem[] {
+export function materializeChat(messages: readonly StoredMessage[]): ChatItem[] {
   const items: ChatItem[] = [];
   for (const message of messages) {
     if (message.type === 'user') {
@@ -138,7 +138,7 @@ export function materializeChat(messages: StoredMessage[]): ChatItem[] {
   return items;
 }
 
-export function materializeTools(messages: StoredMessage[]): ToolActivityItem[] {
+export function materializeTools(messages: readonly StoredMessage[]): ToolActivityItem[] {
   const results = new Map(messages.filter((message) => message.type === 'tool_result').map((message) => [message.toolUseId, message]));
   const turnStatusById = new Map(deriveTurnRecords(messages).map((turn) => [turn.turnId, turn.status]));
   return messages
@@ -331,20 +331,16 @@ export function overlayLiveTurn(
   // inferred `completed` is a guess, and such a turn cannot be live anyway.
   const turnRecordedAsEnded =
     current.statusSource === 'recorded' && current.status !== 'running';
-  const tools = [...current.tools];
-  const toolByUseId = new Map(tools.map((tool) => [tool.toolUseId, tool]));
+  const toolByUseId = new Map(current.tools.map((tool) => [tool.toolUseId, tool]));
   const liveToolIds = new Set<string>();
   for (const step of liveTurn.steps) {
     for (const liveTool of step.tools) {
       liveToolIds.add(liveTool.toolUseId);
       const persisted = toolByUseId.get(liveTool.toolUseId);
-      const merged = persisted
-        ? mergeLiveOverPersisted(persisted, liveTool, turnRecordedAsEnded)
-        : liveTool;
-      toolByUseId.set(merged.toolUseId, merged);
-      const toolIndex = tools.findIndex((tool) => tool.toolUseId === merged.toolUseId);
-      if (toolIndex >= 0) tools[toolIndex] = merged;
-      else tools.push(merged);
+      toolByUseId.set(
+        liveTool.toolUseId,
+        persisted ? mergeLiveOverPersisted(persisted, liveTool, turnRecordedAsEnded) : liveTool,
+      );
     }
   }
   const timeline: TurnTimelineItem[] = [];
@@ -389,22 +385,29 @@ export function overlayLiveTurn(
       }
     }
   }
-  const next = { ...current, tools, timeline: mergeAdjacentTimeline(timeline) };
+  const mergedTimeline = mergeAdjacentTimeline(timeline);
+  const next = { ...current, tools: timelineTools(mergedTimeline), timeline: mergedTimeline };
   const overlaid = targetIndex < 0
     ? [...turns, next]
     : turns.map((turn, index) => index === targetIndex ? next : turn);
   return foldShellRunTurns(overlaid);
 }
 
-export function overlayShellRunUpdates(
-  turns: readonly TurnViewModel[],
+/**
+ * The display state a shell-run update contributes to its owning tool: the
+ * merged result plus the ownership badge. Folded from the raw update list once
+ * per update change, so the per-tool application below has an identity-stable
+ * key to memoize against.
+ */
+export interface ShellRunOverlayEntry {
+  result: Extract<ToolResultContent, { kind: 'shell_run' }>;
+  source: ToolActivityItem['shellRunSource'];
+}
+
+export function foldShellRunUpdates(
   updates: readonly ShellRunUpdate[],
-): readonly TurnViewModel[] {
-  if (updates.length === 0) return turns;
-  const byToolUseId = new Map<string, {
-    result: Extract<ToolResultContent, { kind: 'shell_run' }>;
-    source: ToolActivityItem['shellRunSource'];
-  }>();
+): ReadonlyMap<string, ShellRunOverlayEntry> {
+  const byToolUseId = new Map<string, ShellRunOverlayEntry>();
   for (const update of updates) {
     const current = byToolUseId.get(update.sourceToolCallId);
     const merged = mergeShellRunStateWithDiagnostics(
@@ -419,19 +422,45 @@ export function overlayShellRunUpdates(
         : update.ownership.kind === 'source_owned' ? 'owned' : 'unavailable',
     });
   }
+  return byToolUseId;
+}
+
+/**
+ * Apply one folded update to the tool that owns it. Returns the SAME tool when
+ * the update says nothing new, so a caller that holds the previous output can
+ * tell "nothing changed" from object identity.
+ *
+ * A durable update's revision permanently leads the `tool_result` snapshot
+ * persisted in messages, so this returns a fresh object every time it is
+ * called against the persisted tool. The caller must therefore remember the
+ * result rather than re-derive it — see `createTranscriptProjection`.
+ */
+export function applyShellRunOverlayEntry(
+  tool: ToolActivityItem,
+  entry: ShellRunOverlayEntry,
+): ToolActivityItem {
+  if (tool.toolName !== 'Bash') return tool;
+  const current = tool.result?.kind === 'shell_run' ? tool.result : undefined;
+  if (tool.result && !current) return tool;
+  const merged = mergeShellRunStateWithDiagnostics(
+    current,
+    entry.result,
+    'ui.overlay-shell-run-update',
+  );
+  return merged.changed || tool.shellRunSource !== entry.source
+    ? { ...tool, result: merged.result, shellRunSource: entry.source }
+    : tool;
+}
+
+export function overlayShellRunUpdates(
+  turns: readonly TurnViewModel[],
+  updates: readonly ShellRunUpdate[],
+): readonly TurnViewModel[] {
+  if (updates.length === 0) return turns;
+  const byToolUseId = foldShellRunUpdates(updates);
   const projected = turns.flatMap((turn) => turn.tools).map((tool) => {
-    const update = byToolUseId.get(tool.toolUseId);
-    if (!update || tool.toolName !== 'Bash') return tool;
-    const current = tool.result?.kind === 'shell_run' ? tool.result : undefined;
-    if (tool.result && !current) return tool;
-    const merged = mergeShellRunStateWithDiagnostics(
-      current,
-      update.result,
-      'ui.overlay-shell-run-update',
-    );
-    return merged.changed || tool.shellRunSource !== update.source
-      ? { ...tool, result: merged.result, shellRunSource: update.source }
-      : tool;
+    const entry = byToolUseId.get(tool.toolUseId);
+    return entry ? applyShellRunOverlayEntry(tool, entry) : tool;
   });
   return projectTurnTools(turns, projected);
 }
@@ -441,10 +470,9 @@ export function overlayShellRunUpdates(
  * without a turnId (e.g. fake-backend echo, or older sessions) fall into a
  * synthetic `__loose` bucket rendered first so they remain visible.
  */
-export function materializeTurns(messages: StoredMessage[]): TurnViewModel[] {
+export function materializeTurns(messages: readonly StoredMessage[]): TurnViewModel[] {
   const turnRecords = deriveTurnRecords(messages);
   const turnRecordById = new Map(turnRecords.map((turn) => [turn.turnId, turn]));
-  const turnsByMsg = new Map<string, string>();
   const order: string[] = [];
   const byId = new Map<string, TurnViewModel>();
   const looseTurnId = '__loose';
@@ -542,8 +570,6 @@ export function materializeTurns(messages: StoredMessage[]): TurnViewModel[] {
         text: SYSTEM_NOTE_LABELS[message.kind] ?? message.kind,
         ts: message.ts,
       });
-    } else if (message.type === 'tool_call') {
-      turnsByMsg.set(message.id, turnId);
     } else if (message.type === 'token_usage') {
       const totals = turn.tokens ?? { input: 0, output: 0 };
       totals.input += message.input;
@@ -557,28 +583,26 @@ export function materializeTurns(messages: StoredMessage[]): TurnViewModel[] {
     }
   }
 
-  // Second pass: persisted tools land in the turn matching their tool_call's
-  // turnId. Live tools are applied separately by overlayLiveTurn so streaming
-  // deltas never force settled history to rematerialize.
-  const persistedTools = foldShellRunToolActivities(materializeTools(messages));
-  // toolItemByUseId feeds the timeline pass: the fully merged (persisted+live)
-  // item keyed by toolUseId, so replaying tool_call rows in storage order
-  // yields the same ToolActivityItem the tools list holds.
-  const toolItemByUseId = new Map<string, ToolActivityItem>();
-  for (const tool of persistedTools) {
-    const turnId = turnsByMsg.get(tool.toolUseId) ?? order[order.length - 1] ?? looseTurnId;
-    const turn = ensureTurn(turnId, Date.now());
-    turn.tools.push(tool);
-    toolItemByUseId.set(tool.toolUseId, tool);
-  }
+  // Second pass: build the canonical tool map. Live tools are applied
+  // separately by overlayLiveTurn so streaming deltas never force settled
+  // history to rematerialize.
+  const toolItemByUseId = new Map<string, ToolActivityItem>(
+    foldShellRunToolActivities(materializeTools(messages))
+      .map((tool) => [tool.toolUseId, tool]),
+  );
   // Third pass: rebuild each turn's render timeline from its storage-ordered
-  // messages, interleaving a step's thinking/text with its paired tools.
+  // messages, interleaving a step's thinking/text with its paired tools. The
+  // timeline is the turn's only tool authority; `tools` is flattened out of it
+  // so the two can never disagree about which tools a turn holds (a tool_call
+  // row always lands in its own turn's message list, so every surviving tool
+  // reaches exactly one timeline).
   for (const turnId of order) {
     const turn = byId.get(turnId)!;
     turn.timeline = buildTurnTimeline(
       messagesByTurn.get(turnId) ?? [],
       toolItemByUseId,
     );
+    turn.tools = timelineTools(turn.timeline);
   }
 
   return order.map((turnId) => byId.get(turnId)!);
@@ -621,17 +645,27 @@ function foldShellRunTurns(turns: readonly TurnViewModel[]): readonly TurnViewMo
   );
 }
 
-function projectTurnTools(
+/** Flatten a turn's timeline into its tool list — the one derivation direction. */
+export function timelineTools(timeline: readonly TurnTimelineItem[]): ToolActivityItem[] {
+  return timeline.flatMap((item) => item.kind === 'tools' ? item.items : []);
+}
+
+/**
+ * Rewrite `turns` against a canonical tool map. The timeline is rebuilt from
+ * the map and `turn.tools` is flattened out of the rebuilt timeline, so there
+ * is one tool authority per turn instead of two structures kept in step.
+ *
+ * Identity-preserving: a turn whose tools all resolve to the objects it
+ * already holds is returned unchanged, which is what lets a memoized TurnView
+ * skip a turn that this pass did not touch.
+ */
+export function projectTurnTools(
   turns: readonly TurnViewModel[],
   tools: readonly ToolActivityItem[],
 ): readonly TurnViewModel[] {
   const projected = new Map(tools.map((tool) => [tool.toolUseId, tool]));
   return turns.map((turn) => {
-    const nextTools = turn.tools.flatMap((tool) => {
-      const projectedTool = projected.get(tool.toolUseId);
-      return projectedTool ? [projectedTool] : [];
-    });
-    let timelineChanged = false;
+    let changed = false;
     const timeline = turn.timeline.flatMap<TurnTimelineItem>((item): TurnTimelineItem[] => {
       if (item.kind !== 'tools') return [item];
       const items = item.items.flatMap((tool) => {
@@ -639,13 +673,12 @@ function projectTurnTools(
         return projectedTool ? [projectedTool] : [];
       });
       if (items.length !== item.items.length || items.some((tool, index) => tool !== item.items[index])) {
-        timelineChanged = true;
+        changed = true;
       }
       return items.length > 0 ? [{ kind: 'tools' as const, items }] : [];
     });
-    const toolsChanged = nextTools.length !== turn.tools.length
-      || nextTools.some((tool, index) => tool !== turn.tools[index]);
-    return toolsChanged || timelineChanged ? { ...turn, tools: nextTools, timeline } : turn;
+    if (!changed) return turn;
+    return { ...turn, tools: timelineTools(timeline), timeline };
   });
 }
 
