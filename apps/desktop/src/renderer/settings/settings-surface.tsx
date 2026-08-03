@@ -313,7 +313,7 @@ export function SettingsSurface(props: {
             <Layout
               height="fill"
               padding={0}
-              contentWidth={640}
+              contentWidth={section === 'usage' ? 920 : 640}
               header={(
                 <LayoutHeader padding={6}>
                   <div className="settingsPageHeader">
