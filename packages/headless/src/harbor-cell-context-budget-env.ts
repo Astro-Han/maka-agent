@@ -11,7 +11,10 @@ import { join } from 'node:path';
 import type {
   ContextBudgetPolicy,
   ToolResultArchiveReader,
+  ToolResultArchiveReadFailureReason,
+  ToolResultArchiveReadResult,
   ToolResultArchiveRecorder,
+  ToolResultArchiveResourceReader,
 } from '@maka/runtime';
 import type { HarborCellContextBudgetPolicySnapshot } from './cell-output.js';
 import {
@@ -459,40 +462,76 @@ export function buildHarborCellContextBudgetBackendOptions(
       await writeFile(join(archiveDir, artifactId), `${JSON.stringify(record)}\n`, 'utf8');
       return { artifactId };
     },
-    readToolResultArchive: async (input) => {
-      if (!isSafeHarborCellArchiveArtifactId(input.artifactId))
-        return { ok: false, reason: 'not_allowed' };
-      let raw: string;
-      try {
-        raw = await readFile(join(archiveDir, input.artifactId), 'utf8');
-      } catch {
-        return { ok: false, reason: 'not_found' };
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        return { ok: false, reason: 'corrupt' };
-      }
-      if (!isHarborCellToolResultArchiveRecord(parsed)) return { ok: false, reason: 'corrupt' };
-      if (parsed.sessionId !== input.sessionId) return { ok: false, reason: 'session_mismatch' };
-      if (
-        parsed.runtimeEventId !== input.runtimeEventId ||
-        parsed.toolCallId !== input.toolCallId
-      ) {
-        return { ok: false, reason: 'source_mismatch' };
-      }
-      if (parsed.originalBytes !== input.originalBytes)
-        return { ok: false, reason: 'size_mismatch' };
-      if (parsed.bodySha256 !== input.bodySha256) return { ok: false, reason: 'source_mismatch' };
-      const actualSha = createHash('sha256').update(parsed.serializedResult).digest('hex');
-      if (actualSha !== input.bodySha256) return { ok: false, reason: 'corrupt' };
-      if (Buffer.byteLength(parsed.serializedResult, 'utf8') !== input.originalBytes) {
-        return { ok: false, reason: 'size_mismatch' };
-      }
-      return { ok: true, serializedResult: parsed.serializedResult };
-    },
+    // Replay hydration addresses an archive by the originating runtime event, so
+    // it verifies that identity on top of the shared artifact checks.
+    readToolResultArchive: async (input) =>
+      readHarborCellArchivedToolResult(archiveDir, input, (record) =>
+        record.runtimeEventId !== input.runtimeEventId || record.toolCallId !== input.toolCallId
+          ? 'source_mismatch'
+          : undefined,
+      ),
   };
+}
+
+/**
+ * Ref-addressed reader backing the `ArchiveRead` tool. It is gated on exactly the
+ * same archive dir as the writer above, so a cell that archives tool results can
+ * always read them back. Unlike replay hydration it has no runtime event identity
+ * to check — a `maka://archive/...` ref only carries artifact id, hash, and size —
+ * and it must never synthesize one to satisfy the stricter path.
+ */
+export function buildHarborCellToolResultArchiveResourceReader(
+  env: RunHarborCellEnv = process.env,
+): ToolResultArchiveResourceReader | undefined {
+  normalizeHarborCellContextEnv(env);
+  const archiveDir = harborCellToolResultArchiveDir(env);
+  if (!archiveDir) return undefined;
+  return {
+    readArchivedToolResultResource: async (input) =>
+      readHarborCellArchivedToolResult(archiveDir, input),
+  };
+}
+
+async function readHarborCellArchivedToolResult(
+  archiveDir: string,
+  input: {
+    artifactId: string;
+    sessionId: string;
+    bodySha256: string;
+    originalBytes: number;
+    maxBytes?: number;
+  },
+  verifyRecord?: (
+    record: HarborCellToolResultArchiveRecord,
+  ) => ToolResultArchiveReadFailureReason | undefined,
+): Promise<ToolResultArchiveReadResult> {
+  if (!isSafeHarborCellArchiveArtifactId(input.artifactId))
+    return { ok: false, reason: 'not_allowed' };
+  let raw: string;
+  try {
+    raw = await readFile(join(archiveDir, input.artifactId), 'utf8');
+  } catch {
+    return { ok: false, reason: 'not_found' };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: 'corrupt' };
+  }
+  if (!isHarborCellToolResultArchiveRecord(parsed)) return { ok: false, reason: 'corrupt' };
+  if (parsed.sessionId !== input.sessionId) return { ok: false, reason: 'session_mismatch' };
+  const identityFailure = verifyRecord?.(parsed);
+  if (identityFailure) return { ok: false, reason: identityFailure };
+  if (parsed.originalBytes !== input.originalBytes) return { ok: false, reason: 'size_mismatch' };
+  if (parsed.bodySha256 !== input.bodySha256) return { ok: false, reason: 'source_mismatch' };
+  const actualSha = createHash('sha256').update(parsed.serializedResult).digest('hex');
+  if (actualSha !== input.bodySha256) return { ok: false, reason: 'corrupt' };
+  const actualBytes = Buffer.byteLength(parsed.serializedResult, 'utf8');
+  if (actualBytes !== input.originalBytes) return { ok: false, reason: 'size_mismatch' };
+  if (input.maxBytes !== undefined && actualBytes > input.maxBytes)
+    return { ok: false, reason: 'too_large' };
+  return { ok: true, serializedResult: parsed.serializedResult };
 }
 
 export function buildHarborCellTaskLedgerExperimentPolicy(
