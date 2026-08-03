@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
 import type { SessionEvent, SessionSummary } from '@maka/core';
-import type { TurnViewModel } from '@maka/ui';
+import type { LiveTurnProjection, TurnViewModel } from '@maka/ui';
 import { applyLiveTurnEvent, armLiveTurn } from '@maka/ui';
 import { build } from 'esbuild';
 import { act, createElement, type ReactElement } from 'react';
@@ -12,13 +12,10 @@ import {
   createAppShellSessionUiStateController,
   type AppShellSessionUiState,
 } from '../../renderer/app-shell-session-ui-state.js';
-import {
-  deriveLiveTurnSnapshot,
-  liveTurnSnapshotsEqual,
-  type LiveTurnSnapshot,
-} from '../../renderer/live-turn-snapshot.js';
+import { deriveLiveTurnSnapshot } from '../../renderer/live-turn-snapshot.js';
 import { useAppShellSessionUiReads } from '../../renderer/use-app-shell-session-ui-reads.js';
 import { useAppShellSessionUiSelector } from '../../renderer/use-app-shell-session-ui-selector.js';
+import { useShellLiveTurn } from '../../renderer/use-shell-live-turn.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
 const LUCIDE_REACT_PACKAGE = ['lucide', 'react'].join('-');
@@ -153,21 +150,20 @@ describe('UI render memo boundary contract', () => {
 // split at the subscription, which is what keeps the sidebar and composer still
 // while an answer streams.
 describe('AppShell session UI subscription boundary', () => {
-  it('holds a semantic live-turn subscriber steady while a streamed delta re-renders the projection subscriber', async () => {
+  // Drives `useAppShellSessionUiReads` — the shell's real read of the store,
+  // not a copy of its selector list — against a projection subscriber standing
+  // in for the chat surface. Both directions are pinned here: the shell must
+  // still follow the two changes that mean something, and must not follow the
+  // deltas that do not. Adding a token-rate selection to that hook fails this.
+  it('re-renders the shell for the arm and the first token, then for no delta after', async () => {
     const controller = createAppShellSessionUiStateController();
     const { root } = installReactRenderer();
-    let snapshotRenders = 0;
+    let shellRenders = 0;
     let projectionRenders = 0;
-    let lastSnapshot: LiveTurnSnapshot | undefined;
 
-    function SnapshotConsumer(): null {
-      lastSnapshot = useAppShellSessionUiSelector(
-        controller,
-        selectTestSnapshot,
-        LIVE_SESSION_ID,
-        liveTurnSnapshotsEqual,
-      );
-      snapshotRenders += 1;
+    function ShellReader(): null {
+      useAppShellSessionUiReads(controller, LIVE_SESSION_ID);
+      shellRenders += 1;
       return null;
     }
 
@@ -179,79 +175,68 @@ describe('AppShell session UI subscription boundary', () => {
 
     await render(
       root,
-      createElement('div', null, createElement(SnapshotConsumer), createElement(ProjectionConsumer)),
+      createElement('div', null, createElement(ShellReader), createElement(ProjectionConsumer)),
     );
-    const snapshotBaseline = snapshotRenders;
+    const shellBaseline = shellRenders;
     const projectionBaseline = projectionRenders;
 
     // Arming a turn is a semantic change: no turn in flight → waiting.
     await act(async () => {
       controller.setLiveTurnBySession((current) => ({ ...current, [LIVE_SESSION_ID]: armLiveTurn('turn-1') }));
     });
-    assert.equal(snapshotRenders, snapshotBaseline + 1);
-    assert.equal(projectionRenders, projectionBaseline + 1);
+    assert.equal(shellRenders, shellBaseline + 1, 'the shell must follow the arm');
 
-    // First delta is also semantic: waiting → streamed, and text appears.
+    // The first delta is also semantic: waiting → streamed, and text appears.
     await act(async () => {
       streamLiveText(controller, 'Hel', 2);
     });
-    assert.equal(snapshotRenders, snapshotBaseline + 2);
-    assert.equal(projectionRenders, projectionBaseline + 2);
-    assert.equal(lastSnapshot?.hasStreamingText, true);
+    assert.equal(shellRenders, shellBaseline + 2, 'the shell must follow the first token');
 
     // Every further delta only grows text the chat surface owns.
-    await act(async () => {
-      streamLiveText(controller, 'lo', 3);
-    });
-    await act(async () => {
-      streamLiveText(controller, ' there', 4);
-    });
-    assert.equal(
-      projectionRenders,
-      projectionBaseline + 4,
-      'the chat surface must follow every delta',
-    );
-    assert.equal(
-      snapshotRenders,
-      snapshotBaseline + 2,
-      'a text delta must not disturb subscribers that read only semantic turn state',
-    );
-  });
-
-  // Drives `useAppShellSessionUiReads` — the shell's real read of the store, not
-  // a copy of its selector list. Adding a token-rate selection to that hook
-  // fails this test, which is the regression it exists to catch.
-  it('re-renders the shell for no delta after the first token', async () => {
-    const controller = createAppShellSessionUiStateController();
-    const { root } = installReactRenderer();
-    let shellRenders = 0;
-
-    function ShellReader(): null {
-      useAppShellSessionUiReads(controller, LIVE_SESSION_ID);
-      shellRenders += 1;
-      return null;
-    }
-
-    await render(root, createElement(ShellReader));
-    await act(async () => {
-      controller.setLiveTurnBySession((current) => ({ ...current, [LIVE_SESSION_ID]: armLiveTurn('turn-1') }));
-    });
-    await act(async () => {
-      streamLiveText(controller, 'Hel', 2);
-    });
-    const afterFirstToken = shellRenders;
-
-    for (const [index, chunk] of ['lo', ' there', ', here is', ' the answer'].entries()) {
+    const chunks = ['lo', ' there', ', here is', ' the answer'];
+    for (const [index, chunk] of chunks.entries()) {
       await act(async () => {
         streamLiveText(controller, chunk, 3 + index);
       });
     }
 
     assert.equal(
+      projectionRenders,
+      projectionBaseline + 2 + chunks.length,
+      'the chat surface must follow every delta',
+    );
+    assert.equal(
       shellRenders,
-      afterFirstToken,
+      shellBaseline + 2,
       'no delta after the first may re-render the shell',
     );
+  });
+
+  // `useSyncExternalStore` calls `getSnapshot` several times for ONE store
+  // state — in the subscription callback, during render, and again in a passive
+  // effect. A selector that derives a fresh value therefore has to be memoized
+  // per store state, or every call hands React a new identity and it re-renders
+  // forever. That idempotence belongs to this hook; a caller-supplied `isEqual`
+  // is an optimization, not the thing standing between the app and a freeze.
+  it('holds a comparator-less derived selector to one render per store change', async () => {
+    const controller = createAppShellSessionUiStateController();
+    const { root } = installReactRenderer();
+    let renders = 0;
+
+    function Reader(): null {
+      useAppShellSessionUiSelector(controller, selectTestStopPendingIds);
+      renders += 1;
+      return null;
+    }
+
+    await render(root, createElement(Reader));
+    const baseline = renders;
+
+    await act(async () => {
+      controller.setStopPendingBySession((current) => ({ ...current, [LIVE_SESSION_ID]: true }));
+    });
+
+    assert.equal(renders, baseline + 1, 'one store change must cost exactly one render');
   });
 
   // The one branch where the snapshot cache must yield without the store moving.
@@ -277,12 +262,95 @@ describe('AppShell session UI subscription boundary', () => {
   });
 });
 
+// The snapshot is where the shell's turn state is decided, and `useShellLiveTurn`
+// is the only place its two Stop witnesses meet (#1987): the local arm and the
+// runtime's `runningTurnIds`. Drive both through the real adapter, from a
+// projection the reducer can actually produce.
+describe('live-turn snapshot', () => {
+  function renderTurnActive(
+    projection: LiveTurnProjection | undefined,
+    runningTurnIds: readonly string[] | undefined,
+  ): Promise<boolean> {
+    const { root } = installReactRenderer();
+    let turnActive = false;
+
+    function Reader(): null {
+      turnActive = useShellLiveTurn({
+        liveTurn: deriveLiveTurnSnapshot(projection),
+        activeSession: { id: LIVE_SESSION_ID, runningTurnIds } as SessionSummary,
+      }).turnActive;
+      return null;
+    }
+
+    return render(root, createElement(Reader)).then(() => turnActive);
+  }
+
+  /** What a finished turn actually leaves behind: a `complete` over real steps. */
+  function settledTurn(): LiveTurnProjection {
+    const streamed = applyLiveTurnEvent(armLiveTurn('turn-1'), {
+      type: 'text_delta',
+      id: 'event-1',
+      turnId: 'turn-1',
+      ts: 1,
+      messageId: 'message-1',
+      text: 'answer',
+    });
+    return applyLiveTurnEvent(streamed, {
+      type: 'complete',
+      id: 'event-2',
+      turnId: 'turn-1',
+      ts: 2,
+    } as SessionEvent) as LiveTurnProjection;
+  }
+
+  it('releases the turn once its own turn ends, even while the runtime still lists it', async () => {
+    // The projection sees the terminal event first, so a session summary
+    // fetched before that write must not light Stop back up.
+    assert.equal(await renderTurnActive(settledTurn(), ['turn-1']), false);
+  });
+
+  it('holds the turn while a sibling turn is still running', async () => {
+    // Dropping `turnId` from the snapshot would let the arm's own id mask this.
+    assert.equal(await renderTurnActive(settledTurn(), ['turn-1', 'turn-2']), true);
+  });
+
+  it('holds the turn from the local arm alone, before the runtime knows of it', async () => {
+    assert.equal(await renderTurnActive(armLiveTurn('turn-1'), []), true);
+  });
+
+  it('withholds the handoff message id until the text step closes', () => {
+    const streaming = applyLiveTurnEvent(armLiveTurn('turn-1'), {
+      type: 'text_delta',
+      id: 'event-1',
+      turnId: 'turn-1',
+      ts: 1,
+      messageId: 'message-1',
+      text: 'partial',
+    });
+
+    const midStream = deriveLiveTurnSnapshot(streaming);
+    assert.equal(midStream.hasStreamingText, true);
+    assert.equal(midStream.streamingMessageId, undefined, 'an open text step has nothing to hand off');
+
+    const closed = applyLiveTurnEvent(streaming, {
+      type: 'text_complete',
+      id: 'event-2',
+      turnId: 'turn-1',
+      ts: 2,
+      messageId: 'message-1',
+      text: 'partial answer',
+    });
+
+    assert.equal(deriveLiveTurnSnapshot(closed).streamingMessageId, 'message-1');
+  });
+});
+
 const LIVE_SESSION_ID = 'session-live';
 
-const selectTestSnapshot = (state: AppShellSessionUiState, sessionId: string) =>
-  deriveLiveTurnSnapshot(state.liveTurnBySession[sessionId]);
 const selectTestProjection = (state: AppShellSessionUiState, sessionId: string) =>
   state.liveTurnBySession[sessionId];
+/** Derives a fresh array on every call, and deliberately ships no comparator. */
+const selectTestStopPendingIds = (state: AppShellSessionUiState) => Object.keys(state.stopPendingBySession);
 
 function streamLiveText(
   controller: ReturnType<typeof createAppShellSessionUiStateController>,
@@ -462,6 +530,11 @@ function installFakeDom(): void {
     }),
     HTMLElement: FakeElement,
     HTMLIFrameElement: class HTMLIFrameElement {},
+    // `useDelayedFlag` schedules the turn-wait cues through the window. Timers
+    // are real here; the tests below assert only on the undelayed values, and
+    // the timers are unref'd so a pending reveal cannot hold the process open.
+    setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms).unref(),
+    clearTimeout: (handle: NodeJS.Timeout) => clearTimeout(handle),
   } as unknown as RendererWindow;
   Object.defineProperty(fakeDocument, 'defaultView', { value: fakeWindow });
   globalThis.document = fakeDocument;

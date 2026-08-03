@@ -1,7 +1,7 @@
 import type { SessionSummary } from '@maka/core';
-import type { LiveTurnSnapshot } from './live-turn-snapshot';
-import { MODEL_CONTINUING_DELAY_MS, MODEL_PROCESSING_DELAY_MS, deriveModelWait, deriveTurnActive, type ModelWaitKind } from './model-wait-state';
-import { useDelayedFlag } from './use-delayed-flag';
+import type { LiveTurnSnapshot } from './live-turn-snapshot.js';
+import { MODEL_CONTINUING_DELAY_MS, MODEL_PROCESSING_DELAY_MS, deriveModelWait, deriveTurnActive, type ModelWaitKind } from './model-wait-state.js';
+import { useDelayedFlag } from './use-delayed-flag.js';
 
 /**
  * Owns everything the SHELL derives from the active session's live turn: the
