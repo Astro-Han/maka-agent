@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Badge,
   Banner,
@@ -6,7 +6,6 @@ import {
   EmptyState,
   Heading,
   HStack,
-  IconButton,
   List,
   ListItem,
   Skeleton,
@@ -15,7 +14,7 @@ import {
   Toolbar,
   VStack,
 } from '@astryxdesign/core';
-import { ArrowLeft, ChevronRight } from '@maka/ui/icons';
+import { ChevronRight } from '@maka/ui/icons';
 import {
   type LlmConnection,
   type ProviderType,

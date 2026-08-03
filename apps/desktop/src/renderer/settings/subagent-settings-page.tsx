@@ -19,7 +19,7 @@
 // cluster, an oklch-tinted warning callout, and a flex-end button row — were
 // each a restatement of something the kit or Astryx already draws (the row end
 // slot, `Banner status="warning"`, `SettingsActions`).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Banner, HStack, VStack } from '@astryxdesign/core';
 import {
   connectionEnabledModelIds,
@@ -56,16 +56,25 @@ import {
   SettingsRow,
   SettingsSection,
 } from './settings-section.js';
+import { SettingRow } from './settings-rows.js';
 import {
+  nextSubagentDraftForName,
   subagentPresetAvailability,
   suggestSubagentPresetId,
 } from './subagent-preset-presentation.js';
 import { statusBadgeVariant } from './settings-status-badge.js';
 
-/** `null` is the unsaved new preset; a string is an existing preset's id. */
-type EditorRoute = { presetId: string | null };
+/**
+ * Where the page is. `create` and `edit` are the same form; they are separate
+ * cases because the id, the delete section, and the enabled control differ, and
+ * because an `edit` route can become unsatisfiable while `create` cannot.
+ */
+type PageRoute =
+  | { kind: 'list' }
+  | { kind: 'create' }
+  | { kind: 'edit'; presetId: string };
 
-type EditorDraft = {
+export type SubagentEditorDraft = {
   id: string;
   name: string;
   description: string;
@@ -73,6 +82,7 @@ type EditorDraft = {
   connectionSlug: string;
   model: string;
   thinkingLevel: ThinkingLevel | '';
+  enabled: boolean;
 };
 
 export function SubagentSettingsPage(props: {
@@ -85,13 +95,68 @@ export function SubagentSettingsPage(props: {
   const locale = useUiLocale();
   const copy = getSubagentSettingsCopy(locale);
   const toast = useToast();
-  const [route, setRoute] = useState<EditorRoute | null>(null);
+  const [route, setRoute] = useState<PageRoute>({ kind: 'list' });
   const [saving, setSaving] = useState(false);
   const presets = props.settings.subagents.presets;
-  const editorPreset = route?.presetId == null
-    ? null
-    : presets.find((preset) => preset.id === route.presetId) ?? null;
+  const editorPreset = route.kind === 'edit'
+    ? presets.find((preset) => preset.id === route.presetId) ?? null
+    : null;
+  // An edit route whose preset vanished (deleted in another window, or removed
+  // by an external settings write) is an unsatisfiable route, not a state to
+  // correct: the list is what it renders as. Deriving that beats scheduling a
+  // setState from inside render — and beats the alternative this page shipped
+  // with, where a missing preset silently became a blank create form that
+  // appended a second preset on save.
+  const level: PageRoute['kind'] = route.kind === 'edit' && !editorPreset ? 'list' : route.kind;
   const atLimit = presets.length >= MAX_SUBAGENT_PRESETS;
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  // Which row the user left the list from, so returning puts focus back where
+  // they were rather than at the top of the page.
+  const listReturnFocusRef = useRef<string | null>(null);
+
+  // Focus follows the level. Without this a level change leaves the ring on
+  // `document.body` — the chevron that had focus just unmounted — and a
+  // keyboard user restarts from the top of the document on every move. The
+  // Dialog this page replaced got the same behaviour for free; a route level
+  // has to say it. Mirrors ProvidersPanel, which owns the same two levels.
+  //
+  // Navigating, not arriving: the page does not grab focus when the settings
+  // surface first renders the list — the user is still in the settings nav
+  // they clicked to get here, and taking the ring off it strands them.
+  const hasNavigatedRef = useRef(false);
+  useEffect(() => {
+    if (!hasNavigatedRef.current) {
+      hasNavigatedRef.current = true;
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      if (level !== 'list') {
+        // The level, not its back button: an IconButton opens its tooltip on
+        // focus, so focusing one on arrival would pop a tooltip at every mouse
+        // user who merely clicked a row. `preventScroll` because this is a
+        // landing — the level just rendered at the top of the content area.
+        document
+          .querySelector<HTMLElement>('[data-maka-contract="subagent-detail"]')
+          ?.focus({ preventScroll: true });
+        return;
+      }
+      // Consumed here and only here. The row the user came from may be gone —
+      // that is exactly what deletion does — so the add button is the
+      // fallback, not the default.
+      const returnToId = listReturnFocusRef.current;
+      listReturnFocusRef.current = null;
+      const row = returnToId
+        ? document.querySelector<HTMLElement>(`[data-subagent-preset="${CSS.escape(returnToId)}"]`)
+        : null;
+      (row ?? addButtonRef.current)?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [level]);
+
+  function openEditor(presetId: string): void {
+    listReturnFocusRef.current = presetId;
+    setRoute({ kind: 'edit', presetId });
+  }
 
   async function persist(nextPresets: SubagentPreset[]): Promise<boolean> {
     setSaving(true);
@@ -116,13 +181,14 @@ export function SubagentSettingsPage(props: {
     });
     if (!confirmed) return;
     const removed = await persist(presets.filter((candidate) => candidate.id !== preset.id));
-    if (removed) setRoute(null);
+    if (removed) setRoute({ kind: 'list' });
   }
 
-  if (route) {
+  if (level !== 'list') {
     return (
-      // tabIndex -1 so the level itself can take focus when it lands, instead
-      // of dropping a keyboard user on document.body. It draws no ring.
+      // tabIndex -1 so the level itself can take the focus the effect above
+      // hands it, instead of dropping a keyboard user on document.body. It
+      // draws no ring.
       <VStack
         gap={5}
         tabIndex={-1}
@@ -130,11 +196,18 @@ export function SubagentSettingsPage(props: {
         data-maka-contract="subagent-detail"
       >
         <SettingsRouteHeader
-          onBack={() => setRoute(null)}
+          onBack={() => setRoute({ kind: 'list' })}
           backLabel={copy.editor.backToList}
           contract="subagent-detail-back"
           title={editorPreset ? editorPreset.name : copy.editor.createTitle}
           subtitle={editorPreset ? copy.editor.editSubtitle : copy.editor.createSubtitle}
+          // Enabled state is a fact about the preset the user just opened, and
+          // the row that carried it is now off screen. The header slot already
+          // exists for exactly this (providers marks its default connection
+          // here), so the editor states it instead of re-asking for it.
+          badge={editorPreset && !editorPreset.enabled
+            ? <Badge variant="neutral" label={copy.status.disabled} />
+            : null}
         />
         <SubagentPresetEditor
           key={editorPreset?.id ?? 'new'}
@@ -142,13 +215,13 @@ export function SubagentSettingsPage(props: {
           presets={presets}
           connections={props.connections}
           isSaving={saving}
-          onCancel={() => setRoute(null)}
+          onCancel={() => setRoute({ kind: 'list' })}
           onDelete={editorPreset ? () => void removePreset(editorPreset) : undefined}
           onSave={async (next) => {
             const nextPresets = editorPreset
               ? presets.map((candidate) => candidate.id === editorPreset.id ? next : candidate)
               : [...presets, next];
-            if (await persist(nextPresets)) setRoute(null);
+            if (await persist(nextPresets)) setRoute({ kind: 'list' });
           }}
         />
       </VStack>
@@ -156,33 +229,34 @@ export function SubagentSettingsPage(props: {
   }
 
   return (
-    <SettingsPage className="settingsSubagentsPage">
-      {/* The page's single lead group, so it carries no title of its own: the
-          settings surface already heads it 子 Agent over the same sentence,
-          and a section title here was that heading a second time. Only the
-          preset ceiling has anything left to say, and only once it is hit. */}
+    <SettingsPage>
       <SettingsSection
-        description={atLimit ? copy.section.limitNote : undefined}
-        action={(
+        title={copy.section.title}
+        description={atLimit ? copy.section.limitNote : copy.section.count(presets.length, MAX_SUBAGENT_PRESETS)}
+        action={presets.length > 0 ? (
           <Button
+            ref={addButtonRef}
             variant="primary"
             size="sm"
             label={copy.section.add}
             isDisabled={saving || atLimit}
-            onClick={() => setRoute({ presetId: null })}
+            onClick={() => setRoute({ kind: 'create' })}
           />
-        )}
+        ) : undefined}
       >
         {presets.length === 0 ? (
+          // The empty state owns the only call to action here; a section
+          // action beside it would be the same button twice on one screen.
           <EmptyState
             title={copy.section.emptyTitle}
             description={copy.section.emptyDescription}
             actions={(
               <Button
+                ref={addButtonRef}
                 variant="primary"
                 label={copy.section.add}
                 isDisabled={saving}
-                onClick={() => setRoute({ presetId: null })}
+                onClick={() => setRoute({ kind: 'create' })}
               />
             )}
           />
@@ -233,7 +307,11 @@ export function SubagentSettingsPage(props: {
                     tooltip={copy.row.configure(preset.name)}
                     icon={<ChevronRight size={16} aria-hidden="true" />}
                     isDisabled={saving}
-                    onClick={() => setRoute({ presetId: preset.id })}
+                    // The focus anchor for the way back. It rides the control
+                    // the page already renders, so the settings kit does not
+                    // need a row-level data escape hatch for one caller.
+                    data-subagent-preset={preset.id}
+                    onClick={() => openEditor(preset.id)}
                   />
                 </>
               )}
@@ -270,7 +348,7 @@ function SubagentPresetEditor(props: {
   const initialModels = initialConnection && initialConnection.enabled
     ? connectionEnabledModelIds(initialConnection)
     : [];
-  const [draft, setDraft] = useState<EditorDraft>(() => ({
+  const [draft, setDraft] = useState<SubagentEditorDraft>(() => ({
     // Empty, not a pre-derived `subagent`: an id the user has not been asked
     // for yet reads as a value the page already decided. Typing the name fills
     // it (until the user takes it over), and the placeholder says what it is.
@@ -281,6 +359,7 @@ function SubagentPresetEditor(props: {
     connectionSlug: props.preset?.connectionSlug ?? usableConnections[0]?.slug ?? '',
     model: props.preset?.model ?? initialModels[0] ?? '',
     thinkingLevel: props.preset?.thinkingLevel ?? '',
+    enabled: props.preset?.enabled ?? true,
   }));
   const [idWasEdited, setIdWasEdited] = useState(props.preset !== null);
   const [submitted, setSubmitted] = useState(false);
@@ -334,11 +413,7 @@ function SubagentPresetEditor(props: {
   }
 
   function updateName(name: string): void {
-    setDraft((current) => ({
-      ...current,
-      name,
-      ...(!idWasEdited ? { id: suggestSubagentPresetId(name, existingIds) } : {}),
-    }));
+    setDraft((current) => nextSubagentDraftForName(current, name, idWasEdited, existingIds));
   }
 
   function selectConnection(connectionSlug: string): void {
@@ -363,10 +438,7 @@ function SubagentPresetEditor(props: {
       connectionSlug: draft.connectionSlug,
       model: draft.model,
       ...(draft.thinkingLevel ? { thinkingLevel: draft.thinkingLevel } : {}),
-      // A preset is created ready to use, and whether the main agent may still
-      // select it is the list row's switch — the one place that answers it. A
-      // second "enable now" control in here answered the same question twice.
-      enabled: props.preset?.enabled ?? true,
+      enabled: draft.enabled,
     });
   }
 
@@ -410,11 +482,16 @@ function SubagentPresetEditor(props: {
             agent's routing both reference it — so it reads as a row's value.
             Only a new preset's id is still the user's to type. */}
         {props.preset ? (
-          <SettingsRow
-            label={copy.editor.id}
-            description={copy.editor.idDescription}
-            align="start"
-            end={<code className="settingsReadOnlyValue">{props.preset.id}</code>}
+          // `SettingRow mono`, not a hand-rolled <code> in the end slot: the
+          // kit renders machine text as its own full-width line under the
+          // description, because `.settingsReadOnlyValue` without
+          // `data-mono="true"` is body type in a 320px right-anchored box —
+          // and a subagent_id runs to 128 characters.
+          <SettingRow
+            title={copy.editor.id}
+            detail={copy.editor.idDescription}
+            value={props.preset.id}
+            mono
           />
         ) : (
           <SettingsField>
@@ -521,13 +598,36 @@ function SubagentPresetEditor(props: {
             )}
           />
         ) : null}
+        {/* Only on create. An existing preset is switched from its list row —
+            one back-press away, and the header states the current value — but
+            a preset that does not exist yet has no row, so without this the
+            user cannot land one in a disabled state and has to reach for the
+            switch in the window where the main agent can already select it. */}
+        {props.preset ? null : (
+          <SettingsRow
+            label={copy.editor.enabled}
+            description={copy.editor.enabledDescription}
+            align="start"
+            end={(
+              <Switch
+                label={copy.editor.enabled}
+                isLabelHidden
+                value={draft.enabled}
+                isDisabled={props.isSaving}
+                onChange={(enabled) => setDraft((current) => ({ ...current, enabled }))}
+              />
+            )}
+          />
+        )}
       </SettingsSection>
 
       {/* Save commits the whole preset, not the route group it would sit
           inside, so it stands on its own between the groups and the delete
-          section. */}
-      <SettingsSection variant="bare">
-        <HStack gap={2} wrap="wrap">
+          section. A bare `HStack` under the page stack, not a title-less
+          `SettingsSection`: with no header that section renders no header and
+          no divider, so it was two wrappers around the same 32px rhythm the
+          page stack already gives any direct child. */}
+      <HStack gap={2} wrap="wrap">
           <Button
             variant="primary"
             label={props.isSaving
@@ -544,13 +644,12 @@ function SubagentPresetEditor(props: {
             isDisabled={props.isSaving}
             onClick={props.onCancel}
           />
-        </HStack>
-      </SettingsSection>
+      </HStack>
 
       {/* Deletion is last and stands alone, so a mis-aimed cursor has nothing
           quiet to hit beside it — the providers detail answers it the same way. */}
       {props.onDelete ? (
-        <SettingsSection title={copy.editor.dangerZone} description={copy.remove.description}>
+        <SettingsSection title={copy.editor.dangerZone} description={copy.editor.dangerZoneHelp}>
           <SettingsActions>
             <Button
               variant="destructive"

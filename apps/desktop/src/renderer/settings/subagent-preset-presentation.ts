@@ -31,6 +31,24 @@ export function subagentPresetAvailability(
   return { kind: 'available', tone: 'success' };
 }
 
+/**
+ * Typing the display name fills the id — until the user takes the id over.
+ *
+ * The rule lives here rather than inside the editor because it is state math,
+ * not rendering: `idWasEdited` is the whole contract ("the id is derived until
+ * the user says otherwise, and an existing preset's id is never derived"), and
+ * an editor that quietly stops honouring it looks identical on screen.
+ */
+export function nextSubagentDraftForName<Draft extends { name: string; id: string }>(
+  draft: Draft,
+  name: string,
+  idWasEdited: boolean,
+  existingIds: ReadonlySet<string>,
+): Draft {
+  if (idWasEdited) return { ...draft, name };
+  return { ...draft, name, id: suggestSubagentPresetId(name, existingIds) };
+}
+
 export function suggestSubagentPresetId(
   name: string,
   existingIds: ReadonlySet<string>,

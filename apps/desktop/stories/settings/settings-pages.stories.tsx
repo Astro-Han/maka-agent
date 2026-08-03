@@ -665,6 +665,15 @@ const subagentStorySettings = mergeSettings(createDefaultSettings(), {
         enabled: true,
       },
       {
+        id: 'orphaned-route',
+        name: '外部资料检索',
+        description: '连接被删除后仍处于启用状态，用于展示失效路由。',
+        profile: 'web_research',
+        connectionSlug: 'removed-connection',
+        model: 'legacy-search-model',
+        enabled: true,
+      },
+      {
         id: 'retired-researcher',
         name: '旧研究配置',
         description: '保留用于展示已停用配置。',
@@ -911,6 +920,24 @@ export const Models: Story = {
 export const Subagents: Story = {
   decorators: [withSubagentSettingsBridge],
   render: () => <SettingsStory section="subagents" />,
+};
+
+// Real path: 设置 → 子 Agent → 配置“实现与验证”. A second story because the
+// editor is a route level, not a disclosure: it replaces the list, shares no
+// content with it, and is where this page's pixel work happens. Landed on the
+// implementation preset because it exercises the most of the level at once —
+// the settled read-only subagent_id, the capability warning, the degraded
+// model option, and the delete section.
+export const SubagentEditor: Story = {
+  decorators: [withSubagentSettingsBridge],
+  render: () => <SettingsStory section="subagents" />,
+  play: async ({ canvasElement }) => {
+    const button = await waitForStoryButton(
+      canvasElement,
+      (candidate) => candidate.getAttribute('aria-label') === '配置“实现与验证”',
+    );
+    await userEvent.click(button);
+  },
 };
 
 // Real path: 设置 → 通用.

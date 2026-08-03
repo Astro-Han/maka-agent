@@ -12,6 +12,8 @@ type ProfileCopy = {
 
 export type SubagentSettingsCopy = {
   section: {
+    title: string;
+    count(total: number, max: number): string;
     add: string;
     limitNote: string;
     emptyTitle: string;
@@ -38,7 +40,10 @@ export type SubagentSettingsCopy = {
     groupRoute: string;
     groupRouteHelp: string;
     dangerZone: string;
+    dangerZoneHelp: string;
     delete: string;
+    enabled: string;
+    enabledDescription: string;
     name: string;
     namePlaceholder: string;
     id: string;
@@ -80,8 +85,10 @@ export type SubagentSettingsCopy = {
 const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
   zh: {
     section: {
+      title: '已批准的子 Agent',
+      count: (total, max) => `共 ${total} / ${max} 个配置`,
       add: '添加子 Agent',
-      limitNote: '已达到 64 个配置的上限。',
+      limitNote: '已达到配置数量上限。',
       emptyTitle: '还没有子 Agent 配置',
       emptyDescription: '添加一个配置后，主 Agent 就能把合适的任务交给独立模型处理。',
     },
@@ -106,7 +113,10 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       groupRoute: '能力与模型',
       groupRouteHelp: '固定这个子 Agent 能做什么，以及它运行在哪个模型上。',
       dangerZone: '删除子 Agent',
+      dangerZoneHelp: '删除后，这个配置将从设置中移除，且无法撤销。',
       delete: '删除',
+      enabled: '创建后即可用',
+      enabledDescription: '关闭后，配置会被保存但主 Agent 暂时不会选择它。',
       name: '显示名称',
       namePlaceholder: '快速代码阅读',
       id: 'subagent_id',
@@ -158,8 +168,10 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
   },
   en: {
     section: {
+      title: 'Approved subagents',
+      count: (total, max) => `${total} of ${max} presets`,
       add: 'Add subagent',
-      limitNote: 'The 64-preset limit has been reached.',
+      limitNote: 'The preset limit has been reached.',
       emptyTitle: 'No subagent presets yet',
       emptyDescription: 'Add a preset so the main agent can delegate suitable work to a separate model.',
     },
@@ -184,7 +196,10 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       groupRoute: 'Capability and model',
       groupRouteHelp: 'Fix what this subagent may do, and which model it runs on.',
       dangerZone: 'Remove subagent',
+      dangerZoneHelp: 'Removing takes this preset out of settings, and cannot be undone.',
       delete: 'Remove',
+      enabled: 'Available once created',
+      enabledDescription: 'Turn this off to save the preset without letting the main agent select it yet.',
       name: 'Display name',
       namePlaceholder: 'Fast code reader',
       id: 'subagent_id',
