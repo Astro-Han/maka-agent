@@ -30,7 +30,10 @@ export function LiveTurnReconciler(props: {
   useEffect(() => {
     if (!activeId) return;
     reconcile(activeId, messages);
-    // `reconcile` is an effect event; `liveTurn` is a trigger, not a read.
+    // `liveTurn` is a trigger, not a read. `reconcile` must come from
+    // `useStableActions` — its identity is fixed for the component's lifetime,
+    // so it belongs in the deps honestly rather than being hidden behind a
+    // wrapper whose identity changes every render.
   }, [activeId, liveTurn, messages, reconcile]);
 
   return null;

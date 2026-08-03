@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -1775,9 +1774,6 @@ function AppShellContent({
     },
   });
 
-  // Runs per delta inside <LiveTurnReconciler/>, which owns no subtree (#1985).
-  const reconcilePersistedMessagesEffect = useEffectEvent(reconcilePersistedMessages);
-
   // Streaming-settle handoff, FALLBACK path only. The bubble's primary
   // `onStreamingSettled` signal runs after Astryx commits the terminal text.
   // Keep a delayed fallback because a stuck slot would otherwise hide the
@@ -2079,7 +2075,7 @@ function AppShellContent({
         controller={sessionUiController}
         activeId={activeId}
         messages={messages}
-        reconcile={reconcilePersistedMessagesEffect}
+        reconcile={reconcilePersistedMessages}
       />
       {/* Window chrome is frame-level hit-test only (not AppShell topNav): a
           transparent drag overlay so column surfaces paint to the window top.
