@@ -444,11 +444,11 @@ describe('tool activity presentation', () => {
     }
   });
 
-  // Astryx's collapsed header projects only the LAST call, so an early failure
-  // behind a trailing success would be invisible — the header would show a
-  // green check and a wrench count for a group that went wrong. Assert on
-  // aria-expanded, not on the text: collapsed content is still in the markup.
-  describe('group with an outcome that the collapsed header cannot show', () => {
+  // Expansion is Astryx's call, not the product's: a settled group stays
+  // collapsed even when an earlier row failed, and the collapsed header shows
+  // the last call alone. Accepting that density trade-off is what "one visual
+  // language" costs — a bespoke group summary is exactly what this PR removed.
+  describe('group expansion follows Astryx', () => {
     const trailingSuccess = {
       toolUseId: 'ok-1',
       toolName: 'Read',
@@ -461,7 +461,7 @@ describe('tool activity presentation', () => {
       return renderToStaticMarkup(createElement(ToolTrow, { items: [first, trailingSuccess] }));
     }
 
-    it('opens when an earlier call was interrupted', () => {
+    it('stays collapsed when a settled group holds an interrupted call', () => {
       const markup = renderGroup({
         toolUseId: 'cut-1',
         toolName: 'Bash',
@@ -469,44 +469,18 @@ describe('tool activity presentation', () => {
         status: 'interrupted',
         args: { command: 'sleep 600' },
       });
-      assert.match(markup, /aria-expanded="true"/);
-      assert.match(markup, /已中断/);
-    });
-
-    it('opens when an earlier call was blocked by the sandbox', () => {
-      const markup = renderGroup({
-        toolUseId: 'denied-1',
-        toolName: 'Bash',
-        activityKind: 'command',
-        status: 'errored',
-        args: { command: 'cat /etc/hosts' },
-        result: {
-          kind: 'terminal',
-          cwd: '/tmp/maka',
-          cmd: 'cat /etc/hosts',
-          status: 'failed',
-          exitCode: 1,
-          output: pipeOutput('', 'Operation not permitted\n'),
-          sandboxDenial: {
-            likely: true,
-            backend: 'macos-seatbelt',
-            recovery: 'require_escalated',
-          },
-        },
-      });
-      assert.match(markup, /aria-expanded="true"/);
-      assert.match(markup, /可能被沙箱阻止/);
-    });
-
-    it('stays collapsed when every call simply succeeded', () => {
-      const markup = renderGroup({
-        toolUseId: 'ok-0',
-        toolName: 'Bash',
-        activityKind: 'command',
-        status: 'completed',
-        args: { command: 'true' },
-      });
       assert.match(markup, /aria-expanded="false"/);
+    });
+
+    it('opens while any call in the group is still running', () => {
+      const markup = renderGroup({
+        toolUseId: 'live-1',
+        toolName: 'Bash',
+        activityKind: 'command',
+        status: 'running',
+        args: { command: 'npm test' },
+      });
+      assert.match(markup, /aria-expanded="true"/);
     });
   });
 });

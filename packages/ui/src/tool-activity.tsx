@@ -291,15 +291,16 @@ export function ToolTrow({ items }: { items: ToolActivityItem[] }) {
     ),
   }));
 
-  // Astryx's collapsed header projects only the last call, so an outcome word
-  // on any earlier row would be invisible behind a trailing success. Open the
-  // group when something in it still runs or needs a word — the two cases where
-  // the header alone would misreport the run.
-  const needsOpen = items.some(
-    (item) => item.status === 'running' || outcomeWord(item, locale) !== undefined,
+  // A group opens while something in it runs, and otherwise follows Astryx: the
+  // collapsed header projects the last call alone, so an earlier failure sits
+  // one click away rather than in the header. That is Astryx's own density
+  // trade-off, and the row does not override it.
+  return (
+    <ChatToolCalls
+      calls={calls}
+      defaultIsExpanded={items.some((item) => item.status === 'running')}
+    />
   );
-
-  return <ChatToolCalls calls={calls} defaultIsExpanded={needsOpen} />;
 }
 
 function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {
