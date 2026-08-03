@@ -925,9 +925,10 @@ export const Subagents: Story = {
 // Real path: 设置 → 子 Agent → 配置“实现与验证”. A second story because the
 // editor is a route level, not a disclosure: it replaces the list, shares no
 // content with it, and is where this page's pixel work happens. Landed on the
-// implementation preset because it exercises the most of the level at once —
-// the settled read-only subagent_id, the capability warning, the degraded
-// model option, and the delete section.
+// implementation preset because it renders the most of the level at once — the
+// settled read-only subagent_id, the capability warning, the degraded model
+// option, and the delete section. It renders them; what they must be is pinned
+// in the e2e journeys, not here.
 export const SubagentEditor: Story = {
   decorators: [withSubagentSettingsBridge],
   render: () => <SettingsStory section="subagents" />,

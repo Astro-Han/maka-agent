@@ -25,8 +25,8 @@ A story earns its place by rendering pixels no other story renders. A second lev
 
 Two facts decide it, and both were guessed wrong once:
 
-- **Where a story renders.** `scripts/storybook-visual-smoke.mjs` renders the `product-smoke-manifest.json` surfaces at three viewports across light and dark, and every *other* story exactly once, at 1280 wide in light (`catalogJobs`). A story is not a width matrix; a surface that needs one belongs in the manifest. And `parameters.viewport.defaultViewport` does nothing in Storybook 10, so a story claiming a viewport that way has been rendering at the default width all along.
-- **Whether `play` reaches the state.** `play` does run in the browser, so a story that clicks into a level renders that level, for a reviewer and for the smoke pass. What it does not do is fail the run when its assertions throw (see below) — so use `play` to reach a state, never to prove one.
+- **Where a story renders.** `scripts/storybook-visual-smoke.mjs` renders each `product-smoke-manifest.json` surface at the viewports and colour schemes that surface declares — several are wide-only or light-only, and every skipped viewport carries a written opt-out reason — and every *other* story exactly once, at 1280 wide in light (`catalogJobs`). A story is not a width matrix; a surface that needs one belongs in the manifest, with its reasons. And `parameters.viewport.defaultViewport` does nothing in Storybook 10, so a story claiming a viewport that way has been rendering at the default width all along.
+- **Whether `play` reaches the state.** `play` runs in the browser, so a story that clicks into a level renders that level — for a reviewer and for the smoke pass, which also fails if the click never lands (see below).
 
 Extra stories still cost: a reviewer scanning the sidebar cannot tell which entry is the page, and duplicates re-render the same pixels every run while claiming coverage they do not add. Where a state matters but renders nothing new, pin it somewhere that runs — a `packages/ui` test or an e2e journey.
 
@@ -42,9 +42,11 @@ When a component has two hosts, one frame is not both. `capability-audit-strip.s
 
 If the runtime computes a field, ask the runtime for it. A story that hardcodes what a classifier would have returned is asserting a fact rather than showing one, and nothing fails when the classifier moves.
 
-## Assertions belong where they run
+## A `play` function is a step, not a test report
 
-`play` functions run, but nothing collects what they assert. No test addon is configured, and `scripts/storybook-visual-smoke.mjs` only listens for the failure events a play function would emit — so a story whose `play` throws unconditionally still ships green. #1853 landed a computed line-height assertion in a `play`; it has never failed a run and never could. The interaction still happens, which is why `play` is the right way to *reach* a second level (above) and the wrong way to *check* one. Put behavioural and computed-style contracts in a `packages/ui` test or in the smoke script's `checks`, and keep stories to what they can actually prove: that the surface renders.
+A `play` that throws — including from an assertion — fails the smoke run and CI: `scripts/storybook-visual-smoke.mjs` subscribes to `playFunctionThrewException` and `unhandledErrorsWhilePlaying`, and the throw also surfaces as a console error it collects. What `play` cannot do is *report*: there is no test addon, so a run tells you the story broke, not which assertion, in what state, or against what expectation. It is also the slowest place to put a check, because reaching it means building and serving Storybook.
+
+So put behavioural and computed-style contracts where they can name what they check — a `packages/ui` test, an e2e journey, or the smoke script's `checks` — and use `play` for what it is good at: driving a story into the state it claims to render.
 
 ## A story that renders nothing is not a story
 
