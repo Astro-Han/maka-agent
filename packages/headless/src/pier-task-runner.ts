@@ -28,6 +28,7 @@ import {
   readTimedOutTrialArtifacts,
   readTrialException,
   resolveNativeTrialTimeoutMs,
+  trialExceptionSuffix,
   withProviderTelemetryArtifact,
   incompleteTerminalProviderRequest,
   modelForOpenCode,
@@ -494,54 +495,67 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
       // every other exception falls through to the normal reward/cell reads —
       // a graded trial scores on its actual reward (e.g. a non-zero Kimi CLI
       // exit the verifier still passed), and missing artifacts become infra
-      // there, with the trial exception attached for diagnosis.
+      // there, with the trial exception attached for diagnosis. Reading the
+      // grade for every exception shape is what makes that fall-through real:
+      // pier's own non-zero exit must not discard a trial the verifier graded.
       const trialException = await readTrialException(
         join(trialDir, TRIAL_RESULT),
         'PierTrialError',
       );
       let completeTimedOutTrial = false;
-      if (trialException && isBudgetExhaustedTrialException(trialException)) {
+      let verifierSettledTrial = false;
+      if (trialException) {
         const [grade, cellArtifact] = await Promise.all([
           readPierGrade(trialDir, input.task.id),
           readOptionalText(join(trialDir, TRIAL_CELL_OUTPUT)),
         ]);
-        // Budget-gate context, distinct from the graded read path: the agent has
-        // already exhausted its budget, which is the authoritative fact. A
-        // verifier that crashed or wrote a corrupt reward here does NOT overturn
-        // it — an `invalid` grade is treated exactly like `ungraded` / a missing
-        // reward file, yielding budget_exhausted (no retry, Pass@1 evidence
-        // preserved) rather than an infra failure the controller would retry. In
-        // the graded read path a corrupt scoring authority IS infra; only when
-        // the budget is already spent does the agent fact take precedence.
-        if (grade.state !== 'graded' || cellArtifact === null) {
-          // Recover attested evidence (identity/usage/cell output) via the shared
-          // Harbor implementation so a budget-exhausted sample keeps its Pass@1
-          // eligibility instead of being excluded as missing_execution_identity.
-          const artifactRefs = await readTimedOutTrialArtifacts(
-            trialDir,
-            input.task.id,
-            agent,
-            harborTraceMode(attemptAgentEnv),
-          );
-          throw new FixedPromptBudgetExhaustedError(
-            `agent budget exhausted for task ${input.task.id}`,
-            // Carry the invalid-grade detail alongside the exhaustion cause so a
-            // corrupt/crashed verifier is still diagnosable, without letting it
-            // count toward the score.
-            grade.state === 'invalid' ? `${trialException}; ${grade.detail}` : trialException,
-            artifactRefs || providerTelemetry.length > 0
-              ? {
-                  ...(artifactRefs ?? {}),
-                  ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
-                }
-              : undefined,
-          );
+        const settledByEvidence = grade.state === 'graded' && cellArtifact !== null;
+        if (!isBudgetExhaustedTrialException(trialException)) {
+          // An unrecognized exception shape the verifier still graded is a real
+          // result, whatever pier's own exit code was: keep the cell's status and
+          // score on the recorded reward instead of discarding the trial as infra.
+          verifierSettledTrial = settledByEvidence;
+        } else {
+          // Budget-gate context, distinct from the graded read path: the agent has
+          // already exhausted its budget, which is the authoritative fact. A
+          // verifier that crashed or wrote a corrupt reward here does NOT overturn
+          // it — an `invalid` grade is treated exactly like `ungraded` / a missing
+          // reward file, yielding budget_exhausted (no retry, Pass@1 evidence
+          // preserved) rather than an infra failure the controller would retry. In
+          // the graded read path a corrupt scoring authority IS infra; only when
+          // the budget is already spent does the agent fact take precedence.
+          if (!settledByEvidence) {
+            // Recover attested evidence (identity/usage/cell output) via the shared
+            // Harbor implementation so a budget-exhausted sample keeps its Pass@1
+            // eligibility instead of being excluded as missing_execution_identity.
+            const artifactRefs = await readTimedOutTrialArtifacts(
+              trialDir,
+              input.task.id,
+              agent,
+              harborTraceMode(attemptAgentEnv),
+            );
+            throw new FixedPromptBudgetExhaustedError(
+              `agent budget exhausted for task ${input.task.id}`,
+              // Carry the invalid-grade detail alongside the exhaustion cause so a
+              // corrupt/crashed verifier is still diagnosable, without letting it
+              // count toward the score.
+              grade.state === 'invalid' ? `${trialException}; ${grade.detail}` : trialException,
+              artifactRefs || providerTelemetry.length > 0
+                ? {
+                    ...(artifactRefs ?? {}),
+                    ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
+                  }
+                : undefined,
+            );
+          }
+          completeTimedOutTrial = true;
         }
-        completeTimedOutTrial = true;
       }
-      if (result.exitCode !== 0 && !completeTimedOutTrial) {
+      if (result.exitCode !== 0 && !completeTimedOutTrial && !verifierSettledTrial) {
         throw new PierInfraError(
-          `pier run exited ${result.exitCode} for task ${input.task.id}`,
+          // The WAL keeps only the message, so the trial exception has to travel
+          // in it or an infra bucket full of timeouts stays invisible to grep.
+          `pier run exited ${result.exitCode} for task ${input.task.id}${trialExceptionSuffix(trialException)}`,
           tail(result.stderr || result.stdout),
         );
       }

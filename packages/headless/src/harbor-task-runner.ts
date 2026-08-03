@@ -373,37 +373,57 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
       const resultPath = join(trialDir, TRIAL_RESULT);
       const hostEventsPath = join(trialDir, TRIAL_RUNTIME_EVENTS);
 
+      // Evidence before wording: Harbor's single_step.py runs the verifier after
+      // *any* agent-phase exception, so the trial's grade — not the exception's
+      // phrasing — decides whether a trial was settled. Read the artifacts for
+      // every exception shape, and only fall back to the budget-shaped message
+      // regexes when the evidence is incomplete.
       const trialException = await readTrialException(resultPath);
       let completeTimedOutTrial = false;
-      if (trialException && isBudgetExhaustedTrialException(trialException)) {
+      let verifierSettledTrial = false;
+      if (trialException) {
         const [rewardArtifact, verifierArtifact, cellArtifact] = await Promise.all([
           readOptionalText(rewardPath),
           readOptionalText(join(trialDir, TRIAL_VERIFIER_OUTCOME)),
           readOptionalText(cellOutputPath),
         ]);
-        if (rewardArtifact === null || verifierArtifact === null || cellArtifact === null) {
-          const artifactRefs = await readTimedOutTrialArtifacts(
-            trialDir,
-            input.task.id,
-            runnerOptions.agent,
-            harborTraceMode(runnerOptions.agentEnv),
-          );
-          throw new FixedPromptBudgetExhaustedError(
-            `agent budget exhausted for task ${input.task.id}`,
-            trialException,
-            artifactRefs || providerTelemetry.length > 0
-              ? {
-                  ...(artifactRefs ?? {}),
-                  ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
-                }
-              : undefined,
-          );
+        const settledByEvidence =
+          rewardArtifact !== null &&
+          cellArtifact !== null &&
+          hasConclusiveVerifierOutcome(verifierArtifact);
+        if (isBudgetExhaustedTrialException(trialException)) {
+          if (rewardArtifact === null || verifierArtifact === null || cellArtifact === null) {
+            const artifactRefs = await readTimedOutTrialArtifacts(
+              trialDir,
+              input.task.id,
+              runnerOptions.agent,
+              harborTraceMode(runnerOptions.agentEnv),
+            );
+            throw new FixedPromptBudgetExhaustedError(
+              `agent budget exhausted for task ${input.task.id}`,
+              trialException,
+              artifactRefs || providerTelemetry.length > 0
+                ? {
+                    ...(artifactRefs ?? {}),
+                    ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
+                  }
+                : undefined,
+            );
+          }
+          completeTimedOutTrial = true;
+        } else {
+          // An unrecognized exception shape that the verifier still graded is a
+          // real result: keep the cell's own status/errorClass (no fabricated
+          // deadline settlement) and let the structured verifier grade score it.
+          verifierSettledTrial = settledByEvidence;
         }
-        completeTimedOutTrial = true;
       }
-      if (result.exitCode !== 0 && !completeTimedOutTrial) {
+      if (result.exitCode !== 0 && !completeTimedOutTrial && !verifierSettledTrial) {
         throw new HarborInfraError(
-          `harbor run exited ${result.exitCode} for task ${input.task.id}`,
+          // WAL records only the message, so name the trial exception here: an
+          // infra bucket that silently swallows every timeout shape is exactly
+          // how the previous wording regression stayed invisible.
+          `harbor run exited ${result.exitCode} for task ${input.task.id}${trialExceptionSuffix(trialException)}`,
           tail(result.stderr || result.stdout),
         );
       }
@@ -1578,6 +1598,33 @@ export function isBudgetExhaustedTrialException(message: string): boolean {
     /^RuntimeError: Maka host cell exceeded \d+(?:\.\d+)?s$/.test(message) ||
     /^AgentTimeoutError: Agent execution timed out after \d+(?:\.\d+)? seconds$/.test(message)
   );
+}
+
+/** Shared across runners: a verifier outcome is authoritative evidence that the
+ * trial was graded only when it reached a verdict. `candidate_timeout` and
+ * `infra_failed` say the verifier itself did not conclude, so they never settle
+ * a trial whose agent phase already ended abnormally. Unreadable or malformed
+ * text is treated as no evidence — the caller's own reader raises the precise
+ * diagnosis on the paths that require a verdict. */
+export function hasConclusiveVerifierOutcome(raw: string | null): boolean {
+  if (raw === null) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!isRecord(parsed)) return false;
+  return parsed.outcome === 'passed' || parsed.outcome === 'failed';
+}
+
+/** Names the trial exception inside an infra error message. The WAL keeps only
+ * the message, so an exception that never reaches it cannot be found by grep. */
+export function trialExceptionSuffix(trialException: string | null): string {
+  if (!trialException) return '';
+  const collapsed = trialException.replace(/\s+/g, ' ').trim();
+  const truncated = collapsed.length > 200 ? `${collapsed.slice(0, 200)}…` : collapsed;
+  return ` (trial exception: ${truncated})`;
 }
 
 /** Shared across runners: the same adapters write the same maka-cell-output.json

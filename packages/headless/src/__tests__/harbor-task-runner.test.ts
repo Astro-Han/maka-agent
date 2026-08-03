@@ -1699,6 +1699,70 @@ describe('createHarborTaskRunner', () => {
     });
   });
 
+  test('scores a graded trial whose exception wording the budget regexes do not match', async () => {
+    await withRun(async ({ jobsDir, repo }) => {
+      const runner = createHarborTaskRunner({
+        makaRepoPath: repo,
+        jobsDir,
+        model: 'deepseek/deepseek-v4-flash',
+        runHarbor: fakeRunner({
+          exitCodeAfterArtifacts: 1,
+          reward: '1\n',
+          cell: cellOutput({ status: 'failed', errorClass: 'aborted' }),
+          trialResult: {
+            exception_info: {
+              exception_type: 'AgentTimeoutError',
+              // Upstream wording drift: same fact, phrasing the pinned regexes miss.
+              exception_message: 'Agent execution exceeded its 900s deadline',
+            },
+          },
+        }),
+      });
+
+      const output = await runner(runInput());
+      assert.equal(output.harbor.reward, 1);
+      assert.equal(output.harbor.verifier?.outcome, 'passed');
+      // The exception is not budget-shaped, so nothing may claim the deadline
+      // settled it — the verifier grade is what makes the trial scoreable.
+      assert.equal(output.cell.deadlineSettlement, undefined);
+      assert.equal(output.cell.errorClass, 'aborted');
+    });
+  });
+
+  test('keeps a non-zero exit infra when the verifier reached no verdict', async () => {
+    await withRun(async ({ jobsDir, repo }) => {
+      const runner = createHarborTaskRunner({
+        makaRepoPath: repo,
+        jobsDir,
+        model: 'deepseek/deepseek-v4-flash',
+        runHarbor: fakeRunner({
+          exitCodeAfterArtifacts: 1,
+          reward: '0\n',
+          cell: cellOutput({ status: 'failed', errorClass: 'aborted' }),
+          verifierOutcome: {
+            schemaVersion: 1,
+            outcome: 'candidate_timeout',
+            attempts: [{ attempt: 1, classification: 'timeout', durationMs: 1 }],
+          },
+          trialResult: {
+            exception_info: {
+              exception_type: 'DockerExecError',
+              exception_message: 'container exec failed',
+            },
+          },
+        }),
+      });
+
+      await assert.rejects(runner(runInput()), (error: unknown) => {
+        assert.ok(error instanceof HarborInfraError);
+        // The infra message has to name the trial exception: the WAL keeps only
+        // the message, so anything dropped here is unfindable after the run.
+        assert.match(error.message, /trial exception: DockerExecError: container exec failed/);
+        return true;
+      });
+    });
+  });
+
   test('returns the official verifier result after a non-zero Harbor timeout exit', async () => {
     await withRun(async ({ jobsDir, repo }) => {
       const timedCell = cellOutput({

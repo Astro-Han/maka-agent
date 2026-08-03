@@ -1014,6 +1014,53 @@ test('createPierTaskRunner scores a graded trial despite a non-budget exception'
   });
 });
 
+test('createPierTaskRunner scores a graded trial despite a non-zero pier exit', async () => {
+  // The grade is the evidence, the exit code is not: pier can exit non-zero on
+  // an exceptional trial the verifier nonetheless graded. Discarding it as infra
+  // drops a real sample out of the Pass@1 denominator.
+  await withDirs(async ({ jobsDir, repo }) => {
+    const runner = createPierTaskRunner(
+      baseOptions({
+        jobsDir,
+        makaRepoPath: repo,
+        runPier: fakePier({
+          reward: 1,
+          exitCode: 1,
+          exceptionInfo: {
+            exception_type: 'NonZeroAgentExitCodeError',
+            exception_message: 'agent exited 1',
+          },
+        }),
+      }),
+    );
+    const output = await runner(runInput());
+    assert.equal(output.harbor.reward, 1);
+    assert.equal(output.cell.deadlineSettlement, undefined);
+  });
+});
+
+test('createPierTaskRunner keeps a non-zero exit infra when the trial went ungraded', async () => {
+  await withDirs(async ({ jobsDir, repo }) => {
+    const runner = createPierTaskRunner(
+      baseOptions({
+        jobsDir,
+        makaRepoPath: repo,
+        runPier: fakePier({
+          exitCode: 1,
+          exceptionInfo: { exception_type: 'DockerExecError', exception_message: 'exec failed' },
+        }),
+      }),
+    );
+    await assert.rejects(runner(runInput()), (error: Error) => {
+      assert.ok(error instanceof PierInfraError);
+      assert.match(error.message, /pier run exited 1/);
+      // The WAL keeps only the message, so the cause has to travel inside it.
+      assert.match(error.message, /trial exception: DockerExecError: exec failed/);
+      return true;
+    });
+  });
+});
+
 test('createPierTaskRunner treats an ungraded non-budget trial exception as infra', async () => {
   await withDirs(async ({ jobsDir, repo }) => {
     const runner = createPierTaskRunner(
