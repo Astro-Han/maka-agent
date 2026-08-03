@@ -18,6 +18,8 @@ import {
   MAKA_CU_ALLOW_GLOBAL_POINTER,
   MAKA_CU_PROTOCOL_VERSION,
   MAKA_CU_RPC_ERROR,
+  isRecord,
+  MakaCuProtocolViolation,
   type MakaCuEnvelope,
   type MakaCuRpcErrorBody,
   type MakaCuRpcResponse,
@@ -35,13 +37,34 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_RESTART_ATTEMPTS = 3;
 const DEFAULT_RESTART_BACKOFF_MS = 50;
 /** No image ever crosses stdout (§8), so the only large payload left is the AX
- *  tree, itself bounded by `limits.maxResponseBytes`. Two of those plus slack. */
-const MAX_STDOUT_BUFFER = 4 * 1024 * 1024;
+ *  tree, itself bounded by `limits.maxResponseBytes`. Until that is negotiated
+ *  there is no declared bound, and this floor is what a handshake needs. */
+const MIN_STDOUT_BUFFER = 4 * 1024 * 1024;
+/** Headroom above two whole responses, for the partial third in the pipe. */
+const STDOUT_BUFFER_SLACK = 1024 * 1024;
 const STDERR_TAIL_CAP = 4096;
 /** §1: three non-JSON stdout lines in one generation are grounds for teardown. */
 const MAX_NON_JSON_LINES = 3;
 /** Used only until the handshake declares `limits.shutdownGraceMs` (§2). */
 const FALLBACK_SHUTDOWN_GRACE_MS = 3_000;
+/**
+ * §7.2/§7.3: how long a `$/cancel` is given to be answered.
+ *
+ * A cancelled request that has been delivered may already have driven the
+ * screen, so the host cannot settle it locally without lying about what
+ * happened — it has to ask and wait. What it must not do is wait the whole
+ * request deadline: measured, an abort at t=120ms against a 4s deadline settled
+ * the caller at t=4022ms, and at the shipping default that is twenty seconds of
+ * a blocked executor lane after the user pressed stop.
+ *
+ * It also has to be a wait at all. The timeout path notified `$/cancel` and
+ * killed the child in the same tick, so the buffered stdin write never
+ * flushed — verified against the mock, whose read log shows the cancel on the
+ * abort path and nothing on the timeout path. §7.3's graceful cancel never
+ * happened, and the executor never got to end its sessions, remove its agent
+ * cursor or clear its image directory.
+ */
+const CANCEL_GRACE_MS = 2_000;
 
 export type MakaCuServiceState =
   | 'idle'
@@ -78,6 +101,8 @@ export class MakaCuLifecycleError extends Error {
     message: string,
     readonly generation: number,
     readonly requestStage?: HostRequestStage,
+    /** Respawning cannot change this answer, so the restart budget is skipped. */
+    readonly fatal: boolean = false,
   ) {
     super(`${code}: ${message}`);
     this.name = 'MakaCuLifecycleError';
@@ -116,7 +141,22 @@ export interface MakaCuCapabilities {
   imageFormats: readonly string[];
 }
 
-/** §2: every one of these has a host consumer; none may be hardcoded here. */
+/**
+ * §2's declared limits.
+ *
+ * Four of these have a host consumer: `snapshotsPerSession` bounds the host's
+ * mirror of the executor's snapshot table, `snapshotTtlMs` expires it,
+ * `maxResponseBytes` sizes the stdout budget, and `shutdownGraceMs` is how long
+ * SIGTERM is given before SIGKILL.
+ *
+ * The other five — `maxElements`, `maxDepth`, `maxTextChars`,
+ * `settleCeilingMs`, `imageDirBudgetBytes` — are read from the wire, validated
+ * and held, and nothing consumes them: they bound work the executor does on its
+ * own side, and the host has no decision that turns on them. This comment used
+ * to claim every one had a host consumer, which is the kind of statement that
+ * stops a reviewer from checking. They are still validated, because a limit the
+ * host does not act on today is still a number an executor may start acting on.
+ */
 export interface MakaCuLimits {
   snapshotsPerSession: number;
   snapshotTtlMs: number;
@@ -158,6 +198,9 @@ interface PendingRequest {
   stage: HostRequestStage;
   resolve: (response: MakaCuRpcResponse) => void;
   reject: (error: Error) => void;
+  /** §7.2: ask the executor to cancel this request and start the grace window. */
+  cancel: () => void;
+  cancelRequested?: boolean;
 }
 
 export class MakaCuService {
@@ -173,6 +216,8 @@ export class MakaCuService {
   private generation = 0;
   private state: MakaCuServiceState = 'idle';
   private restartAttempts = 0;
+  private lastStartError?: unknown;
+  private childError?: Error;
   private nextRestartAt?: number;
   private handshake?: MakaCuHandshake;
   private readonly sessionContext = new AsyncLocalStorage<string>();
@@ -249,7 +294,6 @@ export class MakaCuService {
 
   private async startWithBudget(): Promise<void> {
     const maxAttempts = this.opts.maxRestartAttempts ?? DEFAULT_MAX_RESTART_ATTEMPTS;
-    let lastError: unknown;
     while (this.restartAttempts < maxAttempts) {
       this.assertActive();
       if (this.nextRestartAt !== undefined) {
@@ -264,14 +308,21 @@ export class MakaCuService {
       try {
         await this.start();
         this.restartAttempts = 0;
+        this.lastStartError = undefined;
         this.nextRestartAt = undefined;
         return;
       } catch (error) {
-        lastError = error;
+        this.lastStartError = error;
         if (this.disposed) throw error;
         // §2: a protocol version mismatch is fatal and loud. Retrying it would
         // only re-spawn an executor that has already declared it cannot talk.
-        if (isMakaCuLifecycleError(error, 'service_mismatch')) {
+        // So is an unusable executable, and so is a handshake whose shape the
+        // protocol forbids: all three answer the same way every time.
+        if (
+          isMakaCuLifecycleError(error, 'service_mismatch') ||
+          (isMakaCuLifecycleError(error) && error.fatal) ||
+          error instanceof MakaCuProtocolViolation
+        ) {
           this.state = 'unavailable';
           throw error;
         }
@@ -283,6 +334,12 @@ export class MakaCuService {
     }
     this.state = 'unavailable';
     this.emitRelease('restart_exhausted', [], false, false);
+    // `restartAttempts` only resets on a success, so every call after the
+    // budget runs out re-enters here with the loop already false. Reading the
+    // reason out of a loop-local left those later calls saying "restart budget
+    // exhausted: undefined" for the whole process lifetime — the first failure
+    // is remembered on the instance instead.
+    const lastError = this.lastStartError;
     throw new MakaCuLifecycleError(
       'service_unavailable',
       // §1 sends every executor diagnostic to stderr, so the tail is the only
@@ -322,6 +379,7 @@ export class MakaCuService {
     this.buffer = '';
     this.stderrTail = '';
     this.nonJsonLines = 0;
+    this.childError = undefined;
     this.handshake = undefined;
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => this.onStdout(child, chunk));
@@ -329,7 +387,14 @@ export class MakaCuService {
     child.stderr.on('data', (chunk: string) => this.onStderr(child, chunk));
     child.stdin.on('error', () => this.onExit(child, 'child_exit'));
     child.on('exit', () => this.onExit(child, 'child_exit'));
-    child.on('error', () => this.onExit(child, 'child_exit'));
+    // The `Error` is the whole diagnosis on the one path this binary actually
+    // fails: maka-cu is unsigned, hand-built and not distributed, so ENOENT,
+    // EACCES and EFTYPE are the expected case, and discarding it here left the
+    // host reporting a child exit for a child that never existed.
+    child.on('error', (error: Error) => {
+      if (this.child === child) this.childError = error;
+      this.onExit(child, 'child_exit');
+    });
 
     try {
       this.handshake = await this.hello();
@@ -399,18 +464,35 @@ export class MakaCuService {
           .update(await readFile(resolved))
           .digest('hex');
         if (actual !== this.opts.expectedBinarySha256) {
-          throw new Error(
+          // A file that is there and is the wrong one. This is the only
+          // mismatch in this method: the two sides disagree about which build
+          // is installed, which is what `service_mismatch` means everywhere
+          // else and what maps to the model-facing protocol_violation sentence.
+          throw new MakaCuLifecycleError(
+            'service_mismatch',
             `binary sha256 mismatch: expected ${this.opts.expectedBinarySha256}, got ${actual}`,
+            this.generation,
+            undefined,
+            true,
           );
         }
       }
       return resolved;
     } catch (error) {
       this.state = 'unavailable';
+      if (isMakaCuLifecycleError(error)) throw error;
+      // Absent, unreadable or not executable. Nothing about it is a version
+      // skew, and coding it `service_mismatch` sent every "the binary is not
+      // there" straight to a sentence about two builds disagreeing. Fatal all
+      // the same: respawning a path that does not resolve cannot start working.
       throw new MakaCuLifecycleError(
-        'service_mismatch',
-        error instanceof Error ? error.message : String(error),
+        'service_unavailable',
+        `maka-cu executable is not usable at ${this.opts.binaryPath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
         this.generation,
+        undefined,
+        true,
       );
     }
   }
@@ -418,20 +500,53 @@ export class MakaCuService {
   private onStdout(child: ChildProcessWithoutNullStreams, chunk: string): void {
     if (this.child !== child) return;
     const rest = decodeJsonLines(this.buffer, chunk, {
-      maxBufferBytes: MAX_STDOUT_BUFFER,
-      onOverflow: () => this.kill('child_exit'),
+      // §1: the cap is the negotiated `limits.maxResponseBytes` once the
+      // executor has declared one, so an executor allowed to send an 8 MiB tree
+      // is not torn down in the middle of a response it was told it could send.
+      // Before the handshake there is no declared bound, so the floor applies.
+      maxBufferBytes: this.stdoutBufferCap(),
+      // An unparseable tail past the cap is the peer having stopped framing,
+      // which is §1's protocol violation and not an ordinary child exit — the
+      // report said "exited after request delivery" for a host-initiated kill.
+      onOverflow: () => this.kill('protocol_violation'),
       onMessage: (value) => {
-        const message = value as MakaCuRpcResponse;
+        // `decodeJsonLines` hands over any JSON value, and `null`, `4` and
+        // `"x"` are all valid JSON lines that are not responses. Reading `.id`
+        // off `null` threw a TypeError inside this stdout `data` listener,
+        // where no caller is on the stack to catch it, and took the Electron
+        // main process down. A Rust executor serialising `Option::None` on an
+        // error path emits exactly those five bytes.
+        //
+        // Counted under the same budget as a non-JSON line rather than
+        // dropped: a peer emitting non-messages on the response stream has
+        // stopped speaking the protocol, whether or not the bytes parse.
+        if (!isRecord(value)) {
+          this.countNonProtocolLine();
+          return;
+        }
+        const message = value as unknown as MakaCuRpcResponse;
         // §1: responses MAY arrive out of order; correlation is by id only.
         if (typeof message.id !== 'number') return;
         this.pending.get(message.id)?.resolve(message);
       },
-      onNonJsonLine: () => {
-        this.nonJsonLines += 1;
-        if (this.nonJsonLines >= MAX_NON_JSON_LINES) this.kill('protocol_violation');
-      },
+      onNonJsonLine: () => this.countNonProtocolLine(),
     });
     if (this.child === child) this.buffer = rest;
+  }
+
+  /** §1: the stdout budget, once the executor has declared what it may send. */
+  private stdoutBufferCap(): number {
+    const declared = this.handshake?.limits.maxResponseBytes;
+    if (declared === undefined) return MIN_STDOUT_BUFFER;
+    // Two whole responses plus slack, the same headroom the fixed cap carried,
+    // and never below the floor a handshake itself needs.
+    return Math.max(MIN_STDOUT_BUFFER, declared * 2 + STDOUT_BUFFER_SLACK);
+  }
+
+  /** §1: three stdout lines that are not protocol messages are grounds for teardown. */
+  private countNonProtocolLine(): void {
+    this.nonJsonLines += 1;
+    if (this.nonJsonLines >= MAX_NON_JSON_LINES) this.kill('protocol_violation');
   }
 
   private onStderr(child: ChildProcessWithoutNullStreams, chunk: string): void {
@@ -447,36 +562,31 @@ export class MakaCuService {
     if (this.child !== child) return;
     const requests = [...this.pending.values()];
     this.pending.clear();
-    const potentiallyDelivered = requests.filter(
-      (request) => request.stage === 'writing' || request.stage === 'delivered',
-    );
+    // An exec that never happened delivered nothing, whatever stage the write
+    // reached: `spawn` resolves the write against a pipe that has no process on
+    // the other end. Reporting those as outcome_unknown sent whoever read it
+    // looking for an executor that had died mid-action, when the truth was a
+    // file that could not be executed.
+    const execFailed = this.childError !== undefined;
+    const potentiallyDelivered = execFailed
+      ? []
+      : requests.filter((request) => request.stage === 'writing' || request.stage === 'delivered');
     const sessionIds = potentiallyDelivered.flatMap((request) =>
       request.sessionId ? [request.sessionId] : [],
     );
+    const delivered = new Set(potentiallyDelivered);
     for (const request of requests) {
       request.reject(
-        request.stage === 'writing' || request.stage === 'delivered'
+        delivered.has(request)
           ? new MakaCuLifecycleError(
               'outcome_unknown',
-              // Why the child is gone, not just that it is. The host kills it
-              // on its own deadline as well as on a crash, and both arrived
-              // here saying "exited after request delivery" — which reads as
-              // "the executor died" and sends whoever is looking at it to the
-              // wrong side. Observing an app whose front window is a file
-              // dialog costs about eighteen seconds against a twenty-second
-              // deadline, so this is the message a busy machine produces, for
-              // an executor that was alive and working.
-              reason === 'request_timeout'
-                ? 'maka-cu did not answer within the host deadline and was terminated'
-                : 'maka-cu exited after request delivery',
+              this.terminationReason(reason, true),
               this.generation,
               request.stage,
             )
           : new MakaCuLifecycleError(
               'service_unavailable',
-              reason === 'request_timeout'
-                ? 'maka-cu did not answer within the host deadline and was terminated'
-                : 'maka-cu exited before request delivery',
+              this.terminationReason(reason, false),
               this.generation,
               request.stage,
             ),
@@ -490,6 +600,41 @@ export class MakaCuService {
       this.nextRestartAt = Date.now() + (this.opts.restartBackoffMs ?? DEFAULT_RESTART_BACKOFF_MS);
     }
     this.emitRelease(reason, sessionIds, potentiallyDelivered.length > 0, true);
+  }
+
+  /**
+   * Why the child is gone, not just that it is.
+   *
+   * Every host-initiated kill except `request_timeout` used to report "exited
+   * after request delivery" — a stdout framing overflow, three lines that were
+   * not protocol messages, a session being cleared and the host's own
+   * `dispose()` all read as "the executor died", which sends whoever is looking
+   * at it to the wrong side. And `child.on('error')` discarded its `Error`, so
+   * ENOENT, EACCES and EFTYPE — the expected failures for an unsigned,
+   * hand-built binary that is not distributed — were thrown away entirely:
+   * verified against a 0755 file whose interpreter does not exist, the report
+   * was "maka-cu exited after request delivery" for a child that never execed.
+   */
+  private terminationReason(reason: MakaCuReleaseEvent['reason'], delivered: boolean): string {
+    if (this.childError) {
+      return `maka-cu could not be executed: ${this.childError.message}`;
+    }
+    switch (reason) {
+      case 'request_timeout':
+        return 'maka-cu did not answer within the host deadline and was terminated';
+      case 'protocol_violation':
+        return 'maka-cu sent stdout that is not this protocol and was terminated';
+      case 'session_cleared':
+        return 'maka-cu was terminated while clearing a session with a request in flight';
+      case 'disposed':
+        return 'the host shut maka-cu down';
+      case 'restart_exhausted':
+        return 'maka-cu could not be started within the restart budget';
+      default:
+        return delivered
+          ? 'maka-cu exited after request delivery'
+          : 'maka-cu exited before request delivery';
+    }
   }
 
   private notify(method: string, params?: unknown): void {
@@ -538,8 +683,26 @@ export class MakaCuService {
           cleanup();
           reject(error);
         },
+        cancel: () => {},
       };
       this.pending.set(id, entry);
+      // §7.2: a delivered request is cancelled by asking, not by killing the
+      // child. The executor answers `aborted` if it has not dispatched yet and
+      // the real outcome if it has — killing here would turn every cancelled
+      // pre-dispatch request into outcome_unknown and lose the action's fate.
+      //
+      // The ask is bounded. If the executor does not answer inside
+      // CANCEL_GRACE_MS the request is torn down the way an unanswered deadline
+      // is, because a cancel the executor ignores is an executor that is not
+      // answering, and a caller left hanging on it blocks the whole lane.
+      const requestCancel = () => {
+        if (entry.cancelRequested) return;
+        entry.cancelRequested = true;
+        this.notify('$/cancel', { id });
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => this.kill('request_timeout'), CANCEL_GRACE_MS);
+      };
+      entry.cancel = requestCancel;
       if (opts.signal) {
         if (opts.signal.aborted) {
           entry.reject(
@@ -552,13 +715,9 @@ export class MakaCuService {
           );
           return;
         }
-        // §7.2: a delivered request is cancelled by asking, not by killing the
-        // child. The executor answers `aborted` if it has not dispatched yet and
-        // the real outcome if it has — killing here would turn every cancelled
-        // pre-dispatch request into outcome_unknown and lose the action's fate.
         onAbort = () => {
           if (entry.stage === 'writing' || entry.stage === 'delivered') {
-            this.notify('$/cancel', { id });
+            requestCancel();
             return;
           }
           entry.reject(
@@ -576,12 +735,13 @@ export class MakaCuService {
       timer = setTimeout(() => {
         // §7.3: the host owns the deadline and enforces it with `$/cancel`,
         // followed by teardown when the request had already been delivered.
-        const delivered = entry.stage === 'writing' || entry.stage === 'delivered';
-        this.notify('$/cancel', { id });
-        if (delivered) {
-          this.kill('request_timeout');
+        // The teardown waits for the cancel to be answered — killing in the
+        // same tick left the notify sitting in an unflushed stdin buffer.
+        if (entry.stage === 'writing' || entry.stage === 'delivered') {
+          requestCancel();
           return;
         }
+        this.notify('$/cancel', { id });
         entry.reject(
           new MakaCuLifecycleError(
             'service_unavailable',
@@ -624,16 +784,23 @@ export class MakaCuService {
   }
 
   clearSession(sessionId: string): void {
-    const ownsPending = [...this.pending.values()].some(
+    // §7.2: cancel this session's in-flight work by asking, not by killing.
+    //
+    // Killing the child ended every other session with it, and the executor
+    // never got its `$/cancel` or its `session.end` — so one session's stop
+    // took down a sibling session's observation and left the executor's agent
+    // cursor and images behind. The cancel is bounded by CANCEL_GRACE_MS, and
+    // an executor that ignores it is torn down there, which is the only case
+    // that still costs the generation.
+    const owned = [...this.pending.values()].filter(
       (request) =>
         request.sessionId === sessionId &&
         (request.stage === 'writing' || request.stage === 'delivered'),
     );
-    if (ownsPending) {
-      this.kill('session_cleared');
-      return;
-    }
-    this.emitRelease('session_cleared', [sessionId], false, false);
+    for (const request of owned) request.cancel();
+    // Delivered means the executor may already have driven the screen, so what
+    // happened to it is unknown even though this session is being dropped.
+    this.emitRelease('session_cleared', [sessionId], owned.length > 0, false);
   }
 
   /** The executor stated a path or a shape the protocol forbids (§6.3). */
@@ -650,6 +817,14 @@ export class MakaCuService {
 
   dispose(): void {
     if (this.disposed) return;
+    // Captured before `disposed` is set, because `assertActive()` is what makes
+    // an in-flight `start()` reject, and the rejection is what this has to wait
+    // for. `dispose()` during startup ran its purge, then `start()` carried on
+    // to `mkdir` the image directory it had just deleted and left it on disk
+    // for good — nothing ever purges it again, because the next spawn purges
+    // the directory of a service that no longer exists. cua-driver's supervisor
+    // already had this exact guard and maka-cu's copy dropped it.
+    const starting = this.starting;
     this.disposed = true;
     this.state = 'disposed';
     const child = this.child;
@@ -686,6 +861,10 @@ export class MakaCuService {
     } else {
       purge();
     }
+    // An in-flight `start()` outlives this call and will `mkdir` the directory
+    // again on its way to rejecting. Purge once more when it has finished doing
+    // so, whichever way it ends.
+    void starting?.then(purge, purge);
     try {
       this.emitRelease('disposed', [], false, false);
     } catch {
@@ -694,16 +873,56 @@ export class MakaCuService {
   }
 }
 
+/**
+ * A handshake reader that rejects the value it was given.
+ *
+ * These throw `MakaCuProtocolViolation` rather than a plain `Error` so the one
+ * classifier that exists actually sees them: `backendFailure` matches on the
+ * type, and on a plain `Error` it matched nothing, `reportProtocolViolation()`
+ * never fired, and `startWithBudget` read a structurally broken handshake as a
+ * transient failure and respawned the same binary three times to be told the
+ * same thing.
+ */
+function violation(what: string, reason: string): MakaCuProtocolViolation {
+  return new MakaCuProtocolViolation('host.hello', `${what} ${reason}`);
+}
+
 function readNumber(value: unknown, what: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`maka-cu host.hello: ${what} is not a finite number`);
+    throw violation(what, 'is not a finite number');
   }
   return value;
 }
 
+/**
+ * §2: a limit is a positive whole number, and the host runs on it.
+ *
+ * "Is it a number" was not enough, because the host does arithmetic and loops
+ * with these. `snapshotsPerSession: 0` — the conventional spelling of
+ * "unlimited", and a plausible executor default — wedged the main process in an
+ * infinite synchronous loop: the eviction loop is `while (ids.length >=
+ * snapshotsPerSession)`, a fresh session has no ids, `0 >= 0` holds, the
+ * forget is a no-op on an id that is not there, and nothing in the condition
+ * can change. No abort, no timeout and no `dispose()` can run, because the
+ * event loop is the thing that is blocked. `snapshotTtlMs: -1` expires every
+ * snapshot the moment it is stored, so the click after an observe is refused
+ * with a `stale_frame` sentence that is false about what happened. And
+ * `shutdownGraceMs: 0` SIGKILLs the executor immediately, leaking the
+ * executor-drawn cursor and the image directory that SIGTERM exists to clean
+ * up.
+ *
+ * None of those is a number the host can honour, so none of them is accepted.
+ */
+function readLimit(value: unknown, what: string): number {
+  const parsed = readNumber(value, what);
+  if (!Number.isSafeInteger(parsed)) throw violation(what, 'is not a whole number');
+  if (parsed < 1) throw violation(what, `must be at least 1, got ${parsed}`);
+  return parsed;
+}
+
 function readStringArray(value: unknown, what: string): string[] {
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
-    throw new Error(`maka-cu host.hello: ${what} is not a string array`);
+    throw violation(what, 'is not a string array');
   }
   return value as string[];
 }
@@ -711,7 +930,7 @@ function readStringArray(value: unknown, what: string): string[] {
 function readExecutorInfo(value: unknown): MakaCuExecutorInfo {
   const record = (value ?? {}) as Record<string, unknown>;
   if (typeof record.name !== 'string' || typeof record.version !== 'string') {
-    throw new Error('maka-cu host.hello: executor identity is missing');
+    throw violation('executor', 'identity is missing');
   }
   return {
     name: record.name,
@@ -723,7 +942,7 @@ function readExecutorInfo(value: unknown): MakaCuExecutorInfo {
 function readCapabilities(value: unknown): MakaCuCapabilities {
   const record = (value ?? {}) as Record<string, unknown>;
   if (typeof record.captureStream !== 'boolean') {
-    throw new Error('maka-cu host.hello: capabilities.captureStream is missing');
+    throw violation('capabilities.captureStream', 'is missing');
   }
   return {
     captureStream: record.captureStream,
@@ -735,16 +954,16 @@ function readCapabilities(value: unknown): MakaCuCapabilities {
 }
 
 function readLimits(value: unknown): MakaCuLimits {
-  const record = (value ?? {}) as Record<string, unknown>;
+  if (!isRecord(value)) throw violation('limits', 'is not an object');
   return {
-    snapshotsPerSession: readNumber(record.snapshotsPerSession, 'limits.snapshotsPerSession'),
-    snapshotTtlMs: readNumber(record.snapshotTtlMs, 'limits.snapshotTtlMs'),
-    maxElements: readNumber(record.maxElements, 'limits.maxElements'),
-    maxDepth: readNumber(record.maxDepth, 'limits.maxDepth'),
-    maxTextChars: readNumber(record.maxTextChars, 'limits.maxTextChars'),
-    maxResponseBytes: readNumber(record.maxResponseBytes, 'limits.maxResponseBytes'),
-    settleCeilingMs: readNumber(record.settleCeilingMs, 'limits.settleCeilingMs'),
-    shutdownGraceMs: readNumber(record.shutdownGraceMs, 'limits.shutdownGraceMs'),
-    imageDirBudgetBytes: readNumber(record.imageDirBudgetBytes, 'limits.imageDirBudgetBytes'),
+    snapshotsPerSession: readLimit(value.snapshotsPerSession, 'limits.snapshotsPerSession'),
+    snapshotTtlMs: readLimit(value.snapshotTtlMs, 'limits.snapshotTtlMs'),
+    maxElements: readLimit(value.maxElements, 'limits.maxElements'),
+    maxDepth: readLimit(value.maxDepth, 'limits.maxDepth'),
+    maxTextChars: readLimit(value.maxTextChars, 'limits.maxTextChars'),
+    maxResponseBytes: readLimit(value.maxResponseBytes, 'limits.maxResponseBytes'),
+    settleCeilingMs: readLimit(value.settleCeilingMs, 'limits.settleCeilingMs'),
+    shutdownGraceMs: readLimit(value.shutdownGraceMs, 'limits.shutdownGraceMs'),
+    imageDirBudgetBytes: readLimit(value.imageDirBudgetBytes, 'limits.imageDirBudgetBytes'),
   };
 }

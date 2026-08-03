@@ -2,9 +2,14 @@
  * Sleep that honours an abort signal.
  *
  * The model-facing `wait` action used a bare setTimeout, so a user stop during
- * a long wait was ignored until the timer fired on its own. That is a property
- * of the host's contract with the user, not of any one executor, so both
- * backends wait the same way.
+ * a long wait was ignored until the timer fired on its own.
+ *
+ * Only the maka-cu backend waits this way. `cua-driver-backend.ts` still calls
+ * a bare `setTimeout` for its own `wait`, so a stop during one is still ignored
+ * there for up to ten seconds — a pre-existing bug on the default backend, and
+ * not one this module fixed by existing. This comment previously claimed both
+ * backends waited the same way, which is the kind of sentence that stops the
+ * next person from checking.
  */
 export function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve();

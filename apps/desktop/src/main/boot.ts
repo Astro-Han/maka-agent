@@ -1430,9 +1430,15 @@ wireAppLifecycle({
 });
 
 function computerUseCapabilityInput() {
-  const serviceState = computerUse.backend?.serviceState?.();
+  // Whichever executor was selected reports its own shape: cua-driver an
+  // action/capture role pair, maka-cu (§11) a single supervised child. Reading
+  // only `serviceState` meant a ready maka-cu backend produced `undefined`
+  // here, and the card said "not available" while its own availability half
+  // said the opposite.
+  const executorState =
+    computerUse.backend?.serviceState?.() ?? computerUse.backend?.executorState?.();
   return {
     backendId: computerUse.backendId,
-    health: computerUseServiceHealth(computerUse.backendId, serviceState),
+    health: computerUseServiceHealth(computerUse.backendId, executorState),
   };
 }
