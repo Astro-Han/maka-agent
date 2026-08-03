@@ -22,7 +22,7 @@ import type {
   TurnStatus,
 } from '@maka/core';
 import { deriveTurnRecords, projectToolActivityArgs } from '@maka/core';
-import { toolResultActivityStatus } from '@maka/core';
+import { toolResultActivityStatus, unfinishedToolActivityStatus } from '@maka/core';
 
 // ============================================================================
 // View-model types (mirror packages/ui/src exports, lifted here for reuse)
@@ -139,10 +139,7 @@ export function materializeSession(messages: readonly StoredMessage[]): SessionV
 /**
  * Build a ToolActivityItem from a (ToolCallMessage, ToolResultMessage?) pair.
  *
- * - Missing result, turn still running → 'running' (the call is in flight)
- * - Missing result, turn ended → 'interrupted' (orphan from crash). Sessions
- *   written before `turn_state` fall back to `inferLegacyTurnStatus`, which
- *   never returns 'running', so they land here too.
+ * - Missing result → `unfinishedToolActivityStatus` reads it against the turn
  * - Cancelled shell / aborted explore → 'interrupted' (not failure)
  * - Result with isError === true → 'errored' (includes permission deny/block)
  * - Result with isError === false → 'completed'
@@ -159,7 +156,7 @@ function toolActivityFromPair(
       ...(call.activityKind !== undefined ? { activityKind: call.activityKind } : {}),
       ...(call.displayName !== undefined ? { displayName: call.displayName } : {}),
       ...(call.intent !== undefined ? { intent: call.intent } : {}),
-      status: turnStatus === 'running' ? 'running' : 'interrupted',
+      status: unfinishedToolActivityStatus(turnStatus),
       args: projectToolActivityArgs(call.toolName, call.args),
       ts: call.ts,
     };

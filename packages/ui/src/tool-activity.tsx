@@ -159,7 +159,7 @@ export function ToolCallDetail({ item }: { item: ToolActivityItem }) {
   // Cancel is not a failure; stale errored+cancelled must not paint as failed.
   const failedOutcome = item.status === 'errored' && !cancelled;
   const permissionDenied = isPermissionDeniedToolResult(item.result);
-  const running = item.status === 'running' || item.status === 'pending';
+  const running = isInFlightToolStatus(item.status);
   const ptyControlResult = item.toolName === 'WriteStdin' && item.result?.kind === 'shell_run';
   const ownsPanel = resultOwnsOwnPanel(item);
   // Sandbox only — ordinary failures use ChatToolCalls status=error on the row.

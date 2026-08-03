@@ -543,7 +543,7 @@ export const TurnView = memo(function TurnView(props: {
             )}
             {/* The turn timeline is the rendering source of truth
                 (materialize.ts): each step's 深度思考 disclosure, answer bubble,
-                and Codex-style tool trow in the order the model produced them.
+                and Astryx tool group in the order the model produced them.
                 #1307: runs of reasoning + tools between answer texts render
                 through the derived fold as collapsed Processing blocks. */}
             {foldedTimeline.map((item, index) =>
@@ -851,7 +851,7 @@ function timelineEntryKey(item: TurnTimelineItem, index: number): string {
   return `${item.kind}-${item.messageId}`;
 }
 
-/** Render one timeline entry: reasoning disclosure / answer bubble / tool trow. */
+/** Render one timeline entry: reasoning disclosure / answer bubble / tool group. */
 function TurnTimelineEntry(props: {
   item: TurnTimelineItem;
   onStreamingSettled?: (messageId?: string) => void;

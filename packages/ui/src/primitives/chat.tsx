@@ -88,8 +88,8 @@ export function Marker({
 
 /**
  * `TextShimmer` — a running "sweep of light" across short label text
- * (streaming UI rework). Used for the "深度思考" disclosure title while
- * reasoning streams and for a working trow's active-tool summary.
+ * (streaming UI rework). Used for the turn's processing indicator while a turn
+ * is still working.
  *
  * Two overlaid layers on the same grid cell: an opaque `base` (keeps the text
  * readable at all times, and is all a snapshot / reduced-motion user sees) and
@@ -104,23 +104,14 @@ export function Marker({
  * pass `active` false for settled/snap states so the sweep never runs in a
  * deterministic capture. Kept INTERNAL (off the package barrel, imported by
  * relative path) — its only consumers live in `@maka/ui`.
- *
- * `delayed` (#646 run→done seam) holds the sweep at its resting frame for
- * `--duration-emphasized` (~200ms) before it starts — a purely CSS de-flicker so
- * a sub-second tool row (which unmounts inside the window) never visibly sweeps,
- * while the base text is readable from frame 0. The keyframe rests at
- * `background-position:150% 0` (= the sweep's declared start), so the delay reads
- * as plain static muted text, matching `active={false}`.
  */
 export function TextShimmer({
   children,
   active = true,
-  delayed = false,
   className,
 }: {
   children: React.ReactNode;
   active?: boolean;
-  delayed?: boolean;
   className?: string;
 }): React.ReactElement {
   if (!active) {
@@ -130,15 +121,8 @@ export function TextShimmer({
     <span data-slot="text-shimmer" className={cn("maka-text-shimmer", className)}>
       {/* Base: opaque, muted, always readable. */}
       <span className="maka-text-shimmer-base">{children}</span>
-      {/* Sweep: a clipped light band that travels across the glyphs. The delay
-          rides inside the `animation` shorthand (second <time> = animation-delay)
-          so it can't be reset by the shorthand — the governance keyframe name is
-          still `maka-text-shimmer`, the only token the scanner reads. */}
-      <span
-        aria-hidden="true"
-        className="maka-text-shimmer-sweep"
-        data-delayed={delayed ? "true" : undefined}
-      >
+      {/* Sweep: a clipped light band that travels across the glyphs. */}
+      <span aria-hidden="true" className="maka-text-shimmer-sweep">
         {children}
       </span>
     </span>

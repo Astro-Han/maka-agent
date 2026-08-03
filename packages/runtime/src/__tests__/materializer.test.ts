@@ -367,12 +367,14 @@ describe('applyAppendedMessage', () => {
 describe('setToolStatus', () => {
   test('updates by toolUseId without duplicating', () => {
     const items = applyAppendedMessage([], toolCall('t', 'Read')).items;
+    // Two distinct hops off `pending`, so this stays a transition test rather
+    // than a second copy of the idempotence test below.
     const stage1 = setToolStatus(items, 't', { status: 'running' });
-    const stage2 = setToolStatus(stage1, 't', { status: 'running' });
+    const stage2 = setToolStatus(stage1, 't', { status: 'completed' });
     expect(stage2).toHaveLength(1);
     const item = stage2[0];
     if (item?.kind !== 'tool') throw new Error('wrong kind');
-    expect(item.item.status).toBe('running');
+    expect(item.item.status).toBe('completed');
   });
 
   test('idempotent on duplicate updates', () => {

@@ -6,6 +6,7 @@ import {
   projectToolActivityArgs,
   STEP_LIMIT_NOTICE_TEXT,
   toolResultActivityStatus,
+  unfinishedToolActivityStatus,
 } from '@maka/core';
 import type { AttachmentRef, ToolActivityStatus, InlineReference, QuoteRef, ShellRunUpdate, StoredMessage, ToolActivityKind, ToolResultContent, TurnRecord, TurnStatus, UserMessage } from '@maka/core';
 import type { LiveTurnProjection } from './live-turn-projection.js';
@@ -153,24 +154,12 @@ export function materializeTools(messages: StoredMessage[]): ToolActivityItem[] 
         ...(call.stepId !== undefined ? { stepId: call.stepId } : {}),
         status: result
           ? materializeToolResultStatus(result)
-          : unfinishedToolStatus(turnStatusById.get(call.turnId)),
+          : unfinishedToolActivityStatus(turnStatusById.get(call.turnId)),
         args: projectToolActivityArgs(call.toolName, call.args),
         result: result?.content,
         durationMs: result?.durationMs,
       };
     });
-}
-
-/**
- * A `tool_call` with no `tool_result` is not evidence of a terminal state — it
- * is the absence of evidence. The turn says which: while the turn is still
- * `running` the tool is running too, and only a turn that has itself ended
- * makes the missing result mean the tool never finished. Sessions written
- * before `turn_state` fall back to `inferLegacyTurnStatus`, which never returns
- * `running`, so they keep reading as `interrupted`.
- */
-function unfinishedToolStatus(turnStatus: TurnStatus | undefined): ToolActivityItem['status'] {
-  return turnStatus === 'running' ? 'running' : 'interrupted';
 }
 
 function materializeToolResultStatus(
@@ -245,7 +234,7 @@ function mergeLiveOverPersisted(
  * - `text`: one assistant answer segment (a step's text). `ts` is the source
  *   step's wall-clock for hover meta.
  * - `tools`: one contiguous group of tool activity, rendered as a single
- *   Codex-style trow. Adjacent groups are pre-merged.
+ *   Astryx tool group. Adjacent groups are pre-merged.
  *
  * The model stays FLAT: the collapsed "Processing" fold (#1307) is a render
  * concern applied by `foldTimeline` (timeline-fold.ts) at the component layer,
@@ -693,7 +682,7 @@ function findShellRunParentIndex(items: readonly ToolActivityItem[], ref: string
  *    flush as a trailing tools group.
  *
  * Empty text/thinking produce no item. Adjacent thinking blocks merge with
- * a blank line; adjacent tools groups merge into one trow.
+ * a blank line; adjacent tools groups merge into one group.
  */
 function buildTurnTimeline(
   turnMessages: readonly StoredMessage[],

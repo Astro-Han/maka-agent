@@ -313,9 +313,6 @@
   -webkit-text-fill-color: transparent;
   animation: maka-text-shimmer 1.8s linear infinite;
 }
-.maka-text-shimmer-sweep[data-delayed="true"] {
-  animation-delay: var(--duration-emphasized);
-}
 @media (prefers-reduced-motion: reduce) {
   .maka-text-shimmer-sweep { opacity: 0; animation: none; }
 }
