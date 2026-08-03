@@ -85,7 +85,7 @@ import { useShellSearch } from './use-shell-search';
 import { useSessionGoal } from './use-session-goal';
 import { deriveStaleSessionIds } from './stale-sessions';
 import { deriveProjectGroups, deriveWorktreeSessionIds } from './session-project-grouping';
-import { deriveAppShellTurnViewModel } from './app-shell-turn-view-model';
+import { deriveAppShellTurnViewModel, type AppShellTurnViewModel } from './app-shell-turn-view-model';
 import { readScrollMotionBehavior } from './scroll-motion-policy';
 import { deriveBranchBanner } from './branch-banner';
 import { readNavigationState, selectNavigation } from './nav-selection';
@@ -900,6 +900,10 @@ function AppShellContent({
     }
   }
 
+  // Every per-turn prop a memoized TurnView reads has to keep identity when its
+  // value does, or the stable turn from the transcript projection buys nothing
+  // and the whole transcript re-renders at every refresh anyway (#2030).
+  const turnViewModelRef = useRef<AppShellTurnViewModel | undefined>(undefined);
   const {
     turnFooterActionsByTurn,
     turnFailedReasonLabels,
@@ -907,13 +911,18 @@ function AppShellContent({
     turnLineageBadgesByTurn,
     resumeCandidateTurnId,
   } = useMemo(
-    () => deriveAppShellTurnViewModel({
-      activeId,
-      messages,
-      pendingTurnActions,
-      pendingKeyOf,
-      uiLocale,
-    }),
+    () => {
+      const derived = deriveAppShellTurnViewModel({
+        activeId,
+        messages,
+        pendingTurnActions,
+        pendingKeyOf,
+        uiLocale,
+        previous: turnViewModelRef.current,
+      });
+      turnViewModelRef.current = derived;
+      return derived;
+    },
     [activeId, messages, pendingTurnActions, uiLocale],
   );
 

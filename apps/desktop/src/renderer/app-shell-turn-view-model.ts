@@ -4,6 +4,7 @@ import {
   formatTurnDuration,
   isSandboxDeniedTool,
   materializeTurns,
+  valuesEqual,
   type TurnFooterActionMeta,
   type TurnLineageBadge,
   type TurnViewModel,
@@ -41,6 +42,8 @@ export function deriveAppShellTurnViewModel(input: {
   pendingTurnActions: ReadonlySet<string>;
   uiLocale: UiLocale;
   pendingKeyOf(sessionId: string, turnId: string, actionId: TurnFooterActionMeta['id']): string;
+  /** The previous derivation, so per-turn props keep identity when their value does. */
+  previous?: AppShellTurnViewModel;
 }): AppShellTurnViewModel {
   const turnsForLineage = materializeTurns(input.messages);
   const resumeCandidateTurnId = latestInterruptedResumeTurnId(turnsForLineage);
@@ -99,11 +102,53 @@ export function deriveAppShellTurnViewModel(input: {
     if (turnBadges.length > 0) badges[turn.turnId] = turnBadges;
   }
 
-  return {
+  return reconcileAppShellTurnViewModel(input.previous, {
     turnFooterActionsByTurn: footer,
     turnFailedReasonLabels: failedLabels,
     turnFailedRecoveryLabels: failedRecoveryLabels,
     turnLineageBadgesByTurn: badges,
     ...(resumeCandidateTurnId ? { resumeCandidateTurnId } : {}),
+  });
+}
+
+/**
+ * Intern the per-turn props against the previous derivation.
+ *
+ * `TurnView` is a shallow-compare `memo`, so a stable `turn` only skips a turn
+ * if every sibling prop is stable too. These arrays are rebuilt from scratch on
+ * every `refreshMessages` — which fires at each step and tool boundary — so
+ * without this the incremental transcript projection's refresh half bought
+ * nothing: the turn object was reused and the footer array was not, and the
+ * memo failed on the footer (#2030).
+ *
+ * Value equality, not input equality: the inputs (a freshly deserialized
+ * `messages` array) never carry identity across an IPC read, so identity has to
+ * be re-established from the derived value, exactly as the transcript
+ * projection re-establishes it for turns.
+ */
+function reconcileAppShellTurnViewModel(
+  previous: AppShellTurnViewModel | undefined,
+  next: AppShellTurnViewModel,
+): AppShellTurnViewModel {
+  if (!previous) return next;
+  const turnFooterActionsByTurn = reuseEqualEntries(previous.turnFooterActionsByTurn, next.turnFooterActionsByTurn);
+  const turnLineageBadgesByTurn = reuseEqualEntries(previous.turnLineageBadgesByTurn, next.turnLineageBadgesByTurn);
+  const reconciled: AppShellTurnViewModel = {
+    ...next,
+    turnFooterActionsByTurn,
+    turnLineageBadgesByTurn,
   };
+  return valuesEqual(previous, reconciled) ? previous : reconciled;
+}
+
+function reuseEqualEntries<T>(
+  previous: Record<string, T>,
+  next: Record<string, T>,
+): Record<string, T> {
+  const reconciled: Record<string, T> = {};
+  for (const [turnId, value] of Object.entries(next)) {
+    const prior = previous[turnId];
+    reconciled[turnId] = prior !== undefined && valuesEqual(prior, value) ? prior : value;
+  }
+  return reconciled;
 }
