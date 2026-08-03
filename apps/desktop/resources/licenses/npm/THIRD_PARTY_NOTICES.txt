@@ -8475,10 +8475,10 @@ SOFTWARE.
 
 ================================================================================
 
-Package: ip-address@10.2.0
+Package: ip-address@10.4.0
 Declared license: MIT
 Selected license: MIT
-Repository: git://github.com/beaugunderson/ip-address.git
+Repository: https://github.com/beaugunderson/ip-address.git
 
 --- LICENSE ---
 Copyright (C) 2011 by Beau Gunderson
