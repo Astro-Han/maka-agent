@@ -1784,7 +1784,7 @@ describe('createHarborTaskRunner', () => {
     });
   });
 
-  test('keeps an externally ended run infra however complete its artifacts are', async () => {
+  test('keeps an externally ended run that exited non-zero infra despite full artifacts', async () => {
     await withRun(async ({ jobsDir, repo }) => {
       const runner = createHarborTaskRunner({
         makaRepoPath: repo,
@@ -1795,6 +1795,13 @@ describe('createHarborTaskRunner', () => {
           // Every artifact present and the verdict conclusive: the container
           // died after the verifier ran. The agent still never got the run it
           // was given, so this is not a fair sample at any reward.
+          //
+          // Scoped deliberately to the non-zero exit. Both harnesses swallow a
+          // recorded agent-phase exception and exit 0 (trial.py run()), and on
+          // that path an external termination with a full verdict still falls
+          // through and scores. That is defensible — the verifier did grade it,
+          // and the verifier only ever runs for an agent-owned termination in
+          // the first place — but it is not what this test pins.
           reward: '0\n',
           cell: cellOutput({ status: 'failed', errorClass: 'aborted' }),
           trialResult: {
