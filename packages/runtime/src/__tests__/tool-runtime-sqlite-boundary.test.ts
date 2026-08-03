@@ -24,8 +24,8 @@ describe('ToolRuntime with real SQLite boundary', () => {
         newId: nextId(),
         now: nextNow(),
         getPermissionPauseTarget: () => null,
-        getCurrentRunId: () => 'run-1',
-        getCurrentInvocationId: () => 'invocation-1',
+        runId: 'run-1',
+        invocationId: 'invocation-1',
         runtimeCommitSink: store,
       });
       runtime.beginTurn('turn-1');
@@ -109,8 +109,8 @@ describe('ToolRuntime with real SQLite boundary', () => {
         newId: nextId(),
         now: nextNow(),
         getPermissionPauseTarget: () => null,
-        getCurrentRunId: () => 'run-1',
-        getCurrentInvocationId: () => 'invocation-1',
+        runId: 'run-1',
+        invocationId: 'invocation-1',
         runtimeCommitSink: store,
       });
       const tool: MakaTool = {
@@ -197,8 +197,8 @@ describe('ToolRuntime with real SQLite boundary', () => {
         newId: nextId(),
         now: nextNow(),
         getPermissionPauseTarget: () => null,
-        getCurrentRunId: () => 'run-1',
-        getCurrentInvocationId: () => 'invocation-1',
+        runId: 'run-1',
+        invocationId: 'invocation-1',
         runtimeCommitSink: store,
       });
       const published: SessionEvent[] = [];

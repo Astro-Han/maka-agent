@@ -308,7 +308,7 @@ function buildRuntime(
     newId: nextId(),
     now: () => 1,
     getPermissionPauseTarget: () => null,
-    getCurrentRunId: () => 'parent-run',
+    runId: 'parent-run',
     spawnChildAgent,
   });
 }

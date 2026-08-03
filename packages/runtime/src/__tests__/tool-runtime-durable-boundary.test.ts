@@ -73,8 +73,47 @@ describe('ToolRuntime durable boundary', () => {
     );
   });
 
-  it('does not cross T1 after the captured Run loses ownership', async () => {
-    let runReads = 0;
+  // #1990: a backend instance serves several overlapping turns, so one turn
+  // ending must not disturb the run identity another turn commits under. The
+  // identity is fixed per ToolRuntime, so it cannot drift mid-execution.
+  it('commits each overlapping turn under its own run id', async () => {
+    const commits: Array<{ phase: string; runId: string | undefined }> = [];
+    const sink = (): RuntimeCommitSink => ({
+      commitToolPrepared: async (input) => {
+        commits.push({ phase: 't1', runId: input.runtimeEvent.runId });
+        return { created: true, runtimeEventSeq: 1 };
+      },
+      commitToolOutcome: async (input) => {
+        commits.push({ phase: 't2', runId: input.runtimeEvent.runId });
+        return { created: true, runtimeEventSeq: 2 };
+      },
+    });
+    const first = makeHarness(sink(), undefined, 'run-1');
+    const second = makeHarness(sink(), undefined, 'run-2');
+
+    // The first turn finishes entirely before the second executes its tool.
+    await first.execute(tool(() => ({ ok: true })));
+    await first.runtime.endTurn('turn-1', 'completed');
+
+    let implementationCalls = 0;
+    const result = await second.execute(
+      tool(() => {
+        implementationCalls += 1;
+        return { ok: true };
+      }),
+    );
+
+    assert.deepEqual(result, { ok: true });
+    assert.equal(implementationCalls, 1);
+    assert.deepEqual(commits, [
+      { phase: 't1', runId: 'run-1' },
+      { phase: 't2', runId: 'run-1' },
+      { phase: 't1', runId: 'run-2' },
+      { phase: 't2', runId: 'run-2' },
+    ]);
+  });
+
+  it('refuses durable tool execution when the turn carries no run id', async () => {
     let preparedCalls = 0;
     let implementationCalls = 0;
     const harness = makeHarness(
@@ -88,7 +127,7 @@ describe('ToolRuntime durable boundary', () => {
         },
       },
       undefined,
-      () => (++runReads === 1 ? 'run-1' : undefined),
+      null,
     );
 
     await assert.rejects(
@@ -98,7 +137,7 @@ describe('ToolRuntime durable boundary', () => {
           return { ok: true };
         }),
       ),
-      /lost Run ownership/,
+      /Durable tool execution requires a run id/,
     );
 
     assert.equal(preparedCalls, 0);
@@ -303,11 +342,8 @@ describe('ToolRuntime durable boundary', () => {
   });
 });
 
-function makeHarness(
-  sink: RuntimeCommitSink,
-  order?: string[],
-  getCurrentRunId: () => string | undefined = () => 'run-1',
-) {
+// `null` means the turn carries no run id at all; `undefined` keeps the default.
+function makeHarness(sink: RuntimeCommitSink, order?: string[], runId: string | null = 'run-1') {
   const messages: StoredMessage[] = [];
   const events: SessionEvent[] = [];
   const runtime = createTestToolRuntime({
@@ -321,10 +357,11 @@ function makeHarness(
     newId: nextId(),
     now: nextNow(),
     getPermissionPauseTarget: () => null,
-    getCurrentRunId,
+    ...(runId ? { runId } : {}),
     runtimeCommitSink: sink,
   });
   return {
+    runtime,
     messages,
     events,
     execute: async (target: MakaTool, abortSignal: AbortSignal = new AbortController().signal) =>

@@ -48,7 +48,7 @@ import {
 } from './history-compact-checkpoint.js';
 
 import { createHash } from 'node:crypto';
-import type { ModelMessage } from './model-protocol.js';
+import type { ModelMessage, ProviderImageBudget, ProviderRequestOrigin } from './model-protocol.js';
 import type { ModelAdapter } from './model-adapter.js';
 import type {
   RequestProjection,
@@ -108,7 +108,15 @@ export interface AiSdkCompactionDeps {
     modelId: string;
     runId?: string;
   }) => ProviderRequestTracker | undefined;
-  materializeRuntimeReplayPlan: (plan: RuntimeEventModelReplayPlan) => Promise<ModelMessage[]>;
+  /**
+   * Materialize a replay plan. The image budget belongs to the turn whose
+   * request this replacement is built for, so it is passed in rather than read
+   * from the backend, which may be serving several turns at once.
+   */
+  materializeRuntimeReplayPlan: (
+    plan: RuntimeEventModelReplayPlan,
+    imageBudget: ProviderImageBudget | null | undefined,
+  ) => Promise<ModelMessage[]>;
   canReplayProviderNative: (plan: RuntimeEventModelReplayPlan) => boolean;
   appendTurnTailPrompt: (
     content: ModelMessage['content'],
@@ -129,6 +137,7 @@ export class AiSdkCompaction {
   }) => ProviderRequestTracker | undefined;
   private readonly materializeRuntimeReplayPlan: (
     plan: RuntimeEventModelReplayPlan,
+    imageBudget: ProviderImageBudget | null | undefined,
   ) => Promise<ModelMessage[]>;
   private readonly canReplayProviderNative: (plan: RuntimeEventModelReplayPlan) => boolean;
   private readonly appendTurnTailPrompt: (
@@ -387,8 +396,9 @@ export class AiSdkCompaction {
     requestShapeHashBefore?: string;
     turnId: string;
     /**
-     * Present for a manual compaction, which runs outside `send()` and so has
-     * no live run for the backend to resolve. Absent mid-send, where it does.
+     * The run this summarization is billed to. Always stated by the caller:
+     * mid-send the backend cannot resolve it, because one backend instance
+     * serves several concurrent runs (#1990).
      */
     runId?: string;
     contextBudget: ContextBudgetPolicy;
@@ -1000,7 +1010,8 @@ export class AiSdkCompaction {
       messages: readonly ModelMessage[],
       activeToolsForStep: readonly string[] | undefined,
     ) => string,
-    onDiagnosticPatch?: (patch: Partial<ContextBudgetDiagnostic>) => void,
+    onDiagnosticPatch: ((patch: Partial<ContextBudgetDiagnostic>) => void) | undefined,
+    origin: ProviderRequestOrigin,
     abortSignal?: AbortSignal,
   ): RequestProjectionStage | undefined {
     const policy = this.input.contextBudget?.semanticCompact;
@@ -1028,6 +1039,7 @@ export class AiSdkCompaction {
           turnId,
           callKind: 'semantic_compact',
           modelId: summarizerModelId,
+          ...(origin.runId ? { runId: origin.runId } : {}),
         });
       }
       return summaryTracker;
@@ -1265,6 +1277,7 @@ export class AiSdkCompaction {
     turnTailPrompt: string | undefined,
     systemPromptChars: number,
     onDiagnosticPatch: (patch: Partial<ContextBudgetDiagnostic>) => void,
+    origin: ProviderRequestOrigin,
     abortSignal?: AbortSignal,
   ): RequestProjectionStage | undefined {
     if (!state) return undefined;
@@ -1394,6 +1407,7 @@ export class AiSdkCompaction {
       // keep the raw projection on skip/fail, apply the fold on success.
       const outcome = await this.computeMidTurnCompactionReplacement({
         turnId,
+        origin,
         state,
         queue,
         minFlushedSteps: options.stepNumber,
@@ -1441,6 +1455,8 @@ export class AiSdkCompaction {
   public async computeMidTurnCompactionReplacement(input: {
     turnId: string;
     state: MidTurnCapacityCompactState;
+    /** The turn this replacement request is built for. */
+    origin: ProviderRequestOrigin;
     queue: AsyncEventQueue<SessionEvent>;
     minFlushedSteps: number;
     estimatedNextRequestTokens: number;
@@ -1466,6 +1482,7 @@ export class AiSdkCompaction {
       turnId,
       callKind: 'history_compact',
       modelId: this.input.modelId,
+      ...(input.origin.runId ? { runId: input.origin.runId } : {}),
     });
     const recorder = this.input.recordHistoryCompactCheckpoint!;
     const loadTurnRuntimeEvents = this.input.loadTurnRuntimeEvents!;
@@ -1611,10 +1628,10 @@ export class AiSdkCompaction {
         ? { ...item, content: this.appendTurnTailPrompt(item.content, turnTailPrompt) as string }
         : item,
     );
-    const replacementMessages = await this.materializeRuntimeReplayPlan({
-      ...replayPlan,
-      items: replayItemsWithAnchorTail,
-    });
+    const replacementMessages = await this.materializeRuntimeReplayPlan(
+      { ...replayPlan, items: replayItemsWithAnchorTail },
+      input.origin.imageBudget,
+    );
     // Apply the shape only when it actually shrinks the request versus the
     // reference payload (the incoming request for the proactive hook, the
     // request that overflowed for reactive recovery): a materialized
@@ -1697,6 +1714,7 @@ export class AiSdkCompaction {
     turnTailPrompt: string | undefined;
     queue: AsyncEventQueue<SessionEvent>;
     onDiagnosticPatch: (patch: Partial<ContextBudgetDiagnostic>) => void;
+    origin: ProviderRequestOrigin;
     abortSignal?: AbortSignal;
   }): Promise<{ messages: ModelMessage[] } | undefined> {
     const state = input.midTurnState;
@@ -1721,6 +1739,7 @@ export class AiSdkCompaction {
       );
     const outcome = await this.computeMidTurnCompactionReplacement({
       turnId: input.turnId,
+      origin: input.origin,
       state,
       queue: input.queue,
       // The stream has ended, so every completed step is already flushed; wait

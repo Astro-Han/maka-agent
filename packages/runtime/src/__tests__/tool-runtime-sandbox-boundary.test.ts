@@ -120,7 +120,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       newId: nextId(),
       now: () => 1,
       getPermissionPauseTarget: () => null,
-      getCurrentRunId: () => 'run-1',
+      runId: 'run-1',
     });
     runtime.beginTurn('turn-1');
     const tool = buildRequestSandboxBoundaryTool();
@@ -195,7 +195,7 @@ describe('ToolRuntime session sandbox boundary', () => {
       newId: nextId(),
       now: () => 1,
       getPermissionPauseTarget: () => null,
-      getCurrentRunId: () => 'run-1',
+      runId: 'run-1',
     });
     runtime.beginTurn('turn-1', hostedInteraction);
     const pending = runtime.settleToolCall({

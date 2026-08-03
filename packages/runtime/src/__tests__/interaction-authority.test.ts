@@ -385,8 +385,7 @@ describe('Runtime Interaction authority seam', () => {
       }),
       RUN,
     );
-    let currentRunId: string | undefined = RUN.runId;
-    const runtime = toolRuntime(events, () => currentRunId);
+    const runtime = toolRuntime(events);
     runtime.beginTurn(RUN.turnId, binding);
     const pending = settleTool(
       runtime,
@@ -412,7 +411,6 @@ describe('Runtime Interaction authority seam', () => {
     binding.assertPendingAdmission(published);
 
     const rejected = assert.rejects(pending, /turn_stopped/);
-    currentRunId = undefined;
     runtime.endTurn(RUN.turnId, 'aborted');
     await immediate();
     assert.deepEqual(log, []);
@@ -521,10 +519,7 @@ function authority(
   };
 }
 
-function toolRuntime(
-  events: SessionEvent[],
-  getCurrentRunId: () => string | undefined = () => RUN.runId,
-): ToolRuntime {
+function toolRuntime(events: SessionEvent[], runId: string | undefined = RUN.runId): ToolRuntime {
   let id = 0;
   return createTestToolRuntime({
     sessionId: RUN.sessionId,
@@ -535,7 +530,7 @@ function toolRuntime(
     newId: () => `runtime-${++id}`,
     now: () => 1,
     getPermissionPauseTarget: () => null,
-    getCurrentRunId,
+    ...(runId ? { runId } : {}),
     recordToolInvocation: () => void events,
   });
 }

@@ -23,6 +23,30 @@
 
 import type { CacheMissInputSource } from '@maka/core/usage-stats/types';
 
+/**
+ * Per-provider-request image byte budget.
+ *
+ * Charged while a request's content is materialized, so it belongs to the turn
+ * issuing that request — never to the backend, which serves several turns.
+ */
+export interface ProviderImageBudget {
+  used: number;
+  decisions: Map<string, boolean>;
+}
+
+/**
+ * The turn a provider request is being built for.
+ *
+ * Compaction and other auxiliary calls run inside someone's turn but are owned
+ * by a Session-scoped collaborator, so the issuing turn states its identity
+ * explicitly instead of the collaborator reading back a shared "current" run —
+ * which, with overlapping turns on one backend, can be a different run (#1990).
+ */
+export interface ProviderRequestOrigin {
+  runId?: string;
+  imageBudget?: ProviderImageBudget | null;
+}
+
 // ---------------------------------------------------------------------------
 // JSON value contract
 // ---------------------------------------------------------------------------

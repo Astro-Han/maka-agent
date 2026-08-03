@@ -299,8 +299,15 @@ export interface ToolRuntimeInput {
   newId: () => string;
   now: () => number;
   getPermissionPauseTarget: () => { pause(): void; resume(): void } | null;
-  getCurrentInvocationId?: () => string | undefined;
-  getCurrentRunId?: () => string | undefined;
+  /**
+   * Durable identity of the ONE run this ToolRuntime serves, fixed at
+   * construction. It is deliberately a value and not a getter: a backend
+   * instance is shared by concurrently overlapping runs, so anything a tool
+   * reads back from the backend's "current" state can already belong to a
+   * different run by the time the tool executes (#1990).
+   */
+  runId?: string;
+  invocationId?: string;
   materializeDefaultToolResultOutput?: (options: {
     toolCallId: string;
     output: unknown;
@@ -818,8 +825,8 @@ export class ToolRuntime {
     const toolIntent = describeToolIntent(tool, persistedArgs);
     const trace = this.input.getRunTrace?.() ?? null;
 
-    const runId = this.input.getCurrentRunId?.();
-    const invocationId = this.input.getCurrentInvocationId?.() ?? runId;
+    const runId = this.input.runId;
+    const invocationId = this.input.invocationId ?? runId;
     if (this.input.runtimeCommitSink && !runId) {
       throw new RuntimeCommitBoundaryError(
         'T1',
@@ -997,7 +1004,6 @@ export class ToolRuntime {
       return this.errorReturn(reason);
     }
 
-    this.assertCapturedRunOwner(tool.name, runId);
     let clientCapabilityBoundary: ExecutionBoundary | undefined;
     if (tool.categoryHint === 'client_capability') {
       try {
@@ -1047,7 +1053,6 @@ export class ToolRuntime {
 
     let durableAttempt: DurableToolAttempt | undefined;
     try {
-      this.assertCapturedRunOwner(tool.name, runId);
       durableAttempt = await this.prepareDurableToolAttempt({
         tool,
         startEvent: startEv,
@@ -1089,7 +1094,7 @@ export class ToolRuntime {
       const pauseTarget = this.input.getPermissionPauseTarget();
       pauseTarget?.pause();
       try {
-        const runId = this.input.getCurrentRunId?.();
+        const runId = this.input.runId;
         const executionBoundary = clientCapabilityBoundary ?? (await this.readExecutionBoundary());
         const result = await tool.impl(structuredClone(executionArgs) as never, {
           sessionId: this.input.sessionId,
@@ -1466,7 +1471,6 @@ export class ToolRuntime {
       refs: { operationId, toolCallId: input.startEvent.toolUseId },
     };
     try {
-      this.assertCapturedRunOwner(input.tool.name, runId);
       this.assertDurableDispatchNotAborted(input.tool.name, input.abortSignal);
       const prepared = await sink.commitToolPrepared({
         operationId,
@@ -1553,12 +1557,6 @@ export class ToolRuntime {
     return undefined;
   }
 
-  private assertCapturedRunOwner(toolName: string, expectedRunId: string | undefined): void {
-    if (expectedRunId && this.input.getCurrentRunId?.() !== expectedRunId) {
-      throw new Error(`Tool ${toolName} lost Run ownership before durable dispatch`);
-    }
-  }
-
   private assertDurableDispatchNotAborted(toolName: string, abortSignal: AbortSignal): void {
     if (!abortSignal.aborted) return;
     throw abortSignal.reason instanceof Error
@@ -1596,7 +1594,7 @@ export class ToolRuntime {
     | 'resumeChildAgent'
     | 'retryChildAgent'
   > {
-    const parentRunId = this.input.getCurrentRunId?.();
+    const parentRunId = this.input.runId;
     if (!parentRunId) return {};
     const limiter = this.childAgentRunLimiter;
     const runWithPermit = async <T>(
@@ -1904,7 +1902,7 @@ export class ToolRuntime {
       // Embedded execution publishes the canonical row directly. Hosted
       // execution delegates both preflight and publication to the Host so a
       // rejected admission cannot leave an ownerless pending row behind.
-      const runId = this.input.getCurrentRunId?.();
+      const runId = this.input.runId;
       creation = this.input.createSandboxBoundaryRequest!({
         sessionId: this.input.sessionId,
         requestId,
