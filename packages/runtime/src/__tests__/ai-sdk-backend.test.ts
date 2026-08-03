@@ -10974,6 +10974,25 @@ describe('AiSdkBackend concurrent turns', () => {
     };
 
     const events: SessionEvent[] = [];
+    const sink = { push: (event: SessionEvent) => events.push(event) };
+    // Each tool gets its OWN turn's abort signal, exactly as send() hands it out,
+    // so the broadcast is observed where tools actually receive it.
+    const abortObserved: string[] = [];
+    const abortCall = runtimeExecute(
+      backend,
+      {
+        ...testTool('WaitForAbort', z.object({})),
+        impl: async (_input: unknown, ctx: { abortSignal: AbortSignal }) =>
+          new Promise((resolve) => {
+            ctx.abortSignal.addEventListener('abort', () => {
+              abortObserved.push('turn-a');
+              resolve({ stopped: true });
+            });
+          }),
+      } as MakaTool,
+      'turn-a',
+      sink,
+    )({}, { toolCallId: 'tool-a', abortSignal: failing.abortController.signal });
     const questionCall = runtimeExecute(
       backend,
       {
@@ -10984,12 +11003,24 @@ describe('AiSdkBackend concurrent turns', () => {
         ) => ctx.askUserQuestion([{ question: 'Continue?', options: ['yes', 'no'] }]),
       } as MakaTool,
       'turn-b',
-      { push: (event: SessionEvent) => events.push(event) },
-    )({}, { toolCallId: 'tool-b', abortSignal: new AbortController().signal });
+      sink,
+    )({}, { toolCallId: 'tool-b', abortSignal: parked.abortController.signal });
     await waitFor(() => events.some((event) => event.type === 'user_question_request'));
 
     await assert.rejects(backend.stop('user_stop'), /Could not durably deny/);
 
+    // Every turn is aborted under its own controller, not just the first one:
+    // turn-a's tool observes the signal it was actually handed, and turn-b's
+    // controller is aborted even though turn-a's teardown failed.
+    assert.equal(
+      await Promise.race([
+        abortCall.then(() => 'aborted'),
+        new Promise((resolve) => setTimeout(() => resolve('still running'), 50)),
+      ]),
+      'aborted',
+    );
+    assert.deepEqual(abortObserved, ['turn-a']);
+    assert.equal(parked.abortController.signal.aborted, true);
     // The failing turn's error still surfaces, and the sibling is closed anyway:
     // its parked question is rejected rather than left waiting forever.
     assert.deepEqual(endedTurns, ['turn-a', 'turn-b']);
@@ -13849,6 +13880,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
  */
 interface TestTurnScope {
   turnId: string;
+  abortController: AbortController;
   toolRuntime: ToolRuntime;
   watchdog: { pause(): void; resume(): void } | null;
   runTrace: RunTrace | null;
