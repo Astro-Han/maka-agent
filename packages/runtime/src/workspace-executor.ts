@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import { exec } from 'node:child_process';
 import { glob as nodeGlob } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve } from 'node:path';
-import { isPathInside } from './path-containment.js';
+import { isAbsolute, resolve } from 'node:path';
+import { isPathInside, realpathAllowMissing } from './path-containment.js';
 import { promisify } from 'node:util';
 import type { ToolExecutionFacts } from '@maka/core/permission';
 import { runProcessWithBoundedTail, runShellWithBoundedTail } from './shell-exec.js';
@@ -249,11 +249,16 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   }
 
   async resolveWritablePath(input: WorkspaceResolvePathInput): Promise<WorkspaceResolvePathResult> {
-    return { path: await resolveWritableInsideCwd(input.cwd, input.path, input.label) };
+    return { path: await canonicalPathInsideCwd(input.cwd, input.path, input.label) };
   }
 
   async writeLockKey(input: WorkspaceWriteLockKeyInput): Promise<WorkspaceWriteLockKeyResult> {
-    return { key: resolve(await fs.realpath(input.cwd), input.path) };
+    // Same canonicalisation as the resolvers, so every spelling of one file —
+    // relative, absolute, or through a symlink — takes the same lock. Escapes
+    // are rejected by the resolvers inside the lock, not here.
+    const root = await fs.realpath(input.cwd);
+    const requested = isAbsolute(input.path) ? resolve(input.path) : resolve(root, input.path);
+    return { key: await realpathAllowMissing(requested) };
   }
 
   async globFiles(input: WorkspaceGlobInput): Promise<WorkspaceGlobResult> {
@@ -294,24 +299,30 @@ function shellEscape(arg: string): string {
   return `'${arg.replaceAll("'", "'\\''")}'`;
 }
 
-async function resolveWritableInsideCwd(
+/**
+ * Canonical path of `inputPath` relative to the session cwd, or a containment
+ * error. Both sides of the check live in the realpath space: the root and the
+ * candidate (through its deepest existing ancestor, since the target may not
+ * exist yet). Comparing a realpath'd root against a merely resolved candidate
+ * rejected every legitimate absolute path whenever the session cwd sat under a
+ * symlink — macOS tmpdirs (`/var` → `/private/var`) and symlinked workspace
+ * roots. Following the symlinks does not weaken containment: a link inside the
+ * cwd that points out of it resolves to its outside target and is rejected.
+ */
+async function canonicalPathInsideCwd(
   cwd: string,
   inputPath: string,
   label: string,
 ): Promise<string> {
   const root = await fs.realpath(cwd);
-  const candidate = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath);
+  const requested = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath);
+  const candidate = await realpathAllowMissing(requested);
 
   if (!isPathInside(root, candidate)) {
     throw new Error(
       `${label} path must stay inside session cwd ${JSON.stringify(root)}; ` +
-        `received ${JSON.stringify(inputPath)}.`,
+        `received ${JSON.stringify(inputPath)}, which resolves to ${JSON.stringify(candidate)}.`,
     );
-  }
-
-  const parent = await fs.realpath(dirname(candidate));
-  if (!isPathInside(root, parent)) {
-    throw new Error(`${label} path must stay inside session cwd`);
   }
 
   return candidate;
@@ -322,20 +333,8 @@ async function resolveExistingInsideCwd(
   inputPath: string,
   label: string,
 ): Promise<string> {
-  const root = await fs.realpath(cwd);
-  const candidate = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath);
-
-  if (!isPathInside(root, candidate)) {
-    throw new Error(
-      `${label} path must stay inside session cwd ${JSON.stringify(root)}; ` +
-        `received ${JSON.stringify(inputPath)}.`,
-    );
-  }
-
-  const target = await fs.realpath(candidate);
-  if (!isPathInside(root, target)) {
-    throw new Error(`${label} path must stay inside session cwd`);
-  }
-
-  return target;
+  const candidate = await canonicalPathInsideCwd(cwd, inputPath, label);
+  // The read/search callers depend on the target existing; surface that here
+  // rather than as a downstream open/spawn failure.
+  return await fs.realpath(candidate);
 }

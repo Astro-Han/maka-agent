@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
  * Shared filesystem-containment and identifier guards. This is the single
@@ -56,6 +56,48 @@ export function isSafeSkillId(value: string): boolean {
 export function toRelative(root: string, target: string): string {
   const rel = relative(root, target);
   return rel === '' ? '.' : rel.split(sep).join('/');
+}
+
+/**
+ * Canonicalise `target` even when its leaf (or a run of trailing segments) does
+ * not exist yet: the deepest existing ancestor is realpath'd and the missing
+ * segments are appended. Containment can then be decided against a realpath'd
+ * root in a single path space, which is what {@link isPathInside} assumes —
+ * comparing a realpath'd root against a merely `resolve`d candidate rejects
+ * every legitimate absolute path whenever the root sits under a symlink (macOS
+ * `/var` → `/private/var`, symlinked workspace roots).
+ *
+ * Because symlinks are followed all the way to the leaf, this never legalises
+ * an escape: a link inside the root that points out of it resolves to its
+ * outside target and fails containment.
+ *
+ * Throws the underlying error when a path component is unreadable rather than
+ * missing, so permission problems are not silently treated as containment.
+ */
+export async function realpathAllowMissing(target: string): Promise<string> {
+  let cursor = resolve(target);
+  const missing: string[] = [];
+  while (true) {
+    try {
+      const realExisting = await realpath(cursor);
+      return resolve(realExisting, ...missing.reverse());
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
+      const parent = dirname(cursor);
+      if (parent === cursor) throw error;
+      missing.push(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+  );
 }
 
 // ── Contained file I/O ────────────────────────────────────────────────────

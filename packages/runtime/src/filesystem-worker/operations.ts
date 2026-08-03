@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { glob as nodeGlob } from 'node:fs/promises';
 import { dirname, isAbsolute, parse, resolve } from 'node:path';
-import { isPathInside } from '../path-containment.js';
+import { isPathInside, realpathAllowMissing } from '../path-containment.js';
 import { sandboxBoundaryExpansionAllowsPath } from '@maka/core';
 
 import { computeEditedSource } from '../edit-replace.js';
@@ -389,17 +389,6 @@ function exactWriteCoversParent(
 function assertContainedGlobPattern(pattern: string): void {
   if (isAbsolute(pattern) || pattern.split(/[\\/]+/).includes('..')) {
     throw operationError('path_denied', 'Glob pattern must stay inside its search root.');
-  }
-}
-
-async function realpathAllowMissing(path: string): Promise<string> {
-  try {
-    return await fs.realpath(path);
-  } catch (error) {
-    if (nodeErrorCode(error) !== 'ENOENT') throw error;
-    const parent = dirname(path);
-    if (parent === path) throw error;
-    return resolve(await realpathAllowMissing(parent), path.slice(parent.length + 1));
   }
 }
 
