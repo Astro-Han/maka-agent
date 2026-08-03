@@ -102,15 +102,23 @@ const PROVIDER_REQUEST_TELEMETRY = 'provider-request-telemetry.json';
 /** Shared across runners: the last proxied provider request must have
  * completed. A 200 stream without its protocol terminal event means the
  * provider response is incomplete — the trial is an infra failure, never a
- * graded model failure. Complete timed-out trials settle by deadline, so
- * their truncated tail request is expected and exempt. */
+ * graded model failure.
+ *
+ * A settled trial's tail request is expected to be truncated, but only in one
+ * specific way: killing the agent tears the request down from the client side,
+ * which the proxy records as `aborted` (provider-auth-proxy.ts sets it from
+ * `signal.aborted`). `interrupted` and `failed` are the upstream's doing and
+ * are not explained by the agent phase ending, so they stay infra however the
+ * trial settled — that is what keeps a provider outage out of the denominator
+ * instead of scoring it as the agent's zero. */
 export function incompleteTerminalProviderRequest(
   providerTelemetry: readonly ProviderRequestTelemetry[],
-  completeTimedOutTrial: boolean,
+  agentPhaseSettled: boolean,
 ): ProviderRequestTelemetry | undefined {
-  if (completeTimedOutTrial) return undefined;
   const terminal = providerTelemetry.at(-1);
-  return terminal && terminal.outcome !== 'completed' ? terminal : undefined;
+  if (!terminal || terminal.outcome === 'completed') return undefined;
+  if (agentPhaseSettled && terminal.outcome === 'aborted') return undefined;
+  return terminal;
 }
 
 export class HarborInfraError extends Error {
@@ -373,25 +381,24 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
       const resultPath = join(trialDir, TRIAL_RESULT);
       const hostEventsPath = join(trialDir, TRIAL_RUNTIME_EVENTS);
 
-      // Evidence before wording: Harbor's single_step.py runs the verifier after
-      // *any* agent-phase exception, so the trial's grade — not the exception's
-      // phrasing — decides whether a trial was settled. Read the artifacts for
-      // every exception shape, and only fall back to the budget-shaped message
-      // regexes when the evidence is incomplete.
+      // Two facts decide an abnormally ended trial, in this order: who ended the
+      // agent phase (classifyTrialTermination, from the harness's own exception
+      // class) and whether the verifier reached a verdict. Harbor's
+      // single_step.py runs the verifier after any agent-phase exception, so an
+      // agent-owned termination can still carry an authoritative reward. An
+      // externally ended run never can — the agent did not get the run it was
+      // given — so its artifacts are not evidence and it stays infra below.
       const trialException = await readTrialException(resultPath);
+      const termination = classifyTrialTermination(trialException);
       let completeTimedOutTrial = false;
       let verifierSettledTrial = false;
-      if (trialException) {
+      if (termination === 'agent_budget' || termination === 'agent_exit') {
         const [rewardArtifact, verifierArtifact, cellArtifact] = await Promise.all([
           readOptionalText(rewardPath),
           readOptionalText(join(trialDir, TRIAL_VERIFIER_OUTCOME)),
           readOptionalText(cellOutputPath),
         ]);
-        const settledByEvidence =
-          rewardArtifact !== null &&
-          cellArtifact !== null &&
-          hasConclusiveVerifierOutcome(verifierArtifact);
-        if (isBudgetExhaustedTrialException(trialException)) {
+        if (termination === 'agent_budget') {
           if (rewardArtifact === null || verifierArtifact === null || cellArtifact === null) {
             const artifactRefs = await readTimedOutTrialArtifacts(
               trialDir,
@@ -401,7 +408,7 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
             );
             throw new FixedPromptBudgetExhaustedError(
               `agent budget exhausted for task ${input.task.id}`,
-              trialException,
+              formatTrialException(trialException),
               artifactRefs || providerTelemetry.length > 0
                 ? {
                     ...(artifactRefs ?? {}),
@@ -412,10 +419,14 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
           }
           completeTimedOutTrial = true;
         } else {
-          // An unrecognized exception shape that the verifier still graded is a
-          // real result: keep the cell's own status/errorClass (no fabricated
-          // deadline settlement) and let the structured verifier grade score it.
-          verifierSettledTrial = settledByEvidence;
+          // The agent's own process exited non-zero and the verifier graded the
+          // workspace it left: a real result. Keep the cell's own status and
+          // errorClass — nothing here is a deadline, so nothing may claim one —
+          // and let the structured verifier grade score it.
+          verifierSettledTrial =
+            rewardArtifact !== null &&
+            cellArtifact !== null &&
+            hasConclusiveVerifierOutcome(verifierArtifact);
         }
       }
       if (result.exitCode !== 0 && !completeTimedOutTrial && !verifierSettledTrial) {
@@ -429,11 +440,11 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
       }
       const terminalProviderRequest = incompleteTerminalProviderRequest(
         providerTelemetry,
-        completeTimedOutTrial,
+        completeTimedOutTrial || verifierSettledTrial,
       );
       if (terminalProviderRequest) {
         throw new HarborInfraError(
-          `terminal provider request did not complete for task ${input.task.id}`,
+          `terminal provider request did not complete for task ${input.task.id}${trialExceptionSuffix(trialException)}`,
           [
             `outcome=${terminalProviderRequest.outcome}`,
             terminalProviderRequest.status !== undefined
@@ -1540,14 +1551,14 @@ async function readReward(rewardPath: string, resultPath: string, taskId: string
   } catch (error) {
     const trialException = await readTrialException(resultPath);
     if (trialException) {
-      if (isBudgetExhaustedTrialException(trialException)) {
+      if (classifyTrialTermination(trialException) === 'agent_budget') {
         throw new FixedPromptBudgetExhaustedError(
           `host cell budget exhausted for task ${taskId}`,
-          trialException,
+          formatTrialException(trialException),
         );
       }
       throw new HarborInfraError(
-        `Harbor trial failed before verifier reward for task ${taskId}: ${trialException}`,
+        `Harbor trial failed before verifier reward for task ${taskId}: ${formatTrialException(trialException)}`,
         errorText(error),
       );
     }
@@ -1564,12 +1575,22 @@ async function readReward(rewardPath: string, resultPath: string, taskId: string
   return reward;
 }
 
+/** How the agent phase ended, kept structured. Both harnesses record it in the
+ * trial result's `exception_info` in the same shape, and `exception_type` is
+ * Python's `type(e).__name__` — the harness's own exception classes, which are
+ * a stable fact. Flattening this to one string is what forced every downstream
+ * decision to re-derive the type by matching prose. */
+export interface TrialException {
+  type: string;
+  message: string;
+}
+
 /** Shared across runners: both harnesses record how the agent phase ended in
  * the trial result's `exception_info`, in the same shape. */
 export async function readTrialException(
   resultPath: string,
   fallbackType = 'HarborTrialError',
-): Promise<string | null> {
+): Promise<TrialException | null> {
   let raw: string;
   try {
     raw = await readFile(resultPath, 'utf8');
@@ -1589,24 +1610,53 @@ export async function readTrialException(
     typeof exceptionInfo.exception_type === 'string' ? exceptionInfo.exception_type : fallbackType;
   const message =
     typeof exceptionInfo.exception_message === 'string' ? exceptionInfo.exception_message : '';
-  return message ? `${type}: ${message}` : type;
+  return { type, message };
 }
 
-/** Shared across runners: the trial exceptions that mean the agent budget ran out (host cell deadline or harness AgentTimeoutError). */
-export function isBudgetExhaustedTrialException(message: string): boolean {
-  return (
-    /^RuntimeError: Maka host cell exceeded \d+(?:\.\d+)?s$/.test(message) ||
-    /^AgentTimeoutError: Agent execution timed out after \d+(?:\.\d+)? seconds$/.test(message)
-  );
+/** The `Type: message` rendering used in diagnostics. */
+export function formatTrialException(exception: TrialException | null): string | undefined {
+  if (!exception) return undefined;
+  return exception.message ? `${exception.type}: ${exception.message}` : exception.type;
 }
 
-/** Shared across runners: a verifier outcome is authoritative evidence that the
- * trial was graded only when it reached a verdict. `candidate_timeout` and
- * `infra_failed` say the verifier itself did not conclude, so they never settle
- * a trial whose agent phase already ended abnormally. Unreadable or malformed
- * text is treated as no evidence — the caller's own reader raises the precise
- * diagnosis on the paths that require a verdict. */
-export function hasConclusiveVerifierOutcome(raw: string | null): boolean {
+/** Who ended the agent phase — the one fact that decides whether an abnormally
+ * ended trial can be scored at all.
+ *
+ * - `agent_budget`: the agent ran out of its own time. Harbor raises its own
+ *   `AgentTimeoutError` class, so the type alone is unambiguous; the host cell's
+ *   deadline arrives as a generic `RuntimeError`, so that one still needs its
+ *   message — legitimately, because this repo raises it (harbor/maka_agent.py)
+ *   and `harbor-adapter.test.ts` pins the two ends together.
+ * - `agent_exit`: the agent's own process ended non-zero. That is the agent's
+ *   behavior, so a verifier verdict on the workspace it left is a real result.
+ * - `external`: the harness, container, or anything else ended the run. The
+ *   agent never got the run it was given, so no artifact on disk makes it a
+ *   fair sample. Unrecognized types land here on purpose: an unknown terminator
+ *   is not evidence of a fair trial, and the recognized budget shapes are
+ *   matched by type, so nothing regresses when upstream rewords a message. */
+export type TrialTerminationOwner = 'agent_budget' | 'agent_exit' | 'external';
+
+const HOST_CELL_DEADLINE_MESSAGE = /^Maka host cell exceeded \d+(?:\.\d+)?s$/;
+
+/** Shared across runners. */
+export function classifyTrialTermination(
+  exception: TrialException | null,
+): TrialTerminationOwner | null {
+  if (!exception) return null;
+  if (exception.type === 'AgentTimeoutError') return 'agent_budget';
+  if (exception.type === 'RuntimeError' && HOST_CELL_DEADLINE_MESSAGE.test(exception.message))
+    return 'agent_budget';
+  if (exception.type === 'NonZeroAgentExitCodeError') return 'agent_exit';
+  return 'external';
+}
+
+/** A verifier outcome is authoritative evidence that the trial was graded only
+ * when it reached a verdict. `candidate_timeout` and `infra_failed` say the
+ * verifier itself did not conclude, so they never settle a trial whose agent
+ * phase already ended abnormally. Unreadable or malformed text is treated as no
+ * evidence — the caller's own reader raises the precise diagnosis on the paths
+ * that require a verdict. */
+function hasConclusiveVerifierOutcome(raw: string | null): boolean {
   if (raw === null) return false;
   let parsed: unknown;
   try {
@@ -1620,9 +1670,10 @@ export function hasConclusiveVerifierOutcome(raw: string | null): boolean {
 
 /** Names the trial exception inside an infra error message. The WAL keeps only
  * the message, so an exception that never reaches it cannot be found by grep. */
-export function trialExceptionSuffix(trialException: string | null): string {
-  if (!trialException) return '';
-  const collapsed = trialException.replace(/\s+/g, ' ').trim();
+export function trialExceptionSuffix(trialException: TrialException | null): string {
+  const rendered = formatTrialException(trialException);
+  if (!rendered) return '';
+  const collapsed = rendered.replace(/\s+/g, ' ').trim();
   const truncated = collapsed.length > 200 ? `${collapsed.slice(0, 200)}…` : collapsed;
   return ` (trial exception: ${truncated})`;
 }

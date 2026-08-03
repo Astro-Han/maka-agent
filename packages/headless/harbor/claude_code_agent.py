@@ -128,6 +128,7 @@ class MakaClaudeCodeAgent(ClaudeCode):
             await super().run(instruction, environment, context)
         except asyncio.CancelledError:
             abnormal_exit = True
+            self._deadline_settled = True
             self._failure_class = "budget_exhausted"
             raise
         except BaseException as error:
@@ -248,6 +249,19 @@ class MakaClaudeCodeAgent(ClaudeCode):
             "schemaVersion": 1,
             "status": "failed" if error_class is not None else "completed",
             **({"errorClass": error_class} if error_class is not None else {}),
+            # Same contract as the Codex arm: the benchmark deadline, not the
+            # agent, ended this run, and the arm that observed it is the only
+            # one that can say so.
+            **(
+                {
+                    "deadlineSettlement": {
+                        "source": "benchmark.deadline",
+                        "mode": "immediate",
+                    }
+                }
+                if getattr(self, "_deadline_settled", False)
+                else {}
+            ),
             "runtimeEventsPath": "/logs/agent/runtime-events.jsonl",
             "promptHash": identity["systemPromptHash"],
             "executionIdentity": identity,

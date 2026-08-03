@@ -17,7 +17,6 @@ import {
   harborTraceMode,
   hostTraceEventsPath,
   isBudgetExhaustedError,
-  isBudgetExhaustedTrialException,
   mergeAgentEnv,
   modelIdForProvider,
   providerProxyApiProtocol,
@@ -26,6 +25,8 @@ import {
   providerTokenSummary,
   readCellOutput,
   readTimedOutTrialArtifacts,
+  classifyTrialTermination,
+  formatTrialException,
   readTrialException,
   resolveNativeTrialTimeoutMs,
   trialExceptionSuffix,
@@ -492,28 +493,25 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
       // then unconditionally runs verification, so an exceptional trial can
       // still carry an authoritative reward. Mirror Harbor's authority order
       // exactly: an ungraded budget exhaustion is a budget_exhausted outcome;
-      // every other exception falls through to the normal reward/cell reads —
-      // a graded trial scores on its actual reward (e.g. a non-zero Kimi CLI
-      // exit the verifier still passed), and missing artifacts become infra
-      // there, with the trial exception attached for diagnosis. Reading the
-      // grade for every exception shape is what makes that fall-through real:
-      // pier's own non-zero exit must not discard a trial the verifier graded.
+      // an agent-owned exit the verifier graded scores on its actual reward
+      // (e.g. a non-zero Kimi CLI exit the verifier still passed), whatever
+      // pier's own exit code was; and an externally ended run is infra however
+      // complete its artifacts look, because the agent never got the run it was
+      // given. The trial exception rides along for diagnosis.
       const trialException = await readTrialException(
         join(trialDir, TRIAL_RESULT),
         'PierTrialError',
       );
+      const termination = classifyTrialTermination(trialException);
       let completeTimedOutTrial = false;
       let verifierSettledTrial = false;
-      if (trialException) {
+      if (termination === 'agent_budget' || termination === 'agent_exit') {
         const [grade, cellArtifact] = await Promise.all([
           readPierGrade(trialDir, input.task.id),
           readOptionalText(join(trialDir, TRIAL_CELL_OUTPUT)),
         ]);
         const settledByEvidence = grade.state === 'graded' && cellArtifact !== null;
-        if (!isBudgetExhaustedTrialException(trialException)) {
-          // An unrecognized exception shape the verifier still graded is a real
-          // result, whatever pier's own exit code was: keep the cell's status and
-          // score on the recorded reward instead of discarding the trial as infra.
+        if (termination === 'agent_exit') {
           verifierSettledTrial = settledByEvidence;
         } else {
           // Budget-gate context, distinct from the graded read path: the agent has
@@ -539,7 +537,9 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
               // Carry the invalid-grade detail alongside the exhaustion cause so a
               // corrupt/crashed verifier is still diagnosable, without letting it
               // count toward the score.
-              grade.state === 'invalid' ? `${trialException}; ${grade.detail}` : trialException,
+              grade.state === 'invalid'
+                ? `${formatTrialException(trialException)}; ${grade.detail}`
+                : formatTrialException(trialException),
               artifactRefs || providerTelemetry.length > 0
                 ? {
                     ...(artifactRefs ?? {}),
@@ -563,11 +563,11 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
       // last provider request is infra, never a graded model failure.
       const terminalProviderRequest = incompleteTerminalProviderRequest(
         providerTelemetry,
-        completeTimedOutTrial,
+        completeTimedOutTrial || verifierSettledTrial,
       );
       if (terminalProviderRequest) {
         throw new PierInfraError(
-          `terminal provider request did not complete for task ${input.task.id}`,
+          `terminal provider request did not complete for task ${input.task.id}${trialExceptionSuffix(trialException)}`,
           [
             `outcome=${terminalProviderRequest.outcome}`,
             terminalProviderRequest.status !== undefined
@@ -581,7 +581,11 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
         );
       }
 
-      const reward = await readPierReward(trialDir, input.task.id, trialException);
+      const reward = await readPierReward(
+        trialDir,
+        input.task.id,
+        formatTrialException(trialException),
+      );
       const rawCell = await readCellOutput(
         join(trialDir, TRIAL_CELL_OUTPUT),
         input.task.id,
@@ -1106,7 +1110,7 @@ function classifyPierReward(reward: number, taskId: string): PierGrade {
 async function readPierReward(
   trialDir: string,
   taskId: string,
-  trialException: string | null,
+  trialException: string | undefined,
 ): Promise<number> {
   const grade = await readPierGrade(trialDir, taskId);
   if (grade.state === 'graded') return grade.reward;

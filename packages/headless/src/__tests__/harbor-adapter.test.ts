@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { decodeRuntimeEvent } from '@maka/core';
 import { HARBOR_CELL_CONTEXT_ENV_KEYS } from '../harbor-cell.js';
-import { buildHarborJobConfig, isBudgetExhaustedTrialException } from '../harbor-task-runner.js';
+import { buildHarborJobConfig, classifyTrialTermination } from '../harbor-task-runner.js';
 import { agentPhaseTimeoutSec, MAKA_SETTLEMENT_GRACE_SEC } from '../maka-settlement.js';
 import { DEFAULT_HEADLESS_SYSTEM_PROMPT } from '../system-prompts.js';
 
@@ -106,7 +106,30 @@ describe('Harbor adapter contract', () => {
     assert.ok(template, 'host-cell timeout message template');
     const message = template.replace('{self._agent_phase_timeout_sec()}', '1800');
 
-    assert.equal(isBudgetExhaustedTrialException(`RuntimeError: ${message}`), true);
+    // The host cell's deadline arrives as a generic RuntimeError, so this is the
+    // one termination still identified by its message. That is only sound while
+    // the raiser lives in this repo, which is exactly what this test pins.
+    assert.equal(classifyTrialTermination({ type: 'RuntimeError', message }), 'agent_budget');
+  });
+
+  test('every competitor adapter reports a benchmark deadline the same way', async () => {
+    // Settlement must not depend on which adapter happened to record the fact.
+    // An arm whose cell output omits deadlineSettlement has its timeouts read as
+    // ordinary runtime failures, which silently changes what that arm's score
+    // means relative to the others.
+    for (const adapter of ['codex_agent.py', 'claude_code_agent.py']) {
+      const source = await readFile(resolve(repoRoot, 'packages/headless/harbor', adapter), 'utf8');
+      assert.match(
+        source,
+        /except asyncio\.CancelledError:[\s\S]{0,200}?self\._deadline_settled = True/,
+        `${adapter} must record the deadline that ended its agent phase`,
+      );
+      assert.match(
+        source,
+        /"deadlineSettlement": \{[\s\S]{0,160}?"source": "benchmark\.deadline"/,
+        `${adapter} must emit deadlineSettlement in its cell output`,
+      );
+    }
   });
 
   test('run-host-cell.mjs resolves package-local harbor-cell internals at runtime', (t: TestContext) => {

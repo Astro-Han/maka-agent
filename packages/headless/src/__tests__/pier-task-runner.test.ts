@@ -1026,6 +1026,10 @@ test('createPierTaskRunner scores a graded trial despite a non-zero pier exit', 
         runPier: fakePier({
           reward: 1,
           exitCode: 1,
+          // status 'failed' keeps the verifier grade load-bearing: with the
+          // default 'completed' the controller would score the trial on status
+          // alone and the settle rule under test would not be exercised.
+          cell: cellOutput({ status: 'failed', errorClass: 'aborted' }),
           exceptionInfo: {
             exception_type: 'NonZeroAgentExitCodeError',
             exception_message: 'agent exited 1',
@@ -1035,18 +1039,46 @@ test('createPierTaskRunner scores a graded trial despite a non-zero pier exit', 
     );
     const output = await runner(runInput());
     assert.equal(output.harbor.reward, 1);
+    assert.equal(output.harbor.verifier?.outcome, 'passed');
     assert.equal(output.cell.deadlineSettlement, undefined);
   });
 });
 
-test('createPierTaskRunner keeps a non-zero exit infra when the trial went ungraded', async () => {
+test('createPierTaskRunner scores a graded-failed agent exit, not just a graded-passed one', async () => {
   await withDirs(async ({ jobsDir, repo }) => {
     const runner = createPierTaskRunner(
       baseOptions({
         jobsDir,
         makaRepoPath: repo,
         runPier: fakePier({
+          reward: 0,
           exitCode: 1,
+          cell: cellOutput({ status: 'failed', errorClass: 'aborted' }),
+          exceptionInfo: {
+            exception_type: 'NonZeroAgentExitCodeError',
+            exception_message: 'agent exited 1',
+          },
+        }),
+      }),
+    );
+    const output = await runner(runInput());
+    assert.equal(output.harbor.reward, 0);
+    assert.equal(output.harbor.verifier?.outcome, 'failed');
+  });
+});
+
+test('createPierTaskRunner keeps an externally ended run infra despite a full grade', async () => {
+  await withDirs(async ({ jobsDir, repo }) => {
+    const runner = createPierTaskRunner(
+      baseOptions({
+        jobsDir,
+        makaRepoPath: repo,
+        runPier: fakePier({
+          // Graded and complete, but pier's container — not the agent — ended
+          // the run, so the artifacts are not evidence of a fair sample.
+          reward: 1,
+          exitCode: 1,
+          cell: cellOutput({ status: 'failed', errorClass: 'aborted' }),
           exceptionInfo: { exception_type: 'DockerExecError', exception_message: 'exec failed' },
         }),
       }),
