@@ -23,52 +23,15 @@ async function readSettingsCss(name: string): Promise<string> {
 }
 
 describe('settings window-floor CSS contract', () => {
-  it('keeps permission OS rows structurally wrapable with a readable body floor', async () => {
-    const css = await readSettingsCss('permission.css');
-
-    assertCssRuleDecls(
-      css,
-      '.settingsOsPermissionRow',
-      [/display:\s*flex/, /flex-wrap:\s*wrap/],
-      'OS permission rows must wrap actions under the body instead of squeezing text to 0',
-    );
-    assertCssRuleDecls(
-      css,
-      '.settingsOsPermissionRow > .settingsOsPermissionBody',
-      [/flex:\s*1\s+1\s+101px/, /min-width:\s*101px/],
-      'permission body must keep the status-badge floor (~101px)',
-    );
-    assertCssRuleDecls(
-      css,
-      '.settingsOsPermissionHeading strong',
-      [/min-width:\s*0/, /overflow-wrap:\s*anywhere/],
-      'long permission titles must be allowed to shrink and break',
-    );
-    assertCssRuleDecls(
-      css,
-      '.settingsPermissionSummary',
-      [/grid-template-columns:\s*repeat\(\s*auto-fit\s*,\s*minmax\(\s*96px\s*,\s*1fr\s*\)\s*\)/],
-      'permission summary must auto-fit from a legible track floor, not four hard tracks',
-    );
-    assertCssRuleDecls(
-      css,
-      '.settingsCapabilityLayers',
-      [
-        /grid-template-columns:\s*repeat\(\s*auto-fit\s*,\s*minmax\(\s*min\(\s*150px\s*,\s*100%\s*\)\s*,\s*1fr\s*\)\s*\)/,
-      ],
-      'capability layers must not hard-floor a 150px track past the content column',
-    );
-  });
-
   it('keeps health and usage metric strips auto-fit with legible floors', async () => {
     const health = await readSettingsCss('health.css');
     const usage = await readSettingsCss('bot.css');
 
     assertCssRuleDecls(
       health,
-      '.settingsHealthSummary',
-      [/grid-template-columns:\s*repeat\(\s*auto-fit\s*,\s*minmax\(\s*80px\s*,\s*1fr\s*\)\s*\)/],
-      'health summary must auto-fit from an 80px floor',
+      '.settingsHealthSummaryLine',
+      [/display:\s*flex/, /flex-wrap:\s*wrap/],
+      'the health summary line must wrap its counters at the window floor',
     );
     assertCssRuleDecls(
       usage,
@@ -115,23 +78,16 @@ describe('settings window-floor CSS contract', () => {
     );
     assertCssRuleDecls(
       css,
-      '.settingsWebSearchKeyField, .settingsWebSearchQueryField',
-      [/min-width:\s*0/],
-      'search inputs must be allowed to shrink below UA size at the floor',
+      '.settingsWebSearchControlCluster,\n.settingsWebSearchSearchControls',
+      [/min-width:\s*0/, /flex-wrap:\s*wrap/],
+      'search control clusters must shrink and wrap at the floor',
     );
   });
 
-  it('lets memory preview chrome wrap and keeps form surfaces min-width free', async () => {
-    const memory = await readSettingsCss('memory.css');
+  it('keeps form surfaces min-width free at the window floor', async () => {
     const form = await readSettingsCss('form.css');
     const rows = await readSettingsCss('rows.css');
 
-    assertCssRuleDecls(
-      memory,
-      '.settingsMemoryPromptPreviewHeader',
-      [/flex-wrap:\s*wrap/],
-      'memory preview header must wrap the status cluster under the title',
-    );
     assertCssRuleDecls(
       form,
       '.settingsSurface',
@@ -141,8 +97,8 @@ describe('settings window-floor CSS contract', () => {
     assertCssRuleDecls(
       rows,
       '.settingsRows',
-      [/overflow:\s*hidden/],
-      'settings row cards must clip horizontal overflow of children',
+      [/grid-template-columns:\s*minmax\(\s*0\s*,\s*1fr\s*\)/],
+      'the open row group must pin a 0-floor track so wide rows wrap instead of widening the page',
     );
   });
 

@@ -20,7 +20,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-1) var(--space-4);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
     font-variant-numeric: tabular-nums;
     color: var(--foreground-secondary);
   }

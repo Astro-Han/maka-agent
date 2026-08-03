@@ -51,14 +51,29 @@ describe('flat shell chrome CSS contract', () => {
     assert.ok(detail, '.maka-shell-astryx .maka-panel-detail rule must exist');
     assert.match(detail!, /min-width:\s*0/);
     assert.match(detail!, /min-height:\s*0/);
-    // Same rule as the host above, one level in: AppShell paints the content
-    // column, so the product's box inside it declares layout and nothing else.
-    // AppShell's theme owns the rendered material; this product box must remain
-    // layout-only instead of becoming a second paint authority.
-    assert.doesNotMatch(detail!, /background\s*:/);
-    assert.match(detail!, /padding-top:\s*var\(--h-titlebar\)/);
+    // The content column is the product's rounded floating plate over the
+    // shell canvas: surface token + radius + gap margins, flush to the
+    // sidebar, clipped at its own corners. No gradients or shadows — the
+    // plate separates by tone, not by glow.
+    assert.match(detail!, /background:\s*var\(--agents-content-area-bg\)/);
+    assert.match(detail!, /border-radius:\s*var\(--radius-modal\)/);
+    assert.match(
+      detail!,
+      /margin:\s*var\(--agents-content-area-gap\)\s+var\(--agents-content-area-gap\)\s+var\(--agents-content-area-gap\)\s+0/,
+    );
+    assert.match(detail!, /overflow:\s*hidden/);
+    assert.match(
+      detail!,
+      /padding-top:\s*calc\(var\(--h-titlebar\)\s*-\s*var\(--agents-content-area-gap\)\)/,
+    );
     assert.doesNotMatch(detail!, /background-image\s*:/);
     assert.doesNotMatch(detail!, /box-shadow\s*:/);
+
+    // The canvas behind the plate is the shell's, painted on AppShell's own
+    // content slot so the plate has tone to separate against.
+    const contentSlot = cssRuleBody(shell, '.maka-shell-astryx .astryx-layout-content');
+    assert.ok(contentSlot, '.maka-shell-astryx .astryx-layout-content rule must exist');
+    assert.match(contentSlot!, /background:\s*var\(--agents-layout-bg\)/);
   });
 
   it('keeps the reference shell flatness override present', async () => {

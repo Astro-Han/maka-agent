@@ -10,18 +10,17 @@
    owned surface). */
 .settingsMemoryInjectState {
     color: var(--muted-foreground);
-    font-size: var(--font-size-caption);
+    font: var(--maka-text-supporting);
   }
 .settingsMemoryInjectState[data-active="true"] {
     color: var(--foreground-secondary);
   }
 .settingsMemoryPromptPreview small {
     color: var(--muted-foreground);
-    font-size: var(--font-size-caption);
-    line-height: var(--leading-snug);
+    font: var(--maka-text-supporting);
   }
 .settingsMemoryPromptPreviewBudget {
-    font-family: var(--font-mono);
+    font: var(--maka-text-code);
     color: var(--foreground-secondary);
   }
 .settingsMemoryPromptPreview pre {
@@ -33,17 +32,14 @@
     border-radius: var(--radius-control);
     background: var(--background);
     color: var(--foreground-secondary);
-    font-family: var(--font-mono);
-    font-size: var(--font-size-caption);
-    line-height: var(--leading-normal);
+    font: var(--maka-text-code);
     white-space: pre-wrap;
     word-break: break-word;
   }
 .settingsMemoryPromptPreview p {
     margin: 0;
     color: var(--foreground-secondary);
-    font-size: var(--font-size-ui);
-    line-height: var(--leading-normal);
+    font: var(--maka-text-body);
   }
 .settingsMemoryEntryPreviewNotice {
     display: grid;
@@ -55,12 +51,11 @@
   }
 .settingsMemoryEntryPreviewNotice strong {
     color: var(--foreground);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
   }
 .settingsMemoryEntryPreviewNotice small {
     color: var(--foreground-secondary);
-    font-size: var(--font-size-caption);
-    line-height: var(--leading-snug);
+    font: var(--maka-text-supporting);
   }
 .settingsMemorySaveSummary {
     display: grid;
@@ -72,15 +67,15 @@
   }
 .settingsMemorySaveSummary strong {
     color: var(--foreground);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
   }
 .settingsMemorySaveSummary small {
     color: var(--foreground-secondary);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
   }
 .settingsMemorySaveSummaryTime {
     color: var(--muted-foreground);
-    font-size: var(--font-size-caption);
+    font: var(--maka-text-supporting);
   }
 .settingsMemoryBackupList {
     display: grid;
@@ -93,7 +88,7 @@
   }
 .settingsMemoryBackupList strong {
     color: var(--foreground);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
   }
 /* PR-MEMORY-BACKUP-LIST-A11Y-0 (round 16/30): selector
      targeted the old `<div role="list">`. Container is now a
@@ -114,8 +109,7 @@
   }
 .settingsMemoryBackupList small {
     color: var(--muted-foreground);
-    font-size: var(--font-size-caption);
-    line-height: var(--leading-snug);
+    font: var(--maka-text-supporting);
   }
 .settingsMemoryBackupCandidate {
     /* Was a bordered pill per candidate — pills inside a box inside the
@@ -127,7 +121,7 @@
     flex-wrap: wrap;
     gap: var(--space-1-5);
     color: var(--foreground-secondary);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
   }
 .settingsMemoryBackupCandidate > span {
     flex: 1 1 220px;
@@ -154,13 +148,13 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
     color: var(--foreground-secondary);
   }
 
 .settingsMemoryEntryGroupHeader strong {
     color: var(--foreground);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
   }
 
 .settingsMemoryEntryList {
@@ -202,12 +196,12 @@
   }
 
 .settingsMemoryEntryRow strong {
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
     color: var(--foreground);
   }
 
 .settingsMemoryEntryRow small {
-    font-size: var(--font-size-caption);
+    font: var(--maka-text-supporting);
     color: var(--muted-foreground);
   }
 
@@ -223,15 +217,14 @@
 
 .settingsMemoryDirtyState[data-dirty="true"] {
     color: var(--warning-text, var(--info-text));
-    font-weight: var(--font-weight-semibold);
+    font: var(--maka-text-label);
   }
 
 .settingsMemoryEntryRow p,
   .settingsMemoryEntryEmpty {
     margin: 0;
     color: var(--foreground-secondary);
-    font-size: var(--font-size-ui);
-    line-height: var(--leading-normal);
+    font: var(--maka-text-body);
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -253,7 +246,7 @@
 
 .settingsMemoryFilter small {
   color: var(--muted-foreground);
-  font-size: var(--font-size-caption);
+  font: var(--maka-text-supporting);
   white-space: nowrap;
 }
 
@@ -267,14 +260,13 @@
 .settingsMemoryFilterEmpty strong,
   .settingsMemoryListEmpty strong {
     color: var(--foreground);
-    font-size: var(--font-size-ui);
+    font: var(--maka-text-body);
   }
 
 .settingsMemoryFilterEmpty small,
   .settingsMemoryListEmpty small {
     color: var(--foreground-secondary);
-    font-size: var(--font-size-ui);
-    line-height: var(--leading-normal);
+    font: var(--maka-text-body);
   }
 
 .settingsMemoryManualAdd {
@@ -293,13 +285,12 @@
 
 .settingsMemoryDraftWarning strong {
   color: var(--foreground);
-  font-size: var(--font-size-ui);
+  font: var(--maka-text-body);
 }
 
 .settingsMemoryDraftWarning small {
   color: var(--foreground-secondary);
-  font-size: var(--font-size-caption);
-  line-height: var(--leading-snug);
+  font: var(--maka-text-supporting);
 }
 
 .settingsMemoryBackupCandidate > span {

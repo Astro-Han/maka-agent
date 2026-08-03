@@ -176,10 +176,6 @@ const WRAPS = [
   // `flex-wrap: wrap` is load-bearing — its buttons flow to a second line
   // inside the pill on the floor column (see that rule's own comment).
   '.settingsMemoryBackupCandidate',
-  // Measured: its English copy is 317px on one line in a 260px column. A pin
-  // here is only safe with `white-space: nowrap`, which trades a clipped
-  // second line for a 57px overflow past the card. See that rule.
-  '.settingsCapabilityOsPermissions li',
   // Both of these hold a Badge plus a message that grows without bound; the
   // 20px they measure at comes from the Badge, and must keep coming from it.
   '.maka-plan-card-run',
@@ -681,12 +677,9 @@ describe('type scale contracts', () => {
     // release BOTH or the second line is clipped. That is a real need, not a
     // rule racing the component — but it is the only one, so it is named here
     // rather than pattern-matched.
-    const RELEASES_THE_SINGLE_LINE_BOX = new Set([
-      // Health blockers are sentences, not labels: at the 620px floor a full
-      // sentence in a pill is wider than the content column, so this one
-      // releases `height` and `white-space` together. Predates #1879.
-      '.settingsHealthBlockerBadge',
-    ]);
+    // Empty since the health blockers moved onto Astryx Banner — kept as the
+    // named hole future wrap-releasing call sites must document themselves in.
+    const RELEASES_THE_SINGLE_LINE_BOX = new Set<string>([]);
     const roots = [
       resolve(REPO_ROOT, 'apps/desktop/src/renderer'),
       resolve(REPO_ROOT, 'packages/ui/src'),

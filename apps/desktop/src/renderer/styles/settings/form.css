@@ -77,8 +77,7 @@
 .settingsQuietStatus {
   margin: 0;
   color: var(--foreground-secondary);
-  font-size: var(--font-size-ui);
-  line-height: var(--leading-normal);
+  font: var(--maka-text-body);
 }
 
 .settingsQuietCallout {
@@ -88,12 +87,11 @@
 
 .settingsQuietCallout strong {
   color: var(--foreground);
-  font-size: var(--font-size-ui);
+  font: var(--maka-text-label);
 }
 
 .settingsQuietCallout p {
   margin: 0;
   color: var(--foreground-secondary);
-  font-size: var(--font-size-ui);
-  line-height: var(--leading-normal);
+  font: var(--maka-text-body);
 }
