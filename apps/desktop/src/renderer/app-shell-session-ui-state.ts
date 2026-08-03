@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react';
+import { useRef } from 'react';
 import type { SessionEventStreamSnapshot } from '@maka/core';
 import { confirmLiveTurn, type InteractionQueues, type LiveTurnProjection } from '@maka/ui';
 import type { ShellRunUpdatesBySession } from './shell-run-update-state.js';
@@ -185,8 +185,13 @@ export function createAppShellSessionUiStateController(
 
 export type AppShellSessionUiStateController = ReturnType<typeof createAppShellSessionUiStateController>;
 
+/**
+ * Owns the controller for the component's lifetime. Deliberately does NOT
+ * subscribe: readers select what they need through
+ * `useAppShellSessionUiSelector`, so no single component re-renders for every
+ * write to the store (#1985).
+ */
 export function useAppShellSessionUiState() {
-  const [, forceRender] = useReducer((version: number) => version + 1, 0);
   const controllerRef = useRef<AppShellSessionUiStateController | null>(null);
 
   if (!controllerRef.current) {
@@ -194,13 +199,9 @@ export function useAppShellSessionUiState() {
   }
 
   const controller = controllerRef.current;
-  // TODO(#1985): the aggregate subscription goes away once every reader selects
-  // the slice it needs; kept here so the seam lands in its own commit.
-  useEffect(() => controller.subscribe(() => forceRender()), [controller]);
 
   return {
     controller,
-    state: controller.getState(),
     liveTurnBySessionRef: controller.liveTurnBySessionRef,
     sessionEventHealthBySessionRef: controller.sessionEventHealthBySessionRef,
     setMessageLoadErrorBySession: controller.setMessageLoadErrorBySession,

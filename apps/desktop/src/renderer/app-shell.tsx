@@ -53,6 +53,14 @@ import {
 import { useKeyboardHelp } from './keyboard-help';
 import { useCommandPalette } from './command-palette';
 import { ChatMessageSurface } from './chat-message-surface';
+import { LiveTurnReconciler } from './live-turn-reconciler';
+import {
+  deriveLiveTurnSnapshot,
+  liveTurnSnapshotsEqual,
+  selectStreamingSessionIds,
+  sessionIdSetsEqual,
+} from './live-turn-snapshot';
+import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
 import { AgentGraphPanel } from './agent-graph-panel';
 import { ChatComposerRegion } from './chat-composer-region';
 import { ChatWorkbar } from './chat-workbar';
@@ -260,7 +268,7 @@ function AppShellContent({
     setMessageLoadPending,
     messageRetryPendingRef,
     stopPendingRef,
-    sessionUiState,
+    sessionUiController,
     liveTurnBySessionRef,
     sessionEventHealthBySessionRef,
     setMessageLoadErrorBySession,
@@ -309,16 +317,47 @@ function AppShellContent({
     ));
   }, []);
   const navSelectionRef = useRef<NavSelection>(navSelection);
-  const {
-    messageLoadErrorBySession,
-    messageRetryPendingBySession,
-    stopPendingBySession,
-    liveTurnBySession,
-    shellRunUpdatesBySession,
-    interactionBySession,
-    pendingPermissionModeBySession,
-    pendingSessionModelBySession,
-  } = sessionUiState;
+  // #1985: one selection per map, each returning the store's own reference, so
+  // the shell re-renders only for the maps it actually reads. `liveTurnBySession`
+  // and `shellRunUpdatesBySession` are deliberately absent — they change per
+  // streamed token and belong to ChatMessageSurface, which subscribes to them
+  // itself. Adding either back here puts the whole shell on the token path.
+  const messageLoadErrorBySession = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => state.messageLoadErrorBySession,
+  );
+  const messageRetryPendingBySession = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => state.messageRetryPendingBySession,
+  );
+  const stopPendingBySession = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => state.stopPendingBySession,
+  );
+  const interactionBySession = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => state.interactionBySession,
+  );
+  const pendingPermissionModeBySession = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => state.pendingPermissionModeBySession,
+  );
+  const pendingSessionModelBySession = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => state.pendingSessionModelBySession,
+  );
+  const streamingSessionIds = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => selectStreamingSessionIds(state.liveTurnBySession),
+    sessionIdSetsEqual,
+  );
+  // The active turn as the shell reads it: phase and a few booleans, never the
+  // streamed buffers. Invariant across the deltas of one step.
+  const activeLiveTurnSnapshot = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => deriveLiveTurnSnapshot(activeId ? state.liveTurnBySession[activeId] : undefined),
+    liveTurnSnapshotsEqual,
+  );
   // PR-MEMORY-VISIBILITY-INDICATOR-0: session-context memory state (MEMORY.md
   // injected into the system prompt). State and the fire-and-forget refresh
   // live in `useShellMemoryPill`; recompute is triggered on mount (bootstrap
@@ -547,7 +586,6 @@ function AppShellContent({
   // Active autonomous goal for the current session drives the header
   // kill-switch pill (visible indicator + one-click clear).
   const activeGoal = useSessionGoal(activeId);
-  const activeLiveTurn = activeId ? liveTurnBySession[activeId] : undefined;
   // Set of session ids whose backend / connection is no longer usable —
   // drives the sidebar "已过期" pill (PR108g, paired with the PR108e chat
   // header banner). Derivation is pure (see `stale-sessions.ts`) so the
@@ -599,30 +637,20 @@ function AppShellContent({
     activeInteraction?.type === 'sandbox_boundary_request' ? activeInteraction : undefined;
   const activeQuestion = activeInteraction?.type === 'user_question_request' ? activeInteraction : undefined;
   const activeSession = sessions.find((session) => session.id === activeId);
-  // Live-turn projection of the active session: streaming/thinking slices, the
-  // sidebar pulse set, the in-flight tool signal, and the #646 turn-wait cues
-  // all live in useShellLiveTurn (pure derivation of the live projection).
-  // `activeLiveTurn` itself stays here — a source-slice contract pins its
-  // declaration to app-shell.tsx — and is passed in.
+  // The shell's reading of the active live turn: streaming/settled flags, the
+  // in-flight tool signal, and the #646 turn-wait cues, all derived from the
+  // semantic snapshot rather than the projection (#1985).
   const {
-    activeShellRunUpdates,
-    activeStreaming,
-    activeStreamingComplete,
     activeStreamingLive,
     activeStreamingMessageId,
-    activeThinking,
-    streamingSessionIds,
-    liveTools,
     hasInFlightLiveTools,
+    hasLiveTurnContent,
     turnActive,
     showProcessingIndicator,
     showContinuingIndicator,
   } = useShellLiveTurn({
-    activeId,
+    liveTurn: activeLiveTurnSnapshot,
     activeSession,
-    activeLiveTurn,
-    liveTurnBySession,
-    shellRunUpdatesBySession,
   });
   // Surface a credential-lifecycle alert directly in the chat header when
   // the active session's connection is in `needs_reauth` / `error` or has
@@ -1747,22 +1775,15 @@ function AppShellContent({
     },
   });
 
-  // Tool/thinking evidence may survive its event-triggered refresh, including
-  // between steps of one running turn. Reconcile from durable evidence whenever
-  // either side changes, so old output stays on its original tool instead of
-  // joining the next batch, without deleting text that the live renderer still owns.
+  // Runs per delta inside <LiveTurnReconciler/>, which owns no subtree (#1985).
   const reconcilePersistedMessagesEffect = useEffectEvent(reconcilePersistedMessages);
-  useEffect(() => {
-    if (!activeId) return;
-    reconcilePersistedMessagesEffect(activeId, messages);
-  }, [activeId, activeLiveTurn, messages]);
 
   // Streaming-settle handoff, FALLBACK path only. The bubble's primary
   // `onStreamingSettled` signal runs after Astryx commits the terminal text.
   // Keep a delayed fallback because a stuck slot would otherwise hide the
   // committed answer forever (`streamingMessageId` suppresses it while live).
   useEffect(() => {
-    if (!activeId || !activeStreamingComplete || !activeStreamingMessageId) return;
+    if (!activeId || !activeStreamingMessageId) return;
     const committedAssistantArrived = messages.some(
       (message) => message.type === 'assistant' && message.id === activeStreamingMessageId,
     );
@@ -1771,7 +1792,7 @@ function AppShellContent({
       void settleAssistantStreaming(activeId, activeStreamingMessageId);
     }, SETTLE_FALLBACK_GRACE_MS);
     return () => window.clearTimeout(timer);
-  }, [activeId, activeStreamingComplete, activeStreamingMessageId, messages, settleAssistantStreaming]);
+  }, [activeId, activeStreamingMessageId, messages, settleAssistantStreaming]);
 
   const hasModalOpen = helpOpen || paletteOpen || searchModalOpen;
 
@@ -1998,9 +2019,7 @@ function AppShellContent({
   const homeSurfaceActive =
     navSelection.section === 'sessions' &&
     messages.length === 0 &&
-    activeStreaming.length === 0 &&
-    activeThinking.length === 0 &&
-    liveTools.length === 0 &&
+    !hasLiveTurnContent &&
     !activeMessageLoadError;
   const commandOptions: AppShellCommandListOptions = {
     uiLocale,
@@ -2056,6 +2075,12 @@ function AppShellContent({
          for them to disagree. */
       data-sidebar-state={sessionListCollapsed ? 'collapsed' : 'expanded'}
     >
+      <LiveTurnReconciler
+        controller={sessionUiController}
+        activeId={activeId}
+        messages={messages}
+        reconcile={reconcilePersistedMessagesEffect}
+      />
       {/* Window chrome is frame-level hit-test only (not AppShell topNav): a
           transparent drag overlay so column surfaces paint to the window top.
           It precedes the shell so Chromium applies app-region subtraction from
@@ -2430,9 +2455,9 @@ function AppShellContent({
               >
                 {navSelection.section === 'sessions' ? (
                   <ChatMessageSurface
+                sessionUiController={sessionUiController}
+                activeSessionId={activeId}
                 messages={messages}
-                liveTurn={activeLiveTurn}
-                shellRunUpdates={activeShellRunUpdates}
                 messageLoading={activeMessageLoading}
                 processingIndicator={showProcessingIndicator}
                 continuingIndicator={showContinuingIndicator}

@@ -16,13 +16,14 @@ import { hasInFlightToolActivity } from './session-event-health.js';
  * per delta belongs to the chat surface, not here.
  */
 export interface LiveTurnSnapshot {
+  /** The projected turn's id, kept even once terminal — `deriveTurnActive`'s arm. */
+  turnId: string | undefined;
   /** Turn phase, or undefined when no turn is in flight (incl. a settled one). */
   phase: TurnPhase | undefined;
   /** Whether the active text step has emitted anything yet. */
   hasStreamingText: boolean;
-  /** Whether that text step is closed. */
-  streamingTextComplete: boolean;
-  /** Step id of the settled answer, once complete — the handoff key. */
+  /** Step id of the settled answer, once complete — the handoff key. Its
+   *  presence is also what says the text step is closed. */
   streamingMessageId: string | undefined;
   /** Whether the active reasoning step has emitted anything yet. */
   hasThinkingText: boolean;
@@ -33,9 +34,9 @@ export interface LiveTurnSnapshot {
 }
 
 const NO_LIVE_TURN: LiveTurnSnapshot = {
+  turnId: undefined,
   phase: undefined,
   hasStreamingText: false,
-  streamingTextComplete: false,
   streamingMessageId: undefined,
   hasThinkingText: false,
   hasLiveTools: false,
@@ -50,9 +51,9 @@ export function deriveLiveTurnSnapshot(projection: LiveTurnProjection | undefine
   const tools = steps.flatMap((step) => step.tools);
   const streamingTextComplete = textStep?.text?.complete === true;
   return {
+    turnId: projection.turnId,
     phase: projection.terminal ? undefined : projection.phase,
     hasStreamingText: (textStep?.text?.text.length ?? 0) > 0,
-    streamingTextComplete,
     streamingMessageId: streamingTextComplete ? textStep?.stepId : undefined,
     hasThinkingText: (thinkingStep?.thinking?.text.length ?? 0) > 0,
     hasLiveTools: tools.length > 0,
@@ -62,14 +63,40 @@ export function deriveLiveTurnSnapshot(projection: LiveTurnProjection | undefine
 
 export function liveTurnSnapshotsEqual(a: LiveTurnSnapshot, b: LiveTurnSnapshot): boolean {
   return (
+    a.turnId === b.turnId &&
     a.phase === b.phase &&
     a.hasStreamingText === b.hasStreamingText &&
-    a.streamingTextComplete === b.streamingTextComplete &&
     a.streamingMessageId === b.streamingMessageId &&
     a.hasThinkingText === b.hasThinkingText &&
     a.hasLiveTools === b.hasLiveTools &&
     a.hasInFlightTools === b.hasInFlightTools
   );
+}
+
+/**
+ * Session ids with a live streaming delta — the sidebar pulse set.
+ *
+ * Membership is NOT turn-invariant (a session leaves between a settled step and
+ * the next one), but it is delta-invariant, which is what the sidebar needs.
+ * Pair it with `sessionIdSetsEqual`: the set is rebuilt on every projection
+ * change, so only value equality keeps the sidebar off the token path.
+ */
+export function selectStreamingSessionIds(
+  liveTurnBySession: Record<string, LiveTurnProjection>,
+): Set<string> {
+  const streaming = new Set<string>();
+  for (const [sessionId, projection] of Object.entries(liveTurnBySession)) {
+    if (projection.steps.some((step) => step.text?.text && !step.text.complete)) streaming.add(sessionId);
+  }
+  return streaming;
+}
+
+export function sessionIdSetsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const id of a) {
+    if (!b.has(id)) return false;
+  }
+  return true;
 }
 
 function findLast<T>(items: readonly T[], predicate: (item: T) => boolean): T | undefined {

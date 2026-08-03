@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import { useMemo, type ComponentProps, type ReactNode } from 'react';
 import {
   isDeepResearchSession,
   type LlmConnection,
@@ -8,6 +8,8 @@ import {
 } from '@maka/core';
 import { Banner, Button, ChatView, useUiLocale } from '@maka/ui';
 import { OnboardingHero } from './OnboardingHero';
+import type { AppShellSessionUiStateController } from './app-shell-session-ui-state';
+import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
 import type { SessionHealthNoticeView } from './use-shell-chat-model';
 import { getShellCopy } from './locales/shell-copy';
 import { useDeepResearchRun } from './use-deep-research-run';
@@ -24,8 +26,17 @@ import { useDeepResearchRun } from './use-deep-research-run';
  */
 interface ChatMessageSurfaceProps extends Omit<
   ComponentProps<typeof ChatView>,
-  'deepResearchRun' | 'emptyOverride'
+  'deepResearchRun' | 'emptyOverride' | 'liveTurn' | 'shellRunUpdates'
 > {
+  /**
+   * #1985: the live projection and the shell-run records are the only session
+   * UI state that changes per streamed token, and this surface is their only
+   * renderer. It subscribes to them here rather than taking them as props, so
+   * a delta never reaches AppShell and re-renders the sidebar and composer.
+   */
+  sessionUiController: AppShellSessionUiStateController;
+  /** The shell's selected session. Not derived from `activeSession`, which the shell substitutes for an unsaved chat. */
+  activeSessionId: string | undefined;
   sessionHealthNotice?: SessionHealthNoticeView;
   showOnboardingHero: boolean;
   onboardingState: OnboardingState | undefined;
@@ -40,6 +51,8 @@ interface ChatMessageSurfaceProps extends Omit<
 }
 
 export function ChatMessageSurface({
+  sessionUiController,
+  activeSessionId,
   sessionHealthNotice,
   showOnboardingHero,
   onboardingState,
@@ -61,6 +74,20 @@ export function ChatMessageSurface({
   const deepResearchRun = useDeepResearchRun(
     activeSession?.id,
     isDeepResearchSession(activeSession?.labels),
+  );
+  const liveTurn = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => (activeSessionId ? state.liveTurnBySession[activeSessionId] : undefined),
+  );
+  // Select the raw per-session record — building the array inside `getSnapshot`
+  // would hand `useSyncExternalStore` a new identity on every read.
+  const shellRunUpdateRecord = useAppShellSessionUiSelector(
+    sessionUiController,
+    (state) => (activeSessionId ? state.shellRunUpdatesBySession[activeSessionId] : undefined),
+  );
+  const shellRunUpdates = useMemo(
+    () => Object.values(shellRunUpdateRecord ?? {}),
+    [shellRunUpdateRecord],
   );
   const emptyOverride: ReactNode =
     showOnboardingHero && onboardingState ? (
@@ -93,6 +120,8 @@ export function ChatMessageSurface({
     <>
       <ChatView
         {...chatViewRest}
+        liveTurn={liveTurn}
+        shellRunUpdates={shellRunUpdates}
         deepResearchRun={deepResearchRun}
         emptyOverride={emptyOverride}
       />

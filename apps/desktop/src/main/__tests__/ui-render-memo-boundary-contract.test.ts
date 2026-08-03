@@ -12,6 +12,8 @@ import { createAppShellSessionUiStateController } from '../../renderer/app-shell
 import {
   deriveLiveTurnSnapshot,
   liveTurnSnapshotsEqual,
+  selectStreamingSessionIds,
+  sessionIdSetsEqual,
   type LiveTurnSnapshot,
 } from '../../renderer/live-turn-snapshot.js';
 import { useAppShellSessionUiSelector } from '../../renderer/use-app-shell-session-ui-selector.js';
@@ -210,6 +212,58 @@ describe('AppShell session UI subscription boundary', () => {
       snapshotRenders,
       snapshotBaseline + 2,
       'a text delta must not disturb subscribers that read only semantic turn state',
+    );
+  });
+
+  it('leaves a subscriber shaped like AppShell untouched through a whole stream', async () => {
+    const controller = createAppShellSessionUiStateController();
+    const { root } = installReactRenderer();
+    let shellRenders = 0;
+
+    // The shell's complete read of session UI state: the low-frequency maps by
+    // raw reference, the live turn as a semantic snapshot, and the sidebar's
+    // pulse set by value. Anything added here that follows a delta puts the
+    // sidebar and composer back on the token path.
+    function ShellReader(): null {
+      useAppShellSessionUiSelector(controller, (state) => state.messageLoadErrorBySession);
+      useAppShellSessionUiSelector(controller, (state) => state.messageRetryPendingBySession);
+      useAppShellSessionUiSelector(controller, (state) => state.stopPendingBySession);
+      useAppShellSessionUiSelector(controller, (state) => state.interactionBySession);
+      useAppShellSessionUiSelector(controller, (state) => state.pendingPermissionModeBySession);
+      useAppShellSessionUiSelector(controller, (state) => state.pendingSessionModelBySession);
+      useAppShellSessionUiSelector(
+        controller,
+        (state) => deriveLiveTurnSnapshot(state.liveTurnBySession[LIVE_SESSION_ID]),
+        liveTurnSnapshotsEqual,
+      );
+      useAppShellSessionUiSelector(
+        controller,
+        (state) => selectStreamingSessionIds(state.liveTurnBySession),
+        sessionIdSetsEqual,
+      );
+      shellRenders += 1;
+      return null;
+    }
+
+    await render(root, createElement(ShellReader));
+    await act(async () => {
+      controller.setLiveTurnBySession((current) => ({ ...current, [LIVE_SESSION_ID]: armLiveTurn('turn-1') }));
+    });
+    await act(async () => {
+      streamLiveText(controller, 'Hel', 2);
+    });
+    const afterFirstToken = shellRenders;
+
+    for (const [index, chunk] of ['lo', ' there', ', here is', ' the answer'].entries()) {
+      await act(async () => {
+        streamLiveText(controller, chunk, 3 + index);
+      });
+    }
+
+    assert.equal(
+      shellRenders,
+      afterFirstToken,
+      'no delta after the first may re-render the shell',
     );
   });
 });
