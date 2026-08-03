@@ -28,7 +28,6 @@ describe('ToolRuntime with real SQLite boundary', () => {
         invocationId: 'invocation-1',
         runtimeCommitSink: store,
       });
-      runtime.beginTurn('turn-1');
       const published: SessionEvent[] = [];
       const eventSink = {
         push: (event: SessionEvent) => published.push(event),

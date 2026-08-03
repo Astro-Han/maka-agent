@@ -52,6 +52,7 @@ import type {
   BackendCompactHistoryInput,
   BackendCompactHistoryResult,
   BackendSendInput,
+  HostedInteractionBridge,
 } from '@maka/core/backend-types';
 import type { AgentSpec } from '@maka/core/runtime-inputs';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
@@ -617,7 +618,7 @@ export class AiSdkBackend implements AgentBackend {
       createProviderRequestTracker: (trackerInput) =>
         this.createProviderRequestTracker(trackerInput),
       materializeRuntimeReplayPlan: (plan, imageBudget) =>
-        this.materializeRuntimeReplayPlan(imageBudget, plan),
+        this.materializeRuntimeReplayPlan(plan, imageBudget),
       canReplayProviderNative: (plan) => this.canReplayProviderNative(plan),
       appendTurnTailPrompt: (content, turnTailPrompt) =>
         this.appendTurnTailPrompt(content, turnTailPrompt),
@@ -635,8 +636,10 @@ export class AiSdkBackend implements AgentBackend {
    * long after its step still resolves this turn's watchdog, trace, and run.
    */
   private createToolRuntime(identity: {
+    turnId: string;
     runId: string | undefined;
     invocationId: string | undefined;
+    hostedInteraction: HostedInteractionBridge | undefined;
     scope: () => TurnScope;
   }): ToolRuntime {
     const input = this.input;
@@ -652,6 +655,8 @@ export class AiSdkBackend implements AgentBackend {
       newId: this.newId,
       now: this.now,
       getPermissionPauseTarget: () => identity.scope().watchdog,
+      turnId: identity.turnId,
+      ...(identity.hostedInteraction ? { hostedInteraction: identity.hostedInteraction } : {}),
       ...(identity.runId ? { runId: identity.runId } : {}),
       ...(identity.invocationId ? { invocationId: identity.invocationId } : {}),
       materializeDefaultToolResultOutput: ({ toolCallId, output }) =>
@@ -700,8 +705,10 @@ export class AiSdkBackend implements AgentBackend {
       input.runId,
       orchestration,
       this.createToolRuntime({
+        turnId: input.turnId,
         runId: input.runId,
         invocationId: input.invocationId ?? input.runId,
+        hostedInteraction: input.hostedInteraction,
         scope: () => scope,
       }),
     );
@@ -729,7 +736,6 @@ export class AiSdkBackend implements AgentBackend {
   ): AsyncIterable<SessionEvent> {
     const turnId = input.turnId;
     const toolRuntime = scope.toolRuntime;
-    toolRuntime.beginTurn(turnId, input.hostedInteraction);
     const turnAbortController = scope.abortController;
 
     const midTurnState = this.compaction.buildMidTurnCapacityCompactState(input);
@@ -942,12 +948,6 @@ export class AiSdkBackend implements AgentBackend {
     // current step's snapshot so a group loaded mid-turn is repairable on the
     // step it becomes active, not routed to `invalid`.
     const currentRepairToolNames = plan.currentRepairToolNames;
-    // Establish clean per-turn ToolRuntime state at the START of the turn, then
-    // install this turn's gating. cleanupAfterTurn() also resets at turn end, but
-    // that runs in send()'s finally and so depends on the consumer draining (or
-    // .return()-ing) the generator; resetting here makes each turn's state — the
-    // loop-gate streak, subagent count, gating — depend only on this turn, not on
-    // the previous turn's teardown.
     if (plan.gating) {
       toolRuntime.setGating(plan.gating);
     }
@@ -1087,8 +1087,8 @@ export class AiSdkBackend implements AgentBackend {
             };
           });
           const currentTurnMessages = await this.materializeRuntimeReplayPlan(
-            scope.imageBudget,
             { ...replayPlan, items: replayItems },
+            scope.imageBudget,
             settledModelOutputs,
           );
           const operationAudio = input.voiceAudio ? voiceAudioPart(input.voiceAudio) : undefined;
@@ -2112,7 +2112,7 @@ export class AiSdkBackend implements AgentBackend {
       scope.runTrace?.abortRequested(_reason);
     }
     const settled = await Promise.allSettled(
-      scopes.map((scope) => scope.toolRuntime.endTurn(scope.turnId, 'aborted')),
+      scopes.map((scope) => scope.toolRuntime.endTurn('aborted')),
     );
     const failures = settled.flatMap((result) =>
       result.status === 'rejected' ? [result.reason] : [],
@@ -2132,7 +2132,7 @@ export class AiSdkBackend implements AgentBackend {
 
   async respondToUserQuestion(response: UserQuestionResponse): Promise<void> {
     for (const scope of this.activeTurns) {
-      if (scope.toolRuntime.respondToUserQuestion(scope.turnId, response)) return;
+      if (scope.toolRuntime.respondToUserQuestion(response)) return;
     }
   }
 
@@ -2581,7 +2581,7 @@ export class AiSdkBackend implements AgentBackend {
 
     if (!plan.hasProviderNativeSemantics) {
       return {
-        messages: await this.materializeRuntimeReplayPlan(scope.imageBudget, plan),
+        messages: await this.materializeRuntimeReplayPlan(plan, scope.imageBudget),
         gate: 'runtime_replay_text_only',
         diagnostics: plan.diagnostics,
         runtimeEventCount: runtimeContext.length,
@@ -2606,7 +2606,7 @@ export class AiSdkBackend implements AgentBackend {
     }
 
     return {
-      messages: await this.materializeRuntimeReplayPlan(scope.imageBudget, plan),
+      messages: await this.materializeRuntimeReplayPlan(plan, scope.imageBudget),
       gate: 'runtime_replay_provider_native',
       diagnostics: plan.diagnostics,
       runtimeEventCount: runtimeContext.length,
@@ -2641,8 +2641,8 @@ export class AiSdkBackend implements AgentBackend {
    * text/thinking become standalone messages.
    */
   private async materializeRuntimeReplayPlan(
-    budget: ProviderImageBudget,
     plan: RuntimeEventModelReplayPlan,
+    budget: ProviderImageBudget,
     settledModelOutputs?: ReadonlyMap<string, ToolResultOutput>,
   ): Promise<ModelMessage[]> {
     type ToolCallItem = Extract<RuntimeEventModelReplayItem, { kind: 'tool_call' }>;
@@ -3182,8 +3182,7 @@ export class AiSdkBackend implements AgentBackend {
    */
   private async cleanupAfterTurn(scope: TurnScope): Promise<void> {
     this.activeTurns.delete(scope);
-    scope.runTrace = null;
-    await scope.toolRuntime.endTurn(scope.turnId, scope.aborted ? 'aborted' : 'completed');
+    await scope.toolRuntime.endTurn(scope.aborted ? 'aborted' : 'completed');
   }
 
   /**

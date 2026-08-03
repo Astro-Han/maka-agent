@@ -75,6 +75,7 @@ import type {
   ProviderRequestCaptureRecord,
 } from '../provider-request-telemetry.js';
 import { decodeModelCallAttempt, type ModelCallAttempt } from '@maka/core/model-call-attempt';
+import { buildLlmHistorySummarizer } from '../history-compact-summarizer.js';
 import { createTestAiSdkBackend } from './execution-boundary-test-helpers.js';
 
 describe('AiSdkBackend model history', () => {
@@ -5404,6 +5405,22 @@ describe('AiSdkBackend model history', () => {
     });
     const recorded: HistoryCompactCheckpoint[] = [];
     const summaryInputs: Array<{ previous?: string; newlyFoldedIds: string[] }> = [];
+    const modelCalls: ModelCallAttempt[] = [];
+    const meteredSummarize = buildLlmHistorySummarizer({
+      resolveModel: () =>
+        new MockLanguageModelV4({
+          doGenerate: {
+            content: [{ type: 'text', text: 'V2_ROLLED_SUMMARY' }],
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: {
+              inputTokens: { total: 11, noCache: 11, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 3, text: 3, reasoning: 0 },
+              raw: { input_tokens: 11, output_tokens: 3 },
+            },
+            warnings: [],
+          },
+        }) as never,
+    });
     const firstModel = completionModel();
     const firstBackend = createTestAiSdkBackend({
       sessionId: 'session-1',
@@ -5428,26 +5445,42 @@ describe('AiSdkBackend model history', () => {
         },
       },
       loadHistoryCompactCheckpoint: () => previous,
+      // Metered through the canonical seam, not stubbed: the startup fold's run
+      // attribution only exists on a real provider request.
       summarizeHistoryCompact: async (input) => {
         summaryInputs.push({
           previous: input.previousCheckpoint?.summary,
           newlyFoldedIds: (input.newlyFoldedRuntimeEvents ?? []).map((event) => event.id),
         });
-        return 'V2_ROLLED_SUMMARY';
+        return await meteredSummarize(input);
       },
       recordHistoryCompactCheckpoint: (checkpoint) => {
         recorded.push(checkpoint);
+      },
+      recordModelCallAttempt: (attempt) => {
+        modelCalls.push(attempt);
       },
     });
 
     await drain(
       firstBackend.send({
         turnId: 'turn-current',
+        runId: 'run-current',
         text: 'continue',
         context: [],
         runtimeContext: [...oldEvents, recent],
       }),
     );
+
+    // The startup fold is billed to the run whose send triggered it. Nothing
+    // else catches a dropped run id here: usage accounting discards an
+    // unattributed record without an error (#1990).
+    const startupFold = modelCalls
+      .map((attempt) => decodeModelCallAttempt(attempt))
+      .find((attempt) => attempt.callKind === 'history_compact');
+    assert.ok(startupFold, 'the startup fold must settle a canonical record');
+    assert.equal(startupFold.runId, 'run-current');
+    assert.equal(startupFold.turnId, 'turn-current');
 
     assert.deepEqual(summaryInputs, [
       { previous: 'V2_PREVIOUS_SUMMARY', newlyFoldedIds: ['v2-old-2'] },
@@ -10951,7 +10984,6 @@ describe('AiSdkBackend concurrent turns', () => {
     const endedTurns: string[] = [];
     for (const turnId of ['turn-a', 'turn-b']) {
       const scope = turnScope(backend, turnId);
-      scope.toolRuntime.beginTurn(turnId);
       scope.runTrace = {
         emit: () => {},
         abortRequested: () => aborted.push(turnId),
@@ -10961,16 +10993,16 @@ describe('AiSdkBackend concurrent turns', () => {
     // that only its own endTurn can reject.
     const failing = turnScope(backend, 'turn-a');
     const endFailingTurn = failing.toolRuntime.endTurn.bind(failing.toolRuntime);
-    failing.toolRuntime.endTurn = async (turnId, reason) => {
-      endedTurns.push(turnId);
-      await endFailingTurn(turnId, reason);
+    failing.toolRuntime.endTurn = async (reason) => {
+      endedTurns.push(failing.turnId);
+      await endFailingTurn(reason);
       throw new Error('Could not durably deny every sandbox boundary request');
     };
     const parked = turnScope(backend, 'turn-b');
     const endParkedTurn = parked.toolRuntime.endTurn.bind(parked.toolRuntime);
-    parked.toolRuntime.endTurn = async (turnId, reason) => {
-      endedTurns.push(turnId);
-      await endParkedTurn(turnId, reason);
+    parked.toolRuntime.endTurn = async (reason) => {
+      endedTurns.push(parked.turnId);
+      await endParkedTurn(reason);
     };
 
     const events: SessionEvent[] = [];
