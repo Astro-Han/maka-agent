@@ -1,4 +1,4 @@
-import { useReducer, useRef } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 import type { SessionEventStreamSnapshot } from '@maka/core';
 import { confirmLiveTurn, type InteractionQueues, type LiveTurnProjection } from '@maka/ui';
 import type { ShellRunUpdatesBySession } from './shell-run-update-state.js';
@@ -99,21 +99,31 @@ export function clearAppShellTurnTransientForSession(
 
 export function createAppShellSessionUiStateController(
   initialState: AppShellSessionUiState = createInitialAppShellSessionUiState(),
-  onChange: (state: AppShellSessionUiState) => void = () => {},
 ) {
   let currentState = initialState;
   const liveTurnBySessionRef = { current: currentState.liveTurnBySession };
   // Written by the event-health probes and read back by them alone. Kept off
-  // `currentState` so a probe never notifies `onChange`.
+  // `currentState` so a probe never notifies a subscriber.
   const sessionEventHealthBySessionRef: { current: Record<string, SessionEventStreamSnapshot> } = {
     current: {},
   };
+  const listeners = new Set<() => void>();
 
   function replaceState(next: AppShellSessionUiState): void {
     if (next === currentState) return;
     currentState = next;
     liveTurnBySessionRef.current = next.liveTurnBySession;
-    onChange(next);
+    // Synchronous, immediately after the swap. Never schedule this: the
+    // terminal-turn handoff reads the state it announces (#1985).
+    for (const listener of [...listeners]) listener();
+  }
+
+  /** Subscribe to state replacements. Stable identity, for `useSyncExternalStore`. */
+  function subscribe(listener: () => void): () => void {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
   }
 
   function updateMap<K extends AppShellSessionUiStateMapKey>(
@@ -132,6 +142,7 @@ export function createAppShellSessionUiStateController(
 
   return {
     getState: () => currentState,
+    subscribe,
     liveTurnBySessionRef,
     sessionEventHealthBySessionRef,
     setMessageLoadErrorBySession: createMapSetter('messageLoadErrorBySession'),
@@ -172,20 +183,23 @@ export function createAppShellSessionUiStateController(
   };
 }
 
+export type AppShellSessionUiStateController = ReturnType<typeof createAppShellSessionUiStateController>;
+
 export function useAppShellSessionUiState() {
   const [, forceRender] = useReducer((version: number) => version + 1, 0);
-  const controllerRef = useRef<ReturnType<typeof createAppShellSessionUiStateController> | null>(null);
+  const controllerRef = useRef<AppShellSessionUiStateController | null>(null);
 
   if (!controllerRef.current) {
-    controllerRef.current = createAppShellSessionUiStateController(
-      createInitialAppShellSessionUiState(),
-      () => forceRender(),
-    );
+    controllerRef.current = createAppShellSessionUiStateController();
   }
 
   const controller = controllerRef.current;
+  // TODO(#1985): the aggregate subscription goes away once every reader selects
+  // the slice it needs; kept here so the seam lands in its own commit.
+  useEffect(() => controller.subscribe(() => forceRender()), [controller]);
 
   return {
+    controller,
     state: controller.getState(),
     liveTurnBySessionRef: controller.liveTurnBySessionRef,
     sessionEventHealthBySessionRef: controller.sessionEventHealthBySessionRef,

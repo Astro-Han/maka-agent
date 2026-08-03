@@ -2,11 +2,19 @@ import { strict as assert } from 'node:assert';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
-import type { SessionSummary } from '@maka/core';
+import type { SessionEvent, SessionSummary } from '@maka/core';
 import type { TurnViewModel } from '@maka/ui';
+import { applyLiveTurnEvent, armLiveTurn } from '@maka/ui';
 import { build } from 'esbuild';
 import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { createAppShellSessionUiStateController } from '../../renderer/app-shell-session-ui-state.js';
+import {
+  deriveLiveTurnSnapshot,
+  liveTurnSnapshotsEqual,
+  type LiveTurnSnapshot,
+} from '../../renderer/live-turn-snapshot.js';
+import { useAppShellSessionUiSelector } from '../../renderer/use-app-shell-session-ui-selector.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../../..');
 const LUCIDE_REACT_PACKAGE = ['lucide', 'react'].join('-');
@@ -133,6 +141,99 @@ describe('UI render memo boundary contract', () => {
     assert.equal(settled.length, 1);
   });
 });
+
+// #1985: the shell subscribes to session UI state at one granularity, so a
+// per-token write to `liveTurnBySession` re-rendered every subtree. The chat
+// transcript is the only surface that needs the full projection; everything
+// else reads low-entropy values that a text delta cannot change. This pins that
+// split at the subscription, which is what keeps the sidebar and composer still
+// while an answer streams.
+describe('AppShell session UI subscription boundary', () => {
+  it('holds a semantic live-turn subscriber steady while a streamed delta re-renders the projection subscriber', async () => {
+    const controller = createAppShellSessionUiStateController();
+    const { root } = installReactRenderer();
+    let snapshotRenders = 0;
+    let projectionRenders = 0;
+    let lastSnapshot: LiveTurnSnapshot | undefined;
+
+    function SnapshotConsumer(): null {
+      lastSnapshot = useAppShellSessionUiSelector(
+        controller,
+        (state) => deriveLiveTurnSnapshot(state.liveTurnBySession[LIVE_SESSION_ID]),
+        liveTurnSnapshotsEqual,
+      );
+      snapshotRenders += 1;
+      return null;
+    }
+
+    function ProjectionConsumer(): null {
+      useAppShellSessionUiSelector(controller, (state) => state.liveTurnBySession[LIVE_SESSION_ID]);
+      projectionRenders += 1;
+      return null;
+    }
+
+    await render(
+      root,
+      createElement('div', null, createElement(SnapshotConsumer), createElement(ProjectionConsumer)),
+    );
+    const snapshotBaseline = snapshotRenders;
+    const projectionBaseline = projectionRenders;
+
+    // Arming a turn is a semantic change: no turn in flight → waiting.
+    await act(async () => {
+      controller.setLiveTurnBySession((current) => ({ ...current, [LIVE_SESSION_ID]: armLiveTurn('turn-1') }));
+    });
+    assert.equal(snapshotRenders, snapshotBaseline + 1);
+    assert.equal(projectionRenders, projectionBaseline + 1);
+
+    // First delta is also semantic: waiting → streamed, and text appears.
+    await act(async () => {
+      streamLiveText(controller, 'Hel', 2);
+    });
+    assert.equal(snapshotRenders, snapshotBaseline + 2);
+    assert.equal(projectionRenders, projectionBaseline + 2);
+    assert.equal(lastSnapshot?.hasStreamingText, true);
+
+    // Every further delta only grows text the chat surface owns.
+    await act(async () => {
+      streamLiveText(controller, 'lo', 3);
+    });
+    await act(async () => {
+      streamLiveText(controller, ' there', 4);
+    });
+    assert.equal(
+      projectionRenders,
+      projectionBaseline + 4,
+      'the chat surface must follow every delta',
+    );
+    assert.equal(
+      snapshotRenders,
+      snapshotBaseline + 2,
+      'a text delta must not disturb subscribers that read only semantic turn state',
+    );
+  });
+});
+
+const LIVE_SESSION_ID = 'session-live';
+
+function streamLiveText(
+  controller: ReturnType<typeof createAppShellSessionUiStateController>,
+  text: string,
+  ts: number,
+): void {
+  const event: SessionEvent = {
+    type: 'text_delta',
+    id: `event-${ts}`,
+    turnId: 'turn-1',
+    ts,
+    messageId: 'message-1',
+    text,
+  };
+  controller.setLiveTurnBySession((current) => {
+    const next = applyLiveTurnEvent(current[LIVE_SESSION_ID], event);
+    return next ? { ...current, [LIVE_SESSION_ID]: next } : current;
+  });
+}
 
 function streamingTurn(text: string, complete: boolean): TurnViewModel {
   return {
