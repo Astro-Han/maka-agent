@@ -17,10 +17,12 @@ import type { AppShellSessionUiState, AppShellSessionUiStateController } from '.
  * subscription. Changing `arg` rebuilds the cache, so the first render after
  * switching sessions already reads the new one.
  *
- * `isEqual` is required for any selector that derives a fresh object.
- * `useSyncExternalStore` demands a snapshot that keeps its identity while
- * nothing it selects changed; without it such a selector does not merely
- * over-render, it loops.
+ * The cache is keyed by the STATE the value was derived from, because
+ * `useSyncExternalStore` reads a snapshot several times per store state and
+ * demands the same value each time. A selector that derives a fresh object
+ * would otherwise loop, so keying it here is what makes `isEqual` a plain
+ * fewer-renders optimization: it carries a value's identity ACROSS a state the
+ * selection did not actually change.
  */
 export function useAppShellSessionUiSelector<T, A = undefined>(
   controller: AppShellSessionUiStateController,
@@ -29,14 +31,16 @@ export function useAppShellSessionUiSelector<T, A = undefined>(
   isEqual?: (a: T, b: T) => boolean,
 ): T {
   const getSnapshot = useMemo(() => {
-    let cache: { value: T } | null = null;
+    let cache: { state: AppShellSessionUiState; value: T } | null = null;
     return (): T => {
-      const next = select(controller.getState(), arg as A);
-      if (cache && (Object.is(cache.value, next) || isEqual?.(cache.value, next) === true)) {
-        return cache.value;
-      }
-      cache = { value: next };
-      return next;
+      const state = controller.getState();
+      if (cache && cache.state === state) return cache.value;
+      const next = select(state, arg as A);
+      const value = cache && (Object.is(cache.value, next) || isEqual?.(cache.value, next) === true)
+        ? cache.value
+        : next;
+      cache = { state, value };
+      return value;
     };
   }, [controller, select, arg, isEqual]);
 

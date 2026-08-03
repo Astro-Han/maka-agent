@@ -9,15 +9,14 @@ import {
 import { Banner, Button, ChatView, useUiLocale } from '@maka/ui';
 import { OnboardingHero } from './OnboardingHero';
 import type { AppShellSessionUiState, AppShellSessionUiStateController } from './app-shell-session-ui-state';
-import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
-
-const selectLiveTurn = (state: AppShellSessionUiState, sessionId: string | undefined) =>
-  sessionId ? state.liveTurnBySession[sessionId] : undefined;
-const selectShellRunRecord = (state: AppShellSessionUiState, sessionId: string | undefined) =>
-  sessionId ? state.shellRunUpdatesBySession[sessionId] : undefined;
 import type { SessionHealthNoticeView } from './use-shell-chat-model';
 import { getShellCopy } from './locales/shell-copy';
+import { selectLiveTurn } from './use-app-shell-session-ui-reads';
+import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
 import { useDeepResearchRun } from './use-deep-research-run';
+
+const selectShellRunRecord = (state: AppShellSessionUiState, sessionId: string | undefined) =>
+  sessionId ? state.shellRunUpdatesBySession[sessionId] : undefined;
 
 /**
  * The sessions-section message surface (issue #1043): ChatView plus the
@@ -81,8 +80,10 @@ export function ChatMessageSurface({
     isDeepResearchSession(activeSession?.labels),
   );
   const liveTurn = useAppShellSessionUiSelector(sessionUiController, selectLiveTurn, activeSessionId);
-  // Select the raw per-session record — building the array inside `getSnapshot`
-  // would hand `useSyncExternalStore` a new identity on every read.
+  // Select the raw per-session record: its identity is the store's own, so a
+  // change to any OTHER map cannot rebuild the array. Deriving it in the
+  // selector would need a comparator to say the same thing, and would still
+  // recompute once per store change.
   const shellRunUpdateRecord = useAppShellSessionUiSelector(
     sessionUiController,
     selectShellRunRecord,
