@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { SandboxBoundaryRequestEvent, SessionEventStreamSnapshot, SessionSummary } from '@maka/core';
-import { armLiveTurn, confirmLiveTurn } from '@maka/ui';
+import { applyLiveTurnEvent, armLiveTurn, confirmLiveTurn } from '@maka/ui';
+import { deriveLiveTurnSnapshot } from '../../renderer/live-turn-snapshot.js';
 import { settledSessionTransientIds } from '../../renderer/settled-session-transients.js';
 import {
   clearAppShellSessionUiStateForSession,
@@ -200,5 +201,45 @@ describe('app shell session UI state controller', () => {
     const projection = armLiveTurn('turn-1');
     controller.setLiveTurnBySession((current) => ({ ...current, session: projection }));
     assert.equal(controller.liveTurnBySessionRef.current.session, projection);
+  });
+});
+
+describe('live-turn snapshot', () => {
+  it('drops the phase of a settled turn but keeps its id', () => {
+    // `deriveTurnActive` reads both: no phase means this renderer's arm is
+    // spent, while the id is what tells a still-running sibling turn apart
+    // from this one. Losing the id on terminal would light Stop back up.
+    const settled = { ...armLiveTurn('turn-1'), terminal: true as const };
+
+    const snapshot = deriveLiveTurnSnapshot(settled);
+
+    assert.equal(snapshot.phase, undefined);
+    assert.equal(snapshot.turnId, 'turn-1');
+  });
+
+  it('withholds the handoff message id until the text step closes', () => {
+    const streaming = applyLiveTurnEvent(armLiveTurn('turn-1'), {
+      type: 'text_delta',
+      id: 'event-1',
+      turnId: 'turn-1',
+      ts: 1,
+      messageId: 'message-1',
+      text: 'partial',
+    });
+
+    const midStream = deriveLiveTurnSnapshot(streaming);
+    assert.equal(midStream.hasStreamingText, true);
+    assert.equal(midStream.streamingMessageId, undefined, 'an open text step has nothing to hand off');
+
+    const closed = applyLiveTurnEvent(streaming, {
+      type: 'text_complete',
+      id: 'event-2',
+      turnId: 'turn-1',
+      ts: 2,
+      messageId: 'message-1',
+      text: 'partial answer',
+    });
+
+    assert.equal(deriveLiveTurnSnapshot(closed).streamingMessageId, 'message-1');
   });
 });
