@@ -164,32 +164,19 @@ function materializeToolResultStatus(
 }
 
 /**
- * PR-UI-12 fixup (@xuan review): merge live tool state on top of the
- * persisted tool. The general rule (preserved from before PR-UI-12) is
- * "live wins" — live events arrive faster than persisted JSONL refresh
- * and represent the most current status.
- *
- * One scoped exception: if persisted reached `interrupted` while live
- * is still an in-flight status (`pending` / `running` /
- * `waiting_permission`), persisted wins. This catches the post-abort
- * race where the live handler missed a clean status update (e.g.
- * `error` events without a per-tool terminal patch) and live would
- * otherwise mask the persisted `interrupted` signal forever.
- *
- * `completed` / `errored` always defer to live by design — the
- * existing test "merges live tool over persisted tool keeping the
- * latest status" locks the "stale-persisted-completed" case so a tool
- * that's actually still streaming doesn't snap back to "completed"
- * just because JSONL got there first.
+ * Merge live tool state on top of the persisted tool: live wins. Live events
+ * arrive faster than the persisted JSONL refresh and represent the most
+ * current status — including `interrupted`, which `terminalizeLiveSteps`
+ * stamps onto every in-flight tool when the turn aborts, errors, or
+ * completes. Persisted status must not override it: a `tool_call` with no
+ * `tool_result` yet reads as `interrupted` (materializeTools has no way to
+ * tell "never finished" from "not finished yet"), and preferring that over a
+ * live `running` painted every long command as interrupted until it exited.
  *
  * Live `outputChunks` always come from live — persisted JSONL doesn't
  * store them (PR-REAL-4 contract: chunks are transient UI).
  */
 function mergeLiveOverPersisted(persisted: ToolActivityItem, live: ToolActivityItem): ToolActivityItem {
-  const liveIsInFlight =
-    live.status === 'pending'
-    || live.status === 'running'
-    || live.status === 'waiting_permission';
   const merged: ToolActivityItem = { ...persisted, ...live };
   if (live.toolName === 'Tool') {
     merged.toolName = persisted.toolName;
@@ -209,9 +196,6 @@ function mergeLiveOverPersisted(persisted: ToolActivityItem, live: ToolActivityI
       'ui.live-over-persisted',
     ).result;
     merged.result = shellRun;
-  }
-  if (persisted.status === 'interrupted' && liveIsInFlight) {
-    merged.status = 'interrupted';
   }
   if (live.outputChunks && live.outputChunks.length > 0) {
     merged.outputChunks = live.outputChunks;

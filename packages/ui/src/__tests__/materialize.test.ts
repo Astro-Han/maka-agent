@@ -207,3 +207,49 @@ describe('flat timeline under tool projection (#1307 P1 regression)', () => {
     assert.deepEqual(liveTurn?.timeline.map((item: TurnTimelineItem) => item.kind), ['thinking']);
   });
 });
+
+describe('live tool status over persisted', () => {
+  // A tool_call with no tool_result yet is indistinguishable, in JSONL alone,
+  // from an aborted one — materializeTools reads the gap as `interrupted`
+  // because a replayed turn is always over. A LIVE turn is the counter-
+  // evidence: while the turn still runs, `running` is the truth, and a long
+  // command must not paint as interrupted for its whole duration.
+  test('keeps a still-running tool running when persisted has no result yet', () => {
+    const settled = materializeTurns([
+      userMsg('t1', 1, 'run it'),
+      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 2, toolName: 'Bash', args: { command: 'sleep 60' } },
+    ]);
+    const turns = overlayLiveTurn(settled, {
+      turnId: 't1',
+      phase: 'streamed',
+      steps: [{
+        stepId: 'a1',
+        tools: [{ toolUseId: 'bash-1', toolName: 'Bash', stepId: 'a1', status: 'running', args: { command: 'sleep 60' } }],
+      }],
+    });
+    const tools = turns.find((turn) => turn.turnId === 't1')?.timeline
+      .find((item: TurnTimelineItem) => item.kind === 'tools');
+    assert.equal(tools?.kind === 'tools' ? tools.items[0]?.status : undefined, 'running');
+  });
+
+  // Abort/error/complete all run terminalizeLiveSteps, so the live side carries
+  // its own interrupted signal — no persisted fallback needed to keep it.
+  test('keeps an interrupted live tool interrupted', () => {
+    const settled = materializeTurns([
+      userMsg('t1', 1, 'run it'),
+      { type: 'tool_call', id: 'bash-1', turnId: 't1', ts: 2, toolName: 'Bash', args: { command: 'sleep 60' } },
+    ]);
+    const turns = overlayLiveTurn(settled, {
+      turnId: 't1',
+      phase: 'streamed',
+      terminal: true,
+      steps: [{
+        stepId: 'a1',
+        tools: [{ toolUseId: 'bash-1', toolName: 'Bash', stepId: 'a1', status: 'interrupted', args: { command: 'sleep 60' } }],
+      }],
+    });
+    const tools = turns.find((turn) => turn.turnId === 't1')?.timeline
+      .find((item: TurnTimelineItem) => item.kind === 'tools');
+    assert.equal(tools?.kind === 'tools' ? tools.items[0]?.status : undefined, 'interrupted');
+  });
+});
