@@ -63,13 +63,8 @@
 
 .settingsActionWidthXs { min-width: 46px; }
 
-.settingsSubheading {
-  font: var(--maka-text-heading-4);
-  margin: 0;
-  color: var(--foreground-secondary);
-  letter-spacing: var(--tracking-wider);
-  text-transform: uppercase;
-}
+/* Astryx convergence (task #136): `.settingsSubheading` (uppercase eyebrow)
+   retired with the Claude subscription card's move onto SectionHeader. */
 
 /* Quiet informational voice — replaces the info Banner where content is
    guidance, not an alert (Signal-Not-Texture: blue never becomes ambient
