@@ -19,6 +19,12 @@ The annotation is prose on purpose. Its value is that someone traced the path an
 
 Two of the first batch of annotations were wrong, and both were caught by reading rather than by running anything: one named a path through a builder that cannot produce the state (`CommandPaletteDisabledCommand`), and one named two hosts for a frame that is only one of them. Write the sentence narrow enough to be falsifiable — the host, the builder, the gate — because a sentence vague enough to always be true buys nothing.
 
+## One story per state, not per click
+
+A surface gets one story. It earns a second only for a state that story cannot reach — not for a state one click away from it, and not for the same state at another width: the smoke script already renders every story at three viewports, so a narrow variant needs a layout that genuinely differs there.
+
+Extra stories do not just cost their own size. A reviewer scanning the sidebar can no longer tell which entry is the page, and the duplicates re-render the same pixels every smoke run while claiming coverage they do not add. Where a state matters but does not earn a story, pin it somewhere that runs — a `packages/ui` test or an e2e journey.
+
 ## The frame matters, not just the component
 
 A story that mounts the right component inside the wrong wrapper is still unreachable. If the app wraps a surface in a class that owns its height, padding or alignment, the story has to use that wrapper too — otherwise every geometry comparison against the story is measuring the story's own scaffolding.
