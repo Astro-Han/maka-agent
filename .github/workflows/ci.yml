@@ -242,18 +242,37 @@ jobs:
         run: command -v xvfb-run >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y xvfb; }
       - name: E2E shard ${{ matrix.shard }}/2
         run: xvfb-run -a npm --workspace @maka/desktop run e2e -- --shard=${{ matrix.shard }}/2
-      # Design governance: the CDP alignment auditor walks the e2e-fixture
-      # fixtures and fails on same-type height mismatches, mixed-type
-      # centerline drift, or radius-family splits. One shard reuses its built
-      # renderer so the audit does not pay for a third runner and build.
+
+  # Design governance: the CDP alignment auditor walks the e2e-fixture fixtures
+  # and fails on same-type height mismatches, mixed-type centerline drift, or
+  # radius-family splits. It shares the e2e selection gate and the built
+  # renderer, but not the suite's critical path: it has no data dependency on
+  # Playwright, and riding shard 1 made that shard ~51s longer than shard 2 for
+  # work the shard did not need. Its own runner pays one extra checkout and
+  # build in exchange for balanced shards.
+  alignment_audit:
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Ensure xvfb
+        run: command -v xvfb-run >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y xvfb; }
+      - name: Build renderer
+        run: npm --workspace @maka/desktop run build:with-deps
       - name: Alignment audit
-        if: matrix.shard == 1
         run: xvfb-run -a node scripts/audit-alignment.mjs
 
   # Preserve the existing required check while every selected shard retains
-  # its own failure and diagnostic output.
+  # its own failure and diagnostic output. The audit lane joins the same gate
+  # so splitting it out does not drop it from the required check.
   e2e:
-    needs: [changes, e2e_shard]
+    needs: [changes, e2e_shard, alignment_audit]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -262,6 +281,7 @@ jobs:
           CHANGES_RESULT: ${{ needs.changes.result }}
           E2E_SELECTED: ${{ needs.changes.outputs.e2e }}
           SHARDS_RESULT: ${{ needs.e2e_shard.result }}
+          AUDIT_RESULT: ${{ needs.alignment_audit.result }}
         run: |
           if [[ "$CHANGES_RESULT" != "success" ]]; then
             echo "changes failed: $CHANGES_RESULT" >&2
@@ -273,6 +293,10 @@ jobs:
           fi
           if [[ "$SHARDS_RESULT" != "$expected" ]]; then
             echo "E2E shards expected $expected but were $SHARDS_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$AUDIT_RESULT" != "$expected" ]]; then
+            echo "Alignment audit expected $expected but was $AUDIT_RESULT" >&2
             exit 1
           fi
 
