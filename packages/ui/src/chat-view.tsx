@@ -126,6 +126,14 @@ export function ChatView(props: {
    *
    * Called during render, once per projection step. It must be pure and
    * idempotent for identical turns.
+   *
+   * It must also carry a cache that outlives a single render — the whole point
+   * is answering an unmoved turn from that cache. Purity and idempotence do not
+   * imply it: a deriver rebuilt in the render body satisfies both and silently
+   * gives back every re-render this projection exists to avoid, with no test
+   * turning red. Supply it from a hook that holds the derivation in a ref (see
+   * `useAppShellTurnPresentation`); the one-shot form is for callers with no
+   * render loop at all, such as stories.
    */
   deriveTurnPresentation?: TurnPresentationDeriver;
   onTurnFooterAction?: (turnId: string, actionId: TurnFooterActionMeta['id']) => void;

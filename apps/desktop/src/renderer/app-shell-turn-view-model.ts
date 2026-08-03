@@ -208,7 +208,12 @@ function deriveTurnPresentationEntry(input: {
   return entry;
 }
 
-/** One-shot derivation, for callers with no render loop to keep state across. */
+/**
+ * One-shot derivation, for callers with no render loop to keep state across —
+ * stories and tests. Passing this as ChatView's `deriveTurnPresentation` type
+ * checks and renders correctly while throwing the cache away every render,
+ * which is the entire optimization; use `useAppShellTurnPresentation` there.
+ */
 export function deriveAppShellTurnPresentation(
   turns: readonly TurnViewModel[],
   context: AppShellTurnPresentationContext,
