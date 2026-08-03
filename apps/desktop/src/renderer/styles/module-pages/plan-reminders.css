@@ -172,6 +172,33 @@
   overflow: auto;
 }
 
+/* Right-side sheet (reference layout): pinned to the window edge full-height,
+   rounded on the exposed edge only, with a whisper backdrop so the task list
+   stays readable behind it. */
+.maka-plan-dialog {
+  margin: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: var(--radius-modal) 0 0 var(--radius-modal);
+}
+
+.maka-plan-dialog::backdrop {
+  background: oklch(from var(--foreground) l c h / 0.08);
+}
+
+/* The reference wraps each group's rows in an inset rounded container. */
+.maka-plan-rows {
+  border: var(--border-width-hairline) solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--background);
+  padding-inline: var(--space-3);
+  overflow: hidden;
+}
+
+.maka-plan-form-footer {
+  justify-content: flex-end;
+}
+
 .maka-plan-form-header {
   align-items: flex-start;
   padding-bottom: var(--space-0-5);

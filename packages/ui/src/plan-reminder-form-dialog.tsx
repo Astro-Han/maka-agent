@@ -37,7 +37,6 @@ import {
 import {
   Button as UiButton,
   Field,
-  Selector,
   TextInput,
 } from '@astryxdesign/core';
 import { IconButton } from '@astryxdesign/core';
@@ -57,6 +56,42 @@ import type {
   PlanReminderDraftInput,
   PlanReminderUpdatePatch,
 } from './module-panel-types.js';
+
+/** The reference panels render enum values as quiet "value ⌄" menu triggers,
+ *  not bordered select boxes. Ghost DropdownMenu with the current option as
+ *  its label; the row label travels in the trigger's aria-label. */
+function PlanValueMenu(props: {
+  fieldLabel: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; label: string; icon?: React.ReactNode }>;
+  disabled?: boolean;
+  onSelect(value: string): void;
+}) {
+  const current = props.options.find((option) => option.value === props.value)?.label ?? props.value;
+  return (
+    <DropdownMenu
+      button={{
+        label: current,
+        variant: 'ghost',
+        size: 'sm',
+        isDisabled: props.disabled,
+        'aria-label': `${props.fieldLabel}: ${current}`,
+      }}
+      menuWidth={220}
+      className="maka-plan-value-menu"
+    >
+      {props.options.map((option) => (
+        <DropdownMenuItem
+          key={option.value}
+          label={option.label}
+          icon={option.icon}
+          onClick={() => props.onSelect(option.value)}
+          endContent={option.value === props.value ? <Check size={14} aria-hidden="true" /> : undefined}
+        />
+      ))}
+    </DropdownMenu>
+  );
+}
 
 export function PlanReminderFormDialog(props: {
   open: boolean;
@@ -189,8 +224,9 @@ export function PlanReminderFormDialog(props: {
         }
       }}
       className="maka-plan-dialog"
-      width={680}
-      maxHeight="min(86dvh, 760px)"
+      width={440}
+      maxHeight="100dvh"
+      position={{ top: 0, right: 0, bottom: 0 }}
       aria-labelledby="maka-plan-dialog-title"
       padding={0}
       purpose="form"
@@ -277,14 +313,12 @@ export function PlanReminderFormDialog(props: {
             <div className="maka-plan-rows">
               <div className="maka-plan-row">
                 <span className="maka-plan-row-label">{copy.field.recurrence}</span>
-                <Selector
+                <PlanValueMenu
+                  fieldLabel={copy.field.recurrence}
                   value={recurrence}
-                  onChange={(value) => setRecurrence(value as PlanReminderRecurrence)}
-                  isDisabled={formInteractionDisabled}
-                  label={copy.field.recurrence}
-                  isLabelHidden
-                  width={220}
+                  disabled={formInteractionDisabled}
                   options={copy.recurrenceOptions.map(([value, label]) => ({ value, label }))}
+                  onSelect={(value) => setRecurrence(value as PlanReminderRecurrence)}
                 />
               </div>
               <div className="maka-plan-row">
@@ -341,42 +375,35 @@ export function PlanReminderFormDialog(props: {
             <div className="maka-plan-rows">
               <div className="maka-plan-row">
                 <span className="maka-plan-row-label">{copy.field.channel}</span>
-                <Selector
+                <PlanValueMenu
+                  fieldLabel={copy.field.channel}
                   value={deliveryChannel}
-                  onChange={(value) => setDeliveryChannel(value as PlanReminderDeliveryTarget['channel'])}
-                  isDisabled={formInteractionDisabled}
-                  label={copy.field.delivery}
-                  isLabelHidden
-                  width={220}
+                  disabled={formInteractionDisabled}
                   options={copy.deliveryOptions.map(([value, label]) => ({ value, label }))}
+                  onSelect={(value) => setDeliveryChannel(value as PlanReminderDeliveryTarget['channel'])}
                 />
               </div>
               {deliveryChannel === 'bot' && (
                 <>
                   <div className="maka-plan-row">
                     <span className="maka-plan-row-label">{copy.field.platform}</span>
-                    <Selector
+                    <PlanValueMenu
+                      fieldLabel={copy.field.platform}
                       value={deliveryPlatform}
-                      onChange={(value) => setDeliveryPlatform(value as BotProvider)}
-                      isDisabled={formInteractionDisabled}
-                      label={copy.field.platform}
-                      isLabelHidden
-                      width={220}
-                      options={BOT_DELIVERY_PROVIDERS.map((provider) => {
-                        const icon = (
+                      disabled={formInteractionDisabled}
+                      options={BOT_DELIVERY_PROVIDERS.map((provider) => ({
+                        value: provider,
+                        label: botDisplayLabel(provider),
+                        icon: (
                           <BotBrandLogo
                             provider={provider}
-                            width="100%"
-                            height="100%"
+                            width={16}
+                            height={16}
                             aria-hidden="true"
                           />
-                        );
-                        return {
-                          value: provider,
-                          label: botDisplayLabel(provider),
-                          icon,
-                        };
-                      })}
+                        ),
+                      }))}
+                      onSelect={(value) => setDeliveryPlatform(value as BotProvider)}
                     />
                   </div>
                   <div className="maka-plan-row">
@@ -405,12 +432,6 @@ export function PlanReminderFormDialog(props: {
             )}
           </section>
           <footer className="maka-plan-form-footer">
-            <UiButton
-              variant="secondary"
-              onClick={closeReminderDialog}
-              isDisabled={formInteractionDisabled}
-              label={copy.cancel}
-            />
             <UiButton
               variant="primary"
               type="submit"
