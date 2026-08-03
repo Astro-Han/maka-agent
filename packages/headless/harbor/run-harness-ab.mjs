@@ -1215,9 +1215,9 @@ async function runLocked({
         const summary = await runHarnessArmCohortUnlocked(runInput);
         return buildHarnessCohortReport(
           summary,
+          reportOracleEvidence,
           execution.billingMode,
           manifest,
-          reportOracleEvidence,
         );
       }
       const summary = await runHarnessAbComparisonUnlocked(runInput);

@@ -3849,6 +3849,14 @@ class ClaudeCode:
                 "is_error": True,
                 "subtype": "401 Unauthorized",
             })
+        elif instruction == "terminal-duration-403":
+            events.append({
+                "type": "result",
+                "session_id": "session-1",
+                "is_error": True,
+                "subtype": "error_max_turns",
+                "duration_ms": 403000,
+            })
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         (self.logs_dir / "claude-code.txt").write_text(
             "\n".join(json.dumps(event) for event in events) + "\n",
@@ -3931,6 +3939,13 @@ with tempfile.TemporaryDirectory() as tmp:
     error_cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
     assert error_cell["status"] == "failed", error_cell
     assert error_cell["errorClass"] == "auth", error_cell
+
+    duration_error = agent(logs)
+    asyncio.run(duration_error.run("terminal-duration-403", environment, context))
+    duration_error.populate_context_post_run(context)
+    duration_error_cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+    assert duration_error_cell["status"] == "failed", duration_error_cell
+    assert duration_error_cell["errorClass"] == "infra_failed", duration_error_cell
 
     pipeline = agent(logs)
     try:

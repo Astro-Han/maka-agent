@@ -2,7 +2,7 @@ import { buildRunManifestFingerprint } from './ab-manifest.js';
 import { runArmCohort } from './ab-run.js';
 import { withAbRunLock } from './ab-run-lock.js';
 import type { AbComparisonSummary, ArmCohortResult } from './ab-types.js';
-import { summarizeAbComparison } from './ab-summary.js';
+import { isEvaluatedOutcome, summarizeAbComparison } from './ab-summary.js';
 import type { Config } from './contracts.js';
 import type { HarborBillingMode } from './harbor-task-runner.js';
 import {
@@ -113,7 +113,7 @@ export async function runHarnessArmCohortUnlocked(
       const event = cohort.runsByArmId[arm.id]![0]!.find(
         (candidate) => candidate.taskId === taskId,
       );
-      return event?.eligible === true;
+      return event !== undefined && isEvaluatedOutcome(event);
     });
     if (!comparable) excludedGroupIds.push(`r0-${taskId}`);
   }

@@ -36,7 +36,6 @@ import {
 import {
   harnessAgentDefinition,
   providerProxyClientAuthMode,
-  providerProxyClientBaseUrl,
   providerProxyUpstreamAuthMode,
   providerProxyUpstreamBaseUrl,
   providerProxyUsageProtocol,
@@ -908,7 +907,7 @@ async function pierProviderRuntime(
               MAKA_HOST_API_KEY: proxy.token,
             }
         : {
-            MAKA_PROVIDER_PROXY_URL: providerProxyClientBaseUrl(proxy.baseUrl, agent, provider),
+            MAKA_PROVIDER_PROXY_URL: proxy.baseUrl,
             MAKA_PROVIDER_PROXY_TOKEN: proxy.token,
           },
     agentEnv: {},

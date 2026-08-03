@@ -141,9 +141,9 @@ export interface HarnessCohortReport {
 
 export function buildHarnessCohortReport(
   summary: HarnessArmCohortSummary,
+  oracleEvidence?: HarnessAbOracleEvidenceReportInput,
   billingMode: HarnessAbReport['billingMode'] = 'metered',
   manifest?: Pick<HarnessAbRunManifest, 'arms'>,
-  oracleEvidence?: HarnessAbOracleEvidenceReportInput,
 ): HarnessCohortReport {
   const pairwise = summary.pairwise.map((comparison) =>
     buildHarnessAbReport(
@@ -281,8 +281,8 @@ export function renderHarnessCohortReportCsv(report: HarnessCohortReport): strin
     ...report.tasks.flatMap((task) =>
       task.arms.map((arm) =>
         [
-          task.taskId,
-          arm.armId,
+          csvCell(task.taskId),
+          csvCell(arm.armId),
           arm.observed,
           arm.valid,
           arm.passed,

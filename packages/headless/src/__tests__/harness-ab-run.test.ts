@@ -553,6 +553,42 @@ describe('runHarnessArmCohort', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test('excludes an unscored arm cell from the common cohort', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maka-harness-cohort-exclusion-'));
+    try {
+      const promptPath = join(dir, 'empty-system-prompt.txt');
+      await writeFile(promptPath, '', 'utf8');
+      const calls: string[] = [];
+      const codex = harnessArm('codex', calls);
+      const meteredRunner = codex.harborRunner;
+      codex.harborRunner = async (input) => {
+        const output = await meteredRunner(input);
+        const { tokenSummary: _tokenSummary, ...cell } = output.cell;
+        return { ...output, cell };
+      };
+
+      const summary = await runHarnessArmCohort({
+        runId: 'deepseek-three-way-exclusion',
+        runRoot: dir,
+        resultsJsonlPath: join(dir, 'results.jsonl'),
+        systemPromptPath: promptPath,
+        resumeFingerprint: 'sha256:manifest',
+        evaluationTasks: [{ id: 'a', path: '/tasks/a' }],
+        arms: [harnessArm('maka', calls), codex, harnessArm('claude-code', calls)],
+        pairConcurrency: 1,
+        armExecution: 'sequential',
+      });
+
+      assert.deepEqual(summary.commonCohort, {
+        groups: 1,
+        comparableGroups: 0,
+        excludedGroupIds: ['r0-a'],
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 function harnessArm(id: HarnessAbArmId, calls: string[], beforeRun?: () => Promise<void>) {

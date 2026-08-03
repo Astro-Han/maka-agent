@@ -91,6 +91,7 @@ function copilotModelsResponse(): Response {
 
 test('DeepSeek routes each CLI through its native wire protocol', () => {
   assert.equal(providerProxyUsageProtocol('codex', 'deepseek'), 'openai-responses-sse');
+  assert.equal(providerProxyUsageProtocol('codex', 'openai-codex'), 'openai-responses-sse');
   assert.equal(providerProxyUsageProtocol('claude-code', 'deepseek'), 'anthropic-sse');
   assert.equal(providerProxyClientAuthMode('codex', 'deepseek'), 'bearer');
   assert.equal(providerProxyClientAuthMode('claude-code', 'deepseek'), 'x-api-key');

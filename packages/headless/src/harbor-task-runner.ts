@@ -1197,7 +1197,14 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
   const agent = options.agent ?? 'maka';
   const provider = options.provider ?? 'deepseek';
   if (usesHostProviderProxy(agent) && provider === 'github-copilot') {
-    const adapter = agent === 'kimi-code' ? 'Kimi Code' : agent === 'codex' ? 'Codex' : 'OpenCode';
+    const adapter =
+      agent === 'kimi-code'
+        ? 'Kimi Code'
+        : agent === 'codex'
+          ? 'Codex'
+          : agent === 'claude-code'
+            ? 'Claude Code'
+            : 'OpenCode';
     throw new Error(
       `GitHub Copilot Harbor runs use the Maka host agent; the ${adapter} Harbor adapter does not support this provider`,
     );

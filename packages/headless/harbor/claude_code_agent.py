@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import secrets
 import shlex
 import time
@@ -184,12 +185,17 @@ class MakaClaudeCodeAgent(ClaudeCode):
         if error_class is None and (
             terminal_result is None or terminal_result.get("is_error") is not False
         ):
-            error_class = _classify_failure(
-                RuntimeError(
-                    json.dumps(terminal_result, ensure_ascii=False)
-                    if terminal_result is not None
-                    else "Claude Code exited without a result event"
+            failure_details = (
+                " ".join(
+                    str(terminal_result[key])
+                    for key in ("subtype", "error", "message", "result")
+                    if terminal_result.get(key) is not None
                 )
+                if terminal_result is not None
+                else "Claude Code exited without a result event"
+            )
+            error_class = _classify_failure(
+                RuntimeError(failure_details)
             )
         tool_call_counts: dict[str, int] = {}
         session_id = "claude-code"
@@ -267,14 +273,24 @@ class MakaClaudeCodeAgent(ClaudeCode):
 
 def _classify_failure(error: Exception) -> str:
     text = str(error).lower()
-    if any(marker in text for marker in ("401", "403", "unauthorized", "authentication", "invalid api key")):
+    if _has_http_status(text, 401, 403) or any(
+        marker in text for marker in ("unauthorized", "authentication", "invalid api key")
+    ):
         return "auth"
-    if any(marker in text for marker in ("429", "rate limit", "too many requests")):
+    if _has_http_status(text, 429) or any(marker in text for marker in ("rate limit", "too many requests")):
         return "rate_limit"
     if any(marker in text for marker in ("billing", "insufficient credit", "quota exceeded")):
         return "provider_billing"
     if any(marker in text for marker in ("connection", "network", "dns", "socket")):
         return "network"
-    if any(marker in text for marker in ("500", "502", "503", "504", "unavailable")):
+    if _has_http_status(text, 500, 502, 503, 504) or "unavailable" in text:
         return "provider_unavailable"
     return "infra_failed"
+
+
+def _has_http_status(text: str, *codes: int) -> bool:
+    alternatives = "|".join(str(code) for code in codes)
+    return re.search(
+        rf"\b(?:http(?: error)?|status(?: code)?|code)\s*[:=]?\s*(?:{alternatives})\b",
+        text,
+    ) is not None

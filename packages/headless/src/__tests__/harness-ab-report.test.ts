@@ -91,6 +91,11 @@ describe('harness A/B report', () => {
           comparison('codex', 'claude-code'),
         ],
       },
+      {
+        snapshotFingerprint: `sha256:${'a'.repeat(64)}`,
+        annotations: [{ taskId: 'a', state: 'passed' }],
+        warnings: ['frozen Oracle warning'],
+      },
       'metered',
       {
         arms: [
@@ -99,19 +104,41 @@ describe('harness A/B report', () => {
           harnessManifestArm('claude-code', 'openai-responses'),
         ],
       },
-      {
-        snapshotFingerprint: `sha256:${'a'.repeat(64)}`,
-        annotations: [{ taskId: 'a', state: 'passed' }],
-        warnings: ['frozen Oracle warning'],
-      },
     );
 
     assert.equal(report.arms.length, 3);
+    assert.deepEqual(
+      report.arms.map(({ armId, passed, evaluated, passRate, inputTokens, infraFailed }) => ({
+        armId,
+        passed,
+        evaluated,
+        passRate,
+        inputTokens,
+        infraFailed,
+      })),
+      [
+        { armId: 'maka', passed: 1, evaluated: 1, passRate: 1, inputTokens: 100, infraFailed: 0 },
+        { armId: 'codex', passed: 0, evaluated: 1, passRate: 0, inputTokens: 120, infraFailed: 0 },
+        {
+          armId: 'claude-code',
+          passed: 1,
+          evaluated: 1,
+          passRate: 1,
+          inputTokens: 110,
+          infraFailed: 0,
+        },
+      ],
+    );
     assert.deepEqual(report.measurement.protocolByArm, {
       maka: 'anthropic-messages',
       codex: 'openai-chat',
       'claude-code': 'openai-responses',
     });
+    const escapedCsv = renderHarnessCohortReportCsv({
+      ...report,
+      tasks: [{ ...report.tasks[0]!, taskId: 'task,"quoted"' }],
+    });
+    assert.match(escapedCsv, /^"task,""quoted""",maka,/m);
     assert.deepEqual(report.tasks[0]?.arms, [
       {
         armId: 'maka',
