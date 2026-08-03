@@ -1,3 +1,10 @@
+/* Astryx convergence: the pre-#1972 remote-access dialect is retired — page
+   containers → SettingsPage, section headers → SettingsSection, the runtime
+   tinted card + <dl> status grid → SettingsSection + MetadataList, the
+   quick-setup plate → Astryx Card, list grids → the kit's rows body. What
+   stays below is genuine art (brand plate, QR frames, onboarding glyphs) and
+   the row-level behaviors (attention wash, planned opacity). */
+
 .settingsBotLogo {
   width: 32px;
   height: 32px;
@@ -13,49 +20,6 @@
 .settingsBotLogo[data-large="true"] {
   width: 44px;
   height: 44px;
-}
-
-.settingsRemoteAccessOverview,
-.settingsRemoteAccessDetail,
-.settingsBotDetail {
-  display: grid;
-  align-content: start;
-}
-
-.settingsRemoteAccessOverview {
-  gap: var(--space-8);
-}
-
-.settingsRemoteAccessSection {
-  display: grid;
-  gap: var(--space-2-5);
-}
-
-.settingsRemoteAccessSectionHeader,
-.settingsBotConfigurationHeader {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding-inline: var(--space-1);
-}
-
-.settingsRemoteAccessSectionHeader h3,
-.settingsBotConfigurationHeader h4 {
-  font: var(--maka-text-heading-4);
-  margin: 0;
-  color: var(--foreground);
-}
-
-.settingsRemoteAccessSectionHeader span,
-.settingsBotConfigurationHeader span {
-  font: var(--maka-text-supporting);
-  color: var(--muted-foreground);
-}
-
-.settingsRemoteAccessActiveList {
-  display: grid;
-  gap: var(--space-1);
 }
 
 .settingsRemoteAccessChannelRow,
@@ -88,19 +52,6 @@
   color: var(--muted-foreground);
 }
 
-/* The active-list empty slot rides the shared EmptyState card primitive;
-   trim its default page-scale padding so it sits compactly inside the
-   settings list instead of the full-height module-page treatment. */
-.settingsRemoteAccessEmpty {
-  padding: var(--space-5);
-}
-
-.settingsRemoteAccessCatalog {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-1);
-}
-
 .settingsRemoteAccessCatalogRow[data-support="planned"] {
   opacity: var(--opacity-muted);
 }
@@ -128,7 +79,14 @@
   min-width: 0;
 }
 
-.settingsBotDetailHeader > .settingsBotLogo {
+.settingsBotDetailHeader > /* Astryx convergence: the pre-#1972 remote-access dialect is retired — page
+   containers → SettingsPage, section headers → SettingsSection, the runtime
+   tinted card + <dl> status grid → SettingsSection + MetadataList, the
+   quick-setup plate → Astryx Card, list grids → the kit's rows body. What
+   stays below is genuine art (brand plate, QR frames, onboarding glyphs) and
+   the row-level behaviors (attention wash, planned opacity). */
+
+.settingsBotLogo {
   grid-column: 1;
   grid-row: 1;
 }
@@ -175,84 +133,10 @@
   text-decoration: underline;
 }
 
-.settingsBotRuntime {
-  display: grid;
-  gap: var(--space-4);
-  border-radius: var(--radius-surface);
-  background: var(--foreground-3);
-  padding: var(--space-4);
-}
-
-.settingsBotRuntimeHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.settingsBotRuntimeHeader h4 {
-  font: var(--maka-text-heading-4);
-  margin: 0 0 var(--space-1);
-  color: var(--foreground);
-}
-
-.settingsBotRuntimeHeader p {
-  font: var(--maka-text-supporting);
-  margin: 0;
-  color: var(--foreground-secondary);
-}
-
-.settingsBotStatusGrid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-4);
-  margin: 0;
-}
-.settingsBotStatusGrid div {
-  min-width: 0;
-}
-.settingsBotStatusGrid dt {
-  font: var(--maka-text-supporting);
-  margin-bottom: var(--space-1);
-  color: var(--muted-foreground);
-}
-.settingsBotStatusGrid dd {
-  font: var(--maka-text-body);
-  min-width: 0;
-  margin: 0;
-  color: var(--foreground);
-  overflow-wrap: anywhere;
-}
-
-.settingsBotConfigurationHeader {
-  margin-top: var(--space-2);
-}
-
-@media (max-width: 900px) {
-  .settingsRemoteAccessCatalog {
-    grid-template-columns: 1fr;
-  }
-
-  .settingsBotRuntimeHeader {
-    flex-direction: column;
-  }
-
-  .settingsBotStatusGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 /* At the restored/sanitized 480px window floor, the fixed Settings navigation
    leaves a narrow content column. Keep provider summaries readable instead of
    squeezing the logo, title, status chip, and switch into one row. */
 @media (max-width: 620px) {
-  .settingsRemoteAccessSectionHeader,
-  .settingsBotConfigurationHeader {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
   .settingsBotDetailHeader {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
@@ -265,10 +149,6 @@
   .settingsBotConfigDocLink {
     grid-column: 1 / -1;
     grid-row: 3;
-  }
-
-  .settingsBotStatusGrid {
-    grid-template-columns: 1fr;
   }
 
   .settingsRemoteAccessChannelRow,
@@ -296,40 +176,6 @@
 .settingsBotSetupModes,
 .settingsBotBrandChoice {
   justify-self: start;
-}
-
-.settingsBotQuickSetup {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  border: var(--border-width-hairline) solid var(--border);
-  border-radius: var(--radius-surface);
-  background: var(--foreground-3);
-}
-
-.settingsBotQuickSetup strong {
-  font: var(--maka-text-heading-4);
-  display: block;
-  margin-bottom: var(--space-1);
-  color: var(--foreground);
-}
-
-.settingsBotQuickSetup p {
-  font: var(--maka-text-supporting);
-  max-width: 58ch;
-  margin: 0;
-  color: var(--foreground-secondary);
-}
-
-.settingsBotQuickSetup .settingsBotBrandChoice {
-  grid-column: 1;
-}
-
-.settingsBotQuickSetup > button:last-child {
-  grid-column: 2;
-  grid-row: 1 / span 2;
 }
 
 .settingsBotOnboardingBody {
@@ -416,15 +262,6 @@
 }
 
 @media (max-width: 620px) {
-  .settingsBotQuickSetup {
-    grid-template-columns: 1fr;
-  }
-
-  .settingsBotQuickSetup > button:last-child {
-    grid-column: 1;
-    grid-row: auto;
-  }
-
   .settingsBotOnboardingBody {
     padding-inline: var(--space-4);
   }

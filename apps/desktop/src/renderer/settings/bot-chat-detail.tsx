@@ -10,11 +10,10 @@ import {
 } from '@maka/core';
 import type { BotStatus } from '@maka/runtime';
 import { MAX_ALLOWED_USER_IDS, parseAllowedUserIdsFromText } from '@maka/core/settings';
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core';
+import { Card, MetadataList, MetadataListItem, SegmentedControl, SegmentedControlItem, StatusDot, Text, VStack } from '@astryxdesign/core';
 import {
   BOT_BRAND,
   Button,
-  Badge,
   FormLayout,
   TextInput,
   RelativeTime,
@@ -38,7 +37,8 @@ import {
   type BotPendingActionName,
 } from './bot-chat-shared';
 import { getBotSettingsCopy, type BotSettingsCopy } from '../locales/settings-bot-copy';
-import { statusBadgeVariant } from './settings-status-badge';
+import { SettingsSection } from './settings-section';
+import { statusDotVariant } from './settings-status-badge';
 
 function canEnableBotChannel(readiness: BotReadinessState): boolean {
   return readiness === 'credentials_valid' || readiness === 'operational' || readiness === 'degraded';
@@ -178,7 +178,12 @@ export function BotChatChannelDetail(props: {
           <div className="settingsBotDetailHeaderBody">
             <h3>
               {providerPresentation.label}
-              <Badge variant={statusBadgeVariant(readinessCopy.tone)} label={readinessCopy.label} />
+              {/* Astryx convergence: readiness reads as the shared StatusDot +
+                  text idiom — "no decorative Badge" (astryx docs principles). */}
+              <span className="settingsStatus">
+                <StatusDot variant={statusDotVariant(readinessCopy.tone)} label={readinessCopy.label} />
+                <span>{readinessCopy.label}</span>
+              </span>
             </h3>
             <p>{providerPresentation.help}</p>
             {enableSwitchHint && (
@@ -211,12 +216,14 @@ export function BotChatChannelDetail(props: {
           )}
         </header>
 
-        <section className="settingsBotRuntime" aria-labelledby="settings-bot-runtime-heading">
-          <div className="settingsBotRuntimeHeader">
-            <div>
-              <h4 id="settings-bot-runtime-heading">{viewState.liveOperational ? detailCopy.listening : readinessCopy.label}</h4>
-              <p>{viewState.liveOperational ? detailCopy.healthy : readinessCopy.detail}</p>
-            </div>
+        {/* Astryx convergence: the runtime block was a full-width tinted card
+            used as page structure (the named cards-in-page anti-pattern). It
+            is an open kit section now — header + anchor divider + rows. */}
+        <SettingsSection
+          titleId="settings-bot-runtime-heading"
+          title={viewState.liveOperational ? detailCopy.listening : readinessCopy.label}
+          description={viewState.liveOperational ? detailCopy.healthy : readinessCopy.detail}
+          action={(
             <div className="settingsBotActionStack" role="group" aria-label={detailCopy.actionsAria(providerPresentation.label)}>
               {inQuickOnboarding ? (
                 <>
@@ -238,15 +245,18 @@ export function BotChatChannelDetail(props: {
                 <Button variant="secondary" isDisabled={props.actionBusy} onClick={() => void props.onRestart()} label={props.restarting ? detailCopy.restarting : detailCopy.restart} />
               )}
             </div>
-          </div>
-
-          <dl className="settingsBotStatusGrid" aria-label={detailCopy.runtimeAria(providerPresentation.label)}>
-            <div><dt>{detailCopy.identity}</dt><dd>{status?.identity?.username ?? status?.identity?.displayName ?? detailCopy.unknownIdentity}</dd></div>
-            <div><dt>{detailCopy.connectionType}</dt><dd>{botConnectionLabel(status?.connection ?? 'none', locale)}</dd></div>
-            <div><dt>{detailCopy.lastEvent}</dt><dd>{status?.lastEventAt ? <RelativeTime ts={status.lastEventAt} /> : detailCopy.noneYet}</dd></div>
-            <div><dt>{detailCopy.lastTest}</dt><dd>{channel.lastTestAt ? <RelativeTime ts={channel.lastTestAt} /> : detailCopy.neverTested}</dd></div>
-          </dl>
-        </section>
+          )}
+        >
+          {/* Astryx convergence: the hand-rolled <dl> grid (4→2→1 columns via
+              two media queries) is MetadataList, whose multi-column layout
+              handles the collapse itself. */}
+          <MetadataList columns="multi" aria-label={detailCopy.runtimeAria(providerPresentation.label)}>
+            <MetadataListItem label={detailCopy.identity}>{status?.identity?.username ?? status?.identity?.displayName ?? detailCopy.unknownIdentity}</MetadataListItem>
+            <MetadataListItem label={detailCopy.connectionType}>{botConnectionLabel(status?.connection ?? 'none', locale)}</MetadataListItem>
+            <MetadataListItem label={detailCopy.lastEvent}>{status?.lastEventAt ? <RelativeTime ts={status.lastEventAt} /> : detailCopy.noneYet}</MetadataListItem>
+            <MetadataListItem label={detailCopy.lastTest}>{channel.lastTestAt ? <RelativeTime ts={channel.lastTestAt} /> : detailCopy.neverTested}</MetadataListItem>
+          </MetadataList>
+        </SettingsSection>
 
         {props.statusLoadError && (
           <Banner
@@ -271,11 +281,14 @@ export function BotChatChannelDetail(props: {
             )} />
         )}
 
-        <div className="settingsBotConfigurationHeader">
-          <h4>{quickOnboarding && !qrOnlyOnboarding ? detailCopy.setupMethod : detailCopy.connectionSettings}</h4>
-          <span>{quickOnboarding ? detailCopy.localCredentials : detailCopy.autosave}</span>
-        </div>
-
+        {/* Astryx convergence: the bespoke configuration header dialect
+            becomes a kit section wrapping the mode toggle, quick-setup
+            callout, and credential form. */}
+        <SettingsSection
+          variant="bare"
+          title={quickOnboarding && !qrOnlyOnboarding ? detailCopy.setupMethod : detailCopy.connectionSettings}
+          description={quickOnboarding ? detailCopy.localCredentials : detailCopy.autosave}
+        >
         {quickOnboarding && !qrOnlyOnboarding && (
           <SegmentedControl
             className="settingsBotSetupModes"
@@ -289,36 +302,41 @@ export function BotChatChannelDetail(props: {
         )}
 
         {quickOnboarding && provider !== 'wechat' && setupMode === 'quick' && (
-          <section className="settingsBotQuickSetup" aria-label={detailCopy.quickAria(providerPresentation.label)}>
-            <div>
-              <strong>
-                {provider === 'wecom'
-                  ? detailCopy.quickWecomTitle
-                  : provider === 'qq'
-                    ? detailCopy.quickQqTitle
-                    : detailCopy.quickTitle}
-              </strong>
-              <p>
-                {provider === 'wecom'
-                  ? detailCopy.quickWecomDetail
-                  : provider === 'qq'
-                    ? detailCopy.quickQqDetail
-                    : detailCopy.quickDetail}
-              </p>
-            </div>
-            {provider === 'feishu' ? (
-              <SegmentedControl
-                className="settingsBotBrandChoice"
-                value={feishuBrand}
-                label={detailCopy.feishuRegionAria}
-                onChange={(value) => setFeishuBrand(value as BotOnboardingBrand)}
-              >
-                <SegmentedControlItem value="feishu" label={detailCopy.feishu} />
-                <SegmentedControlItem value="lark" label="Lark" />
-              </SegmentedControl>
-            ) : null}
-            <Button variant="primary" onClick={() => setScanLoginPhase('mounting')} label={provider === 'wecom' ? detailCopy.beginQuickBind : detailCopy.scanWith(provider === 'feishu' && feishuBrand === 'lark' ? 'Lark' : providerPresentation.label)} />
-          </section>
+          /* Astryx convergence: the hand-tinted quick-setup plate is an
+             Astryx Card — a genuine callout, the one legitimate Card use
+             inside a settings page. */
+          <Card padding={4} role="region" aria-label={detailCopy.quickAria(providerPresentation.label)}>
+            <VStack gap={2} align="start">
+              <VStack gap={0.5}>
+                <Text weight="semibold">
+                  {provider === 'wecom'
+                    ? detailCopy.quickWecomTitle
+                    : provider === 'qq'
+                      ? detailCopy.quickQqTitle
+                      : detailCopy.quickTitle}
+                </Text>
+                <Text type="supporting" color="secondary">
+                  {provider === 'wecom'
+                    ? detailCopy.quickWecomDetail
+                    : provider === 'qq'
+                      ? detailCopy.quickQqDetail
+                      : detailCopy.quickDetail}
+                </Text>
+              </VStack>
+              {provider === 'feishu' ? (
+                <SegmentedControl
+                  className="settingsBotBrandChoice"
+                  value={feishuBrand}
+                  label={detailCopy.feishuRegionAria}
+                  onChange={(value) => setFeishuBrand(value as BotOnboardingBrand)}
+                >
+                  <SegmentedControlItem value="feishu" label={detailCopy.feishu} />
+                  <SegmentedControlItem value="lark" label="Lark" />
+                </SegmentedControl>
+              ) : null}
+              <Button variant="primary" onClick={() => setScanLoginPhase('mounting')} label={provider === 'wecom' ? detailCopy.beginQuickBind : detailCopy.scanWith(provider === 'feishu' && feishuBrand === 'lark' ? 'Lark' : providerPresentation.label)} />
+            </VStack>
+          </Card>
         )}
 
         {/* PR-BOT-WECHAT-SCAN-LOGIN-0 (WAWQAQ msg `2fa6ada6` screenshots):
@@ -348,6 +366,7 @@ export function BotChatChannelDetail(props: {
         {support === 'planned' && (
           <Banner status="info" title={detailCopy.planned} />
         )}
+        </SettingsSection>
 
         {/* WeChat keeps scan login as a first-class action, separate from
             connection testing, because QR generation and listener readiness
