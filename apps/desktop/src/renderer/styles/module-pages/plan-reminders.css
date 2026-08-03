@@ -167,9 +167,9 @@
   border: 0;
   border-radius: 0;
   background: var(--background);
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5) var(--space-4);
-  overflow: auto;
+  gap: var(--space-5);
+  padding: var(--space-2) var(--space-5) var(--space-4);
+  overflow: visible;
 }
 
 /* Right-side sheet (reference layout): pinned to the window edge full-height,
@@ -180,28 +180,57 @@
   height: 100dvh;
   max-height: 100dvh;
   border-radius: var(--radius-modal) 0 0 var(--radius-modal);
+  /* Dark mode separates by ring before shadow (DESIGN dark-restraint). */
+  border-inline-start: var(--border-width-hairline) solid var(--border);
 }
 
+/* A right sheet slides in from its own edge; Astryx's directional scale
+   animation detaches a 100dvh element from three window edges mid-flight. */
+@keyframes maka-plan-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.maka-plan-dialog[open] {
+  animation: maka-plan-sheet-in var(--duration-base) var(--ease-out-strong);
+}
+
+/* Deep-review: deriving the scrim from --foreground inverted in dark mode
+   (an 8% WHITE film brightening the page). Derive from the surface instead:
+   a light wash over light, a dark wash over dark — list stays readable. */
 .maka-plan-dialog::backdrop {
-  background: oklch(from var(--foreground) l c h / 0.08);
+  background: oklch(from var(--background) l c h / 0.5);
 }
 
-/* The reference wraps each group's rows in an inset rounded container. */
+/* The reference wraps each group's rows in an inset rounded container.
+   Deep-review: the fill makes it genuinely inset — a border on the same
+   surface color read as a bare outlined rectangle. */
 .maka-plan-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   border: var(--border-width-hairline) solid var(--border);
   border-radius: var(--radius-surface);
-  background: var(--background);
+  background: var(--muted);
   padding-inline: var(--space-3);
   overflow: hidden;
 }
 
 .maka-plan-form-footer {
   justify-content: flex-end;
+  width: 100%;
+  padding: var(--space-2) var(--space-5) var(--space-4);
 }
 
 .maka-plan-form-header {
-  align-items: flex-start;
-  padding-bottom: var(--space-0-5);
+  align-items: center;
+  width: 100%;
+  padding: var(--space-3) var(--space-5) var(--space-1);
 }
 
 .maka-plan-form-header-actions {
@@ -231,26 +260,30 @@
 }
 
 .maka-plan-title-input::placeholder {
-  color: var(--muted-foreground);
+  color: var(--color-text-secondary, var(--foreground-secondary));
+}
+
+/* Deep-review: a chrome-free control still owes a focus cue (DESIGN §5).
+   Keyboard focus draws the ring; mouse focus stays quiet. */
+.maka-plan-title-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: var(--radius-control);
 }
 
 /* One labeled group: quiet label over hairline-divided label/control rows —
    the settings open-row idiom, scoped to the dialog. */
 .maka-plan-group {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-1-5);
 }
 
 .maka-plan-group-label {
-  font: var(--maka-text-supporting);
+  font: var(--maka-text-label);
   margin: 0;
-  color: var(--muted-foreground);
+  color: var(--foreground-secondary);
 }
 
-.maka-plan-rows {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
 
 .maka-plan-rows > * + * {
   border-block-start: var(--border-width-hairline) solid var(--border);
@@ -275,6 +308,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
+  padding-block: var(--space-1-5);
 }
 
 .maka-plan-preset {
