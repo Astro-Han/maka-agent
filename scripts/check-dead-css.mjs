@@ -94,6 +94,9 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   // AppShell's sidenav slot (AppShell.tsx themeProps); shell-layout.css clears
   // its top so the column runs under the transparent titlebar.
   'astryx-app-shell-sidenav',
+  // AppShell's content column (Layout themeProps); shell-layout.css paints the
+  // canvas behind the floating content plate on it.
+  'astryx-layout-content',
   // SideNav shell + items + section titles (sidebar.css product overrides).
   'astryx-side-nav',
   'astryx-side-nav-item',

@@ -245,7 +245,7 @@ export function WebSearchSettingsPage(props: {
           align="start"
           end={<div className="settingsWebSearchControlCluster">
             <div className="settingsWebSearchStatusCluster" role="group" aria-label={copy.statusAria}>
-              <span className="settingsHealthSignalStatus">
+              <span className="settingsStatus">
                 <StatusDot variant={statusDotVariant(statusCopy.tone)} label={statusCopy.label} />
                 <span>{statusCopy.label}</span>
               </span>

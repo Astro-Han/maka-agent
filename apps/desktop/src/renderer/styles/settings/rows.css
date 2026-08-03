@@ -84,6 +84,23 @@
   margin-block-start: var(--space-2);
 }
 
+/* A quiet subgroup label inside a row group (health layers, palette groups):
+   more air above than below so it binds to the rows it introduces. */
+.settingsRows > .settingsRowsSubheading {
+  padding-block: var(--space-3) var(--space-1);
+}
+
+/* StatusDot + text, the quiet status idiom shared by health / permission /
+   memory / web-search rows. */
+.settingsStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  color: var(--foreground-secondary);
+  font-size: var(--font-size-ui);
+  white-space: nowrap;
+}
+
 /* The row's end slot (SettingsRow `end`): right-aligned, allowed to wrap,
    and capped so a wide control shrinks/wraps before it crushes the label. */
 .settingsRowEnd {

@@ -372,7 +372,7 @@ function CapabilityRow(props: {
       label={(
         <HStack gap={2} align="center">
           <Text type="label" size="sm">{capabilityLabel}</Text>
-          <span className="settingsHealthSignalStatus">
+          <span className="settingsStatus">
             <StatusDot variant={statusDotVariant(readinessCopy.tone)} label={readinessCopy.label} />
             <span>{readinessCopy.label}</span>
           </span>
@@ -418,7 +418,7 @@ function CapabilityRow(props: {
                 >
                   {capability.osPermissions.map((req) => (
                     <MetadataListItem key={req.id} label={copy.osPermissions[req.id]?.label ?? req.id}>
-                      <span className="settingsHealthSignalStatus">
+                      <span className="settingsStatus">
                         <StatusDot variant={statusDotVariant(copy.osStates[req.status].tone)} label={copy.osStates[req.status].label} />
                         <span>{copy.osStates[req.status].label}</span>
                       </span>
@@ -564,7 +564,7 @@ function OsPermissionRow(props: {
       label={(
         <HStack gap={2} align="center">
           <Text type="label" size="sm">{label}</Text>
-          <span className="settingsHealthSignalStatus">
+          <span className="settingsStatus">
             <StatusDot variant={statusDotVariant(stateCopy.tone)} label={stateCopy.label} />
             <span>{stateCopy.label}</span>
           </span>

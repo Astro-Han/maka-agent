@@ -67,15 +67,6 @@
   }
 
 /* StatusDot + label cluster in the row's end slot. */
-.settingsHealthSignalStatus {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    color: var(--foreground-secondary);
-    font-size: var(--font-size-ui);
-    white-space: nowrap;
-  }
-
 .settingsHealthFootnote {
     font: var(--maka-text-supporting);
     margin: 0;

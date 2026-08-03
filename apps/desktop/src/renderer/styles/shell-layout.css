@@ -80,24 +80,26 @@
   top: var(--h-titlebar);
 }
 
-/* Layout only. The content column's MATERIAL belongs to AppShell, which paints
-   --color-background-surface onto its own `.astryx-layout-content` under
-   `variant="elevated"`; this panel is the product's content box inside it.
-   Declaring a background here too resolved to the same color and so looked
-   harmless, but it made the panel a second paint authority that would silently
-   win over any future theme change — and the column-material E2E sampled THIS
-   element, so it was reading the product's copy rather than the shell's paint. */
+/* The content column is a rounded floating plate over the shell canvas —
+   flush to the sidebar on the left, a small gap on the other three sides. */
+.maka-shell-astryx .astryx-layout-content {
+  background: var(--agents-layout-bg);
+}
+
 .maka-shell-astryx .maka-panel-detail {
-  width: 100%;
-  height: 100%;
+  width: calc(100% - var(--agents-content-area-gap));
+  height: calc(100% - 2 * var(--agents-content-area-gap));
+  margin: var(--agents-content-area-gap) var(--agents-content-area-gap) var(--agents-content-area-gap) 0;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  /* Clear the absolute chrome strip; AppShell's surface shows through the
-     padding, so the session color still extends under the transparent
+  border-radius: var(--radius-modal);
+  background: var(--agents-content-area-bg);
+  overflow: hidden;
+  /* Clear the absolute chrome strip so content starts below the transparent
      titleband. */
-  padding-top: var(--h-titlebar);
+  padding-top: calc(var(--h-titlebar) - var(--agents-content-area-gap));
   box-sizing: border-box;
 }
 

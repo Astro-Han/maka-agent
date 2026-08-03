@@ -100,7 +100,7 @@ export function MemorySettingsPage(props: {
           description={copy.text.localFileHelp}
           end={(
             <span className="settingsFormRowControlCluster">
-              <span className="settingsHealthSignalStatus">
+              <span className="settingsStatus">
                 <StatusDot
                   variant={statusDotVariant(memoryStatusTone(effective.status))}
                   label={memoryStatusLabel(effective.status, copy)}
@@ -194,7 +194,12 @@ export function MemorySettingsPage(props: {
                 />
                 <Button
                   variant="ghost"
-                  onClick={() => setAddFormOpen(false)}
+                  onClick={() => {
+                    setAddFormOpen(false);
+                    setNewMemoryTitle('');
+                    setNewMemoryTags('');
+                    setNewMemoryContent('');
+                  }}
                   label={sharedCopy.cancel}
                 />
               </SettingsActions>

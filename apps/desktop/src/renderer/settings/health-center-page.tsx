@@ -5,6 +5,7 @@ import type {
   HealthSnapshot,
 } from '@maka/core';
 import { HEALTH_SIGNAL_LAYERS } from '@maka/core';
+import { Text, VStack } from '@astryxdesign/core';
 import { Button, RelativeTime, StatusDot, useUiLocale, Banner } from '@maka/ui';
 import { getHealthCenterCopy, type HealthCenterCopy } from '../locales/settings-health-copy';
 import { settingsActionErrorMessage } from './settings-error-copy';
@@ -133,22 +134,22 @@ export function HealthCenterPage() {
         />
       )}
 
-      {HEALTH_SIGNAL_LAYERS.map((layer) => {
-        const signals = signalsByLayer[layer];
-        if (!signals || signals.length === 0) return null;
-        const layerCopy = copy.layers[layer];
-        return (
-          <SettingsSection
-            key={layer}
-            title={layerCopy.label}
-            description={layerCopy.description}
-          >
-            {signals.map((signal) => (
+      <SettingsSection>
+        {HEALTH_SIGNAL_LAYERS.flatMap((layer) => {
+          const signals = signalsByLayer[layer];
+          if (!signals || signals.length === 0) return [];
+          const layerCopy = copy.layers[layer];
+          return [
+            <VStack key={`${layer}-head`} gap={0} className="settingsRowsSubheading">
+              <Text type="supporting" size="sm" weight="medium">{layerCopy.label}</Text>
+              <Text type="supporting" size="sm" color="secondary">{layerCopy.description}</Text>
+            </VStack>,
+            ...signals.map((signal) => (
               <HealthSignalRow key={signal.id} signal={signal} copy={copy} />
-            ))}
-          </SettingsSection>
-        );
-      })}
+            )),
+          ];
+        })}
+      </SettingsSection>
 
       <p className="settingsHealthFootnote">
         {copy.footnote}
@@ -184,7 +185,7 @@ function HealthSignalRow(props: { signal: HealthSignal; copy: HealthCenterCopy }
         </span>
       )}
       end={(
-        <span className="settingsHealthSignalStatus">
+        <span className="settingsStatus">
           <StatusDot
             variant={badgeVariant === 'info' ? 'accent' : badgeVariant === 'success' ? 'success' : badgeVariant === 'warning' ? 'warning' : badgeVariant === 'error' ? 'error' : 'neutral'}
             label={statusCopy.label}
