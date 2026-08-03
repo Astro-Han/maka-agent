@@ -42,8 +42,6 @@ import {
 } from '@astryxdesign/core';
 import type { ISODateTimeString } from '@astryxdesign/core/DateTimeInput';
 import { IconButton } from '@astryxdesign/core';
-import { Dialog } from '@astryxdesign/core/Dialog';
-import { Layout, LayoutContent, LayoutFooter, LayoutHeader } from '@astryxdesign/core/Layout';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -145,6 +143,13 @@ export function PlanReminderFormDialog(props: {
     };
   }, []);
 
+  // Split-view panel (no <dialog>): focus the title ourselves on open. The
+  // panel remounts this component per form session (key={formNonce}), so the
+  // effect runs exactly once per open.
+  useEffect(() => {
+    if (props.open) document.getElementById('maka-plan-title')?.focus();
+  }, [props.open]);
+
   useEffect(() => {
     if (editingId && !props.reminders.some((reminder) => reminder.id === editingId)) resetForm();
   }, [editingId, props.reminders]);
@@ -214,27 +219,23 @@ export function PlanReminderFormDialog(props: {
     }
   }
 
+  if (!props.open) return null;
+
+  // Split-view panel (reference layout): the form is an in-page column flush
+  // against the task list — not an overlay. Non-modal `role="dialog"` keeps
+  // the e2e/assistive name; Escape closes via the same guarded path.
   return (
-    <Dialog
-      isOpen={props.open}
-      onOpenChange={(open) => {
-        if (open) {
-          props.onOpenChange(true);
-        } else {
+    <aside
+      className="maka-plan-form-aside"
+      role="dialog"
+      aria-labelledby="maka-plan-dialog-title"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.stopPropagation();
           closeReminderDialog();
         }
       }}
-      className="maka-plan-dialog"
-      width={480}
-      maxHeight="100dvh"
-      position={{ top: 0, right: 0, bottom: 0 }}
-      aria-labelledby="maka-plan-dialog-title"
-      padding={0}
-      purpose="form"
     >
-      <Layout
-        header={
-          <LayoutHeader>
             <div className="maka-plan-form-header">
               <h3 id="maka-plan-dialog-title" className="maka-plan-form-kicker">{isEditing ? copy.editTitle : copy.createTitle}</h3>
               <div className="maka-plan-form-header-actions">
@@ -268,23 +269,6 @@ export function PlanReminderFormDialog(props: {
                 />
               </div>
             </div>
-          </LayoutHeader>
-        }
-        footer={
-          <LayoutFooter>
-            <div className="maka-plan-form-footer">
-              <UiButton
-                variant="primary"
-                type="submit"
-                form="maka-plan-reminder-form"
-                isDisabled={submitDisabled}
-                label={submitPending ? (isEditing ? copy.saving : copy.creating) : (isEditing ? copy.save : copy.create)}
-              />
-            </div>
-          </LayoutFooter>
-        }
-        content={
-          <LayoutContent padding={0} isScrollable>
         {/* Redesign (WAWQAQ msg `67d21f99`): the form reads like the reference
             scheduled-task panels now — a quiet kicker, a large borderless
             title, a bare description field, then label-left / control-right
@@ -458,9 +442,15 @@ export function PlanReminderFormDialog(props: {
             )}
           </section>
         </form>
-          </LayoutContent>
-        }
-      />
-    </Dialog>
+        <div className="maka-plan-form-footer">
+          <UiButton
+            variant="primary"
+            type="submit"
+            form="maka-plan-reminder-form"
+            isDisabled={submitDisabled}
+            label={submitPending ? (isEditing ? copy.saving : copy.creating) : (isEditing ? copy.save : copy.create)}
+          />
+        </div>
+    </aside>
   );
 }

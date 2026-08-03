@@ -169,23 +169,20 @@
   background: var(--background);
   gap: var(--space-5);
   padding: var(--space-2) var(--space-5) var(--space-4);
-  overflow: visible;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
-/* Right-side sheet (reference layout): pinned to the window edge full-height,
-   rounded on the exposed edge only, with a whisper backdrop so the task list
-   stays readable behind it. */
-.maka-plan-dialog {
-  margin: 0;
-  height: 100dvh;
-  max-height: 100dvh;
-  border-radius: var(--radius-modal) 0 0 var(--radius-modal);
-  /* Dark mode separates by ring before shadow (DESIGN dark-restraint). */
-  border-inline-start: var(--border-width-hairline) solid var(--border);
+/* Split view (reference layout): with the form open the page becomes two
+   columns — the list keeps flowing in the first, the form panel sits FLUSH
+   against it in the second, separated by one hairline. No overlay, no dead
+   band between list and panel. */
+.maka-plan-panel[data-form-open="true"] {
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+  align-items: start;
 }
 
-/* A right sheet slides in from its own edge; Astryx's directional scale
-   animation detaches a 100dvh element from three window edges mid-flight. */
 @keyframes maka-plan-sheet-in {
   from {
     opacity: 0;
@@ -197,15 +194,16 @@
   }
 }
 
-.maka-plan-dialog[open] {
+.maka-plan-form-aside {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: calc(100dvh - var(--h-titlebar));
+  border-inline-start: var(--border-width-hairline) solid var(--border);
+  background: var(--background);
   animation: maka-plan-sheet-in var(--duration-base) var(--ease-out-strong);
-}
-
-/* Deep-review: deriving the scrim from --foreground inverted in dark mode
-   (an 8% WHITE film brightening the page). Derive from the surface instead:
-   a light wash over light, a dark wash over dark — list stays readable. */
-.maka-plan-dialog::backdrop {
-  background: oklch(from var(--background) l c h / 0.5);
 }
 
 /* The reference wraps each group's rows in an inset rounded container.
