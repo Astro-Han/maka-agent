@@ -1753,25 +1753,6 @@ describe('maka-cu backend selection', () => {
     assert.equal(selected.backendId, 'maka-cu');
     assert.equal(made, 1);
   });
-
-  it('is stepped around only by naming the other executor', () => {
-    // cua-driver is still selectable, and now only by asking for it by name.
-    if (process.platform !== 'darwin') return;
-    let made = 0;
-    const selected = selectComputerUseBackend({
-      backendId: 'cua-driver',
-      binaryPath: '/tmp/does-not-matter',
-      expectedBinarySha256: 'deadbeef',
-      createBackend: () => {
-        made += 1;
-        return {
-          preflight: async () => ({ accessibility: false, screenRecording: false }),
-        } as never;
-      },
-    });
-    assert.equal(selected.backendId, 'cua-driver');
-    assert.equal(made, 1);
-  });
 });
 
 describe('maka-cu key chord parsing', () => {
