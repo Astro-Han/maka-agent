@@ -149,6 +149,7 @@ class MakaClaudeCodeAgent(ClaudeCode):
     ) -> Any:
         command_scope = getattr(self, "_active_command_scope", None)
         if command_scope:
+            command = f"set -o pipefail; {command}"
             command = scoped_command(command, command_scope, secrets.token_urlsafe(12))
         return await super().exec_as_agent(environment, command=command, **kwargs)
 
@@ -175,6 +176,21 @@ class MakaClaudeCodeAgent(ClaudeCode):
         finished_at = getattr(self, "_finished_at_ms", started_at)
         identity = self._execution_identity()
         events = self._events()
+        terminal_result = next(
+            (event for event in reversed(events) if event.get("type") == "result"),
+            None,
+        )
+        error_class = getattr(self, "_failure_class", None)
+        if error_class is None and (
+            terminal_result is None or terminal_result.get("is_error") is not False
+        ):
+            error_class = _classify_failure(
+                RuntimeError(
+                    json.dumps(terminal_result, ensure_ascii=False)
+                    if terminal_result is not None
+                    else "Claude Code exited without a result event"
+                )
+            )
         tool_call_counts: dict[str, int] = {}
         session_id = "claude-code"
         assistant_steps = 0
@@ -199,8 +215,8 @@ class MakaClaudeCodeAgent(ClaudeCode):
         )
         output = {
             "schemaVersion": 1,
-            "status": "failed" if hasattr(self, "_failure_class") else "completed",
-            **({"errorClass": self._failure_class} if hasattr(self, "_failure_class") else {}),
+            "status": "failed" if error_class is not None else "completed",
+            **({"errorClass": error_class} if error_class is not None else {}),
             "runtimeEventsPath": "/logs/agent/runtime-events.jsonl",
             "promptHash": identity["systemPromptHash"],
             "executionIdentity": identity,

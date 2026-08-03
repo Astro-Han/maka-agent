@@ -23,23 +23,6 @@ export interface SummarizeAbComparisonInput {
   nonInferiorityMargin?: number;
 }
 
-export interface RunAbComparisonInput {
-  runId: string;
-  arms: readonly [AbArmSpec, AbArmSpec];
-  evaluationTasks: readonly FixedPromptTask[];
-  reps?: number;
-  maxConcurrency?: number;
-  armExecution?: 'parallel' | 'sequential';
-  observedCostStopUsd?: number;
-  roundIdPrefix?: string;
-  budgetMs?: number;
-  nonInferiorityMargin?: number;
-  /** Events already present when this invocation began. They remain
-   * in the summary but must not re-trigger live stop guards on explicit resume. */
-  preexistingEventIds?: ReadonlySet<string>;
-  runArm: AbArmRunner;
-}
-
 export interface RunArmCohortInput {
   runId: string;
   arms: readonly AbArmSpec[];
@@ -49,8 +32,16 @@ export interface RunArmCohortInput {
   armExecution?: 'parallel' | 'sequential';
   observedCostStopUsd?: number;
   roundIdPrefix?: string;
+  /** Events already present when this invocation began. They remain
+   * in the summary but must not re-trigger live stop guards on explicit resume. */
   preexistingEventIds?: ReadonlySet<string>;
   runArm: AbArmRunner;
+}
+
+export interface RunAbComparisonInput extends Omit<RunArmCohortInput, 'arms'> {
+  arms: readonly [AbArmSpec, AbArmSpec];
+  budgetMs?: number;
+  nonInferiorityMargin?: number;
 }
 
 export interface ArmCohortResult {

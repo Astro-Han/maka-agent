@@ -1341,24 +1341,6 @@ test('buildPierRunArgs targets the Codex adapter and forwards constructor kwargs
   assert.ok(args.includes('reasoning_effort=xhigh'));
 });
 
-test('buildPierRunArgs targets the Claude Code adapter', () => {
-  const args = buildPierRunArgs({
-    agent: 'claude-code',
-    model: 'deepseek-v4-flash',
-    taskPath: '/tasks/dasel',
-    jobsDir: '/jobs',
-    jobName: 'trial',
-    environment: 'docker',
-    timeoutMultiplier: 1,
-    mounts: [],
-    agentEnv: {},
-    agentKwargs: { version: '2.1.220', reasoning_effort: 'max' },
-  });
-  assert.match(args.join(' '), /--agent-import-path claude_code_agent:MakaClaudeCodeAgent/);
-  assert.ok(args.includes('version=2.1.220'));
-  assert.ok(args.includes('reasoning_effort=max'));
-});
-
 test('createPierTaskRunner rejects a Codex arm whose version does not match the pinned toolchain', () => {
   assert.throws(
     () =>

@@ -3,11 +3,11 @@ import type { ThinkingLevel } from '@maka/core/model-thinking';
 import { buildAbRunManifest, buildRunManifestFingerprint } from './ab-manifest.js';
 import type { AbRunManifest } from './ab-types.js';
 import type { HarnessOracleAnnotation } from './harness-oracle-registry.js';
+import type { HarnessAgentId } from './harness-agent-registry.js';
 
-export type HarnessAbArmId = 'maka' | 'opencode' | 'kimi-code' | 'codex' | 'claude-code';
+export type HarnessAbArmId = HarnessAgentId;
 
 export const HARNESS_AB_PAIR_CONCURRENCY = 2;
-export const HARNESS_AB_MAX_CONCURRENT_ATTEMPTS = HARNESS_AB_PAIR_CONCURRENCY * 2;
 export const HARNESS_MAKA_CONTEXT_BUDGET = {
   activeToolResultPrune: {
     enabled: true,

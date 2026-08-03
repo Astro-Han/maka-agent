@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { resolve } from 'node:path';
 import {
   CODEX_DEEPSEEK_MODEL_CATALOG_FINGERPRINT,
   CODEX_TOOLCHAIN_FINGERPRINT,
   CODEX_TOOLCHAIN_SPEC,
 } from '../codex-toolchain.js';
 
-test('Codex toolchain pins the official linux/x64 CLI package and runtime files', () => {
+test('Codex toolchain pins the official linux/x64 CLI package and runtime files', async () => {
   assert.equal(CODEX_TOOLCHAIN_SPEC.codex.version, '0.144.6');
   assert.equal(
     CODEX_TOOLCHAIN_SPEC.codex.archiveIntegrity,
@@ -21,8 +24,11 @@ test('Codex toolchain pins the official linux/x64 CLI package and runtime files'
     packageMetadata: '4415fcb6e062b567abf79960dbbd38f046ce3c8fbb1170e35fd8129d476126d8',
   });
   assert.match(CODEX_TOOLCHAIN_FINGERPRINT, /^sha256:[a-f0-9]{64}$/);
+  const catalog = await readFile(
+    resolve(import.meta.dirname, '../../harbor/deepseek-codex-models.json'),
+  );
   assert.equal(
     CODEX_DEEPSEEK_MODEL_CATALOG_FINGERPRINT,
-    'sha256:1789822e86d6c61c21a38c31184442b090c54f20adaa8c4ec6a5b4d179c0780c',
+    `sha256:${createHash('sha256').update(catalog).digest('hex')}`,
   );
 });

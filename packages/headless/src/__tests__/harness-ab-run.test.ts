@@ -438,6 +438,67 @@ describe('runHarnessAbComparison', () => {
 });
 
 describe('runHarnessArmCohort', () => {
+  test('resumes a two-arm prefix by running only the missing third-arm cells', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maka-harness-cohort-resume-'));
+    try {
+      const promptPath = join(dir, 'empty-system-prompt.txt');
+      const resultsJsonlPath = join(dir, 'results.jsonl');
+      await writeFile(promptPath, '', 'utf8');
+      const calls: string[] = [];
+      const maka = harnessArm('maka', calls);
+      const codex = harnessArm('codex', calls);
+      const claude = harnessArm('claude-code', calls);
+      const common = {
+        runId: 'deepseek-three-way-resume',
+        runRoot: dir,
+        resultsJsonlPath,
+        systemPromptPath: promptPath,
+        resumeFingerprint: 'sha256:manifest',
+        pairConcurrency: 1,
+        armExecution: 'sequential' as const,
+      };
+
+      await runHarnessAbComparison({
+        ...common,
+        evaluationTasks: [
+          { id: 'a', path: '/tasks/a' },
+          { id: 'b', path: '/tasks/b' },
+        ],
+        arms: [maka, codex],
+      });
+      assert.equal(calls.length, 4);
+
+      const resumed = await runHarnessArmCohort({
+        ...common,
+        evaluationTasks: [
+          { id: 'a', path: '/tasks/a' },
+          { id: 'b', path: '/tasks/b' },
+          { id: 'c', path: '/tasks/c' },
+        ],
+        arms: [maka, codex, claude],
+      });
+
+      assert.deepEqual(resumed.commonCohort, {
+        groups: 3,
+        comparableGroups: 3,
+        excludedGroupIds: [],
+      });
+      assert.deepEqual(calls, [
+        'a:maka',
+        'a:codex',
+        'b:codex',
+        'b:maka',
+        'a:claude-code',
+        'b:claude-code',
+        'c:claude-code',
+        'c:maka',
+        'c:codex',
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('reports all pairwise projections from one three-arm cohort', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'maka-harness-cohort-'));
     try {

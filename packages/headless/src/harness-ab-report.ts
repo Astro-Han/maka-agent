@@ -1,4 +1,4 @@
-import type { AbComparisonSummary, AbTokenCostSummary } from './ab-types.js';
+import type { AbComparisonSummary, AbTaskArmSummary, AbTokenCostSummary } from './ab-types.js';
 import type {
   HarnessOracleAnnotation,
   HarnessOracleAnnotationState,
@@ -128,9 +128,10 @@ export interface HarnessCohortReport {
     infraFailed: number;
   }>;
   pairwise: HarnessAbReport[];
+  oracleEvidence?: HarnessAbReport['oracleEvidence'];
   tasks: Array<{
     taskId: string;
-    arms: Array<{ armId: string; observed: number; valid: number; passed: number }>;
+    arms: Array<{ armId: string } & AbTaskArmSummary>;
   }>;
   measurement: {
     protocolByArm: Record<string, 'openai-chat' | 'openai-responses' | 'anthropic-messages'>;
@@ -142,9 +143,21 @@ export function buildHarnessCohortReport(
   summary: HarnessArmCohortSummary,
   billingMode: HarnessAbReport['billingMode'] = 'metered',
   manifest?: Pick<HarnessAbRunManifest, 'arms'>,
+  oracleEvidence?: HarnessAbOracleEvidenceReportInput,
 ): HarnessCohortReport {
   const pairwise = summary.pairwise.map((comparison) =>
-    buildHarnessAbReport(comparison, undefined, billingMode, manifest),
+    buildHarnessAbReport(
+      comparison,
+      oracleEvidence,
+      billingMode,
+      manifest
+        ? {
+            arms: manifest.arms.filter(
+              (arm) => arm.id === comparison.baselineArmId || arm.id === comparison.candidateArmId,
+            ),
+          }
+        : undefined,
+    ),
   );
   const armSummary = (armId: string) => {
     for (const comparison of summary.pairwise) {
@@ -202,28 +215,40 @@ export function buildHarnessCohortReport(
       };
     }),
     pairwise,
+    ...(pairwise[0]?.oracleEvidence ? { oracleEvidence: pairwise[0].oracleEvidence } : {}),
     tasks: summary.pairwise[0]!.taskLevel.tasks.map(({ taskId }) => ({
       taskId,
       arms: summary.armIds.map((armId) => {
         const task = taskArm(taskId, armId);
-        return { armId, observed: task.observed, valid: task.valid, passed: task.passed };
+        return { armId, ...task };
       }),
     })),
     measurement: {
       protocolByArm: Object.fromEntries(
-        summary.armIds.map((armId) => [
-          armId,
-          armId === 'codex'
-            ? 'openai-responses'
-            : armId === 'claude-code'
-              ? 'anthropic-messages'
-              : 'openai-chat',
-        ]),
+        summary.armIds.map((armId) => [armId, manifestArmTransport(manifest, armId)]),
       ),
       cacheSemantics:
         'Cached input is recorded from each native protocol field; cache creation is distinct only where the provider protocol reports it, so cache columns are comparable usage evidence rather than identical client-side cache behavior.',
     },
   };
+}
+
+function manifestArmTransport(
+  manifest: Pick<HarnessAbRunManifest, 'arms'> | undefined,
+  armId: string,
+): 'openai-chat' | 'openai-responses' | 'anthropic-messages' {
+  const arm = manifest?.arms.find((candidate) => candidate.id === armId);
+  const config = arm?.metadata?.config;
+  const transport =
+    config && typeof config === 'object' && 'transport' in config ? config.transport : undefined;
+  if (
+    transport !== 'openai-chat' &&
+    transport !== 'openai-responses' &&
+    transport !== 'anthropic-messages'
+  ) {
+    throw new Error(`harness cohort arm ${armId} must declare its measured transport`);
+  }
+  return transport;
 }
 
 export function renderHarnessCohortReportMarkdown(report: HarnessCohortReport): string {
@@ -241,6 +266,8 @@ export function renderHarnessCohortReportMarkdown(report: HarnessCohortReport): 
         `| ${arm.armId} | ${arm.passRate === null ? '' : arm.passRate.toFixed(4)} | ${arm.passed} / ${arm.evaluated} | ${arm.inputTokens} | ${arm.cachedInputTokens} | ${arm.outputTokens} | ${arm.costUsd.toFixed(6)} | ${arm.meanDurationMs ?? ''} | ${arm.infraFailed} |`,
     ),
     '',
+    ...oracleEvidenceMarkdown(report),
+    ...(report.oracleEvidence ? [''] : []),
     `Measurement boundary: ${report.measurement.cacheSemantics}`,
     '',
   ].join('\n');
@@ -248,22 +275,26 @@ export function renderHarnessCohortReportMarkdown(report: HarnessCohortReport): 
 
 export function renderHarnessCohortReportCsv(report: HarnessCohortReport): string {
   const header =
-    'arm_id,passed,evaluated,pass_rate,input_tokens,cached_input_tokens,output_tokens,cost_usd,mean_duration_ms,infra_failed';
+    'task_id,arm_id,observed,valid,passed,pass_rate,completed,budget_exhausted,infra_failed,plumbing_failed,attestation_warnings,missing';
   return `${[
     header,
-    ...report.arms.map((arm) =>
-      [
-        arm.armId,
-        arm.passed,
-        arm.evaluated,
-        arm.passRate ?? '',
-        arm.inputTokens,
-        arm.cachedInputTokens,
-        arm.outputTokens,
-        arm.costUsd,
-        arm.meanDurationMs ?? '',
-        arm.infraFailed,
-      ].join(','),
+    ...report.tasks.flatMap((task) =>
+      task.arms.map((arm) =>
+        [
+          task.taskId,
+          arm.armId,
+          arm.observed,
+          arm.valid,
+          arm.passed,
+          arm.passRate ?? '',
+          arm.completed,
+          arm.budgetExhausted,
+          arm.infraFailed,
+          arm.plumbingFailed,
+          arm.attestationWarnings,
+          arm.missing,
+        ].join(','),
+      ),
     ),
   ].join('\n')}\n`;
 }
@@ -641,7 +672,7 @@ function countOracleStates(
   return counts;
 }
 
-function oracleEvidenceMarkdown(report: HarnessAbReport): string[] {
+function oracleEvidenceMarkdown(report: Pick<HarnessAbReport, 'oracleEvidence'>): string[] {
   if (!report.oracleEvidence) return [];
   const order: readonly HarnessOracleAnnotationState[] = [
     'passed',

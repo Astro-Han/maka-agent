@@ -87,6 +87,7 @@ import { envPath as parseEnvPath } from '#headless-run-env';
 import { buildSubjectFingerprint, buildToolchainFingerprint } from '#experiment-fingerprint';
 import { runExperiment } from '#experiment-engine';
 import { DEEPSEEK_V4_FLASH_PRICING } from '#deepseek-pricing';
+import { harnessAgentDefinition, providerProxyUsageProtocol } from '#harness-agent-registry';
 
 const execFileAsync = promisify(execFile);
 
@@ -270,7 +271,6 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
     version: KIMI_CODE_TOOLCHAIN_SPEC.kimiCode.version,
     toolchainFingerprint: KIMI_CODE_TOOLCHAIN_FINGERPRINT,
     config: Object.freeze({
-      adapter: 'kimi_code_agent:MakaKimiCodeAgent',
       outputFormat: 'stream-json',
       permissions: 'prompt-auto',
       attemptPolicy: 'single',
@@ -281,7 +281,6 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
     version: OPENCODE_TOOLCHAIN_SPEC.opencode.version,
     toolchainFingerprint: OPENCODE_TOOLCHAIN_FINGERPRINT,
     config: Object.freeze({
-      adapter: 'opencode_agent:MakaOpenCodeAgent',
       pure: true,
       permissions: 'auto',
       attemptPolicy: 'single',
@@ -292,7 +291,6 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
     version: CODEX_TOOLCHAIN_SPEC.codex.version,
     toolchainFingerprint: CODEX_TOOLCHAIN_FINGERPRINT,
     config: Object.freeze({
-      adapter: 'codex_agent:MakaCodexAgent',
       transport: 'responses-http',
       permissions: 'container-full-access',
       attemptPolicy: 'single',
@@ -303,7 +301,6 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
     version: CLAUDE_CODE_TOOLCHAIN_SPEC.claudeCode.version,
     toolchainFingerprint: CLAUDE_CODE_TOOLCHAIN_FINGERPRINT,
     config: Object.freeze({
-      adapter: 'claude_code_agent:MakaClaudeCodeAgent',
       transport: 'anthropic-messages',
       permissions: 'bypassPermissions',
       attemptPolicy: 'single',
@@ -549,7 +546,7 @@ export function resolveHarnessAbRunId(composition, explicitRunId, isolatedTaskId
   ) {
     return DEFAULT_HARNESS_AB_RUN_ID;
   }
-  const { benchmarkProfile, runtimeProfile, competitorProfile, competitorProfiles } = composition;
+  const { benchmarkProfile, runtimeProfile } = composition;
   const competitorSlug = composition.competitorProfiles.map((profile) => profile.id).join('-vs-');
   return `${runtimeProfile.model}-maka-vs-${competitorSlug}${runtimeProfile.auth.kind === 'codex-oauth' ? '-oauth' : ''}-${benchmarkProfile.runIdSlug}-v1`;
 }
@@ -766,6 +763,14 @@ export function harnessMakaAgentEnv(benchmarkProfile) {
   };
 }
 
+function harnessMeasuredTransport(agentId, provider) {
+  const protocol = providerProxyUsageProtocol(agentId, provider);
+  if (protocol === 'openai-chat-sse') return 'openai-chat';
+  if (protocol === 'openai-responses-sse') return 'openai-responses';
+  if (protocol === 'anthropic-sse') return 'anthropic-messages';
+  throw new Error(`harness arm ${agentId} has no measured protocol for provider ${provider}`);
+}
+
 export function buildHarnessAbManifest({
   subjectFingerprint,
   taskSourceFingerprint,
@@ -779,7 +784,7 @@ export function buildHarnessAbManifest({
   pierVersion = null,
 }) {
   assertResolvedHarnessComposition(composition);
-  const { benchmarkProfile, runtimeProfile, competitorProfile, competitorProfiles } = composition;
+  const { benchmarkProfile, runtimeProfile, competitorProfiles } = composition;
   const resolvedTaskIds = taskIds ?? benchmarkProfile.taskIds;
   const resolvedPairConcurrency =
     pairConcurrency ?? Math.min(DEFAULT_PAIR_CONCURRENCY, resolvedTaskIds.length);
@@ -815,7 +820,10 @@ export function buildHarnessAbManifest({
         id: 'maka',
         version: subjectFingerprint,
         config: {
-          adapter: 'maka_agent:MakaAgent',
+          adapter: harnessAgentDefinition('maka').importPath,
+          ...(competitorProfiles.length > 1
+            ? { transport: harnessMeasuredTransport('maka', execution.provider) }
+            : {}),
           externalSystemPrompt: 'empty',
           reasoningEffort: execution.reasoningEffort,
           continuation: false,
@@ -837,7 +845,11 @@ export function buildHarnessAbManifest({
         id: profile.id,
         version: profile.version,
         config: {
+          adapter: harnessAgentDefinition(profile.id).importPath,
           ...profile.config,
+          ...(competitorProfiles.length > 1
+            ? { transport: harnessMeasuredTransport(profile.id, execution.provider) }
+            : {}),
           ...(profile.id === 'codex' && runtimeProfile.provider === 'deepseek'
             ? { modelCatalogFingerprint: CODEX_DEEPSEEK_MODEL_CATALOG_FINGERPRINT }
             : {}),
@@ -1188,27 +1200,28 @@ async function runLocked({
         armExecution: manifest.metadata.execution.armExecution,
         retryAdjudicatedInfraRoundIdsOnce,
       };
+      const reportOracleEvidence = oracleEvidence
+        ? {
+            ...(oracleEvidence.resolvedSnapshotFingerprint
+              ? { snapshotFingerprint: oracleEvidence.resolvedSnapshotFingerprint }
+              : {}),
+            annotations: oracleEvidence.annotations.filter((annotation) =>
+              evaluatedTaskIds.has(annotation.taskId),
+            ),
+            warnings: oracleEvidence.warnings,
+          }
+        : { annotations: [], warnings: [] };
       if (competitorProfiles.length > 1) {
         const summary = await runHarnessArmCohortUnlocked(runInput);
-        return buildHarnessCohortReport(summary, execution.billingMode, manifest);
+        return buildHarnessCohortReport(
+          summary,
+          execution.billingMode,
+          manifest,
+          reportOracleEvidence,
+        );
       }
       const summary = await runHarnessAbComparisonUnlocked(runInput);
-      return buildHarnessAbReport(
-        summary,
-        oracleEvidence
-          ? {
-              ...(oracleEvidence.resolvedSnapshotFingerprint
-                ? { snapshotFingerprint: oracleEvidence.resolvedSnapshotFingerprint }
-                : {}),
-              annotations: oracleEvidence.annotations.filter((annotation) =>
-                evaluatedTaskIds.has(annotation.taskId),
-              ),
-              warnings: oracleEvidence.warnings,
-            }
-          : { annotations: [], warnings: [] },
-        execution.billingMode,
-        manifest,
-      );
+      return buildHarnessAbReport(summary, reportOracleEvidence, execution.billingMode, manifest);
     },
     artifacts: (report) => {
       const cohort = report.schemaVersion === 'maka.harness_cohort.report.v1';

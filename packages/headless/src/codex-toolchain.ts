@@ -7,7 +7,7 @@ import {
 
 export const CODEX_TOOLCHAIN_CONTAINER_PATH = '/opt/maka-codex-toolchain';
 export const CODEX_DEEPSEEK_MODEL_CATALOG_FINGERPRINT =
-  'sha256:1789822e86d6c61c21a38c31184442b090c54f20adaa8c4ec6a5b4d179c0780c';
+  'sha256:faac5d862e0ce0bf5bcaccd515de04cf2dcd33cd38a53f0332fe2e8620ab7caa';
 
 export const CODEX_TOOLCHAIN_SPEC = {
   schemaVersion: 1,

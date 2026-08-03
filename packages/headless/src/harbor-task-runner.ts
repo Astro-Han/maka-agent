@@ -49,13 +49,6 @@ import {
   providerProxyUsageProtocol,
   type HarnessAgentId,
 } from './harness-agent-registry.js';
-export {
-  providerProxyClientAuthMode,
-  providerProxyClientBaseUrl,
-  providerProxyUpstreamAuthMode,
-  providerProxyUpstreamBaseUrl,
-  providerProxyUsageProtocol,
-} from './harness-agent-registry.js';
 import {
   isSensitiveEnvName,
   providerBaseUrlFromEnv,
@@ -1322,16 +1315,6 @@ export function providerProxyApiProtocol(
 ): string | undefined {
   if (agent !== 'maka') return undefined;
   return agentEnv?.MAKA_HOST_MODEL_API_PROTOCOL || agentEnv?.MAKA_MODEL_API_PROTOCOL || undefined;
-}
-
-/** Shared across runners: the selected Kimi protocol overrides its Anthropic registry default. */
-export function providerProxyAuthMode(
-  provider: string,
-  apiProtocol?: string,
-): 'bearer' | 'x-api-key' {
-  if (provider === 'kimi-coding-plan' && apiProtocol === 'openai-chat') return 'bearer';
-  if (provider === 'kimi-coding-plan' && apiProtocol === 'anthropic-messages') return 'x-api-key';
-  return providerProxyUpstreamAuthMode('maka', provider, apiProtocol);
 }
 
 async function resolveGitHubCopilotHostCredential(

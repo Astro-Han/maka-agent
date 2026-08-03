@@ -21,11 +21,6 @@ import {
   mergeAgentEnv,
   modelIdForProvider,
   providerProxyApiProtocol,
-  providerProxyClientAuthMode,
-  providerProxyClientBaseUrl,
-  providerProxyUpstreamAuthMode,
-  providerProxyUpstreamBaseUrl,
-  providerProxyUsageProtocol,
   providerRequiresSecret,
   providerTelemetryArtifactRefs,
   providerTokenSummary,
@@ -38,18 +33,21 @@ import {
   modelForOpenCode,
   type HarborTaskPricing,
 } from './harbor-task-runner.js';
-import { harnessAgentDefinition, type HarnessAgentId } from './harness-agent-registry.js';
+import {
+  harnessAgentDefinition,
+  providerProxyClientAuthMode,
+  providerProxyClientBaseUrl,
+  providerProxyUpstreamAuthMode,
+  providerProxyUpstreamBaseUrl,
+  providerProxyUsageProtocol,
+  type HarnessAgentId,
+} from './harness-agent-registry.js';
 import { lenientPositiveIntEnv } from './headless-run-env.js';
 import {
   CODEX_TOOLCHAIN_CONTAINER_PATH,
   CODEX_TOOLCHAIN_FINGERPRINT,
   CODEX_TOOLCHAIN_SPEC,
 } from './codex-toolchain.js';
-import {
-  CLAUDE_CODE_TOOLCHAIN_CONTAINER_PATH,
-  CLAUDE_CODE_TOOLCHAIN_FINGERPRINT,
-  CLAUDE_CODE_TOOLCHAIN_SPEC,
-} from './claude-code-toolchain.js';
 import {
   KIMI_CODE_TOOLCHAIN_CONTAINER_PATH,
   KIMI_CODE_TOOLCHAIN_FINGERPRINT,
@@ -150,8 +148,6 @@ export interface PierTaskRunnerOptions {
   kimiCodeToolchainPath?: string;
   /** Prepared Codex toolchain bind-mounted read-only into task containers. */
   codexToolchainPath?: string;
-  /** Prepared Claude Code native toolchain bind-mounted read-only into task containers. */
-  claudeCodeToolchainPath?: string;
   /** Prepared OpenCode toolchain bind-mounted read-only into task containers. */
   opencodeToolchainPath?: string;
   /** Competitor CLI version, forwarded as the adapter's `version` kwarg. The
@@ -254,7 +250,7 @@ export interface PierRunResult {
 
 export type PierProcessRunner = (request: PierRunRequest) => Promise<PierRunResult>;
 
-export type PierAgent = HarnessAgentId;
+export type PierAgent = Exclude<HarnessAgentId, 'claude-code'>;
 
 interface PierProviderRuntime {
   /** Proxy-minted secret env delivered via `--env-file` (kept off argv). */
@@ -270,14 +266,6 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
   if (options.agent === 'codex' && options.agentVersion !== CODEX_TOOLCHAIN_SPEC.codex.version) {
     throw new Error(
       `Codex adapter version must match toolchain version ${CODEX_TOOLCHAIN_SPEC.codex.version}`,
-    );
-  }
-  if (
-    options.agent === 'claude-code' &&
-    options.agentVersion !== CLAUDE_CODE_TOOLCHAIN_SPEC.claudeCode.version
-  ) {
-    throw new Error(
-      `Claude Code adapter version must match toolchain version ${CLAUDE_CODE_TOOLCHAIN_SPEC.claudeCode.version}`,
     );
   }
   if (
@@ -402,7 +390,7 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
             // Constructor kwargs ride `--ak`; env cannot carry them. The Codex
             // adapter pins its CLI build via `version` and forwards the effort
             // as the `-c model_reasoning_effort` CLI flag descriptor.
-            ...(agent === 'codex' || agent === 'claude-code'
+            ...(agent === 'codex'
               ? {
                   agentKwargs: {
                     version: options.agentVersion!,
@@ -731,17 +719,6 @@ function buildPierMounts(
       read_only: true,
     });
   }
-  if (agent === 'claude-code') {
-    if (!options.claudeCodeToolchainPath) {
-      throw new Error('claudeCodeToolchainPath is required for the Claude Code adapter');
-    }
-    mounts.push({
-      type: 'bind',
-      source: options.claudeCodeToolchainPath,
-      target: CLAUDE_CODE_TOOLCHAIN_CONTAINER_PATH,
-      read_only: true,
-    });
-  }
   if (agent === 'opencode') {
     if (!options.opencodeToolchainPath) {
       throw new Error('opencodeToolchainPath is required for the OpenCode adapter');
@@ -788,9 +765,6 @@ function buildPierAgentEnv(
   }
   if (agent === 'codex') {
     env.MAKA_CODEX_TOOLCHAIN_FINGERPRINT = CODEX_TOOLCHAIN_FINGERPRINT;
-  }
-  if (agent === 'claude-code') {
-    env.MAKA_CLAUDE_CODE_TOOLCHAIN_FINGERPRINT = CLAUDE_CODE_TOOLCHAIN_FINGERPRINT;
   }
   if (agent === 'opencode') {
     env.MAKA_OPENCODE_TOOLCHAIN_FINGERPRINT = OPENCODE_TOOLCHAIN_FINGERPRINT;

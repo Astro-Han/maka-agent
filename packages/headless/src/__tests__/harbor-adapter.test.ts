@@ -556,6 +556,19 @@ describe('Harbor adapter contract', () => {
     assert.match(result.stdout, /codex adapter ok/);
   });
 
+  test('claude_code_agent.py requires a successful terminal result behind the host proxy', (t: TestContext) => {
+    const result = spawnSync('python3', ['-c', pythonClaudeCodeAdapterSmokeScript(repoRoot)], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
+      t.skip('python3 is not available');
+      return;
+    }
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /claude-code adapter ok/);
+  });
+
   test('Codex DeepSeek catalog pins the official Flash model contract', async () => {
     const catalog = JSON.parse(
       await readFile(
@@ -3774,6 +3787,167 @@ print("kimi-code adapter ok")
 `;
 }
 
+function pythonClaudeCodeAdapterSmokeScript(root: string): string {
+  return String.raw`
+import asyncio
+import json
+import os
+import sys
+import tempfile
+import types
+from pathlib import Path
+
+root = Path(${JSON.stringify(root)})
+
+def module(name):
+    mod = types.ModuleType(name)
+    sys.modules[name] = mod
+    return mod
+
+module("harbor")
+module("harbor.agents")
+module("harbor.agents.installed")
+claude_mod = module("harbor.agents.installed.claude_code")
+
+class ClaudeCode:
+    def __init__(self, logs_dir, extra_env=None, model_name=None, **kwargs):
+        self.logs_dir = Path(logs_dir)
+        self._extra_env = extra_env or {}
+        self.model_name = model_name
+        self.parent_calls = []
+        self.logger = types.SimpleNamespace(debug=lambda *args, **kwargs: None)
+
+    def _get_env(self, key):
+        return self._extra_env.get(key) or os.environ.get(key)
+
+    async def exec_as_agent(self, environment, command, env=None, **kwargs):
+        return await environment.exec(command, env=env or {}, **kwargs)
+
+    async def exec_as_root(self, environment, command, env=None, **kwargs):
+        return await environment.exec(command, env=env or {}, as_root=True, **kwargs)
+
+    async def run(self, instruction, environment, context):
+        self.parent_calls.append({
+            "api_key": self._get_env("ANTHROPIC_API_KEY"),
+            "auth_token": self._get_env("ANTHROPIC_AUTH_TOKEN"),
+            "oauth_token": self._get_env("CLAUDE_CODE_OAUTH_TOKEN"),
+        })
+        if instruction == "pipeline-fail":
+            result = await self.exec_as_agent(
+                environment,
+                command="false 2>&1 | tee /dev/null",
+            )
+            if result.return_code != 0:
+                raise RuntimeError("Claude command exited non-zero")
+        events = [{"type": "assistant", "session_id": "session-1", "message": {"content": []}}]
+        if instruction == "success" or instruction == "pipeline-fail":
+            events.append({"type": "result", "session_id": "session-1", "is_error": False})
+        elif instruction == "terminal-error":
+            events.append({
+                "type": "result",
+                "session_id": "session-1",
+                "is_error": True,
+                "subtype": "401 Unauthorized",
+            })
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        (self.logs_dir / "claude-code.txt").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+
+    def populate_context_post_run(self, context):
+        return None
+
+claude_mod.ClaudeCode = ClaudeCode
+module("harbor.environments")
+env_mod = module("harbor.environments.base")
+env_mod.BaseEnvironment = object
+module("harbor.models")
+module("harbor.models.agent")
+context_mod = module("harbor.models.agent.context")
+context_mod.AgentContext = object
+
+sys.path.insert(0, str(root / "packages" / "headless" / "harbor"))
+from claude_code_agent import MakaClaudeCodeAgent
+
+class Environment:
+    def __init__(self):
+        self.commands = []
+
+    async def exec(self, command, env=None, **kwargs):
+        self.commands.append(command)
+        process = await asyncio.create_subprocess_exec(
+            "bash",
+            "-lc",
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        return types.SimpleNamespace(
+            return_code=process.returncode,
+            stdout=stdout.decode(),
+            stderr=stderr.decode(),
+        )
+
+def agent(logs):
+    return MakaClaudeCodeAgent(
+        logs,
+        model_name="deepseek-v4-flash",
+        extra_env={
+            "MAKA_PROVIDER_PROXY_URL": "http://host.docker.internal:43210/anthropic",
+            "MAKA_PROVIDER_PROXY_TOKEN": "ephemeral-token",
+            "MAKA_MODEL": "deepseek-v4-flash",
+            "MAKA_SYSTEM_PROMPT": "",
+        },
+    )
+
+with tempfile.TemporaryDirectory() as tmp:
+    logs = Path(tmp)
+    environment = Environment()
+    context = types.SimpleNamespace()
+
+    success = agent(logs)
+    asyncio.run(success.run("success", environment, context))
+    success.populate_context_post_run(context)
+    cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+    assert cell["status"] == "completed", cell
+    assert success.parent_calls[0] == {
+        "api_key": "ephemeral-token",
+        "auth_token": None,
+        "oauth_token": None,
+    }, success.parent_calls
+
+    missing = agent(logs)
+    asyncio.run(missing.run("missing-result", environment, context))
+    missing.populate_context_post_run(context)
+    missing_cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+    assert missing_cell["status"] == "failed", missing_cell
+    assert missing_cell["errorClass"] == "infra_failed", missing_cell
+
+    terminal_error = agent(logs)
+    asyncio.run(terminal_error.run("terminal-error", environment, context))
+    terminal_error.populate_context_post_run(context)
+    error_cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+    assert error_cell["status"] == "failed", error_cell
+    assert error_cell["errorClass"] == "auth", error_cell
+
+    pipeline = agent(logs)
+    try:
+        asyncio.run(pipeline.run("pipeline-fail", environment, context))
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Claude pipeline hid the CLI non-zero exit")
+    pipeline.populate_context_post_run(context)
+    pipeline_cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+    assert pipeline_cell["status"] == "failed", pipeline_cell
+    assert pipeline_cell["errorClass"] == "infra_failed", pipeline_cell
+
+print("claude-code adapter ok")
+`;
+}
+
 function pythonCodexAdapterSmokeScript(root: string): string {
   return String.raw`
 import asyncio
@@ -3855,6 +4029,18 @@ class Codex:
         if instruction == "no-completion":
             (self.logs_dir / "codex.txt").write_text(
                 json.dumps({"type": "turn.failed", "error": {"message": "429 rate limit"}}) + "\n",
+                encoding="utf-8",
+            )
+            return
+        if instruction == "transcript-no-completion":
+            (self.logs_dir / "codex.txt").write_text(
+                json.dumps({
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution",
+                        "aggregated_output": "jal 403ef0 <doomgeneric_tick>",
+                    },
+                }) + "\n",
                 encoding="utf-8",
             )
             return
@@ -4089,6 +4275,24 @@ with tempfile.TemporaryDirectory() as tmp:
     incomplete_cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
     assert incomplete_cell["status"] == "failed", incomplete_cell
     assert incomplete_cell["errorClass"] == "rate_limit", incomplete_cell
+
+    transcript = MakaCodexAgent(
+        logs,
+        version="0.144.6",
+        model_name="deepseek-v4-flash",
+        reasoning_effort="max",
+        extra_env={
+            "MAKA_PROVIDER_PROXY_URL": "http://host.docker.internal:43210",
+            "MAKA_PROVIDER_PROXY_TOKEN": "ephemeral-token",
+            "MAKA_MODEL": "deepseek-v4-flash",
+            "MAKA_SYSTEM_PROMPT": "",
+        },
+    )
+    asyncio.run(transcript.run("transcript-no-completion", environment, incomplete_context))
+    transcript.populate_context_post_run(incomplete_context)
+    transcript_cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+    assert transcript_cell["status"] == "failed", transcript_cell
+    assert transcript_cell["errorClass"] == "infra_failed", transcript_cell
 
     policy = MakaCodexAgent(
         logs,

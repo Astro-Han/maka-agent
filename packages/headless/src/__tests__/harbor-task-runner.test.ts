@@ -12,14 +12,16 @@ import {
   createHarborOracleQualifier,
   createHarborTaskRunner,
   HarborInfraError,
-  providerProxyClientAuthMode,
-  providerProxyClientBaseUrl,
-  providerProxyUpstreamAuthMode,
-  providerProxyUsageProtocol,
   type HarborProcessRunner,
   type HarborRunRequest,
   type HarborRunResult,
 } from '../harbor-task-runner.js';
+import {
+  providerProxyClientAuthMode,
+  providerProxyClientBaseUrl,
+  providerProxyUpstreamAuthMode,
+  providerProxyUsageProtocol,
+} from '../harness-agent-registry.js';
 import { HARBOR_ORACLE_EXECUTION_POLICY } from '../harness-oracle-policy.js';
 import {
   CLAUDE_CODE_TOOLCHAIN_FINGERPRINT,

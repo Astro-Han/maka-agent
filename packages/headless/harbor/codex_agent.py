@@ -370,7 +370,7 @@ class MakaCodexAgent(Codex):
         error_class = getattr(self, "_failure_class", None)
         if failed and error_class is None:
             error_class = _classify_failure(
-                RuntimeError(json.dumps(events, ensure_ascii=False)), events
+                RuntimeError("Codex exited without a turn.completed event"), events
             )
         totals = self._token_totals(context)
         started_at = getattr(self, "_started_at_ms", int(time.time() * 1000))

@@ -448,7 +448,6 @@ test('harness A/B defaults to pinned Kimi Code and keeps OpenCode selectable', a
       defaultConnectionSlug: 'codex-subscription',
     },
   });
-  assert.equal(codexProfile.config.adapter, 'codex_agent:MakaCodexAgent');
   assert.equal(codexProfile.config.permissions, 'container-full-access');
   assert.equal(codexProfile.config.transport, 'responses-http');
   assert.equal('armExecution' in codexProfile, false);
@@ -460,6 +459,7 @@ test('harness A/B defaults to pinned Kimi Code and keeps OpenCode selectable', a
     composition: codexComposition,
   });
   assert.deepEqual(codexManifest.metadata.execution, { armExecution: 'sequential' });
+  assert.equal(codexManifest.arms[1]?.metadata?.config.adapter, 'codex_agent:MakaCodexAgent');
   assert.equal(codexManifest.maxConcurrency, 1);
   assert.equal(codexManifest.maxConcurrentAttempts, 1);
   assert.throws(() => resolveHarnessCompetitorProfile('unknown'), /MAKA_HARNESS_AB_COMPETITOR/);
@@ -712,9 +712,15 @@ test('harness CLI freezes the synchronized DeepSeek three-way composition', asyn
     manifest.arms.map((arm: { id: string }) => arm.id),
     ['maka', 'codex', 'claude-code'],
   );
-  assert.match(
-    String(manifest.arms[1]?.metadata?.config.modelCatalogFingerprint),
-    /^sha256:[a-f0-9]{64}$/,
+  assert.equal(
+    manifest.arms[1]?.metadata?.config.modelCatalogFingerprint,
+    'sha256:faac5d862e0ce0bf5bcaccd515de04cf2dcd33cd38a53f0332fe2e8620ab7caa',
+  );
+  assert.deepEqual(
+    manifest.arms.map(
+      (arm: { metadata?: { config?: { transport?: string } } }) => arm.metadata?.config?.transport,
+    ),
+    ['openai-chat', 'openai-responses', 'anthropic-messages'],
   );
   assert.equal(manifest.maxConcurrentAttempts, 6);
   assert.equal(

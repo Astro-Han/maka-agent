@@ -79,31 +79,91 @@ describe('harness A/B report', () => {
         baselineRuns: [events[baselineArmId]],
         candidateRuns: [events[candidateArmId]],
       });
-    const report = buildHarnessCohortReport({
-      runId: 'deepseek-three-way',
-      armIds: ['maka', 'codex', 'claude-code'],
-      taskCount: 1,
-      commonCohort: { groups: 1, comparableGroups: 1, excludedGroupIds: [] },
-      pairwise: [
-        comparison('maka', 'codex'),
-        comparison('maka', 'claude-code'),
-        comparison('codex', 'claude-code'),
-      ],
-    });
+    const report = buildHarnessCohortReport(
+      {
+        runId: 'deepseek-three-way',
+        armIds: ['maka', 'codex', 'claude-code'],
+        taskCount: 1,
+        commonCohort: { groups: 1, comparableGroups: 1, excludedGroupIds: [] },
+        pairwise: [
+          comparison('maka', 'codex'),
+          comparison('maka', 'claude-code'),
+          comparison('codex', 'claude-code'),
+        ],
+      },
+      'metered',
+      {
+        arms: [
+          harnessManifestArm('maka', 'anthropic-messages'),
+          harnessManifestArm('codex', 'openai-chat'),
+          harnessManifestArm('claude-code', 'openai-responses'),
+        ],
+      },
+      {
+        snapshotFingerprint: `sha256:${'a'.repeat(64)}`,
+        annotations: [{ taskId: 'a', state: 'passed' }],
+        warnings: ['frozen Oracle warning'],
+      },
+    );
 
     assert.equal(report.arms.length, 3);
     assert.deepEqual(report.measurement.protocolByArm, {
-      maka: 'openai-chat',
-      codex: 'openai-responses',
-      'claude-code': 'anthropic-messages',
+      maka: 'anthropic-messages',
+      codex: 'openai-chat',
+      'claude-code': 'openai-responses',
     });
     assert.deepEqual(report.tasks[0]?.arms, [
-      { armId: 'maka', observed: 1, valid: 1, passed: 1 },
-      { armId: 'codex', observed: 1, valid: 1, passed: 0 },
-      { armId: 'claude-code', observed: 1, valid: 1, passed: 1 },
+      {
+        armId: 'maka',
+        observed: 1,
+        valid: 1,
+        passed: 1,
+        passRate: 1,
+        completed: 1,
+        budgetExhausted: 0,
+        infraFailed: 0,
+        plumbingFailed: 0,
+        attestationWarnings: 0,
+        missing: 0,
+      },
+      {
+        armId: 'codex',
+        observed: 1,
+        valid: 1,
+        passed: 0,
+        passRate: 0,
+        completed: 1,
+        budgetExhausted: 0,
+        infraFailed: 0,
+        plumbingFailed: 0,
+        attestationWarnings: 0,
+        missing: 0,
+      },
+      {
+        armId: 'claude-code',
+        observed: 1,
+        valid: 1,
+        passed: 1,
+        passRate: 1,
+        completed: 1,
+        budgetExhausted: 0,
+        infraFailed: 0,
+        plumbingFailed: 0,
+        attestationWarnings: 0,
+        missing: 0,
+      },
     ]);
     assert.match(renderHarnessCohortReportMarkdown(report), /Common cohort: 1\/1/);
-    assert.match(renderHarnessCohortReportCsv(report), /claude-code,1,1,1/);
+    assert.match(
+      renderHarnessCohortReportCsv(report),
+      /^task_id,arm_id,observed,valid,passed,pass_rate,completed,budget_exhausted,infra_failed,plumbing_failed,attestation_warnings,missing\n/,
+    );
+    assert.match(renderHarnessCohortReportCsv(report), /a,claude-code,1,1,1,1,1,0,0,0,0,0/);
+    assert.deepEqual(report.oracleEvidence?.stateCounts, { passed: 1 });
+    assert.ok(report.pairwise.every((pair) => pair.oracleEvidence?.stateCounts.passed === 1));
+    assert.ok(report.pairwise.every((pair) => pair.execution?.arms.length === 2));
+    assert.match(renderHarnessCohortReportMarkdown(report), /Oracle evidence: passed 1\./);
+    assert.match(renderHarnessCohortReportMarkdown(report), /Warning: frozen Oracle warning/);
   });
 
   test('keeps effectiveness and economy as separate reproducible axes', () => {
@@ -504,6 +564,20 @@ describe('harness A/B report', () => {
     );
   });
 });
+
+function harnessManifestArm(
+  id: 'maka' | 'codex' | 'claude-code',
+  transport: 'openai-chat' | 'openai-responses' | 'anthropic-messages',
+) {
+  return {
+    id,
+    kind: 'harness' as const,
+    fingerprint: `${id}-fingerprint`,
+    metadata: {
+      config: { transport, execution: { placement: 'task-container' } },
+    },
+  };
+}
 
 function usage(
   taskId: string,
