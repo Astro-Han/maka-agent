@@ -253,6 +253,29 @@ describe('AppShell turn presentation prop identity', () => {
     }
   });
 
+  it('keeps an untouched turn\'s lineage badges when the transcript grows', () => {
+    // A new turn forces a fresh presentation, so this is the path where the
+    // per-turn cache actually has to answer — the whole-result short circuit
+    // above cannot cover it.
+    const drive = driver();
+    const before = drive(regenerated);
+    const after = drive([
+      ...structuredClone(regenerated),
+      { type: 'user', id: 'user-4', turnId: 'turn-4', ts: 9, text: 'fourth' },
+    ]);
+
+    assert.notEqual(after, before);
+    for (const turnId of ['turn-1', 'turn-3']) {
+      assert.ok(before.lineageBadgesByTurn[turnId]);
+      assert.equal(
+        after.lineageBadgesByTurn[turnId],
+        before.lineageBadgesByTurn[turnId],
+        `${turnId} lineage badges must keep identity`,
+      );
+      assert.equal(after.footerActionsByTurn[turnId], before.footerActionsByTurn[turnId]);
+    }
+  });
+
   it('moves only the turn whose derived props actually changed', () => {
     const drive = driver();
     const before = drive(transcript);
