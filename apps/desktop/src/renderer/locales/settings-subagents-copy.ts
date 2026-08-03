@@ -15,7 +15,6 @@ export type SubagentSettingsCopy = {
     title: string;
     count(total: number, max: number): string;
     add: string;
-    limitNote: string;
     emptyTitle: string;
     emptyDescription: string;
   };
@@ -25,14 +24,12 @@ export type SubagentSettingsCopy = {
     fallbackDescription: string;
   };
   status: {
-    disabled: string;
     missingConnection: string;
     connectionDisabled: string;
     modelDisabled: string;
   };
   editor: {
     backToList: string;
-    createTitle: string;
     createSubtitle: string;
     editSubtitle: string;
     groupPurpose: string;
@@ -60,10 +57,10 @@ export type SubagentSettingsCopy = {
     noConnection: string;
     noModel: string;
     requiredName: string;
-    requiredDescription: string;
     invalidId: string;
     duplicateId: string;
-    invalidRoute: string;
+    invalidConnection: string;
+    invalidModel: string;
     cancel: string;
     create: string;
     save: string;
@@ -77,6 +74,7 @@ export type SubagentSettingsCopy = {
   };
   toast: {
     saveFailed: string;
+    rejected: string;
   };
   profiles: Record<SubagentProfile, ProfileCopy>;
   thinking: Record<ThinkingLevel, string>;
@@ -88,7 +86,6 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       title: '已批准的子 Agent',
       count: (total, max) => `共 ${total} / ${max} 个配置`,
       add: '添加子 Agent',
-      limitNote: '已达到配置数量上限。',
       emptyTitle: '还没有子 Agent 配置',
       emptyDescription: '添加一个配置后，主 Agent 就能把合适的任务交给独立模型处理。',
     },
@@ -98,14 +95,12 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       fallbackDescription: '尚未填写适用场景',
     },
     status: {
-      disabled: '已停用',
       missingConnection: '连接不存在',
       connectionDisabled: '连接已停用',
       modelDisabled: '模型未启用',
     },
     editor: {
       backToList: '返回子 Agent 列表',
-      createTitle: '添加子 Agent',
       createSubtitle: '创建一个可由主 Agent 自动选择的模型配置。',
       editSubtitle: '修改适用场景、能力边界和模型路由。',
       groupPurpose: '用途',
@@ -113,10 +108,10 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       groupRoute: '能力与模型',
       groupRouteHelp: '固定这个子 Agent 能做什么，以及它运行在哪个模型上。',
       dangerZone: '删除子 Agent',
-      dangerZoneHelp: '删除后，这个配置将从设置中移除，且无法撤销。',
+      dangerZoneHelp: '此操作不可撤销。',
       delete: '删除',
-      enabled: '创建后即可用',
-      enabledDescription: '关闭后，配置会被保存但主 Agent 暂时不会选择它。',
+      enabled: '启用',
+      enabledDescription: '关闭后配置仍会保留，但主 Agent 暂时不会选择它。',
       name: '显示名称',
       namePlaceholder: '快速代码阅读',
       id: 'subagent_id',
@@ -133,10 +128,10 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       noConnection: '请先在“模型”页启用一个模型连接。',
       noModel: '所选连接没有已启用的模型。',
       requiredName: '请输入显示名称。',
-      requiredDescription: '请说明这个子 Agent 的适用场景。',
       invalidId: '只能使用字母、数字、点、下划线、冒号和连字符，最多 128 个字符。',
       duplicateId: '这个 subagent_id 已经存在。',
-      invalidRoute: '请选择已启用的连接和模型。',
+      invalidConnection: '请选择一个已启用的模型连接。',
+      invalidModel: '请选择一个已启用的模型。',
       cancel: '取消',
       create: '创建',
       save: '保存',
@@ -150,6 +145,7 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
     },
     toast: {
       saveFailed: '保存子 Agent 配置失败',
+      rejected: '配置没有被保存。请确认名称长度和配置数量都在上限之内。',
     },
     profiles: {
       local_read: { label: '代码阅读', description: '只读访问当前工作区，适合搜索、理解和总结代码。' },
@@ -171,7 +167,6 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       title: 'Approved subagents',
       count: (total, max) => `${total} of ${max} presets`,
       add: 'Add subagent',
-      limitNote: 'The preset limit has been reached.',
       emptyTitle: 'No subagent presets yet',
       emptyDescription: 'Add a preset so the main agent can delegate suitable work to a separate model.',
     },
@@ -181,14 +176,12 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       fallbackDescription: 'No usage guidance yet',
     },
     status: {
-      disabled: 'Disabled',
       missingConnection: 'Connection missing',
       connectionDisabled: 'Connection disabled',
       modelDisabled: 'Model not enabled',
     },
     editor: {
       backToList: 'Back to subagents',
-      createTitle: 'Add subagent',
       createSubtitle: 'Create a model preset that the main agent can select automatically.',
       editSubtitle: 'Change its usage guidance, capability boundary, and model route.',
       groupPurpose: 'Purpose',
@@ -196,10 +189,10 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       groupRoute: 'Capability and model',
       groupRouteHelp: 'Fix what this subagent may do, and which model it runs on.',
       dangerZone: 'Remove subagent',
-      dangerZoneHelp: 'Removing takes this preset out of settings, and cannot be undone.',
+      dangerZoneHelp: 'This cannot be undone.',
       delete: 'Remove',
-      enabled: 'Available once created',
-      enabledDescription: 'Turn this off to save the preset without letting the main agent select it yet.',
+      enabled: 'Enabled',
+      enabledDescription: 'Turn this off to keep the preset without letting the main agent select it.',
       name: 'Display name',
       namePlaceholder: 'Fast code reader',
       id: 'subagent_id',
@@ -216,10 +209,10 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
       noConnection: 'Enable a model connection on the Models page first.',
       noModel: 'The selected connection has no enabled models.',
       requiredName: 'Enter a display name.',
-      requiredDescription: 'Describe when this subagent should be used.',
       invalidId: 'Use only letters, numbers, dots, underscores, colons, and hyphens, up to 128 characters.',
       duplicateId: 'That subagent_id already exists.',
-      invalidRoute: 'Select an enabled connection and model.',
+      invalidConnection: 'Select an enabled model connection.',
+      invalidModel: 'Select an enabled model.',
       cancel: 'Cancel',
       create: 'Create',
       save: 'Save',
@@ -233,6 +226,7 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
     },
     toast: {
       saveFailed: 'Failed to save subagent presets',
+      rejected: 'The preset was not saved. Check that its name length and the preset count are within their limits.',
     },
     profiles: {
       local_read: { label: 'Code reading', description: 'Read-only access to the current workspace for search, understanding, and summaries.' },

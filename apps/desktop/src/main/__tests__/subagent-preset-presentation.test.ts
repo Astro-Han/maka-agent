@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import type { LlmConnection, SubagentPreset } from '@maka/core';
 import {
   nextSubagentDraftForName,
+  resolveSubagentRoute,
   subagentPresetAvailability,
   suggestSubagentPresetId,
 } from '../../renderer/settings/subagent-preset-presentation.js';
@@ -40,9 +41,11 @@ describe('subagentPresetAvailability', () => {
       kind: 'available',
       tone: 'success',
     });
-    // The tone is asserted with the kind, not separately: the tone is what the
-    // list row actually renders, so a broken route quietly turning green is a
-    // pure-data regression this file is the only place to catch.
+    // The tone is asserted with the kind, not separately: it is what decides
+    // the badge variant, so a broken route quietly turning green is a pure-data
+    // regression this file is the only place to catch. `available` and
+    // `disabled` render no badge — the switch beside the row says the second —
+    // but they stay in the value range so callers branch on one thing.
     assert.deepEqual(subagentPresetAvailability(preset({ enabled: false }), []), {
       kind: 'disabled',
       tone: 'neutral',
@@ -108,5 +111,38 @@ describe('nextSubagentDraftForName', () => {
       nextSubagentDraftForName(draft, '网页研究', false, new Set([first.id])).id,
       'subagent-2',
     );
+  });
+});
+
+describe('resolveSubagentRoute', () => {
+  const fastReader = preset();
+
+  it('resolves an edit route to the preset it names', () => {
+    assert.deepEqual(resolveSubagentRoute({ kind: 'edit', presetId: 'fast-reader' }, [fastReader]), {
+      level: 'edit',
+      preset: fastReader,
+    });
+  });
+
+  it('renders the list for an edit route whose preset is gone', () => {
+    // The whole reason this is a function: a preset deleted from under an open
+    // editor used to leave `preset` null while the editor still rendered, which
+    // is its create branch — so saving appended a SECOND preset instead of
+    // updating one. Nothing on screen said so.
+    assert.deepEqual(resolveSubagentRoute({ kind: 'edit', presetId: 'gone' }, [fastReader]), {
+      level: 'list',
+      preset: null,
+    });
+  });
+
+  it('carries list and create through untouched', () => {
+    assert.deepEqual(resolveSubagentRoute({ kind: 'list' }, [fastReader]), {
+      level: 'list',
+      preset: null,
+    });
+    assert.deepEqual(resolveSubagentRoute({ kind: 'create' }, []), {
+      level: 'create',
+      preset: null,
+    });
   });
 });

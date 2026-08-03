@@ -5,6 +5,32 @@ import {
 } from '@maka/core';
 import type { StatusTone } from './settings-status-badge.js';
 
+/**
+ * Where the page is. `create` and `edit` are the same form; they are separate
+ * cases because the id is settled in one and typed in the other, and because
+ * an `edit` route can become unsatisfiable while `create` cannot.
+ */
+export type SubagentPageRoute =
+  | { kind: 'list' }
+  | { kind: 'create' }
+  | { kind: 'edit'; presetId: string };
+
+/**
+ * An edit route whose preset vanished (deleted, or removed by an external
+ * settings write) is an unsatisfiable route, not a state to correct: the list
+ * is what it renders as. Resolving it here rather than in the component keeps
+ * the rule testable — inlined, the only way to reach it was to delete a preset
+ * from under an open editor, and nothing did.
+ */
+export function resolveSubagentRoute(
+  route: SubagentPageRoute,
+  presets: readonly SubagentPreset[],
+): { level: SubagentPageRoute['kind']; preset: SubagentPreset | null } {
+  if (route.kind !== 'edit') return { level: route.kind, preset: null };
+  const preset = presets.find((candidate) => candidate.id === route.presetId) ?? null;
+  return preset ? { level: 'edit', preset } : { level: 'list', preset: null };
+}
+
 export type SubagentPresetAvailabilityKind =
   | 'available'
   | 'disabled'

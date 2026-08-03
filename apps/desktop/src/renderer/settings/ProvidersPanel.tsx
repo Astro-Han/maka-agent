@@ -30,6 +30,7 @@ import {
   type SetupTarget,
 } from './provider-catalog-page';
 import { ConnectionDetail } from './provider-connection-detail';
+import { useSettingsRouteFocus } from './settings-route-focus';
 import { SettingsRouteHeader } from './settings-route-header';
 import { ProviderLogo, providerDisplay } from './provider-display';
 import { oauthPanelSubtitle } from './provider-oauth-section';
@@ -99,7 +100,6 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
   // Which row the user left the list from, so returning puts focus back where
   // they were rather than on the page's primary action.
   const listReturnFocusRef = useRef<string | null>(null);
-  const hasNavigatedRef = useRef(false);
   const locale = useUiLocale();
   const providerCopy = getProviderSettingsCopy(locale);
   const copy = providerCopy.panel;
@@ -199,60 +199,23 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
   // as. Deriving that beats scheduling a setState from inside render.
   const level: PanelRoute['kind'] = route.kind === 'detail' && !selected ? 'list' : route.kind;
 
-  // Focus follows the level, to its first meaningful control. Navigating
-  // without this leaves the ring on `document.body` every time a level
-  // unmounts, which costs a keyboard user their place on every move.
-  //
-  // Navigating, not arriving: the panel does not grab focus when the settings
-  // page first renders the list — the user is still in the settings nav they
-  // clicked to get here.
-  useEffect(() => {
-    if (loading) return;
-    if (!hasNavigatedRef.current) {
-      hasNavigatedRef.current = true;
-      return;
-    }
-    const frame = window.requestAnimationFrame(focusLevel);
-    return () => window.cancelAnimationFrame(frame);
-
-    function focusLevel() {
-      const find = (selector: string) => document.querySelector<HTMLElement>(selector);
-      // `preventScroll` because this is a landing, not a jump: the level just
-      // rendered at the top of the content area, and scrolling to whatever the
-      // focus target happens to be would push its own header out of view.
-      const focusFirst = (...selectors: string[]) => {
-        for (const selector of selectors) {
-          const element = find(selector);
-          if (element) return element.focus({ preventScroll: true });
-        }
-      };
-      switch (level) {
-        case 'catalog':
-          focusFirst('[data-maka-contract="provider-catalog"] input');
-          return;
-        case 'setup':
-          focusFirst('[data-maka-contract="provider-setup"] input', '[data-maka-contract="provider-setup"]');
-          return;
-        case 'detail':
-          // The region, not its back button: an IconButton opens its tooltip on
-          // focus, so focusing one on arrival would pop a tooltip at every
-          // mouse user who merely clicked a row.
-          focusFirst('[data-maka-contract="connection-detail"]');
-          return;
-        case 'list': {
-          // Consumed here and only here: the ref is set on the way down and has
-          // to survive the levels in between.
-          const returnToSlug = listReturnFocusRef.current;
-          listReturnFocusRef.current = null;
-          // The row the user came from may be gone — that is exactly what
-          // happens after a deletion — so the primary action is the fallback,
-          // not the default.
-          ((returnToSlug ? find(`[data-connection-slug="${returnToSlug}"] button`) : null)
-            ?? addButtonRef.current)?.focus({ preventScroll: true });
-        }
-      }
-    }
-  }, [level, route, loading]);
+  useSettingsRouteFocus({
+    level,
+    listLevel: 'list',
+    routeKey: route,
+    isReady: !loading,
+    focusSelectors: (current) => current === 'detail'
+      // The region, not its back button: an IconButton opens its tooltip on
+      // focus, so focusing one on arrival would pop a tooltip at every mouse
+      // user who merely clicked a row.
+      ? ['[data-maka-contract="connection-detail"]']
+      : current === 'catalog'
+        ? ['[data-maka-contract="provider-catalog"] input']
+        : ['[data-maka-contract="provider-setup"] input', '[data-maka-contract="provider-setup"]'],
+    listReturnFocusRef,
+    listReturnSelector: (slug) => `[data-connection-slug="${slug}"] button`,
+    listFallbackRef: addButtonRef,
+  });
 
   if (loading) {
     return (
@@ -278,7 +241,6 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
           <SettingsRouteHeader
             onBack={goToList}
             backLabel={copy.backToList}
-            contract="connection-detail-back"
             logo={<ProviderLogo type={selected.providerType} compact />}
             title={selected.name}
             badge={selected.slug === defaultSlug ? <Badge variant="neutral" label={copy.default} /> : null}
@@ -302,7 +264,6 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
           <SettingsRouteHeader
             onBack={goToList}
             backLabel={copy.backToList}
-            contract="catalog-back"
             title={copy.addConnection}
             subtitle={copy.addHelp}
           />
@@ -317,7 +278,6 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
           <SettingsRouteHeader
             onBack={goBack}
             backLabel={route.origin === 'catalog' ? copy.backToCatalog : copy.backToList}
-            contract="setup-back"
             logo={<ProviderLogo type={route.target.providerType} compact />}
             title={copy.connectTitle(route.target.name)}
             subtitle={route.target.method === 'account'

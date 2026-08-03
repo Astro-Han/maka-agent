@@ -54,15 +54,19 @@ test('subagent presets can be reviewed and edited in desktop settings', async ({
 
   await page.getByRole('button', { name: '展开侧边栏' }).click();
   await page.getByRole('button', { name: '设置' }).click();
-  await settingsNavigation(page).getByRole('button', { name: '子 Agent', exact: true }).click();
+  const navItem = settingsNavigation(page).getByRole('button', { name: '子 Agent', exact: true });
+  await navItem.click();
 
   const settings = page.getByRole('main', { name: '设置内容' });
   await expect(settings.getByRole('heading', { name: '子 Agent', exact: true })).toBeVisible();
   await expect(settings.getByText('E2E 快速阅读', { exact: true })).toBeVisible();
-  await expect(settings.getByText('已停用', { exact: true })).toBeVisible();
-  // Arriving is not navigating: the page must not pull focus off the settings
-  // nav item the user just clicked. Only a level change moves focus.
-  await expect(settings.getByRole('button', { name: '添加子 Agent' })).not.toBeFocused();
+  // The row's switch states the disabled preset; a badge beside it would be the
+  // same fact twice.
+  const rowSwitch = settings.getByRole('switch', { name: '启用: E2E 快速阅读' });
+  await expect(rowSwitch).not.toBeChecked();
+  // Arriving is not navigating: focus stays on the settings nav item the user
+  // just clicked. Only a level change moves it.
+  await expect(navItem).toBeFocused();
 
   // The editor is a route level, not a dialog: the list is replaced in place
   // and the back affordance is the only way out.
@@ -72,10 +76,13 @@ test('subagent presets can be reviewed and edited in desktop settings', async ({
   // A level change moves focus to the level itself; without it the chevron
   // that had focus unmounts and a keyboard user restarts from document.body.
   await expect(settings.locator('[data-maka-contract="subagent-detail"]')).toBeFocused();
-  // The level owns the whole preset, so it carries the three things the list
-  // row deliberately does not: the settled id, the disabled state, and deletion.
+  // The level owns the whole preset, so it carries the two things the list row
+  // deliberately does not: the settled id, and deletion.
   await expect(settings.getByText('e2e-fast-reader', { exact: true })).toBeVisible();
   await expect(settings.getByRole('button', { name: '删除', exact: true })).toBeVisible();
+  // Renaming is the one edit that could re-key the preset: the id derives from
+  // the name while creating, and an existing preset must never follow it.
+  await settings.getByRole('textbox', { name: '显示名称' }).fill('E2E 快速阅读 v2');
   await settings.getByRole('textbox', { name: '适用场景' }).fill('快速阅读代码，并总结关键调用链。');
   await settings.getByRole('button', { name: '保存', exact: true }).click();
 
@@ -86,8 +93,65 @@ test('subagent presets can be reviewed and edited in desktop settings', async ({
   await expect.poll(async () => page.evaluate(async () => {
     const current = await window.maka.settings.get();
     const preset = current.subagents.presets[0];
-    return { description: preset?.description, enabled: preset?.enabled };
-  })).toEqual({ description: '快速阅读代码，并总结关键调用链。', enabled: false });
+    return { id: preset?.id, name: preset?.name, description: preset?.description, enabled: preset?.enabled };
+  })).toEqual({
+    id: 'e2e-fast-reader',
+    name: 'E2E 快速阅读 v2',
+    description: '快速阅读代码，并总结关键调用链。',
+    enabled: false,
+  });
+});
+
+test('deleting a subagent preset is reversible until the confirm is accepted', async ({ window: page }) => {
+  await page.evaluate(async () => {
+    const connections = await window.maka.connections.list();
+    const connection = connections[0];
+    if (!connection) throw new Error('E2E subagent settings requires a seeded connection');
+    await window.maka.settings.update({
+      subagents: {
+        presets: [{
+          id: 'e2e-doomed',
+          name: 'E2E 待删除',
+          description: '这个配置会在本次测试里被删除。',
+          profile: 'local_read',
+          connectionSlug: connection.slug,
+          model: connection.enabledModelIds?.[0] ?? connection.defaultModel,
+          enabled: true,
+        }],
+      },
+    });
+  });
+
+  await page.getByRole('button', { name: '展开侧边栏' }).click();
+  await page.getByRole('button', { name: '设置' }).click();
+  await settingsNavigation(page).getByRole('button', { name: '子 Agent', exact: true }).click();
+
+  const settings = page.getByRole('main', { name: '设置内容' });
+  await settings.getByRole('button', { name: '配置“E2E 待删除”' }).click();
+  const deleteButton = settings.getByRole('button', { name: '删除', exact: true });
+
+  // Cancelling the confirm has to leave the preset alone — the destructive path
+  // is the one place where "it did nothing" cannot be checked by eye.
+  await deleteButton.click();
+  const confirm = page.getByRole('alertdialog');
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(confirm).toBeHidden();
+  await expect(settings.getByText('e2e-doomed', { exact: true })).toBeVisible();
+
+  await deleteButton.click();
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: '删除', exact: true }).click();
+  await expect(confirm).toBeHidden();
+
+  // Deletion is the only way the row a user came from can be missing, so it is
+  // the only thing that exercises the focus fallback.
+  await expect(settings.getByText('E2E 待删除', { exact: true })).toBeHidden();
+  await expect(settings.getByRole('button', { name: '添加子 Agent' })).toBeFocused();
+  await expect.poll(async () => page.evaluate(async () => {
+    const current = await window.maka.settings.get();
+    return current.subagents.presets.length;
+  })).toBe(0);
 });
 
 test('a subagent preset can be created disabled and then enabled from its row', async ({ window: page }) => {
@@ -108,7 +172,7 @@ test('a subagent preset can be created disabled and then enabled from its row', 
   // The id derives from the name until the user takes it over.
   await expect(settings.getByRole('textbox', { name: 'subagent_id' })).toHaveValue('e2e-web-research');
   await settings.getByRole('textbox', { name: '适用场景' }).fill('查找外部资料。');
-  await settings.getByRole('switch', { name: '创建后即可用' }).click();
+  await settings.getByRole('switch', { name: '启用', exact: true }).click();
   await settings.getByRole('button', { name: '创建', exact: true }).click();
 
   await expect(settings.getByText('E2E Web Research', { exact: true })).toBeVisible();

@@ -1,10 +1,7 @@
 // The header of a settings sub-level: back affordance, title, and one quiet
 // line of context.
 //
-// A settings page that owns more than one level (a list and the detail behind
-// a row) needs exactly one way back. This was private to `ProvidersPanel`,
-// where the four-level provider route lives; the subagent page needs the same
-// two-level shape, so the header moved here rather than being written twice.
+// A settings page that owns more than one level needs exactly one way back.
 //
 // Deliberately a `Toolbar` with everything in `startContent`: the back button,
 // the optional logo, and the title block read as one left-aligned cluster, so
@@ -19,10 +16,10 @@ import { ArrowLeft } from '@maka/ui/icons';
 export function SettingsRouteHeader(props: {
   onBack(): void;
   backLabel: string;
-  /** `data-maka-contract` on the back button, so an e2e can aim at this level. */
-  contract: string;
   logo?: ReactNode;
   title: string;
+  /** Wire the level's `aria-labelledby` to this heading, so it is announced. */
+  titleId?: string;
   badge?: ReactNode;
   subtitle?: string;
 }) {
@@ -38,12 +35,11 @@ export function SettingsRouteHeader(props: {
             tooltip={props.backLabel}
             icon={<ArrowLeft size={16} aria-hidden="true" />}
             onClick={props.onBack}
-            data-maka-contract={props.contract}
           />
           {props.logo}
           <VStack gap={0}>
             <HStack gap={2} vAlign="center">
-              <Heading level={3}>{props.title}</Heading>
+              <Heading level={3} id={props.titleId}>{props.title}</Heading>
               {props.badge}
             </HStack>
             {props.subtitle && (
