@@ -172,7 +172,12 @@ function unfinishedToolStatus(turnStatus: TurnStatus | undefined): ToolActivityI
   return turnStatus === 'running' ? 'running' : 'interrupted';
 }
 
-function isInFlightStatus(status: ToolActivityItem['status']): boolean {
+/**
+ * A tool that has not settled. `pending` counts: `tool_start` opens a call
+ * there and it only reaches `running` once output arrives, so a tool that
+ * never streams stays `pending` for its whole life.
+ */
+export function isInFlightStatus(status: ToolActivityItem['status']): boolean {
   return status === 'pending' || status === 'running';
 }
 

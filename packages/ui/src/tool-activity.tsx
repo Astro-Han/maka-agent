@@ -10,7 +10,11 @@ import {
 } from './icons.js';
 import { useClipboardCopyFeedback } from './clipboard-feedback.js';
 import { useUiLocale } from './locale-context.js';
-import { type ToolActivityItem, type ToolOutputChunk } from './materialize.js';
+import {
+  isInFlightStatus,
+  type ToolActivityItem,
+  type ToolOutputChunk,
+} from './materialize.js';
 import { isConnectorTool, resolveToolDisplayName } from './tool-activity/display-name.js';
 import {
   extractErrorText,
@@ -292,14 +296,16 @@ export function ToolTrow({ items }: { items: ToolActivityItem[] }) {
   }));
 
   // Only reaches a group of two or more: Astryx renders a lone call as a bare
-  // row that owns its own expansion. For a real group this opens it while
-  // something inside runs, and otherwise leaves Astryx's density trade-off
-  // alone — the collapsed header projects the last call, so an earlier failure
-  // sits one click away rather than in the header.
+  // row that owns its own expansion. A group opens while anything inside is
+  // still in flight, because the collapsed header projects the last call alone
+  // — with parallel calls the last one can settle first, and a collapsed green
+  // check would report the whole group done while a sibling still runs. Once
+  // everything has settled the group follows Astryx's density trade-off: an
+  // earlier failure sits one click away rather than in the header.
   return (
     <ChatToolCalls
       calls={calls}
-      defaultIsExpanded={items.some((item) => item.status === 'running')}
+      defaultIsExpanded={items.some((item) => isInFlightStatus(item.status))}
     />
   );
 }
@@ -315,7 +321,9 @@ function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {
 }
 
 /**
- * Full failure text: Astryx hangs it off the status icon and reads it out.
+ * Full failure text. Astryx hangs it off the status icon of an expanded row
+ * and reads it out there; its collapsed group header carries neither this nor
+ * `stats`, so in a settled group the text is reachable only once expanded.
  * `interrupted` says its piece through `stats` instead — routing it here too
  * would make a screen reader announce the same word twice.
  */

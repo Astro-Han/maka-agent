@@ -483,6 +483,22 @@ describe('tool activity presentation', () => {
       });
       assert.match(markup, /aria-expanded="true"/);
     });
+
+    // `pending` is in flight too: tool_start opens a call there and it only
+    // reaches `running` once output arrives, so a tool that never streams stays
+    // pending for its whole life. With parallel calls the last one can settle
+    // first, and the collapsed header would then show a green check for a group
+    // whose sibling is still working.
+    it('opens when a parallel call is still pending behind a settled one', () => {
+      const markup = renderGroup({
+        toolUseId: 'quiet-1',
+        toolName: 'Bash',
+        activityKind: 'command',
+        status: 'pending',
+        args: { command: 'sleep 600' },
+      });
+      assert.match(markup, /aria-expanded="true"/);
+    });
   });
 });
 
