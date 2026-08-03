@@ -143,11 +143,22 @@ export function PlanReminderFormDialog(props: {
     };
   }, []);
 
-  // Split-view panel (no <dialog>): focus the title ourselves on open. The
-  // panel remounts this component per form session (key={formNonce}), so the
-  // effect runs exactly once per open.
+  // Split-view panel (no <dialog>): own the focus contract the Dialog used
+  // to provide. On open, capture the opener (the panel has already re-focused
+  // the triggering row control by layout-effect time) and move focus to the
+  // title; on close, hand focus back to the opener — the e2e asserts the row
+  // menu regains focus after Escape.
+  const planFormOpenerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (props.open) document.getElementById('maka-plan-title')?.focus();
+    if (!props.open) return undefined;
+    planFormOpenerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.getElementById('maka-plan-title')?.focus();
+    return () => {
+      const opener = planFormOpenerRef.current;
+      planFormOpenerRef.current = null;
+      if (opener?.isConnected) opener.focus();
+    };
   }, [props.open]);
 
   useEffect(() => {
