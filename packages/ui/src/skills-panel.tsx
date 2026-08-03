@@ -21,6 +21,7 @@ import {
   Switch,
   Tab,
   TabList,
+  Token,
 } from '@astryxdesign/core';
 import { PageHeader } from './primitives/page-header.js';
 import { TextInput } from '@astryxdesign/core';
@@ -351,7 +352,7 @@ function SkillLibraryPanel(props: {
                 </div>
                 <p>{description}</p>
                 <div className="maka-skill-market-card-foot">
-                  <Badge variant="neutral" className="maka-skill-market-category" label={copy.categories[source.category]} />
+                  <Token size="sm" className="maka-skill-market-category" label={copy.categories[source.category]} />
                   <span>{installed ? copy.install.installed : copy.install.notInstalled}</span>
                 </div>
               </article>
@@ -411,7 +412,7 @@ function SkillLibraryPanel(props: {
                 </div>
                 <p>{description}</p>
                 <div className="maka-skill-market-card-foot">
-                  <Badge variant="neutral" className="maka-skill-market-category" label={copy.categories[entry.category]} />
+                  <Token size="sm" className="maka-skill-market-category" label={copy.categories[entry.category]} />
                   <span>{entry.installed ? copy.install.installed : copy.install.notInstalled}</span>
                 </div>
               </article>
