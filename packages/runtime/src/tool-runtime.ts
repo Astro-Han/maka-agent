@@ -253,7 +253,7 @@ export interface ToolGating {
 
 export const TOOL_ERROR_RESULT_MAX_CHARS = 4000;
 export const MAX_ACTIVE_SUBAGENT_TOOLS_PER_TURN = 5;
-export const MAX_ACTIVE_CHILD_AGENT_RUNS_PER_TURN = 5;
+export const MAX_ACTIVE_CHILD_AGENT_RUNS_PER_TURN = 32;
 export const DEFAULT_PERMISSION_TIMEOUT_MS = 300_000;
 
 /**

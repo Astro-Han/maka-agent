@@ -33,7 +33,7 @@ import type { MakaTool, MakaToolContext } from './tool-runtime.js';
 
 export const AGENT_SWARM_TOOL_NAME = 'agent_swarm';
 export const AGENT_SWARM_DEFAULT_CONCURRENCY = 3;
-export const AGENT_SWARM_MAX_CONCURRENCY = 5;
+export const AGENT_SWARM_MAX_CONCURRENCY = 32;
 export const AGENT_SWARM_MAX_ITEMS = 32;
 export const AGENT_SWARM_PROMPT_TEMPLATE_PLACEHOLDER = '{{item}}';
 export const AGENT_SWARM_DEFAULT_ITEM_TIMEOUT_MS = 2 * 60 * 60 * 1_000;

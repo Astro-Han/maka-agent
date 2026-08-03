@@ -32,7 +32,7 @@ scheduling, see [Graph Is a Schedule, Not a Second Runtime](./architecture/agent
 ## Contract
 
 One call accepts `1..32` items. Local concurrency defaults to `3` and is capped
-at `5`. The entire input is validated before any child starts. Results retain
+at `32`. The entire input is validated before any child starts. Results retain
 input order even when children finish out of order.
 
 New work has two mutually exclusive forms. Callers may provide the explicit
