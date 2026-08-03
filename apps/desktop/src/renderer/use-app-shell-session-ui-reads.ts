@@ -16,8 +16,17 @@ const selectInteraction = (state: AppShellSessionUiState) => state.interactionBy
 const selectPendingPermissionMode = (state: AppShellSessionUiState) => state.pendingPermissionModeBySession;
 const selectPendingSessionModel = (state: AppShellSessionUiState) => state.pendingSessionModelBySession;
 const selectPulseSet = (state: AppShellSessionUiState) => selectStreamingSessionIds(state.liveTurnBySession);
+
+/**
+ * The active session's raw projection — the one selection that moves per token.
+ * Lives here with the rest so its two subscribers (the chat surface and the
+ * reconciler) share one definition instead of each keeping a copy.
+ */
+export const selectLiveTurn = (state: AppShellSessionUiState, sessionId: string | undefined) =>
+  sessionId ? state.liveTurnBySession[sessionId] : undefined;
+
 const selectActiveSnapshot = (state: AppShellSessionUiState, sessionId: string | undefined) =>
-  deriveLiveTurnSnapshot(sessionId ? state.liveTurnBySession[sessionId] : undefined);
+  deriveLiveTurnSnapshot(selectLiveTurn(state, sessionId));
 
 /**
  * Everything AppShell reads from session UI state — the complete list, in one

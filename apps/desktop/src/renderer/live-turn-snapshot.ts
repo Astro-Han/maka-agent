@@ -48,7 +48,6 @@ export function deriveLiveTurnSnapshot(projection: LiveTurnProjection | undefine
   const steps = projection.steps;
   const textStep = findLast(steps, (step) => Boolean(step.text));
   const thinkingStep = findLast(steps, (step) => Boolean(step.thinking));
-  const tools = steps.flatMap((step) => step.tools);
   const streamingTextComplete = textStep?.text?.complete === true;
   return {
     turnId: projection.turnId,
@@ -56,8 +55,8 @@ export function deriveLiveTurnSnapshot(projection: LiveTurnProjection | undefine
     hasStreamingText: (textStep?.text?.text.length ?? 0) > 0,
     streamingMessageId: streamingTextComplete ? textStep?.stepId : undefined,
     hasThinkingText: (thinkingStep?.thinking?.text.length ?? 0) > 0,
-    hasLiveTools: tools.length > 0,
-    hasInFlightTools: hasInFlightToolActivity(tools),
+    hasLiveTools: steps.some((step) => step.tools.length > 0),
+    hasInFlightTools: steps.some((step) => hasInFlightToolActivity(step.tools)),
   };
 }
 

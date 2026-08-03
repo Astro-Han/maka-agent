@@ -1,10 +1,8 @@
 import { useEffect } from 'react';
 import type { StoredMessage } from '@maka/core';
-import type { AppShellSessionUiState, AppShellSessionUiStateController } from './app-shell-session-ui-state';
+import type { AppShellSessionUiStateController } from './app-shell-session-ui-state';
+import { selectLiveTurn } from './use-app-shell-session-ui-reads';
 import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
-
-const selectLiveTurn = (state: AppShellSessionUiState, sessionId: string | undefined) =>
-  sessionId ? state.liveTurnBySession[sessionId] : undefined;
 
 /**
  * Reconciles the live projection against durable messages, and renders nothing.
