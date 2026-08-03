@@ -192,10 +192,12 @@ export function reconcileTurnIdentities(
  * call two different values equal. Reporting "changed" costs a re-render;
  * reporting "unchanged" freezes the UI on a stale value.
  *
- * Exported because a turn's identity is only half of what a memoized TurnView
- * compares: every per-turn prop derived alongside it has to be interned by the
- * same rule, or the memo fails on a sibling prop and the turn's stability buys
- * nothing (see `deriveAppShellTurnViewModel`).
+ * This is the sole judge of whether a turn keeps its object identity, and that
+ * identity is load-bearing beyond this module: the shell caches each turn's
+ * derived presentation in a `WeakMap` keyed on the turn object itself. Relaxing
+ * this comparison — skipping a field to save a walk — therefore fails twice
+ * over: the changed turn keeps its identity AND hits a stale presentation
+ * entry, and the UI freezes on the old value instead of merely re-rendering.
  */
 export function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
