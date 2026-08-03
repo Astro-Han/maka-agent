@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Card, Item } from '@astryxdesign/core';
+import { Item } from '@astryxdesign/core';
+import { SettingsSection } from './settings-section';
 import {
   connectionEnabledModelIds,
   isSafeSubagentPresetId,
@@ -95,16 +96,17 @@ export function SubagentPresetsPanel(props: {
     setId('');
   }
 
+  // Deep-review fix: was a Card-wrapped `.settingsRows` (the retired card
+  // dialect) with a leading Item doing a section header's job.
   return (
-    <Card padding={0} className="settingsRows subagentPresetPanel">
-      <Item
-        label={zh ? '子 Agent 模型路由' : 'Subagent model routing'}
-        description={
-          zh
-            ? '主 Agent 从这里批准的配置中选择 subagent_id；能力边界由 Profile 决定，Provider 与模型在子会话创建时冻结。'
-            : 'The main agent selects an approved subagent_id. The profile owns capabilities; provider and model are frozen when the child session is created.'
-        }
-      />
+    <SettingsSection
+      title={zh ? '子 Agent 模型路由' : 'Subagent model routing'}
+      description={
+        zh
+          ? '主 Agent 从这里批准的配置中选择 subagent_id；能力边界由 Profile 决定，Provider 与模型在子会话创建时冻结。'
+          : 'The main agent selects an approved subagent_id. The profile owns capabilities; provider and model are frozen when the child session is created.'
+      }
+    >
       {props.settings.subagents.presets.map((preset) => (
         <Item
           key={preset.id}
@@ -202,6 +204,6 @@ export function SubagentPresetsPanel(props: {
           />
         </div>
       </div>
-    </Card>
+    </SettingsSection>
   );
 }

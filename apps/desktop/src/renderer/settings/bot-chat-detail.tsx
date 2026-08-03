@@ -37,7 +37,7 @@ import {
   type BotPendingActionName,
 } from './bot-chat-shared';
 import { getBotSettingsCopy, type BotSettingsCopy } from '../locales/settings-bot-copy';
-import { SettingsSection } from './settings-section';
+import { SettingsPage, SettingsSection } from './settings-section';
 import { statusDotVariant } from './settings-status-badge';
 
 function canEnableBotChannel(readiness: BotReadinessState): boolean {
@@ -161,8 +161,12 @@ export function BotChatChannelDetail(props: {
     }
   }, [provider, channel.domain]);
 
+  // Deep-review fix: the old wrapper pair (.settingsRemoteAccessDetail had no
+  // CSS rule at all; .settingsBotDetail set `gap` on a display:block section,
+  // which discards it) left this page with zero inter-section rhythm. The kit
+  // page container owns the rhythm now, same as the overview next door.
   return (
-    <div className="settingsRemoteAccessDetail">
+    <SettingsPage>
       <Button
         variant="ghost"
         className="settingsRemoteAccessBack"
@@ -172,8 +176,7 @@ export function BotChatChannelDetail(props: {
         icon={<ArrowLeft size={16} aria-hidden="true" />}
         label={detailCopy.back}
       />
-      <section className="settingsBotDetail">
-        <header className="settingsBotDetailHeader" data-support={support}>
+      <header className="settingsBotDetailHeader" data-support={support}>
           <BotBrandLogo provider={provider} size="large" />
           <div className="settingsBotDetailHeaderBody">
             <h3>
@@ -220,6 +223,7 @@ export function BotChatChannelDetail(props: {
             used as page structure (the named cards-in-page anti-pattern). It
             is an open kit section now — header + anchor divider + rows. */}
         <SettingsSection
+          variant="bare"
           titleId="settings-bot-runtime-heading"
           title={viewState.liveOperational ? detailCopy.listening : readinessCopy.label}
           description={viewState.liveOperational ? detailCopy.healthy : readinessCopy.detail}
@@ -250,12 +254,16 @@ export function BotChatChannelDetail(props: {
           {/* Astryx convergence: the hand-rolled <dl> grid (4→2→1 columns via
               two media queries) is MetadataList, whose multi-column layout
               handles the collapse itself. */}
-          <MetadataList columns="multi" aria-label={detailCopy.runtimeAria(providerPresentation.label)}>
+          {/* Deep-review fix: MetadataList destructures a closed prop list and
+              silently drops aria-label — the group name rides a real wrapper. */}
+          <div role="group" aria-label={detailCopy.runtimeAria(providerPresentation.label)}>
+          <MetadataList columns="multi">
             <MetadataListItem label={detailCopy.identity}>{status?.identity?.username ?? status?.identity?.displayName ?? detailCopy.unknownIdentity}</MetadataListItem>
             <MetadataListItem label={detailCopy.connectionType}>{botConnectionLabel(status?.connection ?? 'none', locale)}</MetadataListItem>
             <MetadataListItem label={detailCopy.lastEvent}>{status?.lastEventAt ? <RelativeTime ts={status.lastEventAt} /> : detailCopy.noneYet}</MetadataListItem>
             <MetadataListItem label={detailCopy.lastTest}>{channel.lastTestAt ? <RelativeTime ts={channel.lastTestAt} /> : detailCopy.neverTested}</MetadataListItem>
           </MetadataList>
+          </div>
         </SettingsSection>
 
         {props.statusLoadError && (
@@ -406,8 +414,7 @@ export function BotChatChannelDetail(props: {
             onRefreshStatuses={props.onRefreshStatuses}
           />
         )}
-      </section>
-    </div>
+    </SettingsPage>
   );
 }
 

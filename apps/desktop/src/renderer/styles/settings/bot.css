@@ -27,7 +27,9 @@
   min-height: 64px;
   min-width: 0;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-2-5);
+  /* Deep-review fix: flush inline — kit rows edge-align with the section
+     heading; the 10px inset was a leftover from the old card grid. */
+  padding: var(--space-2) 0;
 }
 
 .settingsRemoteAccessItemTitle {
@@ -57,13 +59,12 @@
 }
 
 .settingsRemoteAccessBack {
+  /* Deep-review fix: the page gap owns vertical rhythm now; only the optical
+     inline outdent stays so the ghost button's label aligns with content. */
   justify-self: start;
-  margin: 0 0 var(--space-4) calc(var(--space-2) * -1);
+  margin-inline-start: calc(var(--space-2) * -1);
 }
 
-.settingsBotDetail {
-  gap: var(--space-4);
-}
 
 .settingsBotDetailHeader {
   display: grid;
@@ -79,14 +80,7 @@
   min-width: 0;
 }
 
-.settingsBotDetailHeader > /* Astryx convergence: the pre-#1972 remote-access dialect is retired — page
-   containers → SettingsPage, section headers → SettingsSection, the runtime
-   tinted card + <dl> status grid → SettingsSection + MetadataList, the
-   quick-setup plate → Astryx Card, list grids → the kit's rows body. What
-   stays below is genuine art (brand plate, QR frames, onboarding glyphs) and
-   the row-level behaviors (attention wash, planned opacity). */
-
-.settingsBotLogo {
+.settingsBotDetailHeader > .settingsBotLogo {
   grid-column: 1;
   grid-row: 1;
 }
@@ -154,7 +148,6 @@
   .settingsRemoteAccessChannelRow,
   .settingsRemoteAccessCatalogRow {
     gap: var(--space-2);
-    padding-inline: var(--space-2);
   }
 
   /* The whole row remains the named button. In the narrow layout, dropping

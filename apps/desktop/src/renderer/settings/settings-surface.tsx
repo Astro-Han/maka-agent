@@ -490,9 +490,9 @@ function SettingsPageBody(props: {
       );
     default:
       return (
-        <Card padding={0} className="settingsRows">
+        <div className="settingsRows">
           <SettingRow title={navLabel(props.section, locale)} detail={copy.unavailablePage} value={copy.ready} />
-        </Card>
+        </div>
       );
   }
 }

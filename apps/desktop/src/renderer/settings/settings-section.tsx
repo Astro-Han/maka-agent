@@ -85,7 +85,10 @@ export function SettingsSection(props: {
            font-semibold`, a caption-sized subtitle). Deferring to Astryx means
            section typography now moves with the theme instead of with a copy
            of the theme's values. */
-        <HStack gap={3} align="start" justify="between">
+        /* wrap: at the 480px window floor a multi-button action cluster
+           must drop under the title instead of crushing it (the old
+           bot-runtime header carried a media query for this). */
+        <HStack gap={3} align="start" justify="between" wrap="wrap">
           <VStack gap={0.5}>
             {props.title != null ? <Heading level={3} id={props.titleId}>{props.title}</Heading> : null}
             {props.description != null ? (
