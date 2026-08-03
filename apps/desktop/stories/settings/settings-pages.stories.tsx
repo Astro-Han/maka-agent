@@ -913,7 +913,8 @@ export const SubagentsNarrow: Story = {
   parameters: { viewport: { defaultViewport: 'mobile2' } },
 };
 
-// Real path: 设置 → 子 Agent → 添加子 Agent.
+// Real path: 设置 → 子 Agent → 添加子 Agent. The editor is a route level, so
+// this story shows the whole page swapped for the create form.
 export const SubagentEditorOpen: Story = {
   decorators: [withSubagentSettingsBridge],
   render: () => <SettingsStory section="subagents" />,
@@ -921,6 +922,21 @@ export const SubagentEditorOpen: Story = {
     const button = await waitForStoryButton(
       canvasElement,
       (candidate) => candidate.textContent?.trim() === '添加子 Agent',
+    );
+    await userEvent.click(button);
+  },
+};
+
+// Real path: 设置 → 子 Agent → 配置一个已有的实现类 Profile. Covers the three
+// states the create form has no way to show: the settled read-only
+// subagent_id, the implementation capability warning, and the delete section.
+export const SubagentEditorExisting: Story = {
+  decorators: [withSubagentSettingsBridge],
+  render: () => <SettingsStory section="subagents" />,
+  play: async ({ canvasElement }) => {
+    const button = await waitForStoryButton(
+      canvasElement,
+      (candidate) => candidate.getAttribute('aria-label') === '配置“实现与验证”',
     );
     await userEvent.click(button);
   },

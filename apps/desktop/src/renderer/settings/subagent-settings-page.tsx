@@ -1,7 +1,26 @@
+// 设置 · 子 Agent — the approved model routes the main agent may delegate to.
+//
+// Two levels, one container, one back affordance, and nothing modal:
+//
+//   list ── editor(new | existing)
+//
+// The editor was a 560px Dialog holding eight fields behind an inner
+// scrollbar. A modal exists to interrupt the current task for something short
+// and immediately decidable while preserving the context behind it; naming a
+// capability, writing the guidance the main agent selects on, and picking a
+// connection/model/thinking route is none of those. Astryx says the same —
+// "if the content grows beyond what fits, consider a full page instead" — and
+// the providers panel next door already answers this exact shape with a route
+// level, so this page follows it rather than inventing a second answer.
+//
+// Every element here is a settings-kit part (`SettingsSection`, `SettingsRow`,
+// `SettingsField`, `SettingsActions`) or an Astryx primitive. The page owns no
+// CSS: the three hand-written `.subagentPreset*` rules — a flex-wrap action
+// cluster, an oklch-tinted warning callout, and a flex-end button row — were
+// each a restatement of something the kit or Astryx already draws (the row end
+// slot, `Banner status="warning"`, `SettingsActions`).
 import { useMemo, useState } from 'react';
-import { Badge, HStack, Text, VStack } from '@astryxdesign/core';
-import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
-import { Layout, LayoutContent } from '@astryxdesign/core/Layout';
+import { Badge, Banner, HStack, VStack } from '@astryxdesign/core';
 import {
   connectionEnabledModelIds,
   isSafeSubagentPresetId,
@@ -17,7 +36,7 @@ import {
 import {
   Button,
   EmptyState,
-  FormLayout,
+  IconButton,
   Selector,
   Switch,
   TextArea,
@@ -26,15 +45,25 @@ import {
   useToast,
   useUiLocale,
 } from '@maka/ui';
-import { AlertTriangle } from '@maka/ui/icons';
+import { ChevronRight } from '@maka/ui/icons';
 import { getSubagentSettingsCopy } from '../locales/settings-subagents-copy.js';
 import { settingsActionErrorMessage } from './settings-error-copy.js';
-import { SettingsPage, SettingsRow, SettingsSection } from './settings-section.js';
+import { SettingsRouteHeader } from './settings-route-header.js';
+import {
+  SettingsActions,
+  SettingsField,
+  SettingsPage,
+  SettingsRow,
+  SettingsSection,
+} from './settings-section.js';
 import {
   subagentPresetAvailability,
   suggestSubagentPresetId,
 } from './subagent-preset-presentation.js';
 import { statusBadgeVariant } from './settings-status-badge.js';
+
+/** `null` is the unsaved new preset; a string is an existing preset's id. */
+type EditorRoute = { presetId: string | null };
 
 type EditorDraft = {
   id: string;
@@ -44,7 +73,6 @@ type EditorDraft = {
   connectionSlug: string;
   model: string;
   thinkingLevel: ThinkingLevel | '';
-  enabled: boolean;
 };
 
 export function SubagentSettingsPage(props: {
@@ -57,13 +85,12 @@ export function SubagentSettingsPage(props: {
   const locale = useUiLocale();
   const copy = getSubagentSettingsCopy(locale);
   const toast = useToast();
-  const [editorPresetId, setEditorPresetId] = useState<string | null | undefined>(undefined);
+  const [route, setRoute] = useState<EditorRoute | null>(null);
   const [saving, setSaving] = useState(false);
   const presets = props.settings.subagents.presets;
-  const editorPreset = editorPresetId == null
+  const editorPreset = route?.presetId == null
     ? null
-    : presets.find((preset) => preset.id === editorPresetId) ?? null;
-  const enabledCount = presets.filter((preset) => preset.enabled).length;
+    : presets.find((preset) => preset.id === route.presetId) ?? null;
   const atLimit = presets.length >= MAX_SUBAGENT_PRESETS;
 
   async function persist(nextPresets: SubagentPreset[]): Promise<boolean> {
@@ -79,13 +106,6 @@ export function SubagentSettingsPage(props: {
     }
   }
 
-  async function savePreset(next: SubagentPreset): Promise<boolean> {
-    const nextPresets = editorPresetId == null
-      ? [...presets, next]
-      : presets.map((candidate) => candidate.id === editorPresetId ? next : candidate);
-    return persist(nextPresets);
-  }
-
   async function removePreset(preset: SubagentPreset): Promise<void> {
     const confirmed = await toast.confirm({
       title: copy.remove.title(preset.name),
@@ -95,21 +115,61 @@ export function SubagentSettingsPage(props: {
       destructive: true,
     });
     if (!confirmed) return;
-    await persist(presets.filter((candidate) => candidate.id !== preset.id));
+    const removed = await persist(presets.filter((candidate) => candidate.id !== preset.id));
+    if (removed) setRoute(null);
+  }
+
+  if (route) {
+    return (
+      // tabIndex -1 so the level itself can take focus when it lands, instead
+      // of dropping a keyboard user on document.body. It draws no ring.
+      <VStack
+        gap={5}
+        tabIndex={-1}
+        className="settingsRouteLevel"
+        data-maka-contract="subagent-detail"
+      >
+        <SettingsRouteHeader
+          onBack={() => setRoute(null)}
+          backLabel={copy.editor.backToList}
+          contract="subagent-detail-back"
+          title={editorPreset ? editorPreset.name : copy.editor.createTitle}
+          subtitle={editorPreset ? copy.editor.editSubtitle : copy.editor.createSubtitle}
+        />
+        <SubagentPresetEditor
+          key={editorPreset?.id ?? 'new'}
+          preset={editorPreset}
+          presets={presets}
+          connections={props.connections}
+          isSaving={saving}
+          onCancel={() => setRoute(null)}
+          onDelete={editorPreset ? () => void removePreset(editorPreset) : undefined}
+          onSave={async (next) => {
+            const nextPresets = editorPreset
+              ? presets.map((candidate) => candidate.id === editorPreset.id ? next : candidate)
+              : [...presets, next];
+            if (await persist(nextPresets)) setRoute(null);
+          }}
+        />
+      </VStack>
+    );
   }
 
   return (
     <SettingsPage className="settingsSubagentsPage">
+      {/* The page's single lead group, so it carries no title of its own: the
+          settings surface already heads it 子 Agent over the same sentence,
+          and a section title here was that heading a second time. Only the
+          preset ceiling has anything left to say, and only once it is hit. */}
       <SettingsSection
-        title={copy.section.title}
-        description={`${copy.section.description} ${copy.section.count(enabledCount, presets.length)}`}
+        description={atLimit ? copy.section.limitNote : undefined}
         action={(
           <Button
             variant="primary"
             size="sm"
-            label={atLimit ? copy.section.limitReached : copy.section.add}
+            label={copy.section.add}
             isDisabled={saving || atLimit}
-            onClick={() => setEditorPresetId(null)}
+            onClick={() => setRoute({ presetId: null })}
           />
         )}
       >
@@ -122,26 +182,22 @@ export function SubagentSettingsPage(props: {
                 variant="primary"
                 label={copy.section.add}
                 isDisabled={saving}
-                onClick={() => setEditorPresetId(null)}
+                onClick={() => setRoute({ presetId: null })}
               />
             )}
           />
         ) : presets.map((preset) => {
           const availability = subagentPresetAvailability(preset, props.connections);
-          const connection = props.connections.find(
-            (candidate) => candidate.slug === preset.connectionSlug,
-          );
-          const profile = copy.profiles[preset.profile];
-          const statusLabel = {
-            available: copy.status.available,
+          // A row states what the preset is for; its route, its id, and its
+          // capability boundary are the editor's answer, one level in. Only a
+          // preset that cannot currently be selected carries a badge — a list
+          // where every row says 可用 says nothing.
+          const problem = availability.kind === 'available' ? null : {
             disabled: copy.status.disabled,
             missing_connection: copy.status.missingConnection,
             connection_disabled: copy.status.connectionDisabled,
             model_disabled: copy.status.modelDisabled,
           }[availability.kind];
-          const thinking = preset.thinkingLevel
-            ? copy.thinking[preset.thinkingLevel]
-            : undefined;
           return (
             <SettingsRow
               key={preset.id}
@@ -149,29 +205,14 @@ export function SubagentSettingsPage(props: {
               label={(
                 <HStack gap={2} vAlign="center" wrap="wrap">
                   <span>{preset.name}</span>
-                  <Badge
-                    variant={statusBadgeVariant(availability.tone)}
-                    label={statusLabel}
-                  />
+                  {problem ? (
+                    <Badge variant={statusBadgeVariant(availability.tone)} label={problem} />
+                  ) : null}
                 </HStack>
               )}
-              description={(
-                <VStack gap={0.5}>
-                  <span>{preset.description || copy.row.fallbackDescription}</span>
-                  <Text type="supporting" size="sm" color="secondary">
-                    {copy.row.route(
-                      profile.label,
-                      connection?.name ?? preset.connectionSlug,
-                      preset.model,
-                      thinking,
-                    )}
-                    {' · '}
-                    <code>{preset.id}</code>
-                  </Text>
-                </VStack>
-              )}
+              description={preset.description || copy.row.fallbackDescription}
               end={(
-                <div className="subagentPresetActions">
+                <>
                   <Switch
                     label={`${copy.row.enabled}: ${preset.name}`}
                     isLabelHidden
@@ -185,41 +226,21 @@ export function SubagentSettingsPage(props: {
                       );
                     }}
                   />
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    label={copy.row.edit}
-                    isDisabled={saving}
-                    onClick={() => setEditorPresetId(preset.id)}
-                  />
-                  <Button
+                  <IconButton
                     variant="ghost"
                     size="sm"
-                    label={copy.row.remove}
+                    label={copy.row.configure(preset.name)}
+                    tooltip={copy.row.configure(preset.name)}
+                    icon={<ChevronRight size={16} aria-hidden="true" />}
                     isDisabled={saving}
-                    onClick={() => void removePreset(preset)}
+                    onClick={() => setRoute({ presetId: preset.id })}
                   />
-                </div>
+                </>
               )}
             />
           );
         })}
       </SettingsSection>
-
-      {editorPresetId !== undefined ? (
-        <SubagentPresetEditor
-          key={editorPreset?.id ?? 'new'}
-          preset={editorPreset}
-          presets={presets}
-          connections={props.connections}
-          isSaving={saving}
-          onClose={() => setEditorPresetId(undefined)}
-          onSave={async (next) => {
-            const saved = await savePreset(next);
-            if (saved) setEditorPresetId(undefined);
-          }}
-        />
-      ) : null}
     </SettingsPage>
   );
 }
@@ -229,7 +250,8 @@ function SubagentPresetEditor(props: {
   presets: readonly SubagentPreset[];
   connections: readonly LlmConnection[];
   isSaving: boolean;
-  onClose(): void;
+  onCancel(): void;
+  onDelete?(): void;
   onSave(preset: SubagentPreset): Promise<void>;
 }) {
   const locale = useUiLocale();
@@ -249,14 +271,16 @@ function SubagentPresetEditor(props: {
     ? connectionEnabledModelIds(initialConnection)
     : [];
   const [draft, setDraft] = useState<EditorDraft>(() => ({
-    id: props.preset?.id ?? suggestSubagentPresetId('', existingIds),
+    // Empty, not a pre-derived `subagent`: an id the user has not been asked
+    // for yet reads as a value the page already decided. Typing the name fills
+    // it (until the user takes it over), and the placeholder says what it is.
+    id: props.preset?.id ?? '',
     name: props.preset?.name ?? '',
     description: props.preset?.description ?? '',
     profile: props.preset?.profile ?? 'local_read',
     connectionSlug: props.preset?.connectionSlug ?? usableConnections[0]?.slug ?? '',
     model: props.preset?.model ?? initialModels[0] ?? '',
     thinkingLevel: props.preset?.thinkingLevel ?? '',
-    enabled: props.preset?.enabled ?? true,
   }));
   const [idWasEdited, setIdWasEdited] = useState(props.preset !== null);
   const [submitted, setSubmitted] = useState(false);
@@ -328,10 +352,6 @@ function SubagentPresetEditor(props: {
     }));
   }
 
-  function selectModel(model: string): void {
-    setDraft((current) => ({ ...current, model, thinkingLevel: '' }));
-  }
-
   async function submit(): Promise<void> {
     setSubmitted(true);
     if (!canSave) return;
@@ -343,7 +363,10 @@ function SubagentPresetEditor(props: {
       connectionSlug: draft.connectionSlug,
       model: draft.model,
       ...(draft.thinkingLevel ? { thinkingLevel: draft.thinkingLevel } : {}),
-      enabled: draft.enabled,
+      // A preset is created ready to use, and whether the main agent may still
+      // select it is the list row's switch — the one place that answers it. A
+      // second "enable now" control in here answered the same question twice.
+      enabled: props.preset?.enabled ?? true,
     });
   }
 
@@ -354,152 +377,190 @@ function SubagentPresetEditor(props: {
       : undefined;
 
   return (
-    <Dialog
-      isOpen
-      onOpenChange={(isOpen) => { if (!isOpen) props.onClose(); }}
-      className="subagentPresetEditorDialog"
-      width={560}
-      maxHeight="calc(100dvh - 80px)"
-      purpose="form"
-    >
-      <Layout
-        header={(
-          <DialogHeader
-            title={props.preset ? copy.editor.editTitle : copy.editor.createTitle}
-            subtitle={props.preset ? copy.editor.editSubtitle : copy.editor.createSubtitle}
-            onOpenChange={(isOpen) => { if (!isOpen) props.onClose(); }}
+    <SettingsPage>
+      {/* Name and guidance are prose the user writes, so they are full-width
+          fields, not values crammed into a row's end slot. */}
+      <SettingsSection title={copy.editor.groupPurpose} description={copy.editor.groupPurposeHelp}>
+        <SettingsField>
+          <TextInput
+            label={copy.editor.name}
+            value={draft.name}
+            placeholder={copy.editor.namePlaceholder}
+            isDisabled={props.isSaving}
+            status={submitted && !draft.name.trim()
+              ? { type: 'error', message: copy.editor.requiredName }
+              : undefined}
+            onChange={updateName}
           />
+        </SettingsField>
+        <SettingsField>
+          <TextArea
+            label={copy.editor.description}
+            value={draft.description}
+            placeholder={copy.editor.descriptionPlaceholder}
+            rows={3}
+            isDisabled={props.isSaving}
+            status={submitted && !draft.description.trim()
+              ? { type: 'error', message: copy.editor.requiredDescription }
+              : undefined}
+            onChange={(description) => setDraft((current) => ({ ...current, description }))}
+          />
+        </SettingsField>
+        {/* An existing id is a settled fact — session history and the main
+            agent's routing both reference it — so it reads as a row's value.
+            Only a new preset's id is still the user's to type. */}
+        {props.preset ? (
+          <SettingsRow
+            label={copy.editor.id}
+            description={copy.editor.idDescription}
+            align="start"
+            end={<code className="settingsReadOnlyValue">{props.preset.id}</code>}
+          />
+        ) : (
+          <SettingsField>
+            <TextInput
+              label={copy.editor.id}
+              description={copy.editor.idDescription}
+              value={draft.id}
+              placeholder={copy.editor.idPlaceholder}
+              isDisabled={props.isSaving}
+              status={idStatus}
+              onChange={(id) => {
+                setIdWasEdited(true);
+                setDraft((current) => ({ ...current, id }));
+              }}
+            />
+          </SettingsField>
         )}
-        content={(
-          <LayoutContent padding={6} isScrollable>
-            <FormLayout>
-              <TextInput
-                label={copy.editor.name}
-                value={draft.name}
-                placeholder={copy.editor.namePlaceholder}
-                isDisabled={props.isSaving}
-                status={submitted && !draft.name.trim()
-                  ? { type: 'error', message: copy.editor.requiredName }
+      </SettingsSection>
+
+      <SettingsSection title={copy.editor.groupRoute} description={copy.editor.groupRouteHelp}>
+        <SettingsRow
+          label={copy.editor.profile}
+          description={profileCopy.description}
+          align="start"
+          end={(
+            <Selector
+              label={copy.editor.profile}
+              isLabelHidden
+              value={draft.profile}
+              options={(Object.keys(copy.profiles) as SubagentProfile[]).map((profile) => ({
+                value: profile,
+                label: copy.profiles[profile].label,
+              }))}
+              width="100%"
+              isDisabled={props.isSaving}
+              onChange={(profile) => setDraft((current) => ({
+                ...current,
+                profile: profile as SubagentProfile,
+              }))}
+            />
+          )}
+        />
+        {draft.profile === 'implementation' ? (
+          <SettingsField>
+            <Banner status="warning" title={copy.editor.implementationWarning} />
+          </SettingsField>
+        ) : null}
+        <SettingsRow
+          label={copy.editor.connection}
+          end={(
+            <Selector
+              label={copy.editor.connection}
+              isLabelHidden
+              value={draft.connectionSlug}
+              options={connectionOptions}
+              width="100%"
+              isDisabled={props.isSaving || usableConnections.length === 0}
+              disabledMessage={usableConnections.length === 0 ? copy.editor.noConnection : undefined}
+              status={submitted && !validRoute
+                ? { type: 'error', message: copy.editor.invalidRoute }
+                : usableConnections.length === 0
+                  ? { type: 'warning', message: copy.editor.noConnection }
                   : undefined}
-                onChange={updateName}
-              />
-              <TextInput
-                label={copy.editor.id}
-                description={copy.editor.idDescription}
-                value={draft.id}
-                placeholder={copy.editor.idPlaceholder}
-                isDisabled={props.preset !== null || props.isSaving}
-                status={idStatus}
-                onChange={(id) => {
-                  setIdWasEdited(true);
-                  setDraft((current) => ({ ...current, id }));
-                }}
-              />
-              <TextArea
-                label={copy.editor.description}
-                description={copy.editor.descriptionHelp}
-                value={draft.description}
-                placeholder={copy.editor.descriptionPlaceholder}
-                rows={3}
-                isDisabled={props.isSaving}
-                status={submitted && !draft.description.trim()
-                  ? { type: 'error', message: copy.editor.requiredDescription }
-                  : undefined}
-                onChange={(description) => setDraft((current) => ({ ...current, description }))}
-              />
+              onChange={selectConnection}
+            />
+          )}
+        />
+        <SettingsRow
+          label={copy.editor.model}
+          end={(
+            <Selector
+              label={copy.editor.model}
+              isLabelHidden
+              value={draft.model}
+              options={modelOptions}
+              width="100%"
+              isDisabled={props.isSaving || enabledModels.length === 0}
+              disabledMessage={enabledModels.length === 0 ? copy.editor.noModel : undefined}
+              onChange={(model) => setDraft((current) => ({ ...current, model, thinkingLevel: '' }))}
+            />
+          )}
+        />
+        {thinkingLevels.length > 0 ? (
+          <SettingsRow
+            label={copy.editor.thinking}
+            end={(
               <Selector
-                label={copy.editor.profile}
-                description={profileCopy.description}
-                value={draft.profile}
-                options={(Object.keys(copy.profiles) as SubagentProfile[]).map((profile) => ({
-                  value: profile,
-                  label: copy.profiles[profile].label,
-                }))}
+                label={copy.editor.thinking}
+                isLabelHidden
+                value={thinkingLevels.includes(draft.thinkingLevel as ThinkingLevel)
+                  ? draft.thinkingLevel
+                  : ''}
+                options={[
+                  { value: '', label: copy.editor.defaultThinking },
+                  ...thinkingLevels.map((level) => ({ value: level, label: copy.thinking[level] })),
+                ]}
                 width="100%"
                 isDisabled={props.isSaving}
-                onChange={(profile) => setDraft((current) => ({
+                onChange={(thinkingLevel) => setDraft((current) => ({
                   ...current,
-                  profile: profile as SubagentProfile,
+                  thinkingLevel: thinkingLevel as ThinkingLevel | '',
                 }))}
               />
-              {draft.profile === 'implementation' ? (
-                <div className="subagentPresetWarning" role="note">
-                  <AlertTriangle size={16} aria-hidden="true" />
-                  <Text type="supporting" size="sm">{copy.editor.implementationWarning}</Text>
-                </div>
-              ) : null}
-              <FormLayout direction="horizontal">
-                <Selector
-                  label={copy.editor.connection}
-                  value={draft.connectionSlug}
-                  options={connectionOptions}
-                  width="100%"
-                  isDisabled={props.isSaving || usableConnections.length === 0}
-                  disabledMessage={usableConnections.length === 0 ? copy.editor.noConnection : undefined}
-                  status={submitted && !validRoute
-                    ? { type: 'error', message: copy.editor.invalidRoute }
-                    : usableConnections.length === 0
-                      ? { type: 'warning', message: copy.editor.noConnection }
-                      : undefined}
-                  onChange={selectConnection}
-                />
-                <Selector
-                  label={copy.editor.model}
-                  value={draft.model}
-                  options={modelOptions}
-                  width="100%"
-                  isDisabled={props.isSaving || enabledModels.length === 0}
-                  disabledMessage={enabledModels.length === 0 ? copy.editor.noModel : undefined}
-                  onChange={selectModel}
-                />
-              </FormLayout>
-              {thinkingLevels.length > 0 ? (
-                <Selector
-                  label={copy.editor.thinking}
-                  value={thinkingLevels.includes(draft.thinkingLevel as ThinkingLevel)
-                    ? draft.thinkingLevel
-                    : ''}
-                  options={[
-                    { value: '', label: copy.editor.defaultThinking },
-                    ...thinkingLevels.map((level) => ({ value: level, label: copy.thinking[level] })),
-                  ]}
-                  width="100%"
-                  isDisabled={props.isSaving}
-                  onChange={(thinkingLevel) => setDraft((current) => ({
-                    ...current,
-                    thinkingLevel: thinkingLevel as ThinkingLevel | '',
-                  }))}
-                />
-              ) : null}
-              <Switch
-                label={copy.editor.enabled}
-                description={copy.editor.enabledDescription}
-                value={draft.enabled}
-                isDisabled={props.isSaving}
-                onChange={(enabled) => setDraft((current) => ({ ...current, enabled }))}
-              />
-              <div className="subagentPresetEditorActions">
-                <Button
-                  variant="ghost"
-                  label={copy.editor.cancel}
-                  isDisabled={props.isSaving}
-                  onClick={props.onClose}
-                />
-                <Button
-                  variant="primary"
-                  label={props.isSaving
-                    ? copy.editor.saving
-                    : props.preset
-                      ? copy.editor.save
-                      : copy.editor.create}
-                  isDisabled={props.isSaving}
-                  onClick={() => void submit()}
-                />
-              </div>
-            </FormLayout>
-          </LayoutContent>
-        )}
-      />
-    </Dialog>
+            )}
+          />
+        ) : null}
+      </SettingsSection>
+
+      {/* Save commits the whole preset, not the route group it would sit
+          inside, so it stands on its own between the groups and the delete
+          section. */}
+      <SettingsSection variant="bare">
+        <HStack gap={2} wrap="wrap">
+          <Button
+            variant="primary"
+            label={props.isSaving
+              ? copy.editor.saving
+              : props.preset
+                ? copy.editor.save
+                : copy.editor.create}
+            isDisabled={props.isSaving}
+            onClick={() => void submit()}
+          />
+          <Button
+            variant="ghost"
+            label={copy.editor.cancel}
+            isDisabled={props.isSaving}
+            onClick={props.onCancel}
+          />
+        </HStack>
+      </SettingsSection>
+
+      {/* Deletion is last and stands alone, so a mis-aimed cursor has nothing
+          quiet to hit beside it — the providers detail answers it the same way. */}
+      {props.onDelete ? (
+        <SettingsSection title={copy.editor.dangerZone} description={copy.remove.description}>
+          <SettingsActions>
+            <Button
+              variant="destructive"
+              label={copy.editor.delete}
+              isDisabled={props.isSaving}
+              onClick={props.onDelete}
+            />
+          </SettingsActions>
+        </SettingsSection>
+      ) : null}
+    </SettingsPage>
   );
 }

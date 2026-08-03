@@ -31,6 +31,7 @@ import {
   type SetupTarget,
 } from './provider-catalog-page';
 import { ConnectionDetail } from './provider-connection-detail';
+import { SettingsRouteHeader } from './settings-route-header';
 import { ProviderLogo, providerDisplay } from './provider-display';
 import { oauthPanelSubtitle } from './provider-oauth-section';
 import { providerPanelActionErrorMessage, type ConnectionsBridge } from './provider-panel-shared';
@@ -275,7 +276,7 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
         // the standard SPA answer to "where does focus go when the page
         // swaps", and it draws no ring.
         <VStack gap={5} tabIndex={-1} className="settingsRouteLevel" data-maka-contract="connection-detail">
-          <RouteHeader
+          <SettingsRouteHeader
             onBack={goToList}
             backLabel={copy.backToList}
             contract="connection-detail-back"
@@ -299,7 +300,7 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
         </VStack>
       ) : level === 'catalog' ? (
         <VStack gap={5}>
-          <RouteHeader
+          <SettingsRouteHeader
             onBack={goToList}
             backLabel={copy.backToList}
             contract="catalog-back"
@@ -314,7 +315,7 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
         </VStack>
       ) : level === 'setup' && route.kind === 'setup' ? (
         <VStack gap={5}>
-          <RouteHeader
+          <SettingsRouteHeader
             onBack={goBack}
             backLabel={route.origin === 'catalog' ? copy.backToCatalog : copy.backToList}
             contract="setup-back"
@@ -434,51 +435,6 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
     return copy.chipAria(connection.name, provider, isDefault, status?.label);
   }
 }
-
-/**
- * The way out of any level below the list, spelled once. Modelled on the
- * settings-sidebar template's detail view, which puts the same Toolbar inside
- * the content area rather than reaching for a second page shell.
- */
-function RouteHeader(props: {
-  onBack(): void;
-  backLabel: string;
-  contract: string;
-  logo?: ReactNode;
-  title: string;
-  badge?: ReactNode;
-  subtitle?: string;
-}) {
-  return (
-    <Toolbar
-      label={props.title}
-      gap={2}
-      startContent={(
-        <>
-          <IconButton
-            variant="ghost"
-            label={props.backLabel}
-            tooltip={props.backLabel}
-            icon={<ArrowLeft size={16} aria-hidden="true" />}
-            onClick={props.onBack}
-            data-maka-contract={props.contract}
-          />
-          {props.logo}
-          <VStack gap={0}>
-            <HStack gap={2} vAlign="center">
-              <Heading level={3}>{props.title}</Heading>
-              {props.badge}
-            </HStack>
-            {props.subtitle && (
-              <Text type="supporting" color="secondary">{props.subtitle}</Text>
-            )}
-          </VStack>
-        </>
-      )}
-    />
-  );
-}
-
 
 /** Provider · default model — the row's second line, and the detail's subtitle. */
 function connectionSubtitle(connection: LlmConnection, locale: 'zh' | 'en'): string {

@@ -12,48 +12,45 @@ type ProfileCopy = {
 
 export type SubagentSettingsCopy = {
   section: {
-    title: string;
-    description: string;
-    count(enabled: number, total: number): string;
     add: string;
-    limitReached: string;
+    limitNote: string;
     emptyTitle: string;
     emptyDescription: string;
   };
   row: {
-    edit: string;
-    remove: string;
     enabled: string;
+    configure(name: string): string;
     fallbackDescription: string;
-    route(profile: string, connection: string, model: string, thinking?: string): string;
   };
   status: {
-    available: string;
     disabled: string;
     missingConnection: string;
     connectionDisabled: string;
     modelDisabled: string;
   };
   editor: {
+    backToList: string;
     createTitle: string;
     createSubtitle: string;
-    editTitle: string;
     editSubtitle: string;
+    groupPurpose: string;
+    groupPurposeHelp: string;
+    groupRoute: string;
+    groupRouteHelp: string;
+    dangerZone: string;
+    delete: string;
     name: string;
     namePlaceholder: string;
     id: string;
     idDescription: string;
     idPlaceholder: string;
     description: string;
-    descriptionHelp: string;
     descriptionPlaceholder: string;
     profile: string;
     connection: string;
     model: string;
     thinking: string;
     defaultThinking: string;
-    enabled: string;
-    enabledDescription: string;
     implementationWarning: string;
     noConnection: string;
     noModel: string;
@@ -83,49 +80,45 @@ export type SubagentSettingsCopy = {
 const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
   zh: {
     section: {
-      title: '已批准的子 Agent',
-      description: '主 Agent 会根据适用场景，从已启用且可用的配置中选择。每个配置固定自己的能力边界、连接和模型。',
-      count: (enabled, total) => `已启用 ${enabled} / 共 ${total}`,
       add: '添加子 Agent',
-      limitReached: '已达到 64 个配置的上限',
+      limitNote: '已达到 64 个配置的上限。',
       emptyTitle: '还没有子 Agent 配置',
       emptyDescription: '添加一个配置后，主 Agent 就能把合适的任务交给独立模型处理。',
     },
     row: {
-      edit: '编辑',
-      remove: '删除',
       enabled: '启用',
+      configure: (name) => `配置“${name}”`,
       fallbackDescription: '尚未填写适用场景',
-      route: (profile, connection, model, thinking) =>
-        `${profile} · ${connection} / ${model}${thinking ? ` · 思考 ${thinking}` : ''}`,
     },
     status: {
-      available: '可用',
       disabled: '已停用',
       missingConnection: '连接不存在',
       connectionDisabled: '连接已停用',
       modelDisabled: '模型未启用',
     },
     editor: {
+      backToList: '返回子 Agent 列表',
       createTitle: '添加子 Agent',
       createSubtitle: '创建一个可由主 Agent 自动选择的模型配置。',
-      editTitle: '编辑子 Agent',
       editSubtitle: '修改适用场景、能力边界和模型路由。',
+      groupPurpose: '用途',
+      groupPurposeHelp: '主 Agent 主要根据这里的名称和适用场景挑选配置。',
+      groupRoute: '能力与模型',
+      groupRouteHelp: '固定这个子 Agent 能做什么，以及它运行在哪个模型上。',
+      dangerZone: '删除子 Agent',
+      delete: '删除',
       name: '显示名称',
       namePlaceholder: '快速代码阅读',
       id: 'subagent_id',
       idDescription: '创建后保持不变，主 Agent 和历史会话会用它识别此配置。',
       idPlaceholder: 'fast-reader',
       description: '适用场景',
-      descriptionHelp: '写清楚何时应该使用它；主 Agent 主要根据这段描述挑选配置。',
       descriptionPlaceholder: '适合快速、低成本地阅读大型仓库',
       profile: '能力 Profile',
       connection: '模型连接',
       model: '模型',
       thinking: '思考级别',
       defaultThinking: '跟随模型默认',
-      enabled: '立即启用',
-      enabledDescription: '启用后，主 Agent 可以选择这个配置。',
       implementationWarning: '实现代码 Profile 可以写文件和执行命令，并会在隔离 worktree 中运行。',
       noConnection: '请先在“模型”页启用一个模型连接。',
       noModel: '所选连接没有已启用的模型。',
@@ -165,49 +158,45 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
   },
   en: {
     section: {
-      title: 'Approved subagents',
-      description: 'The main agent selects from enabled, available presets based on when each should be used. Every preset fixes its capability boundary, connection, and model.',
-      count: (enabled, total) => `${enabled} enabled · ${total} total`,
       add: 'Add subagent',
-      limitReached: 'The 64-preset limit has been reached',
+      limitNote: 'The 64-preset limit has been reached.',
       emptyTitle: 'No subagent presets yet',
       emptyDescription: 'Add a preset so the main agent can delegate suitable work to a separate model.',
     },
     row: {
-      edit: 'Edit',
-      remove: 'Remove',
       enabled: 'Enabled',
+      configure: (name) => `Configure “${name}”`,
       fallbackDescription: 'No usage guidance yet',
-      route: (profile, connection, model, thinking) =>
-        `${profile} · ${connection} / ${model}${thinking ? ` · Thinking ${thinking}` : ''}`,
     },
     status: {
-      available: 'Available',
       disabled: 'Disabled',
       missingConnection: 'Connection missing',
       connectionDisabled: 'Connection disabled',
       modelDisabled: 'Model not enabled',
     },
     editor: {
+      backToList: 'Back to subagents',
       createTitle: 'Add subagent',
       createSubtitle: 'Create a model preset that the main agent can select automatically.',
-      editTitle: 'Edit subagent',
       editSubtitle: 'Change its usage guidance, capability boundary, and model route.',
+      groupPurpose: 'Purpose',
+      groupPurposeHelp: 'The main agent selects a preset primarily from the name and guidance here.',
+      groupRoute: 'Capability and model',
+      groupRouteHelp: 'Fix what this subagent may do, and which model it runs on.',
+      dangerZone: 'Remove subagent',
+      delete: 'Remove',
       name: 'Display name',
       namePlaceholder: 'Fast code reader',
       id: 'subagent_id',
       idDescription: 'Stable after creation. The main agent and session history use it to identify this preset.',
       idPlaceholder: 'fast-reader',
       description: 'When to use',
-      descriptionHelp: 'Describe when this preset is the right choice. The main agent relies primarily on this guidance.',
       descriptionPlaceholder: 'Fast, low-cost exploration of large repositories',
       profile: 'Capability profile',
       connection: 'Model connection',
       model: 'Model',
       thinking: 'Thinking level',
       defaultThinking: 'Use model default',
-      enabled: 'Enable immediately',
-      enabledDescription: 'When enabled, the main agent may select this preset.',
       implementationWarning: 'The Implementation profile can write files and run commands inside an isolated worktree.',
       noConnection: 'Enable a model connection on the Models page first.',
       noModel: 'The selected connection has no enabled models.',

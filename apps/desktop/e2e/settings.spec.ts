@@ -55,15 +55,15 @@ test('subagent presets can be reviewed and edited in desktop settings', async ({
   const settings = page.getByRole('main', { name: '设置内容' });
   await expect(settings.getByRole('heading', { name: '子 Agent', exact: true })).toBeVisible();
   await expect(settings.getByText('E2E 快速阅读', { exact: true })).toBeVisible();
-  await expect(settings.getByText('可用', { exact: true })).toBeVisible();
 
-  await settings.getByRole('button', { name: '编辑', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '编辑子 Agent' });
-  const description = dialog.getByRole('textbox', { name: '适用场景' });
-  await description.fill('快速阅读代码，并总结关键调用链。');
-  await dialog.getByRole('button', { name: '保存', exact: true }).click();
+  // The editor is a route level, not a dialog: the list is replaced in place
+  // and the back affordance is the only way out.
+  await settings.getByRole('button', { name: '配置“E2E 快速阅读”' }).click();
+  await expect(settings.getByRole('heading', { name: 'E2E 快速阅读', exact: true })).toBeVisible();
+  await settings.getByRole('textbox', { name: '适用场景' }).fill('快速阅读代码，并总结关键调用链。');
+  await settings.getByRole('button', { name: '保存', exact: true }).click();
 
-  await expect(dialog).toBeHidden();
+  await expect(settings.getByRole('button', { name: '添加子 Agent' })).toBeVisible();
   await expect(settings.getByText('快速阅读代码，并总结关键调用链。', { exact: true })).toBeVisible();
   await expect.poll(async () => page.evaluate(async () => {
     const current = await window.maka.settings.get();
