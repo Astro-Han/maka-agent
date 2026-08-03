@@ -452,19 +452,6 @@ export function applyShellRunOverlayEntry(
     : tool;
 }
 
-export function overlayShellRunUpdates(
-  turns: readonly TurnViewModel[],
-  updates: readonly ShellRunUpdate[],
-): readonly TurnViewModel[] {
-  if (updates.length === 0) return turns;
-  const byToolUseId = foldShellRunUpdates(updates);
-  const projected = turns.flatMap((turn) => turn.tools).map((tool) => {
-    const entry = byToolUseId.get(tool.toolUseId);
-    return entry ? applyShellRunOverlayEntry(tool, entry) : tool;
-  });
-  return projectTurnTools(turns, projected);
-}
-
 /**
  * Group materialized chat + tool items by `turnId` into ordered turns. Items
  * without a turnId (e.g. fake-backend echo, or older sessions) fall into a

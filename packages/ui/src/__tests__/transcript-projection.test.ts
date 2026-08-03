@@ -227,9 +227,12 @@ describe('incremental transcript projection', () => {
     assert.strictEqual(after.turns[1], before.turns[1]);
   });
 
-  test('an ownership flip on the same revision invalidates the owning turn', () => {
-    // revision and ownership are the semantic key — a cache that keyed on the
-    // update object alone could hold a stale badge here.
+  test('an ownership flip at an unchanged revision invalidates the owning turn', () => {
+    // Isolating the ownership term: the persisted result and the update carry
+    // the SAME revision, so the state merge reports no change and the badge is
+    // the only thing that moved. A source session closing after its idle pty
+    // wrote its last output reaches exactly this state. With a leading
+    // revision the merge would mask the ownership comparison entirely.
     const projection = createTranscriptProjection();
     const messages = history();
     const owned: ShellRunUpdate = {
@@ -237,10 +240,12 @@ describe('incremental transcript projection', () => {
       ownership: { kind: 'source_owned', sourceSessionId: 'source', ownerSessionId: 'source' },
       sourceTurnId: 'turn-1',
       sourceToolCallId: 'bash-1',
-      result: shellRunSnapshot(9),
+      result: shellRunSnapshot(1),
     };
     const before = projection.project({ sessionId: SESSION, messages, shellRunUpdates: [owned] });
-    assert.equal(before.turns[0]?.tools[0]?.shellRunSource, 'owned');
+    const bash = before.turns[0]?.tools[0];
+    assert.equal(bash?.shellRunSource, 'owned');
+    assert.equal(bash?.result?.kind === 'shell_run' ? bash.result.revision : undefined, 1);
 
     const after = projection.project({
       sessionId: SESSION,
@@ -248,16 +253,54 @@ describe('incremental transcript projection', () => {
       shellRunUpdates: [{
         ...owned,
         ownership: { kind: 'source_unavailable', sourceSessionId: 'source' },
-        result: shellRunSnapshot(9),
+        result: shellRunSnapshot(1),
       }],
     });
     assert.deepEqual([...after.affectedTurnIds], ['turn-1']);
     assert.equal(after.turns[0]?.tools[0]?.shellRunSource, 'unavailable');
+    assert.strictEqual(after.turns[1], before.turns[1]);
   });
 
-  test('switching sessions drops the previous session state', () => {
+  test('a plain text delta never re-reads the message log', () => {
+    // The one claim this whole layer exists to make. `materializeTurns`
+    // iterates `messages`, so counting iterations catches any future pass that
+    // re-derives the transcript per token — the shape of regression that made
+    // the original defect invisible.
+    const projection = createTranscriptProjection();
+    let iterations = 0;
+    const messages = history();
+    const counted = new Proxy(messages, {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator) iterations += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    projection.project({
+      sessionId: SESSION,
+      messages: counted,
+      liveTurn: streamingTurn('h'),
+      shellRunUpdates: [backgroundUpdate],
+    });
+    assert.ok(iterations > 0, 'the first projection must read the log');
+
+    const baseline = iterations;
+    for (const text of ['he', 'hel', 'hell', 'hello']) {
+      projection.project({
+        sessionId: SESSION,
+        messages: counted,
+        liveTurn: streamingTurn(text),
+        shellRunUpdates: [backgroundUpdate],
+      });
+    }
+    assert.equal(iterations, baseline, 'a delta must not re-read the message log');
+  });
+
+  test('a session switch shows the new session and retains nothing of the old', () => {
     // Two sessions in one revision lineage can carry the same turn and message
-    // ids with different content, so nothing may be reused across a switch.
+    // ids with different content. Correctness here comes from the value
+    // reconciliation, which cannot reuse a turn whose content differs — the
+    // sessionId reset is hygiene, bounding what the projection holds on to
+    // rather than standing between the user and a stale transcript.
     const projection = createTranscriptProjection();
     const first = projection.project({ sessionId: SESSION, messages: history() });
     const other = projection.project({
@@ -270,6 +313,11 @@ describe('incremental transcript projection', () => {
     assert.deepEqual([...other.affectedTurnIds].sort(), ['turn-1', 'turn-2']);
     assert.notStrictEqual(other.turns[0], first.turns[0]);
     assert.equal(other.turns[1]?.assistant?.text, 'a different answer');
+
+    // Nothing of session-1 survived: re-projecting it reports every turn again.
+    const back = projection.project({ sessionId: SESSION, messages: history() });
+    assert.deepEqual([...back.affectedTurnIds].sort(), ['turn-1', 'turn-2']);
+    assert.notStrictEqual(back.turns[0], first.turns[0]);
   });
 
   test('affects the ShellRun owner turn, not the turn the event names', () => {
