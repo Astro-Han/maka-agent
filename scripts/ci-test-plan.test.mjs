@@ -92,6 +92,7 @@ test('release tooling and the release config select the checks that cover them',
   // change itself; verify-packaged-app.mjs is shared, and a change there reaches
   // the macOS release path without touching anything macOS-specific.
   for (const path of [
+    'scripts/npm-spawn.mjs',
     'scripts/package-windows-x64.mjs',
     'scripts/verify-windows-x64.mjs',
     'scripts/windows-x64-release.test.mjs',

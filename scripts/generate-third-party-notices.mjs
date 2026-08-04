@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { npmSpawnOptions } from './npm-spawn.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const outputPath = join(repoRoot, 'apps/desktop/resources/licenses/npm/THIRD_PARTY_NOTICES.txt');
@@ -105,11 +106,15 @@ function normalizeText(text) {
 
 function collectDesktopClosure() {
   const tree = JSON.parse(
-    execFileSync('npm', ['ls', '--workspace', '@maka/desktop', '--omit=dev', '--all', '--json'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      maxBuffer: 16 * 1024 * 1024,
-    }),
+    execFileSync(
+      'npm',
+      ['ls', '--workspace', '@maka/desktop', '--omit=dev', '--all', '--json'],
+      npmSpawnOptions({
+        cwd: repoRoot,
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+      }),
+    ),
   );
   const desktop = tree.dependencies?.['@maka/desktop'];
   if (!desktop) throw new Error('npm ls did not return the @maka/desktop workspace');

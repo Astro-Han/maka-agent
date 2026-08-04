@@ -64,6 +64,7 @@ const EXTENDED_SCRIPT_FILES = new Set([
   'scripts/measure-session-bundle.mjs',
   'scripts/measure-session-bundle.test.mjs',
   'scripts/package-macos-arm64.mjs',
+  'scripts/npm-spawn.mjs',
   'scripts/package-windows-x64.mjs',
   // Shared by both platform verifiers, so a change here reaches the macOS
   // release path even when nothing macOS-specific was touched.

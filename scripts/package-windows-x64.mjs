@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { npmSpawnOptions } from './npm-spawn.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const desktopRoot = join(repoRoot, 'apps', 'desktop');
@@ -18,17 +19,13 @@ export function runCommand(
   { spawnProcess = spawn, platform = process.platform } = {},
 ) {
   return new Promise((resolve, reject) => {
-    const child = spawnProcess(command, args, {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: 'inherit',
-      // On Windows npm is npm.cmd, and a bare `npm` never resolves: libuv's
-      // process launcher tries only .com and .exe and ignores PATHEXT, so the
-      // spawn fails with ENOENT before any packaging happens. Going through the
-      // shell is what makes .cmd reachable. Every command here is a repository
-      // constant, so shell quoting is not a concern.
-      shell: platform === 'win32',
-    });
+    // Every command here is a repository constant, so the shell that Windows
+    // needs to reach npm.cmd introduces no quoting concern.
+    const child = spawnProcess(
+      command,
+      args,
+      npmSpawnOptions({ cwd: repoRoot, env: process.env, stdio: 'inherit' }, platform),
+    );
     child.once('error', reject);
     child.once('exit', (code, signal) => {
       if (code === 0) {

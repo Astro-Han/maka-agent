@@ -8,6 +8,7 @@ import test from 'node:test';
 const { packageWindowsX64, runCommand } = await import(
   new URL('package-windows-x64.mjs', import.meta.url)
 );
+const { npmSpawnOptions } = await import(new URL('npm-spawn.mjs', import.meta.url));
 const {
   assertWindowsProductVersion,
   readPeMachine,
@@ -65,6 +66,12 @@ test('npm is spawned through the shell on Windows, the only way npm.cmd resolves
 
   assert.equal(calls[0].options.shell, true);
   assert.equal(calls[1].options.shell, false);
+
+  // The same rule governs `npm ls` in generate-third-party-notices.mjs, which
+  // runs inside check:release and hit this on the first real Windows run.
+  assert.equal(npmSpawnOptions({ cwd: '.' }, 'win32').shell, true);
+  assert.equal(npmSpawnOptions({ cwd: '.' }, 'darwin').shell, false);
+  assert.equal(npmSpawnOptions({ cwd: '.' }, 'win32').cwd, '.');
 });
 
 test('Windows packaging fails closed on hosts that cannot produce the release', async () => {
