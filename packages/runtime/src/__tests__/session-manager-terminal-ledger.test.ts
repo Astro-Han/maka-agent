@@ -36,6 +36,7 @@ import {
 } from '../terminal-run-commit.js';
 import { RuntimeReadModel } from '../runtime-read-model.js';
 import { RuntimeKernel } from '../runtime-kernel.js';
+import type { RuntimeInteractionAuthority } from '../interaction-authority.js';
 
 describe('SessionManager terminal ledger invariants', () => {
   test('error streams persist a failed terminal fact without non-terminal error ledger rows', async () => {
@@ -187,6 +188,38 @@ describe('SessionManager terminal ledger invariants', () => {
       isTerminalRuntimeEvent,
     );
     expect(terminalEvents).toHaveLength(1);
+  });
+
+  test('a hosted stop leaves the terminal fact to the Host', async () => {
+    const store = new TinySessionStore();
+    const runStore = new TinyAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new NeverEndingBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(21_700),
+      runtimeSource: 'test',
+      interactionAuthority: hostedInteractionAuthority(),
+      canonicalPermissionOutcomes: { readPermissionOutcome: async () => undefined },
+    });
+    const session = await manager.createSession(makeInput());
+
+    const iterator = manager
+      .sendMessage(session.id, { turnId: 'turn-1', text: 'hello' })
+      [Symbol.asyncIterator]();
+    expect((await iterator.next()).value?.type).toBe('text_delta');
+    await manager.stopSession(session.id, { source: 'stop_button' });
+
+    const [run] = await runStore.listSessionRuns(session.id);
+    if (!run) throw new Error('run was not recorded');
+    const terminalEvents = (await runStore.readRuntimeEvents(session.id, run.runId)).filter(
+      isTerminalRuntimeEvent,
+    );
+    expect(terminalEvents).toHaveLength(0);
   });
 
   test('terminal acceptance wins over a later stop during terminal persistence', async () => {
@@ -952,6 +985,69 @@ describe('SessionManager terminal ledger invariants', () => {
       isTerminalRuntimeEvent,
     );
     expect(terminalEvents).toHaveLength(1);
+  });
+
+  test('a stop settlement leaves an already sealed ledger untouched', async () => {
+    const store = new TinySessionStore();
+    const runStore = new TinyAgentRunStore();
+    const session = await store.create(makeInput());
+    const backend = new ScriptBackend({ sessionId: session.id } as BackendFactoryContext, []);
+    const activeRuns = new Map<string, AgentRun>();
+    const turnToRunId = new Map<string, string>();
+    const run = new AgentRun({
+      sessionId: session.id,
+      header: session,
+      userInput: { turnId: 'turn-1', text: 'hello' },
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      newId: nextId(),
+      now: nextNow(41_700),
+      hooks: {
+        reserveRun: async (_sessionId, _header, activeRun) => {
+          activeRuns.set(activeRun.runId, activeRun);
+          turnToRunId.set(activeRun.turnId, activeRun.runId);
+          return {
+            sessionId: session.id,
+            backend,
+            cachedHeader: session,
+            activeRuns,
+            turnToRunId,
+          };
+        },
+        unregisterRun: (_active, activeRun) => {
+          activeRuns.delete(activeRun.runId);
+          turnToRunId.delete(activeRun.turnId);
+        },
+        updateHeader: (sessionId, patch) => store.updateHeader(sessionId, patch),
+        updateStatus: async () => {},
+        appendTurnState: async () => {},
+      },
+    });
+    await run.begin();
+    run.stop('stop_button');
+    // Another owner — a Host recovery, a resumed continuation — sealed the run
+    // before this stop got to settle it.
+    await runStore.appendRuntimeEvent(
+      session.id,
+      run.runId,
+      runtimeEvent({
+        id: 'rt-foreign-terminal',
+        sessionId: session.id,
+        runId: run.runId,
+        turnId: run.turnId,
+        status: 'aborted',
+        actions: { endInvocation: true },
+      }),
+    );
+
+    await run.settleStopTerminal();
+
+    const terminalEvents = (await runStore.readRuntimeEvents(session.id, run.runId)).filter(
+      isTerminalRuntimeEvent,
+    );
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.id).toBe('rt-foreign-terminal');
   });
 
   test('direct AgentRun error events still commit failed terminal facts when failed turn projection fails', async () => {
@@ -1894,6 +1990,18 @@ function nextId(): () => string {
 function nextNow(start: number): () => number {
   let ts = start;
   return () => ++ts;
+}
+
+function hostedInteractionAuthority(): RuntimeInteractionAuthority {
+  return {
+    bindRun: (identity) => ({
+      ...identity,
+      acceptSandboxBoundaryRequest: async () => {},
+      acceptUserQuestionRequest: async () => {},
+      close: async () => {},
+      release: () => {},
+    }),
+  };
 }
 
 function inertAgentRunHooks(store: TinySessionStore) {
