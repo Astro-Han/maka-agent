@@ -177,11 +177,13 @@ export function buildSmokeJobConfig(input: {
 
   if (overrides.maxSteps) agentEnv.MAKA_MAX_STEPS = overrides.maxSteps;
   if (overrides.agentTimeoutSec) agentEnv.MAKA_CELL_TIMEOUT_SEC = overrides.agentTimeoutSec;
-  // Without this, Harbor bounds the agent phase at the task-native budget times
-  // the profile multiplier, which the maka profiles tune to equal the cell
-  // budget exactly — so the cell would be killed at the instant it stops calling
-  // the model and starts writing, and the trial would read as an infra failure
-  // instead of a scored result. Same rule the fixed-prompt runner applies.
+  // Harbor resolves the agent phase as
+  // `min(override_timeout_sec ?? task_declared, max_timeout_sec ?? inf) * multiplier`
+  // (harbor/trial/trial.py, _resolve_timeout_sec). Once a maka profile declares a
+  // cell budget, that budget plus its settlement window is the phase — on every
+  // task, not just the ones whose declared timeout the profile multiplier happens
+  // to line up with. So it goes on override_timeout_sec, which replaces the
+  // declared base; max_timeout_sec is only a ceiling and could never raise it.
   const smokeModelBudgetSec = profileName.startsWith('maka-')
     ? lenientPositiveIntEnv(agentEnv.MAKA_CELL_TIMEOUT_SEC)
     : undefined;
@@ -205,10 +207,13 @@ export function buildSmokeJobConfig(input: {
     jobs_dir: defaults.jobsDir || 'packages/headless/harbor/smoke-jobs',
     n_attempts: Number(defaults.nAttempts || 1),
     timeout_multiplier: Number(defaults.timeoutMultiplier || 1.0),
+    // Harbor applies this multiplier after the min(), so it would scale an
+    // absolute phase too. Where we publish one, the multiplier's whole job —
+    // stretching a task-declared timeout into the budget this profile wants —
+    // is already done, and 1.0 is what keeps the published number the phase.
+    // Profiles with no cell budget of their own still lean on the multiplier.
     agent_timeout_multiplier:
-      profile.agentTimeoutMultiplier === undefined || profile.agentTimeoutMultiplier === null
-        ? null
-        : profile.agentTimeoutMultiplier,
+      smokeAgentPhaseSec !== null ? 1.0 : (profile.agentTimeoutMultiplier ?? null),
     verifier_timeout_multiplier: null,
     agent_setup_timeout_multiplier: null,
     environment_build_timeout_multiplier: null,
@@ -247,9 +252,9 @@ export function buildSmokeJobConfig(input: {
         import_path: agent.importPath ?? null,
         model_name: agentModelName,
         skills: [],
-        override_timeout_sec: null,
+        override_timeout_sec: smokeAgentPhaseSec,
         override_setup_timeout_sec: null,
-        max_timeout_sec: smokeAgentPhaseSec,
+        max_timeout_sec: null,
         extra_allowed_hosts: [],
         kwargs: agent.kwargs ?? {},
         env: agentEnv,
