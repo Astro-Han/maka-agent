@@ -780,6 +780,40 @@ test('harness composition preserves historical manifest fingerprints', async () 
   }
 });
 
+test('task-container placement is declared by every arm, or by none', async () => {
+  // The report throws on a manifest where only some arms declare placement, so
+  // this is not a documentation preference: leaving the competitors silent once
+  // the Maka arm moved is what made four-arm-canary-v1 finish all four cells
+  // and produce no report at all.
+  const { buildHarnessAbManifest, resolveHarnessComposition } = await import(
+    new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
+  );
+  const args = {
+    subjectFingerprint: 'subject',
+    taskSourceFingerprint: 'tasks',
+    toolchainFingerprint: 'tools',
+    composition: resolveHarnessComposition({ competitor: 'codex' }),
+  };
+  const placements = (manifest: { arms: { metadata?: { config?: { execution?: unknown } } }[] }) =>
+    manifest.arms.map(
+      (arm) => (arm.metadata?.config?.execution as { placement?: string } | undefined)?.placement,
+    );
+
+  assert.deepEqual(
+    placements(
+      buildHarnessAbManifest({
+        ...args,
+        env: { MAKA_HARNESS_AB_MAKA_PLACEMENT: 'task-container' },
+      }),
+    ),
+    ['task-container', 'task-container'],
+  );
+  assert.deepEqual(placements(buildHarnessAbManifest({ ...args, env: {} })), [
+    undefined,
+    undefined,
+  ]);
+});
+
 test('redirecting apt is recorded, and leaves runs that do not redirect untouched', async () => {
   const {
     aptMirrorComposeContent,

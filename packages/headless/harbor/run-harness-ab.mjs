@@ -965,7 +965,15 @@ export function buildHarnessAbManifest({
           billingMode: runtimeProfile.billingMode,
           externalSystemPrompt: 'none',
           profile: profile.id,
-          ...(benchmarkProfile.executor === 'pier'
+          // Placement is declared by every arm or by none: the report refuses a
+          // manifest where only some arms state where they ran, because a
+          // comparison that names one arm's environment and not the others'
+          // invites the reader to assume they shared it. These arms have always
+          // run in the task container, so the condition is really about the
+          // Maka arm — once it joins them the fact is worth stating, and while
+          // it bridges from the host no existing manifest states it at all.
+          // Pier reaches this through the same door: it forces task-container.
+          ...(makaPlacement === 'task-container'
             ? { execution: { placement: 'task-container' } }
             : {}),
         },
