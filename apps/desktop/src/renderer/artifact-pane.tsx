@@ -79,6 +79,9 @@ export function ArtifactPane(props: {
     message: string;
   } | null>(null);
   const [pendingArtifactListRetry, setPendingArtifactListRetry] = useState(false);
+  // Only the delete action still needs drawn state: its handler opens a confirm
+  // dialog, so it cannot use clickAction (see the toolbar button below).
+  const [deletingArtifactId, setDeletingArtifactId] = useState<string | null>(null);
   const artifactListRequestSeqRef = useRef(0);
   const artifactPaneMountedRef = useMountedRef();
   const artifactPaneSessionIdRef = useRef<string | undefined>(sessionId);
@@ -180,13 +183,16 @@ export function ArtifactPane(props: {
 
   // ---- actions -----------------------------------------------------------
 
-  // The toolbar buttons hand this to `clickAction`, which owns everything this
-  // function used to render by hand: the disabled button, the delayed spinner,
-  // aria-busy, and the "Loading" announcement. What stays is the part no single
-  // button can know — one artifact action at a time across the whole pane,
-  // including the 在 Finder 中打开 button the preview card renders. A ref, not
-  // state, because nothing is drawn from it any more; dropping the state also
-  // drops the setState-after-unmount the mounted guard was here to prevent.
+  // The open / save / copy buttons hand this to `clickAction`, which owns
+  // everything this function used to render by hand: the disabled button, the
+  // delayed spinner, aria-busy, and the "Loading" announcement. Delete is the
+  // exception — it confirms first, so it stays on onClick and draws its own
+  // isLoading (see the button).
+  //
+  // What stays here is the part no single button can know: one artifact action
+  // at a time across the whole pane, including the 在 Finder 中打开 button the
+  // preview card renders. A ref rather than state, since only delete still
+  // draws from a pending flag.
   async function runArtifactAction(actionKey: string, action: () => Promise<void>) {
     if (pendingArtifactActionRef.current !== null) return;
     pendingArtifactActionRef.current = actionKey;
@@ -495,13 +501,27 @@ export function ArtifactPane(props: {
                       : copy.pane.delete
                   }
                 >
+                  {/* onClick, not clickAction: `deleteArtifact` opens a
+                      confirm dialog first, and clickAction runs inside
+                      startTransition — React holds the state commits that
+                      render the dialog until the action settles, while the
+                      action waits on the dialog. isLoading carries the
+                      spinner, aria-busy, and the disable instead. */}
                   <Button
                     label={copy.pane.delete}
                     icon={<Trash2 size={14} aria-hidden="true" />}
                     isIconOnly
                     variant="destructive"
                     size="sm"
-                    clickAction={() => runArtifactAction(`${selected.id}:delete`, () => deleteArtifact(selected.id))}
+                    onClick={() => void runArtifactAction(`${selected.id}:delete`, async () => {
+                      setDeletingArtifactId(selected.id);
+                      try {
+                        await deleteArtifact(selected.id);
+                      } finally {
+                        if (artifactPaneMountedRef.current) setDeletingArtifactId(null);
+                      }
+                    })}
+                    isLoading={deletingArtifactId === selected.id}
                     isDisabled={
                       selected.source === 'deep_research' ||
                       selected.source === 'tool_result_archive'

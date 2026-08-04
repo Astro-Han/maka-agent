@@ -146,7 +146,7 @@ export function VoiceRecognitionConnectionForm(props: {
           variant="primary"
           type="button"
           isDisabled={busy}
-          clickAction={save}
+          clickAction={() => save()}
           label={copy.recognitionConnectionSave}
         />
       </div>

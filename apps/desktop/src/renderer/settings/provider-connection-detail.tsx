@@ -42,11 +42,10 @@ function UnknownConnectionDetail({ props }: { props: ConnectionDetailProps }) {
   const { connection } = props;
   const toast = useToast();
   const mounted = useMountedRef();
-  // No `deleting` state here: this button is the only control on the fallback,
-  // so there is nothing else to freeze. clickAction holds the button through
-  // the confirm and the delete, dedupes a same-tick second click, and drops the
-  // setState-after-unmount that the mounted guard existed to prevent.
+  const [deleting, setDeleting] = useState(false);
+  // NOT clickAction — see the note on the button below.
   async function remove() {
+    if (deleting) return;
     const ok = await toast.confirm({
       title: copy.deleteProviderTitle(connection.name || connection.slug),
       description: copy.deleteUnknownDescription,
@@ -55,6 +54,7 @@ function UnknownConnectionDetail({ props }: { props: ConnectionDetailProps }) {
       destructive: true,
     });
     if (!mounted.current || !ok) return;
+    setDeleting(true);
     try {
       await props.bridge.delete(connection.slug);
       if (!mounted.current) return;
@@ -62,12 +62,22 @@ function UnknownConnectionDetail({ props }: { props: ConnectionDetailProps }) {
     } catch (error) {
       if (!mounted.current) return;
       toast.error(copy.deleteFailed, providerPanelActionErrorMessage(error, locale));
+    } finally {
+      if (mounted.current) setDeleting(false);
     }
   }
   return (
     <VStack gap={3} hAlign="start">
       <Text>{copy.unknownDescription(connection.providerType)}</Text>
-      <Button variant="destructive" clickAction={() => remove()} label={copy.deleteUnused} />
+      {/* onClick, not clickAction: this handler awaits `toast.confirm`, and
+          clickAction runs inside startTransition. React defers state commits
+          made during an async transition until the action settles, so the
+          confirm dialog — which is React state, and needs four commits to
+          resolve its promise — can never render, and the action waits forever
+          on a dialog that waits on the action. `isLoading` still gives the
+          spinner, aria-busy, and the disable, so the label stays 删除 rather
+          than renaming itself to 删除中… . */}
+      <Button variant="destructive" onClick={() => void remove()} isLoading={deleting} label={copy.deleteUnused} />
     </VStack>
   );
 }
@@ -296,7 +306,12 @@ function ConnectionDetailInner(props: ConnectionDetailProps) {
         <HStack>
           {/* The heading beside it already says 删除连接; repeating it on the
               button was the same three words twice in one row. */}
-          <Button variant="destructive" isDisabled={detailActionBusy} clickAction={() => remove()} label={copy.delete} />
+          {/* onClick, not clickAction: `remove` awaits toast.confirm, which
+              cannot render from inside clickAction's transition (see the
+              fallback detail above). `deleting` already drives
+              detailActionBusy; feeding it to isLoading puts the spinner on
+              the button that is actually working. */}
+          <Button variant="destructive" isDisabled={detailActionBusy} isLoading={deleting} onClick={() => void remove()} label={copy.delete} />
         </HStack>
       </DetailSection>
     </VStack>
