@@ -123,17 +123,18 @@ export function createAppShellSessionEventHandlers(options: {
         void refreshMessages(sessionId, { requiredAssistantMessageId: event.messageId }).catch(() => false);
         break;
       case 'sandbox_boundary_request':
-        onInteractionChanged?.(sessionId);
-        setInteractionBySession((current) => enqueueInteraction(current, sessionId, event));
-        break;
       case 'user_question_request':
         onInteractionChanged?.(sessionId);
         setInteractionBySession((current) => enqueueInteraction(current, sessionId, event));
         break;
       // The runtime drops its owner on this ack, not on the tool result that
-      // follows it, so this is the point an in-flight hydration goes stale.
+      // follows it, so this is where the request stops being answerable — the
+      // same point its boundary sibling settles on, below.
       case 'user_question_answer_ack':
         onInteractionChanged?.(sessionId);
+        setInteractionBySession((current) =>
+          dequeueInteractionByRequestId(current, sessionId, event.requestId),
+        );
         break;
       case 'sandbox_boundary_decision_ack':
         onInteractionChanged?.(sessionId);
