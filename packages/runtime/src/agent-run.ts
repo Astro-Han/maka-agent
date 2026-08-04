@@ -312,7 +312,8 @@ export class AgentRun {
     // own reserved event is not foreign — that is a settlement being retried.
     const claimedEventId = this.terminalClaim.event?.id;
     const events = await this.loadTurnRuntimeEvents();
-    if (events.some((event) => isTerminalRuntimeEvent(event) && event.id !== claimedEventId)) return;
+    if (events.some((event) => isTerminalRuntimeEvent(event) && event.id !== claimedEventId))
+      return;
     const ts = this.lastTs || this.input.now();
     const finalStatus = { status: 'aborted' as const };
     this.finalStatus ??= finalStatus;
