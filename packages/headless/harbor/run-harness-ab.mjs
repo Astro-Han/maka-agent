@@ -263,11 +263,20 @@ async function readPierVersion() {
   }
 }
 
+/**
+ * A competitor profile is the single source of truth for one arm's pinned
+ * toolchain: how to prepare it, which env var overrides its cached path, and
+ * which runner option carries it. Downstream code reads these fields instead
+ * of re-dispatching on the competitor id.
+ */
 export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
   'kimi-code': Object.freeze({
     id: 'kimi-code',
     version: KIMI_CODE_TOOLCHAIN_SPEC.kimiCode.version,
     toolchainFingerprint: KIMI_CODE_TOOLCHAIN_FINGERPRINT,
+    prepareToolchain: prepareKimiCodeToolchain,
+    toolchainPathEnvKey: 'MAKA_HARNESS_AB_KIMI_CODE_TOOLCHAIN',
+    runnerToolchainOption: 'kimiCodeToolchainPath',
     config: Object.freeze({
       outputFormat: 'stream-json',
       permissions: 'prompt-auto',
@@ -278,6 +287,9 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
     id: 'opencode',
     version: OPENCODE_TOOLCHAIN_SPEC.opencode.version,
     toolchainFingerprint: OPENCODE_TOOLCHAIN_FINGERPRINT,
+    prepareToolchain: prepareOpenCodeToolchain,
+    toolchainPathEnvKey: 'MAKA_HARNESS_AB_OPENCODE_TOOLCHAIN',
+    runnerToolchainOption: 'opencodeToolchainPath',
     config: Object.freeze({
       pure: true,
       permissions: 'auto',
@@ -288,6 +300,9 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
     id: 'codex',
     version: CODEX_TOOLCHAIN_SPEC.codex.version,
     toolchainFingerprint: CODEX_TOOLCHAIN_FINGERPRINT,
+    prepareToolchain: prepareCodexToolchain,
+    toolchainPathEnvKey: 'MAKA_HARNESS_AB_CODEX_TOOLCHAIN',
+    runnerToolchainOption: 'codexToolchainPath',
     config: Object.freeze({
       transport: 'responses-http',
       permissions: 'container-full-access',
@@ -298,6 +313,9 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
     id: 'claude-code',
     version: CLAUDE_CODE_TOOLCHAIN_SPEC.claudeCode.version,
     toolchainFingerprint: CLAUDE_CODE_TOOLCHAIN_FINGERPRINT,
+    prepareToolchain: prepareClaudeCodeToolchain,
+    toolchainPathEnvKey: 'MAKA_HARNESS_AB_CLAUDE_CODE_TOOLCHAIN',
+    runnerToolchainOption: 'claudeCodeToolchainPath',
     config: Object.freeze({
       transport: 'anthropic-messages',
       permissions: 'bypassPermissions',
@@ -562,39 +580,16 @@ export function resolveHarnessCompetitorToolchainPath(runRoot, competitorProfile
 }
 
 export function resolveHarnessCompetitorToolchain(runRoot, competitorProfile, env = process.env) {
-  if (competitorProfile.id === 'kimi-code') {
-    return {
-      path: env.MAKA_HARNESS_AB_KIMI_CODE_TOOLCHAIN
-        ? resolve(env.MAKA_HARNESS_AB_KIMI_CODE_TOOLCHAIN)
-        : resolveHarnessCompetitorToolchainPath(runRoot, competitorProfile),
-      prepare: prepareKimiCodeToolchain,
-    };
+  if (!competitorProfile.prepareToolchain) {
+    throw new Error(`unsupported harness competitor: ${competitorProfile.id}`);
   }
-  if (competitorProfile.id === 'opencode') {
-    return {
-      path: env.MAKA_HARNESS_AB_OPENCODE_TOOLCHAIN
-        ? resolve(env.MAKA_HARNESS_AB_OPENCODE_TOOLCHAIN)
-        : resolveHarnessCompetitorToolchainPath(runRoot, competitorProfile),
-      prepare: prepareOpenCodeToolchain,
-    };
-  }
-  if (competitorProfile.id === 'codex') {
-    return {
-      path: env.MAKA_HARNESS_AB_CODEX_TOOLCHAIN
-        ? resolve(env.MAKA_HARNESS_AB_CODEX_TOOLCHAIN)
-        : resolveHarnessCompetitorToolchainPath(runRoot, competitorProfile),
-      prepare: prepareCodexToolchain,
-    };
-  }
-  if (competitorProfile.id === 'claude-code') {
-    return {
-      path: env.MAKA_HARNESS_AB_CLAUDE_CODE_TOOLCHAIN
-        ? resolve(env.MAKA_HARNESS_AB_CLAUDE_CODE_TOOLCHAIN)
-        : resolveHarnessCompetitorToolchainPath(runRoot, competitorProfile),
-      prepare: prepareClaudeCodeToolchain,
-    };
-  }
-  throw new Error(`unsupported harness competitor: ${competitorProfile.id}`);
+  const override = env[competitorProfile.toolchainPathEnvKey];
+  return {
+    path: override
+      ? resolve(override)
+      : resolveHarnessCompetitorToolchainPath(runRoot, competitorProfile),
+    prepare: competitorProfile.prepareToolchain,
+  };
 }
 
 export function resolveHarnessMakaNodeToolchain(runRoot, env = process.env) {
@@ -1178,13 +1173,7 @@ async function runLocked({
               ...runnerOptions,
               agent: profile.id,
               agentVersion: profile.version,
-              ...(profile.id === 'kimi-code'
-                ? { kimiCodeToolchainPath: toolchain.path }
-                : profile.id === 'opencode'
-                  ? { opencodeToolchainPath: toolchain.path }
-                  : profile.id === 'codex'
-                    ? { codexToolchainPath: toolchain.path }
-                    : { claudeCodeToolchainPath: toolchain.path }),
+              [profile.runnerToolchainOption]: toolchain.path,
             }),
           };
         }),
