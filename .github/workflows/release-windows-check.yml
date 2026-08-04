@@ -43,6 +43,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Diagnose third-party notice drift on Windows
+        run: |
+          node scripts/generate-third-party-notices.mjs
+          git diff --stat
+          git diff -- apps/desktop/resources/licenses | head -120
+          git checkout -- .
+
       - name: Package the Windows installer and ZIP
         run: npm run package:windows-x64
 
