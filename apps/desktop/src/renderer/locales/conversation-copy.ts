@@ -67,9 +67,14 @@ export interface DesktopConversationCopy {
     retry: string;
     empty: string;
     costUnavailable: string;
-    attempts: string;
-    retries: string;
-    compactions: string;
+    /** Labels for the totals strip; each names the figure beside it. */
+    totals: {
+      duration: string;
+      calls: string;
+      retries: string;
+      compactions: string;
+      cost: string;
+    };
     coveragePartial: string;
     coverageAbsent: string;
     unreadable: string;
@@ -168,9 +173,13 @@ const COPY = {
       retry: '重试',
       empty: '这个会话还没有可追踪的活动',
       costUnavailable: '费用不可得',
-      attempts: '次调用',
-      retries: '次重试',
-      compactions: '次压缩',
+      totals: {
+        duration: '总耗时',
+        calls: '模型调用',
+        retries: '重试',
+        compactions: '上下文压缩',
+        cost: '花费',
+      },
       coveragePartial: '部分调用没有记录，下面的数字是下界',
       coverageAbsent: '该后端不上报逐次调用明细',
       unreadable: '条记录无法解析',
@@ -254,9 +263,13 @@ const COPY = {
       retry: 'Retry',
       empty: 'Nothing to trace in this session yet',
       costUnavailable: 'cost unavailable',
-      attempts: 'calls',
-      retries: 'retries',
-      compactions: 'compactions',
+      totals: {
+        duration: 'Duration',
+        calls: 'Model calls',
+        retries: 'Retries',
+        compactions: 'Compactions',
+        cost: 'Cost',
+      },
       coveragePartial: 'Some calls have no record; the numbers below are a floor',
       coverageAbsent: 'This backend does not report per-call detail',
       unreadable: 'unreadable records',

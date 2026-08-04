@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   IconButton,
   TaskLedgerPanel,
@@ -7,6 +7,9 @@ import {
   type ChatModelChoice,
 } from '@maka/ui';
 import { PanelRightClose } from '@maka/ui/icons';
+import { Badge } from '@astryxdesign/core/Badge';
+import { Card } from '@astryxdesign/core/Card';
+import { Section } from '@astryxdesign/core/Section';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { Tab, TabList } from '@astryxdesign/core/TabList';
 import { Toolbar } from '@astryxdesign/core/Toolbar';
@@ -24,6 +27,33 @@ import type {
   QuoteCompanionPanelState,
 } from './quote-companion-panel-state';
 import type { CompanionForkVisibilityEvent } from './quote-companion-visibility';
+
+/**
+ * One tab body. `Section` carries the surface; the class carries only what a
+ * scroll parent needs (`min-height: 0`) and the `[hidden]` override, since an
+ * Astryx Section sets its own `display`.
+ */
+function WorkbarPanel(props: { active: boolean; className?: string; children: ReactNode }) {
+  return (
+    <Section
+      variant="transparent"
+      padding={0}
+      hidden={!props.active}
+      className={
+        props.className
+          ? `maka-session-workbar-panel ${props.className}`
+          : 'maka-session-workbar-panel'
+      }
+    >
+      {props.children}
+    </Section>
+  );
+}
+
+/** A tab's count, in the shared Badge rather than a private pill. */
+function TabCount(props: { count: number }) {
+  return <Badge variant="neutral" label={props.count} data-maka-contract="session-workbar-count" />;
+}
 
 export function SessionWorkbar(props: {
   sessionId: string;
@@ -61,97 +91,97 @@ export function SessionWorkbar(props: {
   }, [props.activeTab, props.quote, props.onActiveTabChange]);
 
   return (
-    <aside
+    <Card
+      variant="transparent"
+      padding={0}
+      height="100%"
       className="maka-session-workbar"
       data-maka-contract="session-workbar"
+      role="complementary"
       aria-label={copy.ariaLabel}
       style={{ '--maka-session-workbar-width': `${props.width}px` } as CSSProperties}
     >
-      <div className="maka-session-workbar-tabs">
-        <Toolbar
-          className="maka-session-workbar-toolbar"
-          label={copy.sectionsAriaLabel}
-          size="sm"
-          dividers={['bottom']}
-          /* The close control sits with the tabs it closes, not on its own
-             strip in the titlebar. The titlebar keeps a toggle only while the
-             workbar is shut, where it is the one way back. */
-          endContent={(
-            <Tooltip content={copy.collapse}>
-              <IconButton
-                label={copy.collapse}
-                icon={<PanelRightClose size={15} aria-hidden="true" />}
-                variant="ghost"
-                size="sm"
-                onClick={props.onDismiss}
-                aria-expanded
-              />
-            </Tooltip>
-          )}
-          startContent={
-            <TabList
-              className="maka-session-workbar-tab-list"
-              value={props.activeTab}
-              onChange={(value) => props.onActiveTabChange(value as SessionWorkbarTab)}
+      <Toolbar
+        className="maka-session-workbar-toolbar"
+        label={copy.sectionsAriaLabel}
+        size="sm"
+        dividers={['bottom']}
+        /* The close control sits with the tabs it closes, not on its own
+           strip in the titlebar. The titlebar keeps a toggle only while the
+           workbar is shut, where it is the one way back. */
+        endContent={
+          <Tooltip content={copy.collapse}>
+            <IconButton
+              label={copy.collapse}
+              icon={<PanelRightClose size={15} aria-hidden="true" />}
+              variant="ghost"
               size="sm"
-              layout="fill"
-              aria-label={copy.sectionsAriaLabel}
-            >
-              <Tab
-                value="tasks"
-                label={copy.tasks}
-                endContent={<span className="maka-session-workbar-count" data-maka-contract="session-workbar-count">{taskCount}</span>}
-              />
-              {props.browserLive && <Tab value="browser" label={copy.browser} />}
-              <Tab
-                value="files"
-                label={copy.files}
-                endContent={<span className="maka-session-workbar-count" data-maka-contract="session-workbar-count">{artifactCount}</span>}
-              />
-              <Tab value="inspector" label={copy.inspector} />
-              {props.quote && <Tab value="quote" label={copy.quoteTab} />}
-            </TabList>
-          }
-        />
-        <div hidden={props.activeTab !== 'tasks'} className="maka-session-workbar-panel">
-          <TaskLedgerPanel
-            tasks={sessionTasks.tasks}
-            loading={sessionTasks.loading}
-            error={sessionTasks.error}
-            onRetry={sessionTasks.retry}
-          />
-        </div>
-        <div hidden={props.activeTab !== 'browser'} className="maka-session-workbar-panel">
-          {props.browserLive && <BrowserPanel sessionId={props.sessionId} hidden={props.hidden || props.activeTab !== 'browser'} />}
-        </div>
-        <div hidden={props.activeTab !== 'files'} className="maka-session-workbar-panel">
-          <ArtifactPane sessionId={props.sessionId} onCountChange={setArtifactCount} onDismiss={props.onDismiss} />
-        </div>
-        <div hidden={props.activeTab !== 'inspector'} className="maka-session-workbar-panel">
-          <SessionInspectorPanel
-            sessionId={props.sessionId}
-            active={!props.hidden && props.activeTab === 'inspector'}
-          />
-        </div>
-        {props.quote && (
-          <div
-            hidden={props.activeTab !== 'quote'}
-            className="maka-session-workbar-panel maka-quote-workbar-panel"
-          >
-            <QuoteCompanionPanel
-              key={props.quote.id}
-              panelId={props.quote.id}
-              quotes={props.quote.quotes}
-              sourceSession={props.sourceSession}
-              modelChoices={props.modelChoices ?? []}
-              onClear={props.onClearQuote}
-              onQuotesConsumed={props.onQuotesConsumed ?? (() => {})}
-              onRemoveQuote={props.onRemoveQuote}
-              onForkVisibilityChange={props.onForkVisibilityChange}
+              onClick={props.onDismiss}
+              aria-expanded
             />
-          </div>
+          </Tooltip>
+        }
+        startContent={
+          <TabList
+            className="maka-session-workbar-tab-list"
+            value={props.activeTab}
+            onChange={(value) => props.onActiveTabChange(value as SessionWorkbarTab)}
+            size="sm"
+            layout="fill"
+            aria-label={copy.sectionsAriaLabel}
+          >
+            <Tab value="tasks" label={copy.tasks} endContent={<TabCount count={taskCount} />} />
+            {props.browserLive && <Tab value="browser" label={copy.browser} />}
+            <Tab value="files" label={copy.files} endContent={<TabCount count={artifactCount} />} />
+            <Tab value="inspector" label={copy.inspector} />
+            {props.quote && <Tab value="quote" label={copy.quoteTab} />}
+          </TabList>
+        }
+      />
+      <WorkbarPanel active={props.activeTab === 'tasks'}>
+        <TaskLedgerPanel
+          tasks={sessionTasks.tasks}
+          loading={sessionTasks.loading}
+          error={sessionTasks.error}
+          onRetry={sessionTasks.retry}
+        />
+      </WorkbarPanel>
+      <WorkbarPanel active={props.activeTab === 'browser'}>
+        {props.browserLive && (
+          <BrowserPanel
+            sessionId={props.sessionId}
+            hidden={props.hidden || props.activeTab !== 'browser'}
+          />
         )}
-      </div>
-    </aside>
+      </WorkbarPanel>
+      <WorkbarPanel active={props.activeTab === 'files'}>
+        <ArtifactPane
+          sessionId={props.sessionId}
+          onCountChange={setArtifactCount}
+          onDismiss={props.onDismiss}
+        />
+      </WorkbarPanel>
+      <WorkbarPanel active={props.activeTab === 'inspector'}>
+        <SessionInspectorPanel
+          sessionId={props.sessionId}
+          active={!props.hidden && props.activeTab === 'inspector'}
+        />
+      </WorkbarPanel>
+      {props.quote && (
+        <WorkbarPanel active={props.activeTab === 'quote'} className="maka-quote-workbar-panel">
+          <QuoteCompanionPanel
+            key={props.quote.id}
+            panelId={props.quote.id}
+            quotes={props.quote.quotes}
+            sourceSession={props.sourceSession}
+            modelChoices={props.modelChoices ?? []}
+            onClear={props.onClearQuote}
+            onQuotesConsumed={props.onQuotesConsumed ?? (() => {})}
+            onRemoveQuote={props.onRemoveQuote}
+            onForkVisibilityChange={props.onForkVisibilityChange}
+          />
+        </WorkbarPanel>
+      )}
+    </Card>
   );
 }

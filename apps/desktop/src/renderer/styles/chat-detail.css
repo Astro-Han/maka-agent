@@ -21,6 +21,11 @@
   min-width: 0;
 }
 
+/* Astryx owns the workbar's surface (Card), its header rule (Toolbar
+   `dividers`), its column divider (ResizeHandle `hasDivider`) and its counts
+   (Badge). What is left here is the column geometry those components cannot
+   know: the width the user dragged, and a header/body split that keeps the
+   body a scroll parent. */
 .maka-session-workbar {
   flex: 0 0 auto;
   width: var(--maka-session-workbar-width, 400px);
@@ -28,21 +33,12 @@
   max-width: 600px;
   min-height: 0;
   overflow: hidden;
-  border-left: var(--border-width-hairline) solid var(--border);
-  background: var(--background);
-}
-
-/* The workbar resize handle is Astryx ResizeHandle: it owns the divider hit
-   area, grip, cursor and drag/keyboard sizing. `.maka-workbar-resize-handle`
-   survives only so the narrow breakpoint further down can hide it. */
-
-.maka-session-workbar-tabs {
-  height: 100%;
-  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 0;
 }
+
+/* `.maka-workbar-resize-handle` survives only so the narrow breakpoint further
+   down can hide the handle. */
 
 .maka-session-workbar-toolbar {
   min-width: 0;
@@ -53,67 +49,25 @@
   flex: 0 0 auto;
 }
 
-.maka-session-workbar-count {
-  font: var(--maka-text-supporting);
-  height: var(--h-control-xs);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  white-space: nowrap;
-  min-width: var(--space-4);
-  padding-inline: var(--space-1);
-  border-radius: var(--radius-pill);
-  background: var(--control);
-  color: var(--foreground-dimmed);
-  font-variant-numeric: tabular-nums;
-}
-
 .maka-session-workbar-panel {
   min-height: 0;
   overflow: hidden;
 }
 
+/* Section sets its own `display`, so the attribute needs the override. */
 .maka-session-workbar-panel[hidden] { display: none; }
 
-/* Session Inspector (#1625): a read-only causal timeline in the workbar. */
+/* Session trace (#1625): a read-only causal timeline in the workbar.
+
+   Banner, EmptyState, MetadataList, Badge and Text carry everything they can;
+   this rule set is the timeline's own geometry. It used to reach for a
+   `--maka-space-*` / `--maka-color-*` vocabulary that the token sheet never
+   declared, so every value here silently resolved to its hard-coded fallback
+   and the panel drifted off the product scale. */
 .maka-inspector-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--maka-space-2, 8px);
   height: 100%;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--maka-space-3, 12px);
-  font-size: var(--maka-font-size-sm, 12px);
-}
-
-.maka-inspector-totals,
-.maka-inspector-turn-head,
-.maka-inspector-step {
-  display: flex;
-  align-items: baseline;
-  gap: var(--maka-space-2, 8px);
-  flex-wrap: wrap;
-}
-
-.maka-inspector-totals {
-  font-variant-numeric: tabular-nums;
-  color: var(--maka-color-text-secondary, inherit);
-}
-
-.maka-inspector-coverage {
-  margin: 0;
-  padding: var(--maka-space-2, 8px);
-  border-radius: var(--maka-radius-sm, 6px);
-  background: var(--maka-color-surface-warning, rgba(255, 200, 0, 0.12));
-  color: var(--maka-color-text-warning, inherit);
-}
-
-.maka-inspector-filter {
-  display: flex;
-  align-items: center;
-  gap: var(--maka-space-2, 8px);
-  flex-wrap: wrap;
 }
 
 /* The live region is a wrapper only; its children carry their own spacing. */
@@ -121,22 +75,11 @@
   display: none;
 }
 
-.maka-inspector-hidden {
-  margin: 0;
-  color: var(--maka-color-text-secondary, inherit);
-  font-variant-numeric: tabular-nums;
-}
-
-.maka-inspector-error {
+.maka-inspector-status[data-empty] {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: var(--maka-space-2, 8px);
-  color: var(--maka-color-text-danger, inherit);
-}
-
-.maka-inspector-empty {
-  margin: 0;
-  color: var(--maka-color-text-secondary, inherit);
+  flex-direction: column;
+  justify-content: center;
 }
 
 .maka-inspector-turns,
@@ -146,38 +89,35 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--maka-space-1, 4px);
+  gap: var(--space-1);
 }
 
 .maka-inspector-turn {
-  border-top: 1px solid var(--maka-color-border-subtle, rgba(128, 128, 128, 0.2));
-  padding-top: var(--maka-space-2, 8px);
-}
-
-.maka-inspector-turn-id {
-  font-weight: 600;
+  border-top: var(--border-width-hairline) solid var(--border);
+  padding-top: var(--space-2);
 }
 
 .maka-inspector-steps {
-  padding-left: var(--maka-space-3, 12px);
+  padding-left: var(--space-3);
+}
+
+.maka-inspector-step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .maka-inspector-step-kind {
-  color: var(--maka-color-text-secondary, inherit);
   text-transform: lowercase;
 }
 
 .maka-inspector-step[data-failed='true'] {
-  color: var(--maka-color-text-danger, inherit);
+  color: var(--destructive-text);
 }
 
-.maka-inspector-cost,
-.maka-inspector-step-retries {
+.maka-inspector-cost {
   font-variant-numeric: tabular-nums;
-}
-
-.maka-inspector-failed {
-  color: var(--maka-color-text-danger, inherit);
 }
 
 .maka-session-workbar .maka-browser-panel,
@@ -566,7 +506,9 @@
     min-height: min(220px, 42dvh);
     max-height: min(42dvh, 360px);
     padding-top: 0;
-    border-left: 0;
+    /* Stacked, the panel lifts off the conversation, so it needs the opaque
+       surface and top rule the ResizeHandle drew while it was a column. */
+    background: var(--background);
     border-top: var(--border-width-hairline) solid var(--border);
     box-shadow: 0 -8px 24px oklch(from var(--foreground) l c h / 0.08);
   }

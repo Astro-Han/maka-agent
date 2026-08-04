@@ -26,6 +26,13 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(resize).toHaveAttribute('aria-valuenow', '410');
   await expect(workbar).toHaveCSS('width', '410px');
 
+  // One rule between the columns, not two. The panel is an Astryx Card with no
+  // border of its own; the divider is the handle, which per Astryx takes
+  // exactly 1px of layout and widens only its hit area. Drop either half and
+  // the seam either doubles or disappears.
+  await expect(workbar).toHaveCSS('border-left-width', '0px');
+  await expect(resize).toHaveCSS('width', '1px');
+
   // Pointer drag, grabbed near the bottom of the divider: Astryx's default
   // side-placed grab zone lifts itself half its height off the handle, so a
   // low grab is what proves `pillPlacement="center"` is still holding the hit
