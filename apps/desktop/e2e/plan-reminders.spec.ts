@@ -1,5 +1,20 @@
 import { expect, test } from './fixtures.js';
 
+// The seeded reminders carry distinct createdAt values so the default
+// 创建时间倒序 sort has a single answer. Without them all four tie in the
+// same millisecond and the fallback comparator decides the order, which made
+// any position-based assertion here flaky between runs.
+test('orders the seeded reminders deterministically under the default sort', async ({
+  planRemindersWindow: page,
+}) => {
+  const rows = page.getByRole('article');
+  await expect(rows).toHaveCount(4);
+  const expected = ['已触发的本地提醒', '每周竞品动态追踪', '暂停的发布检查', '同步项目风险'];
+  for (const [index, title] of expected.entries()) {
+    await expect(rows.nth(index)).toContainText(title);
+  }
+});
+
 test('keeps Plan row actions keyboard ordered and destructive confirmation reversible', async ({
   planRemindersWindow: page,
 }) => {

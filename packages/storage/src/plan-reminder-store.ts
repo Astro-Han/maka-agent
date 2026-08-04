@@ -21,7 +21,7 @@ import {
 
 export interface PlanReminderStore {
   list(): Promise<PlanReminder[]>;
-  create(input: unknown): Promise<PlanReminder>;
+  create(input: unknown, now?: number): Promise<PlanReminder>;
   update(id: string, patch: unknown): Promise<PlanReminder>;
   setEnabled(id: string, enabled: boolean): Promise<PlanReminder>;
   snooze(id: string, delayMs: number, now?: number): Promise<PlanReminder>;
@@ -70,8 +70,7 @@ class SqlitePlanReminderStoreImpl implements SqlitePlanReminderStore {
       .sort(comparePlanRemindersForList);
   }
 
-  async create(input: unknown): Promise<PlanReminder> {
-    const now = Date.now();
+  async create(input: unknown, now = Date.now()): Promise<PlanReminder> {
     const normalized = normalizeCreatePlanReminderInput(input, now);
     if (!normalized.ok) throw new Error(normalized.message);
     const value = normalized.value;

@@ -383,6 +383,23 @@ describe('SQLite workflow stores', () => {
       }
     });
   });
+
+  test('stamps Plan Reminders with an explicit creation clock', async () => {
+    await withRoot(async (root) => {
+      const store = createSqlitePlanReminderStore(root);
+      try {
+        const createdAt = Date.now() - 5 * 60_000;
+        const reminder = await store.create(
+          { title: 'Seeded at a fixed clock', runAt: Date.now() + 60_000 },
+          createdAt,
+        );
+        assert.equal(reminder.createdAt, createdAt);
+        assert.equal(reminder.updatedAt, createdAt);
+      } finally {
+        store.close();
+      }
+    });
+  });
 });
 
 function seedLegacyPlanLedger(root: string, eventCount = 3): void {
