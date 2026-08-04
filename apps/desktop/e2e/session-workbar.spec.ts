@@ -104,20 +104,27 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   // which is what keeps this button clear of the Windows caption strip.
   const collapse = page.getByRole('button', { name: '收起会话工作栏' });
   const openBox = (await collapse.boundingBox())!;
+  await expect(collapse).toHaveAttribute('aria-expanded', 'true');
   await collapse.click();
-  await expect(workbar).toBeHidden();
 
   // Collapsing animates, which is only possible because ONE box survives it.
-  // The column itself does not — it polls tasks and can own a live embedded
-  // browser — so the box stays behind at zero width and the column is torn down
-  // when the width transition ends. Lose the box and the panel snaps shut;
-  // leave the column mounted and a closed panel keeps working.
+  // The column itself does not — it subscribes to task changes and can own a
+  // live embedded browser — so the box stays behind at zero width and the column
+  // is torn down when the width transition ends. Each half fails silently: lose
+  // the box and the panel snaps shut, leave the column mounted and a closed
+  // panel keeps working. `toBeHidden` alone would pass for both, so the count is
+  // what actually holds the teardown.
+  // The frames themselves are not observable here — the E2E fixture caps every
+  // transition to 0.01ms on purpose — so what animates is held by the CSS
+  // contract in session-workbar-layout.test.ts, and this covers the end state.
   const motion = page.locator('.maka-workbar-motion');
+  await expect(workbar).toHaveCount(0);
   await expect(motion).toHaveCount(1);
   await expect(motion).toHaveCSS('width', '0px');
   await expect(page.locator('.maka-workbar-resize-handle')).toHaveCount(0);
 
   const expand = page.getByRole('button', { name: '展开会话工作栏' });
+  await expect(expand).toHaveAttribute('aria-expanded', 'false');
   expect(await expand.boundingBox()).toMatchObject({ x: openBox.x, y: openBox.y });
   await expand.click();
   await expect(workbar).toBeVisible();

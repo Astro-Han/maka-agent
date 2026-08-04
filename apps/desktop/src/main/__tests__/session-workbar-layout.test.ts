@@ -5,6 +5,7 @@ import {
   readSessionWorkbarWidth,
   SESSION_WORKBAR_DEFAULT_WIDTH,
 } from '../../renderer/session-workbar-layout.js';
+import { readRendererContractCss } from './contract-css-helpers.js';
 
 // This is the only thing that decides how wide the workbar comes back after a
 // restart (#1861), and the only width the app reads without having produced it.
@@ -68,5 +69,43 @@ describe('readSessionWorkbarTab', () => {
       storedTab(stored);
       assert.equal(readSessionWorkbarTab(), 'tasks');
     }
+  });
+});
+
+// The column's teardown is scheduled on the motion box's width transition
+// ending. `transition: none` and `transition-property: none` do not shorten
+// that transition — they CANCEL it, and no `transitionend` ever arrives — so
+// every rule that quiets the box has to cap the duration instead. Miss this and
+// the panel still looks shut while the column behind it keeps its task
+// subscription and any live embedded browser. Two rules already need the quiet:
+// the stacked layout under 990px, and the drag gate.
+describe('workbar motion CSS contract', () => {
+  it('never removes the motion box transition, only caps it', async () => {
+    const css = await readRendererContractCss();
+    const rules = [...css.matchAll(/\.maka-workbar-motion[^{]*\{([\s\S]*?)\}/g)].map(
+      (match) => match[1] ?? '',
+    );
+    assert.ok(rules.length >= 3, `expected the box to be styled in several places, saw ${rules.length}`);
+
+    for (const body of rules) {
+      assert.doesNotMatch(
+        body,
+        /transition(-property)?:\s*none/,
+        `a .maka-workbar-motion rule cancels its transition instead of capping it: ${body.trim()}`,
+      );
+    }
+
+    // And the transition it caps to still has to reach zero-ish, not stay long.
+    assert.match(css, /\.maka-workbar-motion[^{]*\{[^}]*transition-duration:\s*0\.01ms/);
+  });
+
+  it('animates the box and holds the column still inside it', async () => {
+    const css = await readRendererContractCss();
+    // The E2E fixture caps every transition, so no rendered test can see these
+    // frames; this is where they are held. The box eases its own width, and the
+    // column keeps a floor width so it does not reflow its whole layout on the
+    // way out — the two halves of "the panel slides, its contents do not".
+    assert.match(css, /\.maka-workbar-motion\s*\{[^}]*transition:\s*width\s+var\(--duration-large\)/);
+    assert.match(css, /\.maka-session-workbar\s*\{[^}]*min-width:\s*320px/);
   });
 });

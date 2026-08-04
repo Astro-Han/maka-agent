@@ -64,9 +64,15 @@
    would restart on each one and leave the column trailing the cursor. Astryx
    marks its handle `data-resizing` for exactly this, and the handle is this
    box's sibling — the same gate `.maka-sidenav-motion` uses, read from the row
-   rather than from within. */
+   rather than from within.
+
+   Capped rather than removed, the way every other motion suppression in this
+   app is: `transition-property: none` CANCELS a transition already in flight,
+   and the column's teardown is scheduled on that transition's end. Grabbing the
+   handle while the panel is closing would otherwise strand the column mounted
+   behind a shut panel. */
 .maka-detail-with-artifacts:has([data-resizing]) .maka-workbar-motion {
-  transition: none;
+  transition-duration: 0.01ms;
 }
 
 .maka-session-workbar {
@@ -552,11 +558,13 @@
 
   /* Stacked, the column is a row of the grid rather than a flex item, and it
      has no titlebar above it to clear. Height is what would animate here; it is
-     not wired, so the box just sizes to its content and collapses to nothing. */
+     not wired, so the box just sizes to its content and collapses to nothing.
+     Capped rather than removed: the width still changes, and its transition end
+     is what tears the column down. */
   .maka-workbar-motion {
     width: 100%;
     margin-top: 0;
-    transition: none;
+    transition-duration: 0.01ms;
   }
 
   .maka-session-workbar {
