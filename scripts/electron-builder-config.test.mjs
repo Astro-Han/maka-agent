@@ -12,24 +12,21 @@ const { validateConfiguration } = await import(
   new URL('../node_modules/app-builder-lib/out/util/config/config.js', import.meta.url)
 );
 
-test('the desktop release config is valid for the installed electron-builder', async () => {
-  const config = (
-    await import(new URL('../apps/desktop/electron-builder.config.mjs', import.meta.url))
-  ).default;
+// `validateConfiguration` only reads the config, so it is passed as loaded — a
+// structured clone would throw on the function hooks electron-builder configs
+// are allowed to carry, turning a valid config into a failing test.
+const loadConfig = async () =>
+  (await import(new URL('../apps/desktop/electron-builder.config.mjs', import.meta.url))).default;
 
-  await validateConfiguration(structuredClone(config), { add: () => {} });
+test('the desktop release config is valid for the installed electron-builder', async () => {
+  await validateConfiguration(await loadConfig(), { add: () => {} });
 });
 
 test('an unknown release option is rejected rather than ignored', async () => {
-  const config = (
-    await import(new URL('../apps/desktop/electron-builder.config.mjs', import.meta.url))
-  ).default;
+  const config = await loadConfig();
 
   await assert.rejects(
-    validateConfiguration(
-      { ...structuredClone(config), win: { ...structuredClone(config.win), sign: false } },
-      { add: () => {} },
-    ),
+    validateConfiguration({ ...config, win: { ...config.win, sign: false } }, { add: () => {} }),
     /unknown property 'sign'/,
   );
 });
