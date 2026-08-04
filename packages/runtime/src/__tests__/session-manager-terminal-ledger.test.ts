@@ -149,6 +149,46 @@ describe('SessionManager terminal ledger invariants', () => {
     expect(terminalEvents[0]?.actions?.stateDelta?.abortSource).toBe('renderer.stop_button');
   });
 
+  test('a stop whose terminal settlement fails stays retryable', async () => {
+    let failNextTerminalAppend = true;
+    const store = new TinySessionStore();
+    const runStore = new TinyAgentRunStore({
+      beforeTerminalRuntimeEventAppend: async () => {
+        if (!failNextTerminalAppend) return;
+        failNextTerminalAppend = false;
+        throw new Error('terminal runtime event append failed');
+      },
+    });
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new NeverEndingBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(21_500),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+
+    const iterator = manager
+      .sendMessage(session.id, { turnId: 'turn-1', text: 'hello' })
+      [Symbol.asyncIterator]();
+    expect((await iterator.next()).value?.type).toBe('text_delta');
+
+    await assert.rejects(() => manager.stopSession(session.id, { source: 'stop_button' }));
+    await manager.stopSession(session.id, { source: 'stop_button' });
+
+    const [run] = await runStore.listSessionRuns(session.id);
+    if (!run) throw new Error('run was not recorded');
+    expect(run.status).toBe('cancelled');
+    const terminalEvents = (await runStore.readRuntimeEvents(session.id, run.runId)).filter(
+      isTerminalRuntimeEvent,
+    );
+    expect(terminalEvents).toHaveLength(1);
+  });
+
   test('terminal acceptance wins over a later stop during terminal persistence', async () => {
     const terminalAppendStarted = deferred<void>();
     const releaseTerminalAppend = deferred<void>();

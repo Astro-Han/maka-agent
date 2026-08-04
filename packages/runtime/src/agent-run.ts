@@ -299,21 +299,37 @@ export class AgentRun {
    * produces its own terminal event finds the claim taken and writes nothing.
    */
   async settleStopTerminal(): Promise<void> {
-    if (this.terminalClaim?.owner !== 'stop' || this.terminalClaim.event) return;
-    if (!this.input.runtimeEventStore || !this.runtimeEventStoreAvailable) return;
+    if (this.terminalClaim?.owner !== 'stop' || this.terminalRunHeaderCommitted) return;
+    // Nothing durable is configured, so there is no fact to land. Every other
+    // failure below is real and must reach the stop's caller: a stop that
+    // reports success while the run stays non-terminal is the silent loss this
+    // method exists to prevent.
+    if (!this.input.runtimeEventStore || !this.input.runStore) return;
     // The claim only fences writers inside this Run. Another owner — a Host
     // recovery, a resumed continuation — may have sealed the ledger already,
     // and a sealed run rejects further appends. Nothing to land in that case:
-    // the fact this method exists to guarantee is already there.
-    const sealed = await this.loadTurnRuntimeEvents()
-      .then((events) => events.some(isTerminalRuntimeEvent))
-      .catch(() => true);
-    if (sealed) return;
+    // the fact this method exists to guarantee is already there. This claim's
+    // own reserved event is not foreign — that is a settlement being retried.
+    const claimedEventId = this.terminalClaim.event?.id;
+    const events = await this.loadTurnRuntimeEvents();
+    if (events.some((event) => isTerminalRuntimeEvent(event) && event.id !== claimedEventId)) return;
     const ts = this.lastTs || this.input.now();
     const finalStatus = { status: 'aborted' as const };
     this.finalStatus ??= finalStatus;
     this.reserveFinalizationTerminal(finalStatus, ts);
-    await this.commitTerminalRun(finalStatus, ts);
+    const runStoreAvailable = this.runStoreAvailable;
+    try {
+      await this.commitTerminalRun(finalStatus, ts);
+    } catch (error) {
+      // This commit runs ahead of the stream's own finalize, so one failure is
+      // not evidence the store is gone for the rest of the run. Undo the marks
+      // that would turn a single failed attempt into a permanently unwritable
+      // run, and let the caller decide whether to retry. The reserved event
+      // stays, so a retry lands the same terminal fact rather than a new one.
+      this.runStoreAvailable = runStoreAvailable;
+      if (this.terminalClaim) this.terminalClaim.write = undefined;
+      throw error;
+    }
   }
 
   recordRunTrace(event: RunTraceEvent): void {

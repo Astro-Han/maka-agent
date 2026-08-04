@@ -2296,7 +2296,11 @@ export class RuntimeKernel implements RuntimeKernelLike {
         try {
           await target.run?.settleStopTerminal();
         } catch (error) {
+          // Leave the target unfinished so the operation stays pending and a
+          // retried stop settles it again, the same way a failed projection
+          // write is retried above.
           failures.add(error);
+          continue;
         }
       }
       target.run?.completeStop();
