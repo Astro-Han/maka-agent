@@ -9,7 +9,6 @@ import {
   useToast,
   useUiLocale,
 } from '@maka/ui';
-import { SettingRow } from './settings-rows';
 import { SettingsActions, SettingsPage, SettingsSection } from './settings-section';
 import { settingsActionErrorMessage } from './settings-error-copy';
 import { SettingsSkeletonStack } from './settings-skeleton';
@@ -84,7 +83,6 @@ export function AboutSettingsPage() {
   }
 
   const platformPretty = PLATFORM_LABEL[info.platform] ?? info.platform;
-  const platformLine = `${platformPretty} ${info.osRelease} · ${info.arch}`;
 
   async function copyEnvSummary() {
     if (!info) return;
@@ -161,24 +159,20 @@ export function AboutSettingsPage() {
           {copy.privacyPoints.map((point) => <ListItem key={point} label={<>{point}</>} />)}
         </List>
       </SettingsSection>
-      <SettingsSection title={sharedCopy.groups.buildInfo} description={sharedCopy.groups.buildInfoHelp}>
-        <SettingRow
-          title={copy.runtime}
-          detail={copy.runtimeDetail}
-          value={`Electron ${info.electronVersion} · Node ${info.nodeVersion} · Chrome ${info.chromeVersion}`}
-        />
-        <SettingRow title={copy.platform} detail={copy.platformDetail} value={platformLine} />
-        <SettingRow
-          title={copy.workspace}
-          detail={copy.workspaceDetail}
-          value={info.workspacePath}
-          mono
-        />
-        <SettingRow
-          title={copy.storage}
-          detail={copy.storageDetail}
-          value={copy.local}
-        />
+      {/* UX audit (owner msg `30f736ed`): this group used to print Electron /
+          Node / Chrome, OS + arch, the workspace path, and "storage: local" as
+          four readout rows. The only task any of it serves is "send my
+          environment to a developer", and the 复制环境信息 button already does
+          that task completely — the rows were the button's payload, spread out
+          for the user to read and then not act on.
+
+          The workspace path also had a second home on the 数据 page, which is
+          the one that can actually open and copy it, and "storage: local" only
+          repeated a line the privacy list above already makes.
+
+          What is left is the version itself (in the hero above) and the one
+          action. */}
+      <SettingsSection title={sharedCopy.groups.buildInfo}>
         <SettingsActions>
           <Button variant="primary" isDisabled={copyingEnvSummary} aria-describedby={envSummaryHelpId} onClick={() => void copyEnvSummary()} label={copyingEnvSummary ? copy.copying : copy.copyEnvironment} />
           <p id={envSummaryHelpId}>
