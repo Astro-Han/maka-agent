@@ -64,6 +64,10 @@ test('acts on a reminder through the inspector and keeps deletion reversible', a
   // The row is gone, and so is the inspector — nothing is selected any more.
   await expect(pausedRow).toHaveCount(0);
   await expect(page.getByRole('button', { name: '立即触发' })).toBeHidden();
+  // The 删除 button went down with the inspector, so something has to catch
+  // focus: without this the keyboard user lands on `body`, at the top of the
+  // document, with the list scrolled wherever they left it.
+  await expect(page.locator('.maka-module-page-rows > li button:focus')).toHaveCount(1);
 });
 
 test('opens the edit dialog from the inspector and restores focus on Escape', async ({
@@ -80,4 +84,26 @@ test('opens the edit dialog from the inspector and restores focus on Escape', as
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(editButton).toBeFocused();
+});
+
+test('narrow windows keep the inspector reachable and hand focus back', async ({
+  planRemindersWindow: page,
+}) => {
+  const row = page.getByRole('button', { name: /每周竞品动态追踪/ });
+  await row.click();
+
+  // Crossing the breakpoint is not an action on this page: it must not open a
+  // modal by itself, so the selection goes with the placement change.
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+
+  // The side panel is gone at this width, but every action it carries is not.
+  await row.click();
+  const sheet = page.locator('dialog[open]');
+  await expect(sheet).toHaveCount(1);
+  await expect(sheet.getByRole('button', { name: '立即触发' })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect(row).toBeFocused();
 });

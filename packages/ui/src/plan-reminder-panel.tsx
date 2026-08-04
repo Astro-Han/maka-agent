@@ -96,6 +96,10 @@ export function PlanReminderPanel(props: {
   // the dialog per session means there is nothing left to restore from. Capture
   // the opener ourselves so Escape lands back on 编辑 / 新建定时任务.
   const formDialogOpenerRef = useRef<HTMLElement | null>(null);
+  // Set when a delete starts, consumed once the row has actually left the list
+  // — which only happens when the main process pushes the new set back.
+  const rowsContainerRef = useRef<HTMLDivElement | null>(null);
+  const focusRowAfterRemovalRef = useRef<number | null>(null);
   const [planView, setPlanView] = useState<PlanReminderView>('tasks');
   const [runRange, setRunRange] = useState<PlanReminderRunRange>('week');
   const [listFilter, setListFilter] = useState<PlanReminderListFilter>('all');
@@ -185,6 +189,23 @@ export function PlanReminderPanel(props: {
     formDialogOpenerRef.current = null;
     if (opener?.isConnected) opener.focus();
   }, [formDialogOpen]);
+
+  // Synchronising focus with the DOM once the list it points into has been
+  // re-rendered — an external system, which is what an Effect is for.
+  useEffect(() => {
+    const index = focusRowAfterRemovalRef.current;
+    if (index == null) return;
+    focusRowAfterRemovalRef.current = null;
+    // A frame later, not now: the confirm dialog is still closing, and Astryx
+    // restores focus to ITS trigger — the 删除 button being removed — on the
+    // way out. Claiming focus before that lands means losing it again.
+    const frame = requestAnimationFrame(() => {
+      const rows = rowsContainerRef.current?.querySelectorAll<HTMLElement>('li button');
+      if (!rows?.length) return;
+      rows[Math.min(index, rows.length - 1)]?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [props.reminders]);
 
   async function toggleKeepSystemAwake(next: boolean) {
     if (!props.onKeepSystemAwakeChange || keepSystemAwakePendingRef.current) return;
@@ -310,10 +331,19 @@ export function PlanReminderPanel(props: {
               `${selectedReminder.id}:clear-runs`,
               () => props.onClearRunHistory?.(selectedReminder.id),
             )}
-            onDelete={() => void runPlanReminderAction(
-              `${selectedReminder.id}:delete`,
-              () => props.onDelete?.(selectedReminder.id),
-            )}
+            onDelete={() => {
+              // The 删除 button is about to unmount with the whole inspector,
+              // and nothing else would claim focus — it would fall to `body`,
+              // dropping a keyboard user at the top of the document. Hand it
+              // to the row that takes the deleted one's place.
+              focusRowAfterRemovalRef.current = sortedReminders.findIndex(
+                (reminder) => reminder.id === selectedReminder.id,
+              );
+              void runPlanReminderAction(
+                `${selectedReminder.id}:delete`,
+                () => props.onDelete?.(selectedReminder.id),
+              );
+            }}
           />
         ) : undefined}
         actions={
@@ -388,7 +418,7 @@ export function PlanReminderPanel(props: {
         )}
       >
         {planView === 'tasks' ? (
-          <div className="maka-module-page-panel">
+          <div className="maka-module-page-panel" ref={rowsContainerRef}>
             {normalizedListQuery && (
               <div className="maka-plan-search-summary" role="status" aria-live="polite">
                 <span>{copy.page.searchMatches(searchMatchedReminders.length)}</span>
