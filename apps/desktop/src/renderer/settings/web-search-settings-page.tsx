@@ -314,19 +314,20 @@ export function WebSearchSettingsPage(props: {
         title={sharedCopy.groups.searchBehavior}
         description={sharedCopy.groups.searchBehaviorHelp}
       >
-        <SettingsRow
-          label={copy.liveTitle}
-          description={copy.liveHelp}
-        />
-        {/* The query deserves the full row width — it was squeezed into the
-            row's end slot before, an ~360px input for a real search query. */}
+        {/* UX audit (owner msg `30f736ed`): one action wore three labels —
+            真实查询验证 over 查询 over 执行查询, each with its own help line,
+            for what is a single act: type a query, press the button, read the
+            result. One label now, on the field the user actually fills in.
+
+            The query keeps the full row width — it was squeezed into a row's
+            end slot before, an ~360px input for a real search query. */}
         <SettingsField>
           <TextInput
             value={liveQuery}
             onChange={(value) => updateLiveQuery(value)}
             placeholder={copy.queryPlaceholder}
-            label={copy.query}
-            description={copy.queryHelp}
+            label={copy.testSearch}
+            description={copy.testSearchHelp}
             width="100%"
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !liveQueryRunning) {
@@ -336,11 +337,8 @@ export function WebSearchSettingsPage(props: {
             }}
           />
         </SettingsField>
-        <SettingsRow
-          label={copy.execute}
-          description={copy.executeHelp}
-          align="start"
-          end={<div className="settingsWebSearchSearchControls">
+        <SettingsActions>
+          <div className="settingsWebSearchSearchControls">
             <Button
               variant="primary"
               isDisabled={liveQueryRunning || queryDisabledReason !== null}
@@ -352,8 +350,8 @@ export function WebSearchSettingsPage(props: {
                 {queryDisabledReason}
               </small>
             )}
-          </div>}
-        />
+          </div>
+        </SettingsActions>
       </SettingsSection>
 
       {liveQueryError && (
