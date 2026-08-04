@@ -7,14 +7,23 @@ import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { runWorkspaceTests } from './run-workspace-tests-parallel.mjs';
 
+/**
+ * `plan` is keyed by workspace directory, not by spawn order.
+ *
+ * Keying on order made the outcome depend on which worker's `mkdtemp`
+ * resolved first — something the runner does not promise and a test cannot
+ * control — so `[core] failed with code 1` was a coin flip that landed wrong
+ * about one run in three. Keying on the workspace makes "core exits 1" a fact
+ * of the fixture, which lets the assertions get stricter rather than looser.
+ */
 function makeSpawn(plan) {
   const calls = [];
   const spawn = (command, options) => {
     const child = new EventEmitter();
-    const index = calls.length;
+    const dir = String(options.cwd).split('/').slice(-2).join('/');
     calls.push({ command, cwd: options.cwd, shell: options.shell });
     queueMicrotask(() => {
-      const step = plan[index] ?? { close: 0 };
+      const step = plan[dir] ?? { close: 0 };
       if (step.error) {
         child.emit(
           'error',
@@ -32,7 +41,11 @@ function makeSpawn(plan) {
 test('parallel mode aggregates every failed workspace name', async () => {
   const repoRoot = '/repo';
   const workspaceDirs = ['packages/core', 'packages/ui', 'packages/headless'];
-  const { spawn } = makeSpawn([{ close: 1 }, { close: 2 }, { close: 0 }]);
+  const { spawn, calls } = makeSpawn({
+    'packages/core': { close: 1 },
+    'packages/ui': { close: 2 },
+    'packages/headless': { close: 0 },
+  });
 
   await assert.rejects(
     () =>
@@ -48,6 +61,11 @@ test('parallel mode aggregates every failed workspace name', async () => {
       return true;
     },
   );
+
+  // The serial workspace runs even though the parallel batch failed — the
+  // regression that had headless silently not running whenever anything else
+  // did.
+  assert.ok(calls.some((call) => call.cwd.endsWith('packages/headless')));
 });
 
 test('each workspace runs in its own temp namespace, removed however it ends', async () => {
@@ -108,9 +126,11 @@ test('bounded parallel mode never exceeds its configured concurrency', async () 
   const workspaceDirs = ['packages/core', 'packages/ui', 'apps/desktop'];
   let active = 0;
   let maxActive = 0;
+  let started = 0;
   const spawn = () => {
     const child = new EventEmitter();
     active += 1;
+    started += 1;
     maxActive = Math.max(maxActive, active);
     setImmediate(() => {
       active -= 1;
@@ -121,7 +141,14 @@ test('bounded parallel mode never exceeds its configured concurrency', async () 
 
   await runWorkspaceTests({ repoRoot, workspaceDirs, concurrency: 2, spawn });
 
-  assert.equal(maxActive, 2);
+  // The contract is the one in this test's name: never MORE than the
+  // configured concurrency. Asserting exactly 2 additionally demanded that the
+  // scheduler be saturated at the moment of measurement, which depends on
+  // which worker's mkdtemp resolved first — so it failed about one run in
+  // three on main, before this file was touched.
+  assert.ok(maxActive <= 2, `expected at most 2 concurrent workspaces, saw ${maxActive}`);
+  // …and the cap must not be met by doing less work: every workspace ran.
+  assert.equal(started, workspaceDirs.length);
 });
 
 test('cancellation terminates active workspace process trees and starts no queued work', async () => {
