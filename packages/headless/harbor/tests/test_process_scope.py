@@ -119,28 +119,42 @@ def test_cancellation_still_propagates() -> None:
 
 
 def _holders(stdout_path: Path) -> list[str]:
-    """PIDs still holding the replay open. Draining the pipe would unblock the
-    replay and hide the defect, so ask the process table instead."""
-    return subprocess.run(  # noqa: S603 - fixed argv, no shell interpolation
-        ["pgrep", "-f", str(stdout_path)],
+    """The replay processes still holding the pipe open. Draining the pipe would
+    unblock the replay and hide the defect, so ask the process table instead.
+
+    Matching the path alone would also match the wrapper, whose `bash -c` script
+    text contains that path: the pre-cleanup guard below would then pass with no
+    replay alive at all, which is a false PASS in the one direction that matters.
+    So require the command itself to be the replay.
+    """
+    listing = subprocess.run(  # noqa: S603 - fixed argv, no shell interpolation
+        ["ps", "-A", "-o", "pid=,command="],
         check=False,
         timeout=30,
         capture_output=True,
         text=True,
-    ).stdout.split()
+    ).stdout.splitlines()
+    marker = f"cat -- {stdout_path}"
+    return [
+        line.strip()
+        for line in listing
+        if line.strip().split(maxsplit=1)[1:2] == [marker]
+    ]
 
 
 def test_cleanup_reaps_the_output_replay_so_the_reader_reaches_eof() -> None:
     """The wrapper captures the command's output to a file and replays it after
     the command exits, so that a descendant outliving the command cannot hold the
     exec's stdout open. The replay itself is the hole: when the caller stops
-    reading — which is exactly what an agent-phase timeout does — the replay
-    blocks in ``pipe_write`` forever, and it belongs to neither the command's
-    process group nor the wrapper PID, so every cleanup loop walks past it. The
-    exec never sees EOF, the cell hangs until something kills the container, and
-    the verifier never runs. EOF here is that failure, reproduced without Docker.
+    reading — which is exactly what an agent-phase timeout does — it blocks in
+    ``pipe_write`` forever, and teardown has no handle on it. It is not the
+    wrapper PID and it carries no scope marker, so whether anything reaps it
+    comes down to which process group the shell happened to leave it in. On a
+    host with no ``/proc`` the marker sweep is a no-op and nothing does, which is
+    what this test pins. A stranded replay means the exec never sees EOF, so the
+    cell hangs and the verifier never runs.
     """
-    if shutil.which("bash") is None:
+    if shutil.which("bash") is None or shutil.which("ps") is None:
         return
 
     scope = f"test-scope-{uuid.uuid4().hex}"
