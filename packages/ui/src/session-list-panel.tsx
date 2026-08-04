@@ -3,10 +3,7 @@ import {
   SegmentedControl,
   SegmentedControlItem,
 } from '@astryxdesign/core/SegmentedControl';
-import {
-  SideNav,
-  type SideNavImperativeCollapseHandle,
-} from '@astryxdesign/core/SideNav';
+import { SideNav } from '@astryxdesign/core/SideNav';
 import type { NavModuleMemory, NavSelection } from './nav-selection.js';
 import {
   SessionHistoryList,
@@ -18,14 +15,13 @@ import { SessionSidebarFooter, SessionSidebarNav, type SidebarUpdateReminder } f
 import { Clock, FolderOpen } from './icons.js';
 import { useUiLocale } from './locale-context.js';
 import { getConversationCopy } from './conversation-copy.js';
-import type { CSSProperties, Ref } from 'react';
+import type { CSSProperties } from 'react';
 
 export type SessionViewMode = 'conversation' | 'project';
 
 export function SessionListPanel(props: {
   collapsed?: boolean;
   onCollapsedChange?(collapsed: boolean): void;
-  collapseHandleRef?: Ref<SideNavImperativeCollapseHandle>;
   width?: number;
   onWidthChange?(width: number): void;
   minWidth?: number;
@@ -107,7 +103,6 @@ export function SessionListPanel(props: {
       style={{ '--maka-sidenav-width': `${width}px` } as CSSProperties}
     >
       <SideNav
-        handleRef={props.collapseHandleRef}
         className="maka-session-panel agents-sidebar"
         aria-label={copy.listAriaLabel}
         collapsible={{

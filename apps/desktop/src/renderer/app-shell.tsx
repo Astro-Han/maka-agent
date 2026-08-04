@@ -173,7 +173,6 @@ import {
   showSessionWorkspaceUnavailableToast,
 } from './session-workspace-errors';
 import { AppShell as AstryxAppShell } from '@astryxdesign/core/AppShell';
-import type { SideNavImperativeCollapseHandle } from '@astryxdesign/core/SideNav';
 
 type ComposerImportOwner = {
   sessionId: string | undefined;
@@ -1216,7 +1215,6 @@ function AppShellContent({
     workbarTab,
     setWorkbarTab,
   } = useShellLayout();
-  const sessionSideNavHandleRef = useRef<SideNavImperativeCollapseHandle>(null);
 
   // The companion panel unmounts (and its fork is removed) when the workbar
   // collapses or the active session moves off the panel's source; clear the
@@ -2080,7 +2078,7 @@ function AppShellContent({
       >
         <AppShellTopbarActions
           sidebarCollapsed={sessionListCollapsed}
-          sidebarHandleRef={sessionSideNavHandleRef}
+          onToggleSidebar={() => setSessionListCollapsed((current) => !current)}
           sidebarToggleHidden={settingsOpen}
           onOpenSearchModal={() => setSearchModalOpen(true)}
         />
@@ -2106,7 +2104,6 @@ function AppShellContent({
         inert={hasModalOpen ? true : undefined}
         sideNav={
           <SessionListPanel
-            collapseHandleRef={sessionSideNavHandleRef}
             collapsed={sessionListCollapsed}
             onCollapsedChange={setSessionListCollapsed}
             width={sessionListWidth}
