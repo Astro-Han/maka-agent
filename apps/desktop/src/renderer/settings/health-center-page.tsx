@@ -109,7 +109,7 @@ export function HealthCenterPage() {
           </div>
         )}
       >
-        <p className="settingsHealthSummaryLine" aria-label={copy.summaryAria}>
+        <p className="settingsHealthSummaryLine" role="group" aria-label={copy.summaryAria}>
           {summaryParts.map((part) => (
             <span key={part.key} data-tone={part.count > 0 ? part.tone : 'neutral'}>
               {part.label} {part.count}

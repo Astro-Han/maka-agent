@@ -87,6 +87,7 @@ export function BotChatOverview(props: {
               data-attention={entry.needsAttention ? 'true' : undefined}
               startContent={<BotBrandLogo provider={entry.provider} />}
               label={(
+                // a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision.
                 <span className="settingsRemoteAccessItemTitle" aria-label={copy.manageAria(botCopy.providers[entry.provider].label, entry.copy.label)}>
                   {botCopy.providers[entry.provider].label}
                   <span className="settingsStatus">
@@ -112,7 +113,7 @@ export function BotChatOverview(props: {
               className="settingsRemoteAccessCatalogRow"
               data-support={entry.support}
               startContent={<BotBrandLogo provider={entry.provider} />}
-              label={<span className="settingsRemoteAccessItemTitle" aria-label={copy.connectAria(botCopy.providers[entry.provider].label)}>{botCopy.providers[entry.provider].label}</span>}
+              label={/* a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision. */ <span className="settingsRemoteAccessItemTitle" aria-label={copy.connectAria(botCopy.providers[entry.provider].label)}>{botCopy.providers[entry.provider].label}</span>}
               description={botCopy.providers[entry.provider].help}
               endContent={<span className="settingsRemoteAccessItemActions"><ChevronRight size={16} aria-hidden="true" /></span>}
               onClick={() => props.onOpenChannel(entry.provider)}

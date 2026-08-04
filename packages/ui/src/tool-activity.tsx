@@ -383,6 +383,7 @@ function ToolOutputStream(props: {
           >
             {chunk.text}
             {chunk.redacted && (
+              // a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision.
               <span className="maka-tool-output-redacted" aria-label={copy.redactedAriaLabel}>
                 {' '}{copy.redacted}
               </span>

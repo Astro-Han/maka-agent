@@ -362,7 +362,7 @@ export function ArtifactPane(props: {
   }
 
   return (
-    <div className="maka-artifact-pane" aria-label={copy.pane.panelAria} onKeyDown={handlePaneKeyDown}>
+    <div className="maka-artifact-pane" role="region" aria-label={copy.pane.panelAria} onKeyDown={handlePaneKeyDown}>
       {activeListError && (
             <Banner
               status="error"

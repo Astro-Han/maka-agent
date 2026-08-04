@@ -47,7 +47,7 @@ export function AppShellTopbarActions(props: {
   const locale = useUiLocale();
   const copy = getShellCopy(locale).chrome;
   return (
-    <div className="maka-shell-topbar-rail" data-maka-contract="shell-topbar-rail" aria-label={copy.windowActions}>
+    <div className="maka-shell-topbar-rail" data-maka-contract="shell-topbar-rail" role="group" aria-label={copy.windowActions}>
       <Tooltip content={copy.searchConversations}>
         <IconButton
           label={copy.searchConversations}

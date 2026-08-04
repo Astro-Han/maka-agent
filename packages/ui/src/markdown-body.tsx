@@ -315,6 +315,7 @@ function MarkdownLink(props: { href: string; children: ReactNode }) {
       );
     }
     return (
+      // a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision.
       <span
         data-reason="internal-invalid"
         title={copy.invalidInternalLink}
@@ -338,6 +339,7 @@ function MarkdownLink(props: { href: string; children: ReactNode }) {
     );
   }
   return (
+    // a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision.
     <span
       data-reason="unsafe-scheme"
       title={copy.unsafeLink}

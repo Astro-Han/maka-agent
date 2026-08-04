@@ -293,7 +293,7 @@ function SkillLibraryPanel(props: {
         className="maka-skill-section-row"
         title={<span className="maka-skill-section-label">{copy.market.official}</span>}
         action={
-          <div className="maka-skill-filter-actions" aria-label={copy.market.sourceActions}>
+          <div className="maka-skill-filter-actions" role="group" aria-label={copy.market.sourceActions}>
             <UiButton
               variant="secondary"
               size="sm"

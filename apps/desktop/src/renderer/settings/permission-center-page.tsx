@@ -201,7 +201,7 @@ export function PermissionCenterPage() {
           </div>
         )}
       >
-        <p className="settingsHealthSummaryLine" aria-label={copy.summaryAria}>
+        <p className="settingsHealthSummaryLine" role="group" aria-label={copy.summaryAria}>
           <span data-tone="neutral">{copy.granted} {counts.granted}</span>
           <span data-tone={counts.pending > 0 ? 'warning' : 'neutral'}>{copy.pending} {counts.pending}</span>
           <span data-tone={counts.denied > 0 ? 'destructive' : 'neutral'}>{copy.denied} {counts.denied}</span>
