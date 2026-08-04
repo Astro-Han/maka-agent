@@ -287,6 +287,12 @@ export interface HarborTaskRunnerOptions {
   makaNodeToolchainPath?: string;
   /** Explicit Docker target platform shared by comparison arms. */
   dockerPlatform?: 'linux/amd64';
+  /**
+   * Compose overlay that points the task container's Ubuntu apt hosts at a
+   * mirror. Layered after the harness compose file so it adds `extra_hosts`
+   * entries beside the host-gateway mapping rather than replacing them.
+   */
+  aptMirrorComposePath?: string;
   /** Base directory under which each task gets an isolated per-task job dir. */
   jobsDir: string;
   /** MAKA_MODEL, e.g. "deepseek/deepseek-v4-flash". */
@@ -1267,6 +1273,7 @@ export function buildHarborJobConfig(
                 options.makaRepoPath,
                 'packages/headless/harbor/docker-compose-linux-amd64.yaml',
               ),
+              ...(options.aptMirrorComposePath ? [options.aptMirrorComposePath] : []),
             ],
           }
         : {}),

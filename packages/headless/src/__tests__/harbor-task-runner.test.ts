@@ -2642,6 +2642,30 @@ describe('buildHarborJobConfig', () => {
     );
   });
 
+  test('layers the apt mirror overlay after the harness compose file', () => {
+    // Order is the assertion. Both files set `extra_hosts`, and Compose merges
+    // later files over earlier ones, so the overlay has to come second for the
+    // host-gateway mapping every competitor arm dials to survive alongside it.
+    const config = buildHarborJobConfig(runInput(), {
+      makaRepoPath: '/repo',
+      jobsDir: '/jobs/x',
+      jobName: 'trial',
+      agent: 'maka',
+      model: 'zai-coding-plan/glm-5.2',
+      provider: 'zai-coding-plan',
+      dockerPlatform: 'linux/amd64',
+      aptMirrorComposePath: '/runs/r1/apt-mirror.compose.yaml',
+    } as unknown as Parameters<typeof buildHarborJobConfig>[1]);
+
+    assert.deepEqual(
+      (config.environment as { extra_docker_compose?: string[] }).extra_docker_compose,
+      [
+        '/repo/packages/headless/harbor/docker-compose-linux-amd64.yaml',
+        '/runs/r1/apt-mirror.compose.yaml',
+      ],
+    );
+  });
+
   test('pins the Kimi Code adapter and official toolchain without serializing credentials', () => {
     const config = buildHarborJobConfig(runInput(), {
       makaRepoPath: '/repo',

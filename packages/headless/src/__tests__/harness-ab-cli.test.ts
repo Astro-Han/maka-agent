@@ -780,6 +780,46 @@ test('harness composition preserves historical manifest fingerprints', async () 
   }
 });
 
+test('redirecting apt is recorded, and leaves runs that do not redirect untouched', async () => {
+  const {
+    aptMirrorComposeContent,
+    buildHarnessAbManifest,
+    resolveHarnessComposition,
+    UBUNTU_APT_HOSTS,
+  } = await import(new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href);
+  const composition = resolveHarnessComposition({ competitor: 'reasonix' });
+  const args = {
+    subjectFingerprint: 'subject',
+    taskSourceFingerprint: 'tasks',
+    toolchainFingerprint: 'tools',
+    composition,
+    env: { MAKA_HARNESS_AB_APT_MIRROR: 'mirrors.example.com' },
+  };
+
+  const plain = buildHarnessAbManifest({ ...args, env: {} });
+  const redirected = buildHarnessAbManifest({ ...args, aptMirrorAddress: '10.0.0.7' });
+
+  assert.equal(plain.metadata.benchmark.packageMirror, undefined);
+  assert.deepEqual(redirected.metadata.benchmark.packageMirror, {
+    hosts: UBUNTU_APT_HOSTS,
+    name: 'mirrors.example.com',
+    address: '10.0.0.7',
+  });
+  // Where packages came from is part of what a run was, so the two must not be
+  // resumable as each other. Recording it without forking the fingerprint would
+  // let a redirected run continue a manifest that fetched from Ubuntu's hosts.
+  assert.notEqual(plain.fingerprint, redirected.fingerprint);
+
+  // Both hosts the base image's sources list names have to move together: apt
+  // reads noble-security from security.ubuntu.com, and leaving it behind puts
+  // every security-pocket fetch back on the link the redirect exists to avoid.
+  const overlay = aptMirrorComposeContent('10.0.0.7');
+  for (const host of UBUNTU_APT_HOSTS)
+    assert.match(overlay, new RegExp(`'${host}:10\\.0\\.0\\.7'`));
+  assert.match(overlay, /^services:\n {2}main:\n {4}extra_hosts:\n/);
+  assert.throws(() => aptMirrorComposeContent(''), /apt mirror address is required/);
+});
+
 test('Reasonix comparison freezes the DeepSeek runtime, toolchain, and run identity', async () => {
   const {
     buildHarnessAbManifest,
