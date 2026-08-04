@@ -8255,6 +8255,70 @@ describe('SessionManager permission mode updates', () => {
     );
   });
 
+  test('sendMessage replays a prior run left non-terminal by an unanswered interaction', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    let backend: TestBackend | undefined;
+    backends.register('fake', (ctx) => {
+      backend = new TestBackend(ctx);
+      return backend;
+    });
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(7_075),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+    // A run parked on AskUserQuestion and then stopped: the header never left
+    // `waiting_for_user` and the ledger never received a terminal fact. Its
+    // turn is still conversation the model must see.
+    await seedRuntimeRun(
+      runStore,
+      makeRunHeader({
+        sessionId: session.id,
+        runId: 'run-1',
+        turnId: 'turn-1',
+        status: 'waiting_for_user',
+        createdAt: 100,
+        updatedAt: 102,
+      }),
+      [
+        runtimeEvent({
+          id: 'rt-user',
+          sessionId: session.id,
+          runId: 'run-1',
+          turnId: 'turn-1',
+          ts: 101,
+          role: 'user',
+          author: 'user',
+          content: { kind: 'text', text: 'prior question' },
+        }),
+        runtimeEvent({
+          id: 'rt-assistant',
+          sessionId: session.id,
+          runId: 'run-1',
+          turnId: 'turn-1',
+          ts: 102,
+          role: 'model',
+          author: 'agent',
+          content: { kind: 'text', text: 'prior answer' },
+        }),
+      ],
+    );
+
+    await drain(manager.sendMessage(session.id, { turnId: 'turn-2', text: 'follow up' }));
+
+    expect(backend?.sendInputs[0]?.runtimeContext?.map((event) => event.id)).toEqual([
+      'rt-user',
+      'rt-assistant',
+    ]);
+  });
+
   test('sendMessage resumes incomplete legacy backfill for prior context', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore({ failRuntimeEventAppendAfter: 1 });
