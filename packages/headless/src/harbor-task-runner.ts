@@ -406,7 +406,7 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
       runnerOptions.resolveProviderCredential !== undefined ||
       githubCopilotAccountTokenFromEnv(runnerOptions.provider, runnerOptions.agentEnv) !==
         undefined ||
-      (!usesHostProviderProxy(runnerOptions.agent) &&
+      (!usesHostProviderProxy(runnerOptions.agent, runnerOptions.makaPlacement) &&
         !providerRequiresSecret(runnerOptions.provider));
     const configPath = join(jobsDir, 'job-config.json');
     const { agentEnv: _attemptAgentEnv, ...inputWithoutAttemptEnv } = input;
@@ -1347,7 +1347,7 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
 } | null> {
   const agent = options.agent ?? 'maka';
   const provider = options.provider ?? 'deepseek';
-  if (usesHostProviderProxy(agent) && provider === 'github-copilot') {
+  if (usesHostProviderProxy(agent, options.makaPlacement) && provider === 'github-copilot') {
     const adapter =
       agent === 'kimi-code'
         ? 'Kimi Code'
@@ -1388,7 +1388,7 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
       )
     : undefined;
   const baseUrl = copilotCredential?.baseUrl ?? configuredBaseUrl;
-  if (options.resolveProviderCredential || usesHostProviderProxy(agent)) {
+  if (options.resolveProviderCredential || usesHostProviderProxy(agent, options.makaPlacement)) {
     const apiKeyFile = options.apiKeyFile;
     const resolveProviderCredential = options.resolveProviderCredential;
     if (!apiKeyFile && !resolveProviderCredential) return null;
@@ -1445,8 +1445,19 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
   };
 }
 
-function usesHostProviderProxy(agent: HarborTaskRunnerOptions['agent']): boolean {
-  return agent !== undefined && agent !== 'maka';
+/**
+ * Whether this arm reaches the provider through the host proxy rather than
+ * holding host credentials itself. That follows the container boundary, not the
+ * arm's name: Maka was exempt because it ran on the host, and an in-container
+ * Maka is on the same side as every competitor, with no host credential to use.
+ */
+function usesHostProviderProxy(
+  agent: HarborTaskRunnerOptions['agent'],
+  makaPlacement?: HarborTaskRunnerOptions['makaPlacement'],
+): boolean {
+  if (agent === undefined) return false;
+  if (agent === 'maka') return makaPlacement === 'task-container';
+  return true;
 }
 
 /** Shared cost math across runners: build the cell token summary from proxy-observed usage and per-1M pricing. */
