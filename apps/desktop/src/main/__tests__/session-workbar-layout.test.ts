@@ -99,14 +99,29 @@ describe('workbar motion CSS contract', () => {
     assert.match(css, /\.maka-workbar-motion[^{]*\{[^}]*transition-duration:\s*0\.01ms/);
   });
 
-  it('keeps the plate a frame rather than a scrollport', async () => {
+  it('keeps the frame a frame rather than a scrollport', async () => {
     const css = await readRendererContractCss();
-    // The column reaches the plate's top edge by hanging above the plate's
-    // padding box. To an `overflow: hidden` plate that overhang is scrollable
-    // overflow, so focusing anything in the column — the resize handle is
-    // reachable by Tab — scrolls the whole plate up by the clearance and leaves
-    // it there. `clip` clips identically and is not a scroll container.
+    // The frame is not a scroll container, and nothing inside it reaches
+    // outside its own box. Both halves of the same lesson: the column used to
+    // hang above the frame's padding box to meet its top edge, and to an
+    // `overflow: hidden` frame that overhang was scrollable overflow — the
+    // first focus anywhere inside, and the resize handle is one Tab away,
+    // scrolled the whole frame up by the clearance and left it there.
     assert.match(css, /\.maka-panel-detail\s*\{[^}]*overflow:\s*clip/);
+    assert.doesNotMatch(
+      css,
+      /margin-top:\s*calc\(\s*-1\s*\*\s*var\(--maka-plate-titlebar-clearance\)/,
+      'a plate is hanging above the frame again instead of padding itself',
+    );
+    // Each plate pays for its own clearance, which is what puts their top
+    // edges on one line without anyone overhanging.
+    for (const plate of ['\\.mainColumn', '\\.maka-session-workbar']) {
+      assert.match(
+        css,
+        new RegExp(`${plate}\\s*\\{[^}]*padding-top:\\s*var\\(--maka-plate-titlebar-clearance\\)`),
+        `${plate} does not clear the titlebar itself`,
+      );
+    }
   });
 
   it('animates the box and holds the column still inside it', async () => {

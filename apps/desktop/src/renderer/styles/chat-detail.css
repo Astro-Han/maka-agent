@@ -23,19 +23,17 @@
 
 /* Astryx owns the workbar's chrome (Card, Toolbar, TabList, Badge). What is
    left here is what those components cannot know: the width the user dragged,
-   a header/body split that keeps the body a scroll parent, and which surface
-   this column stands on.
+   a header/body split that keeps the body a scroll parent, and that this column
+   is a floating plate, not a region drawn inside another one.
 
-   `--background` is the same tone the SideNav paints, and it is the whole seam:
-   the shell already separates chrome from content by stepping tone (the
-   sidebar's own border is set to `transparent` in shell-layout.css), so the
-   workbar reads as the right-hand mirror of the left rail rather than as a
-   panel fenced off by a rule. Painting it also gives the seam the column's
-   full height — the resize handle, which used to draw it, starts below the
-   titlebar so its drag zone is not swallowed by the window drag strip, and a
-   line that begins 36px down beside one that runs edge to edge is exactly the
-   mismatch this replaces. The plate's `overflow: clip` rounds the outer corners
-   for free. */
+   The seam is the canvas between the two plates — the same gap the content
+   frame already leaves on its other three sides, and the shell's only way of
+   separating surfaces. It replaced a hairline, and for a while it was supposed
+   to be a tone step against the conversation instead; that step does not exist
+   anywhere but darwin dark, where a glass override happens to lift the content
+   surface. Measured on darwin light: plate, workbar and rail all resolve to
+   `oklch(1 0 0)`, and the column had no visible boundary at all. A gap has no
+   palette to be right in. */
 /* The column's motion box, and the only part of the column that survives the
    collapse (chat-workbar.tsx). It owns the animated width and the clip; the
    column inside keeps a fixed width so it slides off rather than reflowing.
@@ -49,15 +47,19 @@
   width: var(--maka-session-workbar-width, 400px);
   min-height: 0;
   overflow: hidden;
-  /* The surface reaches the plate's top edge; the column re-applies the
-     clearance to its own content. Here rather than on the column because this
-     box clips, and an overhang above a clipping box is an overhang cut off. */
-  margin-top: calc(-1 * var(--maka-plate-titlebar-clearance));
-  transition: width var(--duration-large) var(--ease-out-strong);
+  /* The canvas gutter between the two plates, and it belongs to this one: it
+     exists exactly as long as the panel does, so it leaves with it rather than
+     leaving a strip of canvas behind a shut panel. Both properties ease on the
+     same curve, so the gutter closes with the width instead of snapping. */
+  margin-left: var(--agents-content-area-gap);
+  transition:
+    width var(--duration-large) var(--ease-out-strong),
+    margin-left var(--duration-large) var(--ease-out-strong);
 }
 
 .maka-workbar-motion[data-collapsed] {
   width: 0;
+  margin-left: 0;
 }
 
 /* A pointer drag feeds a new width back on every move; a standing transition
@@ -97,11 +99,12 @@
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  background: var(--background);
-  /* The clearance the motion box bled through, re-applied to the content: the
-     tone reaches the plate's top edge, the tabs still start below the titlebar.
-     Painting only below the clearance would put a hard horizontal edge across
-     the top of the column — the seam this whole change removes, rotated 90°. */
+  /* Plate, on the same terms as the conversation beside it: same surface, same
+     corner, and its own clearance so the tabs start below the chrome strip.
+     Reading the clearance from the frame rather than restating it is what keeps
+     the two plates' top edges on one line. */
+  background: var(--agents-content-area-bg);
+  border-radius: var(--radius-modal);
   padding-top: var(--maka-plate-titlebar-clearance);
   box-sizing: border-box;
 }
@@ -572,11 +575,17 @@
      has no titlebar above it to clear. Height is what would animate here; it is
      not wired, so the box just sizes to its content and collapses to nothing.
      Capped rather than removed: the width still changes, and its transition end
-     is what tears the column down. */
+     is what tears the column down. The gutter turns with the stack — the two
+     plates now sit above and below rather than side by side. */
   .maka-workbar-motion {
     width: 100%;
-    margin-top: 0;
+    margin-left: 0;
+    margin-top: var(--agents-content-area-gap);
     transition-duration: 0.01ms;
+  }
+
+  .maka-workbar-motion[data-collapsed] {
+    margin-top: 0;
   }
 
   .maka-session-workbar {
@@ -586,11 +595,6 @@
     min-height: min(220px, 42dvh);
     max-height: min(42dvh, 360px);
     padding-top: 0;
-    /* Stacked, the surface tone alone cannot carry the seam: the panel lifts
-       off the conversation rather than standing beside it, so this is the one
-       place the workbar draws a rule. */
-    border-top: var(--border-width-hairline) solid var(--border);
-    box-shadow: 0 -8px 24px oklch(from var(--foreground) l c h / 0.08);
   }
 
   .maka-workbar-resize-handle { display: none; }

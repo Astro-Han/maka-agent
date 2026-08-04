@@ -107,20 +107,31 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* This element frames; it does not paint. What the user reads as "the content
+     area" is the column inside it, and beside that column the workbar is a
+     second plate of the same kind. The canvas showing between them is the seam,
+     which is the same seam this frame's own margin draws on its other three
+     sides — the shell has exactly one way of separating surfaces, and it is a
+     gap, not a tone step and not a rule.
+
+     `clip`, not `hidden`: a frame is never a scrollport. Nothing overflows it
+     today, and the one thing that ever did — a column hung above this box to
+     reach its top edge — scrolled the whole frame up by the clearance the first
+     time anything inside took focus. */
+  overflow: clip;
+  /* How far each plate inside has to start below the absolute chrome strip.
+     Declared here because the frame is what the strip sits over, consumed by
+     every plate that stands in it — the conversation column and the workbar
+     both. One number, no plate reaching outside its own box to get it. */
+  --maka-plate-titlebar-clearance: calc(var(--h-titlebar) - var(--agents-content-area-gap));
+  box-sizing: border-box;
+}
+
+/* The conversation plate. Every view renders into this column, so this is where
+   the content surface actually is. */
+.maka-shell-astryx .mainColumn {
   border-radius: var(--radius-modal);
   background: var(--agents-content-area-bg);
-  /* `clip`, not `hidden`: the plate is a frame, never a scrollport. A column
-     that reaches the plate's top edge does it by hanging above this padding box
-     (`.maka-workbar-motion`), and that overhang is scrollable overflow to a
-     `hidden` box — focusing anything inside it, the resize handle included,
-     makes the browser scroll the whole plate up by the clearance and leave it
-     there. `clip` clips the same and is not a scroll container at all. */
-  overflow: clip;
-  /* Clear the absolute chrome strip so content starts below the transparent
-     titleband. Named, because a column inside the plate that paints its own
-     surface has to reach the plate's edge and re-apply this to its content —
-     see `.maka-session-workbar` in chat-detail.css. Two places, one number. */
-  --maka-plate-titlebar-clearance: calc(var(--h-titlebar) - var(--agents-content-area-gap));
   padding-top: var(--maka-plate-titlebar-clearance);
   box-sizing: border-box;
 }

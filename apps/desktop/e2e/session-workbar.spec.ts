@@ -26,30 +26,33 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(resize).toHaveAttribute('aria-valuenow', '410');
   await expect(workbar).toHaveCSS('width', '410px');
 
-  // The seam is a surface-tone step, the same one the sidebar makes on the
-  // other side — no rule anywhere. Each half fails silently on its own: drop
-  // the background and the column vanishes into the conversation, add a border
-  // back and the app is speaking two seam languages at once.
-  await expect(workbar).toHaveCSS('border-left-width', '0px');
-  await expect(workbar).toHaveCSS(
-    'background-color',
-    await page.locator('.astryx-app-shell-sidenav').evaluate(
-      (el) => getComputedStyle(el).backgroundColor,
-    ),
-  );
-
-  // And it runs the plate's full height. The surface has to reach the plate's
-  // top edge while its CONTENT keeps the titlebar clearance — miss that and
-  // the tone starts one clearance below the sidebar's, which is the same
-  // mismatched seam turned 90°.
-  // Measured AFTER the handle above took focus, deliberately: the column
-  // reaches that edge by hanging above the plate's padding box, and a plate
-  // that is a scroll container scrolls that overhang into view on focus and
-  // stays there. Keep this after a focus, or it stops seeing that.
-  const plateBox = (await page.locator('.maka-panel-detail').boundingBox())!;
+  // The seam is the canvas between two plates, and it is asserted as a GAP,
+  // not as a colour. Comparing the workbar's tone to another surface is what
+  // this used to do, and it passed while the column was invisible: it was
+  // compared to the sidebar, which paints the same value the conversation does,
+  // so "the workbar matches" and "the workbar has no boundary" were the same
+  // assertion. Every default palette but darwin dark resolves all three to
+  // `oklch(1 0 0)`.
+  const conversation = page.locator('.mainColumn');
   const workbarBox = (await workbar.boundingBox())!;
-  expect(Math.round(workbarBox.y)).toBe(Math.round(plateBox.y));
-  expect(Math.round(workbarBox.height)).toBe(Math.round(plateBox.height));
+  const conversationBox = (await conversation.boundingBox())!;
+  const gutter = workbarBox.x - (conversationBox.x + conversationBox.width);
+  expect(Math.round(gutter)).toBe(4);
+  // And it is really canvas showing through, not a third surface: the frame
+  // holding both plates paints nothing.
+  await expect(page.locator('.maka-panel-detail')).toHaveCSS(
+    'background-color',
+    'rgba(0, 0, 0, 0)',
+  );
+  await expect(workbar).toHaveCSS('border-left-width', '0px');
+
+  // Two plates, one line. Each keeps the titlebar clearance as its own padding,
+  // so their top edges agree without either reaching outside its box for it —
+  // the previous formulation hung the column above the frame's padding box,
+  // which made the frame scroll the overhang into view on the first focus.
+  // Measured after the handle above took focus, which is what caught that.
+  expect(Math.round(workbarBox.y)).toBe(Math.round(conversationBox.y));
+  expect(Math.round(workbarBox.height)).toBe(Math.round(conversationBox.height));
 
   // Pointer drag, grabbed near the bottom of the divider: Astryx's default
   // side-placed grab zone lifts itself half its height off the handle, so a
