@@ -27,6 +27,15 @@ export interface HarborVerifierOutcome {
   attempts: HarborVerifierAttempt[];
 }
 
+/** What the harness's verifier wrote about a trial. One shape from the runner's
+ * read of the trial directory through to the WAL, so the grade contract cannot
+ * drift along the way. Whether it amounts to a score is decided in one place,
+ * by structuredVerifierGrade. */
+export interface HarborTrialGrade {
+  reward: number;
+  verifier?: HarborVerifierOutcome;
+}
+
 export interface FixedPromptTaskCompletedEvent {
   schemaVersion: typeof FIXED_PROMPT_WAL_SCHEMA_VERSION;
   type: 'task_completed';
@@ -137,10 +146,7 @@ export interface FixedPromptTaskBudgetExhaustedEvent {
   taskToolSummary?: HarborCellTaskToolSummary;
   steps?: number;
   durationMs?: number;
-  harbor?: {
-    reward: number;
-    verifier?: HarborVerifierOutcome;
-  };
+  harbor?: HarborTrialGrade;
 }
 
 export interface FixedPromptTaskPlumbingFailedEvent {

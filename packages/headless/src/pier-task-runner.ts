@@ -553,13 +553,11 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
               grade.state === 'invalid'
                 ? `${formatTrialException(trialException)}; ${grade.detail}`
                 : formatTrialException(trialException),
-              artifactRefs || harbor || providerTelemetry.length > 0
-                ? {
-                    ...(artifactRefs ?? {}),
-                    ...(harbor ? { harbor } : {}),
-                    ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
-                  }
-                : undefined,
+              {
+                ...(artifactRefs ?? {}),
+                ...(harbor ? { harbor } : {}),
+                ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
+              },
             );
           }
           completeTimedOutTrial = true;

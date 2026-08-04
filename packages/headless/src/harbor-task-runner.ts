@@ -26,7 +26,11 @@ import {
   type TaskRunOutput,
   type TaskRunner,
 } from './fixed-prompt-controller.js';
-import type { HarborVerifierAttempt, HarborVerifierOutcome } from './fixed-prompt-wal-types.js';
+import type {
+  HarborTrialGrade,
+  HarborVerifierAttempt,
+  HarborVerifierOutcome,
+} from './fixed-prompt-wal-types.js';
 import {
   HARBOR_ORACLE_EXECUTION_POLICY,
   HARBOR_ORACLE_MAX_ATTEMPTS,
@@ -483,19 +487,17 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
             );
             // The exhaustion is the agent's fact; the verifier's verdict is the
             // harness's. Both are true at once, so both travel — dropping the
-            // grade because the agent never filed its self-report threw away a
+            // verdict because the agent never filed its self-report threw away a
             // pass Harbor had already awarded.
-            const harbor = authoritativeTrialGrade(rewardArtifact, verifierArtifact, input.task.id);
+            const harbor = trialVerifierArtifacts(rewardArtifact, verifierArtifact, input.task.id);
             throw new FixedPromptBudgetExhaustedError(
               `agent budget exhausted for task ${input.task.id}`,
               formatTrialException(trialException),
-              artifactRefs || harbor || providerTelemetry.length > 0
-                ? {
-                    ...(artifactRefs ?? {}),
-                    ...(harbor ? { harbor } : {}),
-                    ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
-                  }
-                : undefined,
+              {
+                ...(artifactRefs ?? {}),
+                ...(harbor ? { harbor } : {}),
+                ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
+              },
             );
           }
           completeTimedOutTrial = true;
@@ -504,6 +506,13 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
           // workspace it left: a real result. Keep the cell's own status and
           // errorClass — nothing here is a deadline, so nothing may claim one —
           // and let the structured verifier grade score it.
+          //
+          // The cell requirement is a known exclusion, not the veto fixed above:
+          // a graded agent-exit trial with no self-report has no truthful event
+          // to land in. It claims no deadline, so task_budget_exhausted would
+          // lie, and task_completed needs the runtimeRefs/steps only the cell
+          // attests. Until such a shape exists it stays infra. Widening it is a
+          // WAL taxonomy decision, tracked separately.
           verifierSettledTrial =
             rewardArtifact !== null &&
             cellArtifact !== null &&
@@ -1677,34 +1686,35 @@ export function classifyTrialTermination(
   return 'external';
 }
 
+/** What the verifier wrote about the trial, read straight from its own
+ * artifacts. It exists independently of `maka-cell-output.json`: that file is
+ * the agent's self-report, and an agent that ran out of budget mid-write never
+ * gets to file one, so a budget exhaustion can still carry the verdict Harbor
+ * reached. This only transports what is on disk — whether the two artifacts
+ * agree, and so whether they amount to a grade, is decided once by the
+ * controller's structuredVerifierGrade, the same judge the completed path uses.
+ * Artifacts that do not parse are not evidence and travel as nothing. */
+function trialVerifierArtifacts(
+  rewardArtifact: string | null,
+  verifierArtifact: string | null,
+  taskId: string,
+): HarborTrialGrade | undefined {
+  if (rewardArtifact === null || verifierArtifact === null) return undefined;
+  const reward = Number(rewardArtifact.trim());
+  if (rewardArtifact.trim().length === 0 || !Number.isFinite(reward)) return undefined;
+  try {
+    return { reward, verifier: parseVerifierOutcome(JSON.parse(verifierArtifact), taskId) };
+  } catch {
+    return undefined;
+  }
+}
+
 /** A verifier outcome is authoritative evidence that the trial was graded only
  * when it reached a verdict. `candidate_timeout` and `infra_failed` say the
  * verifier itself did not conclude, so they never settle a trial whose agent
  * phase already ended abnormally. Unreadable or malformed text is treated as no
  * evidence — the caller's own reader raises the precise diagnosis on the paths
  * that require a verdict. */
-/** The trial's authoritative grade, read straight from the verifier's own
- * artifacts. It exists independently of `maka-cell-output.json`: that file is
- * the agent's self-report, and an agent that ran out of budget mid-write never
- * gets to file one. Returning the grade lets a budget exhaustion carry the
- * verdict Harbor actually reached instead of discarding it. A verifier that did
- * not conclude, or artifacts that do not parse, yield no grade — the caller
- * then records the exhaustion with no score, as before. */
-function authoritativeTrialGrade(
-  rewardArtifact: string | null,
-  verifierArtifact: string | null,
-  taskId: string,
-): { reward: number; verifier: HarborVerifierOutcome } | undefined {
-  if (rewardArtifact === null || !hasConclusiveVerifierOutcome(verifierArtifact)) return undefined;
-  const reward = Number(rewardArtifact.trim());
-  if (rewardArtifact.trim().length === 0 || !Number.isFinite(reward)) return undefined;
-  try {
-    return { reward, verifier: parseVerifierOutcome(JSON.parse(verifierArtifact!), taskId) };
-  } catch {
-    return undefined;
-  }
-}
-
 function hasConclusiveVerifierOutcome(raw: string | null): boolean {
   if (raw === null) return false;
   let parsed: unknown;

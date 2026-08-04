@@ -997,6 +997,9 @@ describe('fixed prompt controller', () => {
       assert.equal(result.events[0]?.type, 'task_budget_exhausted');
       assert.equal(result.events[0]?.eligible, true);
       assert.equal(result.events[0]?.passed, false);
+      // An exhaustion the verifier never graded carries no score, however clean
+      // its evidence: eligibility is about attribution, not about a verdict.
+      assert.equal(result.events[0]?.scored, false);
       assert.equal(result.events[0]?.expectedPromptHash, hashSystemPrompt('fixed prompt\n'));
       if (result.events[0]?.type !== 'task_budget_exhausted')
         assert.fail('expected budget exhaustion event');

@@ -6,7 +6,12 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { tokenSummary } from './helpers/cell-output-fixtures.js';
 import type { HarborCellExecutionIdentity, HarborCellOutput } from '../cell-output.js';
-import { FixedPromptBudgetExhaustedError, type TaskRunInput } from '../fixed-prompt-controller.js';
+import {
+  FixedPromptBudgetExhaustedError,
+  runFixedPromptController,
+  type FixedPromptTaskBudgetExhaustedEvent,
+  type TaskRunInput,
+} from '../fixed-prompt-controller.js';
 import { CODEX_TOOLCHAIN_SPEC } from '../codex-toolchain.js';
 import {
   buildHarborJobConfig,
@@ -276,6 +281,51 @@ async function withRun<T>(
   } finally {
     await rm(base, { recursive: true, force: true });
   }
+}
+
+/** Drives the real Harbor runner through the controller so a trial directory on
+ * disk is projected into the WAL row the benchmark actually counts. */
+async function budgetExhaustedWalEvent(input: {
+  jobsDir: string;
+  repo: string;
+  opts: FakeOptions;
+}): Promise<FixedPromptTaskBudgetExhaustedEvent> {
+  const systemPromptPath = join(input.repo, 'system_prompt.md');
+  await writeFile(systemPromptPath, 'fixed prompt\n', 'utf8');
+  let id = 0;
+  const result = await runFixedPromptController({
+    runId: 'run-1',
+    roundId: 'round-1',
+    config: {
+      id: 'cfg',
+      backend: 'ai-sdk',
+      llmConnectionSlug: 'deepseek',
+      model: 'deepseek-v4-flash',
+    },
+    systemPromptPath,
+    resultsJsonlPath: join(input.jobsDir, 'results.jsonl'),
+    tasks: [{ id: 'task-1', path: '/tasks/cobol-modernization' }],
+    taskRunner: createHarborTaskRunner({
+      makaRepoPath: input.repo,
+      jobsDir: input.jobsDir,
+      model: 'deepseek/deepseek-v4-flash',
+      runHarbor: fakeRunner({
+        trialResult: {
+          exception_info: {
+            exception_type: 'AgentTimeoutError',
+            exception_message: 'Agent execution timed out after 60.0 seconds',
+          },
+        },
+        ...input.opts,
+      }),
+    }),
+    now: () => 100,
+    newId: () => `id-${(id += 1)}`,
+  });
+  const event = result.events[0];
+  assert.equal(event?.type, 'task_budget_exhausted');
+  if (event?.type !== 'task_budget_exhausted') assert.fail('expected budget exhaustion event');
+  return event;
 }
 
 describe('createHarborTaskRunner', () => {
@@ -1983,40 +2033,105 @@ describe('createHarborTaskRunner', () => {
     });
   });
 
-  test('carries the authoritative verifier grade of a timed-out trial that never wrote its cell output', async () => {
-    await withRun(async ({ jobsDir, repo }) => {
-      const runner = createHarborTaskRunner({
-        makaRepoPath: repo,
-        jobsDir,
-        model: 'deepseek/deepseek-v4-flash',
-        runHarbor: fakeRunner({
-          reward: '1.0\n',
-          cell: null,
-          trialResult: {
-            exception_info: {
-              exception_type: 'AgentTimeoutError',
-              exception_message: 'Agent execution timed out after 60.0 seconds',
+  // The runner transports the verifier's artifacts verbatim; the controller
+  // decides what counts as a grade. So the contract under test here is only
+  // "readable artifacts travel, unreadable ones do not" — including reward 0,
+  // which is a real graded failure and must not be silently dropped.
+  for (const trial of [
+    {
+      name: 'a passing reward',
+      opts: { reward: '1.0\n' },
+      expected: { reward: 1, outcome: 'passed' },
+    },
+    { name: 'a zero reward', opts: { reward: '0\n' }, expected: { reward: 0, outcome: 'failed' } },
+    { name: 'no reward file', opts: {}, expected: undefined },
+    { name: 'an empty reward file', opts: { reward: '' }, expected: undefined },
+    { name: 'a non-numeric reward', opts: { reward: 'crashed\n' }, expected: undefined },
+    {
+      name: 'no verifier outcome file',
+      opts: { reward: '1.0\n', verifierOutcome: null },
+      expected: undefined,
+    },
+    {
+      name: 'a malformed verifier outcome',
+      opts: { reward: '1.0\n', verifierOutcome: { schemaVersion: 1, outcome: 'passed' } },
+      expected: undefined,
+    },
+  ] as const) {
+    test(`carries the verifier artifacts of a timed-out trial without cell output: ${trial.name}`, async () => {
+      await withRun(async ({ jobsDir, repo }) => {
+        const runner = createHarborTaskRunner({
+          makaRepoPath: repo,
+          jobsDir,
+          model: 'deepseek/deepseek-v4-flash',
+          runHarbor: fakeRunner({
+            ...trial.opts,
+            cell: null,
+            trialResult: {
+              exception_info: {
+                exception_type: 'AgentTimeoutError',
+                exception_message: 'Agent execution timed out after 60.0 seconds',
+              },
             },
-          },
-        }),
-      });
+          }),
+        });
 
-      await assert.rejects(runner(runInput()), (error: unknown) => {
-        assert.ok(error instanceof FixedPromptBudgetExhaustedError);
-        assert.equal(error.artifactRefs?.harbor?.reward, 1);
-        assert.equal(error.artifactRefs?.harbor?.verifier?.outcome, 'passed');
-        return true;
+        await assert.rejects(runner(runInput()), (error: unknown) => {
+          assert.ok(error instanceof FixedPromptBudgetExhaustedError);
+          assert.equal(error.artifactRefs?.harbor?.reward, trial.expected?.reward);
+          assert.equal(error.artifactRefs?.harbor?.verifier?.outcome, trial.expected?.outcome);
+          return true;
+        });
       });
+    });
+  }
+
+  // The reported defect end to end: the six dropped cells were exactly these
+  // artifacts on disk. Nothing else joins the runner's read of the trial dir to
+  // the WAL row the benchmark counts.
+  test('scores a timed-out trial the verifier graded, from trial dir to WAL', async () => {
+    await withRun(async ({ jobsDir, repo }) => {
+      const event = await budgetExhaustedWalEvent({
+        jobsDir,
+        repo,
+        opts: { reward: '1.0\n', cell: null },
+      });
+      assert.equal(event.passed, true);
+      assert.equal(event.scored, true);
+      assert.equal(event.eligible, true);
+      assert.equal(event.harbor?.reward, 1);
     });
   });
 
-  test('carries no verifier grade when a timed-out trial has no conclusive verifier outcome', async () => {
+  test('refuses to score a timed-out trial whose reward disagrees with its verifier outcome', async () => {
     await withRun(async ({ jobsDir, repo }) => {
-      const runner = createHarborTaskRunner({
-        makaRepoPath: repo,
+      const event = await budgetExhaustedWalEvent({
         jobsDir,
-        model: 'deepseek/deepseek-v4-flash',
-        runHarbor: fakeRunner({
+        repo,
+        opts: {
+          reward: '1.0\n',
+          verifierOutcome: {
+            schemaVersion: 1,
+            outcome: 'failed',
+            attempts: [{ attempt: 1, classification: 'failed', durationMs: 1, reward: 0 }],
+          },
+          cell: null,
+        },
+      });
+      // The completed path rejects these same artifacts as infra
+      // (assertVerifierRewardAgreement); a missing self-report must not turn a
+      // corrupt scoring authority into a pass.
+      assert.equal(event.passed, false);
+      assert.equal(event.scored, false);
+    });
+  });
+
+  test('refuses to score a timed-out trial whose verifier never concluded', async () => {
+    await withRun(async ({ jobsDir, repo }) => {
+      const event = await budgetExhaustedWalEvent({
+        jobsDir,
+        repo,
+        opts: {
           reward: '1.0\n',
           verifierOutcome: {
             schemaVersion: 1,
@@ -2024,20 +2139,10 @@ describe('createHarborTaskRunner', () => {
             attempts: [{ attempt: 1, classification: 'timeout', durationMs: 1 }],
           },
           cell: null,
-          trialResult: {
-            exception_info: {
-              exception_type: 'AgentTimeoutError',
-              exception_message: 'Agent execution timed out after 60.0 seconds',
-            },
-          },
-        }),
+        },
       });
-
-      await assert.rejects(runner(runInput()), (error: unknown) => {
-        assert.ok(error instanceof FixedPromptBudgetExhaustedError);
-        assert.equal(error.artifactRefs?.harbor, undefined);
-        return true;
-      });
+      assert.equal(event.passed, false);
+      assert.equal(event.scored, false);
     });
   });
 
