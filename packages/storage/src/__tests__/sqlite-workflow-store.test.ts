@@ -395,6 +395,15 @@ describe('SQLite workflow stores', () => {
         );
         assert.equal(reminder.createdAt, createdAt);
         assert.equal(reminder.updatedAt, createdAt);
+        // The injected clock also governs validation, so a runAt still ahead
+        // of wall time but behind that clock is rejected.
+        await assert.rejects(
+          store.create(
+            { title: 'Behind the injected clock', runAt: Date.now() + 60_000 },
+            Date.now() + 2 * 60_000,
+          ),
+          /must be in the future/,
+        );
       } finally {
         store.close();
       }
