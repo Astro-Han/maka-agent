@@ -11,6 +11,7 @@ const { packageWindowsX64, runCommand } = await import(
 const { npmSpawnOptions } = await import(new URL('npm-spawn.mjs', import.meta.url));
 const {
   assertWindowsProductVersion,
+  powerShellLiteral,
   readPeMachine,
   verifyPackagedWindowsApp,
   verifyWindowsX64Exe,
@@ -146,6 +147,14 @@ test('the packaged Windows app is checked for every unsigned helper that could s
       `${helper} is not among the paths the packaged app is checked against`,
     );
   }
+});
+
+test('paths reach PowerShell as literals, not as strings it expands', () => {
+  // A double-quoted PowerShell string expands $, and the path being verified is
+  // an argument this script does not choose.
+  assert.equal(powerShellLiteral('D:/a/Maka.exe'), "'D:/a/Maka.exe'");
+  assert.equal(powerShellLiteral("C:/it's/Maka.exe"), "'C:/it''s/Maka.exe'");
+  assert.equal(powerShellLiteral('C:/$env:TEMP/Maka.exe'), "'C:/$env:TEMP/Maka.exe'");
 });
 
 test('the PE machine is read from the executable header', async () => {

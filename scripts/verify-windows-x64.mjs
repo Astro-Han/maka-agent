@@ -29,6 +29,12 @@ function runPowerShell(run, script) {
   return run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
 }
 
+// A single-quoted PowerShell string is literal — a double-quoted one would
+// expand `$` in a path we did not choose.
+export function powerShellLiteral(value) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 // electron-builder writes the Windows product version resource in the four-part
 // form Windows wants (app-builder-lib `AppInfo.getVersionInWeirdWindowsForm`),
 // so 0.1.5 ships as 0.1.5.0 and the release version is its first three parts.
@@ -93,7 +99,7 @@ export async function verifyPackagedWindowsApp(
 
   const { stdout } = await runPowerShell(
     run,
-    `(Get-Item -LiteralPath ${JSON.stringify(executable)}).VersionInfo.ProductVersion`,
+    `(Get-Item -LiteralPath ${powerShellLiteral(executable)}).VersionInfo.ProductVersion`,
   );
   assertWindowsProductVersion(stdout, desktopManifest.version);
 
@@ -137,11 +143,16 @@ export async function verifyWindowsX64Exe(
   const extracted = join(temporaryDirectory, 'app');
 
   try {
+    // Not Expand-Archive: it walks the entries through the PowerShell pipeline
+    // and takes over half an hour on a packaged Electron app, which is most of
+    // an hour added to every release. This is the library Expand-Archive calls,
+    // without that overhead.
     await runPowerShell(
       run,
-      `Expand-Archive -LiteralPath ${JSON.stringify(zipPath)} -DestinationPath ${JSON.stringify(
-        extracted,
-      )} -Force`,
+      `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
+        `[System.IO.Compression.ZipFile]::ExtractToDirectory(${powerShellLiteral(
+          zipPath,
+        )}, ${powerShellLiteral(extracted)})`,
     );
     await verifyApp(extracted, { workingDirectory: temporaryDirectory });
 
