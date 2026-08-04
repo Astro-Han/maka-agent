@@ -34,8 +34,8 @@
    full height — the resize handle, which used to draw it, starts below the
    titlebar so its drag zone is not swallowed by the window drag strip, and a
    line that begins 36px down beside one that runs edge to edge is exactly the
-   mismatch this replaces. The plate's `overflow: hidden` rounds the outer
-   corners for free. */
+   mismatch this replaces. The plate's `overflow: clip` rounds the outer corners
+   for free. */
 /* The column's motion box, and the only part of the column that survives the
    collapse (chat-workbar.tsx). It owns the animated width and the clip; the
    column inside keeps a fixed width so it slides off rather than reflowing.
@@ -71,7 +71,19 @@
    and the column's teardown is scheduled on that transition's end. Grabbing the
    handle while the panel is closing would otherwise strand the column mounted
    behind a shut panel. */
-.maka-detail-with-artifacts:has([data-resizing]) .maka-workbar-motion {
+/* Astryx marks `data-resizing` only while a POINTER is down; its arrow-key path
+   commits a size and ends in the same tick, so it never appears there. Without
+   the focused handle in this gate, every keypress restarts the ease and a 10px
+   step takes 280ms to arrive — measured 400 → 405.7 → 408.1 → … → 410 — while
+   the announced `aria-valuenow` is already at the new value. Holding the key
+   crawls. `:focus-visible` is the keyboard half of the same "the user is
+   sizing this right now" fact.
+
+   Scoped away from the collapsed state so a handle that still holds focus
+   cannot cap the collapse ease itself; the box carries that state, which is
+   what makes this expressible here. */
+.maka-detail-with-artifacts:has([data-resizing], .maka-workbar-resize-handle:focus-visible)
+  .maka-workbar-motion:not([data-collapsed]) {
   transition-duration: 0.01ms;
 }
 
