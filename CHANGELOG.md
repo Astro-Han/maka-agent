@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+## 0.1.5 - 2026-08-05
+
+### Highlights
+
+- Added provider-native web search: one `WebSearch` routing layer that selects
+  the current model provider or explicit Tavily execution, with OpenAI and
+  Anthropic implementations, durable replay, citation metadata, and privacy-mode
+  coverage across Desktop, CLI, Runtime Host, and opt-in Headless Harbor.
+- Extended Runtime Host ownership to Plan turn transitions, Plan and Daily
+  Review runtime state, Deep Research state, and derived Session effects, and
+  added its Desktop client foundation: session adapter, catalog, execution, and
+  domain IPC, plus effective pricing projection.
+- Bundled an English Computer Use Skill tailored to the shipping semantic action
+  surface, auto-installed only when a Computer Use backend is available without
+  overwriting modified or untrusted copies.
+- Made app updates background and task-aware: discovery and download now live in
+  Electron main, and restart/install is guarded by a main-owned activity
+  snapshot that confirms how many tasks it interrupts.
+- Restored the native application menu and unified platform command routing.
+- Gated managed-workspace execution behind an owner-bound, short-lived authority
+  scope and sealed baseline admission with a durable Git receipt, so a
+  capability is usable only while the storage root, workspace binding, and
+  canonical head describe the same Git state.
+- Continued the Astryx redesign of Settings: every capability gets its own
+  disclosure, a settled value stays a row until you ask to edit it, and the
+  specs and jargon nobody can act on are gone; project files left Settings, the
+  junk drawer emptied into the workbar toggle, and project and branch joined the
+  composer footer control row.
+- Let the Inspector trace filter by what a reader actually asks, and closed the
+  follow-ups left on the trace panel.
+
+### Performance
+
+- Lazy-mounted sidebar session trees.
+- Removed the swarm ledger full-scan hot path.
+
+### Reliability and developer experience
+
+- Fixed copied tool authority facts on branched tools, preserved stream liveness
+  across filtered parts, returned proxied responses at headers instead of body
+  EOF, landed the terminal fact a stop claims, and made the execution boundary
+  the sole file-path authority in one realpath space.
+- Made realtime session creation single-flight, released settled bot typing
+  listeners, honored the default permission mode immediately, reset incompatible
+  operational state, and resolved permission overlay assets in bundled dev.
+- Bounded Headless teardown and marked the output replay, reaped the scoped
+  command's replay, kept Harbor archive ids within ref grammar, stopped handing
+  graded competitor arms this repo's tree, made Maka's settlement window
+  reachable at the Harbor boundary, honored the command-timeout floor, resolved
+  `host.docker.internal` for in-container arms, unified `canonicalJson` into a
+  single serializer, added the Reasonix benchmark arm, and raised the A/B
+  pair-concurrency cap to 16.
+- Rehydrated an unanswered user question the surface never received, and made
+  thinking strength follow the chosen level on Kimi/StepFun/MiniMax coding
+  plans.
+- Added an a11y audit that flags `aria-label` on elements whose role cannot hold
+  a name, and established the Windows support baseline.
+- Replaced fixed waits with explicit barriers in runtime tests, owned the temp
+  namespace in the test runners, seeded a real project in the sidebar rename
+  spec, eliminated Desktop smoke false failures, and fixed the serial workspace
+  batch that never ran after a parallel failure.
+
+### Removed
+
+- Removed dead storage modules, consumer-less Desktop IPC bridge surface, dead
+  shell CSS recipes, and the reusable raw worktree path from runtime consumers.
+
+### Distribution
+
+- Ships for Apple Silicon macOS as a signed and notarized DMG and ZIP.
+- The bundled Computer Use skill ships with the app, but the Computer Use
+  executor remains excluded from this release.
+
 ## 0.1.4 - 2026-08-04
 
 ### Highlights
