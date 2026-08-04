@@ -42,6 +42,10 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   // top edge while its CONTENT keeps the titlebar clearance — miss that and
   // the tone starts one clearance below the sidebar's, which is the same
   // mismatched seam turned 90°.
+  // Measured AFTER the handle above took focus, deliberately: the column
+  // reaches that edge by hanging above the plate's padding box, and a plate
+  // that is a scroll container scrolls that overhang into view on focus and
+  // stays there. Keep this after a focus, or it stops seeing that.
   const plateBox = (await page.locator('.maka-panel-detail').boundingBox())!;
   const workbarBox = (await workbar.boundingBox())!;
   expect(Math.round(workbarBox.y)).toBe(Math.round(plateBox.y));

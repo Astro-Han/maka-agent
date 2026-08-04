@@ -99,6 +99,16 @@ describe('workbar motion CSS contract', () => {
     assert.match(css, /\.maka-workbar-motion[^{]*\{[^}]*transition-duration:\s*0\.01ms/);
   });
 
+  it('keeps the plate a frame rather than a scrollport', async () => {
+    const css = await readRendererContractCss();
+    // The column reaches the plate's top edge by hanging above the plate's
+    // padding box. To an `overflow: hidden` plate that overhang is scrollable
+    // overflow, so focusing anything in the column — the resize handle is
+    // reachable by Tab — scrolls the whole plate up by the clearance and leaves
+    // it there. `clip` clips identically and is not a scroll container.
+    assert.match(css, /\.maka-panel-detail\s*\{[^}]*overflow:\s*clip/);
+  });
+
   it('animates the box and holds the column still inside it', async () => {
     const css = await readRendererContractCss();
     // The E2E fixture caps every transition, so no rendered test can see these

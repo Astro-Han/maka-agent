@@ -109,7 +109,13 @@
   flex-direction: column;
   border-radius: var(--radius-modal);
   background: var(--agents-content-area-bg);
-  overflow: hidden;
+  /* `clip`, not `hidden`: the plate is a frame, never a scrollport. A column
+     that reaches the plate's top edge does it by hanging above this padding box
+     (`.maka-workbar-motion`), and that overhang is scrollable overflow to a
+     `hidden` box — focusing anything inside it, the resize handle included,
+     makes the browser scroll the whole plate up by the clearance and leave it
+     there. `clip` clips the same and is not a scroll container at all. */
+  overflow: clip;
   /* Clear the absolute chrome strip so content starts below the transparent
      titleband. Named, because a column inside the plate that paints its own
      surface has to reach the plate's edge and re-apply this to its content —
