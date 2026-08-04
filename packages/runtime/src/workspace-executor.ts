@@ -249,7 +249,7 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   }
 
   async resolveWritablePath(input: WorkspaceResolvePathInput): Promise<WorkspaceResolvePathResult> {
-    return { path: await canonicalPathInsideCwd(input.cwd, input.path, input.label) };
+    return { path: (await canonicalPathInsideCwd(input.cwd, input.path, input.label)).path };
   }
 
   async writeLockKey(input: WorkspaceWriteLockKeyInput): Promise<WorkspaceWriteLockKeyResult> {
@@ -300,10 +300,10 @@ function shellEscape(arg: string): string {
 }
 
 /**
- * Canonical path of `inputPath` relative to the session cwd, or a containment
- * error. Both sides of the check live in the realpath space: the root and the
- * candidate (through its deepest existing ancestor, since the target may not
- * exist yet). Comparing a realpath'd root against a merely resolved candidate
+ * Canonical session cwd and the canonical path of `inputPath` under it, or a
+ * containment error. Both sides of the check live in the realpath space: the
+ * root, and the candidate through its deepest existing ancestor (the target may
+ * not exist yet). Comparing a realpath'd root against a merely resolved candidate
  * rejected every legitimate absolute path whenever the session cwd sat under a
  * symlink — macOS tmpdirs (`/var` → `/private/var`) and symlinked workspace
  * roots. Following the symlinks does not weaken containment: a link inside the
@@ -313,19 +313,11 @@ async function canonicalPathInsideCwd(
   cwd: string,
   inputPath: string,
   label: string,
-): Promise<string> {
+): Promise<{ root: string; path: string }> {
   const root = await fs.realpath(cwd);
   const requested = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath);
-  const candidate = await realpathAllowMissing(requested);
-
-  if (!isPathInside(root, candidate)) {
-    throw new Error(
-      `${label} path must stay inside session cwd ${JSON.stringify(root)}; ` +
-        `received ${JSON.stringify(inputPath)}, which resolves to ${JSON.stringify(candidate)}.`,
-    );
-  }
-
-  return candidate;
+  const candidate = assertInsideCwd(root, await realpathAllowMissing(requested), inputPath, label);
+  return { root, path: candidate };
 }
 
 async function resolveExistingInsideCwd(
@@ -333,8 +325,25 @@ async function resolveExistingInsideCwd(
   inputPath: string,
   label: string,
 ): Promise<string> {
-  const candidate = await canonicalPathInsideCwd(cwd, inputPath, label);
+  const { root, path: candidate } = await canonicalPathInsideCwd(cwd, inputPath, label);
   // The read/search callers depend on the target existing; surface that here
-  // rather than as a downstream open/spawn failure.
-  return await fs.realpath(candidate);
+  // rather than as a downstream open/spawn failure. Re-check the result: a
+  // segment that was missing a moment ago can have become a symlink out of the
+  // cwd since it was canonicalised.
+  return assertInsideCwd(root, await fs.realpath(candidate), inputPath, label);
+}
+
+function assertInsideCwd(
+  root: string,
+  candidate: string,
+  inputPath: string,
+  label: string,
+): string {
+  if (!isPathInside(root, candidate)) {
+    throw new Error(
+      `${label} path must stay inside session cwd ${JSON.stringify(root)}; ` +
+        `received ${JSON.stringify(inputPath)}, which resolves to ${JSON.stringify(candidate)}.`,
+    );
+  }
+  return candidate;
 }
