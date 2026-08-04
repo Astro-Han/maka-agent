@@ -50,7 +50,3 @@ jobs:
         run: |
           version="$(node -p "require('./apps/desktop/package.json').version")"
           npm run verify:windows-x64 -- "apps/desktop/release/Maka-${version}-win-x64.exe"
-
-      - name: Report what was produced
-        if: always()
-        run: ls -l apps/desktop/release || true

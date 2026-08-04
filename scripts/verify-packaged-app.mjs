@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { access, mkdir, readFile, realpath, rm } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
@@ -72,7 +72,7 @@ export async function assertMissing(path) {
   throw new Error(`Forbidden release resource exists: ${path}`);
 }
 
-export async function reserveTcpPort() {
+async function reserveTcpPort() {
   const server = createServer();
   await new Promise((resolvePromise, reject) => {
     server.once('error', reject);
@@ -89,7 +89,7 @@ export async function reserveTcpPort() {
   return address.port;
 }
 
-export function delay(milliseconds) {
+function delay(milliseconds) {
   return new Promise((resolvePromise) => {
     setTimeout(resolvePromise, milliseconds);
   });
@@ -239,55 +239,6 @@ export function isolatedUserEnv(homeDirectory, { temporaryDirectory = homeDirect
     TEMP: temporaryDirectory,
     TMP: temporaryDirectory,
   };
-}
-
-export async function smokePackagedFilesystemWorker(
-  executable,
-  worker,
-  { workingDirectory, run = runCommand } = {},
-) {
-  const workspace = await realpath(workingDirectory);
-  const target = join(workspace, 'filesystem-worker-smoke.txt');
-  const content = 'maka-filesystem-worker-ok';
-  const operationBoundary = {
-    filesystem: {
-      entries: [{ path: target, access: 'write', scope: 'exact' }],
-    },
-  };
-  const request = {
-    version: 4,
-    requestId: 'release-filesystem-worker-smoke',
-    operation: { kind: 'write', cwd: workspace, path: target, content },
-    operationBoundary,
-    expectedTarget: {
-      enforcementPath: target,
-      access: 'write',
-      scope: 'exact',
-      targetType: 'missing',
-    },
-  };
-
-  await rm(target, { force: true });
-  try {
-    const result = await run(executable, [worker], {
-      cwd: workspace,
-      env: {
-        ELECTRON_RUN_AS_NODE: '1',
-        ...isolatedUserEnv(join(workspace, 'worker-home'), { temporaryDirectory: workspace }),
-      },
-      input: `${JSON.stringify(request)}\n`,
-    });
-    const response = JSON.parse(result.stdout);
-    if (
-      response?.ok !== true ||
-      response.result?.kind !== 'write' ||
-      (await readFile(target, 'utf8')) !== content
-    ) {
-      throw new Error(`Packaged filesystem worker smoke failed: ${result.stdout.trim()}`);
-    }
-  } finally {
-    await rm(target, { force: true });
-  }
 }
 
 export async function smokePackagedRenderer(executable, { workingDirectory } = {}) {

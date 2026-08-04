@@ -1,4 +1,13 @@
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -9,7 +18,6 @@ import {
   makePtyProbe,
   runCommand,
   sha256File,
-  smokePackagedFilesystemWorker,
   smokePackagedRenderer,
 } from './verify-packaged-app.mjs';
 
@@ -20,6 +28,57 @@ const ptyProbe = makePtyProbe('/bin/echo', ['maka-node-pty-ok']);
 
 function runCommandFromRepo(command, args, options = {}) {
   return runCommand(command, args, { cwd: repoRoot, ...options });
+}
+
+// macOS-only: the worker exists to enforce a sandbox profile, and Windows has no
+// implementation of one, so the app there runs file tools in-process instead.
+async function smokePackagedFilesystemWorker(
+  executable,
+  worker,
+  { workingDirectory, run = runCommand } = {},
+) {
+  const workspace = await realpath(workingDirectory);
+  const target = join(workspace, 'filesystem-worker-smoke.txt');
+  const content = 'maka-filesystem-worker-ok';
+  const operationBoundary = {
+    filesystem: {
+      entries: [{ path: target, access: 'write', scope: 'exact' }],
+    },
+  };
+  const request = {
+    version: 4,
+    requestId: 'release-filesystem-worker-smoke',
+    operation: { kind: 'write', cwd: workspace, path: target, content },
+    operationBoundary,
+    expectedTarget: {
+      enforcementPath: target,
+      access: 'write',
+      scope: 'exact',
+      targetType: 'missing',
+    },
+  };
+
+  await rm(target, { force: true });
+  try {
+    const result = await run(executable, [worker], {
+      cwd: workspace,
+      env: {
+        ELECTRON_RUN_AS_NODE: '1',
+        ...isolatedUserEnv(join(workspace, 'worker-home'), { temporaryDirectory: workspace }),
+      },
+      input: `${JSON.stringify(request)}\n`,
+    });
+    const response = JSON.parse(result.stdout);
+    if (
+      response?.ok !== true ||
+      response.result?.kind !== 'write' ||
+      (await readFile(target, 'utf8')) !== content
+    ) {
+      throw new Error(`Packaged filesystem worker smoke failed: ${result.stdout.trim()}`);
+    }
+  } finally {
+    await rm(target, { force: true });
+  }
 }
 
 function assertSingleArchitecture(output, subject) {
