@@ -212,7 +212,10 @@ export function SubagentSettingsPage(props: {
     <SettingsPage>
       <SettingsSection
         title={copy.section.title}
-        description={copy.section.count(presets.length, MAX_SUBAGENT_PRESETS)}
+        /* The 「/ 64」 was a system ceiling nobody can raise or act on;
+           MAX_SUBAGENT_PRESETS still gates creation, and the disabled
+           新建 button says so when you actually reach it. */
+        description={copy.section.count(presets.length)}
         action={presets.length > 0 ? (
           <Button
             ref={addButtonRef}

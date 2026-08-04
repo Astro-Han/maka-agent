@@ -13,7 +13,7 @@ type ProfileCopy = {
 export type SubagentSettingsCopy = {
   section: {
     title: string;
-    count(total: number, max: number): string;
+    count(total: number): string;
     add: string;
     emptyTitle: string;
     emptyDescription: string;
@@ -84,7 +84,7 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
   zh: {
     section: {
       title: '已批准的子 Agent',
-      count: (total, max) => `共 ${total} / ${max} 个配置`,
+      count: (total) => `共 ${total} 个配置`,
       add: '添加子 Agent',
       emptyTitle: '还没有子 Agent 配置',
       emptyDescription: '添加一个配置后，主 Agent 就能把合适的任务交给独立模型处理。',
@@ -165,7 +165,7 @@ const SETTINGS_SUBAGENTS_COPY_BY_LOCALE = {
   en: {
     section: {
       title: 'Approved subagents',
-      count: (total, max) => `${total} of ${max} presets`,
+      count: (total) => `${total} presets`,
       add: 'Add subagent',
       emptyTitle: 'No subagent presets yet',
       emptyDescription: 'Add a preset so the main agent can delegate suitable work to a separate model.',
