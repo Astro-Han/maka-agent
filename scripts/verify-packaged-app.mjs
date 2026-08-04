@@ -5,6 +5,9 @@ import { access, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
+// A verifier that hangs is worse than one that fails: the release workflow just
+// burns its timeout with no indication of which step stopped. Every command a
+// packaged app runs gets a deadline, so a hang reports where it happened.
 export function runCommand(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
@@ -14,6 +17,25 @@ export function runCommand(command, args, options = {}) {
     });
     let stdout = '';
     let stderr = '';
+    const deadline =
+      options.timeoutMs === undefined
+        ? null
+        : setTimeout(() => {
+            child.kill('SIGKILL');
+            reject(
+              new Error(
+                `${command} ${args.join(' ')} did not finish within ${options.timeoutMs}ms` +
+                  `${stdout.trim() ? `\nstdout: ${stdout.trim()}` : ''}` +
+                  `${stderr.trim() ? `\nstderr: ${stderr.trim()}` : ''}`,
+              ),
+            );
+          }, options.timeoutMs);
+    const settle = (finish) => (value) => {
+      if (deadline) clearTimeout(deadline);
+      finish(value);
+    };
+    resolvePromise = settle(resolvePromise);
+    reject = settle(reject);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {

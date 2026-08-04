@@ -25,6 +25,12 @@ function runCommandFromRepo(command, args, options = {}) {
   return runCommand(command, args, { cwd: repoRoot, ...options });
 }
 
+// The release workflow shows only this script's output, so each stage announces
+// itself: an unfinished stage is the one that hung.
+function step(message) {
+  console.log(`[verify-windows] ${message}`);
+}
+
 function runPowerShell(run, script) {
   return run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
 }
@@ -89,28 +95,42 @@ export async function verifyPackagedWindowsApp(
   const filesystemWorker = join(resources, 'workers', 'filesystem-worker.js');
   const appAsar = join(resources, 'app.asar');
 
+  step('checking packaged resources');
   await requirePath(executable);
   await assertPackagedResources(resources, { requirePath, forbidPath });
 
+  step('reading the executable architecture');
   const machine = await readMachine(executable);
   if (machine !== amd64Machine) {
     throw new Error(`${executableName} must be x64, found PE machine 0x${machine.toString(16)}.`);
   }
 
+  step('reading the product version resource');
   const { stdout } = await runPowerShell(
     run,
     `(Get-Item -LiteralPath ${powerShellLiteral(executable)}).VersionInfo.ProductVersion`,
   );
   assertWindowsProductVersion(stdout, desktopManifest.version);
 
+  step('smoking node-pty through conpty');
   await run(executable, ['-e', ptyProbe, join(appAsar, 'package.json')], {
     env: {
       ELECTRON_RUN_AS_NODE: '1',
       ...isolatedUserEnv(join(workingDirectory, 'pty-home')),
     },
+    timeoutMs: 60_000,
   });
-  await smokeFilesystemWorker(executable, filesystemWorker, { workingDirectory, run });
+
+  step('smoking the filesystem worker');
+  await smokeFilesystemWorker(executable, filesystemWorker, {
+    workingDirectory,
+    run: (command, args, options = {}) => run(command, args, { timeoutMs: 60_000, ...options }),
+  });
+
+  step('smoking the packaged renderer');
   await smokeRenderer(executable, { workingDirectory });
+
+  step('packaged app verified');
 }
 
 // Neither release artifact is inspected as an artifact: the NSIS installer has
@@ -153,6 +173,7 @@ export async function verifyWindowsX64Release(
   try {
     await verifyApp(unpackedDirectory, { workingDirectory: temporaryDirectory });
 
+    step('checksumming the release artifacts');
     const checksums = [];
     for (const path of [exePath, zipPath]) {
       const sha256 = await checksum(path);
