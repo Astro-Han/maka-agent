@@ -114,6 +114,40 @@ describe('SessionManager terminal ledger invariants', () => {
     expect(terminalEvents[0]?.actions?.stateDelta?.abortSource).toBe('renderer.stop_button');
   });
 
+  test('stopSession commits a terminal fact when the backend stream never ends', async () => {
+    const store = new TinySessionStore();
+    const runStore = new TinyAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new NeverEndingBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(21_000),
+      runtimeSource: 'test',
+    });
+    const session = await manager.createSession(makeInput());
+
+    const iterator = manager
+      .sendMessage(session.id, { turnId: 'turn-1', text: 'hello' })
+      [Symbol.asyncIterator]();
+    expect((await iterator.next()).value?.type).toBe('text_delta');
+    await manager.stopSession(session.id, { source: 'stop_button' });
+
+    const [run] = await runStore.listSessionRuns(session.id);
+    if (!run) throw new Error('run was not recorded');
+    expect(run.status).toBe('cancelled');
+    expect(run.abortSource).toBe('renderer.stop_button');
+    const terminalEvents = (await runStore.readRuntimeEvents(session.id, run.runId)).filter(
+      isTerminalRuntimeEvent,
+    );
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.status).toBe('aborted');
+    expect(terminalEvents[0]?.actions?.stateDelta?.abortSource).toBe('renderer.stop_button');
+  });
+
   test('terminal acceptance wins over a later stop during terminal persistence', async () => {
     const terminalAppendStarted = deferred<void>();
     const releaseTerminalAppend = deferred<void>();
@@ -1435,6 +1469,36 @@ class StopDuringSendBackend implements AgentBackend {
     this.stopReturned.resolve();
   }
 
+  async respondToSandboxBoundary(_decision: SandboxBoundaryResponse): Promise<void> {}
+  async dispose(): Promise<void> {}
+}
+
+/**
+ * A turn parked on an unanswered interaction: `stop()` returns, but the event
+ * stream never produces another event and never ends, so nothing downstream
+ * can finalize the run.
+ */
+class NeverEndingBackend implements AgentBackend {
+  readonly kind = 'fake' as const;
+  readonly sessionId: string;
+
+  constructor(ctx: BackendFactoryContext) {
+    this.sessionId = ctx.sessionId;
+  }
+
+  async *send(input: BackendSendInput): AsyncIterable<SessionEvent> {
+    yield {
+      type: 'text_delta',
+      id: `${input.turnId}-text`,
+      turnId: input.turnId,
+      ts: 1,
+      messageId: 'message-1',
+      text: 'before the question',
+    };
+    await new Promise<never>(() => {});
+  }
+
+  async stop(_reason: 'user_stop' | 'redirect'): Promise<void> {}
   async respondToSandboxBoundary(_decision: SandboxBoundaryResponse): Promise<void> {}
   async dispose(): Promise<void> {}
 }

@@ -287,6 +287,26 @@ export class AgentRun {
     if (this.terminalClaim?.owner === 'stop') this.terminalClaim.stopCompleted = true;
   }
 
+  /**
+   * Cash the terminal claim a stop already took.
+   *
+   * `stop()` claims the terminal outcome, but only `finalize()` — reached when
+   * the backend's event stream ends — has ever cashed it. A turn parked on an
+   * unanswered interaction never ends that stream, so the Session projection
+   * read as aborted while the run stayed non-terminal in the ledger forever,
+   * and every later turn dropped it from model context. Cash the claim at the
+   * stop instead. The claim keeps this idempotent: a stream that later
+   * produces its own terminal event finds the claim taken and writes nothing.
+   */
+  async settleStopTerminal(): Promise<void> {
+    if (this.terminalClaim?.owner !== 'stop' || this.terminalClaim.event) return;
+    const ts = this.lastTs || this.input.now();
+    const finalStatus = { status: 'aborted' as const };
+    this.finalStatus ??= finalStatus;
+    this.reserveFinalizationTerminal(finalStatus, ts);
+    await this.commitTerminalRun(finalStatus, ts);
+  }
+
   recordRunTrace(event: RunTraceEvent): void {
     if (!this.input.runStore || !this.runStoreAvailable) return;
     this.enqueueRunStore('append trace event', async () => {

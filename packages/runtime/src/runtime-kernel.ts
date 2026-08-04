@@ -2283,7 +2283,16 @@ export class RuntimeKernel implements RuntimeKernelLike {
       await this.appendStopProjection(sessionId, operation.abortNote);
       operation.abortNoteProjected = true;
     }
+    // The Session projection above now reads as aborted. The ledger has to say
+    // the same thing before this stop reports success: a Run left non-terminal
+    // here stays that way, because the stream that would have finalized it is
+    // exactly the one the stop could not wake.
     for (const target of stoppedRuns.values()) {
+      try {
+        await target.run?.settleStopTerminal();
+      } catch (error) {
+        failures.add(error);
+      }
       target.run?.completeStop();
       target.stopCompleted = true;
     }
