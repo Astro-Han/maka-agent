@@ -173,6 +173,7 @@ import {
   showSessionWorkspaceUnavailableToast,
 } from './session-workspace-errors';
 import { AppShell as AstryxAppShell } from '@astryxdesign/core/AppShell';
+import type { SideNavImperativeCollapseHandle } from '@astryxdesign/core/SideNav';
 
 type ComposerImportOwner = {
   sessionId: string | undefined;
@@ -525,6 +526,10 @@ function AppShellContent({
   const [paletteOpen, openPalette, closePalette] = useCommandPalette();
   const [viewMode, setViewMode] = useState<SessionViewMode>('conversation');
   const composerRef = useRef<ComposerHandle>(null);
+  // The rail's toggle has to reach Astryx's resizable state, not just this
+  // boolean — see the prop's note on SessionListPanel. The sidenav is mounted
+  // for the whole shell, so the handle is always live by the time it is called.
+  const sessionSideNavHandleRef = useRef<SideNavImperativeCollapseHandle | null>(null);
   // Codex-style quote side panel: a companion (fork of the main session) opened
   // from text selections in the transcript, surfaced as a transient workbar tab.
   // `quotes` accumulates excerpts staged for the next follow-up — selecting more
@@ -2078,7 +2083,7 @@ function AppShellContent({
       >
         <AppShellTopbarActions
           sidebarCollapsed={sessionListCollapsed}
-          onToggleSidebar={() => setSessionListCollapsed((current) => !current)}
+          onToggleSidebar={() => sessionSideNavHandleRef.current?.getCollapseState()?.toggle()}
           sidebarToggleHidden={settingsOpen}
           onOpenSearchModal={() => setSearchModalOpen(true)}
         />
@@ -2104,6 +2109,7 @@ function AppShellContent({
         inert={hasModalOpen ? true : undefined}
         sideNav={
           <SessionListPanel
+            collapseHandleRef={sessionSideNavHandleRef}
             collapsed={sessionListCollapsed}
             onCollapsedChange={setSessionListCollapsed}
             width={sessionListWidth}

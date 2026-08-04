@@ -3,7 +3,7 @@ import {
   SegmentedControl,
   SegmentedControlItem,
 } from '@astryxdesign/core/SegmentedControl';
-import { SideNav } from '@astryxdesign/core/SideNav';
+import { SideNav, type SideNavImperativeCollapseHandle } from '@astryxdesign/core/SideNav';
 import type { NavModuleMemory, NavSelection } from './nav-selection.js';
 import {
   SessionHistoryList,
@@ -15,13 +15,20 @@ import { SessionSidebarFooter, SessionSidebarNav, type SidebarUpdateReminder } f
 import { Clock, FolderOpen } from './icons.js';
 import { useUiLocale } from './locale-context.js';
 import { getConversationCopy } from './conversation-copy.js';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, Ref } from 'react';
 
 export type SessionViewMode = 'conversation' | 'project';
 
 export function SessionListPanel(props: {
   collapsed?: boolean;
   onCollapsedChange?(collapsed: boolean): void;
+  /* The rail's collapse is two pieces of state, not one: the boolean this shell
+     owns, and the width Astryx's `useResizable` keeps behind `resizable`.
+     Dragging the handle past Astryx's threshold zeroes that width and reports
+     the collapse outward, so a toggle that only flips the boolean back leaves
+     the rail expanded over a stored width of 0 — the next drag starts from
+     zero. `toggle()` is the one call that moves both. */
+  collapseHandleRef?: Ref<SideNavImperativeCollapseHandle>;
   width?: number;
   onWidthChange?(width: number): void;
   minWidth?: number;
@@ -103,6 +110,7 @@ export function SessionListPanel(props: {
       style={{ '--maka-sidenav-width': `${width}px` } as CSSProperties}
     >
       <SideNav
+        handleRef={props.collapseHandleRef}
         className="maka-session-panel agents-sidebar"
         aria-label={copy.listAriaLabel}
         collapsible={{
