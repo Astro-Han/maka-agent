@@ -120,6 +120,11 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   // Rendered by Astryx's own Collapsible; chat-message.css targets it to give
   // reasoning/tool disclosures one trigger dialect inside the turn body (#1768).
   'astryx-collapsible-trigger',
+  // Astryx's Item (themeProps class on every settings row). rows.css squares
+  // its corners inside an open row group: Item ships a 10px radius for its
+  // standalone chip use, and our hairline is a border on the Item itself, so
+  // the radius bent the divider at both ends.
+  'astryx-item',
   // Rendered by `useTriggerMenu` for the composer's `@` / `/` menus.
   // composer-mention.css caps its width: upstream sets a 180px floor and no
   // ceiling, and our rows carry a non-wrapping second line.
