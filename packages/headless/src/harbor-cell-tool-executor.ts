@@ -18,6 +18,11 @@ import {
 
 const execAsync = promisify(nodeExec);
 
+// Container mode's fallback when no command and no operator asks for a timeout.
+// Its host-cell counterpart is maka_agent.py's _BRIDGE_DEFAULT_TIMEOUT_SEC: two
+// enforcers in two processes, so two constants, but the same cell must not be
+// killed at different times depending on which isolation mode ran it. Change
+// both or neither.
 export const HARBOR_CELL_DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
 
 // The bridge returns response headers only after the isolated command exits.
