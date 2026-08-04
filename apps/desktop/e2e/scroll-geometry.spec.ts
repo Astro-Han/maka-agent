@@ -253,3 +253,22 @@ test('returning to the session after visiting skills re-settles the new transcri
   await settleGeometry(page, { pinned: true });
   expectHonestClimb(await climbToTop(page));
 });
+
+// The empty surface is back here as a live metric, unlike the flush contract
+// the header notes moved out to static CSS. What centres the hero is the
+// ABSENCE of Astryx's push-to-bottom spacer, and the rule that collapses it
+// keys on ChatMessageList's internal DOM — a CSS read can only prove the
+// selector is written, never that it still matches. Shipped uncollapsed, the
+// hero sat 172px below this centre.
+test('the empty-chat hero centres in the reading column', async ({ window: page }) => {
+  await expect(page.locator('.maka-hero-empty-chat')).toBeVisible();
+  const offset = await page.evaluate(() => {
+    const hero = document.querySelector('.maka-hero-empty-chat');
+    const column = hero?.closest('.maka-chat-message-list');
+    if (!hero || !column) throw new Error('Expected the empty-chat hero inside the message list');
+    const heroBox = hero.getBoundingClientRect();
+    const columnBox = column.getBoundingClientRect();
+    return Math.abs((heroBox.top + heroBox.bottom) / 2 - (columnBox.top + columnBox.bottom) / 2);
+  });
+  expect(offset).toBeLessThanOrEqual(1);
+});

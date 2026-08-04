@@ -98,6 +98,9 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   'astryx-button',
   'astryx-badge',
   'astryx-resize-handle-pill',
+  // EmptyState's root (EmptyState.tsx themeProps). chat-message.css reads it to
+  // tell an empty chat surface from a conversation with rows in it.
+  'astryx-empty-state',
   // The column resize handle's hit area (Resizable/ResizeHandle themeProps).
   // shell-layout.css starts it below the chrome strip so its top 36px is not
   // swallowed by the window drag rect.
