@@ -82,14 +82,19 @@
 }
 
 
-/* The column resize handle is the one control positioned against the column BOX
-   rather than flowing inside it (Astryx gives it `position:absolute; top:0;
+/* The SIDENAV's resize handle is the one control positioned against the column
+   BOX rather than flowing inside it (Astryx gives it `position:absolute; top:0;
    inset-block-end:0`), so the columns' `padding-top` clearance does not move it
    and its top 36px lands under the chrome strip. The strip is the topmost hit
    surface across the whole band, so that part of the handle cannot be grabbed at
    all — pointer-down there reaches the OS as a window drag instead. Start the
-   handle below the strip; `inset-block-end: 0` still takes it to the bottom. */
-.maka-shell-astryx .astryx-resize-handle {
+   handle below the strip; `inset-block-end: 0` still takes it to the bottom.
+
+   Keyed on the sidenav handle's own testid, not on the class: every Astryx
+   ResizeHandle carries that class, and a page's own inspector handle is a
+   `position: relative` flex item, so the same `top` shoved its divider 36px
+   down the page — it started below the header's rule instead of meeting it. */
+.maka-shell-astryx [data-testid="astryx-sidenav-resize-handle"] {
   top: var(--h-titlebar);
 }
 

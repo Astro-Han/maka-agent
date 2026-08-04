@@ -345,41 +345,40 @@ export function PlanReminderPanel(props: {
             </DropdownMenu>
           </>
         }
+        toolbar={(
+          <div className="maka-module-page-bar">
+            {props.hubHeader?.badge}
+            <Toolbar
+              size="sm"
+              label={copy.page.filtersAriaLabel}
+              startContent={
+                <SegmentedControl
+                  value={planView}
+                  onChange={(value) => {
+                    if (value !== 'tasks' && value !== 'runs') return;
+                    setPlanView(value);
+                  }}
+                  label={copy.page.viewsAriaLabel}
+                  size="sm"
+                >
+                  <SegmentedControlItem value="tasks" label={copy.page.tasks} />
+                  <SegmentedControlItem value="runs" label={copy.page.runs} />
+                </SegmentedControl>
+              }
+              endContent={planView === 'tasks' ? listControls : (
+                <Selector
+                  value={runRange}
+                  onChange={(value) => setRunRange(value as typeof runRange)}
+                  label={copy.page.range}
+                  isLabelHidden
+                  width={148}
+                  options={copy.page.rangeOptions.map(([value, label]) => ({ value, label }))}
+                />
+              )}
+            />
+          </div>
+        )}
       >
-        {/* Module switch on the left (navigation), this page's view + filters
-            on the right — the same split 每日回顾 uses. */}
-        <div className="maka-module-page-bar">
-          {props.hubHeader?.badge}
-          <Toolbar
-            size="sm"
-            label={copy.page.filtersAriaLabel}
-            startContent={
-              <SegmentedControl
-                value={planView}
-                onChange={(value) => {
-                  if (value !== 'tasks' && value !== 'runs') return;
-                  setPlanView(value);
-                }}
-                label={copy.page.viewsAriaLabel}
-                size="sm"
-              >
-                <SegmentedControlItem value="tasks" label={copy.page.tasks} />
-                <SegmentedControlItem value="runs" label={copy.page.runs} />
-              </SegmentedControl>
-            }
-            endContent={planView === 'tasks' ? listControls : (
-              <Selector
-                value={runRange}
-                onChange={(value) => setRunRange(value as typeof runRange)}
-                label={copy.page.range}
-                isLabelHidden
-                width={148}
-                options={copy.page.rangeOptions.map(([value, label]) => ({ value, label }))}
-              />
-            )}
-          />
-        </div>
-
         {planView === 'tasks' ? (
           <div className="maka-module-page-panel">
             {normalizedListQuery && (

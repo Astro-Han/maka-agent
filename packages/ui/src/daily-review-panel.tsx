@@ -256,46 +256,45 @@ export function DailyReviewPanel(props: {
       title={props.hubHeader?.title ?? copy.page.title}
       meta={totals ? copy.archive.sessionCount(totals.sessionCount) : undefined}
       actions={primaryAction}
+      toolbar={(
+        <div className="maka-module-page-bar">
+          {props.hubHeader?.badge}
+          <Toolbar
+            size="sm"
+            label={copy.page.timeRange}
+            startContent={(
+              <SegmentedControl value={String(range)} onChange={changeRange} label={copy.page.rangeSwitch} size="sm">
+                {copy.page.rangeOptions.map(([value, label]) => (
+                  <SegmentedControlItem key={value} value={value} label={label} />
+                ))}
+              </SegmentedControl>
+            )}
+            endContent={(
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  isIconOnly
+                  icon={<ChevronLeft />}
+                  label={copy.date.earlier(copy.date.unit.day)}
+                  onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, -1))}
+                />
+                <Text type="label" weight="semibold" className="maka-daily-review-range-label">{rangeLabel}</Text>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  isIconOnly
+                  icon={<ChevronRight />}
+                  label={copy.date.later(copy.date.unit.day)}
+                  isDisabled={offsetDays >= 0}
+                  onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, 1))}
+                />
+              </>
+            )}
+          />
+        </div>
+      )}
     >
-      {/* Module switch on the left (navigation), this page's scope controls on
-          the right — the same split 计划提醒 uses. */}
-      <div className="maka-module-page-bar">
-        {props.hubHeader?.badge}
-        <Toolbar
-          size="sm"
-          label={copy.page.timeRange}
-          startContent={(
-            <SegmentedControl value={String(range)} onChange={changeRange} label={copy.page.rangeSwitch} size="sm">
-              {copy.page.rangeOptions.map(([value, label]) => (
-                <SegmentedControlItem key={value} value={value} label={label} />
-              ))}
-            </SegmentedControl>
-          )}
-          endContent={(
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                isIconOnly
-                icon={<ChevronLeft />}
-                label={copy.date.earlier(copy.date.unit.day)}
-                onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, -1))}
-              />
-              <Text type="label" weight="semibold" className="maka-daily-review-range-label">{rangeLabel}</Text>
-              <Button
-                variant="ghost"
-                size="sm"
-                isIconOnly
-                icon={<ChevronRight />}
-                label={copy.date.later(copy.date.unit.day)}
-                isDisabled={offsetDays >= 0}
-                onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, 1))}
-              />
-            </>
-          )}
-        />
-      </div>
-
       <div key="activity" className="maka-module-page-panel" data-loading={loading ? 'true' : undefined}>
       {error ? (
         <Banner

@@ -42,23 +42,15 @@
   /* Fixed 4-up: auto-fit wrapped the four totals 3 + 1 whenever the page
      column was narrower than the viewport-based breakpoint could see. */
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  /* Bottom rule only — the control bar above already draws the top one. */
-  border-block-end: var(--border-width-hairline) solid var(--foreground-10);
+  /* No rules, in or around the strip. Four labelled numbers on their own grid
+     read as four numbers; hairlines between them only redraw the columns. The
+     page keeps lines for one job — saying where a list row ends. */
+  gap: var(--space-2) var(--space-6);
+  padding-block: var(--space-2) var(--space-5);
 }
 
 .maka-daily-review-metric {
   min-width: 0;
-  padding: var(--space-3) var(--space-4);
-}
-
-/* The strip is inset with the rest of the page, so the first cell must not
-   add a second inset — its label lines up with the page title. */
-.maka-daily-review-metric:first-child {
-  padding-inline-start: 0;
-}
-
-.maka-daily-review-metric + .maka-daily-review-metric {
-  border-inline-start: var(--border-width-hairline) solid var(--foreground-10);
 }
 
 .maka-daily-review-report-prose {
@@ -96,13 +88,5 @@
 
   .maka-daily-review-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .maka-daily-review-metric:nth-child(odd) {
-    border-inline-start: 0;
-  }
-
-  .maka-daily-review-metric:nth-child(n + 3) {
-    border-top: var(--border-width-hairline) solid var(--foreground-10);
   }
 }

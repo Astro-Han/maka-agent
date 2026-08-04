@@ -5,9 +5,8 @@
 // Built on Astryx `Layout` rather than a hand-rolled grid, following the
 // `incident-console` page template — the vendor's archetype for exactly this
 // page: dense rows, not cards, with a resizable inspector panel beside them.
-// Layout owns what we used to own by hand: header/content/panel zones, the
-// full-bleed divider under the header, padding collapse between adjacent
-// slots, and scroll containment.
+// Layout owns what we used to own by hand: header/content/panel zones,
+// padding collapse between adjacent slots, and scroll containment.
 //
 // `contentWidth` clamps the page into a centred column, the way every other
 // main page in this app is clamped — nothing here runs edge to edge. Astryx
@@ -16,12 +15,19 @@
 // keeps the rows' left edge. The inspector rides INSIDE that column rather
 // than beside it, which is what keeps the two aligned when it opens.
 //
-// Header shape is the template's, too: one row — title, one quiet supporting
-// line, then the actions. No lede paragraph, so the page opens straight into
-// its content instead of spending three stacked tiers before the first row.
+// Header shape is the template's, too: title, one quiet supporting line and
+// the actions on one row, then the page's control bar as the header's last
+// row. No lede paragraph, so the page opens straight into its content instead
+// of spending three stacked tiers before the first row.
+//
+// No rules anywhere in the page chrome — not under the header, not beside the
+// inspector. The only lines on the page are the list's own row dividers, which
+// say where a row ends; a header rule and a panel rule would only restate a
+// boundary the layout already draws, and this app separates columns tonally
+// (DESIGN.md, One Working Plane) rather than with hairlines.
 
 import type { ReactNode } from 'react';
-import { HStack, Heading, StackItem, Text } from '@astryxdesign/core';
+import { HStack, Heading, StackItem, Text, VStack } from '@astryxdesign/core';
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from '@astryxdesign/core/Layout';
 import { ResizeHandle, useResizable } from '@astryxdesign/core/Resizable';
 import { useMediaQuery } from '@astryxdesign/core/hooks';
@@ -44,6 +50,14 @@ export interface ModulePageProps {
   meta?: ReactNode;
   /** Right-aligned header cluster: the primary action, then any overflow menu. */
   actions?: ReactNode;
+  /**
+   * The page's control bar — module switch on the left, this page's view and
+   * filters on the right. It belongs to the whole page, not to the list, so it
+   * lives in the header above the content/inspector split. Its own bottom
+   * hairline is then the ONE horizontal rule on the page, and the inspector's
+   * vertical divider starts exactly where that rule ends.
+   */
+  toolbar?: ReactNode;
   /** Page body. Rendered edge-to-edge; the caller owns its own padding. */
   children: ReactNode;
   /**
@@ -62,6 +76,7 @@ export function ModulePage({
   title,
   meta,
   actions,
+  toolbar,
   children,
   inspector,
   inspectorLabel,
@@ -95,27 +110,34 @@ export function ModulePage({
       padding={5}
       className={cn('maka-module-page', className)}
       header={
-        <LayoutHeader hasDivider>
-          <HStack gap={3} vAlign="center">
-            <StackItem size="fill">
-              <HStack gap={2} vAlign="center" wrap="wrap">
-                <Heading level={1}>{title}</Heading>
-                {meta != null ? (
-                  <Text type="supporting" color="secondary">
-                    {meta}
-                  </Text>
-                ) : null}
-              </HStack>
-            </StackItem>
-            {actions}
-          </HStack>
+        <LayoutHeader>
+          <VStack gap={4}>
+            <HStack gap={3} vAlign="center">
+              <StackItem size="fill">
+                <HStack gap={2} vAlign="center" wrap="wrap">
+                  <Heading level={1}>{title}</Heading>
+                  {meta != null ? (
+                    <Text type="supporting" color="secondary">
+                      {meta}
+                    </Text>
+                  ) : null}
+                </HStack>
+              </StackItem>
+              {actions}
+            </HStack>
+            {toolbar}
+          </VStack>
         </LayoutHeader>
       }
       content={<LayoutContent padding={0}>{children}</LayoutContent>}
       end={
         inspector != null && !isNarrow ? (
           <>
-            <ResizeHandle direction="horizontal" isReversed resizable={inspectorPanel.props} hasDivider />
+            {/* No divider: the panel's own edge is already the boundary, and
+                a standing rule here would be a second one drawn on top of it.
+                The handle stays a hover-revealed grip, which is the vendor's
+                own no-divider mode. */}
+            <ResizeHandle direction="horizontal" isReversed resizable={inspectorPanel.props} />
             <LayoutPanel resizable={inspectorPanel.props} label={inspectorLabel} padding={5}>
               {inspector}
             </LayoutPanel>

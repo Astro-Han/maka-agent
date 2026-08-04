@@ -65,8 +65,8 @@
    计划提醒 / 每日回顾 render an Astryx `Layout` (header / content / end
    panel) instead of the grid this file used to hand-roll, following the
    vendor's `incident-console` page template. Layout owns the zones, the
-   full-bleed header divider, padding collapse and scroll containment, so
-   the module main is reduced to giving it a box to fill — plus the top
+   padding collapse and the scroll containment, so the module main is
+   reduced to giving it a box to fill — plus the top
    inset the frameless titlebar still needs. */
 .maka-module-main[data-page-shell="layout"] {
   display: flex;
@@ -81,9 +81,13 @@
   min-height: 0;
 }
 
-/* The one control bar inside a page's content: module switch on the left,
-   this page's view + filters on the right. LayoutContent is edge-to-edge
-   (padding={0}) so the rows below can bleed; the bar pays its own inset. */
+/* The page's one control bar: module switch on the left, this page's view +
+   filters on the right. It is the last row of the Layout header.
+
+   No inline padding: the header's inner wrapper already insets it to the same
+   left edge as the title and the rows. No rule under it either — the header
+   needs no line to be read as the header, and one drawn here would be the only
+   full-width line on a page whose every other edge stops at the column. */
 .maka-module-page-bar {
   display: flex;
   align-items: center;
@@ -91,8 +95,7 @@
   gap: var(--space-3);
   flex-wrap: wrap;
   row-gap: var(--space-2);
-  padding: var(--space-3) var(--space-5);
-  border-block-end: var(--border-width-hairline) solid var(--border);
+  padding-block-start: var(--space-3);
 }
 
 .maka-module-page-panel {
