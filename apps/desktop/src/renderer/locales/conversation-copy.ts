@@ -60,7 +60,7 @@ export interface DesktopConversationCopy {
     regeneratedTo: string;
     regeneratedToTooltip: string;
   };
-  workbar: { ariaLabel: string; sectionsAriaLabel: string; tasks: string; browser: string; files: string; inspector: string; quoteTab: string };
+  workbar: { ariaLabel: string; sectionsAriaLabel: string; collapse: string; tasks: string; browser: string; files: string; inspector: string; quoteTab: string };
   inspector: {
     ariaLabel: string;
     loadFailed: string;
@@ -155,7 +155,7 @@ const COPY = {
     },
     footer: { labels: { regenerate: '重新生成', branch: '分支', copy: '复制', info: '详情' }, pending: '正在处理…', regenerateRunning: '当前回答仍在进行中，结束后再重新生成', regenerateAgain: '已重新生成过，再次点击将创建新的并行回答', regenerate: '让模型重新生成本轮回答', branchRunning: '当前回答仍在进行中，结束后再分支', branchAborted: '从中断前的上下文分支出新对话', branch: '基于此回答的上下文分支出新对话', copy: '复制回答到剪贴板', copyEmpty: '此回答尚无可复制的内容' },
     lineage: { regeneratedFrom: '重新生成自旧回答', regeneratedFromTooltip: '这是重新生成的并行回答，点击查看被保留的旧回答', regeneratedTo: '已重新生成 → 新回答', regeneratedToTooltip: '点击跳转到重新生成的新回答' },
-    workbar: { ariaLabel: '会话工作栏', sectionsAriaLabel: '会话工作栏栏目', tasks: '任务', browser: '浏览器', files: '文件', inspector: '追踪', quoteTab: '追问引用' },
+    workbar: { ariaLabel: '会话工作栏', sectionsAriaLabel: '会话工作栏栏目', collapse: '收起会话工作栏', tasks: '任务', browser: '浏览器', files: '文件', inspector: '追踪', quoteTab: '追问引用' },
     inspector: {
       ariaLabel: '会话追踪',
       loadFailed: '追踪读取失败',
@@ -235,7 +235,7 @@ const COPY = {
     },
     footer: { labels: { regenerate: 'Regenerate', branch: 'Branch', copy: 'Copy', info: 'Details' }, pending: 'Working…', regenerateRunning: 'Wait for the current response to finish before regenerating', regenerateAgain: 'A regenerated response already exists; click again to create another parallel response', regenerate: 'Generate another response to this turn', branchRunning: 'Wait for the current response to finish before branching', branchAborted: 'Branch from the context before the interruption', branch: 'Branch a new conversation from this response', copy: 'Copy response to clipboard', copyEmpty: 'This response has no content to copy' },
     lineage: { regeneratedFrom: 'Regenerated from previous response', regeneratedFromTooltip: 'This is a parallel regenerated response; click to view the retained previous response', regeneratedTo: 'Regenerated → New response', regeneratedToTooltip: 'Jump to the regenerated response' },
-    workbar: { ariaLabel: 'Conversation workbar', sectionsAriaLabel: 'Conversation workbar sections', tasks: 'Tasks', browser: 'Browser', files: 'Files', inspector: 'Trace', quoteTab: 'Quoted' },
+    workbar: { ariaLabel: 'Conversation workbar', sectionsAriaLabel: 'Conversation workbar sections', collapse: 'Collapse conversation workbar', tasks: 'Tasks', browser: 'Browser', files: 'Files', inspector: 'Trace', quoteTab: 'Quoted' },
     inspector: {
       ariaLabel: 'Session trace',
       loadFailed: 'Could not read the trace',

@@ -319,10 +319,6 @@ function ComposedShell(props: {
           workbarAvailable
           workbarCollapsed={false}
           onToggleWorkbar={noop}
-          onOpenFeedback={noop}
-          onOpenPalette={noop}
-          onOpenHelp={noop}
-          onOpenHealth={noop}
         />
       </header>
       <AstryxAppShell

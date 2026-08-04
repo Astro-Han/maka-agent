@@ -1,10 +1,13 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import {
+  IconButton,
   TaskLedgerPanel,
   deriveTaskLedgerPanelModel,
   useUiLocale,
   type ChatModelChoice,
 } from '@maka/ui';
+import { PanelRightClose } from '@maka/ui/icons';
+import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { Tab, TabList } from '@astryxdesign/core/TabList';
 import { Toolbar } from '@astryxdesign/core/Toolbar';
 import type { SessionSummary } from '@maka/core';
@@ -70,6 +73,21 @@ export function SessionWorkbar(props: {
           label={copy.sectionsAriaLabel}
           size="sm"
           dividers={['bottom']}
+          /* The close control sits with the tabs it closes, not on its own
+             strip in the titlebar. The titlebar keeps a toggle only while the
+             workbar is shut, where it is the one way back. */
+          endContent={(
+            <Tooltip content={copy.collapse}>
+              <IconButton
+                label={copy.collapse}
+                icon={<PanelRightClose size={15} aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                onClick={props.onDismiss}
+                aria-expanded
+              />
+            </Tooltip>
+          )}
           startContent={
             <TabList
               className="maka-session-workbar-tab-list"

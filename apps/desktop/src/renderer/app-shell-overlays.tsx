@@ -58,6 +58,7 @@ export function AppShellOverlays(props: {
   settingsConnectionDetailSlug: string | undefined;
   settingsCreateProviderType: ProviderType | undefined;
   onOpenDailyReview(): void;
+  onOpenKeyboardHelp(): void;
   onOpenSettingsSession(sessionId: string): void;
   helpOpen: boolean;
   closeHelp(): void;
@@ -123,6 +124,7 @@ export function AppShellOverlays(props: {
             initialConnectionSlug={settingsConnectionDetailSlug}
             initialCreateProviderType={settingsCreateProviderType}
             onOpenDailyReview={props.onOpenDailyReview}
+            onOpenKeyboardHelp={props.onOpenKeyboardHelp}
             onOpenSession={props.onOpenSettingsSession}
           />
         </Suspense>

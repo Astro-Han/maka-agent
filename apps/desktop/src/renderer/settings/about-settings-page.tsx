@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { Badge, List, ListItem } from '@astryxdesign/core';
+import { Badge, Link, List, ListItem } from '@astryxdesign/core';
 import { Sparkles } from '@maka/ui/icons';
 import {
   Banner,
@@ -10,6 +10,7 @@ import {
   useUiLocale,
 } from '@maka/ui';
 import { SettingsActions, SettingsPage, SettingsSection } from './settings-section';
+import { SettingRow } from './settings-rows';
 import { settingsActionErrorMessage } from './settings-error-copy';
 import { SettingsSkeletonStack } from './settings-skeleton';
 import { useActionGuard } from './use-action-guard';
@@ -24,7 +25,10 @@ const PLATFORM_LABEL: Record<string, string> = {
   linux: 'Linux',
 };
 
-export function AboutSettingsPage() {
+/** Where 复制环境信息 is meant to be pasted (owner msg `36501869`). */
+const ISSUE_TRACKER_URL = 'https://github.com/maka-agent/maka-agent/issues';
+
+export function AboutSettingsPage(props: { onOpenKeyboardHelp?(): void }) {
   const locale = useUiLocale();
   const copy = getSettingsPreferencesCopy(locale).about;
   const sharedCopy = getSettingsSharedCopy(locale);
@@ -172,9 +176,30 @@ export function AboutSettingsPage() {
 
           What is left is the version itself (in the hero above) and the one
           action. */}
+      {/* The keyboard sheet's home. It used to be reachable only from the
+          titlebar's `…` drawer and from two shortcuts — which made the panel
+          that lists the shortcuts openable only by shortcut. It is reference
+          material about the app, so it belongs on 关于, and this is the entry
+          a mouse can find. */}
+      {props.onOpenKeyboardHelp && (
+        <SettingsSection title={sharedCopy.groups.reference}>
+          <SettingRow
+            title={copy.keyboardShortcuts}
+            detail={copy.keyboardShortcutsHelp}
+            action={(
+              <Button variant="ghost" size="sm" onClick={props.onOpenKeyboardHelp} label={copy.keyboardShortcutsOpen} />
+            )}
+          />
+        </SettingsSection>
+      )}
       <SettingsSection title={sharedCopy.groups.buildInfo}>
         <SettingsActions>
           <Button variant="primary" isDisabled={copyingEnvSummary} aria-describedby={envSummaryHelpId} onClick={() => void copyEnvSummary()} label={copyingEnvSummary ? copy.copying : copy.copyEnvironment} />
+          {/* The loop this button was always half of. Its help line has always
+              said "paste it into an issue report", but nothing in the app said
+              where — the old 问题反馈 menu item just reopened this page. Now
+              copy, open, paste. */}
+          <Link href={ISSUE_TRACKER_URL} target="_blank" rel="noreferrer noopener">{copy.reportIssueLabel}</Link>
           <p id={envSummaryHelpId}>
             {copy.copyHelp}
           </p>

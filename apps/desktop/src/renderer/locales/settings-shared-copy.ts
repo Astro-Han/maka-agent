@@ -44,6 +44,7 @@ export type SettingsSharedCopy = {
     reviewSchedule: string;
     reviewScheduleHelp: string;
     buildInfo: string;
+    reference: string;
   };
 };
 
@@ -85,6 +86,7 @@ const SETTINGS_SHARED_COPY_BY_LOCALE = {
       reviewSchedule: '回顾计划',
       reviewScheduleHelp: '每日回顾的生成时间与使用的模型。',
       buildInfo: '版本信息',
+      reference: '参考',
     },
   },
   en: {
@@ -124,6 +126,7 @@ const SETTINGS_SHARED_COPY_BY_LOCALE = {
       reviewSchedule: 'Review schedule',
       reviewScheduleHelp: 'When the daily review runs, and which model writes it.',
       buildInfo: 'Build info',
+      reference: 'Reference',
     },
   },
 } satisfies UiCatalog<SettingsSharedCopy>;

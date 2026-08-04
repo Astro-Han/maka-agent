@@ -52,6 +52,8 @@ export function SettingsModal(props: {
    * gracefully when the shell does not provide the jump.
    */
   onOpenDailyReview?(): void;
+  /** Opens the keyboard sheet; 关于 is its click-reachable home. */
+  onOpenKeyboardHelp?(): void;
   /**
    * Jump from diagnostics surfaces (usage rows, later run history) back to the
    * source conversation. Settings owns the table, shell owns navigation.
@@ -109,6 +111,7 @@ export function SettingsModal(props: {
         initialCreateProviderType={props.initialCreateProviderType}
         initialFocusRef={activeNavRef}
         onOpenDailyReview={props.onOpenDailyReview}
+        onOpenKeyboardHelp={props.onOpenKeyboardHelp}
         onOpenSession={props.onOpenSession}
       />
     </div>

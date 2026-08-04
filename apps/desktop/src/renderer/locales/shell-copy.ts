@@ -354,13 +354,7 @@ type ShellCopy = {
     collapseSidebar: string;
     newTask: string;
     expandWorkbar: string;
-    collapseWorkbar: string;
     workspaceActions: string;
-    feedback: string;
-    openCommandPalette: string;
-    openHelp: string;
-    openHealth: string;
-    moreActions: string;
   };
   app: {
     loadingWorkbarLabel: string;
@@ -1020,13 +1014,7 @@ const SHELL_COPY_BY_LOCALE = {
       collapseSidebar: '收起侧边栏',
       newTask: '新任务',
       expandWorkbar: '展开会话工作栏',
-      collapseWorkbar: '收起会话工作栏',
       workspaceActions: '工作区辅助操作',
-      feedback: '问题反馈',
-      openCommandPalette: '打开命令面板',
-      openHelp: '打开帮助',
-      openHealth: '打开健康中心',
-      moreActions: '更多操作',
     },
     app: {
       loadingWorkbarLabel: '正在加载会话工作栏',
@@ -1524,13 +1512,7 @@ const SHELL_COPY_BY_LOCALE = {
       collapseSidebar: 'Collapse sidebar',
       newTask: 'New task',
       expandWorkbar: 'Expand conversation workbar',
-      collapseWorkbar: 'Collapse conversation workbar',
       workspaceActions: 'Workspace actions',
-      feedback: 'Send feedback',
-      openCommandPalette: 'Open command palette',
-      openHelp: 'Open help',
-      openHealth: 'Open Health Center',
-      moreActions: 'More actions',
     },
     app: {
       loadingWorkbarLabel: 'Loading conversation workbar',

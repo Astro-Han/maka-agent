@@ -74,6 +74,7 @@ export function SettingsSurface(props: {
   initialCreateProviderType?: ProviderType;
   initialFocusRef: RefObject<HTMLButtonElement | null>;
   onOpenDailyReview?(): void;
+  onOpenKeyboardHelp?(): void;
   onOpenSession?(sessionId: string): void;
 }) {
   const locale = useUiLocale();
@@ -362,6 +363,7 @@ export function SettingsSurface(props: {
                       onThemeChange={props.onThemeChange}
                       onThemePaletteChange={props.onThemePaletteChange}
                       onOpenDailyReview={props.onOpenDailyReview}
+                      onOpenKeyboardHelp={props.onOpenKeyboardHelp}
                       onOpenSession={props.onOpenSession}
                       openProviderCatalog={providerCatalogRequested}
                       initialConnectionSlug={props.initialConnectionSlug}
@@ -394,6 +396,7 @@ function SettingsPageBody(props: {
   onThemeChange(pref: ThemePreference): void;
   onThemePaletteChange(palette: ThemePalette): void;
   onOpenDailyReview?(): void;
+  onOpenKeyboardHelp?(): void;
   onOpenSession?(sessionId: string): void;
   openProviderCatalog?: boolean;
   initialConnectionSlug?: string;
@@ -448,7 +451,7 @@ function SettingsPageBody(props: {
         />
       );
     case 'about':
-      return <AboutSettingsPage />;
+      return <AboutSettingsPage onOpenKeyboardHelp={props.onOpenKeyboardHelp} />;
     case 'general':
       return (
         <GeneralSettingsPage
