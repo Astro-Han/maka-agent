@@ -68,6 +68,31 @@ def test_kill_still_runs_after_term_fails() -> None:
     assert signals == ["TERM", "KILL"], signals
 
 
+def test_a_broken_logger_never_replaces_the_agent_failure() -> None:
+    class _RaisingLogger(_Logger):
+        def warning(self, message: str, *args: object) -> None:
+            raise RuntimeError("logging handler is down")
+
+    missing = _Agent(fail=True)
+    del missing.logger
+    raising = _Agent(fail=True)
+    raising.logger = _RaisingLogger()
+
+    for agent in (missing, raising):
+
+        async def run(agent: _Agent = agent) -> None:
+            try:
+                raise TimeoutError("agent deadline")
+            finally:
+                await cleanup_process_scope(agent, object(), "scope-4")
+
+        try:
+            asyncio.run(run())
+        except TimeoutError:
+            continue
+        raise AssertionError("reporting the teardown failure became one")
+
+
 def test_cancellation_still_propagates() -> None:
     class _Cancelling(_Agent):
         async def exec_as_agent(self, environment: object, command: str) -> None:

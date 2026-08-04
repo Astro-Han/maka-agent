@@ -26,9 +26,17 @@ async def cleanup_process_scope(
                 command=scoped_process_cleanup_command(scope, signal),
             )
         except Exception as error:  # noqa: BLE001 - teardown is best effort.
-            agent.logger.warning(
-                "process scope %s %s cleanup failed: %s", scope, signal, error
-            )
+            logger = getattr(agent, "logger", None)
+            if logger is not None:
+                # Reporting the failure must not become one: an exception from
+                # here escapes the same `finally` and rewrites the same agent
+                # failure this function exists to preserve.
+                try:
+                    logger.warning(
+                        "process scope %s %s cleanup failed: %s", scope, signal, error
+                    )
+                except Exception:  # noqa: BLE001 - logging is best effort too.
+                    pass
         if signal == "TERM":
             await asyncio.sleep(0.2)
 
