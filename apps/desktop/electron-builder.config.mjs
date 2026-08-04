@@ -105,6 +105,18 @@ export default {
     // in latest-mac.yml.
     writeUpdateInfo: false,
   },
+  win: {
+    target: [
+      { target: 'nsis', arch: ['x64'] },
+      { target: 'zip', arch: ['x64'] },
+    ],
+    artifactName: 'Maka-${version}-win-${arch}.${ext}',
+    icon: 'assets/icon.png',
+    // No Authenticode certificate yet: the release workflow runs unsigned.
+    // Revisit before publishing a signed Windows build.
+    sign: false,
+    verifyUpdateCodeSignature: false,
+  },
   publish: [
     {
       provider: 'github',
