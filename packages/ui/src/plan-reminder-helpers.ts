@@ -44,22 +44,6 @@ export function toPlanReminderLocalDateTimeValue(ts: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-export function planReminderPresetRunAt(preset: 'ten-minutes' | 'one-hour' | 'tomorrow-morning' | 'next-monday', now: number = Date.now()): number {
-  if (preset === 'ten-minutes') return now + 10 * 60 * 1000;
-  if (preset === 'one-hour') return now + 60 * 60 * 1000;
-  const date = new Date(now);
-  if (preset === 'tomorrow-morning') {
-    date.setDate(date.getDate() + 1);
-    date.setHours(9, 0, 0, 0);
-    return date.getTime();
-  }
-  const day = date.getDay();
-  const daysUntilNextMonday = ((8 - day) % 7) || 7;
-  date.setDate(date.getDate() + daysUntilNextMonday);
-  date.setHours(9, 0, 0, 0);
-  return date.getTime();
-}
-
 export function planReminderTemplateNextRunAt(template: PlanReminderExampleTemplate, now: number = Date.now()): number {
   const nextRun = new Date(now);
   nextRun.setSeconds(0, 0);
