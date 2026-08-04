@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { Link } from '@astryxdesign/core';
 import type { AppSettings, UpdateAppSettingsResult, WebSearchCredentialStatus } from '@maka/core';
 import { normalizeSearchUrl, webSearchCredentialStatusFromResponse } from '@maka/core';
 import { Button, StatusDot, TextInput, RelativeTime, Switch, redactSecrets, useMountedRef, useToast, useUiLocale } from '@maka/ui';
@@ -281,7 +282,7 @@ export function WebSearchSettingsPage(props: {
           />
           {!usingEnvKey && (
             <small className="settingsQuietStatus">
-              <a href="https://tavily.com" target="_blank" rel="noreferrer noopener">tavily.com</a>
+              <Link href="https://tavily.com" target="_blank" rel="noreferrer noopener">tavily.com</Link>
             </small>
           )}
         </SettingsField>
@@ -394,7 +395,7 @@ export function WebSearchSettingsPage(props: {
             <ul className="settingsWebSearchResults" aria-label={copy.resultsAria}>
               {safeRows.map((row, idx) => (
                 <li key={`${row.url}-${idx}`} className="settingsWebSearchResult">
-                  <a href={row.url} target="_blank" rel="noreferrer noopener">{row.title}</a>
+                  <Link href={row.url} target="_blank" rel="noreferrer noopener">{row.title}</Link>
                   <small>{row.source}</small>
                   <p>{row.snippet}</p>
                 </li>
