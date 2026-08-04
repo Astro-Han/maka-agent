@@ -12,12 +12,22 @@ const requiredElectronLicensePaths = [
   join(electronDistributionDirectory, 'LICENSES.chromium.html'),
 ];
 
-function runCommand(command, args) {
+export function runCommand(
+  command,
+  args,
+  { spawnProcess = spawn, platform = process.platform } = {},
+) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawnProcess(command, args, {
       cwd: repoRoot,
       env: process.env,
       stdio: 'inherit',
+      // On Windows npm is npm.cmd, and a bare `npm` never resolves: libuv's
+      // process launcher tries only .com and .exe and ignores PATHEXT, so the
+      // spawn fails with ENOENT before any packaging happens. Going through the
+      // shell is what makes .cmd reachable. Every command here is a repository
+      // constant, so shell quoting is not a concern.
+      shell: platform === 'win32',
     });
     child.once('error', reject);
     child.once('exit', (code, signal) => {

@@ -114,9 +114,10 @@ export default {
     icon: 'assets/icon.png',
     // No Authenticode certificate yet. Being unsigned is the absence of one:
     // electron-builder skips signing when no certificate is configured, and
-    // `forceCodeSigning` is left off so that skip is not an error. Only the
-    // updater has to be told, because it verifies the signature of an update
-    // before installing it. Revisit both when a certificate exists.
+    // `forceCodeSigning` is left off so that skip is not an error. Without a
+    // certificate no publisher name reaches app-update.yml, so electron-updater
+    // would skip its signature check anyway — this states that intent outright
+    // rather than leaving it to fall out. Remove it when a certificate exists.
     verifyUpdateCodeSignature: false,
   },
   publish: [

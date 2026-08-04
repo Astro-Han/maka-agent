@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const { packageWindowsX64 } = await import(new URL('package-windows-x64.mjs', import.meta.url));
+const { packageWindowsX64, runCommand } = await import(
+  new URL('package-windows-x64.mjs', import.meta.url)
+);
 const {
   assertWindowsProductVersion,
   readPeMachine,
@@ -43,6 +46,26 @@ function packagedAppOptions(overrides = {}) {
     ...overrides,
   };
 }
+
+test('npm is spawned through the shell on Windows, the only way npm.cmd resolves', async () => {
+  // libuv's Windows process launcher tries only .com and .exe and ignores
+  // PATHEXT, so a bare `npm` is ENOENT there — the packaging script would die
+  // on its first command. This cannot be caught by running the suite on macOS,
+  // so the spawn strategy itself is what gets pinned.
+  const calls = [];
+  const spawnProcess = (command, args, options) => {
+    calls.push({ command, options });
+    const child = new EventEmitter();
+    setImmediate(() => child.emit('exit', 0, null));
+    return child;
+  };
+
+  await runCommand('npm', ['run', 'build'], { spawnProcess, platform: 'win32' });
+  await runCommand('npm', ['run', 'build'], { spawnProcess, platform: 'darwin' });
+
+  assert.equal(calls[0].options.shell, true);
+  assert.equal(calls[1].options.shell, false);
+});
 
 test('Windows packaging fails closed on hosts that cannot produce the release', async () => {
   await assert.rejects(packageWindowsX64({ platform: 'darwin', arch: 'x64' }), /Windows x64 host/);
