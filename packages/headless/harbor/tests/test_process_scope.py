@@ -13,6 +13,7 @@ Run directly: ``python3 packages/headless/harbor/tests/test_process_scope.py``
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import shutil
 import subprocess
@@ -96,27 +97,58 @@ def test_every_teardown_exec_is_time_bounded() -> None:
     assert agent.timeouts == [CLEANUP_TIMEOUT_SEC, CLEANUP_TIMEOUT_SEC], agent.timeouts
 
 
-def test_the_shared_helper_is_the_only_way_to_issue_a_teardown_exec() -> None:
-    """Two teardowns run these cleanup shells: the adapters' and the bridged
-    executor's in maka_agent.py. The executor's shipped unbounded, and no test
-    here could catch it — this suite is stdlib-only by CI contract, so it cannot
-    import maka_agent at all. Owning the budget in one helper is what makes the
-    gap testable: pin the helper, and no call site can reintroduce it.
-    """
+def test_the_shared_helper_carries_the_budget() -> None:
     agent = _Agent(fail=False)
     asyncio.run(exec_cleanup_command(agent, object(), "cleanup"))
     assert agent.timeouts == [CLEANUP_TIMEOUT_SEC], agent.timeouts
 
 
-def test_the_replay_carries_the_scope_marker() -> None:
-    """The replay is a `cat` the pgid file cannot describe until after it is
-    forked. The marker needs no window to be recorded in — but it is readable
-    only once `env` has exec'd, and not at all where there is no `/proc`. Two
-    partial handles, which is why the ordering below has to do the closing."""
+def test_no_teardown_reaches_exec_as_agent_without_the_helper() -> None:
+    """Pinning the helper is not the same as pinning its use. The bridged
+    executor in maka_agent.py is the call site that actually shipped unbounded
+    and stalled a graded cell for 1524s, and restoring that one line — a direct
+    `exec_as_agent` with no budget — leaves every other test in this file green.
+
+    This suite is stdlib-only by CI contract and maka_agent needs Harbor, so it
+    cannot be imported here. `ast` reads the source without running it, which is
+    enough to pin the thing that matters: the cleanup shells reach the transport
+    through the helper that owns the budget, or they do not run at all.
+    """
+    source = Path(__file__).resolve().parent.parent / "maka_agent.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if "cleanup" not in node.name:
+            continue
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            name = getattr(call.func, "attr", None) or getattr(call.func, "id", None)
+            if name == "exec_as_agent":
+                offenders.append(f"{node.name}:{call.lineno}")
+    assert not offenders, (
+        f"{source.name} teardown calls exec_as_agent directly at {offenders}; "
+        "route it through exec_cleanup_command so the budget cannot be dropped"
+    )
+
+
+def test_the_marker_is_on_the_process_that_owns_both_replays() -> None:
+    """The pgid file cannot describe the replay until after it is forked, so the
+    marker covers that window — but only if it names something that outlives a
+    single kill. Marking each `cat` instead leaves their parent anonymous: it
+    survives the sweep that kills the first `cat` and starts the second, which
+    the sweep has already walked past, and on the last pass that one keeps the
+    caller's stdout open for good. So the owner is what has to carry the marker.
+    """
     command = scoped_command("echo hi", "scope-6", "cid")
     replay = command.split("wait \"$command_pid\"", 1)[1]
-    marker = f"{COMMAND_SCOPE_ENV}=scope-6 {COMMAND_ID_ENV}=cid"
-    assert replay.count(f"env {marker} cat --") == 2, replay
+    marker = f"env {COMMAND_SCOPE_ENV}=scope-6 {COMMAND_ID_ENV}=cid"
+    assert replay.count(marker) == 1, replay
+    owner = replay.split(marker, 1)[1].lstrip()
+    assert owner.startswith("sh -c"), owner
+    assert "cat --" not in owner.split("&", 1)[0].split("sh -c", 1)[0], owner
 
 
 def test_cleanup_kills_the_wrapper_before_it_hunts_for_the_replay() -> None:
@@ -183,6 +215,25 @@ def test_cancellation_still_propagates() -> None:
     assert len(agent.commands) == 1, agent.commands
 
 
+def _process_table() -> str:
+    """The process listing, or `""` where this host will not produce one.
+
+    A sandbox can refuse `ps` even though it is on PATH, so presence is not
+    availability: checking only `which` turns a host that cannot run this test
+    into a host that fails it.
+    """
+    try:
+        return subprocess.run(  # noqa: S603 - fixed argv, no shell interpolation
+            ["ps", "-A", "-o", "pid=,command="],
+            check=False,
+            timeout=30,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def _holders(stdout_path: Path) -> list[str]:
     """The replay processes still holding the pipe open. Draining the pipe would
     unblock the replay and hide the defect, so ask the process table instead.
@@ -192,13 +243,7 @@ def _holders(stdout_path: Path) -> list[str]:
     replay alive at all, which is a false PASS in the one direction that matters.
     So require the command itself to be the replay.
     """
-    listing = subprocess.run(  # noqa: S603 - fixed argv, no shell interpolation
-        ["ps", "-A", "-o", "pid=,command="],
-        check=False,
-        timeout=30,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
+    listing = _process_table().splitlines()
     marker = f"cat -- {stdout_path}"
     return [
         line.strip()
@@ -220,7 +265,7 @@ def test_cleanup_reaps_the_output_replay_so_the_reader_reaches_eof() -> None:
     be enough by itself. A stranded replay means the exec never sees EOF, so the
     cell hangs and the verifier never runs.
     """
-    if shutil.which("bash") is None or shutil.which("ps") is None:
+    if shutil.which("bash") is None or not _process_table():
         return
 
     scope = f"test-scope-{uuid.uuid4().hex}"

@@ -102,9 +102,16 @@ def scoped_command(command: str, scope: str, command_id: str) -> str:
         # and the write below. Neither handle closes that window alone — the
         # cleanup order does, by killing the wrapper before it looks for what
         # the wrapper can still produce.
+        #
+        # The marker goes on the shell that owns both replays, not on each
+        # `cat`. Marking only the `cat`s leaves the owner anonymous: a sweep
+        # kills the first `cat`, the owner survives it and starts the second,
+        # and the second is a process the sweep has already walked past. On the
+        # last pass there is nothing behind it, so that second `cat` holds the
+        # caller's stdout open for good. Killing the owner ends the sequence.
         "set -m; "
-        f"{{ env {marker_env} cat -- {stdout_path}; "
-        f"env {marker_env} cat -- {stderr_path} >&2; }} & replay_pid=$!; "
+        f"env {marker_env} sh -c 'cat -- \"$1\"; cat -- \"$2\" >&2' "
+        f"replay {stdout_path} {stderr_path} & replay_pid=$!; "
         "set +m; "
         f"printf '%s\\n' \"$replay_pid\" > {replay_pgid_path}; "
         "wait \"$replay_pid\" 2>/dev/null; "
