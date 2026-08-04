@@ -10,6 +10,7 @@ import {
   useUiLocale,
 } from '@maka/ui';
 import { PasswordInput } from './password-input';
+import { SettingsExpandableRow } from './settings-expandable-row';
 import { getProviderSettingsCopy } from '../locales/settings-provider-copy';
 import { providerDisplay } from './provider-display';
 import { EnabledModelManager } from './provider-enabled-model-manager';
@@ -215,14 +216,15 @@ function ConnectionDetailInner(props: ConnectionDetailProps) {
           <VStack gap={0}>
             <Divider />
             {supportsApiKey && (
-              <ExpandableSettingRow
+              <>
+              <SettingsExpandableRow
                 label={copy.modelKey}
                 value={apiKeyStatusHint}
                 actionLabel={hasSecret === true ? copy.change : copy.set}
                 isEditing={editingRow === 'key'}
                 isDisabled={detailActionBusy}
                 canSave={hasApiKeyChange}
-                saveLabel={busy ? copy.saving : copy.save}
+                saveLabel={copy.save}
                 cancelLabel={copy.cancel}
                 onEdit={() => openRow('key')}
                 onCancel={() => { setApiKey(''); setEditingRow(null); }}
@@ -246,17 +248,20 @@ function ConnectionDetailInner(props: ConnectionDetailProps) {
                     {copy.getModelKey}
                   </Link>
                 )}
-              </ExpandableSettingRow>
+              </SettingsExpandableRow>
+              <Divider />
+              </>
             )}
             {showsEndpoint && (
-              <ExpandableSettingRow
+              <>
+              <SettingsExpandableRow
                 label={copy.endpoint}
                 value={savedBaseUrl || copy.endpointDefault}
                 actionLabel={copy.edit}
                 isEditing={editingRow === 'endpoint'}
                 isDisabled={detailActionBusy}
                 canSave={hasBaseUrlChange}
-                saveLabel={busy ? copy.saving : copy.save}
+                saveLabel={copy.save}
                 cancelLabel={copy.cancel}
                 onEdit={() => openRow('endpoint')}
                 onCancel={() => { setBaseUrl(savedBaseUrl); setEditingRow(null); }}
@@ -270,7 +275,9 @@ function ConnectionDetailInner(props: ConnectionDetailProps) {
                   placeholder={defaults.baseUrl}
                   isDisabled={detailActionBusy}
                 />
-              </ExpandableSettingRow>
+              </SettingsExpandableRow>
+              <Divider />
+              </>
             )}
           </VStack>
         )}
@@ -325,63 +332,6 @@ function ConnectionDetailInner(props: ConnectionDetailProps) {
  * as heading → sentence → controls; it splits into two columns for free if the
  * shell ever widens.
  */
-/**
- * A settled value: its name, what it currently is, and one link to change it.
- * Editing swaps the row in place for the control plus save / cancel — the
- * settings-sidebar template's ExpandableRow, which is the shape Astryx uses for
- * exactly this (a password that is already set, an address already on file).
- *
- * The Divider trails each row, as in the template, so a stack of rows carries
- * its own separators without the caller interleaving them.
- */
-function ExpandableSettingRow(props: {
-  label: string;
-  value: string;
-  actionLabel: string;
-  isEditing: boolean;
-  isDisabled: boolean;
-  canSave: boolean;
-  saveLabel: string;
-  cancelLabel: string;
-  onEdit(): void;
-  onCancel(): void;
-  onSave(): void | Promise<void>;
-  children: ReactNode;
-}) {
-  return (
-    <>
-      {props.isEditing ? (
-        <VStack gap={3} paddingBlock={4}>
-          <Text type="body" weight="semibold">{props.label}</Text>
-          {props.children}
-          <HStack gap={2}>
-            <Button
-              variant="primary"
-              isDisabled={props.isDisabled || !props.canSave}
-              onClick={() => void props.onSave()}
-              label={props.saveLabel}
-            />
-            <Button variant="ghost" isDisabled={props.isDisabled} onClick={props.onCancel} label={props.cancelLabel} />
-          </HStack>
-        </VStack>
-      ) : (
-        <HStack hAlign="between" vAlign="start" gap={4} paddingBlock={4}>
-          <VStack gap={0}>
-            <Text type="body" weight="semibold">{props.label}</Text>
-            <Text type="supporting" color="secondary">{props.value}</Text>
-          </VStack>
-          {/* A button, not a Link: this opens a form, it does not navigate. As
-              a link it announced itself as one, ignored Space, and pointed at
-              "#". Astryx has no link-styled variant, and ghost is the right
-              weight for a row affordance anyway. */}
-          <Button variant="ghost" size="sm" isDisabled={props.isDisabled} onClick={props.onEdit} label={props.actionLabel} />
-        </HStack>
-      )}
-      <Divider />
-    </>
-  );
-}
-
 function DetailSection(props: { title: string; description: string; children: ReactNode }) {
   return (
     /* `columnGap`, not `gap`: the template's 10 is the gutter BETWEEN the two
