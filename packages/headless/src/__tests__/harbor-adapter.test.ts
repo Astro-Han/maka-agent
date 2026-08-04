@@ -4172,12 +4172,23 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "reasonix.toml" not in run_command, run_command
     assert 'api_key_env = "MAKA_REASONIX_PROXY_TOKEN"' in run_command, run_command
     assert 'base_url = "http://host.docker.internal:43210"' in run_command, run_command
-    # Secret boundary: the cell-scoped proxy token exists only in the process
-    # environment — never the command line, never the generated config.
+    # Reasonix resolves api_key_env from its own credential store rather than
+    # the process environment, so the token has to reach $REASONIX_HOME/.env.
+    # It must get there by shell expansion of the env var, never by
+    # interpolating the value into the command.
+    assert "/tmp/maka-reasonix/.env" in run_command, run_command
+    assert '"$MAKA_REASONIX_PROXY_TOKEN"' in run_command, run_command
+    # umask must precede every write so the credential file is never even
+    # momentarily group- or world-readable.
+    assert run_command.index("umask 077") < run_command.index("/tmp/maka-reasonix/.env"), run_command
+    # Secret boundary: the token value never appears in the command line (and so
+    # never in the process table or Harbor's command logs) nor in the config.
     assert PROXY_TOKEN not in run_command, run_command
+    assert PROXY_TOKEN not in agent._config_toml(), agent._config_toml()
     assert run_env["MAKA_REASONIX_PROXY_TOKEN"] == PROXY_TOKEN, run_env
     assert run_env["REASONIX_HOME"] == "/tmp/maka-reasonix", run_env
-    assert PROXY_TOKEN not in agent._config_toml(), agent._config_toml()
+    # The credential file lives in the isolated home, never the task workspace.
+    assert "/tmp/maka-reasonix/" in run_command, run_command
 
     agent.populate_context_post_run(object())
     cell = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))

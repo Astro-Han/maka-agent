@@ -34,9 +34,13 @@ _TOOLCHAIN_MANIFEST = _TOOLCHAIN_ROOT / "manifest.json"
 _TOOLCHAIN_CHECKSUMS = _TOOLCHAIN_ROOT / "checksums.sha256"
 _OUTPUT_PATH = Path("/logs/agent/reasonix.jsonl")
 _REASONIX_HOME = Path("/tmp/maka-reasonix")
-# Reasonix resolves a provider's key through api_key_env, so only the variable
-# name lands in config.toml. A Maka-specific name keeps the proxy token clear of
-# any DEEPSEEK_API_KEY a stray environment or global .env might also define.
+# Reasonix resolves api_key_env against its own credential store
+# ($REASONIX_HOME/.env), NOT the process environment — see
+# ProviderEntry.APIKey -> storedCredentialValue in internal/config. So the
+# config file names the key and this file holds it, both inside an isolated
+# home outside the task workspace. A Maka-specific name keeps the cell-scoped
+# proxy token clear of any DEEPSEEK_API_KEY a stray environment might define.
+_REASONIX_CREDENTIALS = _REASONIX_HOME / ".env"
 _PROXY_TOKEN_ENV = "MAKA_REASONIX_PROXY_TOKEN"
 # A reserved provider name: it cannot collide with Reasonix's built-in deepseek
 # entry, so the proxy route is unambiguous regardless of what else resolves.
@@ -118,9 +122,20 @@ class MakaReasonixAgent(BaseInstalledAgent):
         abnormal_exit = False
         try:
             command = (
+                # umask before any write: the credential file must never exist
+                # group- or world-readable, not even momentarily.
+                "umask 077; "
                 f"mkdir -p {shlex.quote(str(_REASONIX_HOME))}; "
                 f"printf %s {shlex.quote(self._config_toml())} > "
                 f"{shlex.quote(str(_REASONIX_HOME / 'config.toml'))}; "
+                # Reasonix resolves api_key_env from its own credential store,
+                # not the process environment, so the token has to reach that
+                # file. It is expanded from the environment here rather than
+                # interpolated, so the value never enters the command line,
+                # the process table, or Harbor's command logs.
+                f"printf '%s=%s\\n' {shlex.quote(_PROXY_TOKEN_ENV)} "
+                f'"${_PROXY_TOKEN_ENV}" > '
+                f"{shlex.quote(str(_REASONIX_CREDENTIALS))}; "
                 f"{shlex.quote(str(_TOOLCHAIN_BINARY))} run --auto "
                 f"--model {shlex.quote(self._model_reference())} "
                 f"--effort {shlex.quote(self._effort())} "
@@ -214,11 +229,14 @@ class MakaReasonixAgent(BaseInstalledAgent):
         if not proxy_token:
             raise ValueError("Reasonix requires the host provider proxy")
         return {
-            # An isolated home keeps Reasonix's config, session state, and .env
-            # off any host or task-workspace config that could redirect the run.
+            # An isolated home keeps Reasonix's config, session state, and
+            # credential file off any host or task-workspace config that could
+            # redirect the run.
             "REASONIX_HOME": str(_REASONIX_HOME),
-            # The only place the cell-scoped proxy token exists: never a config
-            # file, never a command line, never the task workspace.
+            # This carries the cell-scoped proxy token into the container so the
+            # command can expand it into Reasonix's credential file without ever
+            # naming the value itself. The upstream provider key stays host-side
+            # in the proxy and never enters the container in any form.
             _PROXY_TOKEN_ENV: proxy_token,
         }
 
