@@ -88,6 +88,31 @@ describe('realpathAllowMissing', () => {
     );
   });
 
+  test('treats a non-directory ancestor as missing rather than throwing ENOTDIR', async () => {
+    const { workspace, link } = await symlinkedWorkspace('maka-realpath-notdir-');
+    await writeFile(join(workspace, 'file.txt'), 'x', 'utf8');
+
+    assert.equal(
+      await realpathAllowMissing(join(link, 'file.txt', 'child')),
+      join(workspace, 'file.txt', 'child'),
+    );
+  });
+
+  test('rejects a pathological dangling chain instead of walking it forever', async () => {
+    const { workspace } = await symlinkedWorkspace('maka-realpath-hops-');
+    // Every link resolves to the next and only the last one dangles. The kernel
+    // caps its own symlink traversal well below this length, so it answers ELOOP
+    // before the helper's hop cap can fire; either way the walk must terminate
+    // by rejecting rather than by hopping forever.
+    const chain = 64;
+    await symlink(join(workspace, 'absent'), join(workspace, `hop-${chain}`));
+    for (let index = chain; index > 0; index -= 1) {
+      await symlink(join(workspace, `hop-${index}`), join(workspace, `hop-${index - 1}`));
+    }
+
+    await assert.rejects(realpathAllowMissing(join(workspace, 'hop-0')), /ELOOP|too many/);
+  });
+
   test('propagates a symlink cycle instead of walking forever', async () => {
     const { workspace } = await symlinkedWorkspace('maka-realpath-cycle-');
     await symlink(join(workspace, 'b'), join(workspace, 'a'));

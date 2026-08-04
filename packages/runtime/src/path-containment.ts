@@ -16,7 +16,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
  * authority for path-containment checks across the runtime, the desktop main
  * process, and headless: both the pure-Node runtime and the desktop main (which
  * already depends on `@maka/runtime`) reach it here without reverse
- * dependencies. The leaf imports only `node:path`.
+ * dependencies. {@link isPathInside} itself is a pure `node:path` predicate; the
+ * canonicalisation and contained-I/O helpers around it touch the filesystem.
  *
  * {@link isPathInside} is separator-aware: it rejects only a real
  * parent-reference segment (`..` exactly, or `..${sep}`-prefixed), so a child
