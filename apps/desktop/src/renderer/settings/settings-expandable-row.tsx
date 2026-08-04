@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Button, HStack, Text } from '@astryxdesign/core';
 import { SettingsField, SettingsRow } from './settings-section';
 
@@ -50,7 +50,6 @@ export function SettingsExpandableRow(props: {
   onSave(): void | Promise<void>;
   children: ReactNode;
 }) {
-  const editorId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   // Only pull focus for a transition the user drove. Without this the row
@@ -72,6 +71,14 @@ export function SettingsExpandableRow(props: {
     if (closed) triggerRef.current?.focus();
   }, [props.isEditing]);
 
+  // The collapsed row carries no aria-expanded / aria-controls on purpose.
+  // Those describe a disclosure — a trigger that stays put while a region
+  // beside it opens — and this is a mode swap: the trigger unmounts when the
+  // editor replaces it, so aria-expanded could never reach true and
+  // aria-controls would name a node that does not exist while collapsed.
+  // Declaring a contract the DOM never honours is worse than declaring none;
+  // the focus move is what tells assistive tech the mode changed, and that
+  // part is measured rather than assumed.
   if (!props.isEditing) {
     return (
       <SettingsRow
@@ -85,8 +92,6 @@ export function SettingsExpandableRow(props: {
             size="sm"
             isDisabled={props.isDisabled}
             onClick={props.onEdit}
-            aria-expanded={false}
-            aria-controls={editorId}
             label={props.actionLabel}
           />
         )}
@@ -96,7 +101,7 @@ export function SettingsExpandableRow(props: {
 
   return (
     <SettingsField>
-      <div id={editorId} ref={editorRef} className="settingsExpandableEditor">
+      <div ref={editorRef} className="settingsExpandableEditor">
         {/* The label survives the swap. Collapsed, the row's own label names
             the value; expanded, the editor would otherwise be an unlabelled
             box — the user pressed 更改 on something and must still be able to

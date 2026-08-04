@@ -125,24 +125,31 @@ export function PersonalizationSettingsPage(props: {
 
   // Shared persist path for every personalization field. Locale has its own
   // last-write-wins lane so unrelated saves cannot steal rollback ownership.
-  async function persistPersonalization(patch: Partial<PersonalizationSettings>) {
+  // Returns whether the write landed. The autosaving fields ignore it — they
+  // have nowhere to put the answer — but a row that closes on save has to
+  // know, or a failed write collapses the row onto the old value and drops
+  // the draft with only a toast to show for it.
+  async function persistPersonalization(patch: Partial<PersonalizationSettings>): Promise<boolean> {
     const ticket = ++persistTicketRef.current;
     const localeTicket = patch.uiLocale === undefined ? null : ++localePersistTicketRef.current;
     persistPendingCountRef.current += 1;
     try {
       const result = await props.onUpdate({ personalization: patch });
-      if (!personalizationMountedRef.current) return;
+      // Saved. An unmounted page just has nowhere left to reflect it.
+      if (!personalizationMountedRef.current) return true;
       if (localeTicket !== null && localeTicket === localePersistTicketRef.current) {
         setUiLocale(result.settings.personalization.uiLocale);
       }
+      return true;
     } catch (error) {
-      if (!personalizationMountedRef.current) return;
+      if (!personalizationMountedRef.current) return false;
       if (localeTicket !== null && localeTicket === localePersistTicketRef.current) {
         setUiLocale(value.uiLocale);
       }
       if (ticket === persistTicketRef.current) {
         toast.error(copy.saveFailed, settingsActionErrorMessage(error, locale));
       }
+      return false;
     } finally {
       persistPendingCountRef.current = Math.max(0, persistPendingCountRef.current - 1);
     }
@@ -199,8 +206,12 @@ export function PersonalizationSettingsPage(props: {
             setExpandedRow(null);
           }}
           onSave={async () => {
-            await persistPersonalization({ displayName: displayName.trim().slice(0, 60) });
-            setExpandedRow(null);
+            // Only close on a write that landed: a failed save leaves the row
+            // open with the draft intact, which is the promise explicit saving
+            // makes and blur-autosave could not keep.
+            if (await persistPersonalization({ displayName: displayName.trim().slice(0, 60) })) {
+              setExpandedRow(null);
+            }
           }}
         >
           <TextInput
