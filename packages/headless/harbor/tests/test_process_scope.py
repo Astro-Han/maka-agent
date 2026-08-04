@@ -24,11 +24,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from process_scope import (  # noqa: E402
+    CLEANUP_TIMEOUT_SEC,
     COMMAND_ID_ENV,
     COMMAND_SCOPE_ENV,
     COMMAND_SCOPE_ROOT,
     cleanup_process_scope,
+    exec_cleanup_command,
     scoped_command,
+    scoped_command_cleanup_command,
     scoped_process_cleanup_command,
 )
 
@@ -90,20 +93,51 @@ def test_every_teardown_exec_is_time_bounded() -> None:
     graded cell was observed stalled for 1524s with both teardown execs alive."""
     agent = _Agent(fail=False)
     asyncio.run(cleanup_process_scope(agent, object(), "scope-5"))
-    assert agent.timeouts and all(
-        isinstance(t, int) and t > 0 for t in agent.timeouts
-    ), agent.timeouts
+    assert agent.timeouts == [CLEANUP_TIMEOUT_SEC, CLEANUP_TIMEOUT_SEC], agent.timeouts
+
+
+def test_the_shared_helper_is_the_only_way_to_issue_a_teardown_exec() -> None:
+    """Two teardowns run these cleanup shells: the adapters' and the bridged
+    executor's in maka_agent.py. The executor's shipped unbounded, and no test
+    here could catch it — this suite is stdlib-only by CI contract, so it cannot
+    import maka_agent at all. Owning the budget in one helper is what makes the
+    gap testable: pin the helper, and no call site can reintroduce it.
+    """
+    agent = _Agent(fail=False)
+    asyncio.run(exec_cleanup_command(agent, object(), "cleanup"))
+    assert agent.timeouts == [CLEANUP_TIMEOUT_SEC], agent.timeouts
 
 
 def test_the_replay_carries_the_scope_marker() -> None:
-    """The recorded process group is written after the replay is forked, so a
-    teardown landing in that window finds nothing to kill. The marker closes it:
-    it is a name teardown knows before the fork, so there is no instant at which
-    the replay is alive and unfindable. `/proc`-less hosts still need the pgid."""
+    """The replay is a `cat` the pgid file cannot describe until after it is
+    forked. The marker needs no window to be recorded in — but it is readable
+    only once `env` has exec'd, and not at all where there is no `/proc`. Two
+    partial handles, which is why the ordering below has to do the closing."""
     command = scoped_command("echo hi", "scope-6", "cid")
     replay = command.split("wait \"$command_pid\"", 1)[1]
     marker = f"{COMMAND_SCOPE_ENV}=scope-6 {COMMAND_ID_ENV}=cid"
     assert replay.count(f"env {marker} cat --") == 2, replay
+
+
+def test_cleanup_kills_the_wrapper_before_it_hunts_for_the_replay() -> None:
+    """Reaping the command is what makes the wrapper fork a replay, so a sweep
+    ordered command-first races the wrapper it just woke: the replay can appear
+    after the `/proc` sweep has passed and the wrapper die before recording a
+    pgid, leaving a replay no handle describes, still holding the caller's
+    stdout. That is the 1524s hang again, and the KILL pass is where it bites —
+    a command that ignores SIGTERM survives to die on exactly that pass.
+
+    Killing the wrapper first ends it: a dead wrapper forks nothing, so every
+    replay that can exist exists before the sweeps run.
+    """
+    for command in (
+        scoped_process_cleanup_command("scope-7", "KILL"),
+        scoped_command_cleanup_command("scope-7", ["cid"], "KILL"),
+    ):
+        wrapper = command.index("wrapper_file")
+        pgid = command.index("pgid_file")
+        marker = command.index("/proc/[0-9]*/environ")
+        assert wrapper < pgid < marker, command
 
 
 def test_a_broken_logger_never_replaces_the_agent_failure() -> None:
