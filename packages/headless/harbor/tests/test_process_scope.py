@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -92,6 +94,14 @@ def test_every_teardown_exec_is_time_bounded() -> None:
     issued with no bound is the one failure swallowing cannot cover: Harbor waits
     on `communicate()` forever, so the trial hangs and no reward is produced. A
     graded cell was observed stalled for 1524s with both teardown execs alive."""
+    # Asserting against the constant alone is circular: setting it to None
+    # passes every such assertion and hands Harbor back the unbounded
+    # `communicate()` this whole branch exists to remove. The budget has to be
+    # a real one, so say what a real one is before comparing anything to it.
+    assert isinstance(CLEANUP_TIMEOUT_SEC, int), CLEANUP_TIMEOUT_SEC
+    assert not isinstance(CLEANUP_TIMEOUT_SEC, bool), CLEANUP_TIMEOUT_SEC
+    assert 0 < CLEANUP_TIMEOUT_SEC < 3600, CLEANUP_TIMEOUT_SEC
+
     agent = _Agent(fail=False)
     asyncio.run(cleanup_process_scope(agent, object(), "scope-5"))
     assert agent.timeouts == [CLEANUP_TIMEOUT_SEC, CLEANUP_TIMEOUT_SEC], agent.timeouts
@@ -313,6 +323,80 @@ def test_cleanup_reaps_the_output_replay_so_the_reader_reaches_eof() -> None:
         wrapper.kill()
         wrapper.wait(timeout=10)
         shutil.rmtree(Path(COMMAND_SCOPE_ROOT) / scope, ignore_errors=True)
+
+
+def test_command_cleanup_reaps_the_wrapper_and_its_command() -> None:
+    """The per-command cleanup cancels one in-flight exec, and until now nothing
+    ran it. Its handles are built from the command id, so a wrong suffix aims
+    every kill at a file that does not exist and the whole thing degrades to a
+    no-op that still exits 0 — the text assertions above stay green through it.
+
+    Only `bash`, `sleep` and signal 0 are needed, so this runs where there is no
+    `/proc` and the marker sweep cannot: what it pins is that the recorded
+    handles alone reach both the wrapper and the command it is waiting on.
+    """
+    if shutil.which("bash") is None:
+        return
+
+    scope = f"test-scope-{uuid.uuid4().hex}"
+    command_id = "cancelme"
+    scope_dir = Path(COMMAND_SCOPE_ROOT) / scope
+    wrapper_file = scope_dir / f"{command_id}.wrapper"
+    pgid_file = scope_dir / f"{command_id}.pgid"
+
+    payload = "sleep 300"
+    wrapper = subprocess.Popen(  # noqa: S603 - fixed argv, no shell interpolation
+        ["bash", "-c", scoped_command(payload, scope, command_id)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if wrapper_file.exists() and pgid_file.exists():
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("the wrapper never recorded its handles")
+        command_pgid = int(pgid_file.read_text().strip())
+        # Nothing is proved by killing what was already dead.
+        os.killpg(command_pgid, 0)
+        assert wrapper.poll() is None, "the wrapper exited before cleanup ran"
+
+        subprocess.run(  # noqa: S603 - fixed argv, no shell interpolation
+            ["bash", "-c", scoped_command_cleanup_command(scope, [command_id], "KILL")],
+            check=False,
+            timeout=30,
+            capture_output=True,
+        )
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if wrapper.poll() is not None:
+                break
+            time.sleep(0.1)
+        # That the wrapper is gone proves nothing on its own: this same pass
+        # deletes the files the replay reads, so a wrapper cleanup never touched
+        # still finds its replay failing and exits on its own, with the status
+        # of the command it was waiting on. Only the signal tells the two apart,
+        # and only one of them means the cleanup's handles were aimed correctly.
+        assert wrapper.poll() == -signal.SIGKILL, (
+            f"the wrapper ended with {wrapper.poll()}, not SIGKILL; cleanup "
+            "never reached it and it merely ran out of things to wait for"
+        )
+        try:
+            os.killpg(command_pgid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise AssertionError(
+                "cleanup left the command's process group alive; a cancelled "
+                "exec that keeps running is what strands the cell"
+            )
+    finally:
+        wrapper.kill()
+        wrapper.wait(timeout=10)
+        shutil.rmtree(scope_dir, ignore_errors=True)
 
 
 def _main() -> int:
