@@ -1,6 +1,7 @@
 import {
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
   PanelRightOpen,
   Search,
 } from '@maka/ui/icons';
@@ -81,10 +82,17 @@ export function AppShellTopbarActions(props: {
  * Settings → 关于, and the other two now have real homes: the keyboard sheet is
  * a row on 关于, and the palette keeps ⌘K, which that sheet documents.
  *
- * What is left is the workbar toggle, and only while the workbar is closed —
- * open, the toggle lives in the workbar's own tab row, beside the thing it
- * closes. So this bar renders nothing at all rather than holding an empty
- * no-drag rectangle open in the titlebar.
+ * What is left is the workbar toggle — the right-hand mirror of the sidebar
+ * toggle above, and positioned the same way: one control that stays put across
+ * its own state change. It used to hand itself off to a second button inside
+ * the workbar's tab row while the workbar was open, so the single control a
+ * user clicks twice moved ~30px down and left between those two clicks.
+ *
+ * The titlebar is also the only row in the app that already knows where the
+ * platform's native window controls are: `.maka-window-titlebar` reserves
+ * `env(titlebar-area-*)` on both sides, so this button clears the macOS traffic
+ * lights and the Windows caption strip without either platform being named
+ * here. A toggle parked anywhere else would have to restate that.
  */
 export function AppShellWorkspaceTopActions(props: {
   workbarAvailable: boolean;
@@ -93,20 +101,22 @@ export function AppShellWorkspaceTopActions(props: {
 }) {
   const locale = useUiLocale();
   const copy = getShellCopy(locale).chrome;
-  // Open, the toggle is the workbar's own; closed, this is the only way back.
-  if (!props.workbarAvailable || !props.workbarCollapsed) return null;
+  // Nothing to toggle outside a session; an empty no-drag rectangle in the
+  // titlebar would only subtract from the window's drag surface.
+  if (!props.workbarAvailable) return null;
+  const label = props.workbarCollapsed ? copy.expandWorkbar : copy.collapseWorkbar;
 
   return (
     <div className="maka-workspace-top-actions" role="toolbar" aria-label={copy.workspaceActions}>
-      <Tooltip content={copy.expandWorkbar}>
+      <Tooltip content={label}>
         <IconButton
-          label={copy.expandWorkbar}
-          icon={<ChromeIcon icon={PanelRightOpen} />}
+          label={label}
+          icon={<ChromeIcon icon={props.workbarCollapsed ? PanelRightOpen : PanelRightClose} />}
           variant="ghost"
           size="md"
           className="maka-titlebar-action"
           onClick={props.onToggleWorkbar}
-          aria-expanded={false}
+          aria-expanded={!props.workbarCollapsed}
         />
       </Tooltip>
     </div>

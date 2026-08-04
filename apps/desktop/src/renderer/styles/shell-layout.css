@@ -111,8 +111,11 @@
   background: var(--agents-content-area-bg);
   overflow: hidden;
   /* Clear the absolute chrome strip so content starts below the transparent
-     titleband. */
-  padding-top: calc(var(--h-titlebar) - var(--agents-content-area-gap));
+     titleband. Named, because a column inside the plate that paints its own
+     surface has to reach the plate's edge and re-apply this to its content —
+     see `.maka-session-workbar` in chat-detail.css. Two places, one number. */
+  --maka-plate-titlebar-clearance: calc(var(--h-titlebar) - var(--agents-content-area-gap));
+  padding-top: var(--maka-plate-titlebar-clearance);
   box-sizing: border-box;
 }
 

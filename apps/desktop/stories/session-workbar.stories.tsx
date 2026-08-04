@@ -15,9 +15,11 @@ import { withScopedMakaBridge } from './maka-bridge';
 // separate Artifact Pane / Session Trace / Task Ledger groups each carried a
 // hand-written box, and two of them re-rendered pixels this group already owns.
 //
-// What this group cannot show: the column divider. It belongs to the
-// ResizeHandle in ChatWorkbar, one level up — see the computed-style
-// assertions in e2e/session-workbar.spec.ts.
+// What this group cannot show: the seam. The workbar's surface tone only reads
+// as a seam against the conversation plate it stands beside, and the plate is
+// two levels up in the shell — as is the titlebar clearance the surface bleeds
+// through. Both are pinned by computed-style assertions in
+// e2e/session-workbar.spec.ts instead.
 //
 // Read these at a canvas of 990px or wider. The app's own breakpoint is on the
 // viewport, and Storybook's canvas IS the viewport, so a narrower window puts

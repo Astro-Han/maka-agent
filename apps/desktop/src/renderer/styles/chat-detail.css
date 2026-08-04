@@ -21,11 +21,21 @@
   min-width: 0;
 }
 
-/* Astryx owns the workbar's surface (Card), its header rule (Toolbar
-   `dividers`), its column divider (ResizeHandle `hasDivider`) and its counts
-   (Badge). What is left here is the column geometry those components cannot
-   know: the width the user dragged, and a header/body split that keeps the
-   body a scroll parent. */
+/* Astryx owns the workbar's chrome (Card, Toolbar, TabList, Badge). What is
+   left here is what those components cannot know: the width the user dragged,
+   a header/body split that keeps the body a scroll parent, and which surface
+   this column stands on.
+
+   `--background` is the same tone the SideNav paints, and it is the whole seam:
+   the shell already separates chrome from content by stepping tone (the
+   sidebar's own border is set to `transparent` in shell-layout.css), so the
+   workbar reads as the right-hand mirror of the left rail rather than as a
+   panel fenced off by a rule. Painting it also gives the seam the column's
+   full height — the resize handle, which used to draw it, starts below the
+   titlebar so its drag zone is not swallowed by the window drag strip, and a
+   line that begins 36px down beside one that runs edge to edge is exactly the
+   mismatch this replaces. The plate's `overflow: hidden` rounds the outer
+   corners for free. */
 .maka-session-workbar {
   flex: 0 0 auto;
   width: var(--maka-session-workbar-width, 400px);
@@ -35,6 +45,20 @@
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  background: var(--background);
+  /* The surface reaches the plate's top edge; the content keeps the plate's
+     titlebar clearance. Without this the tone would start one clearance below
+     the sidebar's, putting a hard horizontal edge across the top of the column
+     — the seam this whole change exists to remove, rotated 90°. The plate's
+     `overflow: hidden` rounds the outer corners. */
+  margin-top: calc(-1 * var(--maka-plate-titlebar-clearance));
+  padding-top: var(--maka-plate-titlebar-clearance);
+  box-sizing: border-box;
+  /* Beats Card's `height="100%"`, which resolves against the row and so would
+     leave the surface one clearance short at the bottom once the negative
+     margin lifts it. Flex `stretch` sizes the MARGIN box, which is the box
+     that has to match the plate. */
+  height: auto !important;
 }
 
 /* `.maka-workbar-resize-handle` survives only so the narrow breakpoint further
@@ -505,10 +529,12 @@
     max-width: none;
     min-height: min(220px, 42dvh);
     max-height: min(42dvh, 360px);
+    /* Stacked below the conversation, there is no titlebar to clear. */
+    margin-top: 0;
     padding-top: 0;
-    /* Stacked, the panel lifts off the conversation, so it needs the opaque
-       surface and top rule the ResizeHandle drew while it was a column. */
-    background: var(--background);
+    /* Stacked, the surface tone alone cannot carry the seam: the panel lifts
+       off the conversation rather than standing beside it, so this is the one
+       place the workbar draws a rule. */
     border-top: var(--border-width-hairline) solid var(--border);
     box-shadow: 0 -8px 24px oklch(from var(--foreground) l c h / 0.08);
   }

@@ -26,12 +26,26 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(resize).toHaveAttribute('aria-valuenow', '410');
   await expect(workbar).toHaveCSS('width', '410px');
 
-  // One rule between the columns, not two. The panel is an Astryx Card with no
-  // border of its own; the divider is the handle, which per Astryx takes
-  // exactly 1px of layout and widens only its hit area. Drop either half and
-  // the seam either doubles or disappears.
+  // The seam is a surface-tone step, the same one the sidebar makes on the
+  // other side — no rule anywhere. Each half fails silently on its own: drop
+  // the background and the column vanishes into the conversation, add a border
+  // back and the app is speaking two seam languages at once.
   await expect(workbar).toHaveCSS('border-left-width', '0px');
-  await expect(resize).toHaveCSS('width', '1px');
+  await expect(workbar).toHaveCSS(
+    'background-color',
+    await page.locator('.astryx-app-shell-sidenav').evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    ),
+  );
+
+  // And it runs the plate's full height. The surface has to reach the plate's
+  // top edge while its CONTENT keeps the titlebar clearance — miss that and
+  // the tone starts one clearance below the sidebar's, which is the same
+  // mismatched seam turned 90°.
+  const plateBox = (await page.locator('.maka-panel-detail').boundingBox())!;
+  const workbarBox = (await workbar.boundingBox())!;
+  expect(Math.round(workbarBox.y)).toBe(Math.round(plateBox.y));
+  expect(Math.round(workbarBox.height)).toBe(Math.round(plateBox.height));
 
   // Pointer drag, grabbed near the bottom of the divider: Astryx's default
   // side-placed grab zone lifts itself half its height off the handle, so a
@@ -83,10 +97,19 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(recent).toHaveAttribute('aria-expanded', 'true');
   await expect(recentRow).toBeVisible();
 
-  await page.getByRole('button', { name: '收起会话工作栏' }).click();
+  // One toggle, in one place, across its own state change. It used to hand off
+  // to a second button inside the workbar's tab row while the workbar was open,
+  // so the control a user clicks twice moved between those two clicks. The
+  // titlebar is also the only row that already reserves `env(titlebar-area-*)`,
+  // which is what keeps this button clear of the Windows caption strip.
+  const collapse = page.getByRole('button', { name: '收起会话工作栏' });
+  const openBox = (await collapse.boundingBox())!;
+  await collapse.click();
   await expect(workbar).toBeHidden();
 
-  await page.getByRole('button', { name: '展开会话工作栏' }).click();
+  const expand = page.getByRole('button', { name: '展开会话工作栏' });
+  expect(await expand.boundingBox()).toMatchObject({ x: openBox.x, y: openBox.y });
+  await expand.click();
   await expect(workbar).toBeVisible();
   await tabs.getByRole('button', { name: /文件/ }).click();
   await expect(workbar.getByText('暂无生成文件')).toBeVisible();

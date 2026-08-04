@@ -90,9 +90,14 @@ export function ChatWorkbar({
         // must widen it.
         isReversed
         isAlwaysVisible={false}
-        // The handle draws the column divider (as in Astryx's own split-pane
-        // template), so the panel itself carries no border-inline-start.
-        hasDivider
+        // No `hasDivider`. The shell separates its columns by surface tone, not
+        // by rules: the sidebar's own border is zeroed out and the seam you see
+        // on the left is `--background` meeting the content plate. A hairline
+        // here was a second, contradictory seam language — and one this column
+        // could not draw properly anyway, since the shared handle rule starts
+        // every handle below the titlebar so the drag strip cannot swallow it.
+        // The workbar's surface has no such offset, so the tonal seam runs the
+        // column's full height the way the left one does.
         // Astryx offsets a side-placed horizontal grab zone with
         // `translateY(-50%)` on top of `top: 0; bottom: 0`, which lifts it half
         // its height off the divider and makes the lower half undraggable.
