@@ -34,10 +34,6 @@ import {
   type PlanReminderExampleTemplate,
 } from './plan-reminder-copy.js';
 
-export type PlanReminderDisplayRow =
-  | { kind: 'group'; key: string; label: string; count: number }
-  | { kind: 'reminder'; reminder: PlanReminder };
-
 export function toPlanReminderLocalDateTimeValue(ts: number): string {
   const date = new Date(ts);
   const pad = (value: number) => String(value).padStart(2, '0');
@@ -146,22 +142,6 @@ export function planReminderSearchText(reminder: PlanReminder, locale: UiLocale)
     reminder.lastRun?.message,
     ...reminder.runs.map((run) => `${runStatusLabel(run.status, locale)} ${run.message}`),
   ].filter(Boolean).join('\n');
-}
-
-// Not exported: this display-list builder currently has no external consumer.
-// Demoted (was `export`) to keep it — and its sibling helpers it references —
-// out of knip's unused-export report without deleting the cohesive plan-reminder
-// display API. Re-export if/when a panel adopts it.
-function planReminderDisplayRows(filter: 'all' | PlanReminderStatus, reminders: PlanReminder[], locale: UiLocale): PlanReminderDisplayRow[] {
-  if (filter !== 'all') return reminders.map((reminder) => ({ kind: 'reminder', reminder }));
-  const rows: PlanReminderDisplayRow[] = [];
-  for (const status of ['scheduled', 'paused', 'completed'] satisfies PlanReminderStatus[]) {
-    const group = reminders.filter((reminder) => reminder.status === status);
-    if (group.length === 0) continue;
-    rows.push({ kind: 'group', key: `group-${status}`, label: planReminderStatusGroupLabel(status, locale), count: group.length });
-    rows.push(...group.map((reminder) => ({ kind: 'reminder' as const, reminder })));
-  }
-  return rows;
 }
 
 export function planReminderStatusGroupLabel(status: PlanReminderStatus, locale: UiLocale): string {
