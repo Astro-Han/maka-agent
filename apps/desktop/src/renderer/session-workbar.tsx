@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   TaskLedgerPanel,
   deriveTaskLedgerPanelModel,
@@ -56,7 +56,6 @@ export function SessionWorkbar(props: {
   sessionId: string;
   browserLive: boolean;
   hidden: boolean;
-  width: number;
   onDismiss: () => void;
   activeTab: SessionWorkbarTab;
   onActiveTabChange: (tab: SessionWorkbarTab) => void;
@@ -96,7 +95,6 @@ export function SessionWorkbar(props: {
       data-maka-contract="session-workbar"
       role="complementary"
       aria-label={copy.ariaLabel}
-      style={{ '--maka-session-workbar-width': `${props.width}px` } as CSSProperties}
     >
       <Toolbar
         className="maka-session-workbar-toolbar"

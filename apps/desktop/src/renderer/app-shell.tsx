@@ -2572,9 +2572,14 @@ function AppShellContent({
                 ) : null}
               </ChatSurfaceLayout>
             </div>
-            {navSelection.section === 'sessions' && activeId && !workbarCollapsed && (
+            {/* Rendered collapsed too: ChatWorkbar's own box is what the
+                collapse animates, and it has to be in the tree on both sides of
+                the toggle for there to be an animation at all. The column
+                inside it still unmounts. */}
+            {navSelection.section === 'sessions' && activeId && (
               <ChatWorkbar
                 activeId={activeId}
+                collapsed={workbarCollapsed}
                 browserLive={liveBrowserSessionIds.includes(activeId)}
                 hidden={hasModalOpen}
                 width={workbarWidth}

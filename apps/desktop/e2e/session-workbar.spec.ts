@@ -107,10 +107,22 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await collapse.click();
   await expect(workbar).toBeHidden();
 
+  // Collapsing animates, which is only possible because ONE box survives it.
+  // The column itself does not — it polls tasks and can own a live embedded
+  // browser — so the box stays behind at zero width and the column is torn down
+  // when the width transition ends. Lose the box and the panel snaps shut;
+  // leave the column mounted and a closed panel keeps working.
+  const motion = page.locator('.maka-workbar-motion');
+  await expect(motion).toHaveCount(1);
+  await expect(motion).toHaveCSS('width', '0px');
+  await expect(page.locator('.maka-workbar-resize-handle')).toHaveCount(0);
+
   const expand = page.getByRole('button', { name: '展开会话工作栏' });
   expect(await expand.boundingBox()).toMatchObject({ x: openBox.x, y: openBox.y });
   await expand.click();
   await expect(workbar).toBeVisible();
+  // The width the drag above landed on, restored rather than reset.
+  await expect(motion).toHaveCSS('width', '431px');
   await tabs.getByRole('button', { name: /文件/ }).click();
   await expect(workbar.getByText('暂无生成文件')).toBeVisible();
 

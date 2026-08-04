@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState, type CSSProperties } from 'react';
 import { Card } from '@astryxdesign/core/Card';
 import { ResizeHandle, type ResizableProps } from '@astryxdesign/core/Resizable';
 import { useUiLocale, type ChatModelChoice } from '@maka/ui';
@@ -37,12 +37,15 @@ function SessionWorkbarFallback() {
 /**
  * The artifacts column of the sessions surface (issue #1043): the workbar
  * resize handle plus the lazy-mounted SessionWorkbar (task ledger, embedded
- * browser, artifact pane). AppShell renders this conditionally - only beside
- * an active session inside the sessions module - so it is not part of the
- * always-mounted chat surface.
+ * browser, artifact pane). AppShell renders this beside an active session
+ * inside the sessions module and nowhere else, so it is not part of the
+ * always-mounted chat surface. Collapsed it is an empty animating box; the
+ * column itself mounts and unmounts inside it.
  */
 interface ChatWorkbarProps {
   activeId: string;
+  /** Shell state. Collapsed, the column leaves — after it has animated out. */
+  collapsed: boolean;
   browserLive: boolean;
   hidden: boolean;
   width: number;
@@ -64,6 +67,7 @@ interface ChatWorkbarProps {
 
 export function ChatWorkbar({
   activeId,
+  collapsed,
   browserLive,
   hidden,
   width,
@@ -80,8 +84,26 @@ export function ChatWorkbar({
   modelChoices,
 }: ChatWorkbarProps) {
   const copy = getShellCopy(useUiLocale()).app;
+  // Collapsing has to be watched to its end, because the column is torn down at
+  // the end of it; expanding does not, because the wrapper below is already in
+  // the tree and widening it is just a style change. Derived by comparing props
+  // during render rather than in an Effect — this reconciles internal state, it
+  // does not synchronise with anything outside React.
+  const [wasCollapsed, setWasCollapsed] = useState(collapsed);
+  const [isLeaving, setIsLeaving] = useState(false);
+  if (wasCollapsed !== collapsed) {
+    setWasCollapsed(collapsed);
+    setIsLeaving(collapsed);
+  }
+  const showsColumn = !collapsed || isLeaving;
+
   return (
     <>
+      {/* Outside the clipping wrapper below: the handle sits a pixel to the
+          LEFT of the column it sizes, so inside it the seam control would be
+          the one thing `overflow: hidden` cut off. It is also not part of the
+          column's motion — there is nothing to size while the column leaves. */}
+      {showsColumn && (
       <ResizeHandle
         className="maka-workbar-resize-handle"
         resizable={workbarResizable}
@@ -106,13 +128,42 @@ export function ChatWorkbar({
         pillPlacement="center"
         label={copy.resizeWorkbar}
       />
+      )}
+      {/* The width lives on this wrapper, not on the column, for the reason the
+          sidebar rail already documents: a transition needs an element that
+          exists on BOTH sides of the toggle. The column itself is unmounted
+          while collapsed — it polls tasks and can hold a live embedded browser,
+          neither of which should keep running behind a closed panel — so it can
+          never be that element. Closed, this is an empty box at zero width.
+
+          It also clips, which is what lets the column keep its own full width on
+          the way out (`min-width` there) and slide off rather than reflow its
+          tabs into each other frame by frame. */}
+      <div
+        className="maka-workbar-motion"
+        data-collapsed={collapsed || undefined}
+        /* The user's dragged width, on the box that animates it. The column
+           inside reads the same property by inheritance, so it holds that width
+           while this box narrows past it. */
+        style={{ '--maka-session-workbar-width': `${width}px` } as CSSProperties}
+        /* The one event that says the column is off screen. Every path this app
+           has for suppressing motion — OS reduced-motion, the e2e-fixture
+           attribute — caps `transition-duration` to 0.01ms rather than setting
+           `transition: none`, precisely so state changes stay observable; that
+           is what keeps this from being a teardown that never fires. */
+        onTransitionEnd={(event) => {
+          if (event.propertyName === 'width' && event.currentTarget === event.target) {
+            setIsLeaving(false);
+          }
+        }}
+      >
+      {showsColumn && (
       <Suspense fallback={<SessionWorkbarFallback />}>
         <SessionWorkbar
           key={activeId}
           sessionId={activeId}
           browserLive={browserLive}
           hidden={hidden}
-          width={width}
           onDismiss={onDismiss}
           activeTab={activeTab}
           onActiveTabChange={onActiveTabChange}
@@ -125,6 +176,8 @@ export function ChatWorkbar({
           modelChoices={modelChoices}
         />
       </Suspense>
+      )}
+      </div>
     </>
   );
 }

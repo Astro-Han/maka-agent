@@ -340,7 +340,6 @@ function Workbar(props: { tab: 'tasks' | 'files' | 'inspector' }) {
           sessionId={SESSION_ID}
           browserLive={false}
           hidden={false}
-          width={400}
           onDismiss={noop}
           activeTab={props.tab}
           onActiveTabChange={noop}

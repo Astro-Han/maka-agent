@@ -36,9 +36,43 @@
    line that begins 36px down beside one that runs edge to edge is exactly the
    mismatch this replaces. The plate's `overflow: hidden` rounds the outer
    corners for free. */
-.maka-session-workbar {
+/* The column's motion box, and the only part of the column that survives the
+   collapse (chat-workbar.tsx). It owns the animated width and the clip; the
+   column inside keeps a fixed width so it slides off rather than reflowing.
+
+   Same shape as `.maka-sidenav-motion` on the other side, and the same reason:
+   a width transition needs one element that is the same node before and after.
+   The rail can hold its own width because SideNav is never unmounted; this
+   column is, so the box has to outlive it. */
+.maka-workbar-motion {
   flex: 0 0 auto;
   width: var(--maka-session-workbar-width, 400px);
+  min-height: 0;
+  overflow: hidden;
+  /* The surface reaches the plate's top edge; the column re-applies the
+     clearance to its own content. Here rather than on the column because this
+     box clips, and an overhang above a clipping box is an overhang cut off. */
+  margin-top: calc(-1 * var(--maka-plate-titlebar-clearance));
+  transition: width var(--duration-large) var(--ease-out-strong);
+}
+
+.maka-workbar-motion[data-collapsed] {
+  width: 0;
+}
+
+/* A pointer drag feeds a new width back on every move; a standing transition
+   would restart on each one and leave the column trailing the cursor. Astryx
+   marks its handle `data-resizing` for exactly this, and the handle is this
+   box's sibling — the same gate `.maka-sidenav-motion` uses, read from the row
+   rather than from within. */
+.maka-detail-with-artifacts:has([data-resizing]) .maka-workbar-motion {
+  transition: none;
+}
+
+.maka-session-workbar {
+  width: var(--maka-session-workbar-width, 400px);
+  /* Load-bearing during the collapse, not just a resize clamp: it is what keeps
+     the column at full width inside a box narrowing to zero. */
   min-width: 320px;
   max-width: 600px;
   min-height: 0;
@@ -46,19 +80,12 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--background);
-  /* The surface reaches the plate's top edge; the content keeps the plate's
-     titlebar clearance. Without this the tone would start one clearance below
-     the sidebar's, putting a hard horizontal edge across the top of the column
-     — the seam this whole change exists to remove, rotated 90°. The plate's
-     `overflow: hidden` rounds the outer corners. */
-  margin-top: calc(-1 * var(--maka-plate-titlebar-clearance));
+  /* The clearance the motion box bled through, re-applied to the content: the
+     tone reaches the plate's top edge, the tabs still start below the titlebar.
+     Painting only below the clearance would put a hard horizontal edge across
+     the top of the column — the seam this whole change removes, rotated 90°. */
   padding-top: var(--maka-plate-titlebar-clearance);
   box-sizing: border-box;
-  /* Beats Card's `height="100%"`, which resolves against the row and so would
-     leave the surface one clearance short at the bottom once the negative
-     margin lifts it. Flex `stretch` sizes the MARGIN box, which is the box
-     that has to match the plate. */
-  height: auto !important;
 }
 
 /* `.maka-workbar-resize-handle` survives only so the narrow breakpoint further
@@ -523,14 +550,21 @@
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
+  /* Stacked, the column is a row of the grid rather than a flex item, and it
+     has no titlebar above it to clear. Height is what would animate here; it is
+     not wired, so the box just sizes to its content and collapses to nothing. */
+  .maka-workbar-motion {
+    width: 100%;
+    margin-top: 0;
+    transition: none;
+  }
+
   .maka-session-workbar {
     width: 100%;
     min-width: 0;
     max-width: none;
     min-height: min(220px, 42dvh);
     max-height: min(42dvh, 360px);
-    /* Stacked below the conversation, there is no titlebar to clear. */
-    margin-top: 0;
     padding-top: 0;
     /* Stacked, the surface tone alone cannot carry the seam: the panel lifts
        off the conversation rather than standing beside it, so this is the one
