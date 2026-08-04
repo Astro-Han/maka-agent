@@ -246,10 +246,18 @@ export function PermissionCenterPage() {
             settings surface uses everywhere else, except now it is the
             component's, not ours. `density` must be stated: hasDividers
             silently defaults items to `balanced`. */}
+        {/* `role="group"` is load-bearing, not decoration. CollapsibleGroup's
+            wrapper is a bare div with no role of its own, and an aria-label on
+            a role-less element names nothing — ARIA prohibits naming `generic`.
+            The rows used to sit in a `List`, which ships `role="list"` and can
+            carry a name, so without this the section would have quietly lost
+            its accessible name in the move. `group` + aria-label is valid and
+            gives 功能能力列表 back. */}
         <CollapsibleGroup
           type="single"
           hasDividers
           density="compact"
+          role="group"
           className="settingsCapabilityGroup"
           aria-label={copy.capabilityListAria}
         >
