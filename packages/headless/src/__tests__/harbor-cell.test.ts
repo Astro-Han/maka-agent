@@ -4850,6 +4850,47 @@ describe('createHarborHttpToolExecutor', () => {
     }
   });
 
+  test('applies the operator command-timeout floor over the bridge too', async () => {
+    // MAKA_CELL_COMMAND_TIMEOUT_MS reached the local executor and was dropped on
+    // the floor here, so the same env var raised the per-command ceiling in
+    // container mode and did nothing in host-cell mode — the mode the benchmark
+    // actually runs. maka_agent.py forwards it either way.
+    const previousFetch = globalThis.fetch;
+    const bodies: Array<Record<string, unknown>> = [];
+    try {
+      globalThis.fetch = async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ exitCode: 0, stdout: '', stderr: '' }), {
+          status: 200,
+        });
+      };
+      const executor = createMockedHarborHttpToolExecutor({
+        MAKA_HARBOR_TOOL_EXECUTOR_URL: 'http://127.0.0.1:1',
+        MAKA_HARBOR_TOOL_EXECUTOR_TOKEN: 'test-token',
+        MAKA_CELL_COMMAND_TIMEOUT_MS: '600000',
+      });
+
+      // A command that asks for nothing inherits the operator's floor.
+      await executor.exec({ command: 'make', cwd: '/workspace' });
+      assert.equal(bodies.at(-1)?.timeoutMs, 600_000);
+
+      // A command that asks for its own timeout still owns it, in both directions.
+      await executor.exec({ command: 'ls', cwd: '/workspace', timeoutMs: 5_000 });
+      assert.equal(bodies.at(-1)?.timeoutMs, 5_000);
+
+      // Unset leaves the field off entirely so the bridge's own default stands as
+      // the single fallback rather than being shadowed by a second one here.
+      const bare = createMockedHarborHttpToolExecutor({
+        MAKA_HARBOR_TOOL_EXECUTOR_URL: 'http://127.0.0.1:1',
+        MAKA_HARBOR_TOOL_EXECUTOR_TOKEN: 'test-token',
+      });
+      await bare.exec({ command: 'make', cwd: '/workspace' });
+      assert.equal(Object.hasOwn(bodies.at(-1) ?? {}, 'timeoutMs'), false);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test('uses a long-running dispatcher without replacing active-tool cancellation', async () => {
     const previousFetch = globalThis.fetch;
     const controller = new AbortController();
@@ -4890,7 +4931,6 @@ describe('createHarborHttpToolExecutor', () => {
         command: 'sleep until cancelled',
         cwd: '/workspace',
         timeoutMs: 600_000,
-        timeoutSec: 600,
       });
     } finally {
       globalThis.fetch = previousFetch;
