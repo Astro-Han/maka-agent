@@ -1410,6 +1410,12 @@ export class AgentRun {
       const terminalEvent = terminalClaim?.event;
       if (!terminalEvent) throw new Error('terminal RuntimeEvent claim is missing');
       await terminalClaim.write;
+      // Re-check after the await, not only at entry. Two callers — a stop
+      // settling the claim and the stream's own finalize — can both pass the
+      // entry guard and then queue behind the same write. The claim slot
+      // dedupes the RuntimeEvent, but the run-store projection would append a
+      // second terminal AgentRunEvent for the one run.
+      if (this.terminalRunHeaderCommitted) return;
       if (this.continuationActive) {
         await this.input.continuationFailpoint?.('after_terminal_event_committed');
       }

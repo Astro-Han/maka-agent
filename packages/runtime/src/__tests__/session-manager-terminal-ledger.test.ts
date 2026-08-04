@@ -1,5 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { setTimeout as timerDelay } from 'node:timers/promises';
 import { deriveTurnRecords, DurableStoreWriteError, isTerminalRuntimeEvent } from '@maka/core';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type {
@@ -844,6 +845,73 @@ describe('SessionManager terminal ledger invariants', () => {
     await new RuntimeReadModel({ runStore, runtimeEventStore: runStore }).getSessionView(
       session.id,
     );
+  });
+
+  test('a stop settlement racing finalize commits exactly one terminal run event', async () => {
+    const store = new TinySessionStore();
+    const settleReachedAppend = deferred<void>();
+    const releaseTerminalAppend = deferred<void>();
+    const runStore = new TinyAgentRunStore({
+      beforeTerminalRuntimeEventAppend: async () => {
+        settleReachedAppend.resolve();
+        await releaseTerminalAppend.promise;
+      },
+    });
+    const session = await store.create(makeInput());
+    const backend = new ScriptBackend({ sessionId: session.id } as BackendFactoryContext, []);
+    const activeRuns = new Map<string, AgentRun>();
+    const turnToRunId = new Map<string, string>();
+    const run = new AgentRun({
+      sessionId: session.id,
+      header: session,
+      userInput: { turnId: 'turn-1', text: 'hello' },
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      newId: nextId(),
+      now: nextNow(41_500),
+      hooks: {
+        reserveRun: async (_sessionId, _header, activeRun) => {
+          activeRuns.set(activeRun.runId, activeRun);
+          turnToRunId.set(activeRun.turnId, activeRun.runId);
+          return {
+            sessionId: session.id,
+            backend,
+            cachedHeader: session,
+            activeRuns,
+            turnToRunId,
+          };
+        },
+        unregisterRun: (_active, activeRun) => {
+          activeRuns.delete(activeRun.runId);
+          turnToRunId.delete(activeRun.turnId);
+        },
+        updateHeader: (sessionId, patch) => store.updateHeader(sessionId, patch),
+        updateStatus: async () => {},
+        appendTurnState: async () => {},
+      },
+    });
+
+    await run.begin();
+    run.stop('stop_button');
+    // The stop settles the claim while the backend stream is still unwinding,
+    // so both settlement paths queue behind the same in-flight terminal write.
+    const settled = run.settleStopTerminal();
+    await settleReachedAppend.promise;
+    await timerDelay(0);
+    const finalized = run.finalize();
+    await timerDelay(0);
+    releaseTerminalAppend.resolve();
+    await Promise.all([settled, finalized]);
+
+    const runEvents = (await runStore.readEvents(session.id, run.runId)).filter(
+      (event) => event.type === 'run_cancelled',
+    );
+    expect(runEvents).toHaveLength(1);
+    const terminalEvents = (await runStore.readRuntimeEvents(session.id, run.runId)).filter(
+      isTerminalRuntimeEvent,
+    );
+    expect(terminalEvents).toHaveLength(1);
   });
 
   test('direct AgentRun error events still commit failed terminal facts when failed turn projection fails', async () => {
