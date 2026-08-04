@@ -780,6 +780,58 @@ test('harness composition preserves historical manifest fingerprints', async () 
   }
 });
 
+test('Reasonix comparison freezes the DeepSeek runtime, toolchain, and run identity', async () => {
+  const {
+    buildHarnessAbManifest,
+    buildHarnessExecutionProfile,
+    resolveHarnessAbRunId,
+    resolveHarnessComposition,
+    resolveHarnessCompetitorToolchain,
+    resolveHarnessCompetitorToolchainPath,
+  } = await import(new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href);
+  const composition = resolveHarnessComposition({ competitor: 'reasonix' });
+  const { competitorProfile, runtimeProfile } = composition;
+  // The competitor axis alone selects the DeepSeek runtime; both arms then
+  // share one model, effort, pricing source, and execution policy.
+  assert.equal(runtimeProfile.id, 'deepseek-v4-flash-max');
+  const manifest = buildHarnessAbManifest({
+    subjectFingerprint: 'subject',
+    taskSourceFingerprint: 'tasks',
+    toolchainFingerprint: 'tools',
+    composition,
+  });
+  assert.deepEqual(manifest.metadata.model, {
+    provider: 'deepseek',
+    id: 'deepseek-v4-flash',
+    reasoningEffort: 'max',
+  });
+  assert.equal(manifest.arms[0].id, 'maka');
+  assert.equal(manifest.arms[1].id, 'reasonix');
+  assert.equal(manifest.arms[1].metadata.config.adapter, 'reasonix_agent:MakaReasonixAgent');
+  assert.equal(manifest.arms[1].metadata.config.billingMode, 'metered');
+  assert.equal(manifest.metadata.pricing.source, runtimeProfile.pricing.source);
+  assert.equal(
+    resolveHarnessAbRunId(composition),
+    'deepseek-v4-flash-maka-vs-reasonix-tbench-2.1-full-v1',
+  );
+  assert.match(
+    resolveHarnessCompetitorToolchainPath('/run', competitorProfile),
+    new RegExp(
+      `reasonix-1\\.19\\.4-${competitorProfile.toolchainFingerprint.slice(7, 19)}-linux-x64$`,
+    ),
+  );
+  const toolchain = resolveHarnessCompetitorToolchain('/run', competitorProfile, {
+    MAKA_HARNESS_AB_REASONIX_TOOLCHAIN: '/prepared/reasonix',
+  });
+  assert.equal(toolchain.path, '/prepared/reasonix');
+  assert.equal(toolchain.prepare.name, 'prepareReasonixToolchain');
+  assert.equal(competitorProfile.runnerToolchainOption, 'reasonixToolchainPath');
+  assert.equal(
+    buildHarnessExecutionProfile(runtimeProfile).modelSpec,
+    'deepseek/deepseek-v4-flash',
+  );
+});
+
 test('Codex comparison freezes the OpenAI model, pricing, and run identity', async () => {
   const {
     buildHarnessAbManifest,

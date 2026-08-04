@@ -75,6 +75,11 @@ import {
   CLAUDE_CODE_TOOLCHAIN_FINGERPRINT,
   CLAUDE_CODE_TOOLCHAIN_SPEC,
 } from './claude-code-toolchain.js';
+import {
+  REASONIX_TOOLCHAIN_CONTAINER_PATH,
+  REASONIX_TOOLCHAIN_FINGERPRINT,
+  REASONIX_TOOLCHAIN_SPEC,
+} from './reasonix-toolchain.js';
 
 import { agentPhaseTimeoutSec, settlementGraceSec } from './maka-settlement.js';
 
@@ -101,6 +106,7 @@ const COMPETITOR_TOOLCHAINS: Partial<
         | 'kimiCodeToolchainPath'
         | 'codexToolchainPath'
         | 'claudeCodeToolchainPath'
+        | 'reasonixToolchainPath'
       >;
       readonly version: string;
       readonly containerPath: string;
@@ -140,6 +146,14 @@ const COMPETITOR_TOOLCHAINS: Partial<
     containerPath: CLAUDE_CODE_TOOLCHAIN_CONTAINER_PATH,
     fingerprint: CLAUDE_CODE_TOOLCHAIN_FINGERPRINT,
     fingerprintEnvKey: 'MAKA_CLAUDE_CODE_TOOLCHAIN_FINGERPRINT',
+  },
+  reasonix: {
+    label: 'Reasonix',
+    optionKey: 'reasonixToolchainPath',
+    version: REASONIX_TOOLCHAIN_SPEC.reasonix.version,
+    containerPath: REASONIX_TOOLCHAIN_CONTAINER_PATH,
+    fingerprint: REASONIX_TOOLCHAIN_FINGERPRINT,
+    fingerprintEnvKey: 'MAKA_REASONIX_TOOLCHAIN_FINGERPRINT',
   },
 };
 const TRIAL_CELL_OUTPUT = 'agent/maka-cell-output.json';
@@ -236,6 +250,8 @@ export interface HarborTaskRunnerOptions {
   codexToolchainPath?: string;
   /** Prepared Claude Code native toolchain mounted read-only into task containers. */
   claudeCodeToolchainPath?: string;
+  /** Prepared Reasonix toolchain mounted read-only into task containers. */
+  reasonixToolchainPath?: string;
   /** Explicit Docker target platform shared by comparison arms. */
   dockerPlatform?: 'linux/amd64';
   /** Base directory under which each task gets an isolated per-task job dir. */

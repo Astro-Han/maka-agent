@@ -1,0 +1,391 @@
+"""Harbor adapter for the pinned official Reasonix CLI."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import secrets
+import shlex
+import time
+from pathlib import Path
+from typing import Any
+
+# harness_compat picks the harbor.* tree under plain Harbor 0.13.2 and the
+# pier.* tree under Pier, whose parallel classes are type-incompatible with
+# harbor's (Pier's TrialResult only accepts Pier's AgentInfo).
+from harness_compat import (
+    AgentContext,
+    BaseEnvironment,
+    BaseInstalledAgent,
+    NetworkAllowlist as _NetworkAllowlist,
+    with_prompt_template,
+)
+from process_scope import cleanup_process_scope, scoped_command
+from provider_proxy import provider_proxy_endpoint, warn_if_pier_unreachable_proxy_port
+
+_TOOLCHAIN_ROOT = Path("/opt/maka-reasonix-toolchain")
+# Reasonix is a static Go binary; the pinned Node next to it is only the offline
+# manifest verifier install() runs, exactly as for the prebuilt OpenCode binary.
+_TOOLCHAIN_NODE = _TOOLCHAIN_ROOT / "bin" / "node"
+_TOOLCHAIN_BINARY = _TOOLCHAIN_ROOT / "bin" / "reasonix"
+_TOOLCHAIN_MANIFEST = _TOOLCHAIN_ROOT / "manifest.json"
+_TOOLCHAIN_CHECKSUMS = _TOOLCHAIN_ROOT / "checksums.sha256"
+_OUTPUT_PATH = Path("/logs/agent/reasonix.jsonl")
+_REASONIX_HOME = Path("/tmp/maka-reasonix")
+# Reasonix resolves a provider's key through api_key_env, so only the variable
+# name lands in config.toml. A Maka-specific name keeps the proxy token clear of
+# any DEEPSEEK_API_KEY a stray environment or global .env might also define.
+_PROXY_TOKEN_ENV = "MAKA_REASONIX_PROXY_TOKEN"
+# A reserved provider name: it cannot collide with Reasonix's built-in deepseek
+# entry, so the proxy route is unambiguous regardless of what else resolves.
+_PROVIDER_NAME = "maka-proxy"
+_DEFAULT_EFFORT = "max"
+_DEFAULT_CELL_TIMEOUT_SEC = 900
+_MAX_SAFE_INTEGER = 9007199254740991
+_POSITIVE_INT_RE = re.compile(r"[1-9][0-9]*")
+
+
+class MakaReasonixAgent(BaseInstalledAgent):
+    """Run Reasonix in deterministic print mode for a single Harbor task."""
+
+    @staticmethod
+    def name() -> str:
+        return "reasonix"
+
+    def install_spec(self) -> None:
+        # The Reasonix toolchain is baked into the task image and only verified
+        # (sha256 checksums + manifest fingerprint) in install(); there is
+        # nothing to install at Pier build time. Pier declares this abstract on
+        # BaseInstalledAgent; None keeps the runtime verify path unchanged.
+        return None
+
+    def network_allowlist(self) -> _NetworkAllowlist | None:
+        # Called only under Pier; plain Harbor never calls it and harness_compat
+        # exports NetworkAllowlist = None there.
+        if _NetworkAllowlist is None:
+            return None
+        # The container runs the pre-baked Reasonix CLI against the provider
+        # base_url written into config.toml, which _write_config() sets to
+        # MAKA_PROVIDER_PROXY_URL. The toolchain is verified offline (no install
+        # download), so the only outbound host the container needs is that model
+        # endpoint. A missing or malformed proxy URL fails here, at environment
+        # creation — no fallback domain, so a misconfigured trial never gets a
+        # spurious egress grant.
+        hostname, port = provider_proxy_endpoint(self._get_env, "Reasonix")
+        warn_if_pier_unreachable_proxy_port(port, "Reasonix")
+        return _NetworkAllowlist(domains=[hostname])
+
+    def get_version_command(self) -> str | None:
+        return f"{shlex.quote(str(_TOOLCHAIN_BINARY))} --version"
+
+    async def install(self, environment: BaseEnvironment) -> None:
+        expected_fingerprint = self._get_env("MAKA_REASONIX_TOOLCHAIN_FINGERPRINT")
+        if not expected_fingerprint:
+            raise ValueError("MAKA_REASONIX_TOOLCHAIN_FINGERPRINT is required")
+        manifest_check = (
+            "const fs = require('node:fs'); "
+            "const manifest = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); "
+            "if (manifest.fingerprint !== process.env.MAKA_EXPECTED_TOOLCHAIN_FINGERPRINT) "
+            "throw new Error('Reasonix toolchain fingerprint mismatch');"
+        )
+        command = (
+            "set -euo pipefail; "
+            'test "$(uname -s)" = Linux; '
+            'test "$(uname -m)" = x86_64; '
+            f"cd {shlex.quote(str(_TOOLCHAIN_ROOT))}; "
+            f"sha256sum --check {shlex.quote(_TOOLCHAIN_CHECKSUMS.name)}; "
+            f"{shlex.quote(str(_TOOLCHAIN_NODE))} -e {shlex.quote(manifest_check)} "
+            f"{shlex.quote(str(_TOOLCHAIN_MANIFEST))}"
+        )
+        await self.exec_as_agent(
+            environment,
+            command=command,
+            env={"MAKA_EXPECTED_TOOLCHAIN_FINGERPRINT": expected_fingerprint},
+        )
+
+    @with_prompt_template
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        self._started_at_ms = int(time.time() * 1000)
+        self._write_execution_identity()
+        command_scope = secrets.token_urlsafe(24)
+        abnormal_exit = False
+        try:
+            command = (
+                f"mkdir -p {shlex.quote(str(_REASONIX_HOME))}; "
+                f"printf %s {shlex.quote(self._config_toml())} > "
+                f"{shlex.quote(str(_REASONIX_HOME / 'config.toml'))}; "
+                f"{shlex.quote(str(_TOOLCHAIN_BINARY))} run --auto "
+                f"--model {shlex.quote(self._model_reference())} "
+                f"--effort {shlex.quote(self._effort())} "
+                "--output-format stream-json "
+                f"{shlex.quote(instruction)} "
+                f"> {shlex.quote(str(_OUTPUT_PATH))} "
+                "2> /logs/agent/reasonix.stderr.txt"
+            )
+            await self.exec_as_agent(
+                environment,
+                command=scoped_command(
+                    command,
+                    command_scope,
+                    secrets.token_urlsafe(12),
+                ),
+                env=self._runtime_env(),
+            )
+        except BaseException as error:
+            abnormal_exit = True
+            if isinstance(error, Exception):
+                self._failure_class = _classify_failure(error)
+            raise
+        finally:
+            try:
+                if abnormal_exit:
+                    await cleanup_process_scope(self, environment, command_scope)
+            finally:
+                self._finished_at_ms = int(time.time() * 1000)
+                await self._download_agent_logs(environment)
+
+    async def _download_agent_logs(self, environment: BaseEnvironment) -> None:
+        # _write_cell_output's only in-container input is the stream-json the
+        # CLI writes to /logs/agent/reasonix.jsonl (identity and timestamps are
+        # host-side). Under Harbor the agent log dir is bind-mounted, so the
+        # file is already host-side and is skipped; under Pier a --mounts-json
+        # run replaces the default log mounts while capabilities.mounted stays
+        # true (pier docker.py), so pier's own log download never runs —
+        # without this download, _events() sees nothing and a real
+        # token-burning run is misclassified as infra. Runs in run()'s finally
+        # so the AgentTimeoutError path is hydrated too.
+        local = self.logs_dir / _OUTPUT_PATH.name
+        if local.exists():
+            return
+        try:
+            await environment.download_file(_OUTPUT_PATH.as_posix(), local)
+        except Exception as exc:  # noqa: BLE001 - best-effort log hydration.
+            self.logger.debug("Could not download Reasonix stream %s: %s", _OUTPUT_PATH, exc)
+
+    def populate_context_post_run(self, context: AgentContext) -> None:
+        self._write_cell_output()
+
+    def _model(self) -> str:
+        model = self._get_env("MAKA_MODEL") or self.model_name
+        if not model:
+            raise ValueError("MAKA_MODEL is required")
+        return model
+
+    def _model_reference(self) -> str:
+        return f"{_PROVIDER_NAME}/{self._model()}"
+
+    def _effort(self) -> str:
+        return self._get_env("MAKA_REASONING_EFFORT") or _DEFAULT_EFFORT
+
+    def _config_toml(self) -> str:
+        proxy_url = self._get_env("MAKA_PROVIDER_PROXY_URL")
+        if not proxy_url:
+            raise ValueError("Reasonix requires the host provider proxy")
+        model = self._model()
+        # Reasonix has no flag or environment override for a provider base_url,
+        # so the proxy route has to come from config. Only non-secret values are
+        # written here: the key itself is resolved from api_key_env at runtime.
+        # Model and effort are also pinned as flags, which outrank config; both
+        # are declared so a dropped flag cannot silently downgrade the arm.
+        return (
+            f"default_model = {_toml_string(f'{_PROVIDER_NAME}/{model}')}\n"
+            "\n"
+            "[[providers]]\n"
+            f"name = {_toml_string(_PROVIDER_NAME)}\n"
+            'kind = "openai"\n'
+            f"base_url = {_toml_string(proxy_url)}\n"
+            f"models = [{_toml_string(model)}]\n"
+            f"api_key_env = {_toml_string(_PROXY_TOKEN_ENV)}\n"
+            f"effort = {_toml_string(self._effort())}\n"
+        )
+
+    def _runtime_env(self) -> dict[str, str]:
+        # The proxy URL is forwarded opaquely (IPv6 included) — endpoint-shape
+        # validation is a Pier allowlist constraint and lives in
+        # network_allowlist(), not in this plain-Harbor code path.
+        proxy_token = self._get_env("MAKA_PROVIDER_PROXY_TOKEN")
+        if not proxy_token:
+            raise ValueError("Reasonix requires the host provider proxy")
+        return {
+            # An isolated home keeps Reasonix's config, session state, and .env
+            # off any host or task-workspace config that could redirect the run.
+            "REASONIX_HOME": str(_REASONIX_HOME),
+            # The only place the cell-scoped proxy token exists: never a config
+            # file, never a command line, never the task workspace.
+            _PROXY_TOKEN_ENV: proxy_token,
+        }
+
+    def _cell_timeout_sec(self) -> int:
+        raw = self._get_env("MAKA_CELL_TIMEOUT_SEC")
+        if not raw:
+            return _DEFAULT_CELL_TIMEOUT_SEC
+        stripped = raw.strip()
+        if _POSITIVE_INT_RE.fullmatch(stripped) is None:
+            return _DEFAULT_CELL_TIMEOUT_SEC
+        try:
+            value = int(stripped)
+        except ValueError:
+            return _DEFAULT_CELL_TIMEOUT_SEC
+        return value if value <= _MAX_SAFE_INTEGER else _DEFAULT_CELL_TIMEOUT_SEC
+
+    def _events(self, *, require_result: bool = False) -> list[dict[str, Any]]:
+        path = self.logs_dir / _OUTPUT_PATH.name
+        if not path.exists():
+            if require_result:
+                raise ValueError("Reasonix stream-json did not contain a result object")
+            return []
+        events = []
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as error:
+                if require_result:
+                    raise ValueError(
+                        f"Reasonix stream-json line {line_number} is not valid JSON"
+                    ) from error
+                continue
+            if not isinstance(value, dict):
+                if require_result:
+                    raise ValueError(
+                        f"Reasonix stream-json line {line_number} must be a JSON object"
+                    )
+                continue
+            events.append(value)
+        if require_result and _result_object(events) is None:
+            raise ValueError("Reasonix stream-json did not contain a result object")
+        return events
+
+    def _write_cell_output(self) -> None:
+        started_at = getattr(self, "_started_at_ms", int(time.time() * 1000))
+        finished_at = getattr(self, "_finished_at_ms", started_at)
+        identity = self._execution_identity()
+        failed = hasattr(self, "_failure_class")
+        events = self._events(require_result=not failed)
+        result = _result_object(events)
+        tool_call_counts: dict[str, int] = {}
+        for event in events:
+            # tool_result and tool_progress repeat a dispatched call; only
+            # tool_dispatch marks a distinct invocation.
+            if event.get("kind") != "tool_dispatch":
+                continue
+            tool = event.get("tool")
+            name = tool.get("name") if isinstance(tool, dict) else None
+            if name:
+                key = str(name)
+                tool_call_counts[key] = tool_call_counts.get(key, 0) + 1
+        session_id = "reasonix"
+        steps = 0
+        error_class: str | None = self._failure_class if failed else None
+        if result is not None:
+            if isinstance(result.get("session_id"), str) and result["session_id"]:
+                session_id = result["session_id"]
+            if isinstance(result.get("num_turns"), int):
+                steps = max(0, result["num_turns"])
+            # A run that reports its own failure stays failed even when the CLI
+            # exits 0, so a token-burning error is never scored as completed.
+            if error_class is None and result.get("is_error") is True:
+                error_class = _classify_failure_subtype(result.get("subtype"))
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        runtime_events_path = self.logs_dir / "runtime-events.jsonl"
+        source_path = self.logs_dir / _OUTPUT_PATH.name
+        runtime_events_path.write_text(
+            source_path.read_text(encoding="utf-8") if source_path.exists() else "",
+            encoding="utf-8",
+        )
+        output = {
+            "schemaVersion": 1,
+            "status": "failed" if error_class else "completed",
+            **({"errorClass": error_class} if error_class else {}),
+            "runtimeEventsPath": "/logs/agent/runtime-events.jsonl",
+            "promptHash": identity["systemPromptHash"],
+            "executionIdentity": identity,
+            "toolSummary": {
+                "providerVisibleToolCount": 0,
+                "actualToolCalls": sum(tool_call_counts.values()),
+                "actualToolNames": sorted(tool_call_counts),
+                "actualToolCallCounts": tool_call_counts,
+            },
+            "steps": steps,
+            "durationMs": max(0, finished_at - started_at),
+            "startedAt": started_at,
+            "finishedAt": finished_at,
+            "runtimeRefs": {
+                "invocationId": session_id,
+                "sessionId": session_id,
+                "runId": session_id,
+                "turnId": session_id,
+            },
+        }
+        (self.logs_dir / "maka-cell-output.json").write_text(
+            json.dumps(output, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def _execution_identity(self) -> dict[str, Any]:
+        system_prompt = self._get_env("MAKA_SYSTEM_PROMPT") or ""
+        prompt_hash = "sha256:" + hashlib.sha256(
+            json.dumps(system_prompt, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return {
+            "llmConnectionSlug": self._get_env("MAKA_LLM_CONNECTION_SLUG") or "deepseek",
+            "model": self._get_env("MAKA_MODEL") or self.model_name or "deepseek-v4-flash",
+            "reasoningEffort": self._effort(),
+            "systemPromptHash": prompt_hash,
+            "pricingProfile": self._get_env("MAKA_TRIAL_PRICING_SOURCE") or "unconfigured",
+            "agentTools": False,
+        }
+
+    def _write_execution_identity(self) -> None:
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        path = self.logs_dir / "maka-cell-execution-identity.json"
+        with path.open("w", encoding="utf-8") as output:
+            output.write(json.dumps(self._execution_identity(), indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+
+
+def _toml_string(value: str) -> str:
+    """Render a TOML basic string; JSON string escaping is a valid subset."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _result_object(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    # stream-json emits one eventwire object per line, then the final result
+    # object; the result is the only line keyed by "type" instead of "kind".
+    for event in reversed(events):
+        if event.get("type") == "result":
+            return event
+    return None
+
+
+def _classify_failure_subtype(subtype: Any) -> str:
+    # error_during_execution is Reasonix reporting its own run failure, which is
+    # an agent-incomplete outcome (harbor-failure-policy's runtime_error), not
+    # an infrastructure fault that should be retried or excluded from scoring.
+    return "runtime_error" if subtype == "error_during_execution" else "infra_failed"
+
+
+def _classify_failure(error: Exception) -> str:
+    text = str(error).lower()
+    if any(
+        marker in text
+        for marker in ("401", "403", "unauthorized", "authentication", "invalid api key")
+    ):
+        return "auth"
+    if any(marker in text for marker in ("429", "rate limit", "too many requests")):
+        return "rate_limit"
+    if any(marker in text for marker in ("billing", "insufficient credit", "quota exceeded")):
+        return "provider_billing"
+    if any(marker in text for marker in ("connection", "network", "dns", "socket")):
+        return "network"
+    if any(marker in text for marker in ("500", "502", "503", "504", "unavailable")):
+        return "provider_unavailable"
+    return "infra_failed"

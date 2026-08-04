@@ -46,6 +46,11 @@ import {
   CLAUDE_CODE_TOOLCHAIN_SPEC,
   prepareClaudeCodeToolchain,
 } from '#claude-code-toolchain';
+import {
+  REASONIX_TOOLCHAIN_FINGERPRINT,
+  REASONIX_TOOLCHAIN_SPEC,
+  prepareReasonixToolchain,
+} from '#reasonix-toolchain';
 import { MAKA_NODE_TOOLCHAIN_FINGERPRINT, prepareMakaNodeToolchain } from '#maka-node-toolchain';
 import { createCodexOAuthHarnessCredentialBinding } from '#codex-oauth-harness';
 import {
@@ -322,6 +327,22 @@ export const HARNESS_COMPETITOR_PROFILES = Object.freeze({
       attemptPolicy: 'single',
     }),
   }),
+  reasonix: Object.freeze({
+    id: 'reasonix',
+    version: REASONIX_TOOLCHAIN_SPEC.reasonix.version,
+    toolchainFingerprint: REASONIX_TOOLCHAIN_FINGERPRINT,
+    prepareToolchain: prepareReasonixToolchain,
+    toolchainPathEnvKey: 'MAKA_HARNESS_AB_REASONIX_TOOLCHAIN',
+    runnerToolchainOption: 'reasonixToolchainPath',
+    config: Object.freeze({
+      // stream-json carries real tool names, which the redacted --events-jsonl
+      // surface aliases away; the arms are only comparable on tool behaviour if
+      // both capture their CLI's native stream.
+      outputFormat: 'stream-json',
+      permissions: 'auto',
+      attemptPolicy: 'single',
+    }),
+  }),
 });
 
 export const HARNESS_RUNTIME_PROFILES = Object.freeze({
@@ -393,6 +414,7 @@ const DEFAULT_RUNTIME_BY_COMPETITOR = Object.freeze({
   opencode: 'kimi-coding-plan-k3-max',
   codex: 'openai-codex-gpt-5.6-sol-xhigh',
   'claude-code': 'deepseek-v4-flash-max',
+  reasonix: 'deepseek-v4-flash-max',
 });
 
 const SUPPORTED_HARNESS_COMPOSITIONS = new Set([
@@ -403,6 +425,7 @@ const SUPPORTED_HARNESS_COMPOSITIONS = new Set([
   'terminal-bench-2.1|openai-codex-gpt-5.6-sol-xhigh|codex',
   'terminal-bench-2.1|deepseek-v4-flash-max|codex',
   'terminal-bench-2.1|deepseek-v4-flash-max|claude-code',
+  'terminal-bench-2.1|deepseek-v4-flash-max|reasonix',
   'deep-swe-1.1|kimi-coding-plan-k3-max|kimi-code',
   'deep-swe-1.1|openai-codex-gpt-5.6-sol-xhigh|codex',
   'deep-swe-1.1-full|kimi-coding-plan-k3-max|kimi-code',
