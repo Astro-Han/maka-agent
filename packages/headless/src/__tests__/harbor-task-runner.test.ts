@@ -2802,6 +2802,46 @@ describe('buildHarborJobConfig', () => {
     assert.equal(env.MAKA_BACKEND, 'ai-sdk');
   });
 
+  // Harbor resolves the agent phase as `min(override ?? task_declared, max ?? inf)`
+  // (harbor/trial/trial.py, _resolve_timeout_sec). Every deadline assertion below
+  // goes through this rather than reading a field directly: a settlement tail
+  // published on max_timeout_sec satisfies a field-shaped assertion while
+  // resolving straight back to the task's own timeout, which is exactly how the
+  // window stayed unreachable while these tests were green.
+  type HarborAgentEntry = {
+    env: Record<string, string>;
+    override_timeout_sec?: number;
+    max_timeout_sec?: number;
+  };
+  const harborAgentPhaseSec = (agent: HarborAgentEntry, taskDeclaredSec: number): number =>
+    Math.min(
+      agent.override_timeout_sec ?? taskDeclaredSec,
+      agent.max_timeout_sec ?? Number.POSITIVE_INFINITY,
+    );
+
+  test('resolves Maka a settlement tail past the task-declared agent timeout', () => {
+    // The regression this pins: publishing budget + grace on max_timeout_sec.
+    // Harbor folds that to min(1800, 1830) = 1800, so the cell was SIGKILLed at
+    // the instant it was supposed to begin writing maka-cell-output.json — and
+    // every timed-out Maka cell lost its already-authoritative verifier reward.
+    const declared = 1800;
+    const config = buildHarborJobConfig(runInput(), {
+      makaRepoPath: '/repo',
+      jobsDir: '/jobs/x',
+      jobName: 'trial',
+      model: 'deepseek/deepseek-v4-flash',
+      agentEnv: { MAKA_CELL_TIMEOUT_SEC: String(declared) },
+    });
+    const agent = (config.agents as HarborAgentEntry[])[0]!;
+    assert.equal(
+      harborAgentPhaseSec(agent, declared),
+      declared + MAKA_SETTLEMENT_GRACE_SEC,
+      'Harbor must kill one settlement window after the model budget, not at it',
+    );
+    // A ceiling cannot raise a base, so leaving one behind can only re-clamp it.
+    assert.equal(agent.max_timeout_sec, undefined);
+  });
+
   test('every arm gets the same model budget and only Maka a settlement tail', () => {
     // Maka's cell stops calling the model one grace window before its own budget
     // runs out; native CLIs run until Harbor cancels. Taking the grace out of the
@@ -2821,9 +2861,7 @@ describe('buildHarborJobConfig', () => {
             }
           : {}),
       });
-      return (
-        config.agents as Array<{ env: Record<string, string>; max_timeout_sec?: number }>
-      )[0]!;
+      return (config.agents as HarborAgentEntry[])[0]!;
     };
 
     // Pin the window as a real quantity: with a zero grace every assertion below
@@ -2831,22 +2869,21 @@ describe('buildHarborJobConfig', () => {
     assert.ok(MAKA_SETTLEMENT_GRACE_SEC > 0, 'the settlement window must be a real window');
 
     const maka = agentFor('maka');
-    assert.equal(maka.max_timeout_sec, 1800 + MAKA_SETTLEMENT_GRACE_SEC);
+    const makaPhase = harborAgentPhaseSec(maka, 1800);
+    assert.equal(makaPhase, 1800 + MAKA_SETTLEMENT_GRACE_SEC);
     // The budget the cell is handed is the model budget itself, on every path.
     assert.equal(maka.env.MAKA_CELL_TIMEOUT_SEC, '1800');
     assert.equal(maka.env.MAKA_CELL_SETTLEMENT_GRACE_SEC, String(MAKA_SETTLEMENT_GRACE_SEC));
     // Harbor kills at the agent phase, which is that budget plus the window.
-    assert.equal(
-      maka.max_timeout_sec! - Number(maka.env.MAKA_CELL_TIMEOUT_SEC),
-      MAKA_SETTLEMENT_GRACE_SEC,
-    );
+    assert.equal(makaPhase - Number(maka.env.MAKA_CELL_TIMEOUT_SEC), MAKA_SETTLEMENT_GRACE_SEC);
 
     const codex = agentFor('codex');
-    assert.equal(codex.max_timeout_sec, 1800);
+    const codexPhase = harborAgentPhaseSec(codex, 1800);
+    assert.equal(codexPhase, 1800);
     assert.equal(codex.env.MAKA_CELL_SETTLEMENT_GRACE_SEC, undefined);
     // The whole asymmetry: Maka's phase is longer by exactly the window it
     // spends settling, and both arms still call the model for the same 1800s.
-    assert.equal(maka.max_timeout_sec! - codex.max_timeout_sec!, MAKA_SETTLEMENT_GRACE_SEC);
+    assert.equal(makaPhase - codexPhase, MAKA_SETTLEMENT_GRACE_SEC);
   });
 
   test('an operator-widened settlement window is honoured, not overwritten', () => {
@@ -2863,12 +2900,10 @@ describe('buildHarborJobConfig', () => {
         MAKA_CELL_SETTLEMENT_GRACE_SEC: String(widened),
       },
     });
-    const agent = (
-      config.agents as Array<{ env: Record<string, string>; max_timeout_sec?: number }>
-    )[0]!;
+    const agent = (config.agents as HarborAgentEntry[])[0]!;
     assert.equal(agent.env.MAKA_CELL_SETTLEMENT_GRACE_SEC, String(widened));
     assert.equal(agent.env.MAKA_CELL_TIMEOUT_SEC, '1800');
-    assert.equal(agent.max_timeout_sec, 1800 + widened);
+    assert.equal(harborAgentPhaseSec(agent, 1800), 1800 + widened);
   });
 
   test('a malformed cell timeout falls back instead of failing the run', () => {
@@ -2897,7 +2932,9 @@ describe('buildHarborJobConfig', () => {
     for (const { raw, parsed } of cases) {
       const agentEnv: Record<string, string> =
         raw === undefined ? {} : { MAKA_CELL_TIMEOUT_SEC: raw };
-      const label = JSON.stringify(raw);
+      // String(): JSON.stringify(undefined) is undefined, and an undefined assert
+      // message throws ERR_INVALID_ARG_TYPE over the top of the real diff.
+      const label = String(JSON.stringify(raw));
 
       // A parse miss falls back to the task metadata timeout.
       const withMetadata = buildHarborJobConfig(
@@ -2916,9 +2953,7 @@ describe('buildHarborJobConfig', () => {
           model: 'deepseek/deepseek-v4-flash',
         },
       );
-      const metadataAgent = (
-        withMetadata.agents as Array<{ env: Record<string, string>; max_timeout_sec?: number }>
-      )[0]!;
+      const metadataAgent = (withMetadata.agents as HarborAgentEntry[])[0]!;
       assert.equal(metadataAgent.env.MAKA_CELL_TIMEOUT_SEC, String(parsed ?? 1234), label);
       assert.equal(
         metadataAgent.env.MAKA_STREAM_CONNECT_TIMEOUT_MS,
@@ -2931,7 +2966,7 @@ describe('buildHarborJobConfig', () => {
         label,
       );
       assert.equal(
-        metadataAgent.max_timeout_sec,
+        harborAgentPhaseSec(metadataAgent, 1234),
         (parsed ?? 1234) + MAKA_SETTLEMENT_GRACE_SEC,
         label,
       );
@@ -2944,17 +2979,18 @@ describe('buildHarborJobConfig', () => {
         jobName: 'trial',
         model: 'deepseek/deepseek-v4-flash',
       });
-      const agent = (
-        withoutMetadata.agents as Array<{ env: Record<string, string>; max_timeout_sec?: number }>
-      )[0]!;
+      const agent = (withoutMetadata.agents as HarborAgentEntry[])[0]!;
       assert.equal(
         agent.env.MAKA_CELL_TIMEOUT_SEC,
         parsed !== undefined ? String(parsed) : raw,
         label,
       );
+      // With nothing to derive a budget from, the phase must stay Harbor's own —
+      // the task's declared timeout, stood in for here by a sentinel.
+      const declaredSentinel = 4321;
       assert.equal(
-        agent.max_timeout_sec,
-        parsed === undefined ? undefined : parsed + MAKA_SETTLEMENT_GRACE_SEC,
+        harborAgentPhaseSec(agent, declaredSentinel),
+        parsed === undefined ? declaredSentinel : parsed + MAKA_SETTLEMENT_GRACE_SEC,
         label,
       );
     }
@@ -2977,13 +3013,11 @@ describe('buildHarborJobConfig', () => {
         provider: 'zai-coding-plan',
       },
     );
-    const agent = (
-      config.agents as Array<{ env: Record<string, string>; max_timeout_sec?: number }>
-    )[0]!;
+    const agent = (config.agents as HarborAgentEntry[])[0]!;
     assert.equal(agent.env.MAKA_CELL_TIMEOUT_SEC, '1234');
     assert.equal(agent.env.MAKA_STREAM_CONNECT_TIMEOUT_MS, '1234000');
     assert.equal(agent.env.MAKA_STREAM_IDLE_TIMEOUT_MS, '1234000');
-    assert.equal(agent.max_timeout_sec, 1234 + MAKA_SETTLEMENT_GRACE_SEC);
+    assert.equal(harborAgentPhaseSec(agent, 1234), 1234 + MAKA_SETTLEMENT_GRACE_SEC);
   });
 
   test('merges per-attempt agent env into the Harbor agent config', () => {

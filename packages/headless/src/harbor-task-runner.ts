@@ -1217,7 +1217,13 @@ export function buildHarborJobConfig(
                 }
               : {},
         env: agentEnv,
-        ...(agentPhaseSec !== undefined ? { max_timeout_sec: agentPhaseSec } : {}),
+        // override_timeout_sec, not max_timeout_sec: Harbor resolves the agent
+        // phase as `min(override ?? task_declared, max ?? inf)`, so max_ can only
+        // ever lower the task's own timeout. Asking for budget + settlement
+        // through max_ resolved to the task timeout unchanged, which left Maka's
+        // settlement window mathematically unreachable — the cell was SIGKILLed
+        // at the instant it was supposed to start writing.
+        ...(agentPhaseSec !== undefined ? { override_timeout_sec: agentPhaseSec } : {}),
       },
     ],
     datasets: [],
