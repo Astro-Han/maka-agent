@@ -98,8 +98,8 @@ test('harness A/B uses one safe execution default and accepts per-run overrides'
     armExecution: 'sequential',
   });
   assert.throws(
-    () => resolveHarnessAbExecutionPolicy('5', undefined, 30),
-    /MAKA_HARNESS_AB_PAIR_CONCURRENCY must be an integer between 1 and 4/,
+    () => resolveHarnessAbExecutionPolicy('17', undefined, 30),
+    /MAKA_HARNESS_AB_PAIR_CONCURRENCY must be an integer between 1 and 16/,
   );
   assert.throws(
     () => resolveHarnessAbExecutionPolicy(undefined, 'together', 30),
@@ -283,10 +283,6 @@ test('harness A/B records its configured execution policy in the manifest', asyn
   assert.equal(selection.limit, 89);
   assert.equal(manifest.maxConcurrency, 2);
   assert.equal(manifest.maxConcurrentAttempts, 4);
-  assert.throws(
-    () => resolveHarnessAbExecutionPolicy('5', undefined, selection.taskIds.length),
-    /MAKA_HARNESS_AB_PAIR_CONCURRENCY must be an integer between 1 and 4/,
-  );
 });
 
 test('harness Oracle environment selects the linux/amd64 image manifest digest', async () => {

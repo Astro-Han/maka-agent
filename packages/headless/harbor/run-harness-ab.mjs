@@ -89,7 +89,9 @@ const execFileAsync = promisify(execFile);
 
 export const DEFAULT_HARNESS_AB_RUN_ID = 'k3-maka-vs-kimi-code-tbench-2.1-full-v2';
 const CANARY_TASKS = 5;
-const MAX_PAIR_CONCURRENCY = 4;
+// Bounds host load only: every cell is an independent Harbor run, so pair
+// concurrency never enters scoring or resume identity beyond the manifest.
+const MAX_PAIR_CONCURRENCY = 16;
 const DEFAULT_PAIR_CONCURRENCY = 1;
 const DEFAULT_ARM_EXECUTION = 'sequential';
 const KIMI_CODING_PLAN_PRICING = Object.freeze({
