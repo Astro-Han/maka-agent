@@ -207,8 +207,7 @@ export function ModelChipStatic(props: { label: string; onOpenSettings?: () => v
     );
   }
   return (
-    // a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision.
-    <span className="maka-composer-model-chip" aria-label={copy.currentAriaLabel(props.label)} title={props.label}>
+    <span className="maka-composer-model-chip" title={props.label}>
       <span className="maka-composer-model-chip-text">{props.label}</span>
       <span className="maka-composer-model-status" aria-hidden="true" />
     </span>

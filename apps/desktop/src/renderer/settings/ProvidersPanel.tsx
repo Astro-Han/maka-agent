@@ -370,8 +370,8 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
                     startContent={<ProviderLogo type={connection.providerType} compact />}
                     label={(
                       <HStack gap={2} vAlign="center">
-                        {/* a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision. */}
-                        <span aria-label={chipAriaLabel(connection, isDefault)}>{connection.name}</span>
+                        {}
+                        <span>{connection.name}</span>
                         {isDefault && <Badge variant="neutral" label={copy.default} />}
                       </HStack>
                     )}
@@ -398,11 +398,6 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
     </VStack>
   );
 
-  function chipAriaLabel(connection: LlmConnection, isDefault: boolean): string {
-    const provider = providerDisplay(connection.providerType, locale).name;
-    const status = connectionChipStatus(connection, locale);
-    return copy.chipAria(connection.name, provider, isDefault, status?.label);
-  }
 }
 
 /** Provider · default model — the row's second line, and the detail's subtitle. */

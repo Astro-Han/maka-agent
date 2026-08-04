@@ -125,7 +125,7 @@ export function ProviderCatalogPage(props: {
               data-status="ready"
               data-logged-in={card.isLoggedIn ? 'true' : undefined}
               startContent={<ProviderLogo type={card.providerType} />}
-              label={/* a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision. */ <span aria-label={providerCopy.oauthSection.cardAria(card.name, card.status, card.description)}>{card.name}</span>}
+              label={<span>{card.name}</span>}
               description={card.description}
               endContent={<ChevronRight size={15} aria-hidden="true" />}
               onClick={() => props.onPick({
@@ -145,7 +145,7 @@ export function ProviderCatalogPage(props: {
                 data-provider={type}
                 data-status="ready"
                 startContent={<ProviderLogo type={type} />}
-                label={/* a11y-allow: this label is already inert — a role-less span cannot carry a name — so deleting it or moving it onto the interactive ancestor is a UX call, not a mechanical one. Pending design decision. */ <span aria-label={catalogCopy.cardAria(display.name, display.description)}>{display.name}</span>}
+                label={<span>{display.name}</span>}
                 description={display.description}
                 endContent={<ChevronRight size={15} aria-hidden="true" />}
                 onClick={() => props.onPick({ method: 'credentials', providerType: type, name: display.name })}

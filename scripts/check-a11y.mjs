@@ -368,7 +368,6 @@ const RULES = [
         'kbd',
         'samp',
         'var',
-        'blockquote',
         'figcaption',
         'sub',
         'sup',

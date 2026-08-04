@@ -83,13 +83,12 @@ const zhCopy = {
     categoriesAria: '模型供应商分类', searchPlaceholder: '搜索服务商', searchAria: '搜索模型服务商', noMatch: '没有匹配的服务商',
     createSubtitle: '完成必要配置后，连接会出现在模型页上方。', connection: '模型连接',
     count: (value: number) => `${value} 个连接`, connectTitle: (name: string) => `连接 ${name}`,
-    chipAria: (name: string, provider: string, isDefault: boolean, status?: string) => `模型连接：${name}，供应商：${provider}${isDefault ? '，默认连接' : ''}${status ? `，${status}` : ''}`,
     addConnection: '添加连接', category: '分类', backToList: '返回模型连接', backToCatalog: '返回服务商列表',
   },
   catalog: {
     unavailable: '未开放',
     wiredTitle: (name: string) => `${name}（请从账号连接登录）`,
-    unwiredTitle: (name: string) => `${name}（账号登录暂未接入聊天发送）`, cardAria: (name: string, description: string) => `添加模型供应商：${name}，${description}`,
+    unwiredTitle: (name: string) => `${name}（账号登录暂未接入聊天发送）`,
   },
   add: {
     invalidSlug: '连接标识格式不正确', duplicateSlug: '连接标识已存在', cloudflareAccount: '请填写 Cloudflare Account ID', endpointRequired: '这个供应商需要填写服务地址',
@@ -224,13 +223,12 @@ const enCopy: ProviderSettingsCopy = {
     categoriesAria: 'Model provider categories', searchPlaceholder: 'Search providers', searchAria: 'Search model providers', noMatch: 'No matching providers',
     createSubtitle: 'After required setup, the connection appears above on the Models page.', connection: 'Model connection',
     count: (value: number) => `${value} ${value === 1 ? 'connection' : 'connections'}`, connectTitle: (name: string) => `Connect ${name}`,
-    chipAria: (name: string, provider: string, isDefault: boolean, status?: string) => `Model connection: ${name}; provider: ${provider}${isDefault ? '; default connection' : ''}${status ? `; ${status}` : ''}`,
     addConnection: 'Add connection', category: 'Category', backToList: 'Back to model connections', backToCatalog: 'Back to the provider list',
   },
   catalog: {
     unavailable: 'Unavailable',
     wiredTitle: (name: string) => `${name} (sign in under account connections)`,
-    unwiredTitle: (name: string) => `${name} (account sign-in not connected to chat)`, cardAria: (name: string, description: string) => `Add model provider: ${name}; ${description}`,
+    unwiredTitle: (name: string) => `${name} (account sign-in not connected to chat)`,
   },
   add: {
     invalidSlug: 'The connection identifier format is invalid', duplicateSlug: 'Connection identifier already exists', cloudflareAccount: 'Enter the Cloudflare Account ID', endpointRequired: 'This provider requires a service URL',
