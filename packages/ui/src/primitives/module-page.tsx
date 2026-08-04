@@ -9,11 +9,12 @@
 // full-bleed divider under the header, padding collapse between adjacent
 // slots, and scroll containment.
 //
-// Deliberately NO `contentWidth` clamp. A clamp centres each slot inside its
-// own box, so the header centres across the full width while the content
-// centres inside (width − panel) — the title stops lining up with the rows the
-// moment the inspector opens. The vendor template is edge-to-edge and so is
-// this; the detail pane already bounds the page.
+// `contentWidth` clamps the page into a centred column, the way every other
+// main page in this app is clamped — nothing here runs edge to edge. Astryx
+// applies the same `--layout-content-width` to the header's inner wrapper and
+// to the body row, and both centre inside the full plate width, so the title
+// keeps the rows' left edge. The inspector rides INSIDE that column rather
+// than beside it, which is what keeps the two aligned when it opens.
 //
 // Header shape is the template's, too: one row — title, one quiet supporting
 // line, then the actions. No lede paragraph, so the page opens straight into
@@ -25,6 +26,12 @@ import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from '@astryxdesign/
 import { ResizeHandle, useResizable } from '@astryxdesign/core/Resizable';
 import { useMediaQuery } from '@astryxdesign/core/hooks';
 import { cn } from '../utils.js';
+
+/**
+ * The page column's max width. Matches the clamp the skills / MCP / settings
+ * pages already use, so every main page shares one measure.
+ */
+const MODULE_PAGE_WIDTH = 900;
 
 export interface ModulePageProps {
   /** Page title. Also the `main` landmark's accessible name. */
@@ -67,16 +74,20 @@ export function ModulePage({
   const isNarrow = useMediaQuery('(max-width: 1024px)');
   // Hooks cannot be conditional, so the region always exists; only the panel
   // and its handle are conditional on there being something to inspect.
+  // Sized against the clamped column, not the window: the inspector shares
+  // MODULE_PAGE_WIDTH with the rows, so a panel tuned for a full-bleed page
+  // would leave the list too little of it.
   const inspectorPanel = useResizable({
-    defaultSize: 380,
-    minSizePx: 300,
-    maxSizePx: 560,
+    defaultSize: 320,
+    minSizePx: 280,
+    maxSizePx: 420,
     autoSaveId: inspectorAutoSaveId,
   });
 
   return (
     <Layout
       height="fill"
+      contentWidth={MODULE_PAGE_WIDTH}
       // The app shell is itself a full-bleed Layout, and
       // `--layout-padding-outer-x: 0` inherits into every nested one — the page
       // title would sit flush against the pane edge, 20px left of its own rows.
