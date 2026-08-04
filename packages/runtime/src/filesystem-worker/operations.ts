@@ -316,15 +316,21 @@ async function resolveWritableAllowed(
   } catch (error) {
     if (nodeErrorCode(error) !== 'ENOENT') throw error;
   }
-  const parent = await fs.realpath(dirname(candidate));
-  assertAllowed(root, candidate, label, 'write', permission);
-  if (!isPathInside(root, parent) && !exactWriteCoversParent(permission, candidate, parent)) {
+  // The target does not exist, but it can still be a dangling symlink, and a
+  // write lands on what the link names rather than on the link. Authorise the
+  // followed path — the same one `assertTargetUnchanged` pins the request to —
+  // so the worker enforces its own boundary instead of trusting the caller to
+  // have canonicalised the path for it.
+  const followed = await realpathAllowMissing(candidate);
+  const parent = await fs.realpath(dirname(followed));
+  assertAllowed(root, followed, label, 'write', permission);
+  if (!isPathInside(root, parent) && !exactWriteCoversParent(permission, followed, parent)) {
     throw operationError(
       'path_denied',
       `${label} parent was not covered by the operation boundary.`,
     );
   }
-  return candidate;
+  return followed;
 }
 
 async function resolveExistingAllowed(
