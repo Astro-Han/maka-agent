@@ -241,13 +241,9 @@ export function PlanReminderFormDialog(props: {
                 {/* `isRequired` is the ONLY way to get `aria-required` onto an
                     Astryx field: it writes `aria-required` after spreading
                     `...rest`, so passing the attribute through is silently
-                    dropped (TextInput.tsx). It also renders a hard-coded
-                    English "Required" marker with no message id, which is why
-                    this form dropped the prop entirely for a while — and lost
-                    the required semantics with it. The marker is suppressed in
-                    CSS instead (see astryx-field.css): screen readers keep
-                    `aria-required` and announce it in their OWN language, and
-                    no English leaks into a Chinese form. */}
+                    dropped (TextInput.tsx). Its visible marker is localized
+                    through the vendor patch (#2184), so the prop now costs
+                    nothing to carry. */}
                 <TextInput
                   label={copy.field.title}
                   isRequired

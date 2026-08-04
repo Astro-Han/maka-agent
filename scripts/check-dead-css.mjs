@@ -104,9 +104,6 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   // The column resize handle's hit area (Resizable/ResizeHandle themeProps).
   // sidebar.css styles the sidenav handle's own line through it.
   'astryx-resize-handle',
-  // Field labels (Field/FieldLabel themeProps). astryx-field.css suppresses
-  // the vendor's hard-coded English "Required" / "Optional" marker there.
-  'astryx-field-label',
   // AppShell's sidenav slot (AppShell.tsx themeProps); shell-layout.css clears
   // its top so the column runs under the transparent titlebar.
   'astryx-app-shell-sidenav',

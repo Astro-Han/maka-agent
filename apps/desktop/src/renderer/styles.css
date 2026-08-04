@@ -18,7 +18,6 @@
    without a compatibility layer. */
 @import "./styles/native-cursor.css" layer(components);
 /* Suppresses the plan-reminder form's untranslatable required marker. */
-@import "./styles/astryx-field.css" layer(components);
 @import "./styles/shell-layout.css" layer(components);
 @import "./styles/sidebar.css" layer(components);
 @import "./styles/search-modal.css" layer(components);
