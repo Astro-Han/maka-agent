@@ -83,8 +83,3 @@
   flex: 1 1 auto;
   flex-direction: column;
 }
-
-.agents-inner-view-clamp {
-  width: min(100%, 1024px);
-  margin-inline: auto;
-}

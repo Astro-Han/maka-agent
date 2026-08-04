@@ -18,11 +18,6 @@
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.maka-module-main[data-module="daily-review"] {
-  grid-template-rows: auto auto;
-  align-content: start;
-}
-
 .maka-module-main-header {
   width: min(100%, 900px);
   margin-inline: auto;
@@ -44,8 +39,8 @@
    level with the section headings underneath it, collapsing the one size step
    that makes a page title read as one. Display keeps the size and gives up the
    weight, which is the trade the vendor's own reasoning endorses at this size
-   (large text needs less weight). Same call at .maka-plan-heading h2 and
-   .settingsPageHeader h2; nothing else in the renderer uses display outside a
+   (large text needs less weight). Same call at .settingsPageHeader h2;
+   nothing else in the renderer uses display outside a
    real hero. */
 .maka-module-main-header h2 {
   font: var(--maka-text-display-2);
@@ -58,6 +53,59 @@
   font: var(--maka-text-body);
   margin: var(--space-1) 0 0;
   color: var(--foreground-secondary);
+}
+
+/* Keep the lede a readable measure. The header is a flex row, so without a
+   cap the subtitle stretches to the full 900px clamp and outruns the title. */
+.maka-module-main-header [data-slot="page-header-content"] {
+  max-width: 560px;
+}
+
+/* ── The module page body ──────────────────────────────────────────────
+   One skeleton for every module page under the header: a clamped column
+   that stacks page TIERS with the 24px two-tier rhythm (checklist rule 10)
+   and never re-pads — .maka-module-main owns the page padding.
+
+   Adopted by 计划提醒 and 每日回顾, which each used to carry a private copy
+   of this block (.maka-plan-shell, .maka-daily-review-panel) and drifted
+   apart on gap, padding and clamp. */
+.maka-module-page-body {
+  width: min(100%, 900px);
+  min-height: 0;
+  margin-inline: auto;
+  display: grid;
+  align-content: start;
+  gap: var(--space-6);
+  padding: 0;
+  overflow: auto;
+}
+
+/* One tier: a control bar over the content it governs. Small step inside the
+   unit, so the bar reads as the panel's own header rather than a page tier. */
+.maka-module-page-tier {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Left slot = what you are looking at (view tabs / period stepper); right
+   slot = how it is filtered. The hairline is owned HERE rather than by
+   whichever control lands on the left — that is what used to split the two
+   pages into a TabList `hasDivider` on one and a standalone <Divider /> on
+   the other. */
+.maka-module-page-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-2-5);
+  flex-wrap: wrap;
+  row-gap: var(--space-2-5);
+  padding-block-end: var(--space-1-5);
+  border-block-end: var(--border-width-hairline) solid var(--border);
+}
+
+.maka-module-page-panel {
+  display: grid;
+  gap: var(--space-3);
 }
 
 .maka-module-hub-heading {
@@ -90,5 +138,12 @@
 
   .maka-module-main-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1100px) {
+  .maka-module-page-bar {
+    display: grid;
+    align-items: stretch;
   }
 }

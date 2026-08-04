@@ -1,3 +1,7 @@
+/* The split-view container under the page header: the list column plus, when
+   the create/edit form is open, the form panel flush beside it. Everything
+   else about the page's skeleton — clamp, tier rhythm, control bar, panel —
+   is the shared .maka-module-page-* set in module-shell.css. */
 .maka-plan-panel {
   min-height: 0;
   overflow: auto;
@@ -11,78 +15,19 @@
   width: 100%;
 }
 
-/* Unboxed (maintainer 2026-07-18): the outer card chrome wrapped the whole
-   定时任务 module (hero + system alert + tabs + card grid) in a second frame
-   the MCP page never had — the inner surfaces (system alert, template cards,
-   task cards, run rows, form) already carry their own borders, so the wrapper
-   read as a box-in-box. Plain layout container now; content aligns flush with
-   the module header like the skills / MCP pages. */
-.maka-plan-shell {
-  width: min(100%, 900px);
-  margin-inline: auto;
+/* Column 1 of the split view: the page header over the list, spaced like the
+   module main spaces its own children so the page reads identically whether
+   the form is open or not. */
+.maka-plan-column {
+  min-width: 0;
   display: grid;
-  /* Premium checklist rule 10: two-tier rhythm — 24px between page tiers
-     (hero / tabs / panel), small steps only inside a unit. */
-  gap: var(--space-6);
-  padding: 0;
-}
-
-.maka-plan-hero {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.maka-plan-heading {
-  display: grid;
-  gap: var(--space-1);
-  max-width: 560px;
-}
-
-.maka-plan-heading h2 {
-  font: var(--maka-text-display-2);
-  margin: 0;
-  color: var(--foreground);
-  letter-spacing: var(--tracking-normal);
-}
-
-.maka-plan-heading p:last-child {
-  font: var(--maka-text-body);
-  margin: 0;
-  color: var(--foreground-secondary);
-}
-
-.maka-plan-top-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-1-5);
-  flex-wrap: wrap;
+  align-content: start;
+  gap: var(--space-4);
 }
 
 .maka-plan-page-menu,
 .maka-plan-card-menu {
   min-width: 168px;
-}
-
-.maka-plan-tabs {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.maka-plan-tabs-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2-5);
-  flex-wrap: wrap;
-  row-gap: var(--space-2-5);
-}
-
-.maka-plan-tab-panel {
-  display: grid;
-  gap: var(--space-3);
 }
 
 /* Premium checklist rules 6/11: edge-to-edge rows, zero gap, hairline
@@ -339,7 +284,7 @@
 }
 
 .maka-plan-search-summary {
-  font: var(--maka-text-heading-5);
+  font: var(--maka-text-supporting);
   font-variant-numeric: tabular-nums;
   display: flex;
   min-width: 0;
@@ -374,7 +319,8 @@
 }
 
 .maka-plan-run-main strong {
-  font: var(--maka-text-heading-4);
+  font: var(--maka-text-body);
+  font-weight: 600;
   min-width: 0;
   color: var(--foreground);
   overflow: hidden;
@@ -394,15 +340,6 @@
 }
 
 @media (max-width: 1100px) {
-  .maka-plan-hero,
-  .maka-plan-tabs-bar {
-    display: grid;
-  }
-
-  .maka-plan-top-actions {
-    justify-content: flex-start;
-  }
-
   .maka-plan-run-row {
     grid-template-columns: minmax(0, 1fr);
   }

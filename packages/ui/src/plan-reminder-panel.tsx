@@ -276,19 +276,21 @@ export function PlanReminderPanel(props: {
   }
 
   return (
+    /* The split view is a grid: the page column (header + list) and, when the
+       create/edit form is open, the form panel flush beside it. Header and
+       list share one column so the title keeps aligning with the list rows
+       instead of drifting to the page centre when the form opens. */
     <div className="maka-plan-panel" data-form-open={formDialogOpen ? 'true' : undefined}>
-      <div className="maka-plan-shell agents-inner-view-clamp">
-        <PageHeader
-          as_wrapper="div"
-          className="maka-plan-hero"
-          as="h2"
-          title={props.hubHeader?.title ?? copy.page.title}
-          subtitle={props.hubHeader?.subtitle ?? copy.page.subtitle}
-          badge={props.hubHeader?.badge}
-          headingRowClassName={props.hubHeader ? 'maka-module-hub-heading' : undefined}
-          contentClassName="maka-plan-heading"
-          actions={
-            <div className="maka-plan-top-actions" role="group" aria-label={copy.page.actionsAriaLabel}>
+      <div className="maka-plan-column">
+      <PageHeader
+        className="maka-module-main-header"
+        as="h2"
+        title={props.hubHeader?.title ?? copy.page.title}
+        subtitle={props.hubHeader?.subtitle ?? copy.page.subtitle}
+        badge={props.hubHeader?.badge}
+        headingRowClassName={props.hubHeader ? 'maka-module-hub-heading' : undefined}
+        actions={
+          <div className="maka-module-main-actions" role="group" aria-label={copy.page.actionsAriaLabel}>
               <UiButton
                 variant="primary"
                 onClick={openCreateReminderDialog}
@@ -322,19 +324,19 @@ export function PlanReminderPanel(props: {
                       />
                     </>
                   )}
-              </DropdownMenu>
-            </div>
-          }
-        />
+            </DropdownMenu>
+          </div>
+        }
+      />
 
-        <div className="maka-plan-tabs">
-          <div className="maka-plan-tabs-bar">
+      <div className="maka-module-page-body">
+        <div className="maka-module-page-tier">
+          <div className="maka-module-page-bar">
             <TabList
               value={planView}
               onChange={(value) => {
                 if (value === 'tasks' || value === 'runs') setPlanView(value);
               }}
-              hasDivider
               aria-label={copy.page.viewsAriaLabel}
             >
               <Tab value="tasks" label={copy.page.tasks} />
@@ -345,7 +347,7 @@ export function PlanReminderPanel(props: {
                 <Toolbar
                   size="sm"
                   label={copy.page.filtersAriaLabel}
-                  className="maka-plan-toolbar"
+                  className="maka-module-page-toolbar"
                   startContent={(
                     <>
                       <TextInput
@@ -396,7 +398,7 @@ export function PlanReminderPanel(props: {
               <Toolbar
                 size="sm"
                 label={copy.page.runsFilterAriaLabel}
-                className="maka-plan-toolbar"
+                className="maka-module-page-toolbar"
                 endContent={(
                   <Selector
                     value={runRange}
@@ -412,7 +414,7 @@ export function PlanReminderPanel(props: {
           </div>
 
           {planView === 'tasks' ? (
-            <div className="maka-plan-tab-panel">
+            <div className="maka-module-page-panel">
               {normalizedListQuery && (
               <div className="maka-plan-search-summary" role="status" aria-live="polite">
                 <span>{copy.page.searchMatches(searchMatchedReminders.length)}</span>
@@ -585,7 +587,7 @@ export function PlanReminderPanel(props: {
           ) : null}
 
           {planView === 'runs' ? (
-            <div className="maka-plan-tab-panel">
+            <div className="maka-module-page-panel">
               {visibleRunEntries.length === 0 ? (
               <EmptyState
                 icon={<Clock />}
@@ -612,6 +614,7 @@ export function PlanReminderPanel(props: {
             </div>
           ) : null}
         </div>
+      </div>
       </div>
 
       <PlanReminderFormDialog

@@ -35,6 +35,8 @@ import {
 import type { DailyReviewBridge, DailyReviewMarkdownActionInput } from './module-panel-types.js';
 import type { ModuleHubHeader } from './module-hub-selector.js';
 import { getDailyReviewCopy } from './daily-review-copy.js';
+import { getSharedUiCopy } from './shared-ui-copy.js';
+import { PageHeader } from './primitives/page-header.js';
 import { Markdown } from './markdown.js';
 import { RelativeTime } from './relative-time.js';
 import { useUiLocale } from './locale-context.js';
@@ -65,6 +67,7 @@ export function DailyReviewPanel(props: {
 }) {
   const locale = useUiLocale();
   const copy = getDailyReviewCopy(locale);
+  const sharedCopy = getSharedUiCopy(locale);
   const intlLocale = uiLocaleToIntlLocale(locale);
   const mounted = useMountedRef();
   const bridgeRef = useRef(props.bridge);
@@ -201,22 +204,6 @@ export function DailyReviewPanel(props: {
     }
   }
 
-  if (route.kind === 'report') {
-    return (
-      <VStack className="maka-daily-review-panel" gap={5}>
-        <div key="report" className="maka-daily-review-route-frame">
-          <DailyReviewReport
-            archive={route.archive}
-            onBack={() => setRoute({ kind: 'activity' })}
-            onCopyMarkdown={props.onCopyMarkdown}
-            onAppendMarkdown={props.onAppendMarkdown}
-            onSaveMarkdown={props.onSaveMarkdown}
-          />
-        </div>
-      </VStack>
-    );
-  }
-
   const totals = displayedSummary?.totals;
   const currentTotals = visibleSummary?.totals;
   const hasActivity = Boolean(currentTotals && currentTotals.sessionCount + currentTotals.requestCount > 0);
@@ -226,79 +213,104 @@ export function DailyReviewPanel(props: {
     && props.bridge.getArchive,
   );
 
+  // One page header for BOTH routes — the same shared module-page header the
+  // 计划提醒 / 技能 / MCP pages use, so switching hub tabs or drilling into a
+  // report never moves the title, the hub selector, or the primary action.
+  const header = (
+    <PageHeader
+      className="maka-module-main-header"
+      as="h2"
+      title={props.hubHeader?.title ?? copy.page.title}
+      subtitle={props.hubHeader?.subtitle ?? sharedCopy.modules.dailyReviewDescription}
+      badge={props.hubHeader?.badge}
+      headingRowClassName={props.hubHeader ? 'maka-module-hub-heading' : undefined}
+      actions={route.kind === 'activity' ? (
+        <div className="maka-module-main-actions">
+          {currentArchive?.status === 'ok' ? (
+            <Button
+              variant="primary"
+              label={copy.page.viewAnalysis}
+              isLoading={pendingAction === 'open'}
+              isDisabled={pendingAction !== null}
+              onClick={() => void openArchive(currentArchive)}
+            />
+          ) : canAnalyze ? (
+            <Button
+              variant="primary"
+              label={currentArchive ? copy.page.retryAnalysis : copy.page.generateAnalysis}
+              isLoading={pendingAction === 'generate'}
+              isDisabled={
+                archiveState.status !== 'ready'
+                || pendingAction !== null
+                || !visibleSummary
+                || !hasActivity
+              }
+              onClick={() => void generateAnalysis()}
+            />
+          ) : null}
+        </div>
+      ) : undefined}
+    />
+  );
+
+  if (route.kind === 'report') {
+    return (
+      <>
+        {header}
+        <div key="report" className="maka-module-page-body">
+          <DailyReviewReport
+            archive={route.archive}
+            onBack={() => setRoute({ kind: 'activity' })}
+            onCopyMarkdown={props.onCopyMarkdown}
+            onAppendMarkdown={props.onAppendMarkdown}
+            onSaveMarkdown={props.onSaveMarkdown}
+          />
+        </div>
+      </>
+    );
+  }
+
   return (
-    <VStack className="maka-daily-review-panel" gap={5}>
-      <div key="activity" className="maka-daily-review-route-frame">
-      <VStack gap={5} data-loading={loading ? 'true' : undefined}>
-      <HStack gap={4} vAlign="start" wrap="wrap">
-        <StackItem size="fill">
-          <VStack gap={1}>
-            <HStack gap={2} vAlign="center" wrap="wrap" className={props.hubHeader ? 'maka-module-hub-heading' : undefined}>
-              <Heading level={2}>{props.hubHeader?.title ?? copy.page.title}</Heading>
-              {props.hubHeader?.badge}
-            </HStack>
-          </VStack>
-        </StackItem>
-        <SegmentedControl
-          value={String(range)}
-          onChange={changeRange}
-          label={copy.page.rangeSwitch}
-          size="sm"
-        >
-          {copy.page.rangeOptions.map(([value, label]) => (
-            <SegmentedControlItem key={value} value={value} label={label} />
-          ))}
-        </SegmentedControl>
-      </HStack>
+    <>
+      {header}
+      <div key="activity" className="maka-module-page-body">
+        <div className="maka-module-page-tier">
+          {/* Same bar as 计划提醒: what you are looking at on the left, how it
+              is filtered on the right, one hairline under both. */}
+          <div className="maka-module-page-bar">
+            <div className="maka-daily-review-stepper" role="group" aria-label={copy.page.timeRange}>
+              <Button
+                variant="ghost"
+                size="sm"
+                isIconOnly
+                icon={<ChevronLeft />}
+                label={copy.date.earlier(copy.date.unit.day)}
+                onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, -1))}
+              />
+              <Text type="label" weight="semibold" className="maka-daily-review-range-label">{rangeLabel}</Text>
+              <Button
+                variant="ghost"
+                size="sm"
+                isIconOnly
+                icon={<ChevronRight />}
+                label={copy.date.later(copy.date.unit.day)}
+                isDisabled={offsetDays >= 0}
+                onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, 1))}
+              />
+            </div>
+            <SegmentedControl
+              value={String(range)}
+              onChange={changeRange}
+              label={copy.page.rangeSwitch}
+              size="sm"
+            >
+              {copy.page.rangeOptions.map(([value, label]) => (
+                <SegmentedControlItem key={value} value={value} label={label} />
+              ))}
+            </SegmentedControl>
+          </div>
 
-      <HStack className="maka-daily-review-toolbar" gap={2} vAlign="center" wrap="wrap" role="toolbar" aria-label={copy.page.timeRange}>
-        <Button
-          variant="ghost"
-          size="sm"
-          isIconOnly
-          icon={<ChevronLeft />}
-          label={copy.date.earlier(copy.date.unit.day)}
-          onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, -1))}
-        />
-        <Text type="label" weight="semibold" className="maka-daily-review-range-label">{rangeLabel}</Text>
-        <Button
-          variant="ghost"
-          size="sm"
-          isIconOnly
-          icon={<ChevronRight />}
-          label={copy.date.later(copy.date.unit.day)}
-          isDisabled={offsetDays >= 0}
-          onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, 1))}
-        />
-        <StackItem size="fill" />
-        {currentArchive?.status === 'ok' ? (
-          <Button
-            variant="primary"
-            size="sm"
-            label={copy.page.viewAnalysis}
-            isLoading={pendingAction === 'open'}
-            isDisabled={pendingAction !== null}
-            onClick={() => void openArchive(currentArchive)}
-          />
-        ) : canAnalyze ? (
-          <Button
-            variant="primary"
-            size="sm"
-            label={currentArchive ? copy.page.retryAnalysis : copy.page.generateAnalysis}
-            isLoading={pendingAction === 'generate'}
-            isDisabled={
-              archiveState.status !== 'ready'
-              || pendingAction !== null
-              || !visibleSummary
-              || !hasActivity
-            }
-            onClick={() => void generateAnalysis()}
-          />
-        ) : null}
-      </HStack>
-
-      <Divider />
-
+          <div className="maka-module-page-panel" data-loading={loading ? 'true' : undefined}>
       {error ? (
         <Banner
           status="warning"
@@ -361,9 +373,10 @@ export function DailyReviewPanel(props: {
           </VStack>
         </div>
       ) : null}
-      </VStack>
+          </div>
+        </div>
       </div>
-    </VStack>
+    </>
   );
 }
 
@@ -427,7 +440,7 @@ function DailyReviewReport(props: {
         ) : null}
       </HStack>
       <VStack gap={1}>
-        <Heading level={2}>{title}</Heading>
+        <Heading level={3}>{title}</Heading>
         <Text type="supporting" color="secondary">{meta}</Text>
       </VStack>
       {props.archive.status !== 'ok' ? (
@@ -443,7 +456,7 @@ function DailyReviewReport(props: {
           {sections.map((section, index) => (
             <VStack key={section.key} gap={2}>
               {index > 0 ? <Divider /> : null}
-              <Heading level={3}>{copy.archive.section[section.key]}</Heading>
+              <Heading level={4}>{copy.archive.section[section.key]}</Heading>
               <div className="maka-daily-review-report-prose">
                 <Markdown text={section.content} />
               </div>
