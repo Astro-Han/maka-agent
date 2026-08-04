@@ -140,12 +140,7 @@ export async function verifyPackagedWindowsApp(
 // rewrite the DMG after packaging, so only the final artifact can be trusted.)
 export async function verifyWindowsX64Release(
   inputPath,
-  {
-    platform = process.platform,
-    verifyApp = verifyPackagedWindowsApp,
-    checksum = sha256File,
-    appDirectory,
-  } = {},
+  { platform = process.platform, verifyApp = verifyPackagedWindowsApp, checksum = sha256File } = {},
 ) {
   if (platform !== 'win32') {
     throw new Error('Windows release verification requires Windows.');
@@ -159,7 +154,7 @@ export async function verifyWindowsX64Release(
     throw new Error(`Expected the NSIS installer .exe, found ${basename(exePath)}.`);
   }
   const zipPath = `${exePath.slice(0, -'.exe'.length)}.zip`;
-  const unpackedDirectory = appDirectory ?? join(dirname(exePath), 'win-unpacked');
+  const unpackedDirectory = join(dirname(exePath), 'win-unpacked');
   await access(exePath);
   await access(zipPath);
   await access(unpackedDirectory);

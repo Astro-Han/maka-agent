@@ -142,12 +142,17 @@ test('the packaged Windows app is checked for every unsigned helper that could s
     ),
     /must be x64/,
   );
-  for (const helper of ['cua-driver', 'maka-cu', 'officecli']) {
-    assert.ok(
-      forbidden.some((path) => path.endsWith(helper)),
-      `${helper} is not among the paths the packaged app is checked against`,
-    );
-  }
+  // The exact set, not "some path ends with each name": a helper is forbidden in
+  // both the directories it could be staged from, and matching either one would
+  // let the other be dropped without a test noticing.
+  assert.deepEqual(forbidden.map((path) => path.slice('C:/app/resources/'.length)).sort(), [
+    'bin/cua-driver',
+    'bin/maka-cu',
+    'licenses/officecli',
+    'tools/cua-driver',
+    'tools/maka-cu',
+    'tools/officecli',
+  ]);
 });
 
 test('paths reach PowerShell as literals, not as strings it expands', () => {

@@ -12,7 +12,7 @@ Create a GitHub Environment named `release`. Add required reviewers if the repos
 - `APPLE_API_KEY_ID`: App Store Connect API key ID;
 - `APPLE_API_ISSUER`: App Store Connect API issuer ID.
 
-Windows needs no secrets while the build is unsigned: electron-builder skips signing when no certificate is configured. Adding an Authenticode certificate later means configuring it in `apps/desktop/electron-builder.config.mjs` and removing the `verifyUpdateCodeSignature: false` that unsigned updates require there.
+Windows needs no secrets while the build is unsigned: electron-builder skips signing when no certificate is configured. Adding an Authenticode certificate later means configuring it in `apps/desktop/electron-builder.config.mjs`, and nothing else: electron-builder derives the publisher name that authenticates updates from the certificate itself.
 
 ## Create the draft
 

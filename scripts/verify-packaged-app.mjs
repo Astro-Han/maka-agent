@@ -5,9 +5,11 @@ import { access, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
-// A verifier that hangs is worse than one that fails: the release workflow just
-// burns its timeout with no indication of which step stopped. Every command a
-// packaged app runs gets a deadline, so a hang reports where it happened.
+// `timeoutMs` is opt-in, for the commands that have actually hung: node-pty
+// under conpty keeps a handle open after its child exits. Everything else runs
+// unbounded on purpose — codesign and notarization assessment on a full app
+// bundle have no honest upper bound, and a wrong deadline fails a good release.
+// The workflow timeout is the outer bound; the verifier's stage log says where.
 export function runCommand(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
