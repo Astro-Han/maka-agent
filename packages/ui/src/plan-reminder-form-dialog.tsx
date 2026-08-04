@@ -238,14 +238,19 @@ export function PlanReminderFormDialog(props: {
               aria-busy={submitPending ? 'true' : undefined}
             >
               <FormLayout>
-                {/* No `isRequired` / `isOptional`: Astryx hard-codes those
-                    markers as the English words "Required" / "Optional"
-                    (FieldLabel.tsx) with no message id, so they cannot be
-                    translated and would leak English into a Chinese form. The
-                    title's own validation message carries the requirement, in
-                    Chinese, wired to aria-invalid and aria-describedby. */}
+                {/* `isRequired` is the ONLY way to get `aria-required` onto an
+                    Astryx field: it writes `aria-required` after spreading
+                    `...rest`, so passing the attribute through is silently
+                    dropped (TextInput.tsx). It also renders a hard-coded
+                    English "Required" marker with no message id, which is why
+                    this form dropped the prop entirely for a while — and lost
+                    the required semantics with it. The marker is suppressed in
+                    CSS instead (see astryx-field.css): screen readers keep
+                    `aria-required` and announce it in their OWN language, and
+                    no English leaks into a Chinese form. */}
                 <TextInput
                   label={copy.field.title}
+                  isRequired
                   value={title}
                   onChange={(value) => {
                     setTitleTouched(true);
@@ -268,6 +273,7 @@ export function PlanReminderFormDialog(props: {
                 />
                 <DateTimeInput
                   label={copy.field.time}
+                  isRequired
                   value={(runAtLocal || undefined) as ISODateTimeString | undefined}
                   onChange={(value) => setRunAtLocal(value ?? '')}
                   isDisabled={formInteractionDisabled}
@@ -289,6 +295,7 @@ export function PlanReminderFormDialog(props: {
                 {recurrence === 'cron' && (
                   <TextInput
                     label={copy.field.cron}
+                    isRequired
                     value={cronExpression}
                     onChange={(value) => setCronExpression(value.slice(0, 80))}
                     placeholder={copy.cronPlaceholder}
@@ -327,6 +334,7 @@ export function PlanReminderFormDialog(props: {
                     />
                     <TextInput
                       label={copy.field.chatId}
+                      isRequired
                       value={deliveryChatId}
                       onChange={(value) => setDeliveryChatId(value.slice(0, 160))}
                       placeholder={copy.chatIdPlaceholder}

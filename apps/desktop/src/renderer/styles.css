@@ -17,6 +17,8 @@
    components follow Astryx in the declared cascade, so this remains explicit
    without a compatibility layer. */
 @import "./styles/native-cursor.css" layer(components);
+/* Single owner of the field-label required/optional marker suppression. */
+@import "./styles/astryx-field.css" layer(components);
 @import "./styles/shell-layout.css" layer(components);
 @import "./styles/sidebar.css" layer(components);
 @import "./styles/search-modal.css" layer(components);

@@ -119,7 +119,13 @@ export function DailyReviewPage(props: {
           <DailyReviewPanel {...props} bridge={props.bridge} />
         </Suspense>
       ) : (
-        <ModulePage title={label}>
+        // The disconnected state keeps the module switch: it is the only
+        // in-page way back to 计划提醒, and a page you cannot leave is a worse
+        // failure than the one it is reporting.
+        <ModulePage
+          title={label}
+          toolbar={props.hubHeader?.badge ? <div className="maka-module-page-bar">{props.hubHeader.badge}</div> : undefined}
+        >
           <div className="maka-module-page-panel">
             <EmptyState icon={<CalendarDays />} title={copy.dailyReviewDisconnectedTitle} description={copy.dailyReviewDisconnectedBody} />
           </div>

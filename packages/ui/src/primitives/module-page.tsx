@@ -27,7 +27,7 @@
 // (DESIGN.md, One Working Plane) rather than with hairlines.
 
 import type { ReactNode } from 'react';
-import { HStack, Heading, StackItem, Text, VStack } from '@astryxdesign/core';
+import { Dialog, DialogHeader, HStack, Heading, StackItem, Text, VStack } from '@astryxdesign/core';
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from '@astryxdesign/core/Layout';
 import { ResizeHandle, useResizable } from '@astryxdesign/core/Resizable';
 import { useMediaQuery } from '@astryxdesign/core/hooks';
@@ -61,12 +61,20 @@ export interface ModulePageProps {
   /** Page body. Rendered edge-to-edge; the caller owns its own padding. */
   children: ReactNode;
   /**
-   * Inspector content for the end panel. `undefined` hides the panel and its
-   * resize handle entirely — an empty panel is dead width, not a placeholder.
+   * Inspector content for the selected item. `undefined` hides the panel and
+   * its resize handle entirely — an empty panel is dead width, not a
+   * placeholder. Below the two-column breakpoint the SAME content opens as a
+   * dialog instead, so the actions it carries never become unreachable.
    */
   inspector?: ReactNode;
   /** Accessible name for the inspector panel landmark. */
   inspectorLabel?: string;
+  /**
+   * Clears the caller's selection. Required for the narrow-window dialog: a
+   * dialog owns a close affordance the side panel does not need, and closing
+   * it must deselect rather than leave a hidden selection behind.
+   */
+  onInspectorDismiss?: () => void;
   /** localStorage key so a dragged inspector width survives a relaunch. */
   inspectorAutoSaveId?: string;
   className?: string;
@@ -81,11 +89,20 @@ export function ModulePage({
   inspector,
   inspectorLabel,
   inspectorAutoSaveId,
+  onInspectorDismiss,
   className,
 }: ModulePageProps) {
   // The `incident-console` template's own answer to a narrow window: drop the
-  // end panel entirely rather than squeeze two columns into one. Below this
-  // width the rows would have less room than their own content needs.
+  // end panel rather than squeeze two columns into one. Below this width the
+  // rows would have less room than their own content needs.
+  //
+  // Dropping the PANEL cannot mean dropping the inspector: rows are inert by
+  // design — every per-item action lives in the inspector — so a narrow window
+  // that hid it would leave enable/pause, trigger, snooze, edit, duplicate,
+  // clear and delete with no reachable path at all. The app's own floor is
+  // 480px wide (SAFE_MIN_WIDTH), so this is a window a user really has. Narrow
+  // therefore changes the inspector's PLACEMENT, not its existence: the same
+  // content opens as a dialog over the list.
   const isNarrow = useMediaQuery('(max-width: 1024px)');
   // Hooks cannot be conditional, so the region always exists; only the panel
   // and its handle are conditional on there being something to inspect.
@@ -129,16 +146,49 @@ export function ModulePage({
           </VStack>
         </LayoutHeader>
       }
-      content={<LayoutContent padding={0}>{children}</LayoutContent>}
+      content={(
+        <LayoutContent padding={0}>
+          {children}
+          {inspector != null && isNarrow ? (
+            <Dialog
+              isOpen
+              onOpenChange={(open) => {
+                if (!open) onInspectorDismiss?.();
+              }}
+              // `info`: a detail sheet is not a flow to complete, so every exit
+              // — Escape, backdrop, the close button — should work.
+              purpose="info"
+              width={420}
+            >
+              <Layout
+                height="auto"
+                header={<DialogHeader title={inspectorLabel ?? title} onOpenChange={(open) => {
+                  if (!open) onInspectorDismiss?.();
+                }} />}
+                content={<LayoutContent>{inspector}</LayoutContent>}
+              />
+            </Dialog>
+          ) : null}
+        </LayoutContent>
+      )}
       end={
         inspector != null && !isNarrow ? (
           <>
-            {/* No divider: the panel's own edge is already the boundary, and
-                a standing rule here would be a second one drawn on top of it.
-                The handle stays a hover-revealed grip, which is the vendor's
-                own no-divider mode. */}
-            <ResizeHandle direction="horizontal" isReversed resizable={inspectorPanel.props} />
-            <LayoutPanel resizable={inspectorPanel.props} label={inspectorLabel} padding={5}>
+            {/* No divider, and no grip at rest either (`isAlwaysVisible`
+                defaults to true): the panel's own edge is already the
+                boundary, and a standing rule or a standing pill would be a
+                second one drawn on top of it. Both appear on hover/focus,
+                which is what the vendor's own `incident-console` does. */}
+            <ResizeHandle
+              direction="horizontal"
+              isReversed
+              isAlwaysVisible={false}
+              resizable={inspectorPanel.props}
+            />
+            {/* `role` is what makes `label` an accessible name: Astryx passes
+                both straight to the div, and `aria-label` on a roleless div
+                names nothing. */}
+            <LayoutPanel role="complementary" resizable={inspectorPanel.props} label={inspectorLabel} padding={5}>
               {inspector}
             </LayoutPanel>
           </>

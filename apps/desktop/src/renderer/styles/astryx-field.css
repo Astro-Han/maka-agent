@@ -1,0 +1,20 @@
+/* Astryx renders a field's required/optional marker as the literal English
+   words "Required" / "Optional" — hard-coded in FieldLabel.tsx with no message
+   id, so `AstryxLocaleProvider` cannot reach them. On a Chinese-first product
+   that leaks English into every form.
+
+   Dropping `isRequired` was the wrong trade: it is the only prop that puts
+   `aria-required` on the input (the component writes that attribute AFTER
+   spreading `...rest`, so passing it through is silently overwritten), so
+   removing the marker also removed the semantics. Keep the prop and suppress
+   the marker here instead — `display: none` takes it out of the accessibility
+   tree too, leaving `aria-required`, which screen readers announce in their
+   own language.
+
+   Keyed on the marker's own shape: it is the one element child of a field
+   label that wraps an aria-hidden separator. `.astryx-field-label` is the
+   vendor's stable theme hook; the inner span's class is a hashed StyleX name
+   and is not. */
+.astryx-field-label > span:has(> span[aria-hidden="true"]) {
+  display: none;
+}

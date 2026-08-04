@@ -66,6 +66,7 @@ export function astryxMessageOverrides(locale: UiLocale): Overrides | undefined 
       '@astryx.checkboxList.item.checkbox': shared.markdown.checkbox,
       '@astryx.link.newTab': shared.markdown.opensInNewTab,
       '@astryx.dialog.close': shared.primitives.close,
+      '@astryx.resizable.handle.label': shared.primitives.resizeHandle,
       '@astryx.popover.close': shared.primitives.close,
       '@astryx.toast.dismiss': shared.toast.closeNotification,
       '@astryx.toast.viewport': shared.toast.notifications,

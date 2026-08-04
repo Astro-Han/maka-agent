@@ -280,6 +280,7 @@ export function PlanReminderPanel(props: {
         meta={copy.page.activeCount(activeCount)}
         inspectorLabel={copy.detail.label}
         inspectorAutoSaveId="maka-plan-inspector"
+        onInspectorDismiss={() => setSelectedReminderId(null)}
         inspector={selectedReminder ? (
           <PlanReminderInspector
             reminder={selectedReminder}
