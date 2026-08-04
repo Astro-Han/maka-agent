@@ -24,6 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from process_scope import (  # noqa: E402
+    COMMAND_ID_ENV,
+    COMMAND_SCOPE_ENV,
     COMMAND_SCOPE_ROOT,
     cleanup_process_scope,
     scoped_command,
@@ -43,10 +45,14 @@ class _Agent:
     def __init__(self, fail: bool) -> None:
         self.logger = _Logger()
         self.commands: list[str] = []
+        self.timeouts: list[int | None] = []
         self._fail = fail
 
-    async def exec_as_agent(self, environment: object, command: str) -> None:
+    async def exec_as_agent(
+        self, environment: object, command: str, timeout_sec: int | None = None
+    ) -> None:
         self.commands.append(command)
+        self.timeouts.append(timeout_sec)
         if self._fail:
             raise RuntimeError("Command failed (exit -9)")
 
@@ -77,6 +83,29 @@ def test_kill_still_runs_after_term_fails() -> None:
     assert signals == ["TERM", "KILL"], signals
 
 
+def test_every_teardown_exec_is_time_bounded() -> None:
+    """Teardown swallows every failure because it is best effort, and an exec
+    issued with no bound is the one failure swallowing cannot cover: Harbor waits
+    on `communicate()` forever, so the trial hangs and no reward is produced. A
+    graded cell was observed stalled for 1524s with both teardown execs alive."""
+    agent = _Agent(fail=False)
+    asyncio.run(cleanup_process_scope(agent, object(), "scope-5"))
+    assert agent.timeouts and all(
+        isinstance(t, int) and t > 0 for t in agent.timeouts
+    ), agent.timeouts
+
+
+def test_the_replay_carries_the_scope_marker() -> None:
+    """The recorded process group is written after the replay is forked, so a
+    teardown landing in that window finds nothing to kill. The marker closes it:
+    it is a name teardown knows before the fork, so there is no instant at which
+    the replay is alive and unfindable. `/proc`-less hosts still need the pgid."""
+    command = scoped_command("echo hi", "scope-6", "cid")
+    replay = command.split("wait \"$command_pid\"", 1)[1]
+    marker = f"{COMMAND_SCOPE_ENV}=scope-6 {COMMAND_ID_ENV}=cid"
+    assert replay.count(f"env {marker} cat --") == 2, replay
+
+
 def test_a_broken_logger_never_replaces_the_agent_failure() -> None:
     class _RaisingLogger(_Logger):
         def warning(self, message: str, *args: object) -> None:
@@ -104,7 +133,9 @@ def test_a_broken_logger_never_replaces_the_agent_failure() -> None:
 
 def test_cancellation_still_propagates() -> None:
     class _Cancelling(_Agent):
-        async def exec_as_agent(self, environment: object, command: str) -> None:
+        async def exec_as_agent(
+            self, environment: object, command: str, timeout_sec: int | None = None
+        ) -> None:
             self.commands.append(command)
             raise asyncio.CancelledError
 
@@ -147,11 +178,12 @@ def test_cleanup_reaps_the_output_replay_so_the_reader_reaches_eof() -> None:
     the command exits, so that a descendant outliving the command cannot hold the
     exec's stdout open. The replay itself is the hole: when the caller stops
     reading — which is exactly what an agent-phase timeout does — it blocks in
-    ``pipe_write`` forever, and teardown has no handle on it. It is not the
-    wrapper PID and it carries no scope marker, so whether anything reaps it
-    comes down to which process group the shell happened to leave it in. On a
-    host with no ``/proc`` the marker sweep is a no-op and nothing does, which is
-    what this test pins. A stranded replay means the exec never sees EOF, so the
+    ``pipe_write`` forever, and it is not the wrapper PID, so whether anything
+    reaps it comes down to which process group the shell happened to leave it in.
+
+    This runs on a host with no ``/proc``, where the marker sweep cannot run, so
+    what it pins is the portable handle alone: the recorded process group has to
+    be enough by itself. A stranded replay means the exec never sees EOF, so the
     cell hangs and the verifier never runs.
     """
     if shutil.which("bash") is None or shutil.which("ps") is None:

@@ -13,6 +13,10 @@ COMMAND_SCOPE_ROOT = "/tmp/maka-harbor-command-scopes"
 # Ends in `.pgid` so the scope-wide `*.pgid` sweep reaps the replay without
 # needing to know it exists.
 REPLAY_PGID_SUFFIX = "replay.pgid"
+# Teardown signals process groups and walks `/proc` once per signal; seconds is
+# the honest scale. A pass that has not finished inside this has already failed
+# at its job, and waiting longer only holds the trial open.
+CLEANUP_TIMEOUT_SEC = 60
 
 
 async def cleanup_process_scope(
@@ -21,12 +25,19 @@ async def cleanup_process_scope(
     """Reap the scope's leftovers. Callers run this from a `finally` while the
     agent's own exception is in flight, so raising here would replace the real
     failure with the teardown's — which is how agent timeouts were being
-    recorded as infrastructure failures. Cancellation still propagates."""
+    recorded as infrastructure failures. Cancellation still propagates.
+
+    Every failure here is swallowed because teardown is best effort. Time is the
+    one failure that swallowing cannot cover: an exec issued with no bound waits
+    on `communicate()` forever, so a teardown that hangs takes the whole trial
+    with it and no reward is ever produced. The bound is what makes best effort
+    true."""
     for signal in ("TERM", "KILL"):
         try:
             await agent.exec_as_agent(
                 environment,
                 command=scoped_process_cleanup_command(scope, signal),
+                timeout_sec=CLEANUP_TIMEOUT_SEC,
             )
         except Exception as error:  # noqa: BLE001 - teardown is best effort.
             logger = getattr(agent, "logger", None)
@@ -53,10 +64,13 @@ def scoped_command(command: str, scope: str, command_id: str) -> str:
     wrapper_path = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.wrapper")
     stdout_path = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.stdout")
     stderr_path = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.stderr")
+    marker_env = (
+        f"{COMMAND_SCOPE_ENV}={shlex.quote(scope)} "
+        f"{COMMAND_ID_ENV}={shlex.quote(command_id)}"
+    )
     return (
         f"mkdir -p -- {scope_dir}; printf '%s\\n' \"$$\" > {wrapper_path}; set -m; "
-        f"env {COMMAND_SCOPE_ENV}={shlex.quote(scope)} "
-        f"{COMMAND_ID_ENV}={shlex.quote(command_id)} "
+        f"env {marker_env} "
         f"bash -lc {shlex.quote(command)} > {stdout_path} 2> {stderr_path} & "
         "command_pid=$!; "
         "set +m; "
@@ -64,11 +78,15 @@ def scoped_command(command: str, scope: str, command_id: str) -> str:
         "wait \"$command_pid\" 2>/dev/null; command_status=$?; "
         # The replay writes to the caller's stdout, so it blocks forever once the
         # caller stops reading — which is exactly what an agent-phase timeout
-        # does. Give it its own process group and record it like any other
-        # command, or teardown has no handle on it: it is in neither the
-        # command's group nor the wrapper PID, and it inherits no scope marker.
+        # does. It needs a teardown handle of its own, and it gets two, because
+        # each covers where the other is blind. The scope marker is race-free:
+        # it is a name teardown already knows before the replay is even forked,
+        # so no window exists in which the replay is alive but unfindable. The
+        # recorded process group is the portable one: it is all that works on a
+        # host with no `/proc`, where the marker sweep cannot run at all.
         "set -m; "
-        f"{{ cat -- {stdout_path}; cat -- {stderr_path} >&2; }} & replay_pid=$!; "
+        f"{{ env {marker_env} cat -- {stdout_path}; "
+        f"env {marker_env} cat -- {stderr_path} >&2; }} & replay_pid=$!; "
         "set +m; "
         f"printf '%s\\n' \"$replay_pid\" > {replay_pgid_path}; "
         "wait \"$replay_pid\" 2>/dev/null; "
