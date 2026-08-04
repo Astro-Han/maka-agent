@@ -5,9 +5,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 const { packageWindowsX64 } = await import(new URL('package-windows-x64.mjs', import.meta.url));
-const { readPeMachine, verifyPackagedWindowsApp, verifyWindowsX64Exe } = await import(
-  new URL('verify-windows-x64.mjs', import.meta.url)
-);
+const {
+  assertWindowsProductVersion,
+  readPeMachine,
+  verifyPackagedWindowsApp,
+  verifyWindowsX64Exe,
+} = await import(new URL('verify-windows-x64.mjs', import.meta.url));
 
 const desktopManifest = JSON.parse(
   await readFile(new URL('../apps/desktop/package.json', import.meta.url), 'utf8'),
@@ -25,8 +28,11 @@ function peImage(machine) {
 
 function packagedAppOptions(overrides = {}) {
   return {
+    // rcedit writes the four-part Windows form of the manifest version, so this
+    // is what a correct packaged executable actually reports.
     run: async (command) => {
-      if (command === 'powershell') return { stdout: `${desktopManifest.version}\n`, stderr: '' };
+      if (command === 'powershell')
+        return { stdout: `${desktopManifest.version}.0\r\n`, stderr: '' };
       return { stdout: '', stderr: '' };
     },
     requirePath: async () => {},
@@ -57,13 +63,26 @@ test('Windows verification fails closed on the host, the input, and the architec
   );
 });
 
+test('the Windows product version resource is read in the four-part form rcedit writes', () => {
+  // The release version is the first three parts; the fourth is a build number.
+  // Comparing the raw string against the manifest version would reject every
+  // real executable, which is exactly what a mock-shaped oracle hides.
+  assertWindowsProductVersion('0.1.5.0', '0.1.5');
+  assertWindowsProductVersion('0.1.5.42\r\n', '0.1.5');
+  assertWindowsProductVersion('0.2.0.0', '0.2.0-beta.1');
+
+  for (const wrong of ['0.1.4.0', '0.1.5', '0.1.5.0.1', '0.1.5.x', '']) {
+    assert.throws(() => assertWindowsProductVersion(wrong, '0.1.5'), /Expected app version/);
+  }
+});
+
 test('a packaged Windows app whose version does not match the manifest is rejected', async () => {
   await assert.rejects(
     verifyPackagedWindowsApp(
       'C:/app',
       packagedAppOptions({
         run: async (command) => {
-          if (command === 'powershell') return { stdout: '0.0.0-not-the-release\n', stderr: '' };
+          if (command === 'powershell') return { stdout: '0.0.0.0\r\n', stderr: '' };
           return { stdout: '', stderr: '' };
         },
       }),

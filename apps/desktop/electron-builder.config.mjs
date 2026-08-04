@@ -112,9 +112,11 @@ export default {
     ],
     artifactName: 'Maka-${version}-win-${arch}.${ext}',
     icon: 'assets/icon.png',
-    // No Authenticode certificate yet: the release workflow runs unsigned.
-    // Revisit before publishing a signed Windows build.
-    sign: false,
+    // No Authenticode certificate yet. Being unsigned is the absence of one:
+    // electron-builder skips signing when no certificate is configured, and
+    // `forceCodeSigning` is left off so that skip is not an error. Only the
+    // updater has to be told, because it verifies the signature of an update
+    // before installing it. Revisit both when a certificate exists.
     verifyUpdateCodeSignature: false,
   },
   publish: [

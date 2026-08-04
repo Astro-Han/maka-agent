@@ -29,6 +29,20 @@ function runPowerShell(run, script) {
   return run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
 }
 
+// electron-builder writes the Windows product version resource in the four-part
+// form Windows wants (app-builder-lib `AppInfo.getVersionInWeirdWindowsForm`),
+// so 0.1.5 ships as 0.1.5.0 and the release version is its first three parts.
+// The fourth part is a build number, which is 0 unless one is configured.
+export function assertWindowsProductVersion(productVersion, expectedVersion) {
+  const [expected] = expectedVersion.split('-');
+  const parts = productVersion.trim().split('.');
+  if (parts.length !== 4 || parts.slice(0, 3).join('.') !== expected || !/^\d+$/.test(parts[3])) {
+    throw new Error(
+      `Expected app version ${expected}.<build>, found ${productVersion.trim() || '<none>'}.`,
+    );
+  }
+}
+
 // The Windows build is unsigned, so the only architecture evidence in the
 // artifact is the PE header of the executable itself.
 export async function readPeMachine(path) {
@@ -81,10 +95,7 @@ export async function verifyPackagedWindowsApp(
     run,
     `(Get-Item -LiteralPath ${JSON.stringify(executable)}).VersionInfo.ProductVersion`,
   );
-  const version = stdout.trim();
-  if (version !== desktopManifest.version) {
-    throw new Error(`Expected app version ${desktopManifest.version}, found ${version}.`);
-  }
+  assertWindowsProductVersion(stdout, desktopManifest.version);
 
   await run(executable, ['-e', ptyProbe, join(appAsar, 'package.json')], {
     env: {
