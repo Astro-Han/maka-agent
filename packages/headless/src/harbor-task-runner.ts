@@ -27,6 +27,10 @@ import {
   type TaskRunner,
 } from './fixed-prompt-controller.js';
 import { buildAgentRepoMounts } from './agent-repo-mount.js';
+import {
+  MAKA_NODE_TOOLCHAIN_CONTAINER_PATH,
+  MAKA_NODE_TOOLCHAIN_FINGERPRINT,
+} from './maka-node-toolchain.js';
 import type {
   HarborTrialGrade,
   HarborVerifierAttempt,
@@ -269,6 +273,18 @@ export interface HarborTaskRunnerOptions {
   claudeCodeToolchainPath?: string;
   /** Prepared Reasonix toolchain mounted read-only into task containers. */
   reasonixToolchainPath?: string;
+  /**
+   * Where the Maka arm runs. `host-bridge` keeps the controller on the host and
+   * bridges tool calls in; `task-container` puts it where every competitor arm
+   * already is, which is what makes the arms answer for the same environment.
+   */
+  makaPlacement?: 'host-bridge' | 'task-container';
+  /**
+   * Prepared Maka Node toolchain, mounted read-only into task containers.
+   * Required by `task-container` placement: the repo mount carries Maka's code
+   * but nothing in the task image is pinned to execute it.
+   */
+  makaNodeToolchainPath?: string;
   /** Explicit Docker target platform shared by comparison arms. */
   dockerPlatform?: 'linux/amd64';
   /** Base directory under which each task gets an isolated per-task job dir. */
@@ -1125,6 +1141,10 @@ export function buildHarborJobConfig(
   const adapter = options.agent ?? 'maka';
   const agentModel = adapter === 'opencode' ? modelForOpenCode(options.model, provider) : makaModel;
   const toolchain = adapter === 'maka' ? undefined : COMPETITOR_TOOLCHAINS[adapter];
+  const makaInContainer = adapter === 'maka' && options.makaPlacement === 'task-container';
+  if (makaInContainer && !options.makaNodeToolchainPath) {
+    throw new Error('makaNodeToolchainPath is required for task-container Maka placement');
+  }
   if (toolchain) {
     const toolchainPath = options[toolchain.optionKey];
     if (!toolchainPath) {
@@ -1144,6 +1164,16 @@ export function buildHarborJobConfig(
             type: 'bind',
             source: options[toolchain.optionKey]!,
             target: toolchain.containerPath,
+            read_only: true,
+          },
+        ]
+      : []),
+    ...(makaInContainer
+      ? [
+          {
+            type: 'bind',
+            source: options.makaNodeToolchainPath!,
+            target: MAKA_NODE_TOOLCHAIN_CONTAINER_PATH,
             read_only: true,
           },
         ]
@@ -1358,7 +1388,12 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
     const apiProtocol = providerProxyApiProtocol(agent, options.agentEnv);
     const proxy = await startProviderAuthProxy({
       upstreamBaseUrl: providerProxyUpstreamBaseUrl(baseUrl, provider, apiProtocol),
-      ...(agent === 'maka' ? { advertisedHost: '127.0.0.1' } : {}),
+      // Loopback is the right address only for a controller on this host. From
+      // inside the task container it names the container, so the arm would dial
+      // itself; competitors set nothing here for exactly that reason.
+      ...(agent === 'maka' && options.makaPlacement !== 'task-container'
+        ? { advertisedHost: '127.0.0.1' }
+        : {}),
       ...(resolveProviderCredential
         ? { resolveUpstreamCredential: resolveProviderCredential }
         : { apiKeyFile: apiKeyFile! }),
@@ -1368,7 +1403,12 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
     });
     return {
       env:
-        agent === 'maka'
+        // Which channel an arm gets follows where it runs, not which arm it is.
+        // A host-side Maka reaches the proxy directly; in the task container it
+        // is on the far side of the same boundary as every competitor, so it
+        // needs the same client channel they do — `MAKA_HOST_*` names a host
+        // that is not there.
+        agent === 'maka' && options.makaPlacement !== 'task-container'
           ? {
               MAKA_HOST_BASE_URL: proxy.baseUrl,
               MAKA_HOST_API_KEY: proxy.token,
@@ -1376,6 +1416,7 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
           : {
               MAKA_PROVIDER_PROXY_URL: providerProxyClientBaseUrl(proxy.baseUrl, agent, provider),
               MAKA_PROVIDER_PROXY_TOKEN: proxy.token,
+              ...(agent === 'maka' ? { MAKA_NODE_TOOLCHAIN_FINGERPRINT } : {}),
             },
       usage: proxy.usage,
       telemetry: proxy.telemetry,

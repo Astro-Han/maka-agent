@@ -772,9 +772,39 @@ export function harnessMakaContextBudgetEnv() {
   };
 }
 
-export function harnessMakaAgentEnv(benchmarkProfile) {
+/**
+ * Where the Maka arm runs. Pier always places it in the task container; under
+ * Harbor it bridges from the host unless the caller asks otherwise.
+ *
+ * This is opt-in rather than a flipped default because it changes the shape of
+ * the experiment, not a parameter of it. Every competitor arm runs in the task
+ * container, so a host-side Maka arm is the one arm that cannot be hit by a
+ * defect in the container path — and three such defects were found during this
+ * benchmark. Moving it is what makes the arms comparable; keeping the old
+ * placement reachable is what lets the two topologies be run against each other
+ * to show whether a difference came from the agent or from where it ran.
+ */
+export function harnessMakaPlacement(benchmarkProfile, env = process.env) {
+  const requested = (env.MAKA_HARNESS_AB_MAKA_PLACEMENT || '').trim();
+  if (requested && requested !== 'task-container' && requested !== 'host-bridge') {
+    throw new Error(
+      `MAKA_HARNESS_AB_MAKA_PLACEMENT must be task-container or host-bridge, got ${requested}`,
+    );
+  }
+  if (benchmarkProfile.executor === 'pier') {
+    if (requested === 'host-bridge') {
+      throw new Error('the pier executor always runs the Maka arm in the task container');
+    }
+    return 'task-container';
+  }
+  return requested === 'task-container' ? 'task-container' : 'host-bridge';
+}
+
+export function harnessMakaAgentEnv(benchmarkProfile, env = process.env) {
   return {
-    ...(benchmarkProfile.executor === 'pier' ? { MAKA_HARBOR_MODE: 'task-run' } : {}),
+    ...(harnessMakaPlacement(benchmarkProfile, env) === 'task-container'
+      ? { MAKA_HARBOR_MODE: 'task-run' }
+      : {}),
     ...harnessMakaContextBudgetEnv(),
   };
 }
@@ -798,9 +828,11 @@ export function buildHarnessAbManifest({
   oracleEvidence,
   credentialIdentity,
   pierVersion = null,
+  env = process.env,
 }) {
   assertResolvedHarnessComposition(composition);
   const { benchmarkProfile, runtimeProfile, competitorProfiles } = composition;
+  const makaPlacement = harnessMakaPlacement(benchmarkProfile, env);
   const resolvedTaskIds = taskIds ?? benchmarkProfile.taskIds;
   const resolvedPairConcurrency =
     pairConcurrency ?? Math.min(DEFAULT_PAIR_CONCURRENCY, resolvedTaskIds.length);
@@ -849,7 +881,13 @@ export function buildHarnessAbManifest({
           attemptPolicy: 'single',
           billingMode: runtimeProfile.billingMode,
           contextBudget: HARNESS_MAKA_CONTEXT_BUDGET,
-          ...(benchmarkProfile.executor === 'pier'
+          // Recorded only where this arm leaves its historical placement. The
+          // fingerprint is an experiment's identity, and host-bridge Maka is
+          // the experiment every existing run already is: describing it more
+          // fully would fork their identity without changing what they ran.
+          // Moving into the task container is a different experiment, and gets
+          // a different fingerprint because it deserves one.
+          ...(makaPlacement === 'task-container'
             ? {
                 execution: {
                   placement: 'task-container',
@@ -1083,7 +1121,9 @@ async function runLocked({
     competitorProfiles,
     pierVersion,
     makaNodeToolchainFingerprint:
-      benchmarkProfile.executor === 'pier' ? MAKA_NODE_TOOLCHAIN_FINGERPRINT : null,
+      harnessMakaPlacement(benchmarkProfile) === 'task-container'
+        ? MAKA_NODE_TOOLCHAIN_FINGERPRINT
+        : null,
   });
   const proposedManifest = buildHarnessAbManifest({
     subjectFingerprint,
@@ -1115,8 +1155,9 @@ async function runLocked({
       resolveHarnessCompetitorToolchain(runRoot, profile),
     ]),
   );
+  const makaPlacement = harnessMakaPlacement(benchmarkProfile);
   const makaNodeToolchain =
-    benchmarkProfile.executor === 'pier' ? resolveHarnessMakaNodeToolchain(runRoot) : null;
+    makaPlacement === 'task-container' ? resolveHarnessMakaNodeToolchain(runRoot) : null;
   await Promise.all([
     ...[...competitorToolchains.values()].map((toolchain) => toolchain.prepare(toolchain.path)),
     makaNodeToolchain?.prepare(makaNodeToolchain.path),
@@ -1182,6 +1223,15 @@ async function runLocked({
             ...runnerOptions,
             agent: 'maka',
             agentEnv: { ...runnerOptions.agentEnv, ...harnessMakaAgentEnv(benchmarkProfile) },
+            // Harbor needs both to place the arm: the placement decides the
+            // provider channel and the loopback address, the toolchain is what
+            // the container has to execute the repo mount with.
+            ...(benchmarkProfile.executor === 'pier'
+              ? {}
+              : {
+                  makaPlacement,
+                  ...(makaNodeToolchain ? { makaNodeToolchainPath: makaNodeToolchain.path } : {}),
+                }),
           }),
         },
         ...competitorProfiles.map((profile) => {
