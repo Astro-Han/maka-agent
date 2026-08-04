@@ -26,7 +26,7 @@
 // boundary the layout already draws, and this app separates columns tonally
 // (DESIGN.md, One Working Plane) rather than with hairlines.
 
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Dialog, DialogHeader, HStack, Heading, StackItem, Text, VStack } from '@astryxdesign/core';
 import { Layout, LayoutContent, LayoutHeader, LayoutPanel } from '@astryxdesign/core/Layout';
 import { ResizeHandle, useResizable } from '@astryxdesign/core/Resizable';
@@ -104,6 +104,18 @@ export function ModulePage({
   // therefore changes the inspector's PLACEMENT, not its existence: the same
   // content opens as a dialog over the list.
   const isNarrow = useMediaQuery('(max-width: 1024px)');
+  // Crossing the breakpoint with something selected must not open a modal on
+  // its own: a window resize is not an action on this page, and a dialog that
+  // appears unbidden takes focus and covers the list the reader was in.
+  // Dropping the selection at the crossing keeps the surface honest in both
+  // directions — the placement only ever changes on the user's next click.
+  // The viewport IS the external system here, which is what this Effect syncs.
+  const wasNarrowRef = useRef(isNarrow);
+  useEffect(() => {
+    if (wasNarrowRef.current === isNarrow) return;
+    wasNarrowRef.current = isNarrow;
+    onInspectorDismiss?.();
+  }, [isNarrow, onInspectorDismiss]);
   // Hooks cannot be conditional, so the region always exists; only the panel
   // and its handle are conditional on there being something to inspect.
   // Sized against the clamped column, not the window: the inspector shares
@@ -149,9 +161,12 @@ export function ModulePage({
       content={(
         <LayoutContent padding={0}>
           {children}
-          {inspector != null && isNarrow ? (
+          {/* Mounted for the whole narrow session, opened by `isOpen`: Astryx
+              returns focus on the open→closed transition, and a dialog that
+              unmounted instead would drop focus on `body` every dismiss. */}
+          {isNarrow ? (
             <Dialog
-              isOpen
+              isOpen={inspector != null}
               onOpenChange={(open) => {
                 if (!open) onInspectorDismiss?.();
               }}

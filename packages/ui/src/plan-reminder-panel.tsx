@@ -135,8 +135,11 @@ export function PlanReminderPanel(props: {
     .filter((entry) => runRangeStart === null || entry.run.at >= runRangeStart)
     .sort((a, b) => b.run.at - a.run.at);
   const activeCount = props.reminders.filter((reminder) => reminder.status !== 'completed').length;
-  // Derived, not stored: a deleted or filtered-out reminder closes the
-  // inspector on its own rather than leaving a stale panel to reconcile.
+  // Derived, not stored: whatever hides the row — deletion, a filter, the
+  // 执行记录 view — closes the inspector without a reconciliation step, and the
+  // panel always reads the freshest copy of the reminder. Note the id itself
+  // survives, so clearing a filter re-opens the same selection; a deleted id
+  // can never re-match, so only the reversible cases come back.
   const selectedReminder = planView === 'tasks'
     ? sortedReminders.find((reminder) => reminder.id === selectedReminderId) ?? null
     : null;
@@ -170,8 +173,12 @@ export function PlanReminderPanel(props: {
     props.onCreateRequestHandled?.();
   }, [props.createRequestNonce]);
 
-  // Synchronising focus with the DOM after Astryx tears the dialog down — an
-  // external system, which is what an Effect is for.
+  // Astryx's Dialog does restore focus on close, but it captures the opener in
+  // an Effect — after the commit that opened the dialog — and by then the
+  // inspector button that was clicked has been re-rendered, so what it captures
+  // is `body`. Capturing at click time instead is what actually gets focus back
+  // to 编辑. Deleting this effect fails the e2e Escape-restore assertion, which
+  // is the check that keeps the duplication honest.
   useEffect(() => {
     if (formDialogOpen) return;
     const opener = formDialogOpenerRef.current;
@@ -419,13 +426,24 @@ export function PlanReminderPanel(props: {
                   <ListItem
                     key={reminder.id}
                     label={reminder.title}
-                    description={`${formatPlanRecurrence(reminder, locale)} · ${
+                    /* An exceptional lifecycle state leads the line as TEXT,
+                       not only as the dot's colour: the dot sits outside the
+                       row's button, so tabbing a row would otherwise announce
+                       no state at all, and colour alone fails WCAG 1.4.1.
+                       待触发 stays silent — it is the normal case, and naming
+                       it on every row is the noise this list is built to
+                       avoid. */
+                    description={[
+                      reminder.status === 'scheduled'
+                        ? null
+                        : planReminderStatusLabel(reminder.status, locale),
+                      formatPlanRecurrence(reminder, locale),
                       reminder.nextRunAt
                         ? copy.page.nextRun(formatReminderTime(reminder.nextRunAt, locale))
                         : reminder.lastRun
                           ? copy.page.recentRun(formatReminderTime(reminder.lastRun.at, locale))
-                          : copy.page.unscheduled
-                    }`}
+                          : copy.page.unscheduled,
+                    ].filter(Boolean).join(' · ')}
                     startContent={(
                       <StatusDot
                         variant={planReminderStatusDotVariant(reminder.status)}
