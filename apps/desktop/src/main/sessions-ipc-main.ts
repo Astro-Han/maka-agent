@@ -432,13 +432,11 @@ export function registerSessionsIpc(
   ipcMain.handle('sessions:readExecutionBoundary', (_event, sessionId: string) =>
     runtime.readExecutionBoundary(sessionId),
   );
-  ipcMain.handle('sessions:listActiveSandboxBoundaryRequests', (_event, sessionId: string) => {
+  ipcMain.handle('sessions:listActiveInteractions', (_event, sessionId: string) => {
     // Already filtered by retirement: `getE2eFixtureState` is the one owner of
     // which fixture requests are still unanswered.
     const fixtureRequest = getE2eFixtureState(e2eFixture)?.sandboxBoundaryBySession?.[sessionId];
-    return fixtureRequest
-      ? [fixtureRequest]
-      : runtime.listActiveSandboxBoundaryRequests(sessionId);
+    return fixtureRequest ? [fixtureRequest] : runtime.listActiveInteractions(sessionId);
   });
   ipcMain.handle('sessions:respondToSandboxBoundary', async (_event, sessionId: string, response) => {
     const normalized = normalizeSandboxBoundaryResponse(response);

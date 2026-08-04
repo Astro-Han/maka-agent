@@ -48,6 +48,7 @@ export type {
   ShellRunUpdate,
   SandboxDenialSignal,
   SandboxDenialRecovery,
+  ActiveInteractionRequestEvent,
   SandboxBoundaryRequestEvent,
   SandboxBoundaryDecisionAckEvent,
   AdditionalPermissionRequestEvent,

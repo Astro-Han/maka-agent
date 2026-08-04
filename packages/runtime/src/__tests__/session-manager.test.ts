@@ -14899,7 +14899,7 @@ describe('SessionManager permission mode updates', () => {
       .sendMessage(session.id, { turnId: 'turn-1', text: 'hello' })
       [Symbol.asyncIterator]();
     expect((await iterator.next()).value?.type).toBe('sandbox_boundary_request');
-    const [activeBoundaryRequest] = await manager.listActiveSandboxBoundaryRequests(session.id);
+    const [activeBoundaryRequest] = await manager.listActiveInteractions(session.id);
     expect(activeBoundaryRequest).toMatchObject({
       type: 'sandbox_boundary_request',
       requestId: 'boundary-1',
@@ -14919,9 +14919,55 @@ describe('SessionManager permission mode updates', () => {
     });
     expect(backend?.responses).toEqual([{ requestId: 'boundary-1', decision: 'deny' }]);
     expect((await iterator.next()).value?.type).toBe('sandbox_boundary_decision_ack');
-    expect(await manager.listActiveSandboxBoundaryRequests(session.id)).toEqual([]);
+    expect(await manager.listActiveInteractions(session.id)).toEqual([]);
     while (!(await iterator.next()).done) {}
     expect((await store.readHeader(session.id)).status).toBe('active');
+  });
+
+  test('lists an unanswered user question until its answer ack lands', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    backends.register('fake', (ctx) => new FakeBackend(ctx));
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      backends,
+      newId: nextId(),
+      now: nextNow(9_000),
+    });
+    const session = await manager.createSession(makeInput({ backend: 'fake' }));
+
+    const iterator = manager
+      .sendMessage(session.id, { turnId: 'turn-1', text: FAKE_ASK_USER_QUESTION_PROMPT })
+      [Symbol.asyncIterator]();
+    let request: SessionEvent | undefined;
+    while (request?.type !== 'user_question_request') {
+      const next = await iterator.next();
+      if (next.done) break;
+      request = next.value;
+    }
+    expect(request?.type).toBe('user_question_request');
+
+    // The surface that raised this request may never have been mounted, so the
+    // request has to be readable back from the kernel (#2072).
+    const active = await manager.listActiveInteractions(session.id);
+    expect(active).toEqual([request]);
+
+    await manager.respondToUserQuestion(session.id, {
+      requestId: (request as Extract<SessionEvent, { type: 'user_question_request' }>).requestId,
+      answers: ['邀请制', '本周', '是'],
+    });
+    let ack: SessionEvent | undefined;
+    while (ack?.type !== 'user_question_answer_ack') {
+      const next = await iterator.next();
+      if (next.done) break;
+      ack = next.value;
+    }
+    expect(ack?.type).toBe('user_question_answer_ack');
+    expect(await manager.listActiveInteractions(session.id)).toEqual([]);
+    while (!(await iterator.next()).done) {}
   });
 
   test('reads a completed session back after a sandbox boundary allow', async () => {
