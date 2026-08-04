@@ -4257,12 +4257,18 @@ with tempfile.TemporaryDirectory() as tmp:
     agent.populate_context_post_run(object())
     assert json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))["errorClass"] == "runtime_error"
 
-    # A real infrastructure fault named by the stream itself still classifies as
-    # infrastructure, so an auth or rate-limit failure is not scored as a loss.
-    for message, expected in [
-        ("provider returned 401 unauthorized", "auth"),
-        ("429 rate limit exceeded", "rate_limit"),
-        ("upstream 503 unavailable", "provider_unavailable"),
+    # A run that wrote a terminal result reached the model and burned tokens, so
+    # it stays a scored agent outcome however the message reads. Re-scanning that
+    # prose for infrastructure markers would reintroduce the very coincidence the
+    # override exists to defeat: a task about sockets, or a model that narrates
+    # "the connection kept dropping", would drop the cell out of the denominator.
+    # Over-counting an agent loss is the honest direction; shrinking the
+    # denominator is not.
+    for message in [
+        "provider returned 401 unauthorized",
+        "429 rate limit exceeded",
+        "upstream 503 unavailable",
+        "the connection to the test service kept dropping",
     ]:
         (logs / "reasonix.jsonl").write_text(
             stream(dict(RESULT, is_error=True, subtype="error_during_execution", result=message)),
@@ -4270,7 +4276,12 @@ with tempfile.TemporaryDirectory() as tmp:
         )
         agent.populate_context_post_run(object())
         cell_out = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
-        assert cell_out["errorClass"] == expected, (message, cell_out)
+        assert cell_out["errorClass"] == "runtime_error", (message, cell_out)
+
+    # The marker scan survives for the one path that has no verdict to trust:
+    # a run that died before writing a terminal result.
+    assert _classify_from_harbor_text("provider returned 401 unauthorized") == "auth"
+    assert _classify_from_harbor_text("boom") == "infra_failed"
 
     # With no stream at all there is no verdict to trust, so the exception-derived
     # class stands.
@@ -4281,15 +4292,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert failed["status"] == "failed", failed
     assert failed["errorClass"] == "auth", failed
 
-# Pier custom-mounts path: --mounts-json replaces the default log mounts while
-# capabilities.mounted stays true, so pier's own log download never runs and
-# the CLI's stream-json exists only in the container. The adapter must download
-# it itself, or _events(require_result=True) raises and a real token-burning
-# run is misclassified as infra.
+# Unmounted-log-dir path: when the executor does not bind-mount the agent log
+# dir, the CLI's stream-json exists only in the container. The adapter must
+# download it itself, or _events(require_result=True) raises and a real
+# token-burning run is misclassified as infra.
 with tempfile.TemporaryDirectory() as pier_tmp:
     pier_logs = Path(pier_tmp)
 
-    class PierEnvironment:
+    class UnmountedLogsEnvironment:
         def __init__(self):
             self.downloads = []
 
@@ -4311,7 +4321,7 @@ with tempfile.TemporaryDirectory() as pier_tmp:
             "MAKA_SYSTEM_PROMPT": "",
         },
     )
-    pier_environment = PierEnvironment()
+    pier_environment = UnmountedLogsEnvironment()
     asyncio.run(pier_agent.run("hi", pier_environment, object()))
     assert "/logs/agent/reasonix.jsonl" in pier_environment.downloads, pier_environment.downloads
     pier_agent.populate_context_post_run(object())

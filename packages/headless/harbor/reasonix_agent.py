@@ -147,13 +147,12 @@ class MakaReasonixAgent(BaseInstalledAgent):
     async def _download_agent_logs(self, environment: BaseEnvironment) -> None:
         # _write_cell_output's only in-container input is the stream-json the
         # CLI writes to /logs/agent/reasonix.jsonl (identity and timestamps are
-        # host-side). Under Harbor the agent log dir is bind-mounted, so the
-        # file is already host-side and is skipped; under Pier a --mounts-json
-        # run replaces the default log mounts while capabilities.mounted stays
-        # true (pier docker.py), so pier's own log download never runs —
-        # without this download, _events() sees nothing and a real
-        # token-burning run is misclassified as infra. Runs in run()'s finally
-        # so the AgentTimeoutError path is hydrated too.
+        # host-side). Whenever the agent log dir is bind-mounted the file is
+        # already host-side and this is a no-op; the download is the fallback
+        # for every executor that does not mount it, because without the stream
+        # _events() sees nothing and a real token-burning run is misclassified
+        # as infra. Runs in run()'s finally so the AgentTimeoutError path is
+        # hydrated too. Same shape as the other installed-agent adapters.
         local = self.logs_dir / _OUTPUT_PATH.name
         if local.exists():
             return
@@ -294,12 +293,16 @@ class MakaReasonixAgent(BaseInstalledAgent):
                 # command line, including the task instruction, whose wording
                 # can match the infrastructure markers by chance — and its
                 # fallthrough is infra_failed, which drops the cell out of the
-                # scored denominator. The stream's own message is the accurate
-                # signal, so it wins whenever the run reported its own failure.
-                error_class = _classify_failure_text(
-                    str(result.get("result") or ""),
-                    default=_self_reported_failure_class(result.get("subtype")),
-                )
+                # scored denominator.
+                #
+                # A run that wrote a terminal result object reached the model
+                # and burned tokens, so it is an agent outcome no matter how the
+                # message reads. Re-scanning that message for markers would
+                # reintroduce the same coincidence it exists to defeat, this
+                # time on prose the model itself wrote. Scoring a provider-side
+                # failure as an agent loss is the honest direction; silently
+                # shrinking the denominator is not.
+                error_class = "runtime_error"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         runtime_events_path = self.logs_dir / "runtime-events.jsonl"
         source_path = self.logs_dir / _OUTPUT_PATH.name
@@ -372,22 +375,10 @@ def _result_object(events: list[dict[str, Any]]) -> dict[str, Any] | None:
     return None
 
 
-def _self_reported_failure_class(subtype: Any) -> str:
-    # A failure Reasonix reports about itself is an agent-incomplete outcome
-    # (harbor-failure-policy's runtime_error), not an infrastructure fault to be
-    # retried or dropped from scoring. Unknown subtypes fail safe the same way:
-    # a future Reasonix release adding one must not silently shrink the scored
-    # denominator, and over-counting an agent failure is the honest direction.
-    del subtype
-    return "runtime_error"
-
-
 def _classify_failure(error: Exception) -> str:
-    return _classify_failure_text(str(error), default="infra_failed")
-
-
-def _classify_failure_text(message: str, *, default: str) -> str:
-    text = message.lower()
+    # Only reachable when the run left no terminal result object to trust, so
+    # Harbor's exception text is the only signal there is.
+    text = str(error).lower()
     if any(
         marker in text
         for marker in ("401", "403", "unauthorized", "authentication", "invalid api key")
@@ -401,4 +392,4 @@ def _classify_failure_text(message: str, *, default: str) -> str:
         return "network"
     if any(marker in text for marker in ("500", "502", "503", "504", "unavailable")):
         return "provider_unavailable"
-    return default
+    return "infra_failed"

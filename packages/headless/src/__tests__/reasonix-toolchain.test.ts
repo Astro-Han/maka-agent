@@ -51,6 +51,24 @@ describe('Reasonix toolchain', () => {
       const { validatePreparedReasonixToolchain } = await import('../reasonix-toolchain.js');
       await assert.rejects(validatePreparedReasonixToolchain(root), /bin\/node SHA-256 mismatch/);
       assert.match(await readFile(join(root, 'manifest.json'), 'utf8'), /1\.19\.4/);
+
+      // A cache prepared under a different spec must be refused before its own
+      // checksums are consulted, or a stale toolchain silently passes off as
+      // this one and the arms stop being comparable.
+      await writeFile(
+        join(root, 'manifest.json'),
+        `${JSON.stringify(
+          {
+            schemaVersion: 1,
+            fingerprint: `sha256:${'0'.repeat(64)}`,
+            spec: REASONIX_TOOLCHAIN_SPEC,
+            files,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      await assert.rejects(validatePreparedReasonixToolchain(root), /fingerprint mismatch/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
