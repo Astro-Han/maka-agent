@@ -64,6 +64,7 @@ import {
   MAKA_NODE_TOOLCHAIN_CONTAINER_PATH,
   MAKA_NODE_TOOLCHAIN_FINGERPRINT,
 } from './maka-node-toolchain.js';
+import { buildAgentRepoMounts, CONTAINER_MAKA_REPO } from './agent-repo-mount.js';
 import {
   summarizeProviderTelemetry,
   startProviderAuthProxy,
@@ -75,7 +76,6 @@ import {
   type ProviderUpstreamCredentialResolver,
 } from './provider-auth-proxy.js';
 
-const CONTAINER_MAKA_REPO = '/opt/maka-agent';
 const TRIAL_CELL_OUTPUT = 'agent/maka-cell-output.json';
 const TRIAL_RUNTIME_EVENTS = 'agent/runtime-events.jsonl';
 const TRIAL_REWARD_JSON = 'verifier/reward.json';
@@ -716,7 +716,7 @@ function buildPierMounts(
   mode: 'cell' | 'task-run',
 ): Array<Record<string, unknown>> {
   const mounts: Array<Record<string, unknown>> = [
-    { type: 'bind', source: options.makaRepoPath, target: CONTAINER_MAKA_REPO, read_only: true },
+    ...buildAgentRepoMounts(agent, options.makaRepoPath),
   ];
   if (agent === 'maka' && mode === 'task-run') {
     if (!options.makaNodeToolchainPath) {

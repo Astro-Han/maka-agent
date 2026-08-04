@@ -14,6 +14,7 @@ import {
   type TaskRunInput,
   type TaskRunOutput,
 } from '../fixed-prompt-controller.js';
+import { competitorRepoFiles } from '../agent-repo-mount.js';
 import { CODEX_TOOLCHAIN_FINGERPRINT, CODEX_TOOLCHAIN_SPEC } from '../codex-toolchain.js';
 import { OPENCODE_TOOLCHAIN_FINGERPRINT, OPENCODE_TOOLCHAIN_SPEC } from '../opencode-toolchain.js';
 import { findTrialDir, MAKA_SETTLEMENT_GRACE_SEC } from '../harbor-task-runner.js';
@@ -491,6 +492,50 @@ test('createPierTaskRunner mounts the pinned Maka Node runtime for container tas
       ),
     );
     assert.ok(args.includes(`MAKA_NODE_TOOLCHAIN_FINGERPRINT=${MAKA_NODE_TOOLCHAIN_FINGERPRINT}`));
+  });
+});
+
+test('createPierTaskRunner withholds the repo tree from a competitor arm', async () => {
+  await withDirs(async ({ jobsDir, repo }) => {
+    const repoMountsFor = async (agent: 'maka' | 'codex') => {
+      const captured: FakeOptions['captured'] = {};
+      const runner = createPierTaskRunner(
+        baseOptions({
+          jobsDir,
+          makaRepoPath: repo,
+          agent,
+          agentVersion: CODEX_TOOLCHAIN_SPEC.codex.version,
+          codexToolchainPath: '/toolchains/codex',
+          ...(agent === 'codex'
+            ? {
+                backend: 'ai-sdk' as const,
+                provider: 'openai-codex' as const,
+                model: 'gpt-5.6-sol',
+                resolveProviderCredential: () => Promise.resolve({ value: 'upstream-key' }),
+                providerProxyPort: 0,
+              }
+            : {}),
+          runPier: fakePier({ reward: 0, captured }),
+        }),
+      );
+      await runner(runInput());
+      const args = captured.request?.args ?? [];
+      const mounts = JSON.parse(args[args.indexOf('--mounts-json') + 1]!) as Array<{
+        target: string;
+      }>;
+      return mounts.filter((mount) => mount.target.startsWith('/opt/maka-agent'));
+    };
+
+    assert.ok((await repoMountsFor('maka')).some((mount) => mount.target === '/opt/maka-agent'));
+
+    // Pier shares agent-repo-mount with the Harbor runner precisely so this
+    // cannot regress in one executor while the other stays fixed.
+    const competitor = await repoMountsFor('codex');
+    assert.ok(competitor.every((mount) => mount.target !== '/opt/maka-agent'));
+    assert.deepEqual(
+      competitor.map((mount) => mount.target),
+      competitorRepoFiles('codex').map((file) => `/opt/maka-agent/${file}`),
+    );
   });
 });
 

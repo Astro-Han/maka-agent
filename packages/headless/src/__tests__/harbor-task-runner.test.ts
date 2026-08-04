@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { tokenSummary } from './helpers/cell-output-fixtures.js';
 import { type HarborAgentEntry, harborAgentPhaseSec } from './helpers/harbor-agent-phase.js';
+import { competitorRepoFiles } from '../agent-repo-mount.js';
 import type { HarborCellExecutionIdentity, HarborCellOutput } from '../cell-output.js';
 import {
   FixedPromptBudgetExhaustedError,
@@ -2771,6 +2772,46 @@ describe('buildHarborJobConfig', () => {
     );
     assert.equal(env.OPENAI_API_KEY, undefined);
     assert.equal(env.CODEX_API_KEY, undefined);
+  });
+
+  test('withholds the repo tree from a competitor arm', () => {
+    const forAgent = (agent: 'maka' | 'codex' | 'claude-code') =>
+      (
+        buildHarborJobConfig(runInput(), {
+          makaRepoPath: '/repo',
+          jobsDir: '/jobs/x',
+          jobName: 'trial',
+          agent,
+          model: 'deepseek/deepseek-v4-flash',
+          provider: 'deepseek',
+          agentVersion:
+            agent === 'codex' ? '0.146.0' : CLAUDE_CODE_TOOLCHAIN_SPEC.claudeCode.version,
+          codexToolchainPath: '/cache/codex',
+          claudeCodeToolchainPath: '/cache/claude-code',
+        } as unknown as Parameters<typeof buildHarborJobConfig>[1]).environment as {
+          mounts: Array<Record<string, unknown>>;
+        }
+      ).mounts;
+
+    // Maka executes out of the tree, so it still gets the tree.
+    assert.ok(forAgent('maka').some((mount) => mount.target === '/opt/maka-agent'));
+
+    // A competitor gets the files it named and no directory to walk. Reverting
+    // to the shared tree mount re-opens the path Codex used in the #1970 run:
+    // read the pinned benchmark revision, fetch the task's reference solution.
+    for (const agent of ['codex', 'claude-code'] as const) {
+      const repoMounts = forAgent(agent).filter((mount) =>
+        String(mount.target).startsWith('/opt/maka-agent'),
+      );
+      assert.ok(
+        repoMounts.every((mount) => mount.target !== '/opt/maka-agent'),
+        `${agent} must not receive the repo root`,
+      );
+      assert.deepEqual(
+        repoMounts.map((mount) => mount.target),
+        competitorRepoFiles(agent).map((file) => `/opt/maka-agent/${file}`),
+      );
+    }
   });
 
   test('pins the Claude Code adapter and native toolchain behind the host provider proxy', () => {

@@ -26,6 +26,7 @@ import {
   type TaskRunOutput,
   type TaskRunner,
 } from './fixed-prompt-controller.js';
+import { buildAgentRepoMounts, CONTAINER_MAKA_REPO } from './agent-repo-mount.js';
 import type {
   HarborTrialGrade,
   HarborVerifierAttempt,
@@ -90,8 +91,6 @@ import { agentPhaseTimeoutSec, settlementGraceSec } from './maka-settlement.js';
 export { MAKA_SETTLEMENT_GRACE_SEC } from './maka-settlement.js';
 
 const execFileAsync = promisify(execFile);
-
-const CONTAINER_MAKA_REPO = '/opt/maka-agent';
 
 /**
  * Every competitor arm is pinned the same way: a prepared toolchain directory
@@ -1138,7 +1137,7 @@ export function buildHarborJobConfig(
     }
   }
   const mounts: Array<Record<string, unknown>> = [
-    { type: 'bind', source: options.makaRepoPath, target: CONTAINER_MAKA_REPO, read_only: true },
+    ...buildAgentRepoMounts(adapter, options.makaRepoPath),
     ...(toolchain
       ? [
           {
