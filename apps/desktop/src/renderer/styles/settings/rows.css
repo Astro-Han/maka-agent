@@ -141,3 +141,12 @@
     min-height: 2rem;
   }
 }
+
+/* The expanded half of SettingsExpandableRow: the editor the caller supplies,
+   then its Save / Cancel pair. A grid rather than margins so the gap is the
+   row group's own rhythm and the editor keeps the field block's full width. */
+.settingsExpandableEditor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}

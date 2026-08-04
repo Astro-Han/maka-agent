@@ -9,6 +9,8 @@ import {
   VStack,
 } from '@astryxdesign/core';
 import { SettingsField, SettingsPage, SettingsRow, SettingsSection } from './settings-section';
+import { SettingsExpandableRow } from './settings-expandable-row';
+import { getSettingsSharedCopy } from '../locales/settings-shared-copy';
 import type {
   AppSettings,
   PersonalizationSettings,
@@ -69,6 +71,9 @@ export function PersonalizationSettingsPage(props: {
   const locale = useUiLocale();
   const copy = getSettingsPreferencesCopy(locale).personalization;
   const sections = getSettingsPreferencesCopy(locale).sections;
+  const sharedCopy = getSettingsSharedCopy(locale);
+  // At most one row in the group is open — the template's own rule.
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
   // Persist the tone textarea this long after the user stops typing; blur
   // flushes immediately regardless.
   const TONE_AUTOSAVE_DEBOUNCE_MS = 800;
@@ -143,10 +148,6 @@ export function PersonalizationSettingsPage(props: {
     }
   }
 
-  function flushDisplayName(nextValue: string) {
-    void persistPersonalization({ displayName: nextValue.trim().slice(0, 60) });
-  }
-
   function persistLocale(next: UiLocalePreference) {
     setUiLocale(next);
     void persistPersonalization({ uiLocale: next });
@@ -177,18 +178,42 @@ export function PersonalizationSettingsPage(props: {
           neighboring preferences; the full-width tone field uses the vertical
           row variant. */}
       <SettingsSection title={sections.identity} description={sections.identityHelp}>
-        <SettingsField>
+        {/* A name you set once and then read. A permanently-open input asked
+            the user to fill in something already filled in, and its blur-save
+            gave them no way to back out of a change. The row reports the
+            settled value and opens on demand; Cancel puts the draft back. */}
+        <SettingsExpandableRow
+          label={copy.displayName}
+          value={value.displayName || copy.displayNameUnset}
+          actionLabel={value.displayName ? copy.displayNameChange : copy.displayNameSet}
+          isEditing={expandedRow === 'displayName'}
+          canSave={displayName.trim() !== value.displayName}
+          saveLabel={sharedCopy.save}
+          cancelLabel={sharedCopy.cancel}
+          onEdit={() => {
+            setDisplayName(value.displayName);
+            setExpandedRow('displayName');
+          }}
+          onCancel={() => {
+            setDisplayName(value.displayName);
+            setExpandedRow(null);
+          }}
+          onSave={async () => {
+            await persistPersonalization({ displayName: displayName.trim().slice(0, 60) });
+            setExpandedRow(null);
+          }}
+        >
           <TextInput
             type="text"
             value={displayName}
             onChange={(value) => setDisplayName(value.slice(0, 60))}
-            onBlur={() => flushDisplayName(displayName)}
             placeholder={copy.displayNamePlaceholder}
             label={copy.displayName}
             description={copy.displayNameHelp}
+            isLabelHidden
             width="100%"
           />
-        </SettingsField>
+        </SettingsExpandableRow>
 
         {/*
           PR-LANG-PREF-0 (WAWQAQ msg `edc9cb41` + kenji `7e532892`
