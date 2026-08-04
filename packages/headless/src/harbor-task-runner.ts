@@ -1211,6 +1211,14 @@ export function buildHarborJobConfig(
     }
   }
 
+  if (makaInContainer) {
+    // The adapter re-verifies the mounted toolchain against this before it will
+    // install, and it reads it from the agent env — the same place every other
+    // pinned-toolchain fingerprint is read from. Putting it on the provider
+    // channel instead left the mount in place and the arm unable to start.
+    agentEnv.MAKA_NODE_TOOLCHAIN_FINGERPRINT = MAKA_NODE_TOOLCHAIN_FINGERPRINT;
+  }
+
   Object.assign(agentEnv, attemptAgentEnv ?? {});
   // Lenient by shared contract with the Python adapter: a malformed value must
   // fall back (metadata, then the adapter's default) rather than fail the run.
@@ -1416,7 +1424,6 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
           : {
               MAKA_PROVIDER_PROXY_URL: providerProxyClientBaseUrl(proxy.baseUrl, agent, provider),
               MAKA_PROVIDER_PROXY_TOKEN: proxy.token,
-              ...(agent === 'maka' ? { MAKA_NODE_TOOLCHAIN_FINGERPRINT } : {}),
             },
       usage: proxy.usage,
       telemetry: proxy.telemetry,
