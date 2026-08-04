@@ -28,6 +28,8 @@ const REQUIRED_PRODUCT_SURFACES = Object.freeze([
 
 const PRODUCT_CHECKS = new Set([
   'composer-focus-ownership',
+  'module-page-inspector',
+  'module-page-shell',
   'plan-reminder-row',
   'session-context-layer',
   'play-executed',
@@ -228,7 +230,7 @@ async function smokeStory(page, baseUrl, job, options = {}) {
       }
     }
 
-    if (job.checks?.includes('plan-reminder-row')) {
+    if (job.checks?.includes('plan-reminder-row') || job.checks?.includes('module-page-shell')) {
       try {
         await page.waitForSelector('.maka-module-page-rows > li', {
           state: 'visible',
@@ -236,6 +238,18 @@ async function smokeStory(page, baseUrl, job, options = {}) {
         });
       } catch {
         browserFailures.push('plan reminder rows did not finish rendering');
+      }
+    }
+    if (job.checks?.includes('module-page-inspector')) {
+      try {
+        // Either placement is a pass here; the assertion below is what decides
+        // which one this viewport was supposed to get.
+        await page.waitForSelector(
+          '.maka-module-page [role="complementary"], .maka-module-page [role="dialog"], .maka-module-page dialog[open]',
+          { state: 'attached', timeout: 5_000 },
+        );
+      } catch {
+        browserFailures.push('the selected item never produced an inspector');
       }
     }
 
@@ -394,6 +408,66 @@ async function smokeStory(page, baseUrl, job, options = {}) {
               );
             }
           }
+        }
+        if (checks.includes('module-page-shell')) {
+          /* The page's layout contract, which a screenshot cannot hold:
+             ONE column, the title over its own rows, and no chrome hairline
+             anywhere. Every one of these was a real defect during the
+             rebuild. */
+          const page = document.querySelector('.maka-module-page');
+          const header = page?.querySelector('.astryx-layout-header');
+          const rows = page?.querySelector('.maka-module-page-rows, .maka-module-page-panel');
+          if (!page || !header || !rows) {
+            failures.push('module page shell is missing its header or content');
+          } else {
+            const inner = header.firstElementChild;
+            const headerLeft = inner?.getBoundingClientRect().left ?? -1;
+            const rowsLeft = rows.getBoundingClientRect().left;
+            if (Math.abs(headerLeft - rowsLeft) > 1) {
+              failures.push(
+                `page title (${Math.round(headerLeft)}) must share the rows' left edge (${Math.round(rowsLeft)})`,
+              );
+            }
+            const contentWidth =
+              page.querySelector('.astryx-layout-content')?.getBoundingClientRect().width ?? 0;
+            if (contentWidth > 901) {
+              failures.push(`page column must stay clamped, got ${Math.round(contentWidth)}px`);
+            }
+            /* No rule under the header and none around the toolbar: the only
+               lines on the page are the list's own row dividers. */
+            for (const [element, label] of [
+              [header, 'layout header'],
+              [page.querySelector('.maka-module-page-bar'), 'control bar'],
+            ]) {
+              if (!element) continue;
+              const style = getComputedStyle(element);
+              if (
+                element.getAttribute('data-divider') != null ||
+                style.borderBlockEndWidth !== '0px'
+              ) {
+                failures.push(`${label} must not draw a hairline`);
+              }
+            }
+          }
+        }
+        if (checks.includes('module-page-inspector')) {
+          /* Rows are inert by design, so the inspector is the ONLY path to
+             every per-item action. Narrow drops the side panel — it must not
+             drop the inspector with it. */
+          const panel = document.querySelector('.maka-module-page [role="complementary"]');
+          const dialog = document.querySelector(
+            '.maka-module-page [role="dialog"], .maka-module-page dialog[open]',
+          );
+          const narrow = window.matchMedia('(max-width: 1024px)').matches;
+          const surface = narrow ? dialog : panel;
+          if (!surface) {
+            failures.push(`selected item has no inspector at ${window.innerWidth}px`);
+          } else if (!surface.textContent?.includes('立即触发')) {
+            failures.push('inspector is present but carries none of the item actions');
+          }
+          if (narrow && panel) failures.push('narrow window must not keep the side panel');
+          if (!narrow && dialog)
+            failures.push('wide window must show the inspector beside the rows, not over them');
         }
         if (checks.includes('plan-reminder-row')) {
           if (document.documentElement.scrollWidth > document.documentElement.clientWidth) {

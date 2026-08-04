@@ -113,18 +113,15 @@
       "state": "Recurring, paused, completed and delivery-blocked reminders in one list",
       "viewports": ["wide", "compact", "floor"],
       "colorSchemes": ["light", "dark"],
-      "checks": ["plan-reminder-row"]
+      "checks": ["plan-reminder-row", "module-page-shell"]
     },
     "planRemindersInspector": {
       "storyId": "product-module-hubs--scheduled-plan-reminders-inspector",
       "productionHost": "AppShellDetailPanel > AutomationsPage",
-      "state": "One reminder selected, its inspector open beside the rows",
-      "viewports": ["wide"],
+      "state": "One reminder selected: the inspector beside the rows when wide, over them when narrow",
+      "viewports": ["wide", "compact", "floor"],
       "colorSchemes": ["light", "dark"],
-      "viewportOptOuts": {
-        "compact": "The page drops the inspector below 1024px, so there is no inspector to smoke.",
-        "floor": "The page drops the inspector below 1024px, so there is no inspector to smoke."
-      }
+      "checks": ["module-page-inspector"]
     },
     "planRemindersEmpty": {
       "storyId": "product-module-hubs--scheduled-plan-reminders",

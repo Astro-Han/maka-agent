@@ -28,9 +28,24 @@ test('acts on a reminder through the inspector and keeps deletion reversible', a
   await pausedRow.click();
 
   const deleteButton = page.getByRole('button', { name: '删除', exact: true });
-  await expect(page.getByRole('switch', { name: '启用' })).toBeVisible();
+  const enableSwitch = page.getByRole('switch', { name: '启用' });
   await expect(page.getByRole('button', { name: '立即触发' })).toBeVisible();
   await expect(deleteButton).toBeVisible();
+
+  // The inspector is the only surface these actions have left, so one of them
+  // has to prove the whole chain: row selection → inspector control → main
+  // process → the row's own state. A paused reminder enables into 待触发.
+  await expect(enableSwitch).not.toBeChecked();
+  await enableSwitch.click();
+  await expect(enableSwitch).toBeChecked();
+  // The row carries its lifecycle state only on the StatusDot's accessible
+  // name — a sibling of the row button, not inside it — and its description
+  // picks up the schedule it just regained.
+  const pausedItem = page
+    .locator('.maka-module-page-rows > li')
+    .filter({ hasText: '暂停的发布检查' });
+  await expect(pausedItem.getByRole('img', { name: '待触发' })).toBeVisible();
+  await expect(pausedRow).toHaveText(/下次触发/);
 
   await deleteButton.click();
   const deleteDialog = page.getByRole('alertdialog');
