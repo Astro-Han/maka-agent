@@ -1526,10 +1526,13 @@ test('harness A/B resolves the DeepSWE benchmark axis orthogonally to competitor
         systemPrompt: 'PROMPT\n',
       },
       { makaRepoPath: '/repo', jobsDir: '/jobs/x', jobName: 'trial', model: 'deepseek/v4' },
-    ).agents as Array<{ env: Record<string, string>; max_timeout_sec?: number }>
+    ).agents as Array<{ env: Record<string, string>; override_timeout_sec?: number }>
   )[0]!;
+  // override_timeout_sec, not max_timeout_sec: Harbor folds the latter in as
+  // `min(base, max)`, so a tail published there resolves back to the task's own
+  // declared timeout and the settlement window never exists.
   assert.equal(
-    anchorAgent.max_timeout_sec! - Number(anchorAgent.env.MAKA_CELL_TIMEOUT_SEC),
+    anchorAgent.override_timeout_sec! - Number(anchorAgent.env.MAKA_CELL_TIMEOUT_SEC),
     tbenchManifest.metadata.benchmark.agentSettlementGraceSec,
   );
   // Every arm is handed MAKA_SYSTEM_PROMPT but only the Maka cell applies it, so

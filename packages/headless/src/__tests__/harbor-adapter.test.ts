@@ -467,7 +467,7 @@ describe('Harbor adapter contract', () => {
       },
     );
     const harborAgent = (
-      harborConfig.agents as Array<{ env: Record<string, string>; max_timeout_sec?: number }>
+      harborConfig.agents as Array<{ env: Record<string, string>; override_timeout_sec?: number }>
     )[0]!;
     assert.equal(harborAgent.env.MAKA_CELL_TIMEOUT_SEC, String(budgetSec));
 
@@ -487,7 +487,10 @@ describe('Harbor adapter contract', () => {
           {
             label: 'harbor',
             env: harborAgent.env,
-            agentPhaseSec: harborAgent.max_timeout_sec!,
+            // The phase Harbor will actually resolve: override_timeout_sec
+            // replaces the task's declared timeout, where max_timeout_sec could
+            // only have capped it.
+            agentPhaseSec: harborAgent.override_timeout_sec!,
           },
           { label: 'pier', env: pierEnv, agentPhaseSec: pierPhaseSec },
         ]),
