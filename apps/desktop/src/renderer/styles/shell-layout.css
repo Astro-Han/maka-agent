@@ -42,41 +42,29 @@
   overflow: hidden;
 }
 
-/* Continuous Collapse: at 48px the rail is icons and nothing else, and the
-   traffic lights are wider than it is (measured ~62px) — a column edge there
-   would run straight through the light cluster. Collapsed, the rail drops both
-   halves of that edge, the wash and the hairline, so the lights sit on one
-   surface; expanded, the theme's border and AppShell's wash mark the column.
-   This is the only rule that overrides a column's material, and it is the
-   reason the ease (makaTheme.ts, app-shell-sidenav `base`) exists.
-
-   It has to live in product CSS rather than the theme: AppShell only forwards
-   `variant` to themeProps and has no notion of the product's collapsed state.
-   No `!important` though — Astryx's StyleX sheet is wrapped in
-   `@layer astryx-base` and imported into `astryx-components`, which this file's
-   `components` layer outranks outright; the specificity padding StyleX emits
-   does not survive a layer boundary. The border override on the next line never
-   carried the flag and has always worked, which is the same evidence read from
-   the other side.
-
-   Painting with --color-background-surface rather than --background is
-   deliberate: the rail is taking the CONTENT COLUMN's material, and that token
-   is what AppShell paints the content column with. Naming the value instead
-   would fork the mapping the moment makaTheme.ts changes it. */
-.appFrame[data-sidebar-state="collapsed"] .astryx-app-shell-sidenav {
-  background: var(--color-background-surface);
-  border-inline-end-color: transparent;
-}
-
 /* WAWQAQ msg `9f313715` (2026-08-03): the content column is a rounded floating
    plate flush to the sidebar — its edge is the ONE boundary on that seam. The
    theme's full-height sidenav hairline (`.astryx-app-shell-sidenav.elevated`
    in the built maka.css) ran on the same seam, so beside the plate's top-left
-   corner radius both lines showed and read as a doubled border. The collapsed
-   rail already dropped this edge (rule above); drop it expanded too — column
-   separation is tonal (the plate's fill against the canvas), per DESIGN.md's
-   One Working Plane rule. Override lives here because maka.css is a generated
-   artifact (`npm run astryx:theme`), not a hand-edited file. */
+   corner radius both lines showed and read as a doubled border. Drop it in both
+   collapse states — column separation is tonal (the plate's fill against the
+   canvas), per DESIGN.md's One Working Plane rule. Override lives here because
+   maka.css is a generated artifact (`npm run astryx:theme`), not a hand-edited
+   file.
+
+   Continuous Collapse used to repaint the collapsed rail with
+   --color-background-surface here as well, so the traffic lights would sit on
+   one surface instead of straddling a column edge narrower than they are. That
+   was written while AppShell's own surface was still the content column's
+   material; `.astryx-layout-content` below now paints --agents-layout-bg
+   (== --surface-canvas == --color-background-body), so the two columns already
+   share one material and the repaint was the only thing breaking the band. In
+   light mode --color-background-surface happens to equal the floating plate's
+   fill, which hid it; in dark mode the plate lifts 0.035L off --background and
+   the rail became a THIRD tone (measured L 0.205 against the canvas's 0.18),
+   painting a 49px slab that ran to the window top past the plate's 4px gutter
+   and under the light cluster. The rail now wears its column's material in both
+   states, which is what "one surface" meant in the first place. */
 .maka-shell-astryx .astryx-app-shell-sidenav {
   border-inline-end-color: transparent;
 }
