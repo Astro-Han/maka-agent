@@ -1049,21 +1049,30 @@ export const Data: Story = {
  * and the guidance block are hidden until diagnostics are expanded, so the collapsed story
  * gives those layouts no baseline at all — which is exactly where the remaining overflow
  * was hiding. Everything the collapsed story shows is still on screen here.
+ *
+ * The disclosure is per-row now (a CollapsibleGroup, one open at a time) rather than one
+ * page-level 展开详情 button, so the story opens the first capability instead — and asserts
+ * on the trigger's own `aria-expanded`, which is Collapsible's contract, rather than on a
+ * `data-diagnostics` attribute the page used to maintain by hand for this test.
  */
-// Real path: 设置 → 权限与能力 → 展开详情.
+// Real path: 设置 → 权限与能力 → 展开某个能力行.
 export const PermissionCenterDiagnosticsExpanded: Story = {
   decorators: [withSettingsBridge],
   render: () => <SettingsStory section="permissions" />,
   play: async ({ canvasElement }) => {
-    const toggle = await waitForStoryButton(
+    // Scoped through `data-readiness` — the capability rows' own attribute — so
+    // the story cannot latch onto some other expandable button on the page.
+    const trigger = await waitForStoryButton(
       canvasElement,
-      (candidate) => candidate.textContent?.includes('展开详情') === true,
+      (candidate) =>
+        candidate.getAttribute('aria-expanded') === 'false' &&
+        candidate.closest('[data-readiness]') !== null,
     );
-    toggle.click();
+    trigger.click();
     await waitForStoryCondition(
       () =>
-        canvasElement.querySelector('[data-diagnostics="open"]') !== null,
-      'Permission Center story did not expand the capability diagnostics',
+        canvasElement.querySelector('[data-readiness] button[aria-expanded="true"]') !== null,
+      'Permission Center story did not expand a capability row',
     );
   },
 };
