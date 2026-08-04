@@ -253,12 +253,12 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   }
 
   async writeLockKey(input: WorkspaceWriteLockKeyInput): Promise<WorkspaceWriteLockKeyResult> {
-    // Same canonicalisation as the resolvers, so every spelling of one file —
-    // relative, absolute, or through a symlink — takes the same lock. Escapes
-    // are rejected by the resolvers inside the lock, not here.
-    const root = await fs.realpath(input.cwd);
-    const requested = isAbsolute(input.path) ? resolve(input.path) : resolve(root, input.path);
-    return { key: await realpathAllowMissing(requested) };
+    // The resolvers' canonicalisation without their containment check, so every
+    // spelling of one file — relative, absolute, or through a symlink — takes
+    // the same lock. Escapes are rejected by the resolvers inside the lock, not
+    // here. Sharing the canonicalisation is what keeps the lock-key space and
+    // the resolved-path space from drifting apart.
+    return { key: (await canonicalPathUnderCwd(input.cwd, input.path)).path };
   }
 
   async globFiles(input: WorkspaceGlobInput): Promise<WorkspaceGlobResult> {
@@ -300,24 +300,35 @@ function shellEscape(arg: string): string {
 }
 
 /**
- * Canonical session cwd and the canonical path of `inputPath` under it, or a
- * containment error. Both sides of the check live in the realpath space: the
- * root, and the candidate through its deepest existing ancestor (the target may
- * not exist yet). Comparing a realpath'd root against a merely resolved candidate
- * rejected every legitimate absolute path whenever the session cwd sat under a
- * symlink — macOS tmpdirs (`/var` → `/private/var`) and symlinked workspace
- * roots. Following the symlinks does not weaken containment: a link inside the
- * cwd that points out of it resolves to its outside target and is rejected.
+ * Canonical session cwd and the canonical path `inputPath` names under it, with
+ * no containment check — the single place that decides which path space every
+ * caller works in. Both the root and the candidate are realpath'd, the candidate
+ * through its deepest existing ancestor since the target may not exist yet.
+ * Comparing a realpath'd root against a merely resolved candidate rejected every
+ * legitimate absolute path whenever the session cwd sat under a symlink — macOS
+ * tmpdirs (`/var` → `/private/var`) and symlinked workspace roots.
+ */
+async function canonicalPathUnderCwd(
+  cwd: string,
+  inputPath: string,
+): Promise<{ root: string; path: string }> {
+  const root = await fs.realpath(cwd);
+  const requested = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath);
+  return { root, path: await realpathAllowMissing(requested) };
+}
+
+/**
+ * The same canonical path, rejected unless it stays inside the session cwd.
+ * Following the symlinks does not weaken containment: a link inside the cwd that
+ * points out of it resolves to its outside target and is rejected.
  */
 async function canonicalPathInsideCwd(
   cwd: string,
   inputPath: string,
   label: string,
 ): Promise<{ root: string; path: string }> {
-  const root = await fs.realpath(cwd);
-  const requested = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath);
-  const candidate = assertInsideCwd(root, await realpathAllowMissing(requested), inputPath, label);
-  return { root, path: candidate };
+  const { root, path } = await canonicalPathUnderCwd(cwd, inputPath);
+  return { root, path: assertInsideCwd(root, path, inputPath, label) };
 }
 
 async function resolveExistingInsideCwd(
@@ -327,9 +338,13 @@ async function resolveExistingInsideCwd(
 ): Promise<string> {
   const { root, path: candidate } = await canonicalPathInsideCwd(cwd, inputPath, label);
   // The read/search callers depend on the target existing; surface that here
-  // rather than as a downstream open/spawn failure. Re-check the result: a
-  // segment that was missing a moment ago can have become a symlink out of the
-  // cwd since it was canonicalised.
+  // rather than as a downstream open/spawn failure.
+  //
+  // Do not drop the second assertion: it closes the window between the two
+  // awaits, where a segment that was missing during canonicalisation can become
+  // a symlink out of the cwd before the realpath runs. It is deliberately
+  // defence-in-depth and no deterministic test can drive that race, so nothing
+  // will fail if it is removed.
   return assertInsideCwd(root, await fs.realpath(candidate), inputPath, label);
 }
 
