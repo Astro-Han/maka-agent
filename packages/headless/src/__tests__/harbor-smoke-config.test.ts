@@ -9,6 +9,7 @@ import {
   type SmokeManifest,
 } from '../harbor-smoke-config.js';
 import { MAKA_SETTLEMENT_GRACE_SEC } from '../maka-settlement.js';
+import { type HarborAgentEntry, harborAgentPhaseSec } from './helpers/harbor-agent-phase.js';
 
 const repoRoot = resolve(fileURLToPath(new URL('../../../..', import.meta.url)));
 
@@ -68,37 +69,24 @@ describe('harbor smoke config generation', () => {
     assert.equal(env.MAKA_HARBOR_AGENT_TIMEOUT_SEC, undefined);
   });
 
-  // Harbor resolves the agent phase as
-  // `min(override_timeout_sec ?? task_declared, max_timeout_sec ?? inf) * multiplier`
-  // (harbor/trial/trial.py, _resolve_timeout_sec). Every deadline assertion below
-  // goes through this rather than reading one field: a settlement tail published
-  // on max_timeout_sec satisfies a field-shaped assertion while folding straight
-  // back to the task's own timeout, which is how the window stayed unreachable
-  // through the smoke path while these tests were green.
-  type SmokeAgentEntry = {
-    env: Record<string, string>;
-    override_timeout_sec?: number | null;
-    max_timeout_sec?: number | null;
-  };
-  const harborAgentPhaseSec = (
-    config: Record<string, unknown>,
-    taskDeclaredSec: number,
-  ): number => {
-    const agent = (config.agents as SmokeAgentEntry[])[0]!;
-    const multiplier =
-      (config.agent_timeout_multiplier as number | null) ?? (config.timeout_multiplier as number);
-    return (
-      Math.min(
-        agent.override_timeout_sec ?? taskDeclaredSec,
-        agent.max_timeout_sec ?? Number.POSITIVE_INFINITY,
-      ) * multiplier
-    );
-  };
+  // Every deadline assertion below goes through harborAgentPhaseSec — Harbor's
+  // own resolution rule, modelled once in ./helpers/harbor-agent-phase.js and
+  // shared with the fixed-prompt producer's suite.
+  const MAKA_PROFILES = [
+    'maka-basic',
+    'maka-heavy',
+    'maka-heavy-prune',
+    'maka-prune-default',
+    'maka-stale-off',
+    'maka-retrieval-on',
+  ];
 
-  // The declared agent timeouts actually present in the smoke dataset. The
-  // profile multipliers were tuned against 900 alone, so anything else is where
-  // a multiplier-derived phase silently stops tracking the cell budget.
-  const DECLARED_AGENT_TIMEOUTS_SEC = [600, 900, 1800, 3600];
+  // Two declared timeouts that bracket every shipped cell budget from both
+  // sides. Naming a pair rather than one is the point: with the phase published
+  // absolutely it cannot depend on the declared timeout at all, and one value
+  // cannot express independence.
+  const DECLARED_BELOW_SEC = 600;
+  const DECLARED_ABOVE_SEC = 12_000;
 
   test('the smoke agent phase outlasts the cell budget by the settlement window', async () => {
     // The regression this pins: publishing budget + grace on max_timeout_sec.
@@ -107,17 +95,15 @@ describe('harbor smoke config generation', () => {
     // SIGKILLed at the instant it stopped calling the model and began writing
     // maka-cell-output.json, and a scored trial read as an infra failure.
     const manifest = await loadManifest();
-    for (const profileName of ['maka-basic', 'maka-heavy']) {
+    for (const profileName of MAKA_PROFILES) {
       const { config } = buildSmokeJobConfig({
         manifest,
         profileName,
         overrides: { jobName: 'job' },
       });
-      const agent = (config.agents as SmokeAgentEntry[])[0]!;
+      const agent = (config.agents as HarborAgentEntry[])[0]!;
       const budget = Number(agent.env.MAKA_CELL_TIMEOUT_SEC);
-      // The budget is the cell's, so the phase is the same on every task the
-      // dataset declares — not only the 900s one the multiplier was tuned for.
-      for (const declared of DECLARED_AGENT_TIMEOUTS_SEC) {
+      for (const declared of [DECLARED_BELOW_SEC, DECLARED_ABOVE_SEC]) {
         assert.equal(
           harborAgentPhaseSec(config, declared),
           budget + MAKA_SETTLEMENT_GRACE_SEC,
@@ -126,33 +112,101 @@ describe('harbor smoke config generation', () => {
       }
       // A ceiling cannot raise a base, so leaving one behind can only re-clamp it.
       assert.equal(agent.max_timeout_sec, null, profileName);
+      // 1.0, not null: null makes Harbor fall back to the job-level
+      // timeout_multiplier, which would rescale the absolute phase we just
+      // published. The manifest test below proves the difference is real.
+      assert.equal(config.agent_timeout_multiplier, 1.0, profileName);
     }
   });
 
-  test('a non-maka smoke profile keeps its multiplier and gets no settlement window', async () => {
+  test('a job-level timeout multiplier cannot rescale the published smoke phase', async () => {
+    // timeoutMultiplier is a supported manifest knob, and Harbor reaches for it
+    // whenever agent_timeout_multiplier is null. Pinning agent_timeout_multiplier
+    // at 1.0 is what keeps the number we publish the number Harbor kills at;
+    // leaving it null here would resolve 3630 * 0.5 = 1815 — under the cell's own
+    // 3600s budget, which is the very kill this fix exists to prevent.
     const manifest = await loadManifest();
-    // opencode has no cell budget to publish, so the multiplier stays its only
-    // control — and on the default 900s task it still buys the same 3600s of
-    // model time the maka arms get, which is what makes --compare comparable.
-    const { config: opencode } = buildSmokeJobConfig({
-      manifest,
-      profileName: 'opencode',
+    const scaled: SmokeManifest = {
+      ...manifest,
+      defaults: { ...manifest.defaults, timeoutMultiplier: 0.5 },
+    };
+    const { config } = buildSmokeJobConfig({
+      manifest: scaled,
+      profileName: 'maka-basic',
       overrides: { jobName: 'job' },
     });
-    assert.equal(opencode.agent_timeout_multiplier, 4);
-    assert.equal(harborAgentPhaseSec(opencode, 900), 3600);
-    assert.equal((opencode.agents as SmokeAgentEntry[])[0]!.override_timeout_sec, null);
+    assert.equal(config.timeout_multiplier, 0.5);
+    assert.equal(harborAgentPhaseSec(config, 900), 3600 + MAKA_SETTLEMENT_GRACE_SEC);
+  });
 
+  test('an operator-widened settlement window widens the smoke phase', async () => {
+    const manifest = await loadManifest();
+    const widened = MAKA_SETTLEMENT_GRACE_SEC * 3;
+    const profile = manifest.profiles!['maka-basic']!;
+    const patched: SmokeManifest = {
+      ...manifest,
+      profiles: {
+        ...manifest.profiles,
+        'maka-basic': {
+          ...profile,
+          agent: {
+            ...profile.agent,
+            env: {
+              ...profile.agent!.env,
+              MAKA_CELL_SETTLEMENT_GRACE_SEC: String(widened),
+            },
+          },
+        },
+      },
+    };
+    const { config } = buildSmokeJobConfig({
+      manifest: patched,
+      profileName: 'maka-basic',
+      overrides: { jobName: 'job' },
+    });
+    const agent = (config.agents as HarborAgentEntry[])[0]!;
+    // The cell reads the same env, so both sides of the window move together.
+    assert.equal(agent.env.MAKA_CELL_SETTLEMENT_GRACE_SEC, String(widened));
+    assert.equal(harborAgentPhaseSec(config, 900), 3600 + widened);
+  });
+
+  test('every smoke arm gets the same model budget and only Maka a settlement tail', async () => {
+    // The one number that has to be identical across arms for --compare to mean
+    // anything is the model budget. opencode has no cell budget of its own, so
+    // its multiplier stays the only control that can buy it the same 3600s — and
+    // nothing else in the suite ties the two arms together.
+    const manifest = await loadManifest();
+    const configFor = (profileName: string) =>
+      buildSmokeJobConfig({ manifest, profileName, overrides: { jobName: 'job' } }).config;
+
+    const maka = configFor('maka-basic');
+    const opencode = configFor('opencode');
+    const budget = Number((maka.agents as HarborAgentEntry[])[0]!.env.MAKA_CELL_TIMEOUT_SEC);
+
+    // On the dataset's default task both arms call the model for the same budget.
+    assert.equal(harborAgentPhaseSec(opencode, 900), budget);
+    assert.equal(opencode.agent_timeout_multiplier, 4);
+    assert.equal((opencode.agents as HarborAgentEntry[])[0]!.override_timeout_sec, null);
+
+    // The whole asymmetry: only the Maka cell has artifacts to settle.
+    assert.ok(MAKA_SETTLEMENT_GRACE_SEC > 0, 'the settlement window must be a real window');
+    assert.equal(
+      harborAgentPhaseSec(maka, 900) - harborAgentPhaseSec(opencode, 900),
+      MAKA_SETTLEMENT_GRACE_SEC,
+    );
+  });
+
+  test('the oracle profile gets neither a settlement window nor a multiplier', async () => {
+    const manifest = await loadManifest();
     const { config } = buildSmokeJobConfig({
       manifest,
       profileName: 'oracle',
       overrides: { jobName: 'job' },
     });
-    const agent = (config.agents as SmokeAgentEntry[])[0]!;
+    const agent = (config.agents as HarborAgentEntry[])[0]!;
     assert.equal(agent.max_timeout_sec, null);
     assert.equal(agent.override_timeout_sec, null);
-    // No multiplier of its own: the phase is the task's own declared timeout.
-    assert.equal(config.agent_timeout_multiplier, null);
+    // The phase is the task's own declared timeout, untouched.
     assert.equal(harborAgentPhaseSec(config, 900), 900);
   });
 
@@ -163,7 +217,7 @@ describe('harbor smoke config generation', () => {
       profileName: 'maka-heavy',
       overrides: { jobName: 'job', agentTimeoutSec: '180' },
     });
-    const agent = (config.agents as SmokeAgentEntry[])[0]!;
+    const agent = (config.agents as HarborAgentEntry[])[0]!;
     assert.equal(agent.env.MAKA_CELL_TIMEOUT_SEC, '180');
     // Pre-fix this resolved to min(900, 210) * 8 = 1680 — an operator asking for
     // a 3-minute smoke run got a 28-minute one, and never saw the kill at all.
@@ -193,7 +247,7 @@ describe('harbor smoke config generation', () => {
       profileName: 'maka-basic',
       overrides: { jobName: 'job' },
     });
-    assert.equal((config.agents as SmokeAgentEntry[])[0]!.override_timeout_sec, null);
+    assert.equal((config.agents as HarborAgentEntry[])[0]!.override_timeout_sec, null);
     assert.equal(config.agent_timeout_multiplier, 4);
     assert.equal(harborAgentPhaseSec(config, 900), 3600);
   });

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { tokenSummary } from './helpers/cell-output-fixtures.js';
+import { type HarborAgentEntry, harborAgentPhaseSec } from './helpers/harbor-agent-phase.js';
 import type { HarborCellExecutionIdentity, HarborCellOutput } from '../cell-output.js';
 import { FixedPromptBudgetExhaustedError, type TaskRunInput } from '../fixed-prompt-controller.js';
 import { CODEX_TOOLCHAIN_SPEC } from '../codex-toolchain.js';
@@ -2802,26 +2803,10 @@ describe('buildHarborJobConfig', () => {
     assert.equal(env.MAKA_BACKEND, 'ai-sdk');
   });
 
-  // Harbor resolves the agent phase as `min(override ?? task_declared, max ?? inf)`
-  // (harbor/trial/trial.py, _resolve_timeout_sec). Every deadline assertion below
-  // goes through this rather than reading a field directly: a settlement tail
-  // published on max_timeout_sec satisfies a field-shaped assertion while
-  // resolving straight back to the task's own timeout, which is exactly how the
-  // window stayed unreachable while these tests were green.
-  // Harbor then scales that by agent_timeout_multiplier ?? timeout_multiplier,
-  // omitted here because this runner never sets the former and every call site
-  // passes 1.0 for the latter. Assert a scaled phase through Harbor's own
-  // multiplier rather than widening this helper if that ever stops being true.
-  type HarborAgentEntry = {
-    env: Record<string, string>;
-    override_timeout_sec?: number;
-    max_timeout_sec?: number;
-  };
-  const harborAgentPhaseSec = (agent: HarborAgentEntry, taskDeclaredSec: number): number =>
-    Math.min(
-      agent.override_timeout_sec ?? taskDeclaredSec,
-      agent.max_timeout_sec ?? Number.POSITIVE_INFINITY,
-    );
+  // Deadline assertions below go through harborAgentPhaseSec — Harbor's own
+  // resolution rule, modelled once in ./helpers/harbor-agent-phase.js and shared with
+  // the smoke producer's suite. See that file for why a field-shaped assertion
+  // is not enough.
 
   test('resolves Maka a settlement tail past the task-declared agent timeout', () => {
     // The regression this pins: publishing budget + grace on max_timeout_sec.
@@ -2838,7 +2823,7 @@ describe('buildHarborJobConfig', () => {
     });
     const agent = (config.agents as HarborAgentEntry[])[0]!;
     assert.equal(
-      harborAgentPhaseSec(agent, declared),
+      harborAgentPhaseSec(config, declared),
       declared + MAKA_SETTLEMENT_GRACE_SEC,
       'Harbor must kill one settlement window after the model budget, not at it',
     );
@@ -2850,8 +2835,8 @@ describe('buildHarborJobConfig', () => {
     // Maka's cell stops calling the model one grace window before its own budget
     // runs out; native CLIs run until Harbor cancels. Taking the grace out of the
     // budget would hand Maka less model time than its competitors for the same task.
-    const agentFor = (adapter: 'maka' | 'codex') => {
-      const config = buildHarborJobConfig(runInput(), {
+    const configFor = (adapter: 'maka' | 'codex') =>
+      buildHarborJobConfig(runInput(), {
         makaRepoPath: '/repo',
         jobsDir: '/jobs/x',
         jobName: 'trial',
@@ -2865,15 +2850,14 @@ describe('buildHarborJobConfig', () => {
             }
           : {}),
       });
-      return (config.agents as HarborAgentEntry[])[0]!;
-    };
 
     // Pin the window as a real quantity: with a zero grace every assertion below
     // would hold for an implementation that gives no arm any settlement tail.
     assert.ok(MAKA_SETTLEMENT_GRACE_SEC > 0, 'the settlement window must be a real window');
 
-    const maka = agentFor('maka');
-    const makaPhase = harborAgentPhaseSec(maka, 1800);
+    const makaConfig = configFor('maka');
+    const maka = (makaConfig.agents as HarborAgentEntry[])[0]!;
+    const makaPhase = harborAgentPhaseSec(makaConfig, 1800);
     assert.equal(makaPhase, 1800 + MAKA_SETTLEMENT_GRACE_SEC);
     // The budget the cell is handed is the model budget itself, on every path.
     assert.equal(maka.env.MAKA_CELL_TIMEOUT_SEC, '1800');
@@ -2881,8 +2865,9 @@ describe('buildHarborJobConfig', () => {
     // Harbor kills at the agent phase, which is that budget plus the window.
     assert.equal(makaPhase - Number(maka.env.MAKA_CELL_TIMEOUT_SEC), MAKA_SETTLEMENT_GRACE_SEC);
 
-    const codex = agentFor('codex');
-    const codexPhase = harborAgentPhaseSec(codex, 1800);
+    const codexConfig = configFor('codex');
+    const codex = (codexConfig.agents as HarborAgentEntry[])[0]!;
+    const codexPhase = harborAgentPhaseSec(codexConfig, 1800);
     assert.equal(codexPhase, 1800);
     assert.equal(codex.env.MAKA_CELL_SETTLEMENT_GRACE_SEC, undefined);
     // The whole asymmetry: Maka's phase is longer by exactly the window it
@@ -2907,7 +2892,7 @@ describe('buildHarborJobConfig', () => {
     const agent = (config.agents as HarborAgentEntry[])[0]!;
     assert.equal(agent.env.MAKA_CELL_SETTLEMENT_GRACE_SEC, String(widened));
     assert.equal(agent.env.MAKA_CELL_TIMEOUT_SEC, '1800');
-    assert.equal(harborAgentPhaseSec(agent, 1800), 1800 + widened);
+    assert.equal(harborAgentPhaseSec(config, 1800), 1800 + widened);
   });
 
   test('a malformed cell timeout falls back instead of failing the run', () => {
@@ -2970,7 +2955,7 @@ describe('buildHarborJobConfig', () => {
         label,
       );
       assert.equal(
-        harborAgentPhaseSec(metadataAgent, 1234),
+        harborAgentPhaseSec(withMetadata, 1234),
         (parsed ?? 1234) + MAKA_SETTLEMENT_GRACE_SEC,
         label,
       );
@@ -2993,7 +2978,7 @@ describe('buildHarborJobConfig', () => {
       // the task's declared timeout, stood in for here by a sentinel.
       const declaredSentinel = 4321;
       assert.equal(
-        harborAgentPhaseSec(agent, declaredSentinel),
+        harborAgentPhaseSec(withoutMetadata, declaredSentinel),
         parsed === undefined ? declaredSentinel : parsed + MAKA_SETTLEMENT_GRACE_SEC,
         label,
       );
@@ -3021,7 +3006,7 @@ describe('buildHarborJobConfig', () => {
     assert.equal(agent.env.MAKA_CELL_TIMEOUT_SEC, '1234');
     assert.equal(agent.env.MAKA_STREAM_CONNECT_TIMEOUT_MS, '1234000');
     assert.equal(agent.env.MAKA_STREAM_IDLE_TIMEOUT_MS, '1234000');
-    assert.equal(harborAgentPhaseSec(agent, 1234), 1234 + MAKA_SETTLEMENT_GRACE_SEC);
+    assert.equal(harborAgentPhaseSec(config, 1234), 1234 + MAKA_SETTLEMENT_GRACE_SEC);
   });
 
   test('merges per-attempt agent env into the Harbor agent config', () => {
