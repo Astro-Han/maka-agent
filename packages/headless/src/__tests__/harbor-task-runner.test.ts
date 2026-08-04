@@ -2808,6 +2808,10 @@ describe('buildHarborJobConfig', () => {
   // published on max_timeout_sec satisfies a field-shaped assertion while
   // resolving straight back to the task's own timeout, which is exactly how the
   // window stayed unreachable while these tests were green.
+  // Harbor then scales that by agent_timeout_multiplier ?? timeout_multiplier,
+  // omitted here because this runner never sets the former and every call site
+  // passes 1.0 for the latter. Assert a scaled phase through Harbor's own
+  // multiplier rather than widening this helper if that ever stops being true.
   type HarborAgentEntry = {
     env: Record<string, string>;
     override_timeout_sec?: number;
