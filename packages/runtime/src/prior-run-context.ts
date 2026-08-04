@@ -206,14 +206,13 @@ async function readNonTerminalPriorRun(
   run: AgentRunHeader,
 ): Promise<{ events: RuntimeEvent[]; run?: AgentRunHeader }> {
   if (!input.runtimeEventStore) return { events: [] };
-  const read = async (): Promise<RuntimeEvent[]> =>
-    await input.runtimeEventStore!.readRuntimeEvents(input.sessionId, run.runId).catch(() => []);
-  let events = await read();
-  let terminalFact = classifyRuntimeEventTerminalFact(run, events).fact;
-  if (!terminalFact && (await input.repairRunRuntimeLedger?.(input.sessionId, run.runId))) {
-    events = await read();
-    terminalFact = classifyRuntimeEventTerminalFact(run, events).fact;
-  }
+  // No repair attempt here, unlike the terminal branch: `repairRunTerminalFact`
+  // returns false for a non-terminal header before reading anything, so calling
+  // it would be a promise that only ever answers "no".
+  const events = await input.runtimeEventStore
+    .readRuntimeEvents(input.sessionId, run.runId)
+    .catch(() => []);
+  const terminalFact = classifyRuntimeEventTerminalFact(run, events).fact;
   return terminalFact
     ? { events, run: effectiveRunHeaderFromTerminalFact(run, terminalFact) }
     : { events };
