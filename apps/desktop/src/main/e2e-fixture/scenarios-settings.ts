@@ -239,6 +239,23 @@ export async function writePlanReminders(workspaceRoot: string, now: number): Pr
       status: 'triggered',
       message: '计划提醒已触发',
     });
+    // The list's search / sort / filter controls only appear at eight
+    // reminders, and they are the widest thing the page header carries — the
+    // narrow-window geometry test has nothing to measure below that count.
+    // These four carry no state any other test reads. They are seeded OLDER
+    // than the four above so 创建时间倒序 keeps those four in the first four
+    // rows, which is what the ordering test above pins.
+    for (const [index, title] of [
+      '每日站会前汇总阻塞项',
+      '每月依赖许可证审计',
+      '季度收尾清点未归档会话',
+      '发布前跑一轮回归',
+    ].entries()) {
+      await store.create(
+        { title, runAt: scheduledRunAt + (index + 1) * 86_400_000 },
+        now - (8 - index) * 60_000,
+      );
+    }
   } finally {
     store.close();
   }

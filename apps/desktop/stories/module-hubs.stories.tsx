@@ -267,6 +267,50 @@ const CONFIGURED_REMINDERS: PlanReminder[] = [
     ],
     runCount: 12,
   },
+  // Eighth reminder: the list's own control bar (search / sort / filter) only
+  // appears at eight, so without this row the story could never show it — and
+  // the controls are the widest thing the page's header carries.
+  {
+    id: 'plan-monthly-audit',
+    title: '每月依赖许可证审计',
+    note: '核对新引入依赖的许可证与来源。',
+    schedule: { kind: 'recurring', startAt: PLAN_NOW - 40 * 86_400_000, recurrence: 'monthly' },
+    delivery: { channel: 'local' },
+    status: 'scheduled',
+    enabled: true,
+    createdAt: PLAN_NOW - 40 * 86_400_000,
+    updatedAt: PLAN_NOW - 9 * 86_400_000,
+    nextRunAt: PLAN_NOW + 6 * 86_400_000,
+    runs: [],
+    runCount: 0,
+  },
+  {
+    id: 'plan-standup',
+    title: '每日站会前汇总阻塞项',
+    note: '',
+    schedule: { kind: 'cron', startAt: PLAN_NOW - 20 * 86_400_000, expression: '30 9 * * 1-5' },
+    delivery: { channel: 'local' },
+    status: 'scheduled',
+    enabled: true,
+    createdAt: PLAN_NOW - 20 * 86_400_000,
+    updatedAt: PLAN_NOW - 3 * 86_400_000,
+    nextRunAt: PLAN_NOW + 20 * 3_600_000,
+    runs: [],
+    runCount: 0,
+  },
+  {
+    id: 'plan-quarter-close',
+    title: '季度收尾清点未归档会话',
+    note: '把仍未归档的会话列成一张清单。',
+    schedule: { kind: 'once', runAt: PLAN_NOW + 21 * 86_400_000 },
+    delivery: { channel: 'local' },
+    status: 'paused',
+    enabled: false,
+    createdAt: PLAN_NOW - 11 * 86_400_000,
+    updatedAt: PLAN_NOW - 4 * 86_400_000,
+    runs: [],
+    runCount: 0,
+  },
 ];
 
 const LONG_CONTENT_REMINDERS: PlanReminder[] = [

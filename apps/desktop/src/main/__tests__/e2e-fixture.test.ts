@@ -679,13 +679,16 @@ describe('e2e-fixture mode', () => {
         createdAt: number;
       }>,
       );
-      assert.equal(reminders.length, 4);
+      // Eight, not four: the list's search / sort / filter controls only
+      // appear at eight reminders, and the narrow-window geometry tests in
+      // plan-reminders.spec.ts have nothing to measure below that count.
+      assert.equal(reminders.length, 8);
       // The panel's default 创建时间倒序 sort only falls back to the status /
-      // next-run comparator on `createdAt` ties, so the seed must hand it
-      // four distinct values or row positions drift between runs.
+      // next-run comparator on `createdAt` ties, so the seed must hand every
+      // reminder a distinct value or row positions drift between runs.
       assert.equal(
         new Set(reminders.map((reminder) => reminder.createdAt)).size,
-        4,
+        8,
         'seeded plan reminders need distinct createdAt values',
       );
       const scheduled = reminders.find((reminder) => reminder.title === '同步项目风险');

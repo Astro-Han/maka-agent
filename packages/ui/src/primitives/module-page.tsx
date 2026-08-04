@@ -141,7 +141,13 @@ export function ModulePage({
       header={
         <LayoutHeader>
           <VStack gap={4}>
-            <HStack gap={3} vAlign="center">
+            {/* Wraps rather than squeezes. `StackItem size="fill"` carries its
+                own `min-width: 0`, so on a nowrap row a narrow window
+                compresses the title instead of moving the actions down: at the
+                480px window floor that left 定时任务 running one glyph per
+                line, 112px of vertical title. Wrapping sends the actions to
+                their own row and hands the title back its line. */}
+            <HStack gap={3} vAlign="center" wrap="wrap">
               <StackItem size="fill">
                 <HStack gap={2} vAlign="center" wrap="wrap">
                   <Heading level={1}>{title}</Heading>

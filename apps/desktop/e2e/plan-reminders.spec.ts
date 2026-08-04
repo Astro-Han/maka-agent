@@ -107,3 +107,62 @@ test('narrow windows keep the inspector reachable and hand focus back', async ({
   await expect(sheet).toHaveCount(0);
   await expect(row).toBeFocused();
 });
+
+// 480px is the app's own window floor (SAFE_MIN_WIDTH in window-state.ts), so
+// this is a window a user really has. The page header is a flex row whose title
+// column carries Astryx's `min-width: 0`: without a content floor the row keeps
+// the actions at full width and squeezes the title instead, which at this width
+// left 定时任务 running one glyph per line down 112px of header.
+test('keeps the page title on one line at the window floor', async ({
+  planRemindersWindow: page,
+}) => {
+  const title = page.locator('.maka-module-page h1');
+  const oneLine = (await title.boundingBox())?.height ?? 0;
+  expect(oneLine).toBeGreaterThan(0);
+
+  for (const width of [640, 520, 480]) {
+    await page.setViewportSize({ width, height: 800 });
+    const box = await title.boundingBox();
+    expect(box, `title missing at ${width}px`).not.toBeNull();
+    // One line, not four: allow a pixel of rounding, nothing near a wrap.
+    expect(box?.height, `title wrapped at ${width}px`).toBeLessThanOrEqual(oneLine + 1);
+  }
+});
+
+// The 900px clamp only means something against a real window: the Storybook
+// page stories render without the app shell, so their column is content-sized
+// and would satisfy any width assertion. This is the one place that runs the
+// production geometry.
+test('keeps the page column clamped on a wide window', async ({
+  planRemindersWindow: page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const content = page.locator('.maka-module-page .astryx-layout-content').first();
+  const box = await content.boundingBox();
+  expect(box?.width, 'page column must stay clamped').toBeLessThanOrEqual(901);
+});
+
+// Astryx's Toolbar is a nowrap flex row, and the list controls carry fixed
+// widths that together need 618px. Before they wrapped, the trailing ones
+// simply left the page at narrow widths — past the plate's edge, unclickable,
+// with no scroll to bring them back: the state filter was already gone at
+// 640px, the sort control too by 480px.
+test('keeps every list control inside the column at narrow widths', async ({
+  planRemindersWindow: page,
+}) => {
+  const bar = page.locator('.maka-module-page-bar');
+  const controls = bar.locator('input, .astryx-selector button');
+  await expect(controls).not.toHaveCount(0);
+
+  for (const width of [900, 640, 480]) {
+    await page.setViewportSize({ width, height: 800 });
+    const escaped = await bar.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return [...element.querySelectorAll('input, .astryx-selector button')]
+        .map((control) => control.getBoundingClientRect())
+        .filter((r) => r.width > 0 && (r.right > box.right + 1 || r.left < box.left - 1))
+        .map((r) => `${Math.round(r.left)}-${Math.round(r.right)}`);
+    });
+    expect(escaped, `control escaped the column at ${width}px`).toEqual([]);
+  }
+});

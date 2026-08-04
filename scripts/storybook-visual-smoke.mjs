@@ -428,11 +428,6 @@ async function smokeStory(page, baseUrl, job, options = {}) {
                 `page title (${Math.round(headerLeft)}) must share the rows' left edge (${Math.round(rowsLeft)})`,
               );
             }
-            const contentWidth =
-              page.querySelector('.astryx-layout-content')?.getBoundingClientRect().width ?? 0;
-            if (contentWidth > 901) {
-              failures.push(`page column must stay clamped, got ${Math.round(contentWidth)}px`);
-            }
             /* No rule under the header and none around the toolbar: the only
                lines on the page are the list's own row dividers. */
             for (const [element, label] of [

@@ -104,6 +104,10 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   // The column resize handle's hit area (Resizable/ResizeHandle themeProps).
   // sidebar.css styles the sidenav handle's own line through it.
   'astryx-resize-handle',
+  // A form field's outer box (Field themeProps). module-shell.css gives up the
+  // vendor's tuned control widths inside the module page's control bar once the
+  // column is narrower than they are.
+  'astryx-field',
   // AppShell's sidenav slot (AppShell.tsx themeProps); shell-layout.css clears
   // its top so the column runs under the transparent titlebar.
   'astryx-app-shell-sidenav',
