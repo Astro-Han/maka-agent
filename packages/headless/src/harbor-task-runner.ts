@@ -26,7 +26,7 @@ import {
   type TaskRunOutput,
   type TaskRunner,
 } from './fixed-prompt-controller.js';
-import { buildAgentRepoMounts, CONTAINER_MAKA_REPO } from './agent-repo-mount.js';
+import { buildAgentRepoMounts } from './agent-repo-mount.js';
 import type {
   HarborTrialGrade,
   HarborVerifierAttempt,

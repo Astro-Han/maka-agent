@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import {
@@ -8,7 +8,7 @@ import {
   competitorRepoFiles,
   CONTAINER_MAKA_REPO,
 } from '../agent-repo-mount.js';
-import type { HarnessAgentId } from '../harness-agent-registry.js';
+import { type HarnessAgentId, harnessAgentImportPath } from '../harness-agent-registry.js';
 
 const COMPETITORS: readonly Exclude<HarnessAgentId, 'maka'>[] = [
   'opencode',
@@ -61,6 +61,45 @@ describe('agent repo mounts', () => {
       }
     });
   }
+
+  test('declares every repo file the adapters read at a container path', () => {
+    // Every assertion above derives its expectation from competitorRepoFiles(),
+    // so none of them can tell a wrong list from a right one. The adapters are
+    // the authority for what is read at a container path, so read them instead:
+    // a repo read added there without an entry here mounts nothing, and the arm
+    // fails inside the container partway through a graded run.
+    const harborDir = join(REPO_ROOT, 'packages/headless/harbor');
+    const repoFileByBasename = new Map(
+      readdirSync(harborDir, { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => {
+          const absolute = join(entry.parentPath, entry.name);
+          return [entry.name, relative(REPO_ROOT, absolute)] as const;
+        }),
+    );
+
+    for (const agent of COMPETITORS) {
+      const adapterModule = harnessAgentImportPath(agent).split(':')[0];
+      const source = readFileSync(join(harborDir, `${adapterModule}.py`), 'utf8');
+      const read = new Set<string>();
+      for (const [, literal] of source.matchAll(/["']([^"'\n]+)["']/g)) {
+        // Adapters name a file either by its absolute container path or by
+        // joining MAKA_REPO_ROOT with the path segments, so match both.
+        if (literal.startsWith(`${CONTAINER_MAKA_REPO}/`)) {
+          read.add(literal.slice(CONTAINER_MAKA_REPO.length + 1));
+          continue;
+        }
+        const repoFile = repoFileByBasename.get(literal);
+        if (repoFile) read.add(repoFile);
+      }
+      for (const repoFile of read) {
+        assert.ok(
+          competitorRepoFiles(agent).includes(repoFile),
+          `${adapterModule}.py reads ${repoFile}, which ${agent} is not mounted`,
+        );
+      }
+    }
+  });
 
   test('keeps the benchmark identity out of every competitor container', () => {
     // run-harness-ab.mjs carries TERMINAL_BENCH_2_1_REVISION and the upstream
