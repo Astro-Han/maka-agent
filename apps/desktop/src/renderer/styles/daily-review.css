@@ -31,14 +31,6 @@
   }
 }
 
-/* Period stepper: the bar's left slot, mirroring the 计划提醒 tab strip. */
-.maka-daily-review-stepper {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-1);
-}
-
 .maka-daily-review-range-label {
   min-width: 9rem;
   text-align: center;
@@ -57,6 +49,12 @@
 .maka-daily-review-metric {
   min-width: 0;
   padding: var(--space-3) var(--space-4);
+}
+
+/* The strip is inset with the rest of the page, so the first cell must not
+   add a second inset — its label lines up with the page title. */
+.maka-daily-review-metric:first-child {
+  padding-inline-start: 0;
 }
 
 .maka-daily-review-metric + .maka-daily-review-metric {

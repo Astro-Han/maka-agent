@@ -115,6 +115,17 @@
       "colorSchemes": ["light", "dark"],
       "checks": ["plan-reminder-row"]
     },
+    "planRemindersInspector": {
+      "storyId": "product-module-hubs--scheduled-plan-reminders-inspector",
+      "productionHost": "AppShellDetailPanel > AutomationsPage",
+      "state": "One reminder selected, its inspector open beside the rows",
+      "viewports": ["wide"],
+      "colorSchemes": ["light", "dark"],
+      "viewportOptOuts": {
+        "compact": "The page drops the inspector below 1024px, so there is no inspector to smoke.",
+        "floor": "The page drops the inspector below 1024px, so there is no inspector to smoke."
+      }
+    },
     "planRemindersEmpty": {
       "storyId": "product-module-hubs--scheduled-plan-reminders",
       "productionHost": "AppShellDetailPanel > AutomationsPage",

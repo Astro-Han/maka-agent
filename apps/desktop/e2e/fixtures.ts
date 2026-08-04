@@ -432,7 +432,7 @@ export const test = base.extend<{
     await withE2eWindow(
       {
         seed: false,
-        readinessSelector: '.maka-plan-list-row',
+        readinessSelector: '.maka-module-page-rows',
         e2eFixtureScenario: 'plan-reminders',
         locale: 'zh',
       },

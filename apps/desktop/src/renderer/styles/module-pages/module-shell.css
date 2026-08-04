@@ -61,51 +61,53 @@
   max-width: 560px;
 }
 
-/* ── The module page body ──────────────────────────────────────────────
-   One skeleton for every module page under the header: a clamped column
-   that stacks page TIERS with the 24px two-tier rhythm (checklist rule 10)
-   and never re-pads — .maka-module-main owns the page padding.
+/* ── Astryx Layout page shell ──────────────────────────────────────────
+   计划提醒 / 每日回顾 render an Astryx `Layout` (header / content / end
+   panel) instead of the grid this file used to hand-roll, following the
+   vendor's `incident-console` page template. Layout owns the zones, the
+   full-bleed header divider, padding collapse and scroll containment, so
+   the module main is reduced to giving it a box to fill — plus the top
+   inset the frameless titlebar still needs. */
+.maka-module-main[data-page-shell="layout"] {
+  display: flex;
+  gap: 0;
+  padding: var(--space-16) 0 0;
+  overflow: hidden;
+}
 
-   Adopted by 计划提醒 and 每日回顾, which each used to carry a private copy
-   of this block (.maka-plan-shell, .maka-daily-review-panel) and drifted
-   apart on gap, padding and clamp. */
-.maka-module-page-body {
-  width: min(100%, 900px);
+.maka-module-main[data-page-shell="layout"] > .maka-module-page {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  margin-inline: auto;
-  display: grid;
-  align-content: start;
-  gap: var(--space-6);
-  padding: 0;
-  overflow: auto;
 }
 
-/* One tier: a control bar over the content it governs. Small step inside the
-   unit, so the bar reads as the panel's own header rather than a page tier. */
-.maka-module-page-tier {
-  display: grid;
-  gap: var(--space-2);
-}
-
-/* Left slot = what you are looking at (view tabs / period stepper); right
-   slot = how it is filtered. The hairline is owned HERE rather than by
-   whichever control lands on the left — that is what used to split the two
-   pages into a TabList `hasDivider` on one and a standalone <Divider /> on
-   the other. */
+/* The one control bar inside a page's content: module switch on the left,
+   this page's view + filters on the right. LayoutContent is edge-to-edge
+   (padding={0}) so the rows below can bleed; the bar pays its own inset. */
 .maka-module-page-bar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-2-5);
+  gap: var(--space-3);
   flex-wrap: wrap;
-  row-gap: var(--space-2-5);
-  padding-block-end: var(--space-1-5);
+  row-gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
   border-block-end: var(--border-width-hairline) solid var(--border);
 }
 
 .maka-module-page-panel {
+  min-height: 0;
   display: grid;
-  gap: var(--space-3);
+  align-content: start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5) var(--space-6);
+}
+
+/* Rows keep the page inset rather than bleeding: the header, the control bar
+   and the rows then share one left edge, which is what makes the page read as
+   a single column. */
+.maka-module-page-rows {
+  min-width: 0;
 }
 
 .maka-module-hub-heading {

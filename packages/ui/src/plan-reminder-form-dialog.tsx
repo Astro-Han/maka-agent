@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMountedRef } from './use-mounted-ref.js';
-import { Check, X } from './icons.js';
+import { Check } from './icons.js';
 import { BotBrandLogo } from './bot-brand-logo.js';
 import type {
   BotProvider,
@@ -41,7 +41,9 @@ import {
   TextInput,
 } from '@astryxdesign/core';
 import type { ISODateTimeString } from '@astryxdesign/core/DateTimeInput';
-import { IconButton } from '@astryxdesign/core';
+import { HStack, StackItem } from '@astryxdesign/core';
+import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
+import { Layout, LayoutContent, LayoutFooter } from '@astryxdesign/core/Layout';
 import {
   DropdownMenu,
   DropdownMenuItem,
@@ -230,56 +232,58 @@ export function PlanReminderFormDialog(props: {
     }
   }
 
-  if (!props.open) return null;
-
-  // Split-view panel (reference layout): the form is an in-page column flush
-  // against the task list — not an overlay. Non-modal `role="dialog"` keeps
-  // the e2e/assistive name; Escape closes via the same guarded path.
+  // Astryx Dialog, purpose="form": the vendor's explicit guidance for a
+  // dialog that holds inputs — the backdrop cannot dismiss it, so a
+  // half-filled task is never lost to a stray click, while Escape, focus
+  // trapping and focus restoration come from the native <dialog>.
+  //
+  // This replaces a hand-rolled in-page split-view column. The list beside it
+  // was never a reference the form needed: creating a task is a one-shot
+  // errand, not a browse-and-compare. The end panel that column used to
+  // occupy now belongs to the inspector, which is a browsing surface.
   return (
-    <aside
-      className="maka-plan-form-aside"
-      role="dialog"
-      aria-labelledby="maka-plan-dialog-title"
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          closeReminderDialog();
-        }
+    <Dialog
+      isOpen={props.open}
+      onOpenChange={(open) => {
+        if (!open) closeReminderDialog();
       }}
+      purpose="form"
+      width={520}
+      className="maka-plan-form-dialog"
     >
-            <div className="maka-plan-form-header">
-              <h3 id="maka-plan-dialog-title" className="maka-plan-form-kicker">{isEditing ? copy.editTitle : copy.createTitle}</h3>
-              <div className="maka-plan-form-header-actions">
-                {!isEditing && (
-                  <DropdownMenu
-                    button={{
-                      label: copy.useTemplate,
-                      variant: 'ghost',
-                      size: 'sm',
-                      isDisabled: formInteractionDisabled,
-                    }}
-                    menuWidth={240}
-                  >
-                    {templates.map((template) => (
-                      <DropdownMenuItem
-                        key={template.id}
-                        onClick={() => applyTemplate(template)}
-                        label={template.title}
-                        endContent={template.scheduleLabel}
-                      />
-                    ))}
-                  </DropdownMenu>
-                )}
-                <IconButton
-                  onClick={closeReminderDialog}
-                  isDisabled={formInteractionDisabled}
-                  label={copy.close}
-                  icon={<X size={16} aria-hidden="true" />}
-                  variant="ghost"
-                  size="sm"
-                />
-              </div>
-            </div>
+      <Layout
+        height="auto"
+        header={(
+          <DialogHeader
+            title={isEditing ? copy.editTitle : copy.createTitle}
+            onOpenChange={(open) => {
+              if (!open) closeReminderDialog();
+            }}
+            hasDivider
+            endContent={!isEditing ? (
+              <DropdownMenu
+                button={{
+                  label: copy.useTemplate,
+                  variant: 'ghost',
+                  size: 'sm',
+                  isDisabled: formInteractionDisabled,
+                }}
+                menuWidth={240}
+              >
+                {templates.map((template) => (
+                  <DropdownMenuItem
+                    key={template.id}
+                    onClick={() => applyTemplate(template)}
+                    label={template.title}
+                    endContent={template.scheduleLabel}
+                  />
+                ))}
+              </DropdownMenu>
+            ) : undefined}
+          />
+        )}
+        content={(
+          <LayoutContent padding={0}>
         {/* Redesign (WAWQAQ msg `67d21f99`): the form reads like the reference
             scheduled-task panels now — a quiet kicker, a large borderless
             title, a bare description field, then label-left / control-right
@@ -453,15 +457,26 @@ export function PlanReminderFormDialog(props: {
             )}
           </section>
         </form>
-        <div className="maka-plan-form-footer">
-          <UiButton
-            variant="primary"
-            type="submit"
-            form="maka-plan-reminder-form"
-            isDisabled={submitDisabled}
-            label={submitPending ? (isEditing ? copy.saving : copy.creating) : (isEditing ? copy.save : copy.create)}
-          />
-        </div>
-    </aside>
+          </LayoutContent>
+        )}
+        footer={(
+          <LayoutFooter hasDivider>
+            {/* One button. The dialog already offers two ways out — the
+                header's close control and Escape — so a footer 取消 would be a
+                third route to the same place. */}
+            <HStack gap={2} vAlign="center">
+              <StackItem size="fill" />
+              <UiButton
+                variant="primary"
+                type="submit"
+                form="maka-plan-reminder-form"
+                isDisabled={submitDisabled}
+                label={submitPending ? (isEditing ? copy.saving : copy.creating) : (isEditing ? copy.save : copy.create)}
+              />
+            </HStack>
+          </LayoutFooter>
+        )}
+      />
+    </Dialog>
   );
 }

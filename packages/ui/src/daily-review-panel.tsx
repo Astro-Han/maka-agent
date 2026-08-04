@@ -21,6 +21,7 @@ import {
   SegmentedControlItem,
   Skeleton,
   StackItem,
+  Toolbar,
   Text,
   VStack,
 } from '@astryxdesign/core';
@@ -35,8 +36,7 @@ import {
 import type { DailyReviewBridge, DailyReviewMarkdownActionInput } from './module-panel-types.js';
 import type { ModuleHubHeader } from './module-hub-selector.js';
 import { getDailyReviewCopy } from './daily-review-copy.js';
-import { getSharedUiCopy } from './shared-ui-copy.js';
-import { PageHeader } from './primitives/page-header.js';
+import { ModulePage } from './primitives/module-page.js';
 import { Markdown } from './markdown.js';
 import { RelativeTime } from './relative-time.js';
 import { useUiLocale } from './locale-context.js';
@@ -67,7 +67,6 @@ export function DailyReviewPanel(props: {
 }) {
   const locale = useUiLocale();
   const copy = getDailyReviewCopy(locale);
-  const sharedCopy = getSharedUiCopy(locale);
   const intlLocale = uiLocaleToIntlLocale(locale);
   const mounted = useMountedRef();
   const bridgeRef = useRef(props.bridge);
@@ -213,51 +212,33 @@ export function DailyReviewPanel(props: {
     && props.bridge.getArchive,
   );
 
-  // One page header for BOTH routes — the same shared module-page header the
-  // 计划提醒 / 技能 / MCP pages use, so switching hub tabs or drilling into a
-  // report never moves the title, the hub selector, or the primary action.
-  const header = (
-    <PageHeader
-      className="maka-module-main-header"
-      as="h2"
-      title={props.hubHeader?.title ?? copy.page.title}
-      subtitle={props.hubHeader?.subtitle ?? sharedCopy.modules.dailyReviewDescription}
-      badge={props.hubHeader?.badge}
-      headingRowClassName={props.hubHeader ? 'maka-module-hub-heading' : undefined}
-      actions={route.kind === 'activity' ? (
-        <div className="maka-module-main-actions">
-          {currentArchive?.status === 'ok' ? (
-            <Button
-              variant="primary"
-              label={copy.page.viewAnalysis}
-              isLoading={pendingAction === 'open'}
-              isDisabled={pendingAction !== null}
-              onClick={() => void openArchive(currentArchive)}
-            />
-          ) : canAnalyze ? (
-            <Button
-              variant="primary"
-              label={currentArchive ? copy.page.retryAnalysis : copy.page.generateAnalysis}
-              isLoading={pendingAction === 'generate'}
-              isDisabled={
-                archiveState.status !== 'ready'
-                || pendingAction !== null
-                || !visibleSummary
-                || !hasActivity
-              }
-              onClick={() => void generateAnalysis()}
-            />
-          ) : null}
-        </div>
-      ) : undefined}
+  const primaryAction = currentArchive?.status === 'ok' ? (
+    <Button
+      variant="primary"
+      label={copy.page.viewAnalysis}
+      isLoading={pendingAction === 'open'}
+      isDisabled={pendingAction !== null}
+      onClick={() => void openArchive(currentArchive)}
     />
-  );
+  ) : canAnalyze ? (
+    <Button
+      variant="primary"
+      label={currentArchive ? copy.page.retryAnalysis : copy.page.generateAnalysis}
+      isLoading={pendingAction === 'generate'}
+      isDisabled={
+        archiveState.status !== 'ready'
+        || pendingAction !== null
+        || !visibleSummary
+        || !hasActivity
+      }
+      onClick={() => void generateAnalysis()}
+    />
+  ) : null;
 
   if (route.kind === 'report') {
     return (
-      <>
-        {header}
-        <div key="report" className="maka-module-page-body">
+      <ModulePage title={props.hubHeader?.title ?? copy.page.title}>
+        <div key="report" className="maka-module-page-panel">
           <DailyReviewReport
             archive={route.archive}
             onBack={() => setRoute({ kind: 'activity' })}
@@ -266,19 +247,32 @@ export function DailyReviewPanel(props: {
             onSaveMarkdown={props.onSaveMarkdown}
           />
         </div>
-      </>
+      </ModulePage>
     );
   }
 
   return (
-    <>
-      {header}
-      <div key="activity" className="maka-module-page-body">
-        <div className="maka-module-page-tier">
-          {/* Same bar as 计划提醒: what you are looking at on the left, how it
-              is filtered on the right, one hairline under both. */}
-          <div className="maka-module-page-bar">
-            <div className="maka-daily-review-stepper" role="group" aria-label={copy.page.timeRange}>
+    <ModulePage
+      title={props.hubHeader?.title ?? copy.page.title}
+      meta={totals ? copy.archive.sessionCount(totals.sessionCount) : undefined}
+      actions={primaryAction}
+    >
+      {/* Module switch on the left (navigation), this page's scope controls on
+          the right — the same split 计划提醒 uses. */}
+      <div className="maka-module-page-bar">
+        {props.hubHeader?.badge}
+        <Toolbar
+          size="sm"
+          label={copy.page.timeRange}
+          startContent={(
+            <SegmentedControl value={String(range)} onChange={changeRange} label={copy.page.rangeSwitch} size="sm">
+              {copy.page.rangeOptions.map(([value, label]) => (
+                <SegmentedControlItem key={value} value={value} label={label} />
+              ))}
+            </SegmentedControl>
+          )}
+          endContent={(
+            <>
               <Button
                 variant="ghost"
                 size="sm"
@@ -297,20 +291,12 @@ export function DailyReviewPanel(props: {
                 isDisabled={offsetDays >= 0}
                 onClick={() => selectScope(shiftDailyReviewScope({ range, offsetDays }, 1))}
               />
-            </div>
-            <SegmentedControl
-              value={String(range)}
-              onChange={changeRange}
-              label={copy.page.rangeSwitch}
-              size="sm"
-            >
-              {copy.page.rangeOptions.map(([value, label]) => (
-                <SegmentedControlItem key={value} value={value} label={label} />
-              ))}
-            </SegmentedControl>
-          </div>
+            </>
+          )}
+        />
+      </div>
 
-          <div className="maka-module-page-panel" data-loading={loading ? 'true' : undefined}>
+      <div key="activity" className="maka-module-page-panel" data-loading={loading ? 'true' : undefined}>
       {error ? (
         <Banner
           status="warning"
@@ -352,7 +338,7 @@ export function DailyReviewPanel(props: {
           <VStack gap={2}>
             <Heading level={3}>{copy.overview.activeConversations}</Heading>
             {displayedSummary.sessions.length > 0 ? (
-              <List density="balanced" hasDividers>
+              <List density="balanced" hasDividers className="maka-module-page-rows">
                 {displayedSummary.sessions.map((session) => (
                   <ListItem
                     key={session.id}
@@ -373,10 +359,8 @@ export function DailyReviewPanel(props: {
           </VStack>
         </div>
       ) : null}
-          </div>
-        </div>
       </div>
-    </>
+    </ModulePage>
   );
 }
 

@@ -3,7 +3,7 @@ import type { PlanReminder } from '@maka/core';
 import { deriveCapabilityAuditReport } from '@maka/core';
 import { CalendarDays } from './icons.js';
 import { EmptyState } from '@astryxdesign/core';
-import { PageHeader } from './primitives/page-header.js';
+import { ModulePage } from './primitives/module-page.js';
 import { useUiLocale } from './locale-context.js';
 import { getSharedUiCopy } from './shared-ui-copy.js';
 import type { ModuleHubHeader } from './module-hub-selector.js';
@@ -91,7 +91,7 @@ export function AutomationsPage(props: {
   const copy = getSharedUiCopy(useUiLocale()).modules;
   const label = props.hubHeader?.title ?? copy.automations;
   return (
-    <main className="maka-main detailPane maka-module-main agents-chat-panel" data-module="plan-reminders" aria-label={label}>
+    <main className="maka-main detailPane maka-module-main agents-chat-panel" data-page-shell="layout" data-module="plan-reminders" aria-label={label}>
       <Suspense fallback={<ModulePanelFallback message={copy.loadingAutomations} />}>
         <PlanReminderPanel {...props} reminders={props.reminders ?? []} />
       </Suspense>
@@ -110,7 +110,7 @@ export function DailyReviewPage(props: {
   const copy = getSharedUiCopy(useUiLocale()).modules;
   const label = props.hubHeader?.title ?? copy.dailyReview;
   return (
-    <main className="maka-main detailPane maka-module-main agents-chat-panel" data-module="daily-review" aria-label={label}>
+    <main className="maka-main detailPane maka-module-main agents-chat-panel" data-page-shell="layout" data-module="daily-review" aria-label={label}>
       {props.bridge ? (
         // The page header lives INSIDE the panel: its primary action (生成分析 /
         // 查看分析) rides the panel's run state, exactly like 计划提醒's 新建.
@@ -119,18 +119,11 @@ export function DailyReviewPage(props: {
           <DailyReviewPanel {...props} bridge={props.bridge} />
         </Suspense>
       ) : (
-        <>
-          <PageHeader
-            className="maka-module-main-header"
-            title={label}
-            subtitle={props.hubHeader?.subtitle ?? copy.dailyReviewDescription}
-            badge={props.hubHeader?.badge}
-            headingRowClassName={props.hubHeader ? 'maka-module-hub-heading' : undefined}
-          />
-          <div className="maka-module-page-body">
+        <ModulePage title={label}>
+          <div className="maka-module-page-panel">
             <EmptyState icon={<CalendarDays />} title={copy.dailyReviewDisconnectedTitle} description={copy.dailyReviewDisconnectedBody} />
           </div>
-        </>
+        </ModulePage>
       )}
     </main>
   );
