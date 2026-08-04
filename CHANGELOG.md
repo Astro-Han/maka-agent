@@ -72,6 +72,9 @@
 ### Distribution
 
 - Ships for Apple Silicon macOS as a signed and notarized DMG and ZIP.
+- Adds Windows x64: an NSIS installer and a ZIP, built and verified on Windows
+  in the same release run. This build is not code-signed yet, so Windows
+  SmartScreen warns on first launch.
 - The bundled Computer Use skill ships with the app, but the Computer Use
   executor remains excluded from this release.
 
