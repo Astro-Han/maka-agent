@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
@@ -69,20 +78,34 @@ export function toRelative(root: string, target: string): string {
  *
  * Because symlinks are followed all the way to the leaf, this never legalises
  * an escape: a link inside the root that points out of it resolves to its
- * outside target and fails containment.
+ * outside target and fails containment. That includes a dangling link, whose
+ * `realpath` fails ENOENT — the link is read and followed by hand, because a
+ * write through it lands on its target, not on the link.
  *
  * Throws the underlying error when a path component is unreadable rather than
- * missing, so permission problems are not silently treated as containment.
+ * missing, so permission problems are not silently treated as containment, and
+ * when a symlink cycle keeps the walk from terminating.
  */
 export async function realpathAllowMissing(target: string): Promise<string> {
   let cursor = resolve(target);
   const missing: string[] = [];
+  // `realpath` reports a cycle as ELOOP, so each hop consumes one existing link
+  // and the walk terminates; the cap is a backstop against a pathological
+  // filesystem, not the cycle guard.
+  let hops = 0;
   while (true) {
     try {
       const realExisting = await realpath(cursor);
       return resolve(realExisting, ...missing.reverse());
     } catch (error) {
       if (!isMissingPathError(error)) throw error;
+      const link = await readlink(cursor).catch(() => null);
+      if (link !== null) {
+        if (++hops > MAX_DANGLING_SYMLINK_HOPS)
+          throw new Error(`Path ${JSON.stringify(target)} traverses too many dangling symlinks.`);
+        cursor = resolve(dirname(cursor), link);
+        continue;
+      }
       const parent = dirname(cursor);
       if (parent === cursor) throw error;
       missing.push(basename(cursor));
@@ -90,6 +113,9 @@ export async function realpathAllowMissing(target: string): Promise<string> {
     }
   }
 }
+
+/** Dangling links followed by {@link realpathAllowMissing} before it gives up. */
+const MAX_DANGLING_SYMLINK_HOPS = 32;
 
 function isMissingPathError(error: unknown): boolean {
   return (

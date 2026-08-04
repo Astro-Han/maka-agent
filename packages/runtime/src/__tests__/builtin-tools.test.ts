@@ -2158,6 +2158,15 @@ describe('builtin write tools path containment', () => {
       runTool(write, { path: join(cwd, 'outside-link', 'new.txt'), content: 'x' }, cwd),
       /Write path must stay inside/,
     );
+    // A link whose target does not exist yet cannot be realpath'd, but a write
+    // through it still lands outside the workspace, so it must be followed by
+    // hand rather than treated as a plain missing leaf.
+    await symlink(join(outside, 'not-yet.txt'), join(workspace, 'dangling-escape.txt'));
+    await expectRejects(
+      runTool(write, { path: join(cwd, 'dangling-escape.txt'), content: 'x' }, cwd),
+      /Write path must stay inside/,
+    );
+    await expectRejects(access(join(outside, 'not-yet.txt')), /ENOENT|no such file/);
     await expectRejects(
       runTool(grep, { pattern: 'secret', path: join(cwd, 'outside-link') }, cwd),
       /Grep path must stay inside/,
