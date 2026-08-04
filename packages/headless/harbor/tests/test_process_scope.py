@@ -14,12 +14,21 @@ Run directly: ``python3 packages/headless/harbor/tests/test_process_scope.py``
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from process_scope import cleanup_process_scope  # noqa: E402
+from process_scope import (  # noqa: E402
+    COMMAND_SCOPE_ROOT,
+    cleanup_process_scope,
+    scoped_command,
+    scoped_process_cleanup_command,
+)
 
 
 class _Logger:
@@ -107,6 +116,78 @@ def test_cancellation_still_propagates() -> None:
     else:
         raise AssertionError("teardown swallowed cancellation")
     assert len(agent.commands) == 1, agent.commands
+
+
+def _holders(stdout_path: Path) -> list[str]:
+    """PIDs still holding the replay open. Draining the pipe would unblock the
+    replay and hide the defect, so ask the process table instead."""
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell interpolation
+        ["pgrep", "-f", str(stdout_path)],
+        check=False,
+        timeout=30,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+
+
+def test_cleanup_reaps_the_output_replay_so_the_reader_reaches_eof() -> None:
+    """The wrapper captures the command's output to a file and replays it after
+    the command exits, so that a descendant outliving the command cannot hold the
+    exec's stdout open. The replay itself is the hole: when the caller stops
+    reading — which is exactly what an agent-phase timeout does — the replay
+    blocks in ``pipe_write`` forever, and it belongs to neither the command's
+    process group nor the wrapper PID, so every cleanup loop walks past it. The
+    exec never sees EOF, the cell hangs until something kills the container, and
+    the verifier never runs. EOF here is that failure, reproduced without Docker.
+    """
+    if shutil.which("bash") is None:
+        return
+
+    scope = f"test-scope-{uuid.uuid4().hex}"
+    command_id = "replay"
+    stdout_path = Path(COMMAND_SCOPE_ROOT) / scope / f"{command_id}.stdout"
+    # Comfortably past a 64 KiB pipe buffer, so the replay blocks partway
+    # through rather than finishing before anyone can observe it.
+    payload = "yes 0123456789abcdef | head -c 400000"
+
+    wrapper = subprocess.Popen(  # noqa: S603 - fixed argv, no shell interpolation
+        ["bash", "-c", scoped_command(payload, scope, command_id)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if stdout_path.exists() and stdout_path.stat().st_size >= 400000:
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("the command never finished writing its output")
+        # The wrapper starts the replay once the command exits; give it that
+        # step before asserting on what teardown can still reach.
+        time.sleep(1)
+        assert _holders(stdout_path), (
+            "the replay never blocked, so this test would pass no matter what "
+            "teardown reaps"
+        )
+
+        for signal in ("TERM", "KILL"):
+            subprocess.run(  # noqa: S603 - fixed argv, no shell interpolation
+                ["bash", "-c", scoped_process_cleanup_command(scope, signal)],
+                check=False,
+                timeout=30,
+                capture_output=True,
+            )
+
+        survivors = _holders(stdout_path)
+        assert not survivors, (
+            f"teardown left {len(survivors)} process(es) holding the exec's "
+            "pipe; that is the hang that strands a cell with no verifier"
+        )
+    finally:
+        wrapper.kill()
+        wrapper.wait(timeout=10)
+        shutil.rmtree(Path(COMMAND_SCOPE_ROOT) / scope, ignore_errors=True)
 
 
 def _main() -> int:

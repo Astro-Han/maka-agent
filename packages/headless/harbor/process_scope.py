@@ -10,6 +10,9 @@ from typing import Any
 COMMAND_SCOPE_ENV = "MAKA_HARBOR_COMMAND_SCOPE"
 COMMAND_ID_ENV = "MAKA_HARBOR_COMMAND_ID"
 COMMAND_SCOPE_ROOT = "/tmp/maka-harbor-command-scopes"
+# Ends in `.pgid` so the scope-wide `*.pgid` sweep reaps the replay without
+# needing to know it exists.
+REPLAY_PGID_SUFFIX = "replay.pgid"
 
 
 async def cleanup_process_scope(
@@ -44,6 +47,9 @@ async def cleanup_process_scope(
 def scoped_command(command: str, scope: str, command_id: str) -> str:
     scope_dir = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}")
     pgid_path = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.pgid")
+    replay_pgid_path = shlex.quote(
+        f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.{REPLAY_PGID_SUFFIX}"
+    )
     wrapper_path = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.wrapper")
     stdout_path = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.stdout")
     stderr_path = shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.stderr")
@@ -56,8 +62,17 @@ def scoped_command(command: str, scope: str, command_id: str) -> str:
         "set +m; "
         f"printf '%s\\n' \"$command_pid\" > {pgid_path}; "
         "wait \"$command_pid\" 2>/dev/null; command_status=$?; "
-        f"cat -- {stdout_path}; cat -- {stderr_path} >&2; "
-        f"rm -f -- {stdout_path} {stderr_path}; "
+        # The replay writes to the caller's stdout, so it blocks forever once the
+        # caller stops reading — which is exactly what an agent-phase timeout
+        # does. Give it its own process group and record it like any other
+        # command, or teardown has no handle on it: it is in neither the
+        # command's group nor the wrapper PID, and it inherits no scope marker.
+        "set -m; "
+        f"{{ cat -- {stdout_path}; cat -- {stderr_path} >&2; }} & replay_pid=$!; "
+        "set +m; "
+        f"printf '%s\\n' \"$replay_pid\" > {replay_pgid_path}; "
+        "wait \"$replay_pid\" 2>/dev/null; "
+        f"rm -f -- {replay_pgid_path} {stdout_path} {stderr_path}; "
         f"kill -0 -- \"-$command_pid\" 2>/dev/null || rm -f -- {pgid_path}; "
         f"rm -f -- {wrapper_path}; "
         "exit \"$command_status\""
@@ -88,8 +103,9 @@ def scoped_command_cleanup_command(
     if signal not in ("TERM", "KILL"):
         raise ValueError(f"unsupported cleanup signal: {signal}")
     pgid_paths = [
-        shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.pgid")
+        shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.{suffix}")
         for command_id in command_ids
+        for suffix in ("pgid", REPLAY_PGID_SUFFIX)
     ]
     if not pgid_paths:
         return ":"
@@ -101,7 +117,7 @@ def scoped_command_cleanup_command(
     artifact_paths = " ".join(
         shlex.quote(f"{COMMAND_SCOPE_ROOT}/{scope}/{command_id}.{suffix}")
         for command_id in command_ids
-        for suffix in ("pgid", "wrapper", "stdout", "stderr")
+        for suffix in ("pgid", REPLAY_PGID_SUFFIX, "wrapper", "stdout", "stderr")
     )
     command = (
         f"for pgid_file in {paths}; do "
