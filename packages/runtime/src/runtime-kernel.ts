@@ -2287,11 +2287,17 @@ export class RuntimeKernel implements RuntimeKernelLike {
     // the same thing before this stop reports success: a Run left non-terminal
     // here stays that way, because the stream that would have finalized it is
     // exactly the one the stop could not wake.
+    //
+    // Embedded owners only. A Hosted Run's terminal fact belongs to the Host's
+    // own terminal authority (#1359, #1996), which also parks provider-
+    // indeterminate Runs a stop must not resolve on its behalf.
     for (const target of stoppedRuns.values()) {
-      try {
-        await target.run?.settleStopTerminal();
-      } catch (error) {
-        failures.add(error);
+      if (!this.deps.interactionAuthority) {
+        try {
+          await target.run?.settleStopTerminal();
+        } catch (error) {
+          failures.add(error);
+        }
       }
       target.run?.completeStop();
       target.stopCompleted = true;

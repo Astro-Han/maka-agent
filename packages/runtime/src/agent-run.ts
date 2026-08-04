@@ -300,6 +300,15 @@ export class AgentRun {
    */
   async settleStopTerminal(): Promise<void> {
     if (this.terminalClaim?.owner !== 'stop' || this.terminalClaim.event) return;
+    if (!this.input.runtimeEventStore || !this.runtimeEventStoreAvailable) return;
+    // The claim only fences writers inside this Run. Another owner — a Host
+    // recovery, a resumed continuation — may have sealed the ledger already,
+    // and a sealed run rejects further appends. Nothing to land in that case:
+    // the fact this method exists to guarantee is already there.
+    const sealed = await this.loadTurnRuntimeEvents()
+      .then((events) => events.some(isTerminalRuntimeEvent))
+      .catch(() => true);
+    if (sealed) return;
     const ts = this.lastTs || this.input.now();
     const finalStatus = { status: 'aborted' as const };
     this.finalStatus ??= finalStatus;
