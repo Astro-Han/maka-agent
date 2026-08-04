@@ -79,7 +79,6 @@ export function ArtifactPane(props: {
     message: string;
   } | null>(null);
   const [pendingArtifactListRetry, setPendingArtifactListRetry] = useState(false);
-  const [pendingArtifactAction, setPendingArtifactAction] = useState<string | null>(null);
   const artifactListRequestSeqRef = useRef(0);
   const artifactPaneMountedRef = useMountedRef();
   const artifactPaneSessionIdRef = useRef<string | undefined>(sessionId);
@@ -178,20 +177,24 @@ export function ArtifactPane(props: {
   const listRef = useRef<HTMLUListElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const activeListError = listError && listError.sessionId === sessionId ? listError.message : null;
-  const artifactActionBusy = pendingArtifactAction !== null;
 
   // ---- actions -----------------------------------------------------------
 
+  // The toolbar buttons hand this to `clickAction`, which owns everything this
+  // function used to render by hand: the disabled button, the delayed spinner,
+  // aria-busy, and the "Loading" announcement. What stays is the part no single
+  // button can know — one artifact action at a time across the whole pane,
+  // including the 在 Finder 中打开 button the preview card renders. A ref, not
+  // state, because nothing is drawn from it any more; dropping the state also
+  // drops the setState-after-unmount the mounted guard was here to prevent.
   async function runArtifactAction(actionKey: string, action: () => Promise<void>) {
     if (pendingArtifactActionRef.current !== null) return;
     pendingArtifactActionRef.current = actionKey;
-    setPendingArtifactAction(actionKey);
     try {
       await action();
     } finally {
       if (pendingArtifactActionRef.current === actionKey) {
         pendingArtifactActionRef.current = null;
-        if (artifactPaneMountedRef.current) setPendingArtifactAction(null);
       }
     }
   }
@@ -463,33 +466,24 @@ export function ArtifactPane(props: {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => void runArtifactAction(`${selected.id}:open`, () => openInFinder(selected.id))}
-                  isDisabled={artifactActionBusy}
-                  data-pending={pendingArtifactAction === `${selected.id}:open` ? 'true' : undefined}
-                  aria-busy={pendingArtifactAction === `${selected.id}:open` ? 'true' : undefined}
+                  clickAction={() => runArtifactAction(`${selected.id}:open`, () => openInFinder(selected.id))}
                   icon={<FolderOpen size={14} aria-hidden="true" />}
-                  label={pendingArtifactAction === `${selected.id}:open` ? copy.pane.opening : copy.pane.openInFinder}
+                  label={copy.pane.openInFinder}
                 />
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => void runArtifactAction(`${selected.id}:save`, () => saveAs(selected.id))}
-                  isDisabled={artifactActionBusy}
-                  data-pending={pendingArtifactAction === `${selected.id}:save` ? 'true' : undefined}
-                  aria-busy={pendingArtifactAction === `${selected.id}:save` ? 'true' : undefined}
+                  clickAction={() => runArtifactAction(`${selected.id}:save`, () => saveAs(selected.id))}
                   icon={<Save size={14} aria-hidden="true" />}
-                  label={pendingArtifactAction === `${selected.id}:save` ? copy.pane.saving : copy.pane.saveAs}
+                  label={copy.pane.saveAs}
                 />
                 {isTextKind(selected.kind) && (
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() => void runArtifactAction(`${selected.id}:copy`, () => copyText(selected.id))}
-                    isDisabled={artifactActionBusy}
-                    data-pending={pendingArtifactAction === `${selected.id}:copy` ? 'true' : undefined}
-                    aria-busy={pendingArtifactAction === `${selected.id}:copy` ? 'true' : undefined}
+                    clickAction={() => runArtifactAction(`${selected.id}:copy`, () => copyText(selected.id))}
                     icon={<Copy size={14} aria-hidden="true" />}
-                    label={pendingArtifactAction === `${selected.id}:copy` ? copy.pane.copying : copy.pane.copy}
+                    label={copy.pane.copy}
                   />
                 )}
               </div>}
@@ -498,24 +492,20 @@ export function ArtifactPane(props: {
                   content={
                     selected.source === 'tool_result_archive'
                       ? copy.pane.runtimeArchiveReadOnly
-                      : pendingArtifactAction === `${selected.id}:delete`
-                        ? copy.pane.deleting
-                        : copy.pane.delete
+                      : copy.pane.delete
                   }
                 >
                   <Button
-                    label={pendingArtifactAction === `${selected.id}:delete` ? copy.pane.deleting : copy.pane.delete}
+                    label={copy.pane.delete}
                     icon={<Trash2 size={14} aria-hidden="true" />}
                     isIconOnly
                     variant="destructive"
                     size="sm"
-                    onClick={() => void runArtifactAction(`${selected.id}:delete`, () => deleteArtifact(selected.id))}
+                    clickAction={() => runArtifactAction(`${selected.id}:delete`, () => deleteArtifact(selected.id))}
                     isDisabled={
-                      artifactActionBusy || selected.source === 'deep_research' ||
+                      selected.source === 'deep_research' ||
                       selected.source === 'tool_result_archive'
                     }
-                    data-pending={pendingArtifactAction === `${selected.id}:delete` ? 'true' : undefined}
-                    aria-busy={pendingArtifactAction === `${selected.id}:delete` ? 'true' : undefined}
                   />
                 </Tooltip>
               </div>}
