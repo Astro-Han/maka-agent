@@ -214,11 +214,13 @@ child.onData((data) => {
 });
 child.onExit(({ exitCode }) => {
   clearTimeout(timeout);
-  if (exitCode !== 0 || !output.includes('maka-node-pty-ok')) {
-    console.error('node-pty packaged smoke failed');
-    process.exit(1);
-  }
-  console.log('maka-node-pty-ok');
+  const ok = exitCode === 0 && output.includes('maka-node-pty-ok');
+  // conpty keeps a handle open after its child exits, so on Windows this process
+  // never ends on its own and the probe would hang instead of report. Writing
+  // through the callback exits only once the output has been flushed.
+  const stream = ok ? process.stdout : process.stderr;
+  const message = ok ? 'maka-node-pty-ok' : 'node-pty packaged smoke failed';
+  stream.write(message + '\n', () => process.exit(ok ? 0 : 1));
 });
 `;
 }
