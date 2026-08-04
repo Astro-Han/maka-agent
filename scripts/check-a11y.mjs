@@ -330,6 +330,15 @@ const RULES = [
      * the rows moved from Astryx `List` (`role="list"`, nameable) to a
      * `CollapsibleGroup` whose wrapper is a role-less div (PR #2100).
      *
+     * Before deleting a flagged label, check whether it is naming something
+     * ELSE. The accessible-name algorithm walks descendants, so a label on an
+     * inner span still lands in an interactive ancestor's name-from-content —
+     * and for Astryx's Item it is the only thing that can, because Item puts
+     * consumer props on its outer wrapper and renders a separate invisible
+     * <button> as the click target. Prefer moving the label onto the element
+     * that is actually interactive; where the component gives you no way to do
+     * that, the inner label IS the mechanism and belongs in an a11y-allow.
+     *
      * Scope, and its honest limit: only intrinsic lowercase elements are
      * judged. A capitalized component may set its own role internally — `List`
      * does — so flagging `<SomeComponent aria-label>` would be guesswork and

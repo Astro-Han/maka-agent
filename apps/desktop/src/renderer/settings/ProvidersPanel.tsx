@@ -370,8 +370,8 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
                     startContent={<ProviderLogo type={connection.providerType} compact />}
                     label={(
                       <HStack gap={2} vAlign="center">
-                        {}
-                        <span>{connection.name}</span>
+                        {/* a11y-allow: this label names the ROW, not the span. Astryx's Item puts consumer props on its outer wrapper and renders a separate invisible <button> for the click target, so an aria-label on the Item never reaches that button — measured. The button is named from its content, and this span is how the status reaches that name. Removing it drops the runtime error from the row's accessible name (settings.spec:226).*/}
+                        <span aria-label={chipAriaLabel(connection, isDefault)}>{connection.name}</span>
                         {isDefault && <Badge variant="neutral" label={copy.default} />}
                       </HStack>
                     )}
@@ -398,6 +398,11 @@ export function ProvidersPanel({ bridge, initialPage = 'connections', initialCon
     </VStack>
   );
 
+  function chipAriaLabel(connection: LlmConnection, isDefault: boolean): string {
+    const provider = providerDisplay(connection.providerType, locale).name;
+    const status = connectionChipStatus(connection, locale);
+    return copy.chipAria(connection.name, provider, isDefault, status?.label);
+  }
 }
 
 /** Provider · default model — the row's second line, and the detail's subtitle. */
