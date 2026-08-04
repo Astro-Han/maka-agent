@@ -145,3 +145,56 @@ test('session tools share one user-controlled workbar', async ({ sessionWorkbarW
   await expect(workbar).toBeHidden();
   await expect(page.getByRole('main', { name: '扩展' })).toBeVisible();
 });
+
+// The journey above runs under the fixture's global 0.01ms transition cap, so
+// it can only ever see settled states. That cap is deliberate — every other
+// assertion in this file would be timing-dependent without it — but it also
+// means nothing in the suite watches the collapse actually happen, and the one
+// defect that lived here was invisible for exactly that reason: the column was
+// torn down 5ms into the slide and the 280ms animation ran on an empty box,
+// which no settled-state assertion can distinguish from a correct collapse.
+//
+// So this test lifts the cap for itself and watches the frames. It collapses
+// TWICE, because the first collapse was the one that worked.
+test('the column stays mounted for the whole slide, every time', async ({
+  sessionWorkbarWindow: page,
+}) => {
+  await expect(page.getByRole('complementary', { name: '会话工作栏' })).toBeVisible();
+  await page.evaluate(() => document.documentElement.removeAttribute('data-maka-e2e-fixture'));
+
+  const motion = page.locator('.maka-workbar-motion');
+  const collapseOnce = async () => {
+    // Sample the box's width and whether the column is still under it, on every
+    // frame, from the click until the box reaches zero.
+    const frames = await page.evaluate(async () => {
+      const box = document.querySelector('.maka-workbar-motion') as HTMLElement;
+      const seen: { width: number; mounted: boolean }[] = [];
+      (document.querySelector('button[aria-label="收起会话工作栏"]') as HTMLElement).click();
+      const started = performance.now();
+      while (performance.now() - started < 600) {
+        seen.push({
+          width: Number.parseFloat(getComputedStyle(box).width),
+          mounted: document.querySelector('.maka-session-workbar') !== null,
+        });
+        if (seen.length > 1 && seen.at(-1)!.width === 0) break;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      return seen;
+    });
+    // It really animated — a snap would give two samples, not a spread.
+    const widths = new Set(frames.map((frame) => frame.width));
+    expect(widths.size).toBeGreaterThan(8);
+    // And the column was under the box the whole way down, not just at the top.
+    const carried = frames.filter((frame) => frame.width > 0);
+    expect(carried.every((frame) => frame.mounted)).toBe(true);
+    // Then it goes, once the box is shut.
+    await expect(page.getByRole('complementary', { name: '会话工作栏' })).toHaveCount(0);
+    await expect(motion).toHaveCSS('width', '0px');
+  };
+
+  await collapseOnce();
+  await page.getByRole('button', { name: '展开会话工作栏' }).click();
+  await expect(page.getByRole('complementary', { name: '会话工作栏' })).toBeVisible();
+  await expect(motion).toHaveCSS('width', '400px');
+  await collapseOnce();
+});

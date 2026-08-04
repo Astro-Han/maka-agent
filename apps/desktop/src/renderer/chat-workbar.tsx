@@ -84,26 +84,32 @@ export function ChatWorkbar({
   modelChoices,
 }: ChatWorkbarProps) {
   const copy = getShellCopy(useUiLocale()).app;
-  // Collapsing has to be watched to its end, because the column is torn down at
-  // the end of it; expanding does not, because the wrapper below is already in
-  // the tree and widening it is just a style change. Derived by comparing props
-  // during render rather than in an Effect — this reconciles internal state, it
-  // does not synchronise with anything outside React.
-  const [wasCollapsed, setWasCollapsed] = useState(collapsed);
-  const [isLeaving, setIsLeaving] = useState(false);
-  if (wasCollapsed !== collapsed) {
-    setWasCollapsed(collapsed);
-    setIsLeaving(collapsed);
-  }
-  const showsColumn = !collapsed || isLeaving;
+  // One question, one state: has the column finished sliding off? Nothing else
+  // has to be tracked, because the two moments that matter are already legible
+  // without state — `collapsed` is false the instant the column should be back,
+  // and the box's own transition ending is the instant it is off screen. So the
+  // only writer is that event, and it writes the direction it just finished.
+  //
+  // A boolean per direction, reconciled during render, is the shape this had
+  // first, and it was wrong twice over: `collapsed` and `wasCollapsed` are the
+  // same fact stored twice, and clearing the leave flag on every end — including
+  // the ends where it is already clear — leaves a same-value update queued that
+  // React later replays over the render-phase update arming the NEXT collapse.
+  // Measured: the first collapse animated, every collapse after it tore the
+  // column down 5ms in and ran the 280ms slide on an empty box.
+  const [isGone, setIsGone] = useState(collapsed);
+  const showsColumn = !collapsed || !isGone;
 
   return (
     <>
       {/* Outside the clipping wrapper below: the handle sits a pixel to the
           LEFT of the column it sizes, so inside it the seam control would be
           the one thing `overflow: hidden` cut off. It is also not part of the
-          column's motion — there is nothing to size while the column leaves. */}
-      {showsColumn && (
+          column's motion — there is nothing to size while the column leaves,
+          which is why it goes on `collapsed` and not on the column's own
+          lifetime: a handle still live during the slide would let a drag write
+          a width the user cannot see, and only find out at the next expand. */}
+      {!collapsed && (
       <ResizeHandle
         className="maka-workbar-resize-handle"
         resizable={workbarResizable}
@@ -153,7 +159,7 @@ export function ChatWorkbar({
            is what keeps this from being a teardown that never fires. */
         onTransitionEnd={(event) => {
           if (event.propertyName === 'width' && event.currentTarget === event.target) {
-            setIsLeaving(false);
+            setIsGone(collapsed);
           }
         }}
       >
