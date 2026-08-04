@@ -61,15 +61,13 @@ function report(input: Partial<CapabilityAuditReport['summary']>): CapabilityAud
  * (base.css), something only the E2E harness does.
  *
  * This is the skills host and only the skills host. The plan-reminder page
- * mounts the same component in a different frame — `.maka-plan-shell
- * .agents-inner-view-clamp` inside `.maka-plan-panel`, which caps it at
- * `min(100%, 1024px)` centred (reference-shell.css) and has no
- * `.maka-module-main` ancestor, so `module-shell.css`'s
- * `:has(> .maka-capability-audit-strip)` third grid row does not apply there.
- * Width and vertical-rhythm measurements taken here do not transfer to that
- * page. A second story would only be worth its scaffold if someone were doing
- * pixel work on the plan page; naming the divergence is what stops a
- * measurement here from being quietly reused there.
+ * mounts the same component inside `.maka-module-page-body` (module-shell.css),
+ * which is a nested grid rather than a direct `.maka-module-main` child, so
+ * `module-shell.css`'s `:has(> .maka-capability-audit-strip)` third grid row
+ * does not apply there. Width and vertical-rhythm measurements taken here do
+ * not transfer to that page. A second story would only be worth its scaffold
+ * if someone were doing pixel work on the plan page; naming the divergence is
+ * what stops a measurement here from being quietly reused there.
  */
 function ModulePage(props: { children: React.ReactNode }) {
   return (

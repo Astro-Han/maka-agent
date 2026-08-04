@@ -431,12 +431,6 @@
     --astryx-section-padding: var(--spacing-3);
   }
 
-  .astryx-app-shell-sidenav {
-    transition-property: background-color, border-color;
-    transition-duration: var(--duration-base);
-    transition-timing-function: var(--ease-out-strong);
-  }
-
   .astryx-app-shell-sidenav.elevated {
     border-inline-end-width: 1px;
     border-inline-end-style: solid;

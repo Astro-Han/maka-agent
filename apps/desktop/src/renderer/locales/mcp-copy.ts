@@ -14,8 +14,8 @@ export type McpCopy = {
   };
   remove: { title(id: string): string; description: string; confirm: string; cancel: string };
   page: {
-    subtitle: string; actionsAria: string; refreshing: string; refresh: string; importJson: string; add: string;
-    workspaceAria: string; heroTitle: string; heroDescription: string; localStdio: string; connections: string; remoteHttp: string;
+    subtitle: string; actionsAria: string; refreshing: string; refresh: string; add: string;
+    workspaceAria: string; toolbarAria: string; setupTitle: string; setupDescription: string; localStdio: string;
     categoriesAria: string; market: string; installed: string; searchPlaceholder: string; searchAria: string;
     noMarket: string; noMarketDetail(query: string): string; clearSearch: string; loading: string;
     noInstalled: string; noInstalledDetail: string; browseMarket: string; noInstalledMatch: string; noInstalledMatchDetail(query: string): string;
@@ -33,7 +33,7 @@ export type McpCopy = {
     importTitle: string; editTitle(id: string): string; addTitle: string; importSubtitle: string; manualSubtitle: string;
     modeAria: string; manual: string; pasteJson: string; jsonConfig: string; jsonHelp: string; cancel: string;
     importConnect: string; transportAria: string; localStdio: string; remoteUrl: string;
-    serverId: string; serverIdHelp: string; command: string; arguments: string; argumentsPlaceholder: string; argumentsHelp: string; advanced: string;
+    serverId: string; command: string; arguments: string; argumentsPlaceholder: string; argumentsHelp: string;
     workingDirectory: string; workingDirectoryPlaceholder: string; environment: string; environmentHelp: string;
     url: string; headers: string; headersHelp: string; saveConnect: string;
     required: string; invalidUrl: string;
@@ -58,9 +58,9 @@ const MCP_COPY = {
     },
     remove: { title: (id) => `删除 MCP「${id}」？`, description: '它提供的工具会从下一次 agent turn 中移除，配置无法自动恢复。', confirm: '删除', cancel: '取消' },
     page: {
-      subtitle: '连接外部应用、数据与服务，为 Maka 安全地扩展新工具。', actionsAria: 'MCP 操作', refreshing: '刷新中…', refresh: '刷新', importJson: 'JSON 导入', add: '添加 MCP',
-      workspaceAria: 'MCP 市场与已安装项', heroTitle: '把 Maka 连接到你的工作环境', heroDescription: '从精选模板开始，或添加任意 stdio、Streamable HTTP 与 SSE server。',
-      localStdio: '本地 stdio', connections: '连接管理', remoteHttp: '远程 HTTP', categoriesAria: 'MCP 分类', market: '市场', installed: '已安装',
+      subtitle: '连接外部应用、数据与服务，为 Maka 安全地扩展新工具。', actionsAria: 'MCP 操作', refreshing: '刷新中…', refresh: '刷新', add: '添加 MCP',
+      workspaceAria: 'MCP 市场与已安装项', toolbarAria: 'MCP 浏览操作', setupTitle: '把 Maka 连接到你的工作环境', setupDescription: '从精选模板开始，或添加任意 stdio、Streamable HTTP 与 SSE server。',
+      localStdio: '本地 stdio', categoriesAria: 'MCP 分类', market: '市场', installed: '已安装',
       searchPlaceholder: '搜索 MCP…', searchAria: '搜索 MCP', noMarket: '没有找到匹配的 MCP', noMarketDetail: (query) => `换一个关键词，或清空「${query}」查看全部模板。`,
       clearSearch: '清空搜索', loading: '正在读取 MCP 配置…', noInstalled: '还没有安装 MCP', noInstalledDetail: '从市场选择模板，或手动添加你自己的 server。',
       browseMarket: '浏览市场', noInstalledMatch: '没有匹配的已安装 MCP', noInstalledMatchDetail: (query) => `换一个关键词，或清空「${query}」查看全部已安装项。`,
@@ -78,11 +78,11 @@ const MCP_COPY = {
       importTitle: '通过 JSON 导入', editTitle: (id) => `编辑 ${id}`, addTitle: '添加 MCP', importSubtitle: '粘贴 mcpServers 配置，同名 server 会被更新。',
       manualSubtitle: '配置保存在当前工作区的 mcp.json。', modeAria: 'MCP 添加方式', manual: '手动配置', pasteJson: '粘贴 JSON', jsonConfig: 'JSON 配置',
       jsonHelp: '支持完整 mcpServers 配置或直接的 server map。未在本次导入中出现的已有 MCP 会保留。', cancel: '取消', importConnect: '导入并连接',
-      transportAria: 'MCP transport 类型', localStdio: '本地 stdio', remoteUrl: '远程 URL',
-      serverId: '服务器 ID', serverIdHelp: '稳定标识，也会进入 tool name。', command: '命令', arguments: '参数',
-      argumentsPlaceholder: '每行一个 argument\n-y\n@modelcontextprotocol/server-filesystem\n/path/to/folder', argumentsHelp: '每行作为独立 argument，不经过 shell interpolation。',
-      advanced: '高级设置', workingDirectory: '工作目录', workingDirectoryPlaceholder: '可选，例如 /path/to/project',
-      environment: '环境变量', environmentHelp: '每行一个 KEY=value。', url: 'MCP URL', headers: 'HTTP 请求头', headersHelp: '每行一个 Header=value。',
+      transportAria: '连接方式', localStdio: '本地 stdio', remoteUrl: '远程 URL',
+      serverId: '服务器 ID', command: '命令', arguments: '参数',
+      argumentsPlaceholder: '每行一个参数\n-y\n@modelcontextprotocol/server-filesystem\n/path/to/folder', argumentsHelp: '每行一个参数，不经过 shell 解析。',
+      workingDirectory: '工作目录', workingDirectoryPlaceholder: '可选，例如 /path/to/project',
+      environment: '环境变量', environmentHelp: '每行一个 KEY=value；按 MCP 要求填写。', url: 'MCP URL', headers: 'HTTP 请求头', headersHelp: '每行一个 Header=value。',
       saveConnect: '保存并连接',
       required: '此字段为必填项。', invalidUrl: '请输入有效的 HTTP 或 HTTPS URL。',
       transportLabel: '传输协议', transportAuto: '自动回退', transportStreamableHttp: 'Streamable HTTP', transportLegacySse: '旧版 SSE',
@@ -104,9 +104,9 @@ const MCP_COPY = {
     },
     remove: { title: (id) => `Delete MCP “${id}”?`, description: 'Its tools will be removed from the next agent turn, and the configuration cannot be restored automatically.', confirm: 'Delete', cancel: 'Cancel' },
     page: {
-      subtitle: 'Connect external apps, data, and services to safely extend Maka with new tools.', actionsAria: 'MCP actions', refreshing: 'Refreshing…', refresh: 'Refresh', importJson: 'Import JSON', add: 'Add MCP',
-      workspaceAria: 'MCP marketplace and installed servers', heroTitle: 'Connect Maka to your work environment', heroDescription: 'Start with a curated template, or add any stdio, Streamable HTTP, or SSE server.',
-      localStdio: 'Local stdio', connections: 'Connection management', remoteHttp: 'Remote HTTP', categoriesAria: 'MCP categories', market: 'Marketplace', installed: 'Installed',
+      subtitle: 'Connect external apps, data, and services to safely extend Maka with new tools.', actionsAria: 'MCP actions', refreshing: 'Refreshing…', refresh: 'Refresh', add: 'Add MCP',
+      workspaceAria: 'MCP marketplace and installed servers', toolbarAria: 'MCP browser controls', setupTitle: 'Connect Maka to your work environment', setupDescription: 'Start with a curated template, or add any stdio, Streamable HTTP, or SSE server.',
+      localStdio: 'Local stdio', categoriesAria: 'MCP categories', market: 'Marketplace', installed: 'Installed',
       searchPlaceholder: 'Search MCP…', searchAria: 'Search MCP', noMarket: 'No matching MCP servers', noMarketDetail: (query) => `Try another keyword, or clear “${query}” to view every template.`,
       clearSearch: 'Clear search', loading: 'Reading MCP configuration…', noInstalled: 'No MCP servers installed', noInstalledDetail: 'Choose a template from the marketplace, or add your own server manually.',
       browseMarket: 'Browse marketplace', noInstalledMatch: 'No matching installed MCP servers', noInstalledMatchDetail: (query) => `Try another keyword, or clear “${query}” to view every installed server.`,
@@ -124,11 +124,11 @@ const MCP_COPY = {
       importTitle: 'Import from JSON', editTitle: (id) => `Edit ${id}`, addTitle: 'Add MCP', importSubtitle: 'Paste an mcpServers configuration; servers with matching names will be updated.',
       manualSubtitle: 'Configuration is saved in mcp.json for the current workspace.', modeAria: 'MCP add method', manual: 'Manual configuration', pasteJson: 'Paste JSON', jsonConfig: 'JSON configuration',
       jsonHelp: 'Supports a complete mcpServers configuration or a server map. Existing MCP servers omitted from this import are preserved.', cancel: 'Cancel', importConnect: 'Import and connect',
-      transportAria: 'MCP transport type', localStdio: 'Local stdio', remoteUrl: 'Remote URL',
-      serverId: 'Server ID', serverIdHelp: 'A stable identifier that also appears in tool names.', command: 'Command', arguments: 'Arguments',
+      transportAria: 'Connection method', localStdio: 'Local stdio', remoteUrl: 'Remote URL',
+      serverId: 'Server ID', command: 'Command', arguments: 'Arguments',
       argumentsPlaceholder: 'One argument per line\n-y\n@modelcontextprotocol/server-filesystem\n/path/to/folder', argumentsHelp: 'Each line is a separate argument and does not use shell interpolation.',
-      advanced: 'Advanced settings', workingDirectory: 'Working directory', workingDirectoryPlaceholder: 'Optional, for example /path/to/project',
-      environment: 'Environment', environmentHelp: 'One KEY=value entry per line.', url: 'MCP URL', headers: 'HTTP headers', headersHelp: 'One Header=value entry per line.',
+      workingDirectory: 'Working directory', workingDirectoryPlaceholder: 'Optional, for example /path/to/project',
+      environment: 'Environment', environmentHelp: 'One KEY=value entry per line; complete the variables required by this MCP.', url: 'MCP URL', headers: 'HTTP headers', headersHelp: 'One Header=value entry per line.',
       saveConnect: 'Save and connect',
       required: 'This field is required.', invalidUrl: 'Enter a valid HTTP or HTTPS URL.',
       transportLabel: 'Transport', transportAuto: 'Auto fallback', transportStreamableHttp: 'Streamable HTTP', transportLegacySse: 'Legacy SSE',

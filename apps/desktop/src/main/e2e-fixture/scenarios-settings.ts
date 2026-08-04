@@ -183,43 +183,79 @@ function model(
   return { id, capabilities, contextWindow };
 }
 
-export async function writePlanReminders(workspaceRoot: string, _now: number): Promise<void> {
+export async function writePlanReminders(workspaceRoot: string, now: number): Promise<void> {
   const scheduledRunAt = Date.UTC(2026, 11, 18, 3, 0, 0);
   const pausedRunAt = Date.UTC(2026, 11, 20, 3, 0, 0);
+  // The panel's default 创建时间倒序 sort keys on `createdAt` and only falls
+  // back to a status/next-run comparator on ties. Four back-to-back
+  // `create()` calls land in the same millisecond, so every reminder tied
+  // and the fallback decided the order — which made any position-based
+  // assertion in `plan-reminders.spec.ts` vary between runs. Seed one
+  // explicit minute apart, oldest first, so 创建时间倒序 has a single answer.
+  const createdAt = (index: number): number => now - (4 - index) * 60_000;
   const store = createSqlitePlanReminderStore(workspaceRoot);
   try {
-    await store.create({
-      title: '同步项目风险',
-      note: '提醒我整理 Sidebar gate、搜索接入和计划任务剩余风险。',
-      runAt: scheduledRunAt,
-    });
-    const paused = await store.create({
-      title: '暂停的发布检查',
-      note: '用户可以先暂停提醒，恢复后继续按原时间触发。',
-      runAt: pausedRunAt,
-    });
+    await store.create(
+      {
+        title: '同步项目风险',
+        note: '提醒我整理 Sidebar gate、搜索接入和计划任务剩余风险。',
+        runAt: scheduledRunAt,
+      },
+      createdAt(0),
+    );
+    const paused = await store.create(
+      {
+        title: '暂停的发布检查',
+        note: '用户可以先暂停提醒，恢复后继续按原时间触发。',
+        runAt: pausedRunAt,
+      },
+      createdAt(1),
+    );
     await store.setEnabled(paused.id, false);
-    const weekly = await store.create({
-      title: '每周竞品动态追踪',
-      note: '汇总同类 AI 工具的近期产品变化，提醒我复盘可对标的交互。',
-      runAt: scheduledRunAt,
-      recurrence: 'cron',
-      cronExpression: '0 10 * * 1',
-    });
+    const weekly = await store.create(
+      {
+        title: '每周竞品动态追踪',
+        note: '汇总同类 AI 工具的近期产品变化，提醒我复盘可对标的交互。',
+        runAt: scheduledRunAt,
+        recurrence: 'cron',
+        cronExpression: '0 10 * * 1',
+      },
+      createdAt(2),
+    );
     await store.markTriggered(weekly.id, {
       at: scheduledRunAt,
       status: 'triggered',
       message: '已生成本周竞品动态摘要',
     });
-    const completed = await store.create({
-      title: '已触发的本地提醒',
-      runAt: scheduledRunAt,
-    });
+    const completed = await store.create(
+      {
+        title: '已触发的本地提醒',
+        runAt: scheduledRunAt,
+      },
+      createdAt(3),
+    );
     await store.markTriggered(completed.id, {
       at: scheduledRunAt,
       status: 'triggered',
       message: '计划提醒已触发',
     });
+    // The list's search / sort / filter controls only appear at eight
+    // reminders, and they are the widest thing the page header carries — the
+    // narrow-window geometry test has nothing to measure below that count.
+    // These four carry no state any other test reads. They are seeded OLDER
+    // than the four above so 创建时间倒序 keeps those four in the first four
+    // rows, which is what the ordering test above pins.
+    for (const [index, title] of [
+      '每日站会前汇总阻塞项',
+      '每月依赖许可证审计',
+      '季度收尾清点未归档会话',
+      '发布前跑一轮回归',
+    ].entries()) {
+      await store.create(
+        { title, runAt: scheduledRunAt + (index + 1) * 86_400_000 },
+        now - (8 - index) * 60_000,
+      );
+    }
   } finally {
     store.close();
   }

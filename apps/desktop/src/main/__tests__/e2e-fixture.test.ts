@@ -649,11 +649,14 @@ describe('e2e-fixture mode', () => {
     try {
       const fixture = resolveE2eFixture('plan-reminders', false);
       assert.ok(fixture);
+      // Seeds on the fixture's own clock (E2E_FIXTURE_NOW, the app default)
+      // rather than this file's arbitrary 2023 stamp: the reminders carry
+      // fixed 2026 run times, and the store rejects a runAt more than a year
+      // past its creation clock.
       await seedE2eFixture({
         workspaceRoot,
         fixture,
         credentialStore: fakeCredentialStore(),
-        now: 1_700_000_000_000,
       });
 
       const state = getE2eFixtureState(fixture);
@@ -673,9 +676,21 @@ describe('e2e-fixture mode', () => {
         enabled: boolean;
         nextRunAt?: number;
         lastRun?: { status: string; message: string };
+        createdAt: number;
       }>,
       );
-      assert.equal(reminders.length, 4);
+      // Eight, not four: the list's search / sort / filter controls only
+      // appear at eight reminders, and the narrow-window geometry tests in
+      // plan-reminders.spec.ts have nothing to measure below that count.
+      assert.equal(reminders.length, 8);
+      // The panel's default 创建时间倒序 sort only falls back to the status /
+      // next-run comparator on `createdAt` ties, so the seed must hand every
+      // reminder a distinct value or row positions drift between runs.
+      assert.equal(
+        new Set(reminders.map((reminder) => reminder.createdAt)).size,
+        8,
+        'seeded plan reminders need distinct createdAt values',
+      );
       const scheduled = reminders.find((reminder) => reminder.title === '同步项目风险');
       const paused = reminders.find((reminder) => reminder.title === '暂停的发布检查');
       const weekly = reminders.find((reminder) => reminder.title === '每周竞品动态追踪');

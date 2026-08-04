@@ -28,6 +28,8 @@ const REQUIRED_PRODUCT_SURFACES = Object.freeze([
 
 const PRODUCT_CHECKS = new Set([
   'composer-focus-ownership',
+  'module-page-inspector',
+  'module-page-shell',
   'plan-reminder-row',
   'session-context-layer',
   'play-executed',
@@ -228,11 +230,26 @@ async function smokeStory(page, baseUrl, job, options = {}) {
       }
     }
 
-    if (job.checks?.includes('plan-reminder-row')) {
+    if (job.checks?.includes('plan-reminder-row') || job.checks?.includes('module-page-shell')) {
       try {
-        await page.waitForSelector('.maka-plan-list-row', { state: 'visible', timeout: 5_000 });
+        await page.waitForSelector('.maka-module-page-rows > li', {
+          state: 'visible',
+          timeout: 5_000,
+        });
       } catch {
         browserFailures.push('plan reminder rows did not finish rendering');
+      }
+    }
+    if (job.checks?.includes('module-page-inspector')) {
+      try {
+        // Either placement is a pass here; the assertion below is what decides
+        // which one this viewport was supposed to get.
+        await page.waitForSelector(
+          '.maka-module-page [role="complementary"], .maka-module-page [role="dialog"], .maka-module-page dialog[open]',
+          { state: 'attached', timeout: 5_000 },
+        );
+      } catch {
+        browserFailures.push('the selected item never produced an inspector');
       }
     }
 
@@ -392,11 +409,66 @@ async function smokeStory(page, baseUrl, job, options = {}) {
             }
           }
         }
+        if (checks.includes('module-page-shell')) {
+          /* The page's layout contract, which a screenshot cannot hold:
+             ONE column, the title over its own rows, and no chrome hairline
+             anywhere. Every one of these was a real defect during the
+             rebuild. */
+          const page = document.querySelector('.maka-module-page');
+          const header = page?.querySelector('.astryx-layout-header');
+          const rows = page?.querySelector('.maka-module-page-rows, .maka-module-page-panel');
+          if (!page || !header || !rows) {
+            failures.push('module page shell is missing its header or content');
+          } else {
+            const inner = header.firstElementChild;
+            const headerLeft = inner?.getBoundingClientRect().left ?? -1;
+            const rowsLeft = rows.getBoundingClientRect().left;
+            if (Math.abs(headerLeft - rowsLeft) > 1) {
+              failures.push(
+                `page title (${Math.round(headerLeft)}) must share the rows' left edge (${Math.round(rowsLeft)})`,
+              );
+            }
+            /* No rule under the header and none around the toolbar: the only
+               lines on the page are the list's own row dividers. */
+            for (const [element, label] of [
+              [header, 'layout header'],
+              [page.querySelector('.maka-module-page-bar'), 'control bar'],
+            ]) {
+              if (!element) continue;
+              const style = getComputedStyle(element);
+              if (
+                element.getAttribute('data-divider') != null ||
+                style.borderBlockEndWidth !== '0px'
+              ) {
+                failures.push(`${label} must not draw a hairline`);
+              }
+            }
+          }
+        }
+        if (checks.includes('module-page-inspector')) {
+          /* Rows are inert by design, so the inspector is the ONLY path to
+             every per-item action. Narrow drops the side panel — it must not
+             drop the inspector with it. */
+          const panel = document.querySelector('.maka-module-page [role="complementary"]');
+          const dialog = document.querySelector(
+            '.maka-module-page [role="dialog"], .maka-module-page dialog[open]',
+          );
+          const narrow = window.matchMedia('(max-width: 1024px)').matches;
+          const surface = narrow ? dialog : panel;
+          if (!surface) {
+            failures.push(`selected item has no inspector at ${window.innerWidth}px`);
+          } else if (!surface.textContent?.includes('立即触发')) {
+            failures.push('inspector is present but carries none of the item actions');
+          }
+          if (narrow && panel) failures.push('narrow window must not keep the side panel');
+          if (!narrow && dialog)
+            failures.push('wide window must show the inspector beside the rows, not over them');
+        }
         if (checks.includes('plan-reminder-row')) {
           if (document.documentElement.scrollWidth > document.documentElement.clientWidth) {
             failures.push('document has horizontal overflow');
           }
-          const rows = [...document.querySelectorAll('.maka-plan-list-row')];
+          const rows = [...document.querySelectorAll('.maka-module-page-rows > li')];
           if (rows.length === 0) failures.push('plan reminder rows are missing');
           const checkElement = (element, label) => {
             const rect = element?.getBoundingClientRect();
@@ -417,47 +489,30 @@ async function smokeStory(page, baseUrl, job, options = {}) {
           for (const row of rows) {
             if (row.scrollWidth > row.clientWidth)
               failures.push('plan reminder row has horizontal overflow');
-            /* Premium-row redesign: completed rows show their lifecycle as a
-               StatusDot cluster; run messages live in the runs tab. */
-            if (
-              row.getAttribute('data-status') === 'completed' &&
-              !row.querySelector('.maka-plan-status')
-            ) {
-              failures.push('completed plan reminder row is missing its lifecycle state');
-            }
-            for (const selector of ['.maka-plan-list-row-title', '.maka-plan-list-row-meta']) {
-              checkElement(row.querySelector(selector), selector);
-            }
-            for (const selector of ['.maka-plan-status', '.maka-plan-list-row-countdown']) {
-              const element = row.querySelector(selector);
-              if (element) checkElement(element, selector);
-            }
+            /* Every row leads with a StatusDot — that is what makes the main
+               column start at the same x on every row, whatever its state. */
+            checkElement(row.querySelector('[role="img"]'), 'row status dot');
+            const countdown = row.querySelector('.maka-plan-countdown');
+            if (countdown) checkElement(countdown, '.maka-plan-countdown');
           }
-          // The margin loop above runs zero times if countdowns stop rendering,
-          // which would make the spacing contract pass by vacancy. Rows with a
-          // scheduled next run are exactly the ones that must show one.
-          const scheduledRows = rows.filter(
-            (row) => row.getAttribute('data-status') === 'scheduled',
-          );
-          if (
-            scheduledRows.length > 0 &&
-            !rows.some((row) => row.querySelector('.maka-plan-list-row-countdown'))
-          ) {
+          // The alignment check below runs zero times if countdowns stop
+          // rendering, which would make it pass by vacancy. These fixtures
+          // always have at least one reminder with a next run.
+          if (rows.length > 0 && !rows.some((row) => row.querySelector('.maka-plan-countdown'))) {
             failures.push(
               'no plan reminder row rendered a countdown, so its spacing went unchecked',
             );
           }
           if (document.documentElement.clientWidth >= 1100 && rows[0]) {
-            /* Premium-row contract: a single flex row — leading switch, main
-               column, trailing countdown/menu. Countdown right edges must
-               align across rows so the trailing column reads as a column. */
+            /* One flex row — leading StatusDot, main column, trailing
+               countdown. Countdown right edges must align across rows so the
+               trailing column reads as a column. */
             if (getComputedStyle(rows[0]).display !== 'flex') {
               failures.push('plan reminder wide row must lay out as a flex row');
             }
             const countdownRights = rows
               .map(
-                (row) =>
-                  row.querySelector('.maka-plan-list-row-countdown')?.getBoundingClientRect().right,
+                (row) => row.querySelector('.maka-plan-countdown')?.getBoundingClientRect().right,
               )
               .filter((right) => typeof right === 'number')
               .map((right) => Math.round(right));

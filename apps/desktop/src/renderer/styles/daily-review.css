@@ -1,17 +1,6 @@
-.maka-module-main .maka-daily-review-panel {
-  width: min(100%, 900px);
-  margin-inline: auto;
-}
-
-.maka-daily-review-panel {
-  min-height: 0;
-  overflow: auto;
-  padding: var(--space-4) var(--space-5) var(--space-6);
-}
-
-.maka-daily-review-route-frame {
-  min-width: 0;
-}
+/* Page skeleton (clamp, tier rhythm, control bar) is the shared
+   .maka-module-page-* set in module-pages/module-shell.css. Only the pieces
+   unique to 每日回顾 live here. */
 
 .maka-daily-review-report,
 .maka-daily-review-content {
@@ -42,10 +31,6 @@
   }
 }
 
-.maka-daily-review-toolbar {
-  min-width: 0;
-}
-
 .maka-daily-review-range-label {
   min-width: 9rem;
   text-align: center;
@@ -54,17 +39,18 @@
 
 .maka-daily-review-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
-  border-block: var(--border-width-hairline) solid var(--foreground-10);
+  /* Fixed 4-up: auto-fit wrapped the four totals 3 + 1 whenever the page
+     column was narrower than the viewport-based breakpoint could see. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* No rules, in or around the strip. Four labelled numbers on their own grid
+     read as four numbers; hairlines between them only redraw the columns. The
+     page keeps lines for one job — saying where a list row ends. */
+  gap: var(--space-2) var(--space-6);
+  padding-block: var(--space-2) var(--space-5);
 }
 
 .maka-daily-review-metric {
   min-width: 0;
-  padding: var(--space-3) var(--space-4);
-}
-
-.maka-daily-review-metric + .maka-daily-review-metric {
-  border-inline-start: var(--border-width-hairline) solid var(--foreground-10);
 }
 
 .maka-daily-review-report-prose {
@@ -96,23 +82,11 @@
 }
 
 @media (max-width: 560px) {
-  .maka-daily-review-panel {
-    padding-inline: var(--space-3);
-  }
-
   .maka-daily-review-range-label {
     min-width: 0;
   }
 
   .maka-daily-review-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .maka-daily-review-metric:nth-child(odd) {
-    border-inline-start: 0;
-  }
-
-  .maka-daily-review-metric:nth-child(n + 3) {
-    border-top: var(--border-width-hairline) solid var(--foreground-10);
   }
 }

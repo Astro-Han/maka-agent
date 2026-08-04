@@ -15,7 +15,9 @@ export function AppShellDetailPanel({
   return (
     <div
       {...props}
-      className="maka-panel maka-panel-detail agents-parchment-paper-surface"
+      // No surface class: this frames the plates, it is not one. The content
+      // surface is `.mainColumn` inside it — see shell-layout.css.
+      className="maka-panel maka-panel-detail"
       data-agents-view={agentsView}
     >
       {children}

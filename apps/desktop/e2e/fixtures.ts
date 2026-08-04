@@ -392,7 +392,15 @@ export const test = base.extend<{
   // workspace so its shell controls and peer tabs run against real IPC data.
   sessionWorkbarWindow: async ({}, use) => {
     await withE2eWindow(
-      { seed: false, readinessSelector: 'aside[aria-label="会话工作栏"]', e2eFixtureScenario: 'task-ledger', locale: 'zh' },
+      {
+        seed: false,
+        // The data contract, not the tag: the panel's surface is an Astryx Card
+        // (a div carrying role="complementary"), so a tag-anchored selector
+        // would pin an implementation detail the design system owns.
+        readinessSelector: '[data-maka-contract="session-workbar"]',
+        e2eFixtureScenario: 'task-ledger',
+        locale: 'zh',
+      },
       use,
     );
   },
@@ -424,7 +432,7 @@ export const test = base.extend<{
     await withE2eWindow(
       {
         seed: false,
-        readinessSelector: '.maka-plan-list-row',
+        readinessSelector: '.maka-module-page-rows',
         e2eFixtureScenario: 'plan-reminders',
         locale: 'zh',
       },

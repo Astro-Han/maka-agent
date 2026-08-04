@@ -267,6 +267,50 @@ const CONFIGURED_REMINDERS: PlanReminder[] = [
     ],
     runCount: 12,
   },
+  // Eighth reminder: the list's own control bar (search / sort / filter) only
+  // appears at eight, so without this row the story could never show it — and
+  // the controls are the widest thing the page's header carries.
+  {
+    id: 'plan-monthly-audit',
+    title: '每月依赖许可证审计',
+    note: '核对新引入依赖的许可证与来源。',
+    schedule: { kind: 'recurring', startAt: PLAN_NOW - 40 * 86_400_000, recurrence: 'monthly' },
+    delivery: { channel: 'local' },
+    status: 'scheduled',
+    enabled: true,
+    createdAt: PLAN_NOW - 40 * 86_400_000,
+    updatedAt: PLAN_NOW - 9 * 86_400_000,
+    nextRunAt: PLAN_NOW + 6 * 86_400_000,
+    runs: [],
+    runCount: 0,
+  },
+  {
+    id: 'plan-standup',
+    title: '每日站会前汇总阻塞项',
+    note: '',
+    schedule: { kind: 'cron', startAt: PLAN_NOW - 20 * 86_400_000, expression: '30 9 * * 1-5' },
+    delivery: { channel: 'local' },
+    status: 'scheduled',
+    enabled: true,
+    createdAt: PLAN_NOW - 20 * 86_400_000,
+    updatedAt: PLAN_NOW - 3 * 86_400_000,
+    nextRunAt: PLAN_NOW + 20 * 3_600_000,
+    runs: [],
+    runCount: 0,
+  },
+  {
+    id: 'plan-quarter-close',
+    title: '季度收尾清点未归档会话',
+    note: '把仍未归档的会话列成一张清单。',
+    schedule: { kind: 'once', runAt: PLAN_NOW + 21 * 86_400_000 },
+    delivery: { channel: 'local' },
+    status: 'paused',
+    enabled: false,
+    createdAt: PLAN_NOW - 11 * 86_400_000,
+    updatedAt: PLAN_NOW - 4 * 86_400_000,
+    runs: [],
+    runCount: 0,
+  },
 ];
 
 const LONG_CONTENT_REMINDERS: PlanReminder[] = [
@@ -374,12 +418,33 @@ const configuredMcpConfig: McpConfigFile = {
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-filesystem', '/Users/yuhan/workspace'],
     },
-    'team-tools': {
-      enabled: true,
-      url: 'https://mcp.example.com/team/tools',
-      transport: 'streamable-http',
+    'linear-remote': {
+      enabled: false,
+      url: 'https://mcp.linear.app/sse',
+      transport: 'sse',
     },
   },
+};
+
+const editorMcpConfig: McpConfigFile = {
+  version: 1,
+  mcpServers: {
+    slack: {
+      enabled: false,
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-slack@2025.4.25'],
+      env: { SLACK_BOT_TOKEN: '', SLACK_TEAM_ID: '', SLACK_CHANNEL_IDS: '' },
+    },
+  },
+};
+
+const editorMcpStatus: McpServerStatus = {
+  serverId: 'slack',
+  state: 'disabled',
+  transport: 'stdio',
+  toolCount: 0,
+  tools: [],
+  updatedAt: NOW,
 };
 
 const configuredMcpStatuses: McpServerStatus[] = [
@@ -394,6 +459,28 @@ const configuredMcpStatuses: McpServerStatus[] = [
     ],
     updatedAt: NOW,
   },
+  {
+    serverId: 'linear-remote',
+    state: 'disabled',
+    transport: 'sse',
+    toolCount: 0,
+    tools: [],
+    updatedAt: NOW,
+  },
+];
+
+const failedMcpConfig: McpConfigFile = {
+  version: 1,
+  mcpServers: {
+    'team-tools': {
+      enabled: true,
+      url: 'https://mcp.example.com/team/tools',
+      transport: 'streamable-http',
+    },
+  },
+};
+
+const failedMcpStatuses: McpServerStatus[] = [
   {
     serverId: 'team-tools',
     state: 'error',
@@ -417,6 +504,51 @@ const withConfiguredMcpBridge = withScopedMakaBridge({
     cancelInstall: async () => configuredMcpConfig,
     test: async () => ({ ok: true, status: configuredMcpStatuses[0], latencyMs: 42 }),
     reconnect: async () => configuredMcpStatuses[0],
+    subscribeChanges: () => () => {},
+  },
+});
+
+const withEditorMcpBridge = withScopedMakaBridge({
+  mcp: {
+    getConfig: async () => editorMcpConfig,
+    listStatuses: async () => [editorMcpStatus],
+    setConfig: async () => editorMcpConfig,
+    upsert: async () => editorMcpConfig,
+    install: async () => editorMcpConfig,
+    remove: async () => editorMcpConfig,
+    cancelInstall: async () => editorMcpConfig,
+    test: async () => ({ ok: false, status: editorMcpStatus, latencyMs: 0 }),
+    reconnect: async () => editorMcpStatus,
+    subscribeChanges: () => () => {},
+  },
+});
+
+const withEmptyMcpBridge = withScopedMakaBridge({
+  mcp: {
+    getConfig: async () => ({ version: 1, mcpServers: {} }),
+    listStatuses: async () => [],
+    setConfig: async () => ({ version: 1, mcpServers: {} }),
+    upsert: async () => ({ version: 1, mcpServers: {} }),
+    install: async () => ({ version: 1, mcpServers: {} }),
+    remove: async () => ({ version: 1, mcpServers: {} }),
+    cancelInstall: async () => ({ version: 1, mcpServers: {} }),
+    test: async () => ({ ok: true, status: configuredMcpStatuses[0], latencyMs: 42 }),
+    reconnect: async () => configuredMcpStatuses[0],
+    subscribeChanges: () => () => {},
+  },
+});
+
+const withFailedMcpBridge = withScopedMakaBridge({
+  mcp: {
+    getConfig: async () => failedMcpConfig,
+    listStatuses: async () => failedMcpStatuses,
+    setConfig: async () => failedMcpConfig,
+    upsert: async () => failedMcpConfig,
+    install: async () => failedMcpConfig,
+    remove: async () => failedMcpConfig,
+    cancelInstall: async () => failedMcpConfig,
+    test: async () => ({ ok: false, status: failedMcpStatuses[0], latencyMs: 30_000 }),
+    reconnect: async () => failedMcpStatuses[0],
     subscribeChanges: () => () => {},
   },
 });
@@ -683,7 +815,27 @@ export const ExtensionsSkillsNarrow: Story = {
   parameters: { viewport: { defaultViewport: 'mobile2' } },
 };
 
-// Real path: sidebar → 扩展 → MCP, with one healthy server and one actionable failure.
+// Real path: sidebar → 扩展 → MCP, before any server has been configured.
+export const ExtensionsMcpSetupRequired: Story = {
+  decorators: [withEmptyMcpBridge],
+  render: () => <ExtensionsMcpSurface />,
+  play: async ({ canvasElement }) => {
+    const installed = await waitForStorySelector<HTMLButtonElement>(
+      canvasElement,
+      '[data-tab-value="installed"]',
+    );
+    installed.click();
+    await waitForStoryText(canvasElement, '还没有安装 MCP');
+  },
+};
+
+// Real path: sidebar → 扩展 → MCP, browsing catalog entries with existing configuration.
+export const ExtensionsMcpMarketplace: Story = {
+  decorators: [withConfiguredMcpBridge],
+  render: () => <ExtensionsMcpSurface />,
+};
+
+// Real path: sidebar → 扩展 → MCP, with connected and disabled servers.
 export const ExtensionsMcpConfigured: Story = {
   decorators: [withConfiguredMcpBridge],
   render: () => <ExtensionsMcpSurface />,
@@ -693,6 +845,40 @@ export const ExtensionsMcpConfigured: Story = {
     installed.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
   },
+};
+
+// Real path: sidebar → 扩展 → MCP → Slack 管理, with credential fields visible.
+export const ExtensionsMcpEditor: Story = {
+  decorators: [withEditorMcpBridge],
+  render: () => <ExtensionsMcpSurface />,
+  play: async ({ canvasElement }) => {
+    const manage = await waitForStoryButton(
+      canvasElement,
+      (button) => button.textContent?.trim() === '管理',
+    );
+    manage.click();
+    await waitForStoryText(canvasElement.ownerDocument.body, '编辑 slack');
+  },
+};
+
+// Real path: sidebar → 扩展 → MCP, after an enabled remote server fails to connect.
+export const ExtensionsMcpConnectionFailed: Story = {
+  decorators: [withFailedMcpBridge],
+  render: () => <ExtensionsMcpSurface />,
+  play: async ({ canvasElement }) => {
+    const installed = await waitForStorySelector<HTMLButtonElement>(
+      canvasElement,
+      '[data-tab-value="installed"]',
+    );
+    installed.click();
+    await waitForStoryText(canvasElement, '连接超时，请检查服务器地址或网络代理。');
+  },
+};
+
+// Real path: sidebar → 扩展 → MCP at the narrow desktop viewport floor.
+export const ExtensionsMcpNarrow: Story = {
+  ...ExtensionsMcpConfigured,
+  parameters: { viewport: { defaultViewport: 'mobile2' } },
 };
 
 // Real path: sidebar → 定时任务 → 计划提醒, before any reminder exists.
@@ -709,6 +895,21 @@ export const ScheduledPlanReminders: Story = {
 // plan-reminder-panel.test.tsx asserts its aria-checked in both directions.
 export const ScheduledPlanRemindersConfigured: Story = {
   render: () => <ScheduledPlanRemindersSurface reminders={CONFIGURED_REMINDERS} />,
+};
+
+// Real path: sidebar → 定时任务 → 计划提醒 → click a task row, which opens the
+// inspector where every per-task control now lives. Wide only: below 1024px the
+// page drops the inspector rather than squeeze two columns into one.
+export const ScheduledPlanRemindersInspector: Story = {
+  render: () => <ScheduledPlanRemindersSurface reminders={CONFIGURED_REMINDERS} />,
+  play: async ({ canvasElement }) => {
+    const row = await waitForStoryButton(
+      canvasElement,
+      (candidate) => candidate.textContent?.includes('每周发布风险复盘') === true,
+    );
+    row.click();
+    await waitForStoryText(canvasElement, '立即触发');
+  },
 };
 
 // Real path: sidebar → 定时任务 → 计划提醒, with user-authored content at storage limits.
@@ -770,53 +971,6 @@ export const ScheduledDailyReviewInitialLoadFailed: Story = {
   },
 };
 
-// Real path: sidebar → scheduled tasks → Daily Review while saved reports load.
-export const ScheduledDailyReviewArchivesLoading: Story = {
-  render: () => (
-    <ScheduledDailyReviewSurface
-      bridge={{
-        fetchDay: async () => DAILY_REVIEW_SUMMARY,
-        listArchives: async () => new Promise(() => undefined),
-        runOnce: async () => ({ archiveId: DAILY_REVIEW_ARCHIVE.id }),
-        getArchive: async () => DAILY_REVIEW_ARCHIVE,
-      }}
-    />
-  ),
-  play: async ({ canvasElement }) => {
-    await waitForStorySelector(canvasElement, '.maka-daily-review-content');
-    const generate = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.textContent?.includes('生成分析') === true,
-    );
-    await expect(generate.disabled).toBe(true);
-  },
-};
-
-// Real path: sidebar → scheduled tasks → Daily Review after saved reports fail to load.
-export const ScheduledDailyReviewArchivesFailed: Story = {
-  render: () => (
-    <ScheduledDailyReviewSurface
-      bridge={{
-        fetchDay: async () => DAILY_REVIEW_SUMMARY,
-        listArchives: async () => {
-          throw new Error('archive fixture unavailable');
-        },
-        runOnce: async () => ({ archiveId: DAILY_REVIEW_ARCHIVE.id }),
-        getArchive: async () => DAILY_REVIEW_ARCHIVE,
-      }}
-    />
-  ),
-  play: async ({ canvasElement }) => {
-    await waitForStorySelector(canvasElement, '.maka-daily-review-content');
-    await waitForStoryText(canvasElement, '每日回顾刷新失败');
-    const generate = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.textContent?.includes('生成分析') === true,
-    );
-    await expect(generate.disabled).toBe(true);
-  },
-};
-
 // Real path: sidebar → scheduled tasks → Daily Review while a new range loads.
 export const ScheduledDailyReviewRefreshing: Story = {
   render: () => (
@@ -846,14 +1000,6 @@ export const ScheduledDailyReviewRefreshing: Story = {
     await expect(content.getAttribute('aria-busy')).toBe('true');
     await expect(canvasElement.querySelector('.astryx-skeleton')).toBeNull();
   },
-};
-
-// Real path at a narrow desktop window. The metrics collapse to two columns
-// while the Astryx controls keep their native wrapping behavior.
-// Real path: sidebar → scheduled tasks → Daily Review at a narrow window.
-export const ScheduledDailyReviewNarrow: Story = {
-  ...ScheduledDailyReview,
-  parameters: { viewport: { defaultViewport: 'mobile2' } },
 };
 
 // Real path after an analysis exists and the user opens its dedicated detail route.
@@ -933,34 +1079,5 @@ export const ScheduledDailyReviewReport: Story = {
       ]),
     ].join('\n');
     await expect(input.markdown).toBe(expectedMarkdown);
-  },
-};
-
-// Real path: sidebar → scheduled tasks → Daily Review after a recoverable generation failure.
-export const ScheduledDailyReviewRetryableArchive: Story = {
-  render: () => {
-    const retryableArchive = {
-      ...DAILY_REVIEW_ARCHIVE,
-      status: 'failed' as const,
-      errorMessage: 'temporary fixture failure',
-    };
-    return (
-      <ScheduledDailyReviewSurface
-        bridge={{
-          fetchDay: async () => DAILY_REVIEW_SUMMARY,
-          listArchives: async () => [retryableArchive],
-          runOnce: async () => ({ archiveId: DAILY_REVIEW_ARCHIVE.id }),
-          getArchive: async () => DAILY_REVIEW_ARCHIVE,
-        }}
-      />
-    );
-  },
-  play: async ({ canvasElement }) => {
-    const retry = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.textContent?.includes('重新生成') === true,
-    );
-    retry.click();
-    await waitForStoryText(canvasElement, '返回活动');
   },
 };

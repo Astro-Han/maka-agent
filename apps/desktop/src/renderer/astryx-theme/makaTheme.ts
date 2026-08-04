@@ -147,14 +147,11 @@ export const makaTheme = defineTheme({
   // inheriting a line that no longer matches the columns.
   components: {
     'app-shell-sidenav': {
-      // Both halves of the edge are animated, in `base` rather than under the
-      // variant: the ease belongs to the column whatever material it wears, and
-      // only the collapsed state (shell-layout.css) decides what it eases to.
-      base: {
-        transitionProperty: 'background-color, border-color',
-        transitionDuration: 'var(--duration-base)',
-        transitionTimingFunction: 'var(--ease-out-strong)',
-      },
+      // No color ease on the column: neither half of the edge changes across the
+      // collapse any more. The wash is one material in both states (the rail
+      // wears --color-background-body throughout, see shell-layout.css) and the
+      // hairline is transparent in both, so a background-color/border-color
+      // transition here had nothing left to interpolate.
       'variant:elevated': {
         borderInlineEndWidth: '1px',
         borderInlineEndStyle: 'solid',

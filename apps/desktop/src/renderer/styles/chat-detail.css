@@ -21,28 +21,96 @@
   min-width: 0;
 }
 
-.maka-session-workbar {
+/* Astryx owns the workbar's chrome (Card, Toolbar, TabList, Badge). What is
+   left here is what those components cannot know: the width the user dragged,
+   a header/body split that keeps the body a scroll parent, and that this column
+   is a floating plate, not a region drawn inside another one.
+
+   The seam is the canvas between the two plates — the same gap the content
+   frame already leaves on its other three sides, and the shell's only way of
+   separating surfaces. It replaced a hairline, and for a while it was supposed
+   to be a tone step against the conversation instead; that step does not exist
+   anywhere but darwin dark, where a glass override happens to lift the content
+   surface. Measured on darwin light: plate, workbar and rail all resolve to
+   `oklch(1 0 0)`, and the column had no visible boundary at all. A gap has no
+   palette to be right in. */
+/* The column's motion box, and the only part of the column that survives the
+   collapse (chat-workbar.tsx). It owns the animated width and the clip; the
+   column inside keeps a fixed width so it slides off rather than reflowing.
+
+   Same shape as `.maka-sidenav-motion` on the other side, and the same reason:
+   a width transition needs one element that is the same node before and after.
+   The rail can hold its own width because SideNav is never unmounted; this
+   column is, so the box has to outlive it. */
+.maka-workbar-motion {
   flex: 0 0 auto;
   width: var(--maka-session-workbar-width, 400px);
+  min-height: 0;
+  overflow: hidden;
+  /* The canvas gutter between the two plates, and it belongs to this one: it
+     exists exactly as long as the panel does, so it leaves with it rather than
+     leaving a strip of canvas behind a shut panel. Both properties ease on the
+     same curve, so the gutter closes with the width instead of snapping. */
+  margin-left: var(--agents-content-area-gap);
+  transition:
+    width var(--duration-large) var(--ease-out-strong),
+    margin-left var(--duration-large) var(--ease-out-strong);
+}
+
+.maka-workbar-motion[data-collapsed] {
+  width: 0;
+  margin-left: 0;
+}
+
+/* A pointer drag feeds a new width back on every move; a standing transition
+   would restart on each one and leave the column trailing the cursor. Astryx
+   marks its handle `data-resizing` for exactly this, and the handle is this
+   box's sibling — the same gate `.maka-sidenav-motion` uses, read from the row
+   rather than from within.
+
+   Capped rather than removed, the way every other motion suppression in this
+   app is: `transition-property: none` CANCELS a transition already in flight,
+   and the column's teardown is scheduled on that transition's end. Grabbing the
+   handle while the panel is closing would otherwise strand the column mounted
+   behind a shut panel. */
+/* Astryx marks `data-resizing` only while a POINTER is down; its arrow-key path
+   commits a size and ends in the same tick, so it never appears there. Without
+   the focused handle in this gate, every keypress restarts the ease and a 10px
+   step takes 280ms to arrive — measured 400 → 405.7 → 408.1 → … → 410 — while
+   the announced `aria-valuenow` is already at the new value. Holding the key
+   crawls. `:focus-visible` is the keyboard half of the same "the user is
+   sizing this right now" fact.
+
+   Scoped away from the collapsed state so a handle that still holds focus
+   cannot cap the collapse ease itself; the box carries that state, which is
+   what makes this expressible here. */
+.maka-detail-with-artifacts:has([data-resizing], .maka-workbar-resize-handle:focus-visible)
+  .maka-workbar-motion:not([data-collapsed]) {
+  transition-duration: 0.01ms;
+}
+
+.maka-session-workbar {
+  width: var(--maka-session-workbar-width, 400px);
+  /* Load-bearing during the collapse, not just a resize clamp: it is what keeps
+     the column at full width inside a box narrowing to zero. */
   min-width: 320px;
   max-width: 600px;
   min-height: 0;
   overflow: hidden;
-  border-left: var(--border-width-hairline) solid var(--border);
-  background: var(--background);
-}
-
-/* The workbar resize handle is Astryx ResizeHandle: it owns the divider hit
-   area, grip, cursor and drag/keyboard sizing. `.maka-workbar-resize-handle`
-   survives only so the narrow breakpoint further down can hide it. */
-
-.maka-session-workbar-tabs {
-  height: 100%;
-  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 0;
+  /* Plate, on the same terms as the conversation beside it: same surface, same
+     corner, and its own clearance so the tabs start below the chrome strip.
+     Reading the clearance from the frame rather than restating it is what keeps
+     the two plates' top edges on one line. */
+  background: var(--agents-content-area-bg);
+  border-radius: var(--radius-modal);
+  padding-top: var(--maka-plate-titlebar-clearance);
+  box-sizing: border-box;
 }
+
+/* `.maka-workbar-resize-handle` survives only so the narrow breakpoint further
+   down can hide the handle. */
 
 .maka-session-workbar-toolbar {
   min-width: 0;
@@ -53,67 +121,25 @@
   flex: 0 0 auto;
 }
 
-.maka-session-workbar-count {
-  font: var(--maka-text-supporting);
-  height: var(--h-control-xs);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  white-space: nowrap;
-  min-width: var(--space-4);
-  padding-inline: var(--space-1);
-  border-radius: var(--radius-pill);
-  background: var(--control);
-  color: var(--foreground-dimmed);
-  font-variant-numeric: tabular-nums;
-}
-
 .maka-session-workbar-panel {
   min-height: 0;
   overflow: hidden;
 }
 
+/* Section sets its own `display`, so the attribute needs the override. */
 .maka-session-workbar-panel[hidden] { display: none; }
 
-/* Session Inspector (#1625): a read-only causal timeline in the workbar. */
+/* Session trace (#1625): a read-only causal timeline in the workbar.
+
+   Banner, EmptyState, MetadataList, Badge and Text carry everything they can;
+   this rule set is the timeline's own geometry. It used to reach for a
+   `--maka-space-*` / `--maka-color-*` vocabulary that the token sheet never
+   declared, so every value here silently resolved to its hard-coded fallback
+   and the panel drifted off the product scale. */
 .maka-inspector-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--maka-space-2, 8px);
   height: 100%;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--maka-space-3, 12px);
-  font-size: var(--maka-font-size-sm, 12px);
-}
-
-.maka-inspector-totals,
-.maka-inspector-turn-head,
-.maka-inspector-step {
-  display: flex;
-  align-items: baseline;
-  gap: var(--maka-space-2, 8px);
-  flex-wrap: wrap;
-}
-
-.maka-inspector-totals {
-  font-variant-numeric: tabular-nums;
-  color: var(--maka-color-text-secondary, inherit);
-}
-
-.maka-inspector-coverage {
-  margin: 0;
-  padding: var(--maka-space-2, 8px);
-  border-radius: var(--maka-radius-sm, 6px);
-  background: var(--maka-color-surface-warning, rgba(255, 200, 0, 0.12));
-  color: var(--maka-color-text-warning, inherit);
-}
-
-.maka-inspector-filter {
-  display: flex;
-  align-items: center;
-  gap: var(--maka-space-2, 8px);
-  flex-wrap: wrap;
 }
 
 /* The live region is a wrapper only; its children carry their own spacing. */
@@ -121,22 +147,11 @@
   display: none;
 }
 
-.maka-inspector-hidden {
-  margin: 0;
-  color: var(--maka-color-text-secondary, inherit);
-  font-variant-numeric: tabular-nums;
-}
-
-.maka-inspector-error {
+.maka-inspector-status[data-empty] {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: var(--maka-space-2, 8px);
-  color: var(--maka-color-text-danger, inherit);
-}
-
-.maka-inspector-empty {
-  margin: 0;
-  color: var(--maka-color-text-secondary, inherit);
+  flex-direction: column;
+  justify-content: center;
 }
 
 .maka-inspector-turns,
@@ -146,38 +161,35 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--maka-space-1, 4px);
+  gap: var(--space-1);
 }
 
 .maka-inspector-turn {
-  border-top: 1px solid var(--maka-color-border-subtle, rgba(128, 128, 128, 0.2));
-  padding-top: var(--maka-space-2, 8px);
-}
-
-.maka-inspector-turn-id {
-  font-weight: 600;
+  border-top: var(--border-width-hairline) solid var(--border);
+  padding-top: var(--space-2);
 }
 
 .maka-inspector-steps {
-  padding-left: var(--maka-space-3, 12px);
+  padding-left: var(--space-3);
+}
+
+.maka-inspector-step {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .maka-inspector-step-kind {
-  color: var(--maka-color-text-secondary, inherit);
   text-transform: lowercase;
 }
 
 .maka-inspector-step[data-failed='true'] {
-  color: var(--maka-color-text-danger, inherit);
+  color: var(--destructive-text);
 }
 
-.maka-inspector-cost,
-.maka-inspector-step-retries {
+.maka-inspector-cost {
   font-variant-numeric: tabular-nums;
-}
-
-.maka-inspector-failed {
-  color: var(--maka-color-text-danger, inherit);
 }
 
 .maka-session-workbar .maka-browser-panel,
@@ -559,6 +571,23 @@
     grid-template-rows: minmax(0, 1fr) auto;
   }
 
+  /* Stacked, the column is a row of the grid rather than a flex item, and it
+     has no titlebar above it to clear. Height is what would animate here; it is
+     not wired, so the box just sizes to its content and collapses to nothing.
+     Capped rather than removed: the width still changes, and its transition end
+     is what tears the column down. The gutter turns with the stack — the two
+     plates now sit above and below rather than side by side. */
+  .maka-workbar-motion {
+    width: 100%;
+    margin-left: 0;
+    margin-top: var(--agents-content-area-gap);
+    transition-duration: 0.01ms;
+  }
+
+  .maka-workbar-motion[data-collapsed] {
+    margin-top: 0;
+  }
+
   .maka-session-workbar {
     width: 100%;
     min-width: 0;
@@ -566,9 +595,6 @@
     min-height: min(220px, 42dvh);
     max-height: min(42dvh, 360px);
     padding-top: 0;
-    border-left: 0;
-    border-top: var(--border-width-hairline) solid var(--border);
-    box-shadow: 0 -8px 24px oklch(from var(--foreground) l c h / 0.08);
   }
 
   .maka-workbar-resize-handle { display: none; }

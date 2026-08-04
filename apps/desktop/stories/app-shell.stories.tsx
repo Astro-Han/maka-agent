@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { ComponentProps } from 'react';
 import { projectRevisionLinkedSessionTree } from '@maka/core';
 import type { ProjectRecord, SessionSummary, StoredMessage } from '@maka/core';
@@ -11,7 +11,6 @@ import { deriveAppShellTurnPresentation } from '../src/renderer/app-shell-turn-v
 import { deriveBranchBanner } from '../src/renderer/branch-banner';
 import { deriveSessionRevisionNavigation } from '../src/renderer/session-revisions';
 import { AppShell as AstryxAppShell } from '@astryxdesign/core/AppShell';
-import type { SideNavImperativeCollapseHandle } from '@astryxdesign/core/SideNav';
 
 const NOW = Date.UTC(2026, 6, 1, 9, 30, 0);
 
@@ -264,7 +263,6 @@ function ComposedShell(props: {
   relatedSessions?: SessionSummary[];
 }) {
   const [collapsed, setCollapsed] = useState(props.sidebarCollapsed ?? false);
-  const sidebarHandleRef = useRef<SideNavImperativeCollapseHandle>(null);
   const [viewMode, setViewMode] = useState<SessionViewMode>(props.initialViewMode ?? 'conversation');
   const sidebarWidth = 260;
   const { streaming: sessionStreaming, ...sessionOverrides } = props.session ?? {};
@@ -312,7 +310,7 @@ function ComposedShell(props: {
       <header className="maka-window-titlebar">
         <AppShellTopbarActions
           sidebarCollapsed={collapsed}
-          sidebarHandleRef={sidebarHandleRef}
+          onToggleSidebar={() => setCollapsed((current) => !current)}
           onOpenSearchModal={noop}
         />
         <AppShellWorkspaceTopActions
@@ -333,7 +331,6 @@ function ComposedShell(props: {
         mobileNav={{ breakpoint: 'none', hasToggle: false }}
         sideNav={
           <SessionListPanel
-            collapseHandleRef={sidebarHandleRef}
             collapsed={collapsed}
             onCollapsedChange={setCollapsed}
             width={sidebarWidth}

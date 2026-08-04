@@ -251,3 +251,116 @@ test('keyboard resize survives a collapse round trip', async ({
   await expect(shell).toHaveAttribute('data-sidebar-state', 'expanded');
   await expect.poll(panelWidth).toBe(chosenWidth);
 });
+
+/**
+ * The rail's material contract. AppShell owns both column materials; the rail
+ * takes --color-background-body and the content column takes the product's
+ * --agents-layout-bg, and makaTheme.ts points BOTH at --surface-canvas, so the
+ * two columns are one surface and the transparent titlebar band above them
+ * reads as one band across the window.
+ *
+ * Collapsing must not re-material the rail. Product CSS used to repaint it
+ * --color-background-surface at 48px so the traffic lights would not straddle a
+ * column edge narrower than they are; by the time the content column was moved
+ * onto --agents-layout-bg that override was the only thing splitting the band,
+ * and in dark mode it landed the rail on a third tone (L 0.205 against the
+ * canvas's 0.18) that ran to the window top past the plate's 4px gutter.
+ *
+ * A screenshot cannot lock this — the bug is a state-dependent token mapping,
+ * invisible in light mode because --color-background-surface happens to equal
+ * the plate's fill there. Read the resolved colors instead, in both collapse
+ * states, and compare the rail against the column it must match rather than
+ * against a literal: the contract is "same material", not "this exact gray", so
+ * it survives a palette or theme change.
+ *
+ * Colors are compared as painted RGBA bytes, not as computed-style strings:
+ * Chromium serializes the same color differently depending on how it was
+ * derived (a relative `oklch(from …)` token resolves to `oklab()`), so equal
+ * paint could read as unequal text.
+ *
+ * The read must SETTLE before it is asserted, which is why this takes two
+ * agreeing samples rather than one read or a plain poll-until-equal. A
+ * re-materialing rule reaches its new color through an ease, so immediately
+ * after the toggle the rail still reports its old value — the collapsed
+ * material it is supposed to keep. Both a single fast read and a poll that
+ * stops at its first match would accept exactly the frame the bug flies
+ * through; measured against the pre-fix rule, poll-until-equal passed.
+ */
+interface RailMaterial {
+  rail: string;
+  column: string;
+  railEdge: string;
+}
+
+async function readRailMaterial(page: Page): Promise<RailMaterial | null> {
+  return page.evaluate(() => {
+    const rail = document.querySelector('.astryx-app-shell-sidenav');
+    const column = document.querySelector('.astryx-layout-content');
+    if (!rail || !column) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    const bytes = (color: string): string => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      return Array.from(context.getImageData(0, 0, 1, 1).data).join(',');
+    };
+    return {
+      rail: bytes(getComputedStyle(rail).backgroundColor),
+      column: bytes(getComputedStyle(column).backgroundColor),
+      railEdge: bytes(getComputedStyle(rail).borderInlineEndColor),
+    };
+  });
+}
+
+// Two agreeing consecutive reads, 250ms apart — longer than --duration-base
+// (the ease the pre-fix rule used) so a value still in flight cannot agree with
+// itself. Same shape as scrollListToBottom above.
+async function settledRailMaterial(page: Page): Promise<RailMaterial | null> {
+  let previous: string | null = null;
+  let settled: RailMaterial | null = null;
+  await expect
+    .poll(
+      async () => {
+        const current = await readRailMaterial(page);
+        const serialized = JSON.stringify(current);
+        const agrees = current !== null && serialized === previous;
+        previous = serialized;
+        if (agrees) settled = current;
+        return agrees;
+      },
+      { timeout: 10_000, intervals: [250] },
+    )
+    .toBe(true);
+  return settled;
+}
+
+const TRANSPARENT = '0,0,0,0';
+
+test('the rail wears its column material in both collapse states', async ({
+  sidebarLongSessionsWindow: page,
+}) => {
+  const shell = page.locator('.appFrame');
+
+  await expect(shell).toHaveAttribute('data-sidebar-state', 'expanded');
+  const expanded = await settledRailMaterial(page);
+  expect(expanded, 'expanded').not.toBeNull();
+  expect(expanded?.rail, JSON.stringify(expanded)).toBe(expanded?.column);
+  // The plate's edge is the one boundary on this seam; the theme's own
+  // full-height sidenav hairline stays dropped in both states.
+  expect(expanded?.railEdge, JSON.stringify(expanded)).toBe(TRANSPARENT);
+
+  await page.getByRole('button', { name: '收起侧边栏' }).click();
+  await expect(shell).toHaveAttribute('data-sidebar-state', 'collapsed');
+  const collapsed = await settledRailMaterial(page);
+  // Collapsing is a width change, not a material change: the rail keeps wearing
+  // its column's material, and the column's material has not moved either.
+  expect(collapsed, JSON.stringify({ expanded, collapsed })).toEqual({
+    rail: expanded?.column,
+    column: expanded?.column,
+    railEdge: TRANSPARENT,
+  });
+});

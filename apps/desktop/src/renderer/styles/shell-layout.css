@@ -42,60 +42,58 @@
   overflow: hidden;
 }
 
-/* Continuous Collapse: at 48px the rail is icons and nothing else, and the
-   traffic lights are wider than it is (measured ~62px) — a column edge there
-   would run straight through the light cluster. Collapsed, the rail drops both
-   halves of that edge, the wash and the hairline, so the lights sit on one
-   surface; expanded, the theme's border and AppShell's wash mark the column.
-   This is the only rule that overrides a column's material, and it is the
-   reason the ease (makaTheme.ts, app-shell-sidenav `base`) exists.
-
-   It has to live in product CSS rather than the theme: AppShell only forwards
-   `variant` to themeProps and has no notion of the product's collapsed state.
-   No `!important` though — Astryx's StyleX sheet is wrapped in
-   `@layer astryx-base` and imported into `astryx-components`, which this file's
-   `components` layer outranks outright; the specificity padding StyleX emits
-   does not survive a layer boundary. The border override on the next line never
-   carried the flag and has always worked, which is the same evidence read from
-   the other side.
-
-   Painting with --color-background-surface rather than --background is
-   deliberate: the rail is taking the CONTENT COLUMN's material, and that token
-   is what AppShell paints the content column with. Naming the value instead
-   would fork the mapping the moment makaTheme.ts changes it. */
-.appFrame[data-sidebar-state="collapsed"] .astryx-app-shell-sidenav {
-  background: var(--color-background-surface);
-  border-inline-end-color: transparent;
-}
-
 /* WAWQAQ msg `9f313715` (2026-08-03): the content column is a rounded floating
    plate flush to the sidebar — its edge is the ONE boundary on that seam. The
    theme's full-height sidenav hairline (`.astryx-app-shell-sidenav.elevated`
    in the built maka.css) ran on the same seam, so beside the plate's top-left
-   corner radius both lines showed and read as a doubled border. The collapsed
-   rail already dropped this edge (rule above); drop it expanded too — column
-   separation is tonal (the plate's fill against the canvas), per DESIGN.md's
-   One Working Plane rule. Override lives here because maka.css is a generated
-   artifact (`npm run astryx:theme`), not a hand-edited file. */
+   corner radius both lines showed and read as a doubled border. Drop it in both
+   collapse states — column separation is tonal (the plate's fill against the
+   canvas), per DESIGN.md's One Working Plane rule. Override lives here because
+   maka.css is a generated artifact (`npm run astryx:theme`), not a hand-edited
+   file.
+
+   Continuous Collapse used to repaint the collapsed rail with
+   --color-background-surface here as well, so the traffic lights would sit on
+   one surface instead of straddling a column edge narrower than they are. That
+   was written while AppShell's own surface was still the content column's
+   material; `.astryx-layout-content` below now paints --agents-layout-bg
+   (== --surface-canvas == --color-background-body), so the two columns already
+   share one material and the repaint was the only thing breaking the band. In
+   light mode --color-background-surface happens to equal the floating plate's
+   fill, which hid it; in dark mode the plate lifts 0.035L off --background and
+   the rail became a THIRD tone (measured L 0.205 against the canvas's 0.18),
+   painting a 49px slab that ran to the window top past the plate's 4px gutter
+   and under the light cluster. The rail now wears its column's material in both
+   states, which is what "one surface" meant in the first place. */
 .maka-shell-astryx .astryx-app-shell-sidenav {
   border-inline-end-color: transparent;
 }
 
 
-/* The column resize handle is the one control positioned against the column BOX
-   rather than flowing inside it (Astryx gives it `position:absolute; top:0;
+/* The SIDENAV's resize handle is the one control positioned against the column
+   BOX rather than flowing inside it (Astryx gives it `position:absolute; top:0;
    inset-block-end:0`), so the columns' `padding-top` clearance does not move it
    and its top 36px lands under the chrome strip. The strip is the topmost hit
    surface across the whole band, so that part of the handle cannot be grabbed at
    all — pointer-down there reaches the OS as a window drag instead. Start the
-   handle below the strip; `inset-block-end: 0` still takes it to the bottom. */
-.maka-shell-astryx .astryx-resize-handle {
+   handle below the strip; `inset-block-end: 0` still takes it to the bottom.
+
+   Keyed on the sidenav handle's own testid, not on the class: every Astryx
+   ResizeHandle carries that class, and a page's own inspector handle is a
+   `position: relative` flex item, so the same `top` shoved its divider 36px
+   down the page — it started below the header's rule instead of meeting it. */
+.maka-shell-astryx [data-testid="astryx-sidenav-resize-handle"] {
   top: var(--h-titlebar);
 }
 
-/* The content column is a rounded floating plate over the shell canvas —
-   flush to the sidebar on the left, a small gap on the other three sides. */
-.maka-shell-astryx .astryx-layout-content {
+/* The canvas the floating plate sits on. Keyed on the AppShell's own
+   `#astryx-app-shell-main`, NOT on `.astryx-layout-content`: that class is on
+   EVERY Astryx LayoutContent, so as a descendant selector it also reached the
+   one a page renders inside the plate and painted the darker canvas back over
+   it, edge to edge. In light mode that was a 2.5% step nobody noticed; in dark
+   it repainted the whole page the sidebar's colour and the two columns fused.
+   The id is the vendor's own hook for this region and cannot be nested. */
+.maka-shell-astryx #astryx-app-shell-main {
   background: var(--agents-layout-bg);
 }
 
@@ -107,12 +105,32 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* This element frames; it does not paint. What the user reads as "the content
+     area" is the column inside it, and beside that column the workbar is a
+     second plate of the same kind. The canvas showing between them is the seam,
+     which is the same seam this frame's own margin draws on its other three
+     sides — the shell has exactly one way of separating surfaces, and it is a
+     gap, not a tone step and not a rule.
+
+     `clip`, not `hidden`: a frame is never a scrollport. Nothing overflows it
+     today, and the one thing that ever did — a column hung above this box to
+     reach its top edge — scrolled the whole frame up by the clearance the first
+     time anything inside took focus. */
+  overflow: clip;
+  /* How far each plate inside has to start below the absolute chrome strip.
+     Declared here because the frame is what the strip sits over, consumed by
+     every plate that stands in it — the conversation column and the workbar
+     both. One number, no plate reaching outside its own box to get it. */
+  --maka-plate-titlebar-clearance: calc(var(--h-titlebar) - var(--agents-content-area-gap));
+  box-sizing: border-box;
+}
+
+/* The conversation plate. Every view renders into this column, so this is where
+   the content surface actually is. */
+.maka-shell-astryx .mainColumn {
   border-radius: var(--radius-modal);
   background: var(--agents-content-area-bg);
-  overflow: hidden;
-  /* Clear the absolute chrome strip so content starts below the transparent
-     titleband. */
-  padding-top: calc(var(--h-titlebar) - var(--agents-content-area-gap));
+  padding-top: var(--maka-plate-titlebar-clearance);
   box-sizing: border-box;
 }
 

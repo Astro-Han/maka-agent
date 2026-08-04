@@ -102,9 +102,12 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   // tell an empty chat surface from a conversation with rows in it.
   'astryx-empty-state',
   // The column resize handle's hit area (Resizable/ResizeHandle themeProps).
-  // shell-layout.css starts it below the chrome strip so its top 36px is not
-  // swallowed by the window drag rect.
+  // sidebar.css styles the sidenav handle's own line through it.
   'astryx-resize-handle',
+  // A form field's outer box (Field themeProps). module-shell.css gives up the
+  // vendor's tuned control widths inside the module page's control bar once the
+  // column is narrower than they are.
+  'astryx-field',
   // AppShell's sidenav slot (AppShell.tsx themeProps); shell-layout.css clears
   // its top so the column runs under the transparent titlebar.
   'astryx-app-shell-sidenav',

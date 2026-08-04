@@ -33,6 +33,10 @@
   }
 .maka-lazy-fallback[data-surface="module"] {
     align-self: stretch;
+    /* The module shell is a flex row (module-shell.css), so the fallback must
+       claim the main axis itself — `align-self` only stretches it vertically,
+       leaving the loading message shrunk to its own text width. */
+    flex: 1 1 auto;
     min-height: min(280px, 45vh);
   }
 /* Form-control font inheritance is owned by the Astryx reset. */

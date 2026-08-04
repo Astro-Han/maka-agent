@@ -53,13 +53,13 @@ describe('Plan Reminder scanning hierarchy', () => {
     ]);
 
     assert.match(markup, /每周发布风险复盘/);
-    assert.match(markup, /重复：每周/);
-    assert.match(markup, /下次触发：/);
-    const schedule = markup.match(
-      /<p class="maka-plan-list-row-meta">([\s\S]*?)<\/p>/,
-    )?.[1];
-    assert.ok(schedule);
-    assert.doesNotMatch(schedule, /<svg|lucide-repeat|lucide-clock/);
+    // One description line carries the whole schedule: recurrence, then the
+    // next event. No icons, no separate "重复：" prefix — the row is text.
+    const description = markup.match(/>(每周 · 下次触发：[^<]*)</)?.[1];
+    assert.ok(description, 'expected one combined schedule line on the row');
+    assert.doesNotMatch(description, /<svg|lucide-repeat|lucide-clock/);
+    // Normal state stays on the StatusDot's accessible name, never as row text.
+    assert.match(markup, /aria-label="待触发"/);
     assert.doesNotMatch(markup, />待触发</);
     assert.doesNotMatch(markup, /尚未执行/);
   });
@@ -94,21 +94,6 @@ describe('Plan Reminder scanning hierarchy', () => {
     assert.match(checkbox(render([], false)), /aria-checked="false"/);
   });
 
-  it('renders list selectors with Astryx-owned visible labels', () => {
-    const markup = render(
-      Array.from({ length: 8 }, (_, index) =>
-        reminder({
-          id: `scheduled-${index}`,
-          title: `定时任务 ${index + 1}`,
-        }),
-      ),
-    );
-
-    assert.match(markup, /<label[^>]*>排序<\/label>/);
-    assert.match(markup, /<label[^>]*>状态<\/label>/);
-    assert.doesNotMatch(markup, /<label class="maka-plan-compact-select/);
-  });
-
   it('shows exceptional lifecycle and run states once instead of repeating normal state', () => {
     const markup = render([
       reminder({
@@ -140,11 +125,11 @@ describe('Plan Reminder scanning hierarchy', () => {
       }),
     ]);
 
-    assert.equal(markup.match(/>已完成</g)?.length, 1);
-    assert.equal(markup.match(/>失败</g)?.length, 1);
-    // Premium-checklist redesign: the task row carries only the exceptional
-    // state (StatusDot + text, once). The run MESSAGE lives in the 执行记录
-    // tab — it must not repeat inside every task row.
+    assert.equal(markup.match(/aria-label="已完成"/g)?.length, 1);
+    // The task row carries the reminder's own lifecycle state once, on its
+    // StatusDot. A run's outcome — its status and its MESSAGE — belongs to the
+    // 执行记录 view and the inspector, never repeated inside every task row.
+    assert.doesNotMatch(markup, /失败/);
     assert.doesNotMatch(markup, /投递目标不可用。/);
     assert.doesNotMatch(markup, /maka-capability-audit-strip/);
   });

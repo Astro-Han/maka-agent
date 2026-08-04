@@ -37,6 +37,8 @@ export interface SharedUiCopy {
   formControls: {
     selectPlaceholder: string;
     clear: string;
+    required: string;
+    optional: string;
   };
   modelPicker: {
     searchPlaceholder: string;
@@ -71,6 +73,7 @@ export interface SharedUiCopy {
   primitives: {
     loading: string;
     close: string;
+    resizeHandle: string;
   };
   taskLedger: {
     status: Record<TaskStatus, string>;
@@ -139,6 +142,8 @@ const SHARED_UI_COPY = {
     formControls: {
       selectPlaceholder: '选择…',
       clear: '清除{label}',
+      required: '必填',
+      optional: '可选',
     },
     modelPicker: {
       searchPlaceholder: '搜索模型…',
@@ -170,7 +175,7 @@ const SHARED_UI_COPY = {
       dailyReviewDisconnectedTitle: '等待连接每日回顾数据',
       dailyReviewDisconnectedBody: '桌面端数据桥当前未连接。',
     },
-    primitives: { loading: '加载中', close: '关闭' },
+    primitives: { loading: '加载中', close: '关闭', resizeHandle: '调整宽度' },
     taskLedger: {
       status: { pending: '待处理', in_progress: '进行中', blocked: '已阻塞', completed: '已完成', failed: '失败', cancelled: '已取消' },
       ariaLabel: '会话任务',
@@ -225,6 +230,8 @@ const SHARED_UI_COPY = {
     formControls: {
       selectPlaceholder: 'Select…',
       clear: 'Clear {label}',
+      required: 'Required',
+      optional: 'Optional',
     },
     modelPicker: {
       searchPlaceholder: 'Search models…',
@@ -256,7 +263,7 @@ const SHARED_UI_COPY = {
       dailyReviewDisconnectedTitle: 'Waiting for daily review data',
       dailyReviewDisconnectedBody: 'The desktop data bridge is not connected.',
     },
-    primitives: { loading: 'Loading', close: 'Close' },
+    primitives: { loading: 'Loading', close: 'Close', resizeHandle: 'Resize handle' },
     taskLedger: {
       status: { pending: 'Pending', in_progress: 'In progress', blocked: 'Blocked', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' },
       ariaLabel: 'Conversation tasks',

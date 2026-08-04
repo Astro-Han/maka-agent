@@ -3,7 +3,7 @@ import type { PlanReminder } from '@maka/core';
 import { deriveCapabilityAuditReport } from '@maka/core';
 import { CalendarDays } from './icons.js';
 import { EmptyState } from '@astryxdesign/core';
-import { PageHeader } from './primitives/page-header.js';
+import { ModulePage } from './primitives/module-page.js';
 import { useUiLocale } from './locale-context.js';
 import { getSharedUiCopy } from './shared-ui-copy.js';
 import type { ModuleHubHeader } from './module-hub-selector.js';
@@ -22,12 +22,11 @@ const SkillsModuleMain = lazy(() => import('./skills-panel.js').then((module) =>
 const DailyReviewPanel = lazy(() => import('./daily-review-panel.js').then((module) => ({ default: module.DailyReviewPanel })));
 const PlanReminderPanel = lazy(() => import('./plan-reminder-panel.js').then((module) => ({ default: module.PlanReminderPanel })));
 
+/** Skills renders its own <main> inside the lazy chunk, so its fallback must too. */
 function ModulePageFallback(props: { label: string; message: string }) {
   return (
     <main className="maka-main detailPane maka-module-main agents-chat-panel" aria-label={props.label}>
-      <div className="maka-lazy-fallback" data-surface="module" role="status" aria-busy="true">
-        {props.message}
-      </div>
+      <ModulePanelFallback message={props.message} />
     </main>
   );
 }
@@ -90,12 +89,13 @@ export function AutomationsPage(props: {
   onDelete?: (id: string) => void | Promise<void>;
 }) {
   const copy = getSharedUiCopy(useUiLocale()).modules;
+  const label = props.hubHeader?.title ?? copy.automations;
   return (
-    <Suspense fallback={<ModulePageFallback label={props.hubHeader?.title ?? copy.automations} message={copy.loadingAutomations} />}>
-      <main className="maka-main detailPane maka-module-main agents-chat-panel" aria-label={props.hubHeader?.title ?? copy.automations}>
+    <main className="maka-main detailPane maka-module-main agents-chat-panel" data-page-shell="layout" data-module="plan-reminders" aria-label={label}>
+      <Suspense fallback={<ModulePanelFallback message={copy.loadingAutomations} />}>
         <PlanReminderPanel {...props} reminders={props.reminders ?? []} />
-      </main>
-    </Suspense>
+      </Suspense>
+    </main>
   );
 }
 
@@ -108,27 +108,28 @@ export function DailyReviewPage(props: {
   onSaveMarkdown?: (input: DailyReviewMarkdownActionInput) => Promise<void> | void;
 }) {
   const copy = getSharedUiCopy(useUiLocale()).modules;
+  const label = props.hubHeader?.title ?? copy.dailyReview;
   return (
-    <main className="maka-main detailPane maka-module-main agents-chat-panel" data-module="daily-review" aria-label={props.hubHeader?.title ?? copy.dailyReview}>
+    <main className="maka-main detailPane maka-module-main agents-chat-panel" data-page-shell="layout" data-module="daily-review" aria-label={label}>
       {props.bridge ? (
-        // The PageHeader (title + subtitle + the 生成 actions) now lives INSIDE
-        // the panel so the generation buttons can ride the header's actions slot
-        // with the panel's run state. The bridge-less fallback keeps its own
-        // static header below.
+        // The page header lives INSIDE the panel: its primary action (生成分析 /
+        // 查看分析) rides the panel's run state, exactly like 计划提醒's 新建.
+        // The bridge-less fallback keeps its own static header below.
         <Suspense fallback={<ModulePanelFallback message={copy.loadingDailyReview} />}>
           <DailyReviewPanel {...props} bridge={props.bridge} />
         </Suspense>
       ) : (
-        <>
-          <PageHeader
-            className="maka-module-main-header"
-            title={props.hubHeader?.title ?? copy.dailyReview}
-            subtitle={props.hubHeader?.subtitle ?? copy.dailyReviewDescription}
-            badge={props.hubHeader?.badge}
-            headingRowClassName={props.hubHeader ? 'maka-module-hub-heading' : undefined}
-          />
-          <EmptyState icon={<CalendarDays />} title={copy.dailyReviewDisconnectedTitle} description={copy.dailyReviewDisconnectedBody} />
-        </>
+        // The disconnected state keeps the module switch: it is the only
+        // in-page way back to 计划提醒, and a page you cannot leave is a worse
+        // failure than the one it is reporting.
+        <ModulePage
+          title={label}
+          toolbar={props.hubHeader?.badge ? <div className="maka-module-page-bar">{props.hubHeader.badge}</div> : undefined}
+        >
+          <div className="maka-module-page-panel">
+            <EmptyState icon={<CalendarDays />} title={copy.dailyReviewDisconnectedTitle} description={copy.dailyReviewDisconnectedBody} />
+          </div>
+        </ModulePage>
       )}
     </main>
   );

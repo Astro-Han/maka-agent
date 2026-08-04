@@ -1,8 +1,16 @@
 import { useMemo, useState } from 'react';
+import { Badge } from '@astryxdesign/core/Badge';
+import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
+import { EmptyState } from '@astryxdesign/core/EmptyState';
+import { HStack, VStack } from '@astryxdesign/core/Layout';
+import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
+import { Section } from '@astryxdesign/core/Section';
 import { Switch } from '@astryxdesign/core/Switch';
+import { Text } from '@astryxdesign/core/Text';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { useUiLocale } from '@maka/ui';
+import { Activity } from '@maka/ui/icons';
 import { getDesktopConversationCopy } from './locales/conversation-copy.js';
 import {
   applyInspectorFilter,
@@ -20,7 +28,10 @@ import { useSessionTrace } from './use-session-trace.js';
  * what each model call cost and how long it took.
  *
  * Read-only. Every judgement it makes lives in `deriveInspectorPanelModel`;
- * this file lays the result out.
+ * this file lays the result out — in the same components the rest of the
+ * workbar uses, so a read that failed looks like every other failed read
+ * (Banner), and a session that did nothing looks like every other empty
+ * surface (EmptyState) rather than like a stray paragraph.
  */
 export function SessionInspectorPanel(props: { sessionId: string; active: boolean }) {
   const locale = useUiLocale();
@@ -37,115 +48,148 @@ export function SessionInspectorPanel(props: { sessionId: string; active: boolea
   const hidden = model.hiddenTurns + model.hiddenSteps;
 
   return (
-    <section
+    <Section
+      variant="transparent"
+      padding={3}
       className="maka-inspector-panel"
       data-maka-contract="session-inspector"
       aria-label={copy.ariaLabel}
       aria-busy={snapshot.loading || undefined}
     >
-      {snapshot.error && (
-        <div className="maka-inspector-error" role="alert">
-          <span>{snapshot.error}</span>
-          <button type="button" aria-label={copy.retry} onClick={snapshot.retry}>
-            {copy.retry}
-          </button>
-        </div>
-      )}
-
-      {model.coverage && (
-        <p className="maka-inspector-coverage" data-maka-contract="session-inspector-coverage">
-          {model.coverage.kind === 'absent' ? copy.coverageAbsent : copy.coveragePartial}
-          {model.coverage.turnsMissing > 0 &&
-            ` · ${model.coverage.turnsMissing} ${copy.turnsMissing}`}
-          {model.coverage.turnsShort > 0 && ` · ${model.coverage.turnsShort} ${copy.turnsShort}`}
-          {model.coverage.unreadableRecords > 0 &&
-            ` · ${model.coverage.unreadableRecords} ${copy.unreadable}`}
-        </p>
-      )}
-
-      {!model.empty && (
-        <header className="maka-inspector-totals">
-          <span>{formatDuration(model.totals.durationMs)}</span>
-          <span>
-            {model.totals.modelAttempts} {copy.attempts}
-          </span>
-          {model.totals.retries > 0 && (
-            <span>
-              {model.totals.retries} {copy.retries}
-            </span>
-          )}
-          {model.totals.compactions > 0 && (
-            <span>
-              {model.totals.compactions} {copy.compactions}
-            </span>
-          )}
-          <span className="maka-inspector-cost">
-            {formatCost(model.totals.costUsd, copy.costUnavailable)}
-          </span>
-        </header>
-      )}
-
-      {!model.empty && (
-        <div className="maka-inspector-filter">
-          <TextInput
-            size="sm"
-            label={copy.filterLabel}
-            isLabelHidden
-            hasClear
-            value={filter.query ?? ''}
-            placeholder={copy.filterPlaceholder}
-            onChange={(value) => setFilter({ ...filter, query: value })}
+      <VStack gap={2} height="100%">
+        {snapshot.error && (
+          <Banner
+            status="error"
+            title={snapshot.error}
+            endContent={
+              <Button variant="ghost" size="sm" label={copy.retry} onClick={snapshot.retry} />
+            }
           />
-          <Switch
-            label={copy.filterFailedOnly}
-            value={filter.failedOnly ?? false}
-            onChange={(checked) => setFilter({ ...filter, failedOnly: checked })}
+        )}
+
+        {model.coverage && (
+          <Banner
+            status="warning"
+            data-maka-contract="session-inspector-coverage"
+            title={model.coverage.kind === 'absent' ? copy.coverageAbsent : copy.coveragePartial}
+            description={
+              [
+                model.coverage.turnsMissing > 0 &&
+                  `${model.coverage.turnsMissing} ${copy.turnsMissing}`,
+                model.coverage.turnsShort > 0 && `${model.coverage.turnsShort} ${copy.turnsShort}`,
+                model.coverage.unreadableRecords > 0 &&
+                  `${model.coverage.unreadableRecords} ${copy.unreadable}`,
+              ]
+                .filter(Boolean)
+                .join(' · ') || undefined
+            }
           />
-          {model.filtered && (
-            <Button
-              variant="ghost"
+        )}
+
+        {!model.empty && (
+          <MetadataList orientation="horizontal" label={{ position: 'top' }}>
+            <MetadataListItem label={copy.totals.duration}>
+              {formatDuration(model.totals.durationMs)}
+            </MetadataListItem>
+            <MetadataListItem label={copy.totals.calls}>
+              {model.totals.modelAttempts}
+            </MetadataListItem>
+            {model.totals.retries > 0 && (
+              <MetadataListItem label={copy.totals.retries}>
+                {model.totals.retries}
+              </MetadataListItem>
+            )}
+            {model.totals.compactions > 0 && (
+              <MetadataListItem label={copy.totals.compactions}>
+                {model.totals.compactions}
+              </MetadataListItem>
+            )}
+            <MetadataListItem label={copy.totals.cost}>
+              {formatCost(model.totals.costUsd, copy.costUnavailable)}
+            </MetadataListItem>
+          </MetadataList>
+        )}
+
+        {!model.empty && (
+          <HStack gap={2} vAlign="center" wrap="wrap">
+            <TextInput
               size="sm"
-              label={copy.filterClear}
-              onClick={() => setFilter({})}
+              label={copy.filterLabel}
+              isLabelHidden
+              hasClear
+              value={filter.query ?? ''}
+              placeholder={copy.filterPlaceholder}
+              onChange={(value) => setFilter({ ...filter, query: value })}
+            />
+            <Switch
+              label={copy.filterFailedOnly}
+              value={filter.failedOnly ?? false}
+              onChange={(checked) => setFilter({ ...filter, failedOnly: checked })}
+            />
+            {model.filtered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                label={copy.filterClear}
+                onClick={() => setFilter({})}
+              />
+            )}
+          </HStack>
+        )}
+
+        {/* Three different silences, kept apart: a read that failed, a filter
+            that matches nothing, and a session that did nothing. Only the last
+            one is "nothing to trace".
+            One persistent live region rather than three conditional ones: a
+            container that mounts and unmounts is not announced, and these
+            messages change as the reader types. */}
+        <div
+          role="status"
+          aria-live="polite"
+          className="maka-inspector-status"
+          /* With nothing to trace the region IS the panel, so it takes the
+             leftover height and centres its empty state the way every other
+             workbar tab does. Carrying a hint beside a timeline, it hugs. */
+          data-empty={model.empty || undefined}
+        >
+          {model.empty && !snapshot.loading && !snapshot.error && (
+            <EmptyState
+              isCompact
+              title={copy.empty}
+              icon={<Activity size={20} aria-hidden="true" />}
             />
           )}
+          {!model.empty && model.turns.length === 0 && model.filtered && (
+            <EmptyState
+              isCompact
+              title={copy.noMatches}
+              data-maka-contract="session-inspector-no-matches"
+            />
+          )}
+          {model.filtered && hidden > 0 && model.turns.length > 0 && (
+            <Text
+              type="supporting"
+              color="secondary"
+              data-maka-contract="session-inspector-hidden"
+            >
+              {hidden} {copy.hiddenByFilter}
+            </Text>
+          )}
         </div>
-      )}
 
-      {/* Three different silences, kept apart: a read that failed, a filter
-          that matches nothing, and a session that did nothing. Only the last
-          one is "nothing to trace".
-          One persistent live region rather than three conditional ones: a
-          container that mounts and unmounts is not announced, and these
-          messages change as the reader types. */}
-      <div role="status" aria-live="polite" className="maka-inspector-status">
-        {model.empty && !snapshot.loading && !snapshot.error && (
-          <p className="maka-inspector-empty">{copy.empty}</p>
-        )}
-        {!model.empty && model.turns.length === 0 && model.filtered && (
-          <p className="maka-inspector-empty" data-maka-contract="session-inspector-no-matches">
-            {copy.noMatches}
-          </p>
-        )}
-        {model.filtered && hidden > 0 && model.turns.length > 0 && (
-          <p className="maka-inspector-hidden" data-maka-contract="session-inspector-hidden">
-            {hidden} {copy.hiddenByFilter}
-          </p>
-        )}
-      </div>
-
-      <ol className="maka-inspector-turns">
-        {model.turns.map((turn) => (
-          <TurnRow
-            key={turn.turnId}
-            turn={turn}
-            costUnavailable={copy.costUnavailable}
-            failedLabel={copy.turnFailed}
-            recoveredLabel={copy.recovered}
-          />
-        ))}
-      </ol>
-    </section>
+        <ol className="maka-inspector-turns">
+          {model.turns.map((turn) => (
+            <TurnRow
+              key={turn.turnId}
+              turn={turn}
+              costUnavailable={copy.costUnavailable}
+              failedLabel={copy.turnFailed}
+              recoveredLabel={copy.recovered}
+            />
+          ))}
+        </ol>
+      </VStack>
+    </Section>
   );
 }
 
@@ -158,19 +202,24 @@ function TurnRow(props: {
   const { turn } = props;
   return (
     <li className="maka-inspector-turn" data-maka-contract="session-inspector-turn">
-      <div className="maka-inspector-turn-head">
-        <span className="maka-inspector-turn-id">{turn.turnId}</span>
-        <span>{formatDuration(turn.durationMs)}</span>
-        <span className="maka-inspector-cost">
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <Text type="label" weight="semibold">
+          {turn.turnId}
+        </Text>
+        <Text type="supporting" color="secondary">
+          {formatDuration(turn.durationMs)}
+        </Text>
+        <Text type="supporting" color="secondary" className="maka-inspector-cost">
           {formatCost(turn.totals.costUsd, props.costUnavailable)}
-        </span>
+        </Text>
         {turn.failed && (
-          <span className="maka-inspector-failed" data-maka-contract="session-inspector-turn-failed">
-            {props.failedLabel}
-            {turn.failureCode ? ` · ${turn.failureCode}` : ''}
-          </span>
+          <Badge
+            variant="error"
+            data-maka-contract="session-inspector-turn-failed"
+            label={turn.failureCode ? `${props.failedLabel} · ${turn.failureCode}` : props.failedLabel}
+          />
         )}
-      </div>
+      </HStack>
       <ol className="maka-inspector-steps">
         {turn.steps.map((step) => (
           <StepRow
@@ -198,22 +247,34 @@ function StepRow(props: {
       data-kind={step.kind}
       data-failed={step.failed || undefined}
     >
-      <span className="maka-inspector-step-kind">{step.kind}</span>
-      <span className="maka-inspector-step-label">{step.label}</span>
-      {step.detail && <span className="maka-inspector-step-detail">{step.detail}</span>}
+      <Text type="supporting" color="secondary" className="maka-inspector-step-kind">
+        {step.kind}
+      </Text>
+      <Text type="supporting">{step.label}</Text>
+      {step.detail && (
+        <Text type="supporting" color="secondary">
+          {step.detail}
+        </Text>
+      )}
       {step.recovered && (
-        <span className="maka-inspector-step-detail">
+        <Text type="supporting" color="secondary">
           {props.recoveredLabel}: {step.recovered}
-        </span>
+        </Text>
       )}
       {step.retries !== undefined && (
-        <span className="maka-inspector-step-retries">×{step.retries + 1}</span>
+        <Text type="supporting" color="secondary" className="maka-inspector-cost">
+          ×{step.retries + 1}
+        </Text>
       )}
-      {step.durationMs !== undefined && <span>{formatDuration(step.durationMs)}</span>}
+      {step.durationMs !== undefined && (
+        <Text type="supporting" color="secondary">
+          {formatDuration(step.durationMs)}
+        </Text>
+      )}
       {step.kind === 'model_call' && (
-        <span className="maka-inspector-cost">
+        <Text type="supporting" color="secondary" className="maka-inspector-cost">
           {formatCost(step.costUsd, props.costUnavailable)}
-        </span>
+        </Text>
       )}
     </li>
   );

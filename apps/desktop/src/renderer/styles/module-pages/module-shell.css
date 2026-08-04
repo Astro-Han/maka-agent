@@ -18,11 +18,6 @@
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.maka-module-main[data-module="daily-review"] {
-  grid-template-rows: auto auto;
-  align-content: start;
-}
-
 .maka-module-main-header {
   width: min(100%, 900px);
   margin-inline: auto;
@@ -44,8 +39,8 @@
    level with the section headings underneath it, collapsing the one size step
    that makes a page title read as one. Display keeps the size and gives up the
    weight, which is the trade the vendor's own reasoning endorses at this size
-   (large text needs less weight). Same call at .maka-plan-heading h2 and
-   .settingsPageHeader h2; nothing else in the renderer uses display outside a
+   (large text needs less weight). Same call at .settingsPageHeader h2;
+   nothing else in the renderer uses display outside a
    real hero. */
 .maka-module-main-header h2 {
   font: var(--maka-text-display-2);
@@ -58,6 +53,97 @@
   font: var(--maka-text-body);
   margin: var(--space-1) 0 0;
   color: var(--foreground-secondary);
+}
+
+/* Keep the lede a readable measure. The header is a flex row, so without a
+   cap the subtitle stretches to the full 900px clamp and outruns the title. */
+.maka-module-main-header [data-slot="page-header-content"] {
+  max-width: 560px;
+}
+
+/* ── Astryx Layout page shell ──────────────────────────────────────────
+   计划提醒 / 每日回顾 render an Astryx `Layout` (header / content / end
+   panel) instead of the grid this file used to hand-roll, following the
+   vendor's `incident-console` page template. Layout owns the zones, the
+   padding collapse and the scroll containment, so the module main is
+   reduced to giving it a box to fill — plus the top
+   inset the frameless titlebar still needs. */
+.maka-module-main[data-page-shell="layout"] {
+  display: flex;
+  gap: 0;
+  padding: var(--space-16) 0 0;
+  overflow: hidden;
+}
+
+.maka-module-main[data-page-shell="layout"] > .maka-module-page {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The page's one control bar: module switch on the left, this page's view +
+   filters on the right. It is the last row of the Layout header.
+
+   No inline padding: the header's inner wrapper already insets it to the same
+   left edge as the title and the rows. No rule under it either — the header
+   needs no line to be read as the header, and one drawn here would be the only
+   full-width line on a page whose every other edge stops at the column. */
+.maka-module-page-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+  padding-block-start: var(--space-3);
+}
+
+/* The bar's controls wrap instead of running off the column. Astryx's Toolbar
+   is a nowrap flex row and its search/sort/filter controls carry fixed widths
+   (220/172/148) tuned for a full-width page, so together they need 618px and
+   never shrink — measured identical from 1280 down to 480. Below ~700px of
+   column the trailing controls simply left the plate: at 640 the state filter
+   was already past the edge and unclickable, at 480 the sort control too.
+   Wrapping is scoped to this page's own bar; `[role="toolbar"]` is the
+   vendor's own semantic anchor for that row. */
+.maka-module-page-bar [role="toolbar"],
+.maka-module-page-bar [role="toolbar"] > * {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+.maka-module-page-bar [role="toolbar"],
+.maka-module-page-bar [role="toolbar"] > * {
+  min-width: 0;
+}
+
+/* Below this the column is narrower than the widest control (the 220px search
+   box), and a control that wrapped onto its own row would still be cut off by
+   the plate. Give up the tuned widths there and let each control take the row:
+   the widths exist to keep the bar compact on a wide page, which is not a
+   thing this width has. A max-width cap cannot do this job — the slot is
+   sized to its own content, so a percentage resolves against the very width
+   being capped. */
+@media (max-width: 560px) {
+  .maka-module-page-bar .astryx-field {
+    width: auto;
+    flex: 1 1 100%;
+  }
+}
+
+.maka-module-page-panel {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5) var(--space-6);
+}
+
+/* Rows keep the page inset rather than bleeding: the header, the control bar
+   and the rows then share one left edge, which is what makes the page read as
+   a single column. */
+.maka-module-page-rows {
+  min-width: 0;
 }
 
 .maka-module-hub-heading {
@@ -90,5 +176,12 @@
 
   .maka-module-main-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1100px) {
+  .maka-module-page-bar {
+    display: grid;
+    align-items: stretch;
   }
 }

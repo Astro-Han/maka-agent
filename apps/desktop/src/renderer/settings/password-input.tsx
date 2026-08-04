@@ -37,6 +37,7 @@ export function PasswordInput(props: {
   description?: string;
   status?: InputGroupProps['status'];
   isRequired?: boolean;
+  isOptional?: boolean;
   isDisabled?: boolean;
   onBlur?(): void;
   hasAutoFocus?: boolean;
@@ -85,13 +86,18 @@ export function PasswordInput(props: {
     }
   }
   return (
-    // No isRequired on the group label: Astryx hardcodes an English "· Required"
-    // and our labels already carry 「（必填）」; the semantic lives on the inner input.
+    // The marker rides on the group label because it is the only one: a
+    // TextInput inside an InputGroup returns its bare input wrapper and renders
+    // no Field at all, so its own `isRequired` produces no marker anywhere. It
+    // still carries the prop, because that input is what `aria-required` is
+    // written on, and the group's `aria-labelledby` is what names it.
     <InputGroup
       label={props.label}
       description={props.description}
       isLabelHidden={props.isLabelHidden}
       isDisabled={props.isDisabled}
+      isRequired={props.isRequired}
+      isOptional={props.isOptional}
       status={props.status}
     >
       <TextInput

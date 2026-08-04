@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { McpConfigFile, McpServerConfig, McpServerStatus } from '@maka/core/mcp';
 import { isMcpStdioConfig } from '@maka/core/mcp';
-import { Collapsible, EmptyState, Item, Tab, TabList } from '@astryxdesign/core';
+import { Banner, Card, Collapsible, EmptyState, Item, Tab, TabList } from '@astryxdesign/core';
 import {
   Button,
   Badge,
@@ -318,56 +318,43 @@ export function McpPage(props: { hubHeader?: ModuleHubHeader }) {
             role="group"
             aria-label={copy.page.actionsAria}
           >
-            <Button
-              variant="secondary"
-              onClick={() => void reload()}
-              isDisabled={busy === 'load'}
-              icon={<RefreshCcw aria-hidden="true" />}
-              label={busy === 'load' ? copy.page.refreshing : copy.page.refresh}
-            />
-            <Button
-              variant="secondary"
-              onClick={() => openEditor({ mode: 'json', source: exampleJson() })}
-              icon={<FileCode aria-hidden="true" />}
-              label={copy.page.importJson}
-            />
             <Button variant="primary" onClick={() => openManual()} icon={<Plus aria-hidden="true" />} label={copy.page.add} />
           </div>
         }
       />
 
       <section className="maka-mcp-workspace" aria-label={copy.page.workspaceAria}>
-        <div className="maka-mcp-hero">
-          <div>
-            <strong>{copy.page.heroTitle}</strong>
-            <span>{copy.page.heroDescription}</span>
-          </div>
-          <div className="maka-mcp-hero-signal" aria-hidden="true">
-            <span><Terminal /><small>{copy.page.localStdio}</small></span>
-            <span><Plug /><small>{copy.page.connections}</small></span>
-            <span><Globe /><small>{copy.page.remoteHttp}</small></span>
-          </div>
-        </div>
+        {busy !== 'load' && entries.length === 0 ? (
+          <Banner
+            className="maka-mcp-setup"
+            status="info"
+            icon={<Plug aria-hidden="true" />}
+            title={copy.page.setupTitle}
+            description={copy.page.setupDescription}
+          />
+        ) : null}
 
-        <div>
-          <div className="maka-mcp-tabs-bar">
-            <TabList
-              value={activeTab}
-              onChange={(value) => setActiveTab(value as typeof activeTab)}
-              hasDivider
-              aria-label={copy.page.categoriesAria}
-            >
-              <Tab
-                value="market"
-                label={copy.page.market}
-                endContent={<span>{catalog.length}</span>}
-              />
-              <Tab
-                value="installed"
-                label={copy.page.installed}
-                endContent={<span>{entries.length}</span>}
-              />
-            </TabList>
+        <div className="maka-mcp-browser">
+          <div className="maka-mcp-command-bar" role="toolbar" aria-label={copy.page.toolbarAria}>
+            <div className="maka-mcp-tabs">
+              <TabList
+                value={activeTab}
+                onChange={(value) => setActiveTab(value as typeof activeTab)}
+                hasDivider
+                aria-label={copy.page.categoriesAria}
+              >
+                <Tab
+                  value="market"
+                  label={copy.page.market}
+                  endContent={<span>{catalog.length}</span>}
+                />
+                <Tab
+                  value="installed"
+                  label={copy.page.installed}
+                  endContent={<span>{entries.length}</span>}
+                />
+              </TabList>
+            </div>
             <div className="maka-mcp-search">
               <TextInput
                 value={query}
@@ -379,12 +366,21 @@ export function McpPage(props: { hubHeader?: ModuleHubHeader }) {
                 width="100%"
               />
             </div>
+            <IconButton
+              className="maka-mcp-refresh"
+              variant="ghost"
+              label={busy === 'load' ? copy.page.refreshing : copy.page.refresh}
+              tooltip={copy.page.refresh}
+              onClick={() => void reload()}
+              isDisabled={busy === 'load'}
+              icon={<RefreshCcw aria-hidden="true" />}
+            />
           </div>
 
           {activeTab === 'market' ? (
             <div className="maka-mcp-tab-panel">
               {marketEntries.length > 0 ? (
-              <div className="maka-mcp-market-grid">
+              <div className="maka-mcp-market-grid" role="list">
                 {marketEntries.map((entry) => (
                   <McpCatalogCard
                     key={entry.id}
@@ -426,7 +422,7 @@ export function McpPage(props: { hubHeader?: ModuleHubHeader }) {
                 className="maka-mcp-empty"
               />
             ) : installedEntries.length > 0 ? (
-              <ul className="maka-mcp-server-list">
+              <Card className="maka-mcp-server-list" padding={0} role="list">
                 {installedEntries.map(([serverId, server]) => (
                   <McpServerRow
                     key={serverId}
@@ -441,7 +437,7 @@ export function McpPage(props: { hubHeader?: ModuleHubHeader }) {
                     onRemove={() => void remove(serverId)}
                   />
                 ))}
-              </ul>
+              </Card>
             ) : (
               <EmptyState
                 icon={<Search />}
@@ -515,48 +511,59 @@ function McpCatalogCard(props: {
   const installing = props.phase === 'installing';
   const cancelling = props.phase === 'cancelling';
   return (
-    <article
+    <Card
       className="maka-mcp-market-card"
+      minHeight={104}
+      padding={0}
+      role="listitem"
       data-maka-contract="mcp-market-card"
     >
-      <div
-        className="maka-mcp-market-icon"
-        data-brand={props.entry.id}
-        data-logo={hasMcpBrandMark(props.entry.id) ? 'true' : undefined}
-        aria-hidden="true"
-      >
-        <McpBrandMark entry={props.entry} />
-      </div>
-      <div className="maka-mcp-market-copy">
-        <strong>{props.entry.name}</strong>
-        <p>{props.entry.description}</p>
-        <small>
-          {props.entry.category}
-          {props.entry.platform === 'darwin' ? ` · ${props.copy.card.macOnly}` : ''}
-          {props.entry.setupLabel ? ` · ${props.entry.setupLabel}` : ''}
-        </small>
-      </div>
-      {props.installed ? (
-        <Button size="sm" variant="secondary" onClick={props.onManage} label={props.copy.card.manage} />
-      ) : (
-        <button
-          type="button"
-          className="maka-mcp-install-button"
-          data-phase={props.phase ?? 'idle'}
-          aria-label={cancelling ? props.copy.card.cancellingAria(props.entry.name) : installing ? props.copy.card.cancelAria(props.entry.name) : props.copy.card.installAria(props.entry.name)}
-          title={cancelling ? props.copy.card.cancelling : installing ? props.copy.card.cancel : props.copy.card.install}
-          onClick={installing ? props.onCancel : props.onInstall}
-          disabled={cancelling}
-        >
-          {props.phase ? (
-            <>
-              <Loader2 className="maka-mcp-install-spinner" aria-hidden="true" />
-              <X className="maka-mcp-install-cancel" aria-hidden="true" />
-            </>
-          ) : <Plus aria-hidden="true" />}
-        </button>
-      )}
-    </article>
+      <Item
+        className="maka-mcp-market-item"
+        align="center"
+        density="spacious"
+        startContent={(
+          <div
+            className="maka-mcp-market-icon"
+            data-brand={props.entry.id}
+            data-logo={hasMcpBrandMark(props.entry.id) ? 'true' : undefined}
+            aria-hidden="true"
+          >
+            <McpBrandMark entry={props.entry} />
+          </div>
+        )}
+        label={props.entry.name}
+        description={(
+          <span className="maka-mcp-market-copy">
+            <span>{props.entry.description}</span>
+            <small>
+              {props.entry.category}
+              {props.entry.platform === 'darwin' ? ` · ${props.copy.card.macOnly}` : ''}
+              {props.entry.setupLabel ? ` · ${props.entry.setupLabel}` : ''}
+            </small>
+          </span>
+        )}
+        endContent={props.installed ? (
+          <Button size="sm" variant="secondary" onClick={props.onManage} label={props.copy.card.manage} />
+        ) : (
+          <IconButton
+            className="maka-mcp-install-button"
+            size="sm"
+            variant="ghost"
+            label={cancelling ? props.copy.card.cancellingAria(props.entry.name) : installing ? props.copy.card.cancelAria(props.entry.name) : props.copy.card.installAria(props.entry.name)}
+            tooltip={cancelling ? props.copy.card.cancelling : installing ? props.copy.card.cancel : props.copy.card.install}
+            onClick={installing ? props.onCancel : props.onInstall}
+            isDisabled={cancelling}
+            icon={props.phase ? (
+              <span className="maka-mcp-install-icon" data-phase={props.phase}>
+                <Loader2 className="maka-mcp-install-spinner" aria-hidden="true" />
+                <X className="maka-mcp-install-cancel" aria-hidden="true" />
+              </span>
+            ) : <Plus aria-hidden="true" />}
+          />
+        )}
+      />
+    </Card>
   );
 }
 
@@ -577,10 +584,14 @@ function McpServerRow(props: {
     ? props.copy.page.localStdio
     : props.server.transport ?? 'auto';
   return (
-    <li className="maka-mcp-server-row">
+    // Astryx ListItem does not accept children. Keep this semantic wrapper so
+    // the summary Item and its expandable diagnostics form one list item.
+    <div className="maka-mcp-server-row" role="listitem">
       <Item
         className="maka-mcp-server-summary"
         align="start"
+        density="spacious"
+        descriptionLines={1}
         label={(
           <span className="maka-mcp-server-heading">
             <span>{props.serverId}</span>
@@ -591,7 +602,7 @@ function McpServerRow(props: {
           </span>
         )}
         description={(
-          <span className="maka-mcp-server-description">
+          <span className="maka-mcp-server-description" data-maka-contract="mcp-server-description">
             {!state.exception ? <span>{state.label} · </span> : null}
             <span>{transportLabel} · <code title={endpoint}>{endpoint}</code></span>
           </span>
@@ -620,7 +631,14 @@ function McpServerRow(props: {
           </div>
         )}
       />
-      {props.status?.error && <div className="maka-mcp-server-error" role="alert">{props.status.error}</div>}
+      {props.status?.error ? (
+        <Banner
+          className="maka-mcp-server-error"
+          status="error"
+          title={state.label}
+          description={props.status.error}
+        />
+      ) : null}
       {(props.status?.tools.length || props.status?.stderrTail?.length) ? (
         <Collapsible
           className="maka-mcp-server-details"
@@ -633,7 +651,7 @@ function McpServerRow(props: {
           {props.status?.stderrTail?.length ? <pre>{props.status.stderrTail.join('\n')}</pre> : null}
         </Collapsible>
       ) : null}
-    </li>
+    </div>
   );
 }
 
@@ -665,8 +683,8 @@ function McpEditorDialog(props: {
       isOpen={props.isOpen}
       onOpenChange={props.onOpenChange}
       className="maka-mcp-editor-dialog"
-      width="min(92vw, var(--maka-chat-measure))"
-      maxHeight="85dvh"
+      width="min(92vw, 680px)"
+      maxHeight="min(760px, calc(100dvh - 32px))"
       purpose="form"
     >
       <Layout
@@ -679,7 +697,7 @@ function McpEditorDialog(props: {
           />
         }
         content={
-          <LayoutContent padding={0}>
+          <LayoutContent padding={0} isScrollable={false}>
         {!editing && (
           <RadioList
             className="maka-mcp-editor-choice"
@@ -701,12 +719,12 @@ function McpEditorDialog(props: {
             <RadioListItem
               value="manual"
               label={props.copy.editor.manual}
-              startContent={<Terminal aria-hidden="true" />}
+              startContent={<Terminal className="maka-mcp-choice-icon" aria-hidden="true" />}
             />
             <RadioListItem
               value="json"
               label={props.copy.editor.pasteJson}
-              startContent={<FileCode aria-hidden="true" />}
+              startContent={<FileCode className="maka-mcp-choice-icon" aria-hidden="true" />}
             />
           </RadioList>
         )}
@@ -735,42 +753,43 @@ function McpEditorDialog(props: {
               <RadioListItem
                 value="stdio"
                 label={props.copy.editor.localStdio}
-                startContent={<Terminal aria-hidden="true" />}
+                startContent={<Terminal className="maka-mcp-choice-icon" aria-hidden="true" />}
               />
               <RadioListItem
                 value="remote"
                 label={props.copy.editor.remoteUrl}
-                startContent={<Globe aria-hidden="true" />}
+                startContent={<Globe className="maka-mcp-choice-icon" aria-hidden="true" />}
               />
             </RadioList>
             <div className="maka-mcp-form-fields">
-              <TextInput hasAutoFocus={!editing} label={props.copy.editor.serverId} description={props.copy.editor.serverIdHelp} value={props.state.draft.id} onChange={(value) => updateDraft('id', value)} isDisabled={editing} isRequired placeholder="filesystem" status={props.errors.id ? { type: 'error', message: props.copy.editor.required } : undefined} />
+              <div className="maka-mcp-primary-fields">
+                <TextInput hasAutoFocus={!editing} label={props.copy.editor.serverId} value={props.state.draft.id} onChange={(value) => updateDraft('id', value)} isDisabled={editing} isRequired placeholder="filesystem" status={props.errors.id ? { type: 'error', message: props.copy.editor.required } : undefined} />
+                {props.state.draft.kind === 'stdio' ? (
+                  <TextInput hasAutoFocus={editing} label={props.copy.editor.command} value={props.state.draft.command} onChange={(value) => updateDraft('command', value)} isRequired placeholder="npx" status={props.errors.command ? { type: 'error', message: props.copy.editor.required } : undefined} />
+                ) : (
+                  <TextInput hasAutoFocus={editing} label={props.copy.editor.url} value={props.state.draft.url} onChange={(value) => updateDraft('url', value)} isRequired placeholder="https://example.com/mcp" status={props.errors.url ? { type: 'error', message: props.errors.url === 'required' ? props.copy.editor.required : props.copy.editor.invalidUrl } : undefined} />
+                )}
+              </div>
               {props.state.draft.kind === 'stdio' ? (
                 <>
-                  <TextInput hasAutoFocus={editing} label={props.copy.editor.command} value={props.state.draft.command} onChange={(value) => updateDraft('command', value)} isRequired placeholder="npx" status={props.errors.command ? { type: 'error', message: props.copy.editor.required } : undefined} />
                   <TextArea label={props.copy.editor.arguments} description={props.copy.editor.argumentsHelp} value={props.state.draft.args} onChange={(value) => updateDraft('args', value)} placeholder={props.copy.editor.argumentsPlaceholder} />
-                  <Collapsible className="maka-mcp-advanced" defaultIsOpen={false} trigger={props.copy.editor.advanced}><div className="maka-mcp-advanced-fields">
-                    <TextInput label={props.copy.editor.workingDirectory} value={props.state.draft.cwd} onChange={(value) => updateDraft('cwd', value)} placeholder={props.copy.editor.workingDirectoryPlaceholder} />
-                    <TextArea label={props.copy.editor.environment} description={props.copy.editor.environmentHelp} value={props.state.draft.env} onChange={(value) => updateDraft('env', value)} placeholder={'KEY=value\nTOKEN=secret'} />
-                  </div></Collapsible>
+                  <TextArea label={props.copy.editor.environment} description={props.copy.editor.environmentHelp} value={props.state.draft.env} onChange={(value) => updateDraft('env', value)} placeholder={'KEY=value\nTOKEN=secret'} />
+                  <TextInput label={props.copy.editor.workingDirectory} value={props.state.draft.cwd} onChange={(value) => updateDraft('cwd', value)} placeholder={props.copy.editor.workingDirectoryPlaceholder} />
                 </>
               ) : (
                 <>
-                  <TextInput hasAutoFocus={editing} label={props.copy.editor.url} value={props.state.draft.url} onChange={(value) => updateDraft('url', value)} isRequired placeholder="https://example.com/mcp" status={props.errors.url ? { type: 'error', message: props.errors.url === 'required' ? props.copy.editor.required : props.copy.editor.invalidUrl } : undefined} />
-                  <Collapsible className="maka-mcp-advanced" defaultIsOpen={false} trigger={props.copy.editor.advanced}><div className="maka-mcp-advanced-fields">
-                    <Selector
-                      value={props.state.draft.transport}
-                      options={[
-                        { value: 'auto', label: props.copy.editor.transportAuto },
-                        { value: 'streamable-http', label: props.copy.editor.transportStreamableHttp },
-                        { value: 'sse', label: props.copy.editor.transportLegacySse },
-                      ]}
-                      onChange={(value) => updateDraft('transport', value as Draft['transport'])}
-                      label={props.copy.editor.transportLabel}
-                      width="100%"
-                    />
-                    <TextArea label={props.copy.editor.headers} description={props.copy.editor.headersHelp} value={props.state.draft.headers} onChange={(value) => updateDraft('headers', value)} placeholder={'Authorization=Bearer …\nX-Workspace=…'} />
-                  </div></Collapsible>
+                  <Selector
+                    value={props.state.draft.transport}
+                    options={[
+                      { value: 'auto', label: props.copy.editor.transportAuto },
+                      { value: 'streamable-http', label: props.copy.editor.transportStreamableHttp },
+                      { value: 'sse', label: props.copy.editor.transportLegacySse },
+                    ]}
+                    onChange={(value) => updateDraft('transport', value as Draft['transport'])}
+                    label={props.copy.editor.transportLabel}
+                    width="100%"
+                  />
+                  <TextArea label={props.copy.editor.headers} description={props.copy.editor.headersHelp} value={props.state.draft.headers} onChange={(value) => updateDraft('headers', value)} placeholder={'Authorization=Bearer …\nX-Workspace=…'} />
                 </>
               )}
             </div>
