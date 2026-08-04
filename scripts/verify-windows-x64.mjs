@@ -9,7 +9,6 @@ import {
   makePtyProbe,
   runCommand,
   sha256File,
-  smokePackagedFilesystemWorker,
   smokePackagedRenderer,
 } from './verify-packaged-app.mjs';
 
@@ -85,14 +84,12 @@ export async function verifyPackagedWindowsApp(
     forbidPath = assertMissing,
     readMachine = readPeMachine,
     smokeRenderer = smokePackagedRenderer,
-    smokeFilesystemWorker = smokePackagedFilesystemWorker,
     workingDirectory = appDirectory,
   } = {},
 ) {
   const desktopManifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'));
   const resources = join(appDirectory, 'resources');
   const executable = join(appDirectory, executableName);
-  const filesystemWorker = join(resources, 'workers', 'filesystem-worker.js');
   const appAsar = join(resources, 'app.asar');
 
   step('checking packaged resources');
@@ -121,11 +118,12 @@ export async function verifyPackagedWindowsApp(
     timeoutMs: 60_000,
   });
 
-  step('smoking the filesystem worker');
-  await smokeFilesystemWorker(executable, filesystemWorker, {
-    workingDirectory,
-    run: (command, args, options = {}) => run(command, args, { timeoutMs: 60_000, ...options }),
-  });
+  // No filesystem worker smoke here, unlike macOS. The worker exists to enforce
+  // a sandbox profile, and `isBuiltinFilesystemWorkerSandboxAvailable` is false
+  // on Windows (packages/runtime/src/sandbox/default-sandbox-manager.ts), so the
+  // app never launches it — file tools run through the workspace executor
+  // instead. Driving the worker by hand would only prove that a POSIX-only
+  // boundary check rejects Windows paths, which no Windows user can reach.
 
   step('smoking the packaged renderer');
   await smokeRenderer(executable, { workingDirectory });

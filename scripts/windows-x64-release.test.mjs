@@ -44,7 +44,6 @@ function packagedAppOptions(overrides = {}) {
     forbidPath: async () => {},
     readMachine: async () => 0x8664,
     smokeRenderer: async () => {},
-    smokeFilesystemWorker: async () => {},
     ...overrides,
   };
 }
