@@ -93,9 +93,14 @@
   top: var(--h-titlebar);
 }
 
-/* The content column is a rounded floating plate over the shell canvas —
-   flush to the sidebar on the left, a small gap on the other three sides. */
-.maka-shell-astryx .astryx-layout-content {
+/* The canvas the floating plate sits on. Keyed on the AppShell's own
+   `#astryx-app-shell-main`, NOT on `.astryx-layout-content`: that class is on
+   EVERY Astryx LayoutContent, so as a descendant selector it also reached the
+   one a page renders inside the plate and painted the darker canvas back over
+   it, edge to edge. In light mode that was a 2.5% step nobody noticed; in dark
+   it repainted the whole page the sidebar's colour and the two columns fused.
+   The id is the vendor's own hook for this region and cannot be nested. */
+.maka-shell-astryx #astryx-app-shell-main {
   background: var(--agents-layout-bg);
 }
 
