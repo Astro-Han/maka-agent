@@ -4172,6 +4172,12 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "reasonix.toml" not in run_command, run_command
     assert 'api_key_env = "MAKA_REASONIX_PROXY_TOKEN"' in run_command, run_command
     assert 'base_url = "http://host.docker.internal:43210"' in run_command, run_command
+    # Reasonix's default bash = "enforce" refuses to run bash at all when no OS
+    # sandbox is present, and Terminal-Bench images have no bubblewrap. Without
+    # this the arm silently loses its shell and can only write scripts it cannot
+    # run, which measures the image rather than the agent.
+    assert "[sandbox]" in run_command, run_command
+    assert 'bash = "off"' in run_command, run_command
     # Reasonix resolves api_key_env from its own credential store rather than
     # the process environment, so the token has to reach $REASONIX_HOME/.env.
     # It must get there by shell expansion of the env var, never by

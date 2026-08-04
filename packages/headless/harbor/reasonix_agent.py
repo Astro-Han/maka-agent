@@ -197,6 +197,19 @@ class MakaReasonixAgent(BaseInstalledAgent):
             f"models = [{_toml_string(model)}]\n"
             f"api_key_env = {_toml_string(_PROXY_TOKEN_ENV)}\n"
             f"effort = {_toml_string(self._effort())}\n"
+            "\n"
+            # Reasonix defaults to bash = "enforce", which jails each command in
+            # an OS sandbox and REFUSES to run bash at all when none is
+            # available. Terminal-Bench images do not ship bubblewrap, so the
+            # default silently disables the agent's most important tool: the
+            # first live cell spent its whole run writing a setup script it was
+            # never allowed to execute. The Harbor task container is already the
+            # isolation boundary — that is the declared execution policy, and
+            # every other arm runs its commands unconfined inside it. Turning
+            # this off puts Reasonix on the same footing rather than handing it
+            # an advantage.
+            "[sandbox]\n"
+            'bash = "off"\n'
         )
 
     def _runtime_env(self) -> dict[str, str]:
