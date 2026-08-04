@@ -95,9 +95,9 @@ const CONTAINER_MAKA_REPO = '/opt/maka-agent';
  * fingerprint the in-container adapter re-verifies before it runs. Only Maka
  * runs from the repo mount, so it has no entry.
  */
-const COMPETITOR_TOOLCHAINS: Partial<
+const COMPETITOR_TOOLCHAINS: Readonly<
   Record<
-    HarnessAgentId,
+    Exclude<HarnessAgentId, 'maka'>,
     {
       readonly label: string;
       readonly optionKey: keyof Pick<
@@ -1085,7 +1085,7 @@ export function buildHarborJobConfig(
   const makaModel = modelIdForProvider(options.model, provider);
   const adapter = options.agent ?? 'maka';
   const agentModel = adapter === 'opencode' ? modelForOpenCode(options.model, provider) : makaModel;
-  const toolchain = COMPETITOR_TOOLCHAINS[adapter];
+  const toolchain = adapter === 'maka' ? undefined : COMPETITOR_TOOLCHAINS[adapter];
   if (toolchain) {
     const toolchainPath = options[toolchain.optionKey];
     if (!toolchainPath) {

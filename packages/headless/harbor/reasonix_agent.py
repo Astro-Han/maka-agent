@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import secrets
 import shlex
 import time
@@ -19,11 +18,9 @@ from harness_compat import (
     AgentContext,
     BaseEnvironment,
     BaseInstalledAgent,
-    NetworkAllowlist as _NetworkAllowlist,
     with_prompt_template,
 )
 from process_scope import cleanup_process_scope, scoped_command
-from provider_proxy import provider_proxy_endpoint, warn_if_pier_unreachable_proxy_port
 
 _TOOLCHAIN_ROOT = Path("/opt/maka-reasonix-toolchain")
 # Reasonix is a static Go binary; the pinned Node next to it is only the offline
@@ -46,9 +43,6 @@ _PROXY_TOKEN_ENV = "MAKA_REASONIX_PROXY_TOKEN"
 # entry, so the proxy route is unambiguous regardless of what else resolves.
 _PROVIDER_NAME = "maka-proxy"
 _DEFAULT_EFFORT = "max"
-_DEFAULT_CELL_TIMEOUT_SEC = 900
-_MAX_SAFE_INTEGER = 9007199254740991
-_POSITIVE_INT_RE = re.compile(r"[1-9][0-9]*")
 
 
 class MakaReasonixAgent(BaseInstalledAgent):
@@ -64,22 +58,6 @@ class MakaReasonixAgent(BaseInstalledAgent):
         # nothing to install at Pier build time. Pier declares this abstract on
         # BaseInstalledAgent; None keeps the runtime verify path unchanged.
         return None
-
-    def network_allowlist(self) -> _NetworkAllowlist | None:
-        # Called only under Pier; plain Harbor never calls it and harness_compat
-        # exports NetworkAllowlist = None there.
-        if _NetworkAllowlist is None:
-            return None
-        # The container runs the pre-baked Reasonix CLI against the provider
-        # base_url written into config.toml, which _write_config() sets to
-        # MAKA_PROVIDER_PROXY_URL. The toolchain is verified offline (no install
-        # download), so the only outbound host the container needs is that model
-        # endpoint. A missing or malformed proxy URL fails here, at environment
-        # creation — no fallback domain, so a misconfigured trial never gets a
-        # spurious egress grant.
-        hostname, port = provider_proxy_endpoint(self._get_env, "Reasonix")
-        warn_if_pier_unreachable_proxy_port(port, "Reasonix")
-        return _NetworkAllowlist(domains=[hostname])
 
     def get_version_command(self) -> str | None:
         return f"{shlex.quote(str(_TOOLCHAIN_BINARY))} --version"
@@ -222,9 +200,9 @@ class MakaReasonixAgent(BaseInstalledAgent):
         )
 
     def _runtime_env(self) -> dict[str, str]:
-        # The proxy URL is forwarded opaquely (IPv6 included) — endpoint-shape
-        # validation is a Pier allowlist constraint and lives in
-        # network_allowlist(), not in this plain-Harbor code path.
+        # The proxy URL is forwarded opaquely (IPv6 included): endpoint-shape
+        # validation is a Pier egress-allowlist concern, and this arm runs only
+        # under plain Harbor (see PierAgent in pier-task-runner.ts).
         proxy_token = self._get_env("MAKA_PROVIDER_PROXY_TOKEN")
         if not proxy_token:
             raise ValueError("Reasonix requires the host provider proxy")
@@ -239,19 +217,6 @@ class MakaReasonixAgent(BaseInstalledAgent):
             # in the proxy and never enters the container in any form.
             _PROXY_TOKEN_ENV: proxy_token,
         }
-
-    def _cell_timeout_sec(self) -> int:
-        raw = self._get_env("MAKA_CELL_TIMEOUT_SEC")
-        if not raw:
-            return _DEFAULT_CELL_TIMEOUT_SEC
-        stripped = raw.strip()
-        if _POSITIVE_INT_RE.fullmatch(stripped) is None:
-            return _DEFAULT_CELL_TIMEOUT_SEC
-        try:
-            value = int(stripped)
-        except ValueError:
-            return _DEFAULT_CELL_TIMEOUT_SEC
-        return value if value <= _MAX_SAFE_INTEGER else _DEFAULT_CELL_TIMEOUT_SEC
 
     def _events(self, *, require_result: bool = False) -> list[dict[str, Any]]:
         path = self.logs_dir / _OUTPUT_PATH.name
@@ -308,10 +273,20 @@ class MakaReasonixAgent(BaseInstalledAgent):
                 session_id = result["session_id"]
             if isinstance(result.get("num_turns"), int):
                 steps = max(0, result["num_turns"])
-            # A run that reports its own failure stays failed even when the CLI
-            # exits 0, so a token-burning error is never scored as completed.
-            if error_class is None and result.get("is_error") is True:
-                error_class = _classify_failure_subtype(result.get("subtype"))
+            if result.get("is_error") is True:
+                # Reasonix binds its verdict to its exit code: every
+                # error_during_execution also exits 1 (internal/cli/
+                # run_completion.go), so run() has already raised and classified
+                # from Harbor's exception text. That text embeds the whole
+                # command line, including the task instruction, whose wording
+                # can match the infrastructure markers by chance — and its
+                # fallthrough is infra_failed, which drops the cell out of the
+                # scored denominator. The stream's own message is the accurate
+                # signal, so it wins whenever the run reported its own failure.
+                error_class = _classify_failure_text(
+                    str(result.get("result") or ""),
+                    default=_self_reported_failure_class(result.get("subtype")),
+                )
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         runtime_events_path = self.logs_dir / "runtime-events.jsonl"
         source_path = self.logs_dir / _OUTPUT_PATH.name
@@ -384,15 +359,22 @@ def _result_object(events: list[dict[str, Any]]) -> dict[str, Any] | None:
     return None
 
 
-def _classify_failure_subtype(subtype: Any) -> str:
-    # error_during_execution is Reasonix reporting its own run failure, which is
-    # an agent-incomplete outcome (harbor-failure-policy's runtime_error), not
-    # an infrastructure fault that should be retried or excluded from scoring.
-    return "runtime_error" if subtype == "error_during_execution" else "infra_failed"
+def _self_reported_failure_class(subtype: Any) -> str:
+    # A failure Reasonix reports about itself is an agent-incomplete outcome
+    # (harbor-failure-policy's runtime_error), not an infrastructure fault to be
+    # retried or dropped from scoring. Unknown subtypes fail safe the same way:
+    # a future Reasonix release adding one must not silently shrink the scored
+    # denominator, and over-counting an agent failure is the honest direction.
+    del subtype
+    return "runtime_error"
 
 
 def _classify_failure(error: Exception) -> str:
-    text = str(error).lower()
+    return _classify_failure_text(str(error), default="infra_failed")
+
+
+def _classify_failure_text(message: str, *, default: str) -> str:
+    text = message.lower()
     if any(
         marker in text
         for marker in ("401", "403", "unauthorized", "authentication", "invalid api key")
@@ -406,4 +388,4 @@ def _classify_failure(error: Exception) -> str:
         return "network"
     if any(marker in text for marker in ("500", "502", "503", "504", "unavailable")):
         return "provider_unavailable"
-    return "infra_failed"
+    return default

@@ -4081,7 +4081,7 @@ context_mod = module("harbor.models.agent.context")
 context_mod.AgentContext = object
 
 sys.path.insert(0, str(root / "packages" / "headless" / "harbor"))
-from reasonix_agent import MakaReasonixAgent
+from reasonix_agent import MakaReasonixAgent, _classify_failure as _classify_from_harbor_text
 
 PROXY_TOKEN = "ephemeral-proxy-token"
 
@@ -4218,16 +4218,56 @@ with tempfile.TemporaryDirectory() as tmp:
     assert_invalid_stream("[]\n", "JSON object")
     assert_invalid_stream(stream({"kind": "turn_done"}), "result object")
 
-    # A run that reports its own failure stays failed even on a zero exit code,
-    # and lands in harbor-failure-policy's agent-incomplete class rather than
-    # inflating the infrastructure-failure count.
-    failing = dict(RESULT, is_error=True, subtype="error_during_execution")
+    # Reasonix binds its verdict to its exit code: error_during_execution always
+    # exits 1 (internal/cli/run_completion.go), so the real failure path always
+    # arrives with run() having raised. The stream's verdict must still win, or
+    # every genuine agent failure is classified infra_failed, drops out of the
+    # scored denominator, and silently biases the comparison toward Reasonix.
+    failing = dict(RESULT, is_error=True, subtype="error_during_execution",
+                   result="the model gave up after 40 turns")
     (logs / "reasonix.jsonl").write_text(stream(failing), encoding="utf-8")
+    agent._failure_class = "infra_failed"
     agent.populate_context_post_run(object())
     self_reported = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
     assert self_reported["status"] == "failed", self_reported
     assert self_reported["errorClass"] == "runtime_error", self_reported
 
+    # Harbor's exception text embeds the whole command line, hence the task
+    # instruction; a task about network sockets must not be misread as an
+    # infrastructure fault when Reasonix itself said the agent failed.
+    del agent._failure_class
+    agent._failure_class = _classify_from_harbor_text(
+        "Command failed (exit 1): reasonix run ... 'debug the socket connection timeout'"
+    )
+    assert agent._failure_class == "network", agent._failure_class
+    agent.populate_context_post_run(object())
+    noisy = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+    assert noisy["errorClass"] == "runtime_error", noisy
+
+    # An unknown future subtype must fail safe toward the scored class rather
+    # than silently shrinking the denominator.
+    unknown = dict(RESULT, is_error=True, subtype="some_future_subtype", result="")
+    (logs / "reasonix.jsonl").write_text(stream(unknown), encoding="utf-8")
+    agent.populate_context_post_run(object())
+    assert json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))["errorClass"] == "runtime_error"
+
+    # A real infrastructure fault named by the stream itself still classifies as
+    # infrastructure, so an auth or rate-limit failure is not scored as a loss.
+    for message, expected in [
+        ("provider returned 401 unauthorized", "auth"),
+        ("429 rate limit exceeded", "rate_limit"),
+        ("upstream 503 unavailable", "provider_unavailable"),
+    ]:
+        (logs / "reasonix.jsonl").write_text(
+            stream(dict(RESULT, is_error=True, subtype="error_during_execution", result=message)),
+            encoding="utf-8",
+        )
+        agent.populate_context_post_run(object())
+        cell_out = json.loads((logs / "maka-cell-output.json").read_text(encoding="utf-8"))
+        assert cell_out["errorClass"] == expected, (message, cell_out)
+
+    # With no stream at all there is no verdict to trust, so the exception-derived
+    # class stands.
     agent._failure_class = "auth"
     (logs / "reasonix.jsonl").write_text("", encoding="utf-8")
     agent.populate_context_post_run(object())
