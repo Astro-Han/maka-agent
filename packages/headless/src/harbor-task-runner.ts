@@ -198,6 +198,20 @@ export function incompleteTerminalProviderRequest(
   return terminal;
 }
 
+/** Shared across runners: a verdict is this arm's evidence only if the agent got
+ * the run it was given. A tail request the upstream cut short says it did not,
+ * so the grade does not travel — the same boundary that makes a settled trial
+ * infra, applied where the trial ends as a budget exhaustion instead. Without
+ * it, a provider outage that a verifier happened to pass would be recorded as a
+ * pass on the one path that skips the infra check. `aborted` stays exempt: the
+ * agent phase ended, and tearing the request down is what that looks like. */
+export function trialGradeSurvivingProviderOutage<T>(
+  grade: T | undefined,
+  providerTelemetry: readonly ProviderRequestTelemetry[],
+): T | undefined {
+  return incompleteTerminalProviderRequest(providerTelemetry, true) ? undefined : grade;
+}
+
 export class HarborInfraError extends Error {
   constructor(
     message: string,
@@ -489,7 +503,10 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
             // harness's. Both are true at once, so both travel — dropping the
             // verdict because the agent never filed its self-report threw away a
             // pass Harbor had already awarded.
-            const harbor = trialVerifierArtifacts(rewardArtifact, verifierArtifact, input.task.id);
+            const harbor = trialGradeSurvivingProviderOutage(
+              trialVerifierArtifacts(rewardArtifact, verifierArtifact, input.task.id),
+              providerTelemetry,
+            );
             throw new FixedPromptBudgetExhaustedError(
               `agent budget exhausted for task ${input.task.id}`,
               formatTrialException(trialException),

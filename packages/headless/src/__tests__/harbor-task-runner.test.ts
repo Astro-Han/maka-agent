@@ -19,6 +19,7 @@ import {
   createHarborTaskRunner,
   HarborInfraError,
   incompleteTerminalProviderRequest,
+  trialGradeSurvivingProviderOutage,
   MAKA_SETTLEMENT_GRACE_SEC,
   type HarborProcessRunner,
   type HarborRunRequest,
@@ -3440,6 +3441,25 @@ describe('incompleteTerminalProviderRequest', () => {
         `${outcome} must stay infra`,
       );
     }
+  });
+
+  test('withholds a budget-exhausted grade when the provider cut the tail request short', () => {
+    // The grade is evidence only if the agent got the run it was given. A
+    // provider-side truncation says it did not, so the verdict does not travel
+    // — the same boundary that makes the settled path infra, applied where the
+    // trial ends as a budget exhaustion instead.
+    const grade = { reward: 1 };
+    assert.equal(trialGradeSurvivingProviderOutage(grade, [request('completed')]), grade);
+    assert.equal(trialGradeSurvivingProviderOutage(grade, [request('aborted')]), grade);
+    assert.equal(trialGradeSurvivingProviderOutage(grade, []), grade);
+    for (const outcome of ['interrupted', 'failed'] as const) {
+      assert.equal(
+        trialGradeSurvivingProviderOutage(grade, [request(outcome)]),
+        undefined,
+        `${outcome} must withhold the grade`,
+      );
+    }
+    assert.equal(trialGradeSurvivingProviderOutage(undefined, [request('completed')]), undefined);
   });
 
   test('keeps every non-completing tail request infra on an unsettled trial', () => {

@@ -1015,6 +1015,105 @@ test('createPierTaskRunner carries the verifier grade of a budget-exhausted tria
   });
 });
 
+// The grade travels only from a graded state. `invalid` (corrupt or crashed
+// verifier) and `ungraded` (no reward at all) are not verdicts, so a budget
+// exhaustion carries no score — the same negative side the Harbor table pins.
+for (const trial of [
+  { name: 'a crash-sentinel reward', opts: { reward: -1 } },
+  { name: 'a corrupt reward.json', opts: { rewardJsonRaw: 'not-json{' } },
+  { name: 'no reward at all', opts: {} },
+] as const) {
+  test(`createPierTaskRunner carries no verdict from a budget-exhausted trial with ${trial.name}`, async () => {
+    await withDirs(async ({ jobsDir, repo }) => {
+      const runner = createPierTaskRunner(
+        baseOptions({
+          jobsDir,
+          makaRepoPath: repo,
+          runPier: fakePier({
+            ...trial.opts,
+            cell: null,
+            exceptionInfo: {
+              exception_type: 'AgentTimeoutError',
+              exception_message: 'Agent execution timed out after 600 seconds',
+            },
+          }),
+        }),
+      );
+      await assert.rejects(runner(runInput()), (error: Error) => {
+        assert.ok(error instanceof FixedPromptBudgetExhaustedError);
+        assert.equal(error.artifactRefs?.harbor, undefined);
+        return true;
+      });
+    });
+  });
+}
+
+test('createPierTaskRunner withholds a budget-exhausted grade when the provider cut the tail short', async () => {
+  await withDirs(async ({ jobsDir, repo }) => {
+    const makeRunner = (outcome: ProviderRequestTelemetry['outcome']) =>
+      createPierTaskRunner(
+        baseOptions({
+          jobsDir,
+          makaRepoPath: repo,
+          agent: 'opencode',
+          agentVersion: OPENCODE_TOOLCHAIN_SPEC.opencode.version,
+          backend: 'ai-sdk',
+          provider: 'deepseek',
+          model: 'deepseek-v4-flash',
+          reasoningEffort: 'max',
+          opencodeToolchainPath: repo,
+          apiKeyFile: '/secrets/deepseek.key',
+          providerProxyHub: {
+            baseUrl: 'http://host.docker.internal:443',
+            issue: () => ({
+              baseUrl: 'http://host.docker.internal:443',
+              token: 'ephemeral-token',
+              usage: () => null,
+              telemetry: () => [
+                {
+                  requestId: 1,
+                  method: 'POST',
+                  path: '/chat/completions',
+                  status: 200,
+                  outcome,
+                  durationMs: 5,
+                  bodyChunks: 1,
+                  responseBytes: 64,
+                  terminalEvent: outcome === 'completed',
+                },
+              ],
+              close: async () => {},
+            }),
+            close: async () => {},
+          },
+          runPier: fakePier({
+            reward: 1,
+            cell: null,
+            exceptionInfo: {
+              exception_type: 'AgentTimeoutError',
+              exception_message: 'Agent execution timed out after 600 seconds',
+            },
+          }),
+        }),
+      );
+
+    // The agent tearing its own request down on the way out is what a deadline
+    // looks like from the proxy, so the verdict still travels.
+    await assert.rejects(makeRunner('aborted')(runInput()), (error: Error) => {
+      assert.ok(error instanceof FixedPromptBudgetExhaustedError);
+      assert.equal(error.artifactRefs?.harbor?.reward, 1);
+      return true;
+    });
+    // An upstream truncation is a provider outage: the agent never got the run
+    // it was given, so its verdict is not this arm's evidence.
+    await assert.rejects(makeRunner('interrupted')(runInput()), (error: Error) => {
+      assert.ok(error instanceof FixedPromptBudgetExhaustedError);
+      assert.equal(error.artifactRefs?.harbor, undefined);
+      return true;
+    });
+  });
+});
+
 test('createPierTaskRunner scores a graded trial despite a non-budget exception', async () => {
   // Harbor-authority parity: exception_info records how the agent phase ended,
   // not whether the trial was graded. A Kimi CLI non-zero exit the verifier

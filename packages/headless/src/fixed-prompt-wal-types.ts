@@ -118,9 +118,10 @@ export interface FixedPromptTaskBudgetExhaustedEvent {
   taskId: string;
   status: 'budget_exhausted';
   /** A trial can exhaust its budget and still be graded: the harness runs the
-   * verifier after the agent-phase exception, so an authoritative reward exists
-   * whenever `harbor` is present. Only then may these be true — without a
-   * verifier verdict the outcome carries no score. */
+   * verifier after the agent-phase exception. `scored` is the authority — it is
+   * true only when the verifier's artifacts agreed on a verdict. `harbor` also
+   * travels with a verdict that was rejected, so its presence alone says
+   * nothing; read `scored` before trusting the reward. */
   passed: boolean;
   scored: boolean;
   eligible: boolean;
