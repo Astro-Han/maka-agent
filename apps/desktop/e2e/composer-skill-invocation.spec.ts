@@ -66,8 +66,9 @@ test('slash suggestions in a Deep Research session drop non-research Skills', as
   await expect(listbox).not.toContainText('Deep Research Only');
   await composer.fill('');
 
-  await page.getByRole('button', { name: '更多操作' }).click();
-  await page.getByRole('menuitem', { name: '打开命令面板' }).click();
+  // ⌘K is the palette's only entry now — the 更多操作 menu that used to hold
+  // a 打开命令面板 item is gone. ControlOrMeta covers CI's Linux and macOS.
+  await page.keyboard.press('ControlOrMeta+KeyK');
   await page.getByRole('dialog', { name: '命令面板' }).getByRole('option', { name: /新建深度研究/ }).click();
   await expect(page.getByLabel('深度研究，只读探索').filter({ visible: true })).toBeVisible();
 
