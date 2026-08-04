@@ -108,8 +108,12 @@ export interface FixedPromptTaskBudgetExhaustedEvent {
   resumeFingerprint?: string;
   taskId: string;
   status: 'budget_exhausted';
-  passed: false;
-  scored: false;
+  /** A trial can exhaust its budget and still be graded: the harness runs the
+   * verifier after the agent-phase exception, so an authoritative reward exists
+   * whenever `harbor` is present. Only then may these be true — without a
+   * verifier verdict the outcome carries no score. */
+  passed: boolean;
+  scored: boolean;
   eligible: boolean;
   errorClass: 'budget_exhausted';
   error: string;
@@ -133,6 +137,10 @@ export interface FixedPromptTaskBudgetExhaustedEvent {
   taskToolSummary?: HarborCellTaskToolSummary;
   steps?: number;
   durationMs?: number;
+  harbor?: {
+    reward: number;
+    verifier?: HarborVerifierOutcome;
+  };
 }
 
 export interface FixedPromptTaskPlumbingFailedEvent {

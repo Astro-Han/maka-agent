@@ -990,6 +990,31 @@ test('createPierTaskRunner recovers execution identity from a budget-exhausted t
   });
 });
 
+test('createPierTaskRunner carries the verifier grade of a budget-exhausted trial without cell output', async () => {
+  await withDirs(async ({ jobsDir, repo }) => {
+    const runner = createPierTaskRunner(
+      baseOptions({
+        jobsDir,
+        makaRepoPath: repo,
+        runPier: fakePier({
+          cell: null,
+          reward: 1,
+          exceptionInfo: {
+            exception_type: 'AgentTimeoutError',
+            exception_message: 'Agent execution timed out after 600 seconds',
+          },
+        }),
+      }),
+    );
+    await assert.rejects(runner(runInput()), (error: Error) => {
+      assert.ok(error instanceof FixedPromptBudgetExhaustedError);
+      assert.equal(error.artifactRefs?.harbor?.reward, 1);
+      assert.equal(error.artifactRefs?.harbor?.verifier?.outcome, 'passed');
+      return true;
+    });
+  });
+});
+
 test('createPierTaskRunner scores a graded trial despite a non-budget exception', async () => {
   // Harbor-authority parity: exception_info records how the agent phase ended,
   // not whether the trial was graded. A Kimi CLI non-zero exit the verifier

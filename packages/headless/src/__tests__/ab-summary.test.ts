@@ -85,6 +85,29 @@ describe('summarizeAbComparison', () => {
     assert.equal(result.taskLevel.losses, 1);
   });
 
+  test('counts a graded budget exhaustion as a pass', () => {
+    const gradedTimeout = {
+      ...budgetExhausted('long-task'),
+      passed: true,
+      scored: true,
+      harbor: { reward: 1 },
+    };
+    const result = summarizeAbComparison({
+      runId: 'ab-run',
+      roundId: 'ab-summary',
+      baselineArmId: 'maka-baseline',
+      candidateArmId: 'candidate',
+      evaluationTaskIds: ['long-task'],
+      baselineRuns: [[gradedTimeout]],
+      candidateRuns: [[completed('long-task', false)]],
+    });
+
+    assert.equal(result.baseline.valid, 1);
+    assert.equal(result.baseline.budgetExhausted, 1);
+    assert.equal(result.baseline.passed, 1);
+    assert.equal(result.baseline.passRate, 1);
+  });
+
   test('classifies a scored completed benchmark deadline as budget exhausted', () => {
     const deadlineFailure = {
       ...completed('long-task', false),

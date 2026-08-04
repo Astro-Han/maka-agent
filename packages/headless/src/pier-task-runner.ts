@@ -532,6 +532,19 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
               agent,
               harborTraceMode(attemptAgentEnv),
             );
+            // Same cross-runner contract as Harbor: a graded trial that never
+            // filed its cell output still carries the verifier's own verdict,
+            // because the self-report is not what scores a trial.
+            const harbor =
+              grade.state === 'graded'
+                ? {
+                    reward: grade.reward,
+                    verifier: pierVerifierOutcome(
+                      grade.reward,
+                      await readVerifierDurationMs(join(trialDir, TRIAL_RESULT)),
+                    ),
+                  }
+                : undefined;
             throw new FixedPromptBudgetExhaustedError(
               `agent budget exhausted for task ${input.task.id}`,
               // Carry the invalid-grade detail alongside the exhaustion cause so a
@@ -540,9 +553,10 @@ export function createPierTaskRunner(options: PierTaskRunnerOptions): TaskRunner
               grade.state === 'invalid'
                 ? `${formatTrialException(trialException)}; ${grade.detail}`
                 : formatTrialException(trialException),
-              artifactRefs || providerTelemetry.length > 0
+              artifactRefs || harbor || providerTelemetry.length > 0
                 ? {
                     ...(artifactRefs ?? {}),
+                    ...(harbor ? { harbor } : {}),
                     ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
                   }
                 : undefined,

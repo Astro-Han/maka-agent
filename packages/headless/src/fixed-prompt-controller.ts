@@ -114,6 +114,13 @@ export interface FixedPromptBudgetExhaustedArtifactRefs {
   tokenSummary?: HarborCellTokenSummary;
   cellOutput?: HarborTaskRunCellOutput;
   executionIdentity?: HarborCellExecutionIdentity;
+  /** The verifier's own verdict on the workspace the exhausted agent left. It is
+   * the harness's authoritative artifact, so it survives a missing cell output —
+   * the agent's self-report is not what grades a trial. */
+  harbor?: {
+    reward: number;
+    verifier?: HarborVerifierOutcome;
+  };
 }
 
 export class FixedPromptBudgetExhaustedError extends Error {
@@ -1097,6 +1104,13 @@ function taskBudgetExhaustedEvent(input: {
   const traceEventsPath = artifactRefs.traceEventsPath ?? cellOutput?.traceEventsPath;
   const providerTelemetryPath =
     artifactRefs.providerTelemetryPath ?? cellOutput?.providerTelemetryPath;
+  // A budget exhaustion is a settled deadline, which taskCompletedScoringProjection
+  // already counts as verifierGraded. So the same rule applies here: when the
+  // harness handed back an authoritative reward, the trial has a score, and
+  // reward > 0 is a pass. Evidence that fails to attest this arm keeps it
+  // unscored — a grade nobody can attribute is not this arm's grade.
+  const harbor = evidenceFailure === undefined ? artifactRefs.harbor : undefined;
+  const passed = harbor !== undefined && harbor.reward > 0;
   return {
     schemaVersion: FIXED_PROMPT_WAL_SCHEMA_VERSION,
     type: 'task_budget_exhausted',
@@ -1107,11 +1121,12 @@ function taskBudgetExhaustedEvent(input: {
     ...(input.resumeFingerprint ? { resumeFingerprint: input.resumeFingerprint } : {}),
     taskId: input.taskId,
     status: 'budget_exhausted',
-    passed: false,
-    scored: false,
+    passed,
+    scored: harbor !== undefined,
     eligible: evidenceFailure === undefined,
     errorClass: 'budget_exhausted',
     error: errorMessage(input.error),
+    ...(harbor ? { harbor } : {}),
     ...(evidenceFailure
       ? {
           evidenceErrorClass: evidenceFailure.errorClass,
@@ -1292,7 +1307,8 @@ function budgetExhaustedArtifactRefs(error: unknown): FixedPromptBudgetExhausted
         refs.runtimeEventsUnavailableReason ||
         refs.tokenSummary ||
         refs.cellOutput ||
-        refs.executionIdentity)
+        refs.executionIdentity ||
+        refs.harbor)
     )
       return refs;
   }

@@ -1983,6 +1983,64 @@ describe('createHarborTaskRunner', () => {
     });
   });
 
+  test('carries the authoritative verifier grade of a timed-out trial that never wrote its cell output', async () => {
+    await withRun(async ({ jobsDir, repo }) => {
+      const runner = createHarborTaskRunner({
+        makaRepoPath: repo,
+        jobsDir,
+        model: 'deepseek/deepseek-v4-flash',
+        runHarbor: fakeRunner({
+          reward: '1.0\n',
+          cell: null,
+          trialResult: {
+            exception_info: {
+              exception_type: 'AgentTimeoutError',
+              exception_message: 'Agent execution timed out after 60.0 seconds',
+            },
+          },
+        }),
+      });
+
+      await assert.rejects(runner(runInput()), (error: unknown) => {
+        assert.ok(error instanceof FixedPromptBudgetExhaustedError);
+        assert.equal(error.artifactRefs?.harbor?.reward, 1);
+        assert.equal(error.artifactRefs?.harbor?.verifier?.outcome, 'passed');
+        return true;
+      });
+    });
+  });
+
+  test('carries no verifier grade when a timed-out trial has no conclusive verifier outcome', async () => {
+    await withRun(async ({ jobsDir, repo }) => {
+      const runner = createHarborTaskRunner({
+        makaRepoPath: repo,
+        jobsDir,
+        model: 'deepseek/deepseek-v4-flash',
+        runHarbor: fakeRunner({
+          reward: '1.0\n',
+          verifierOutcome: {
+            schemaVersion: 1,
+            outcome: 'candidate_timeout',
+            attempts: [{ attempt: 1, classification: 'timeout', durationMs: 1 }],
+          },
+          cell: null,
+          trialResult: {
+            exception_info: {
+              exception_type: 'AgentTimeoutError',
+              exception_message: 'Agent execution timed out after 60.0 seconds',
+            },
+          },
+        }),
+      });
+
+      await assert.rejects(runner(runInput()), (error: unknown) => {
+        assert.ok(error instanceof FixedPromptBudgetExhaustedError);
+        assert.equal(error.artifactRefs?.harbor, undefined);
+        return true;
+      });
+    });
+  });
+
   test('recovers checkpoint usage when a timed-out deadline cell has no summary', async () => {
     await withRun(async ({ jobsDir, repo }) => {
       const usageCheckpoint = tokenSummary({

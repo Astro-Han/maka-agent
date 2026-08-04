@@ -481,12 +481,18 @@ export function createHarborTaskRunner(options: HarborTaskRunnerOptions): TaskRu
               runnerOptions.agent,
               harborTraceMode(runnerOptions.agentEnv),
             );
+            // The exhaustion is the agent's fact; the verifier's verdict is the
+            // harness's. Both are true at once, so both travel — dropping the
+            // grade because the agent never filed its self-report threw away a
+            // pass Harbor had already awarded.
+            const harbor = authoritativeTrialGrade(rewardArtifact, verifierArtifact, input.task.id);
             throw new FixedPromptBudgetExhaustedError(
               `agent budget exhausted for task ${input.task.id}`,
               formatTrialException(trialException),
-              artifactRefs || providerTelemetry.length > 0
+              artifactRefs || harbor || providerTelemetry.length > 0
                 ? {
                     ...(artifactRefs ?? {}),
+                    ...(harbor ? { harbor } : {}),
                     ...(providerTelemetry.length > 0 ? { providerTelemetryPath } : {}),
                   }
                 : undefined,
@@ -946,6 +952,10 @@ async function readVerifierOutcome(
       errorText(error),
     );
   }
+  return parseVerifierOutcome(value, taskId);
+}
+
+function parseVerifierOutcome(value: unknown, taskId: string): HarborVerifierOutcome {
   if (!isRecord(value) || value.schemaVersion !== 1) {
     throw new HarborInfraError(`verifier outcome is malformed for task ${taskId}`);
   }
@@ -1673,6 +1683,28 @@ export function classifyTrialTermination(
  * phase already ended abnormally. Unreadable or malformed text is treated as no
  * evidence — the caller's own reader raises the precise diagnosis on the paths
  * that require a verdict. */
+/** The trial's authoritative grade, read straight from the verifier's own
+ * artifacts. It exists independently of `maka-cell-output.json`: that file is
+ * the agent's self-report, and an agent that ran out of budget mid-write never
+ * gets to file one. Returning the grade lets a budget exhaustion carry the
+ * verdict Harbor actually reached instead of discarding it. A verifier that did
+ * not conclude, or artifacts that do not parse, yield no grade — the caller
+ * then records the exhaustion with no score, as before. */
+function authoritativeTrialGrade(
+  rewardArtifact: string | null,
+  verifierArtifact: string | null,
+  taskId: string,
+): { reward: number; verifier: HarborVerifierOutcome } | undefined {
+  if (rewardArtifact === null || !hasConclusiveVerifierOutcome(verifierArtifact)) return undefined;
+  const reward = Number(rewardArtifact.trim());
+  if (rewardArtifact.trim().length === 0 || !Number.isFinite(reward)) return undefined;
+  try {
+    return { reward, verifier: parseVerifierOutcome(JSON.parse(verifierArtifact!), taskId) };
+  } catch {
+    return undefined;
+  }
+}
+
 function hasConclusiveVerifierOutcome(raw: string | null): boolean {
   if (raw === null) return false;
   let parsed: unknown;
