@@ -113,15 +113,20 @@ export async function verifyPackagedWindowsApp(
   await smokeRenderer(executable, { workingDirectory });
 }
 
-// The NSIS installer carries no inspectable app structure, so the ZIP of the
-// same build is what gets verified; installing the .exe is a checklist step.
-export async function verifyWindowsX64Exe(
+// Neither release artifact is inspected as an artifact: the NSIS installer has
+// no readable app structure, and the ZIP is an archive of the win-unpacked
+// directory electron-builder just produced. That directory is the app, so it is
+// what gets verified — unpacking the ZIP would only rebuild a copy of it. The
+// artifacts themselves are pinned by checksum, and installing the .exe is a
+// checklist step. (macOS mounts its DMG instead because notarizing and stapling
+// rewrite the DMG after packaging, so only the final artifact can be trusted.)
+export async function verifyWindowsX64Release(
   inputPath,
   {
     platform = process.platform,
-    run = runCommandFromRepo,
     verifyApp = verifyPackagedWindowsApp,
     checksum = sha256File,
+    appDirectory,
   } = {},
 ) {
   if (platform !== 'win32') {
@@ -136,25 +141,17 @@ export async function verifyWindowsX64Exe(
     throw new Error(`Expected the NSIS installer .exe, found ${basename(exePath)}.`);
   }
   const zipPath = `${exePath.slice(0, -'.exe'.length)}.zip`;
+  const unpackedDirectory = appDirectory ?? join(dirname(exePath), 'win-unpacked');
   await access(exePath);
   await access(zipPath);
+  await access(unpackedDirectory);
 
+  // The smokes write into their working directory, which therefore must not be
+  // the release directory the artifacts live in.
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'maka-release-verify-'));
-  const extracted = join(temporaryDirectory, 'app');
 
   try {
-    // Not Expand-Archive: it walks the entries through the PowerShell pipeline
-    // and takes over half an hour on a packaged Electron app, which is most of
-    // an hour added to every release. This is the library Expand-Archive calls,
-    // without that overhead.
-    await runPowerShell(
-      run,
-      `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
-        `[System.IO.Compression.ZipFile]::ExtractToDirectory(${powerShellLiteral(
-          zipPath,
-        )}, ${powerShellLiteral(extracted)})`,
-    );
-    await verifyApp(extracted, { workingDirectory: temporaryDirectory });
+    await verifyApp(unpackedDirectory, { workingDirectory: temporaryDirectory });
 
     const checksums = [];
     for (const path of [exePath, zipPath]) {
@@ -163,14 +160,14 @@ export async function verifyWindowsX64Exe(
       await writeFile(checksumPath, `${sha256}  ${basename(path)}\n`, 'utf8');
       checksums.push({ path, checksumPath, sha256 });
     }
-    return { exePath, zipPath, checksums };
+    return { exePath, zipPath, unpackedDirectory, checksums };
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = await verifyWindowsX64Exe(process.argv[2]);
+  const result = await verifyWindowsX64Release(process.argv[2]);
   console.log(`Verified ${result.exePath}`);
   for (const { path, sha256 } of result.checksums) {
     console.log(`SHA-256 ${sha256}  ${basename(path)}`);

@@ -58,6 +58,7 @@ export async function packageWindowsX64({
   const exePath = join(releaseDirectory, `Maka-${manifest.version}-win-x64.exe`);
   const zipPath = join(releaseDirectory, `Maka-${manifest.version}-win-x64.zip`);
   const updateMetadataPath = join(releaseDirectory, 'latest.yml');
+  const unpackedDirectory = join(releaseDirectory, 'win-unpacked');
 
   for (const path of requiredElectronLicensePaths) {
     await assertFile(path);
@@ -71,12 +72,18 @@ export async function packageWindowsX64({
   await assertFile(exePath);
   await assertFile(zipPath);
   await assertFile(updateMetadataPath);
-  await remove(join(releaseDirectory, 'win-unpacked'), { recursive: true, force: true });
+  // win-unpacked stays: the ZIP is an archive of exactly this directory, so it
+  // is what the verifier inspects. Extracting the ZIP would only rebuild a copy
+  // of it, and writing tens of thousands of small files on Windows costs more
+  // than the entire packaging step. It is not a release asset — the upload
+  // globs match artifacts by name — and the release directory is rebuilt from
+  // scratch on the next run.
+  await assertFile(unpackedDirectory);
 
-  return exePath;
+  return { exePath, zipPath, unpackedDirectory };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const exePath = await packageWindowsX64();
+  const { exePath } = await packageWindowsX64();
   console.log(`Created ${exePath}`);
 }

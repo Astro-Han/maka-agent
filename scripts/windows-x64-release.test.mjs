@@ -14,7 +14,7 @@ const {
   powerShellLiteral,
   readPeMachine,
   verifyPackagedWindowsApp,
-  verifyWindowsX64Exe,
+  verifyWindowsX64Release,
 } = await import(new URL('verify-windows-x64.mjs', import.meta.url));
 
 const desktopManifest = JSON.parse(
@@ -82,11 +82,20 @@ test('Windows packaging fails closed on hosts that cannot produce the release', 
 
 test('Windows verification fails closed on the host, the input, and the architecture', async () => {
   await assert.rejects(
-    verifyWindowsX64Exe('C:/Maka.exe', { platform: 'darwin' }),
+    verifyWindowsX64Release('C:/Maka.exe', { platform: 'darwin' }),
     /requires Windows/,
   );
-  await assert.rejects(verifyWindowsX64Exe('', { platform: 'win32' }), /Usage:/);
-  await assert.rejects(verifyWindowsX64Exe('C:/Maka.zip', { platform: 'win32' }), /NSIS installer/);
+  await assert.rejects(verifyWindowsX64Release('', { platform: 'win32' }), /Usage:/);
+  await assert.rejects(
+    verifyWindowsX64Release('C:/Maka.zip', { platform: 'win32' }),
+    /NSIS installer/,
+  );
+  // The app directory the ZIP was archived from has to be there; a release
+  // directory without it is a half-built one, not something to verify.
+  await assert.rejects(
+    verifyWindowsX64Release('C:/does-not-exist/Maka.exe', { platform: 'win32' }),
+    /ENOENT/,
+  );
 
   await assert.rejects(
     verifyPackagedWindowsApp('C:/app', packagedAppOptions({ readMachine: async () => 0x014c })),
