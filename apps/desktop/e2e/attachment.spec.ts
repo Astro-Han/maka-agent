@@ -112,12 +112,9 @@ test('a mixed attachment send has the Astryx message hierarchy', async ({ window
   const lightbox = page.locator('.astryx-lightbox');
   await expect(lightbox).toBeVisible();
 
-  // The lightbox parks its close button in the window's top-right corner, which
-  // is inside the titlebar's drag rect. The OS hit-tests drag regions from
-  // element rects and never sees the top layer, so a modal that does not
-  // subtract its own rect leaks clicks on that button to the window manager as
-  // drags. Assert both halves of the contract: the overlap is real (otherwise
-  // the app-region assertion guards nothing), and the modal is `no-drag`.
+  // The lightbox close button lands inside the titlebar's drag rect, where the
+  // OS eats clicks unless the modal is `no-drag`. The overlap is asserted first —
+  // without it the app-region check would guard nothing.
   const titlebar = page.locator('.maka-window-titlebar');
   const [titlebarBox, lightboxBox] = await Promise.all([titlebar.boundingBox(), lightbox.boundingBox()]);
   expect(titlebarBox).not.toBeNull();
