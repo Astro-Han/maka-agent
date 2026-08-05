@@ -28,7 +28,9 @@ describe('ToolTrow stable structure', () => {
     assert.match(one, /class="astryx-chat-tool-calls\b/);
     assert.match(one, /aria-expanded="false"/);
     assert.match(two, /class="astryx-chat-tool-calls\b/);
-    assert.match(two, /aria-expanded="true"/);
-    assert.match(two, />2 tool calls</);
+    // Both render collapsed — a second call does not open the group, and the
+    // collapsed group header projects the last call ("Grep") on its own.
+    assert.doesNotMatch(two, /aria-expanded="true"/);
+    assert.match(two, />Grep</);
   });
 });

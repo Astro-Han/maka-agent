@@ -296,23 +296,18 @@ export function ToolTrow({ items }: { items: ToolActivityItem[] }) {
     ),
   }));
 
-  // Only reaches a group of two or more: Astryx renders a lone call as a bare
-  // row that owns its own expansion. A group opens while anything inside is
-  // still in flight, because the collapsed header projects the last call alone
-  // — with parallel calls the last one can settle first, and a collapsed green
-  // check would report the whole group done while a sibling still runs.
+  // Expansion is Astryx's own default — collapsed — and opening a group is the
+  // reader's move, never the turn's. Seeding it open from in-flight status only
+  // sets Astryx's initial state: the timeline key is deliberately stable so a
+  // disclosure survives mid-turn inserts (see timelineEntryKey), so such a group
+  // never re-collapses once its tools settle and every live turn leaves a trail
+  // of permanently open groups behind it.
   //
-  // This seeds Astryx's initial state only; the group does not re-collapse when
-  // its tools settle, since the timeline key is deliberately stable so a
-  // disclosure survives mid-turn inserts (see timelineEntryKey). So a group
-  // watched live stays open, while the same turn reloaded renders collapsed —
-  // work in progress stays visible, history starts tidy.
-  return (
-    <ChatToolCalls
-      calls={calls}
-      defaultIsExpanded={items.some((item) => isInFlightToolStatus(item.status))}
-    />
-  );
+  // The accepted cost: a collapsed header projects the last call alone, so with
+  // parallel calls the last one can settle first and the header may briefly show
+  // a settled icon while a sibling still runs. It resolves on its own as the
+  // group finishes, and expanding shows every row's real status.
+  return <ChatToolCalls calls={calls} />;
 }
 
 function astryxToolStatus(item: ToolActivityItem): ChatToolCallItem['status'] {

@@ -62,7 +62,7 @@ describe('ProcessingBlock disclosure wiring (#1307)', () => {
     assert.match(markup, /深度思考/);
   });
 
-  it('keeps an unsettled group in the same Astryx rows, expanded, without a processing wrapper', () => {
+  it('keeps an unsettled group in the same collapsed Astryx rows, without a processing wrapper', () => {
     const markup = renderToStaticMarkup(createElement(TurnView, {
       turn: turnWithTools([
         { toolUseId: 'b1', toolName: 'Bash', activityKind: 'command', status: 'completed', args: {} },
@@ -71,7 +71,8 @@ describe('ProcessingBlock disclosure wiring (#1307)', () => {
     }));
     assert.doesNotMatch(markup, /data-processing="block"/);
     assert.match(markup, /class="[^"]*astryx-chat-tool-calls[^"]*"/);
-    assert.match(markup, /aria-expanded="true"/);
+    assert.doesNotMatch(markup, /aria-expanded="true"/);
+    // The collapsed group header projects the last call, intent and all.
     assert.match(markup, /写入配置/);
   });
 });
