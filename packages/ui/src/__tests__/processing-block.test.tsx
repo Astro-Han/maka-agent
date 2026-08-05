@@ -129,8 +129,7 @@ describe('deep-thinking disclosure', () => {
   it('draws its chevron from the same Astryx icon registry as the tool rows', () => {
     // The ejected lab component used to hand-write its own 12-viewBox chevron,
     // which drew a heavier stroke than the tool rows' registry glyph once
-    // chat-message.css forced both to 10x10. Comparing the rendered markup
-    // pins the shared source: a divergent viewBox or size class fails here.
+    // chat-message.css forced both to 10x10.
     const markup = renderToStaticMarkup(createElement(TurnView, {
       turn: {
         ...turnWithTools([
@@ -150,13 +149,32 @@ describe('deep-thinking disclosure', () => {
       },
     }));
 
-    const icons = markup.match(/<span[^>]*class="astryx-icon[^"]*"[^>]*>.*?<\/svg><\/span>/g) ?? [];
-    const chevrons = icons.filter((icon) => icon.includes('M6 9l6 6 6-6'));
-    assert.ok(chevrons.length >= 2, `expected reasoning + tool chevrons, got ${chevrons.length}`);
-    assert.equal(new Set(chevrons).size, 1, 'reasoning and tool chevrons must render identical markup');
-    assert.match(chevrons[0]!, /data-size="xsm"/);
-    assert.match(chevrons[0]!, /viewBox="0 0 24 24"/);
-    assert.doesNotMatch(markup, /viewBox="0 0 12 12"/);
+    // Compared per row, not over one filtered pool of the whole turn. A pool
+    // can only ever prove the icons it collected are alike, and the reasoning
+    // row's old hand-written chevron was not a registry icon at all — it fell
+    // out of the pool, leaving the tool rows to agree with themselves. Slicing
+    // the turn at the two row roots keeps the reasoning row inside its own
+    // assertion, so it fails whichever way the row diverges: no registry icon,
+    // a different icon name, or a different size.
+    const registryIcons = (region: string) =>
+      region.match(/<span[^>]*class="astryx-icon[^"]*"[^>]*>.*?<\/svg><\/span>/g) ?? [];
+    const toolsAt = markup.indexOf('class="astryx-chat-tool-calls');
+    const reasoningAt = markup.indexOf('class="astryx-chat-reasoning');
+    assert.ok(reasoningAt >= 0 && toolsAt > reasoningAt, 'expected a reasoning row before the tool row');
+
+    // The reasoning row's only registry icon is the chevron: its leading
+    // thinking glyph is still the ejected lab's own inline svg.
+    const reasoningIcons = registryIcons(markup.slice(reasoningAt, toolsAt));
+    assert.equal(reasoningIcons.length, 1, 'the reasoning row must draw exactly one registry icon');
+
+    // The tool row also carries per-call status icons, so name the chevron by
+    // its glyph. Both rows resolve the same registry entry, so whichever path
+    // data that entry holds, the two spans have to come out byte-identical.
+    const toolChevrons = registryIcons(markup.slice(toolsAt)).filter((icon) => icon.includes('M6 9l6 6 6-6'));
+    assert.ok(toolChevrons.length > 0, 'expected a chevron on the tool row');
+    assert.equal(reasoningIcons[0], toolChevrons[0], 'both rows must render the same chevron markup');
+    assert.match(reasoningIcons[0]!, /data-size="xsm"/);
+    assert.match(reasoningIcons[0]!, /viewBox="0 0 24 24"/);
   });
 
   it('places assistant actions on ChatMessageMetadata, not a product Marker footer shell', () => {
