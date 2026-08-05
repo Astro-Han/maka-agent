@@ -1,5 +1,5 @@
 diff --git a/node_modules/@ai-sdk/provider-utils/dist/index.js b/node_modules/@ai-sdk/provider-utils/dist/index.js
-index 9260b6b..386967f 100644
+index 9260b6b..9386230 100644
 --- a/node_modules/@ai-sdk/provider-utils/dist/index.js
 +++ b/node_modules/@ai-sdk/provider-utils/dist/index.js
 @@ -3728,11 +3728,12 @@ function resolveSync(value) {
@@ -18,7 +18,7 @@ index 9260b6b..386967f 100644
      var _a3, _b3;
      this.controller = controller;
      this._generateId = (_a3 = options.generateId) != null ? _a3 : generateId;
-@@ -3746,31 +3747,76 @@ var StreamingToolCallTracker = class {
+@@ -3746,31 +3747,90 @@ var StreamingToolCallTracker = class {
     * events as appropriate.
     */
    processDelta(toolCallDelta) {
@@ -41,12 +41,13 @@ index 9260b6b..386967f 100644
 -      this.processExistingToolCall(toolCall, toolCallDelta);
 +      this.processNewToolCall(toolCallDelta, wireId, wireIndex, wireName);
 +      return;
-+    }
-+    if (wireId !== void 0) {
-+      toolCall.wireId = wireId;
      }
 -    if (index != null) {
 -      this.toolCallsByIndex.set(index, toolCall);
++    if (wireId !== void 0) {
++      toolCall.wireId = wireId;
+     }
+-    this.latestToolCall = toolCall;
 +    if (wireIndex !== void 0) {
 +      toolCall.index = wireIndex;
 +    }
@@ -62,6 +63,17 @@ index 9260b6b..386967f 100644
 +   * it reaches a call whose claim on the alias a later call has already superseded, which
 +   * files a whole new call as a continuation of one two positions back.
 +   */
++  /**
++   * Whether an alias the delta carries, but the matched call has not claimed, belongs to some
++   * other call. The delta then addresses two calls at once, which resolves to neither — the
++   * other claimant cannot be it either, because the alias it did match rejected that call
++   * already. Agreement has to be read across the record set: a candidate missing the alias is
++   * not contradicted by it on its own, and reading only the candidate let exactly this
++   * contradiction resolve, silently, onto a call the gateway never addressed.
++   */
++  claimedByAnother(candidate, alias, value) {
++    return value !== void 0 && candidate[alias] === void 0 && this.toolCalls.some((other) => other !== candidate && other[alias] === value);
++  }
 +  findByAlias(wireId, wireIndex, wireName) {
 +    for (let position = this.toolCalls.length - 1; position >= 0; position--) {
 +      const candidate = this.toolCalls[position];
@@ -79,10 +91,12 @@ index 9260b6b..386967f 100644
 +        matched = true;
 +      }
 +      if (matched) {
++        if (this.claimedByAnother(candidate, "wireId", wireId) || this.claimedByAnother(candidate, "index", wireIndex)) {
++          return void 0;
++        }
 +        return wireName !== void 0 && candidate.function.name !== wireName ? void 0 : candidate;
 +      }
-     }
--    this.latestToolCall = toolCall;
++    }
 +    return void 0;
    }
    /**
@@ -106,7 +120,7 @@ index 9260b6b..386967f 100644
      if (this.typeValidation === "required") {
        if (toolCallDelta.type !== "function") {
          throw new InvalidResponseDataError({
-@@ -3786,38 +3832,32 @@ var StreamingToolCallTracker = class {
+@@ -3786,38 +3846,32 @@ var StreamingToolCallTracker = class {
          });
        }
      }
