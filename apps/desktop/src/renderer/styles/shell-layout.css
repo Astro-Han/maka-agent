@@ -259,6 +259,21 @@
   -webkit-app-region: drag;
 }
 
+/* The other half of that drag surface: modal dialogs carve themselves out.
+   Chromium builds drag regions from element rects and the top layer is invisible
+   to that pass — a `showModal()` dialog paints over the titlebar, but any control
+   it places inside the titlebar rect still reaches the OS as a window drag. The
+   lightbox close button sits in the top-right corner and was half-dead for
+   exactly this reason: only the part of it overlapping a `no-drag` titlebar
+   cluster's rect responded to clicks. A modal owns everything it covers and the
+   titlebar under it is inert, so subtracting the whole dialog rect is the rule,
+   not a per-button patch — every `showModal()` surface (Astryx Dialog, Lightbox)
+   gets it. Declared after the drag rect and matching a later node in document
+   order, which is how Chromium resolves the subtraction. */
+dialog:modal {
+  -webkit-app-region: no-drag;
+}
+
 .maka-shell-topbar-rail {
   display: flex;
   align-items: center;
