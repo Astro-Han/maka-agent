@@ -48,7 +48,9 @@ const LICENSE_METADATA_OVERRIDES = new Map([
   // Declares the ambiguous legacy "BSD"; the shipped LICENSE is BSD-3-Clause.
   ['css-mediaquery@0.1.2', 'BSD-3-Clause'],
 ]);
-const APACHE_TEXT_OVERRIDE_KEYS = new Set(['@ai-sdk/provider-utils@5.0.11']);
+// The published tarball omits the repository LICENSE; package.json declares Apache-2.0.
+// Keyed by exact version so a bump re-checks the license rather than inheriting this.
+const APACHE_TEXT_OVERRIDE_KEYS = new Set(['@ai-sdk/provider-utils@5.0.21']);
 const MIT_COPYRIGHT_OVERRIDES = new Map([
   // The published tarball omits the repository LICENSE; sibling @astryxdesign
   // packages ship it verbatim with this notice.
