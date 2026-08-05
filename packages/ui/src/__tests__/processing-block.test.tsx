@@ -127,14 +127,10 @@ describe('deep-thinking disclosure', () => {
   });
 
   it('draws its chevron from the same Astryx icon registry as the tool rows', () => {
-    // One chevron authority. The ejected lab component used to hand-write its
-    // own 12-viewBox chevron at strokeWidth 1.5; the tool rows use Astryx
-    // `Icon icon="chevronDown"`, a 24-viewBox glyph at the theme's 1.75.
-    // chat-message.css forces both to 10x10, so the two identical-looking
-    // glyphs rendered at 1.25px and 0.73px of stroke — the reasoning chevron
-    // read visibly heavier.
-    // Comparing the rendered chevron markup pins the shared source: any
-    // divergence in viewBox, stroke width, or size class fails here.
+    // The ejected lab component used to hand-write its own 12-viewBox chevron,
+    // which drew a heavier stroke than the tool rows' registry glyph once
+    // chat-message.css forced both to 10x10. Comparing the rendered markup
+    // pins the shared source: a divergent viewBox or size class fails here.
     const markup = renderToStaticMarkup(createElement(TurnView, {
       turn: {
         ...turnWithTools([

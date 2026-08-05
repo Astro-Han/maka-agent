@@ -13,15 +13,10 @@
  * call has already been compiled, matching the published package output.
  *
  * Product dialect lives in chat-message.css (cursor default, hover wash,
- * chevron size). This file keeps the ejected lab DOM/behavior, with one
- * deliberate deviation: the disclosure chevron is Astryx `Icon`
- * (`icon="chevronDown" size="xsm"`), not the lab's hand-written 12-viewBox
- * SVG. The lab glyph carried `strokeWidth: 1.5` on a 12 viewBox where the
- * registry glyph carries the theme's 1.75 on a 24 viewBox; once
- * chat-message.css forces both to 10x10 that is 1.25px of stroke against
- * 0.73px, so the reasoning chevron rendered ~70% heavier than the identical
- * chevron on tool rows. Going through the registry keeps one chevron
- * authority app-wide — and one place to retune it.
+ * chevron size). This file keeps the ejected lab DOM/behavior, except that
+ * the chevron is Astryx `Icon` rather than the lab's own 12-viewBox SVG: at
+ * the 10x10 chat-message.css forces, that glyph drew 1.25px of stroke beside
+ * the tool rows' 0.73px. One registry, one chevron.
  */
 import { useCallback, useState, type HTMLAttributes, type ReactNode } from 'react';
 import { Icon } from '@astryxdesign/core/Icon';

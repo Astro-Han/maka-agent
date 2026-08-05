@@ -112,9 +112,8 @@
   margin-inline-start: auto;
 }
 
-/* Both disclosure chevrons are now the same Astryx registry icon, which wraps
-   its svg in an `astryx-icon` span — so both need the wrapper (`> *`) and the
-   svg sized, not just the svg. */
+/* Both chevrons are the same registry icon, which wraps its svg in a span —
+   so the wrapper (`> *`) needs sizing too, not just the svg. */
 .maka-turn :is(.astryx-chat-reasoning, .astryx-chat-tool-calls) [role="button"] > span:last-child svg,
 .maka-turn :is(.astryx-chat-reasoning, .astryx-chat-tool-calls) [role="button"] > span:last-child > * {
   width: 10px;
