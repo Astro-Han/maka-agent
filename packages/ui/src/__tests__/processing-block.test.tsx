@@ -72,7 +72,6 @@ describe('ProcessingBlock disclosure wiring (#1307)', () => {
     assert.doesNotMatch(markup, /data-processing="block"/);
     assert.match(markup, /class="[^"]*astryx-chat-tool-calls[^"]*"/);
     assert.doesNotMatch(markup, /aria-expanded="true"/);
-    // The collapsed group header projects the last call, intent and all.
     assert.match(markup, /写入配置/);
   });
 });

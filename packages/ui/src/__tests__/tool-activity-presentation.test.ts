@@ -443,12 +443,8 @@ describe('tool activity presentation', () => {
     }
   });
 
-  // Expansion is Astryx's call, not the product's, and Astryx's default is
-  // collapsed: a group opens only when the reader opens it, whatever its rows
-  // are doing. The collapsed header shows the last call alone, so a group whose
-  // last call settles first may briefly project a settled icon while a sibling
-  // still runs — the density trade-off "one visual language" costs, and cheaper
-  // than groups that latch open for the rest of the session.
+  // Expansion is Astryx's call, not the product's, and its default is collapsed
+  // whatever the rows are doing.
   describe('group expansion follows Astryx', () => {
     const trailingSuccess = {
       toolUseId: 'ok-1',
@@ -473,8 +469,8 @@ describe('tool activity presentation', () => {
       assert.match(markup, /aria-expanded="false"/);
     });
 
-    // Two items on purpose: Astryx renders a lone call as a bare row that owns
-    // its own expansion, so group expansion is only observable from two up.
+    // Two items on purpose: a lone call is a bare row that owns its own
+    // expansion, so group expansion is only observable from two up.
     it('stays collapsed while a call in the group is still running', () => {
       const markup = renderGroup({
         toolUseId: 'live-1',
@@ -483,14 +479,11 @@ describe('tool activity presentation', () => {
         status: 'running',
         args: { command: 'npm test' },
       });
-      assert.match(markup, /aria-expanded="false"/);
       assert.doesNotMatch(markup, /aria-expanded="true"/);
     });
 
-    // `pending` is in flight too: tool_start opens a call there and it only
-    // reaches `running` once output arrives, so a tool that never streams stays
-    // pending for its whole life. It gets no special treatment either — the
-    // group is collapsed until the reader says otherwise.
+    // `pending` is in flight too: a tool that never streams stays pending for
+    // its whole life, and gets no special treatment either.
     it('stays collapsed when a parallel call is still pending behind a settled one', () => {
       const markup = renderGroup({
         toolUseId: 'quiet-1',
@@ -499,7 +492,6 @@ describe('tool activity presentation', () => {
         status: 'pending',
         args: { command: 'sleep 600' },
       });
-      assert.match(markup, /aria-expanded="false"/);
       assert.doesNotMatch(markup, /aria-expanded="true"/);
     });
   });

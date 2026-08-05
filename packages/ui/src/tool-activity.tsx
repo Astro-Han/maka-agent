@@ -296,17 +296,10 @@ export function ToolTrow({ items }: { items: ToolActivityItem[] }) {
     ),
   }));
 
-  // Expansion is Astryx's own default — collapsed — and opening a group is the
-  // reader's move, never the turn's. Seeding it open from in-flight status only
-  // sets Astryx's initial state: the timeline key is deliberately stable so a
-  // disclosure survives mid-turn inserts (see timelineEntryKey), so such a group
-  // never re-collapses once its tools settle and every live turn leaves a trail
-  // of permanently open groups behind it.
-  //
-  // The accepted cost: a collapsed header projects the last call alone, so with
-  // parallel calls the last one can settle first and the header may briefly show
-  // a settled icon while a sibling still runs. It resolves on its own as the
-  // group finishes, and expanding shows every row's real status.
+  // No defaultIsExpanded: opening a group is the reader's move. Seeding it open
+  // from in-flight status latches, since the prop is uncontrolled and the
+  // timeline key is stable (see timelineEntryKey). Cost: the collapsed header
+  // projects the last call, which can settle before a parallel sibling.
   return <ChatToolCalls calls={calls} />;
 }
 
