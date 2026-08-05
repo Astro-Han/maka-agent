@@ -106,6 +106,16 @@
   padding-block: var(--space-1);
 }
 
+/* Astryx sizes the popover to its widest row (min-width:anchor-size, no max).
+   The model menu lost the 260px/56vw option-label cap with the Selector, so
+   the menu itself needs the ceiling: a long model name (BYOK catalogs love
+   `vendor/a-very-long-model-name`) must wrap inside the panel, never push it
+   off the window. Rows already wrap (Item has no nowrap) and the panel has
+   overflow-y:auto for the tall direction. */
+.maka-composer-quiet-menu {
+  max-width: min(320px, 92vw);
+}
+
 /* Model chip (static fallback) still owns its own quiet geometry. */
 .maka-composer-model-chip {
   font: var(--maka-text-label);
@@ -163,17 +173,10 @@
   min-width: 0;
   max-width: min(420px, 52vw);
 }
-.maka-composer-left-controls .maka-model-switcher {
-  margin: 0;
-  max-width: min(360px, 42vw);
-}
 .maka-composer-left-controls .maka-model-switcher-trigger,
 .maka-composer-left-controls .maka-new-chat-model-selector {
   min-width: 100px;
   max-width: min(220px, 28vw);
-}
-.maka-composer-left-controls .maka-thinking-level-selector {
-  margin: 0;
 }
 
 .maka-composer-model-chip-text {

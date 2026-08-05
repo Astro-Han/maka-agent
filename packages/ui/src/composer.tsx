@@ -1076,13 +1076,26 @@ export const Composer = forwardRef<
   // disabled reasons (empty draft, in-flight import) keep the neutral label.
   const sendTitle = noModelConnection && !props.disabled ? copy.noModelSendTitle : copy.sendLabel;
   const modelChipLabel = props.modelLabel?.trim() || copy.selectModel;
-  const modelSwitcherDisabledReason = props.streaming
-    ? copy.switchDisabledStreaming
+  // Mid-turn the model and thinking menus stay mounted but locked, each
+  // carrying the reason in its own words (model vs thinking level) — the
+  // lock is one state with two wordings, not two locks.
+  const switchLock = props.streaming
+    ? 'streaming'
     : props.activeSession?.status === 'running'
-      ? copy.switchDisabledRunning
+      ? 'running'
       : props.activeSession?.status === 'waiting_for_user'
-        ? copy.switchDisabledPermission
+        ? 'permission'
         : undefined;
+  const modelSwitcherDisabledReason =
+    switchLock === 'streaming' ? copy.switchDisabledStreaming
+    : switchLock === 'running' ? copy.switchDisabledRunning
+    : switchLock === 'permission' ? copy.switchDisabledPermission
+    : undefined;
+  const thinkingSwitcherDisabledReason =
+    switchLock === 'streaming' ? copy.thinkingDisabledStreaming
+    : switchLock === 'running' ? copy.thinkingDisabledRunning
+    : switchLock === 'permission' ? copy.thinkingDisabledPermission
+    : undefined;
 
   /**
    * The drawer's contract is context staged for the *next send*: quotes and
@@ -1217,7 +1230,6 @@ export const Composer = forwardRef<
         <AstryxChatComposer
           className="maka-composer-astryx"
           data-maka-contract="composer-inner"
-          data-streaming={props.streaming ? 'true' : undefined}
           // Unreachable, and required. The shell only submits its own value,
           // and it never has one: `value` is passed straight to the controlled
           // ChatComposerInput, so the shell's copy stays empty and its submit
@@ -1294,7 +1306,7 @@ export const Composer = forwardRef<
             </div>
           )}
           footerActions={(
-            <div className="maka-composer-left-controls" data-streaming={props.streaming ? 'true' : undefined}>
+            <div className="maka-composer-left-controls">
               {/* Resting order: ＋ leftmost, then permission icon. */}
               {showPlusMenu ? (
                 <span className="maka-composer-plus-menu">
@@ -1450,6 +1462,7 @@ export const Composer = forwardRef<
                     current={props.activeThinkingLevel}
                     onChange={props.onThinkingLevelChange}
                     disabled={Boolean(modelSwitcherDisabledReason) || props.modelChangePending}
+                    disabledReason={thinkingSwitcherDisabledReason}
                     loading={props.modelChangePending}
                   />
                 ) : (
