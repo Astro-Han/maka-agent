@@ -2643,9 +2643,13 @@ describe('buildHarborJobConfig', () => {
   });
 
   test('layers the apt mirror overlay after the harness compose file', () => {
-    // Order is the assertion. Both files set `extra_hosts`, and Compose merges
-    // later files over earlier ones, so the overlay has to come second for the
-    // host-gateway mapping every competitor arm dials to survive alongside it.
+    // Order is the assertion. Compose appends `extra_hosts` across `-f` files
+    // rather than replacing them -- `docker compose config` over a base and an
+    // overlay keeps every entry from both, duplicate keys included -- so the
+    // host-gateway mapping every competitor dials survives either way. What the
+    // order pins is a deterministic overlay position; it does not let the
+    // mirror override a task image that declares its own archive.ubuntu.com
+    // entry, which would sit beside ours and be resolved by /etc/hosts order.
     const config = buildHarborJobConfig(runInput(), {
       makaRepoPath: '/repo',
       jobsDir: '/jobs/x',

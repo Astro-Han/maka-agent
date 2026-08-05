@@ -854,6 +854,30 @@ test('redirecting apt is recorded, and leaves runs that do not redirect untouche
   assert.throws(() => aptMirrorComposeContent(''), /apt mirror address is required/);
 });
 
+test('only the executor that applies the mirror is allowed to name one', async () => {
+  const { harnessAptMirror, resolveHarnessComposition } = await import(
+    new URL('../../harbor/run-harness-ab.mjs', import.meta.url).href
+  );
+  const harbor = resolveHarnessComposition({ competitor: 'reasonix' }).benchmarkProfile;
+  const pier = resolveHarnessComposition({
+    benchmark: 'deep-swe-1.1',
+    competitor: 'kimi-code',
+  }).benchmarkProfile;
+  const env = { MAKA_HARNESS_AB_APT_MIRROR: 'mirrors.example.com' };
+
+  assert.equal(harnessAptMirror(harbor, env), 'mirrors.example.com');
+  // Only the harbor runner receives the compose overlay, so a pier run that
+  // accepted the name would publish a redirect its cells never performed and
+  // fork its resume identity on that false record. A shared shell env carrying
+  // the variable across both benchmarks is the way this actually happens, which
+  // is why it has to fail at launch rather than be dropped quietly.
+  assert.throws(
+    () => harnessAptMirror(pier, env),
+    /the pier executor does not redirect package hosts/,
+  );
+  assert.equal(harnessAptMirror(pier, {}), null);
+});
+
 test('Reasonix comparison freezes the DeepSeek runtime, toolchain, and run identity', async () => {
   const {
     buildHarnessAbManifest,

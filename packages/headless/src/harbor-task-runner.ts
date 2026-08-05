@@ -1355,6 +1355,14 @@ async function hostSideProviderRuntime(options: HarborTaskRunnerOptions): Promis
   const agent = options.agent ?? 'maka';
   const provider = options.provider ?? 'deepseek';
   if (usesHostProviderProxy(agent, options.makaPlacement) && provider === 'github-copilot') {
+    // Maka reaches this guard only in task-container placement, where it too
+    // goes through the proxy. Its remedy is the placement it came from, not the
+    // competitors' dead end, so it must not be told an adapter is missing.
+    if (agent === 'maka') {
+      throw new Error(
+        'GitHub Copilot Harbor runs require the host-bridge Maka placement; the host provider proxy does not carry this provider',
+      );
+    }
     const adapter =
       agent === 'kimi-code'
         ? 'Kimi Code'

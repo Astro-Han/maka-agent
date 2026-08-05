@@ -821,8 +821,16 @@ export function harnessMakaPlacement(benchmarkProfile, env = process.env) {
  */
 export const UBUNTU_APT_HOSTS = ['archive.ubuntu.com', 'security.ubuntu.com'];
 
-export function harnessAptMirror(env = process.env) {
-  return (env.MAKA_HARNESS_AB_APT_MIRROR || '').trim() || null;
+export function harnessAptMirror(benchmarkProfile, env = process.env) {
+  const name = (env.MAKA_HARNESS_AB_APT_MIRROR || '').trim() || null;
+  // Only the harbor runner layers the overlay, so a pier run would record a
+  // redirect in its manifest that no cell performed, and fork its identity on
+  // that false record. Refuse the combination rather than silently dropping the
+  // mirror, the same way the placement guard refuses host-bridge under pier.
+  if (name && benchmarkProfile.executor === 'pier') {
+    throw new Error('the pier executor does not redirect package hosts');
+  }
+  return name;
 }
 
 /**
@@ -898,7 +906,7 @@ export function buildHarnessAbManifest({
         ? {
             packageMirror: {
               hosts: UBUNTU_APT_HOSTS,
-              name: harnessAptMirror(env),
+              name: harnessAptMirror(benchmarkProfile, env),
               address: aptMirrorAddress,
             },
           }
@@ -1174,7 +1182,8 @@ async function runLocked({
   });
 
   const pierVersion = benchmarkProfile.executor === 'pier' ? await readPierVersion() : null;
-  const aptMirrorName = harnessAptMirror();
+  const makaPlacement = harnessMakaPlacement(benchmarkProfile);
+  const aptMirrorName = harnessAptMirror(benchmarkProfile);
   const aptMirrorAddress = aptMirrorName ? (await lookup(aptMirrorName)).address : null;
   const toolchainFingerprint = buildHarnessAbToolchainFingerprint({
     hostToolchainFingerprint,
@@ -1182,9 +1191,7 @@ async function runLocked({
     competitorProfiles,
     pierVersion,
     makaNodeToolchainFingerprint:
-      harnessMakaPlacement(benchmarkProfile) === 'task-container'
-        ? MAKA_NODE_TOOLCHAIN_FINGERPRINT
-        : null,
+      makaPlacement === 'task-container' ? MAKA_NODE_TOOLCHAIN_FINGERPRINT : null,
   });
   const proposedManifest = buildHarnessAbManifest({
     subjectFingerprint,
@@ -1217,7 +1224,6 @@ async function runLocked({
       resolveHarnessCompetitorToolchain(runRoot, profile),
     ]),
   );
-  const makaPlacement = harnessMakaPlacement(benchmarkProfile);
   const makaNodeToolchain =
     makaPlacement === 'task-container' ? resolveHarnessMakaNodeToolchain(runRoot) : null;
   const aptMirrorComposePath = aptMirrorAddress ? join(runRoot, 'apt-mirror.compose.yaml') : null;
