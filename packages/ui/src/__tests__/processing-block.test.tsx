@@ -126,6 +126,43 @@ describe('deep-thinking disclosure', () => {
     assert.doesNotMatch(markup, /data-slot="reasoning-disclosure"/);
   });
 
+  it('draws its chevron from the same Astryx icon registry as the tool rows', () => {
+    // One chevron authority. The ejected lab component used to hand-write its
+    // own 12-viewBox chevron at strokeWidth 1.5; the tool rows use Astryx
+    // `Icon icon="chevronDown"`, a 24-viewBox glyph at the theme's 1.75.
+    // chat-message.css forces both to 10x10, so the two identical-looking
+    // glyphs rendered at 1.25px and 0.73px of stroke — the reasoning chevron
+    // read visibly heavier.
+    // Comparing the rendered chevron markup pins the shared source: any
+    // divergence in viewBox, stroke width, or size class fails here.
+    const markup = renderToStaticMarkup(createElement(TurnView, {
+      turn: {
+        ...turnWithTools([
+          { toolUseId: 'r1', toolName: 'Read', activityKind: 'read', status: 'completed', args: {} },
+          { toolUseId: 'r2', toolName: 'Read', activityKind: 'read', status: 'completed', args: {} },
+        ]),
+        timeline: [
+          { kind: 'thinking', text: 'private reasoning', messageId: 'a1' },
+          {
+            kind: 'tools',
+            items: [
+              { toolUseId: 'r1', toolName: 'Read', activityKind: 'read', status: 'completed', args: {} },
+              { toolUseId: 'r2', toolName: 'Read', activityKind: 'read', status: 'completed', args: {} },
+            ],
+          },
+        ],
+      },
+    }));
+
+    const icons = markup.match(/<span[^>]*class="astryx-icon[^"]*"[^>]*>.*?<\/svg><\/span>/g) ?? [];
+    const chevrons = icons.filter((icon) => icon.includes('M6 9l6 6 6-6'));
+    assert.ok(chevrons.length >= 2, `expected reasoning + tool chevrons, got ${chevrons.length}`);
+    assert.equal(new Set(chevrons).size, 1, 'reasoning and tool chevrons must render identical markup');
+    assert.match(chevrons[0]!, /data-size="xsm"/);
+    assert.match(chevrons[0]!, /viewBox="0 0 24 24"/);
+    assert.doesNotMatch(markup, /viewBox="0 0 12 12"/);
+  });
+
   it('places assistant actions on ChatMessageMetadata, not a product Marker footer shell', () => {
     const markup = renderToStaticMarkup(createElement(TurnView, {
       turn: {
