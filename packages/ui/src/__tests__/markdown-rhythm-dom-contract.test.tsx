@@ -45,6 +45,16 @@ function compactMarkup(): string {
 describe('transcript markdown rhythm — DOM hooks', () => {
   it('emits the density attribute the rhythm table scopes on', () => {
     const markup = compactMarkup();
+    // Every rule in the table is prefixed with this, so it is the one hook whose
+    // two halves — selector prefix and runtime attribute — nothing else joins.
+    // Rename it and the CSS contract still passes on text it never renders.
+    assert.match(
+      markup,
+      /data-maka-contract="markdown"/,
+      'the `data-maka-contract="markdown"` wrapper is gone. Every rule in the rhythm ' +
+        'table is scoped on it, so all compact prose spacing and the heading scale are ' +
+        'now dead — and the stylesheet-side contract cannot see it.',
+    );
     assert.match(
       markup,
       /<div[^>]*role="document"[^>]*data-density="compact"|<div[^>]*data-density="compact"[^>]*role="document"/,

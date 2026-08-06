@@ -80,8 +80,8 @@ describe('transcript markdown rhythm', () => {
     for (const [, selector, body] of compactBlockRules) {
       assert.match(
         selector,
-        />\s*\*\s*\+/,
-        'every block gap must be an adjacent-sibling rule (`> * + …`). A gap is a relation ' +
+        />[^{]*\+/,
+        'every block gap must be an adjacent-sibling rule (`> … + …`). A gap is a relation ' +
           'between two blocks, so the first block should match no gap rule at all. The ' +
           '`> *` + `> :first-child` reset form looks equivalent but loses on specificity: ' +
           `:first-child scores (0,4,0) against the heading rules' (0,5,0), so a turn opening ` +
@@ -95,6 +95,57 @@ describe('transcript markdown rhythm', () => {
       /\.astryx-markdown\[data-density="compact"\]\s*>\s*:first-child/,
       'the `:first-child` gap reset is back. It cannot beat the heading rules on ' +
         'specificity — use adjacent-sibling gap rules so the first block is never matched.',
+    );
+
+    // The other half of "the distance between two blocks is the value declared
+    // here": without it Astryx's own per-element end margins survive in the
+    // earlier layer and collapse against these gaps. An `hr` carries 12px in
+    // compact, so dropping the reset silently widens the block step after one.
+    assert.match(
+      css,
+      /\.astryx-markdown\[data-density="compact"\]\s*>\s*\*\s*\{[^}]*margin-block\s*:\s*0/,
+      'the blanket `> * { margin-block: 0 }` reset is gone. The gap rules only set ' +
+        'margin-block-START, so without it Astryx\'s end margins survive and collapse ' +
+        'against them — the declared ladder stops being the spacing you get.',
+    );
+
+    // Declaration and usage are separate failures: the ladder can stay ordered
+    // while the rules that spend it are hardcoded, which turns the table into
+    // decoration and the first test into a tautology.
+    for (const [, selector, body] of compactBlockRules) {
+      assert.match(
+        body,
+        /margin-block-start\s*:\s*var\(\s*--md-gap-[\w-]+\s*\)/,
+        'a compact gap rule sets a literal instead of a `--md-gap-*` variable. The ladder ' +
+          'test above only checks that the variables are declared in order; a hardcoded ' +
+          `value leaves it green while the rendered spacing ignores it. Rule: \`${selector.trim()}\` ` +
+          `{ ${body.trim()} }`,
+      );
+    }
+  });
+
+  it('keeps a typed `hr` wider than the block step', async () => {
+    const css = stripCssComments(await readAllRendererCss());
+    const rule = new RegExp(
+      String.raw`\.astryx-markdown\[data-density="compact"\]\s*>\s*\*\s*\+\s*hr\s*,[^{]*\{([^}]*)\}`,
+    ).exec(css);
+    assert.ok(
+      rule,
+      'the compact surface no longer gives `hr` its own step. An `hr` is the only break ' +
+        'the author typed by hand; left on the generic block gap it reads no wider than ' +
+        'the paragraph boundary above it, so writing one changes nothing.',
+    );
+
+    const used = /margin-block-start\s*:\s*var\(\s*(--md-gap-[\w-]+)\s*\)/.exec(rule[1])?.[1];
+    assert.ok(used, `the \`hr\` rule must spend a --md-gap-* variable. Found: { ${rule[1].trim()} }`);
+
+    const block = LADDER.indexOf('--md-gap-block');
+    const rung = LADDER.indexOf(used as (typeof LADDER)[number]);
+    assert.ok(
+      rung > block,
+      `\`hr\` spends ${used}, which is not above --md-gap-block on the ladder. Which rung ` +
+        'it takes is a design call — section today, chapter would be fine — but it has to ' +
+        'outrank the ordinary block step or the separator carries no meaning.',
     );
   });
 
@@ -112,6 +163,18 @@ describe('transcript markdown rhythm', () => {
       /padding-block\s*:\s*0/,
       'ListItem block padding must be zeroed on the compact surface, otherwise the real ' +
         'list-item gap is padding + gap and the ladder above is not the spacing you get',
+    );
+
+    const listGap = new RegExp(
+      String.raw`\.astryx-markdown\[data-density="compact"\][^{]*\.astryx-list\s*\{([^}]*)\}`,
+    ).exec(css);
+    assert.ok(listGap, 'the compact surface no longer sets a `.astryx-list` row gap');
+    assert.match(
+      listGap[1],
+      /gap\s*:\s*var\(\s*--md-gap-list\s*\)/,
+      'the list gap must spend `--md-gap-list`. A literal here detaches the tightest rung ' +
+        'from the ladder the first test orders, so an inversion could be reintroduced ' +
+        'without failing anything',
     );
   });
 
