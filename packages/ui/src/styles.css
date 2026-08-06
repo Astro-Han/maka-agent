@@ -188,6 +188,15 @@
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] .astryx-markdown-heading:not([data-level="1"], [data-level="2"]) {
   font: var(--maka-text-heading-4);
 }
+/* Below h3 the size ladder is spent — h4-h6 already sit at body size, and
+   growing them back would re-create the slabs the flattening exists to avoid.
+   Colour is the one axis left that costs no vertical space, so the deepest
+   levels step down in ink instead. opencode makes the same call at the same
+   point (13px h4-h6 dropped to muted); it is why a turn can carry four levels
+   of structure inside two type sizes. */
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] .astryx-markdown-heading:not([data-level="1"], [data-level="2"], [data-level="3"]) {
+  color: var(--foreground-secondary);
+}
 
 /* Markdown code renderers are custom components so Mermaid can be loaded only
    for settled Mermaid fences. Astryx skips its own spacing wrapper when
