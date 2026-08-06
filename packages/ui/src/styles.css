@@ -192,7 +192,20 @@
    Cursor (1.43/1.32/1.21), Claude Code (1.14/1.07/1.0) and Codex
    (1.71/1.43/1.21) all flatten here relative to their own document styles, and
    opencode goes further — 17/15/13 with h4+ dropped to a muted colour. Nobody
-   flattens to zero. Two steps plus colour sits inside that range. */
+   flattens to zero. Two steps plus colour sits inside that range.
+
+   RISK, not just a choice: these are the only rules here that are typography
+   rather than spacing, and Astryx's density RFC (facebook/astryx#839) draws
+   the line at "density shifts heights and spacing, not typography". Keying
+   them on `data-density` is honest only while `compact` and "transcript" name
+   the same set — true today, since the transcript is the only caller asking
+   for compact and the Daily Review renders a document at the default. A
+   second compact surface would silently inherit transcript heading sizes and
+   dimmed deep headings. Giving typography its own surface attribute would
+   decouple them, but nothing needs it yet; the assumption is held by a test
+   instead (packages/ui/src/__tests__/markdown-rhythm-dom-contract.test.tsx,
+   "keeps compact markdown a transcript-only surface"), which fails the moment
+   the sets diverge and says what the choice is. */
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] .astryx-markdown-heading:is([data-level="1"], [data-level="2"]) {
   font: var(--maka-text-heading-3);
 }
