@@ -128,7 +128,7 @@
 
      4px  list items   (same level)
      8px  blocks       (paragraph, list, quote, table, code)
-     16px section      (h3-h6)
+     16px section      (h3-h6, and either side of an `hr`)
      24px chapter      (h1, h2)
 
    Three deliberate choices:
@@ -180,6 +180,17 @@
   margin-block-start: var(--md-gap-chapter);
 }
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + .astryx-markdown-heading:not([data-level="1"], [data-level="2"]) {
+  margin-block-start: var(--md-gap-section);
+}
+/* An `hr` is the only break the author typed by hand. Left on the generic block
+   step it reads no wider than the paragraph boundary above it, so writing one
+   changes nothing — which is the same failure as the flattened heading scale,
+   in a different place. It sits at the section step because that is what it
+   separates. A following h1/h2 still wins on specificity ((0,5,0) beats
+   (0,3,1)) and keeps the chapter gap, so `hr` before a major heading is
+   unaffected. */
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + hr,
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > hr + * {
   margin-block-start: var(--md-gap-section);
 }
 /* Prose list, not a control list: drop the ListItem row padding and express the
