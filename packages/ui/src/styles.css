@@ -144,8 +144,19 @@
      Storybook then reproduces the transcript by passing the prop, which the
      old ancestor-scoped rules could not.
 
-   Block gaps are margin-top only: with no bottom margins there is no collapsing
-   to reason about, and the gap between any two blocks is the declared value. */
+   A gap is a relation BETWEEN two blocks, so every gap rule is an adjacent
+   sibling rule. Two consequences, both load-bearing:
+
+   - The first block matches no gap rule at all, so it needs no reset. The
+     reset form (`> *` for the gap, `> :first-child` to take it back) looks
+     equivalent and is not: `:first-child` scores (0,4,0) against the heading
+     rules' (0,5,0), so a turn that OPENS with a heading — which is most of
+     them — kept the 24px chapter gap above its first line and pushed itself
+     off the top of the bubble. Expressing the relation directly is what makes
+     that unrepresentable rather than merely fixed.
+   - Gaps are margin-top only, on top of a blanket `margin-block: 0` that
+     clears Astryx's own margins. Nothing collapses, so the distance between
+     two blocks is the value declared here. */
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] {
   --md-gap-list: var(--space-1);
   --md-gap-block: var(--space-2);
@@ -153,15 +164,15 @@
   --md-gap-chapter: var(--space-6);
 }
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * {
-  margin-block: var(--md-gap-block) 0;
+  margin-block: 0;
 }
-[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > :first-child {
-  margin-block-start: 0;
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + * {
+  margin-block-start: var(--md-gap-block);
 }
-[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > .astryx-markdown-heading:is([data-level="1"], [data-level="2"]) {
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + .astryx-markdown-heading:is([data-level="1"], [data-level="2"]) {
   margin-block-start: var(--md-gap-chapter);
 }
-[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > .astryx-markdown-heading:not([data-level="1"], [data-level="2"]) {
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + .astryx-markdown-heading:not([data-level="1"], [data-level="2"]) {
   margin-block-start: var(--md-gap-section);
 }
 /* Prose list, not a control list: drop the ListItem row padding and express the
