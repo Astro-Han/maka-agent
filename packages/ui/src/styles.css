@@ -131,7 +131,7 @@
      16px section      (h3-h6)
      24px chapter      (h1, h2)
 
-   Two deliberate choices:
+   Three deliberate choices:
 
    - Only `[data-density="compact"]`. The document mode is not broken (its
      lists sit 10px apart against 12px paragraphs, which is already in order),
@@ -143,6 +143,13 @@
      follows the `density` prop instead of where the markdown happens to sit.
      Storybook then reproduces the transcript by passing the prop, which the
      old ancestor-scoped rules could not.
+   - Top level only. `>` keeps every gap on the document's own children, so
+     blocks nested inside a list item or a blockquote keep Astryx's own compact
+     4px instead of the 8px block gap. That tier difference is the point, not
+     an oversight: a list item should read as one unit, so two paragraphs
+     inside it belong closer together than two paragraphs in the transcript.
+     The ladder extends downward (4px nested < 8px block) rather than
+     inverting, which is the invariant that matters.
 
    A gap is a relation BETWEEN two blocks, so every gap rule is an adjacent
    sibling rule. Two consequences, both load-bearing:
