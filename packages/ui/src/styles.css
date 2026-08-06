@@ -112,11 +112,90 @@
 @keyframes maka-spin { to { transform: rotate(360deg); } }
 .maka-spin { animation: maka-spin 1s linear infinite; }
 
+/* ---------------------------------------------------------------------------
+   Transcript markdown rhythm — the single authority for compact prose spacing.
+
+   Astryx's `density` only reaches the blocks Markdown renders itself. Lists are
+   delegated to the List control, and Markdown hands it a hardcoded
+   `density="compact"` in BOTH modes — so a markdown list is spaced as a
+   clickable row (4px block padding, the RFC #839 control value), not as prose.
+   The result under `density="compact"` was a broken order: list items sat 10px
+   apart while paragraphs sat 4px apart, so same-level items read as further
+   apart than different paragraphs.
+
+   This table restores one rule — visual distance rises with semantic distance —
+   by owning every compact prose gap in one place:
+
+     4px  list items   (same level)
+     8px  blocks       (paragraph, list, quote, table, code)
+     16px section      (h3-h6)
+     24px chapter      (h1, h2)
+
+   Two deliberate choices:
+
+   - Only `[data-density="compact"]`. The document mode is not broken (its
+     lists sit 10px apart against 12px paragraphs, which is already in order),
+     and the Daily Review renders through it. Fixing only the broken half keeps
+     that surface out of the blast radius.
+   - Scoped to Astryx's own `data-density`, not to a `.maka-turn` ancestor.
+     `themeProps()` reflects every visual prop as a data attribute for exactly
+     this ("consumers target stable data-attribute selectors"), so the rhythm
+     follows the `density` prop instead of where the markdown happens to sit.
+     Storybook then reproduces the transcript by passing the prop, which the
+     old ancestor-scoped rules could not.
+
+   Block gaps are margin-top only: with no bottom margins there is no collapsing
+   to reason about, and the gap between any two blocks is the declared value. */
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] {
+  --md-gap-list: var(--space-1);
+  --md-gap-block: var(--space-2);
+  --md-gap-section: var(--space-4);
+  --md-gap-chapter: var(--space-6);
+}
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * {
+  margin-block: var(--md-gap-block) 0;
+}
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > :first-child {
+  margin-block-start: 0;
+}
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > .astryx-markdown-heading:is([data-level="1"], [data-level="2"]) {
+  margin-block-start: var(--md-gap-chapter);
+}
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > .astryx-markdown-heading:not([data-level="1"], [data-level="2"]) {
+  margin-block-start: var(--md-gap-section);
+}
+/* Prose list, not a control list: drop the ListItem row padding and express the
+   row rhythm as a gap, so it stays below the block gap above. */
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] .astryx-list-item {
+  padding-block: 0;
+}
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] .astryx-list {
+  gap: var(--md-gap-list);
+}
+/* Heading scale: size says "this is a heading", weight and colour say which
+   level. Astryx's document ladder (20/18/16/14) is a page scale and an agent
+   turn emits `##` every few lines, so the transcript keeps two size steps —
+   but it keeps TWO, not one. The previous rule flattened h2-h6 onto a single
+   size, which left h2 and h3 identical in size, weight AND colour: three
+   levels of structure rendered as three identical bold lines.
+   Cursor (1.43/1.32/1.21), Claude Code (1.14/1.07/1.0) and Codex
+   (1.71/1.43/1.21) all flatten here relative to their own document styles, and
+   opencode goes further — 17/15/13 with h4+ dropped to a muted colour. Nobody
+   flattens to zero. Two steps plus colour sits inside that range. */
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] .astryx-markdown-heading:is([data-level="1"], [data-level="2"]) {
+  font: var(--maka-text-heading-3);
+}
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] .astryx-markdown-heading:not([data-level="1"], [data-level="2"]) {
+  font: var(--maka-text-heading-4);
+}
+
 /* Markdown code renderers are custom components so Mermaid can be loaded only
-   for settled Mermaid fences. Preserve Astryx's document/compact rhythm here. */
+   for settled Mermaid fences. Astryx skips its own spacing wrapper when
+   `components.code` is set, so the custom block sits directly in the document
+   flow — the compact rhythm above already carries it, and only the document
+   mode needs its margins declared here. */
 .maka-markdown-code { min-width: 0; }
 .maka-markdown-code-default { margin-block: var(--space-3) var(--space-4); }
-.maka-markdown-code-compact { margin-block: var(--space-1) var(--space-2); }
 [role="document"] > .maka-markdown-code:first-child { margin-block-start: 0; }
 [role="document"] > .maka-markdown-code:last-child { margin-block-end: 0; }
 .maka-mermaid-diagram {

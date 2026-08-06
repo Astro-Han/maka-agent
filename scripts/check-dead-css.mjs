@@ -156,6 +156,16 @@ const DYNAMIC_STYLE_HOOKS = new Set([
   // literals. Keep in sync with the density prop's values.
   'maka-markdown-code-default',
   'maka-markdown-code-compact',
+  // Astryx's Markdown renders its document root and every block through
+  // themeProps, so these classes exist only at runtime. The transcript rhythm
+  // table in packages/ui/src/styles.css targets them (with `data-density`) to
+  // own compact prose spacing, which Astryx's density cannot reach on its own.
+  'astryx-markdown',
+  'astryx-markdown-heading',
+  // Markdown delegates lists to the List control; the rhythm table re-spaces
+  // its rows as prose.
+  'astryx-list',
+  'astryx-list-item',
 ]);
 
 /**

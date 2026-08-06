@@ -32,8 +32,60 @@ function ProseFrame(props: { children: React.ReactNode; width?: number }) {
   );
 }
 
-// Real path: chat → an assistant answer that mixes headings, emphasis, a list, a quote
-// and a table — the ordinary shape of a long reply.
+// The two stories above render markdown at document density, which is the Daily
+// Review's mode — not the transcript's. The transcript passes
+// `density="compact"` (chat-turn.tsx), a different block rhythm AND a different
+// heading scale, so neither story showed what a chat turn actually looks like.
+// This one does.
+//
+// The frame is written out rather than imported: the real host is `ChatTurn`,
+// which needs a full TurnViewModel and a runtime to build one. What is
+// reproduced here is the part that reaches markdown — the `.maka-turn` wrapper
+// and the assistant bubble. Nothing in the markdown rhythm keys on `.maka-turn`
+// any more (it keys on Astryx's `data-density`), so the wrapper is here for
+// frame fidelity, not to make the styles apply.
+//
+// Real path: chat → any assistant turn whose reply uses nested headings and a
+// list — i.e. the ordinary long answer, rendered as the transcript renders it.
+export const TranscriptTurn: Story = {
+  render: () => (
+    <ProseFrame>
+      <div className="maka-turn">
+        <ChatMessageBubble variant="ghost" className="maka-chat-message-bubble maka-chat-message-bubble-assistant">
+          <Markdown
+            density="compact"
+            text={[
+              '## 改动思路',
+              '',
+              '这次把会话列表收敛成置顶和最近两段，状态只保留在行图标上。好处是**所有会话都遵循同一条时间排序规则**。',
+              '',
+              '### 具体做法',
+              '',
+              '主要做了三件事：',
+              '',
+              '1. 置顶会话固定在最上方；',
+              '2. 其余会话按最近活动时间排序；',
+              '3. 运行中、等待和阻塞等状态只显示为低干扰行图标。',
+              '',
+              '#### 边界情况',
+              '',
+              '按项目视图仍然保留项目折叠，扁平化只作用于按时间视图。',
+              '',
+              '> 注意：新增状态只需补一个行图标。',
+              '',
+              '如果后续要加新状态，只需补充对应的行图标，不再扩张侧栏信息架构。',
+            ].join('\n')}
+          />
+        </ChatMessageBubble>
+      </div>
+    </ProseFrame>
+  ),
+};
+
+// Real path: 每日回顾 → a generated report that mixes headings, emphasis, a list,
+// a quote and a table. This is the document density — the Daily Review panel is
+// the caller that leaves `density` unset. (It was annotated as a chat answer,
+// but chat passes `density="compact"`; see TranscriptTurn above.)
 export const RichAssistantAnswer: Story = {
   render: () => (
     <ProseFrame>
@@ -67,8 +119,8 @@ export const RichAssistantAnswer: Story = {
   ),
 };
 
-// Real path: chat → a long assistant answer, pinned at the 680px prose measure to check
-// vertical rhythm across many blocks.
+// Real path: 每日回顾 → a long generated report, pinned at the 680px prose measure
+// to check vertical rhythm across many blocks at document density.
 export const LongFormArticle: Story = {
   render: () => (
     <ProseFrame width={680}>

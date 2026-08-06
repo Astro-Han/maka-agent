@@ -212,39 +212,16 @@
    independent instead of keyed on a `[data-role="assistant"]` descendant. */
 
 /* --- Conversation heading scale ------------------------------------------- */
-/* Astryx's heading ladder (20/18/16/14…) is a DOCUMENT scale, and the
-   transcript is not a document. An agent turn emits `##` freely, so a ladder
-   that steps 1.4× per level shreds one reply into visually unrelated slabs.
-   Flatten it to two steps — h1 for a genuine section break, everything below
-   at body size — and let weight 600 plus colour carry the hierarchy, which is
-   what the rest of the conversation already does.
-   Cursor (1.43/1.32/1.21), Claude Code (1.14/1.07/1.0) and Codex
-   (1.71/1.43/1.21) all flatten here relative to their own document styles;
-   Claude Code goes furthest and merges h4–h6 into `strong`. Two steps sits
-   inside that range.
-   Every level shares the transcript baseline so headings do not add rhythm of
-   their own.
-   Scoped to `.maka-turn`, not to the Markdown contract alone. The contract is
-   emitted by the shared MarkdownBody, whose other caller is the Daily Review
-   panel — and a review report IS a document, so the argument above does not
-   apply to it. It keeps Astryx's full ladder.
-   Bare tags are the whole story: Astryx's Markdown renderer emits plain
-   h1–h6 with stylex props (Markdown.js `const Tag = \`h${level}\``). The
-   .astryx-heading.level-N classes come from the standalone Heading
-   component, which Markdown never mounts. */
-/* The one heading in a turn that is not at the body size, and so the one that
-   cannot take the body baseline with it: at 16px, --maka-line-body's 20px is
-   on the 4px grid but is the 14px tier's line box, one step tighter than the
-   tier this heading actually sits at. It takes its own tier's leading (24px);
-   the turn still reads as one rhythm because 24 is the next step of the same
-   grid, not a different one. */
-.maka-turn [data-maka-contract="markdown"] h1 {
-  font: var(--maka-text-heading-3);
-}
-
-.maka-turn [data-maka-contract="markdown"] :is(h2, h3, h4, h5, h6) {
-  font: var(--maka-text-heading-4);
-}
+/* Moved to the transcript rhythm table in packages/ui/src/styles.css. The
+   argument for flattening the document ladder is unchanged; what changed is
+   where it is expressed. These rules keyed on a `.maka-turn` ancestor, which
+   made the heading scale a function of DOM position: the same MarkdownBody
+   rendered document-sized headings in the Daily Review and flat ones in a
+   turn, and no Storybook story could reproduce the transcript without
+   remembering to wrap one. The rhythm table keys on Astryx's own
+   `data-density` instead, so the scale follows the `density` prop that already
+   distinguishes the two surfaces. It also keeps two size steps rather than
+   one — h2 and h3 used to be identical in size, weight and colour. */
 
 .maka-chat-message pre:not([data-maka-contract="markdown"] pre) {
   margin: 0;
