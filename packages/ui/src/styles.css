@@ -173,7 +173,15 @@
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * {
   margin-block: 0;
 }
-[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + * {
+/* `:not(dialog)` because a gap is a relation between two blocks in the document
+   flow, and a dialog is not one. Astryx's `Dialog` does not portal, so the
+   Mermaid fullscreen overlay renders as a direct child of the markdown document
+   while being `position: fixed; inset: 0` — an adjacent-sibling margin there
+   pushes the whole viewport-filling overlay off the top of the screen rather
+   than spacing anything (caught by the Mermaid E2E journey, 8px off). The
+   exclusion belongs on the side that RECEIVES the margin; an overlay sitting
+   between two blocks is fine as the `+` antecedent. */
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + *:not(dialog) {
   margin-block-start: var(--md-gap-block);
 }
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + .astryx-markdown-heading:is([data-level="1"], [data-level="2"]) {
@@ -190,7 +198,7 @@
    (0,3,1)) and keeps the chapter gap, so `hr` before a major heading is
    unaffected. */
 [data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > * + hr,
-[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > hr + * {
+[data-maka-contract="markdown"] .astryx-markdown[data-density="compact"] > hr + *:not(dialog) {
   margin-block-start: var(--md-gap-section);
 }
 /* Prose list, not a control list: drop the ListItem row padding and express the
