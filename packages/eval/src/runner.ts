@@ -75,6 +75,16 @@ export interface AttemptStore {
   runExclusive<T>(operation: () => Promise<T>): Promise<T>;
 }
 
+export class ExecutorPreparationFailure extends Error {
+  constructor(
+    readonly artifacts: readonly JsonObject[],
+    options?: ErrorOptions,
+  ) {
+    super('executor preparation failed', options);
+    this.name = 'ExecutorPreparationFailure';
+  }
+}
+
 export async function runExperiment(input: {
   readonly spec: ExperimentSpec;
   readonly store: AttemptStore;
@@ -222,8 +232,13 @@ async function executeCell(
       status: 'indeterminate',
       failureReason: 'executor cleanup did not settle',
     };
-  } catch {
-    return failure('infra_failed', 'executor preparation failed');
+  } catch (error) {
+    return failure(
+      'infra_failed',
+      'executor preparation failed',
+      undefined,
+      error instanceof ExecutorPreparationFailure ? error.artifacts : [],
+    );
   }
 }
 
@@ -338,6 +353,7 @@ function failure(
   status: 'infra_failed' | 'indeterminate',
   failureReason: string,
   subject?: SubjectExecutionResult,
+  artifacts: readonly JsonObject[] = subject?.artifacts ?? [],
 ): EvalResult {
   return {
     score: null,
@@ -346,7 +362,7 @@ function failure(
     durationMs: subject?.durationMs ?? 0,
     status,
     failureReason,
-    artifacts: subject?.artifacts ?? [],
+    artifacts,
   };
 }
 
