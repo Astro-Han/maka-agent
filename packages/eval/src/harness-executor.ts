@@ -18,6 +18,7 @@ import type { EvalResult } from './result.js';
 type Framework = 'harbor' | 'pier';
 
 const PREPARATION_STDERR_LIMIT = 64 * 1024;
+const PREPARATION_REDACTION_OVERLAP = 8 * 1024;
 
 interface RelayState {
   readonly child: ChildProcess;
@@ -194,7 +195,14 @@ async function startTrial(
   let child: ChildProcess | undefined;
   let connectedSocket: Socket | undefined;
   let abort: (() => void) | undefined;
-  const stderr = new BoundedCapture(PREPARATION_STDERR_LIMIT);
+  const exactSecrets = [token, ...Object.values(credentials)];
+  const stderr = new BoundedCapture(
+    PREPARATION_STDERR_LIMIT +
+      Math.max(
+        PREPARATION_REDACTION_OVERLAP,
+        ...exactSecrets.map((secret) => Buffer.byteLength(secret)),
+      ),
+  );
   let stderrClosed: Promise<unknown> | undefined;
   try {
     server.listen(0, '127.0.0.1');
@@ -263,11 +271,7 @@ async function startTrial(
     await closeServer(server);
     await mkdir(trialPath, { recursive: true, mode: 0o700 });
     const diagnosticPath = 'preparation-error.json';
-    const diagnostic = sanitizeDiagnostic(
-      stderr.text(),
-      [token, ...Object.values(credentials)],
-      PREPARATION_STDERR_LIMIT,
-    );
+    const diagnostic = sanitizeDiagnostic(stderr.text(), exactSecrets, PREPARATION_STDERR_LIMIT);
     await writeFile(
       join(trialPath, diagnosticPath),
       `${JSON.stringify({

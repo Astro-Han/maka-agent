@@ -40,10 +40,11 @@ test('harness spawn failure releases its relay listener and process', async () =
 test('preparation failure persists bounded redacted diagnostics on the attempt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'maka-eval-preparation-diagnostic-'));
   const executable = join(root, 'fake-python.mjs');
+  const boundarySecret = 's'.repeat(256);
   await writeFile(
     executable,
     `#!/usr/bin/env node
-await new Promise((resolve) => process.stderr.write('x'.repeat(70_000), resolve));
+await new Promise((resolve) => process.stderr.write('x'.repeat(4_450) + '${boundarySecret}' + 'x'.repeat(65_294), resolve));
 await new Promise((resolve) => process.stderr.write('\\nAuthorization: Bearer test-bearer-secret\\nOPENAI_API_KEY=test-env-secret\\n', resolve));
 process.exitCode = 9;
 `,
@@ -54,7 +55,7 @@ process.exitCode = 9;
   const previousSecret = process.env.MAKA_TEST_SECRET;
   process.env.MAKA_TEST_PYTHON = executable;
   process.env.MAKA_TEST_TRIALS = root;
-  process.env.MAKA_TEST_SECRET = 'test-env-secret';
+  process.env.MAKA_TEST_SECRET = boundarySecret;
   try {
     const spec: ExperimentSpec = {
       schemaVersion: 'maka.eval.v1',
@@ -100,6 +101,7 @@ process.exitCode = 9;
     assert.equal(diagnostic.truncated, true);
     assert.ok(Buffer.byteLength(diagnostic.stderr) <= 65_536);
     assert.doesNotMatch(diagnostic.stderr, /test-bearer-secret|test-env-secret/u);
+    assert.doesNotMatch(diagnostic.stderr, /s{32}/u);
   } finally {
     if (previousPython === undefined) delete process.env.MAKA_TEST_PYTHON;
     else process.env.MAKA_TEST_PYTHON = previousPython;
