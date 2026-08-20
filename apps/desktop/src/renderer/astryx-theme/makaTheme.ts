@@ -129,34 +129,45 @@ export const makaTheme = defineTheme({
     '--color-background-popover': 'var(--background-elevated)',
     '--color-background-muted': 'var(--muted)',
     '--color-border': 'var(--border)',
+    // Elevation reads as CONTACT, not as a drop. Astryx's stock --shadow-low
+    // opens with `0 2px 4px` — offset and blur together, which is the shape of
+    // a sticker casting onto the page behind it. Both systems we measured off
+    // do the opposite: the near layers carry no Y offset at all and only the
+    // far layer sinks. Meta AI's Mac app (elevation-01, read out of its
+    // shipped stylesheet) is `0 0 2px / 0 0 6px / 0 6px 30px` at 2%/3%/7%, and
+    // the Astryx docsite's own brand theme opens at `0 1px 1px`. A zero-offset
+    // near layer darkens evenly around the edge, which is what an object
+    // resting ON a surface does; an offset one states a gap underneath it.
+    //
+    // The inset top line is the other half and is why this cannot be done by
+    // tuning the stock values: it puts a lit edge along the top of the surface
+    // so the object has thickness. Astryx already carries that layer but only
+    // in dark mode (`inset 0 0 0 1px` at white 8%, a full ring rather than a
+    // top edge); light mode gets `transparent`. Here it is a top edge in both,
+    // strong in light (white 64%, matching what the Mac app uses on a
+    // near-white surface) and faint in dark, where the surface is already
+    // lighter than its plate.
+    //
+    // Only `low` moves in this change. `med` and `high` keep the stock drop
+    // character on purpose: this is the token that ChatComposer defaults to,
+    // so it is the one surface where the difference can be judged in isolation
+    // before deciding whether the whole ramp follows.
+    '--shadow-low': [
+      'inset 0 1px 0 light-dark(oklch(1 0 0 / 64%), oklch(1 0 0 / 6%))',
+      '0 0 2px light-dark(oklch(0 0 0 / 2%), oklch(0 0 0 / 22%))',
+      '0 0 6px light-dark(oklch(0 0 0 / 3%), oklch(0 0 0 / 30%))',
+      '0 6px 30px light-dark(oklch(0 0 0 / 7%), oklch(0 0 0 / 45%))',
+    ].join(', '),
   },
-  // The column edge itself. Astryx draws a divider only on
-  // `AppShell variant="section"`, which is a hardcoded `variant === 'section'`
-  // in AppShell.tsx and pairs the line with no wash at all. Cursor and Codex
-  // both do the opposite of one-or-the-other: a 1px rule AND a wash, with the
-  // wash pulled far back (measured off their windows, sidebar→content ΔL 0.025
-  // and ~0.010 against Maka's 0.045). The line states the boundary; the wash
-  // only says the two columns are different material. Authored here rather than
-  // as a product override so the shell keeps one paint authority — this emits
-  // `.astryx-app-shell-sidenav { border-inline-end }` inside the theme's own
-  // @scope. It draws with --color-border, the same token Divider, Card and the
-  // generated `hr` rule use, so the column edge cannot drift away from every
-  // other hairline in the app; that token is remapped to the product's --border
-  // just above. Keyed on the variant, not `base`: the edge belongs to the
-  // elevated treatment, so a future variant change re-decides it instead of
-  // inheriting a line that no longer matches the columns.
-  components: {
-    'app-shell-sidenav': {
-      // No color ease on the column: neither half of the edge changes across the
-      // collapse any more. The wash is one material in both states (the rail
-      // wears --color-background-body throughout, see shell-layout.css) and the
-      // hairline is transparent in both, so a background-color/border-color
-      // transition here had nothing left to interpolate.
-      'variant:elevated': {
-        borderInlineEndWidth: '1px',
-        borderInlineEndStyle: 'solid',
-        borderInlineEndColor: 'var(--color-border)',
-      },
-    },
-  },
+  // No component overrides. This block used to carry the sidebar's hairline —
+  // `app-shell-sidenav / variant:elevated / borderInlineEnd` — authored here so
+  // the shell kept one paint authority and the column edge drew with the same
+  // --color-border as every other rule in the app.
+  //
+  // The edge is gone, not moved: the sidebar is a floating plate now
+  // (shell-layout.css), separated from the content by a gap and its own shadow.
+  // A line would be a third statement of a boundary two things already make.
+  // The rule was already dead before this change — shell-layout.css set
+  // `border-inline-end-width: 0` on the same element from a later cascade
+  // layer, so the theme emitted a hairline nothing could ever paint.
 });

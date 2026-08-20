@@ -1,5 +1,26 @@
 /* Shell layout — app frame, panels, topbar rail, main column, workspace top actions. */
+/* How far the sidebar plate is pulled in from the window on every side. This is
+   the whole of the shell's elevation story: one backplate, one plate floating on
+   it, and this is the distance between them.
+
+   Declared HERE, not on `.maka-shell-astryx`, because the titlebar is the
+   shell's SIBLING rather than its descendant — it is an absolute overlay
+   mounted next to the columns, not inside them — and its first grid column has
+   to span the sidebar's whole slot, plate plus both insets. Scoped to the shell
+   the variable resolved to nothing on that side, which does not fall back: the
+   `calc()` went invalid, the whole `grid-template-columns` declaration dropped,
+   and the strip silently collapsed from three columns to two. `.appFrame` is
+   where `--maka-sidenav-width` already lives (set inline by app-shell.tsx) for
+   exactly the same reason.
+
+   Not `--agents-content-area-gap`. That token is a seam BETWEEN content
+   surfaces — chat-detail.css spends it between the transcript and its
+   neighbours — and 4px is the right size for a seam. How far a floating plate
+   stands off the backplate is a different quantity that happens to also be a
+   length; at 4px the plate reads as a misaligned edge rather than as something
+   lying above the surface. */
 .appFrame {
+  --maka-sidebar-plate-inset: var(--space-2);
   font: var(--maka-text-body);
   position: relative;
   height: 100dvh;
@@ -40,15 +61,63 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+
+  /* How far content has to start below the absolute chrome strip. The content
+     region reaches the window edge, so this is the strip's full height.
+
+     Declared on the shell root rather than on the content frame, where it used
+     to live: chat-detail.css reads it from three places inside that region, and
+     the sidebar derives its own clearance from it below. One number, read from
+     wherever it is needed. */
+  --maka-plate-titlebar-clearance: var(--h-titlebar);
+
 }
 
-/* Sidebar and canvas share one floor colour; the content plate is the only
-   step. Drop the theme sidenav hairline (generated maka.css) so the plate edge
-   is the single seam. Width 0: a transparent 1px border still reserved layout. */
+/* The sidebar is a block lying on the backplate.
+
+   It wears `--agents-content-area-bg`, the same fill the composer and every
+   other raised surface already carries, because what makes a block read as
+   floating is BELONGING TO A SET of them. The composer is already a light
+   surface standing on this canvas; a sidebar painted the canvas's own colour
+   is the odd one out, and an odd one out with a shadow around it reads as a
+   region cut out of the floor rather than an object on it. Both were rendered
+   side by side against the same transcript before choosing.
+
+   Painting it `--agents-layout-bg` was the other candidate and is what Meta AI
+   appears to do — its sidebar and content sample within ~1/255 of each other,
+   with the whole boundary carried by a seam shadow. Not copied, for two
+   reasons: that difference is inside JPEG's own error on the frame it was
+   measured from, so it is not evidence of an exact match; and Meta's composer
+   sits ~5/255 ABOVE its content, so even there the raised surfaces form a set
+   the sidebar is closer to than the floor is.
+
+   Inset from the window on ALL FOUR sides, including the content side. An inset
+   on three and a butt joint on the fourth reads as two panels wedged together,
+   which is exactly what this boundary looked like back when it was a hairline.
+
+   That hairline stays dropped — with an inset and a shadow drawing the
+   boundary, a line is a third statement of it. Width 0 because a transparent
+   1px border still reserved layout.
+
+   The margin is the WHOLE inset, top and bottom included. It first carried a
+   matching `height: calc(100% - 2 * inset)` on the theory that the margin only
+   moves the box and something has to shorten it. That collapsed the column to
+   its content — a nav ending halfway down the window. The flex parent's own
+   height is `auto` (it is itself a stretched flex item), so a percentage height
+   here has no definite basis to resolve against, falls back to `auto`, and the
+   declaration that was meant to fit the column to the window instead measured
+   its items. Stretch already does the right thing: a flex item with
+   `height: auto` stretches to the line and the cross-axis margins are
+   subtracted from it, so the margin alone produces exactly the intended
+   standoff at full height. `box-sizing` went with it — it existed only to make
+   that height read as border-box. */
 .maka-shell-astryx .astryx-app-shell-sidenav {
-  background: var(--agents-layout-bg);
+  background: var(--agents-content-area-bg);
   border-inline-end-color: transparent;
   border-inline-end-width: 0;
+  margin: var(--maka-sidebar-plate-inset);
+  border-radius: var(--radius-modal);
+  box-shadow: var(--shadow-low);
 }
 
 
@@ -65,7 +134,7 @@
    `position: relative` flex item, so the same `top` shoved its divider 36px
    down the page — it started below the header's rule instead of meeting it. */
 .maka-shell-astryx [data-testid="astryx-sidenav-resize-handle"] {
-  top: var(--h-titlebar);
+  top: calc(var(--h-titlebar) - var(--maka-sidebar-plate-inset));
 }
 
 /* The canvas the floating plate sits on. Keyed on the AppShell's own
@@ -80,9 +149,9 @@
 }
 
 .maka-shell-astryx .maka-panel-detail {
-  width: calc(100% - var(--agents-content-area-gap));
-  height: calc(100% - 2 * var(--agents-content-area-gap));
-  margin: var(--agents-content-area-gap) var(--agents-content-area-gap) var(--agents-content-area-gap) 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -99,27 +168,35 @@
      reach its top edge — scrolled the whole frame up by the clearance the first
      time anything inside took focus. */
   overflow: clip;
-  /* How far each plate inside has to start below the absolute chrome strip.
-     Declared here because the frame is what the strip sits over, consumed by
-     every plate that stands in it — the conversation column and the workbar
-     both. One number, no plate reaching outside its own box to get it. */
-  --maka-plate-titlebar-clearance: calc(var(--h-titlebar) - var(--agents-content-area-gap));
   box-sizing: border-box;
 }
 
-/* The conversation plate. Every view renders into this column, so this is where
-   the content surface actually is. */
+/* The conversation region. Every view renders into this column, and it is the
+   BACKPLATE — the surface the sidebar floats on — not a plate of its own.
+
+   It used to carry a radius, a gap and (briefly) a shadow, which made the shell
+   two plates butted together with a seam down the middle. That is not the same
+   picture as one surface with something lying on it, and it is the picture that
+   makes the sidebar read as half of a split rather than as a floating block.
+   Painting nothing is what lets the canvas run edge to edge underneath: the
+   inset around the sidebar shows the same surface the transcript sits on, so
+   the plate has something continuous to float over.
+
+   `#astryx-app-shell-main` above is what actually paints this region. */
 .maka-shell-astryx .mainColumn {
-  border-radius: var(--radius-modal);
-  background: var(--agents-content-area-bg);
   padding-top: var(--maka-plate-titlebar-clearance);
   box-sizing: border-box;
 }
 
 /* Same top clear for the sidebar column so list/nav content sits below the
    traffic-light / left chrome cluster while the transparent plate shows. */
+/* Same top clear as the content, measured from the sidebar plate's own top
+   edge: the plate starts one inset below the window, so it needs that much LESS
+   internal clearance to put its first row on the content's line. Derived from
+   the content's clearance rather than from `--h-titlebar` directly, so the two
+   columns cannot drift apart if the strip's height moves. */
 .maka-shell-astryx .maka-session-panel {
-  padding-top: var(--h-titlebar);
+  padding-top: calc(var(--maka-plate-titlebar-clearance) - var(--maka-sidebar-plate-inset));
   box-sizing: border-box;
 }
 
@@ -259,6 +336,13 @@
      `--maka-titlebar-gap` (8px) of overhang instead of the intended flush
      start.
 
+     `+ 2 * --maka-sidebar-plate-inset` because the sidebar is a floating plate:
+     it is inset from the window on both sides, and `--maka-sidenav-width`
+     measures the plate rather than the slot it stands in. Without both insets
+     the breadcrumb starts left of where the content actually begins — the same
+     off-by-an-inset this column's floor already corrects for on the other
+     side.
+
      `minmax(..., auto)` rather than a fixed width for the collapsed state,
      where the two icons are wider than the 48px rail: the column grows to the
      icons and the gap then holds the breadcrumb off them, which is the same
@@ -272,8 +356,9 @@
   grid-template-columns:
     minmax(
       calc(
-        var(--maka-sidenav-width) - var(--maka-window-resize-edge) -
-          var(--maka-titlebar-gutter-left) - var(--maka-titlebar-gap)
+        var(--maka-sidenav-width) + 2 * var(--maka-sidebar-plate-inset) -
+          var(--maka-window-resize-edge) - var(--maka-titlebar-gutter-left) -
+          var(--maka-titlebar-gap)
       ),
       auto
     )

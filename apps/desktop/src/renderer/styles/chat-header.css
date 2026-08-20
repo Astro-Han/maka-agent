@@ -55,12 +55,28 @@
 .maka-session-context {
   flex: 0 0 auto;
   min-width: 0;
-  /* Visual System 2.0 (T2): same pixels, findable name. This band is flush
-     inside the conversation plate, so it paints the plate's own tier — the
-     point is that it stays INVISIBLE against it. `--background` resolves here
-     too (DESIGN.md §2 lists it as a raised alias), but it reads like "the page
-     color" at a call site, which is the one thing it is not. */
-  background: var(--surface-raised);
+  /* This band is flush inside whatever surface the conversation runs on, and
+     the point has always been that it stays INVISIBLE against it. It used to
+     name that surface directly (`--surface-raised`, the conversation plate's
+     own tier) — correct while the conversation had a plate of its own. It does
+     not any more: the transcript now runs straight on the shell's backplate
+     (shell-layout.css), and a band still painting the raised tier became a
+     white strip across the top of the content with a hard edge under it, which
+     is the most visible thing in the window rather than the least.
+
+     `transparent` states the intent instead of restating one surface's value,
+     so the band cannot become visible again the next time the surface under it
+     is re-decided.
+
+     Astryx's LayoutHeader draws a 1px rule under itself, which belonged to the
+     same reading: a band inside a plate, ruled off from the transcript below
+     it. On a backplate that rule is a full-width line across the content with
+     nothing on either side of it that is a different surface — it divides the
+     one continuous plate the sidebar floats over, which is the single thing
+     this layout depends on. The controls in the band are what the user sees;
+     they do not need a region drawn around them. */
+  background: transparent;
+  border-block-end-width: 0;
   container-type: inline-size;
   -webkit-app-region: no-drag;
 }
