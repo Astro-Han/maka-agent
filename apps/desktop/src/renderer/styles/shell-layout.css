@@ -398,39 +398,46 @@ dialog:modal {
   color: var(--foreground-secondary);
 }
 
-/* The session's identity: left-aligned at the content column's left edge.
+/* The session's identity: a capsule floating over the content, centred in it.
 
-   It sits in the titlebar's second grid column, which opens exactly where the
-   sidebar column ends, so the breadcrumb reads as the heading of the
-   conversation plate beneath it. Laid out in flow instead, it anchored to the
-   icon rail and landed mid-sidebar — straddling the seam, aligned to neither
-   column. Collapsing the sidebar narrows column 1 and the breadcrumb follows it
-   left — flush with the plate while the sidebar is wide enough to be the
-   binding measure, and held off the icon rail by the strip's own gap once the
-   icons are wider than the collapsed column. Both readings are one rule: the
-   column's floor is the sidebar, its ceiling the icons.
+   It used to be flush left at the content column's left edge, reading as the
+   heading of the conversation plate beneath it. That was right while there was
+   a plate to head. There is not any more — the transcript runs on the shell's
+   one backplate — so a bare label pinned to the backplate's left edge is a
+   label lying ON the reading surface with nothing to say it is chrome. It gets
+   the same treatment as every other raised thing in the window: the plate fill,
+   the plate shadow, pill radius. Same fill as the sidebar and the composer,
+   because these are one set and the set is what reads as floating.
 
-   `padding-left` keeps the text off the seam itself. It matches the inset the
-   sidebar's own rows carry, so the two columns' text starts read as a pair
-   rather than one label welded to the divider.
+   `justify-self: center` centres it in the second column, which opens where the
+   sidebar's slot ends and closes at the workspace actions. Centring on the
+   COLUMN and not on the window is what keeps it over the content rather than
+   over the seam, at any sidebar width and with or without the actions present.
 
-   Both plates below reserve the full `--h-titlebar` (`.mainColumn` via
-   `--maka-plate-titlebar-clearance`, `.maka-session-panel` directly), so this
-   strip is empty for its whole width and the label collides with nothing.
+   Padding is symmetric now. The old `padding-left` existed to hold the text off
+   the seam it started at; a centred capsule has no seam to clear, and an
+   asymmetric one would sit visibly off its own centre.
 
-   `min-width: 0` + `justify-self: start`: the column is `minmax(0, 1fr)`, so on
-   a narrow window this is what gives way, truncating its own segments instead
-   of squeezing the two action clusters that flank it. `no-drag` covers only
-   this box — the strip stays draggable on both sides of the text, exactly as it
-   already is around the icon clusters. */
+   Content below reserves the full `--h-titlebar`
+   (`--maka-plate-titlebar-clearance`), so this strip is empty for its whole
+   width and the capsule collides with nothing.
+
+   `min-width: 0`: the column is `minmax(0, 1fr)`, so on a narrow window this is
+   what gives way, truncating its own segments instead of squeezing the two
+   action clusters that flank it. `no-drag` covers only this box — the strip
+   stays draggable on both sides of it, exactly as around the icon clusters. */
 .maka-titlebar-identity {
   grid-column: 2;
-  justify-self: start;
+  justify-self: center;
   min-width: 0;
   /* Never the whole column: what is left of it is the strip's drag band. */
   max-width: calc(100% - var(--maka-titlebar-drag-reserve));
   display: flex;
-  padding-left: var(--space-3);
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  background: var(--agents-content-area-bg);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-low);
   -webkit-app-region: no-drag;
 }
 
