@@ -126,6 +126,37 @@
   justify-self: end;
 }
 
+/* The window's top-right controls, raised.
+
+   The band under them stopped painting anything (see above), so these stand
+   directly on the shell's backplate. Astryx's `token` is a RECESSIVE chip —
+   foreground at 6% — which is what you want on a plate and exactly wrong on the
+   floor: a translucent grey patch on the backplate reads as a stain rather than
+   as a control, and the ghost button next to it reads as nothing at all until
+   hovered.
+
+   So they join the set: plate fill, plate shadow, pill radius, same as the
+   sidebar, the composer and the title capsule. Raising each control rather than
+   painting the cluster around them is deliberate — the cluster is present with
+   an empty overflow list in views that have no context to show, and a painted
+   container would float an empty capsule there.
+
+   The ghost button keeps a hover state, mixed from the fill it now carries
+   instead of Astryx's `--muted` (foreground at 5%). `--muted` is defined
+   relative to whatever is BEHIND it, and behind this button is now an opaque
+   plate, so the stock hover would tint the backplate showing through a surface
+   that no longer lets it through. */
+.maka-session-context__cluster .astryx-token,
+.maka-session-context__cluster .astryx-button.ghost {
+  background: var(--agents-content-area-bg);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-low);
+}
+
+.maka-session-context__cluster .astryx-button.ghost:hover {
+  background: color-mix(in oklch, var(--agents-content-area-bg) 95%, var(--foreground));
+}
+
 .maka-session-context__item,
 .maka-session-context__revision,
 .maka-session-context__goal {
