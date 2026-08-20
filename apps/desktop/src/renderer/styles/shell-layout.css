@@ -381,9 +381,24 @@ dialog:modal {
   -webkit-app-region: no-drag;
 }
 
+/* Search and collapse belong to the SIDEBAR, so they sit at the sidebar plate's
+   top-RIGHT, not pinned to the window's top-left.
+
+   `start` put them against the window edge, which was where they belonged while
+   the sidebar was the floor and its column ran to that edge. Now that the plate
+   is inset and rounded, buttons at the far left read as window chrome that
+   happens to overlap it — and they crowd the traffic lights, which own that
+   corner on macOS. Ending them at the plate's inner edge puts them where the
+   column they act on ends, and leaves the left of the strip to the OS.
+
+   `margin-inline-end` is the sidenav's own inner gutter, not the plate inset
+   that happens to share its value: column 1 stops at the plate's OUTER edge, so
+   without it the buttons would end 8px right of every row inside the plate and
+   their hover fills would hang past the list they sit above. */
 .maka-shell-topbar-rail {
   grid-column: 1;
-  justify-self: start;
+  justify-self: end;
+  margin-inline-end: var(--space-2);
   display: flex;
   align-items: center;
   gap: var(--space-2);
