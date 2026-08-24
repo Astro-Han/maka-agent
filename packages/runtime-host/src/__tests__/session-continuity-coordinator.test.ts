@@ -2078,6 +2078,7 @@ function canonical(
       followup: [],
     },
     interactions: overrides.interactions ?? { pending: [] },
+    rootTurnSourceMessageIds: [],
   };
 }
 

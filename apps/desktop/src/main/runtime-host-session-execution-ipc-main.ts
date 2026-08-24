@@ -827,7 +827,7 @@ function createRuntimeHostSessionStop(
         root &&
         !isTerminalStatus(root.status) &&
         (root.turnId === target.expectedAdmissionId ||
-          observed.rootTurnSourceMessageIds?.includes(target.expectedAdmissionId) === true ||
+          observed.rootTurnSourceMessageIds.includes(target.expectedAdmissionId) ||
           entry?.state === 'in_flight')
       ) {
         expectedTurnId = root.turnId;

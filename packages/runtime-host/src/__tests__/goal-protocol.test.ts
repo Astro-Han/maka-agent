@@ -124,6 +124,7 @@ test('Goal projection is part of the exact Session continuity schema', () => {
     goal,
     queue: { hostEpoch: 'epoch-1', queueRevision: 0, steering: [], followup: [] },
     interactions: { pending: [] },
+    rootTurnSourceMessageIds: [],
   });
   assert.deepEqual(snapshot.goal, goal);
   assert.throws(() =>

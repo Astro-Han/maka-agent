@@ -1436,6 +1436,7 @@ function canonicalProjection(sessionId: string): CanonicalSessionProjection {
       followup: [],
     },
     interactions: { pending: [] },
+    rootTurnSourceMessageIds: [],
   };
 }
 

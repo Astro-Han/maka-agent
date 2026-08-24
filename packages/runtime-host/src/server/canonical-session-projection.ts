@@ -54,7 +54,7 @@ export interface CanonicalSessionProjection {
   readonly goal: GoalProjection | null;
   readonly queue: SessionMessageQueueProjection;
   readonly interactions: SessionInteractionProjection;
-  readonly rootTurnSourceMessageIds?: readonly string[];
+  readonly rootTurnSourceMessageIds: readonly string[];
 }
 
 export interface CanonicalSessionProjectionCandidate {
@@ -133,7 +133,7 @@ export class CanonicalSessionProjectionReader {
       goal,
       queue,
       interactions,
-      ...(admission ? { rootTurnSourceMessageIds } : {}),
+      rootTurnSourceMessageIds,
     };
   }
 
@@ -202,7 +202,7 @@ function sessionContinuitySnapshotInput(
     goal: canonical.goal,
     queue: canonical.queue,
     interactions: canonical.interactions,
-    rootTurnSourceMessageIds: canonical.rootTurnSourceMessageIds ?? [],
+    rootTurnSourceMessageIds: canonical.rootTurnSourceMessageIds,
   };
 }
 

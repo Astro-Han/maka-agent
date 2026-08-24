@@ -582,5 +582,6 @@ function continuitySnapshot() {
       followup: [],
     },
     interactions: { pending: [] },
+    rootTurnSourceMessageIds: [],
   };
 }

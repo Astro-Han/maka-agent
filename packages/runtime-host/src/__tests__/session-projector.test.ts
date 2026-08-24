@@ -493,6 +493,7 @@ function snapshot(overrides: Partial<SessionContinuitySnapshot> = {}): SessionCo
       followup: [],
     },
     interactions: { pending: [] },
+    rootTurnSourceMessageIds: [],
     ...overrides,
   };
 }
@@ -501,7 +502,7 @@ function withRootSourceMessageIds(
   value: SessionContinuitySnapshot,
   rootTurnSourceMessageIds: readonly string[],
 ): SessionContinuitySnapshot {
-  return { ...value, rootTurnSourceMessageIds } as unknown as SessionContinuitySnapshot;
+  return { ...value, rootTurnSourceMessageIds };
 }
 
 function assistant(id: string, text: string): Extract<StoredMessage, { type: 'assistant' }> {

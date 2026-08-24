@@ -74,6 +74,7 @@ test('projects the canonical root lifecycle and the attachment queue from real S
       goal: null,
       queue: { hostEpoch: 'epoch-1', queueRevision: 0, steering: [], followup: [] },
       interactions: { pending: [] },
+      rootTurnSourceMessageIds: [],
     });
 
     const admitted = await rootAdmissions.admitRootTurn({

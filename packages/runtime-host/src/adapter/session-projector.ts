@@ -448,10 +448,10 @@ function emptyUpdate(events: readonly SessionEvent[]): RuntimeHostProjectionUpda
 
 function projectMessageAdmissionEvents(
   root: TurnSnapshot,
-  messageIds: readonly string[] | undefined,
+  messageIds: readonly string[],
   ts: number,
 ): SessionEvent[] {
-  return (messageIds ?? []).map((messageId) => ({
+  return messageIds.map((messageId) => ({
     type: 'message_admission' as const,
     id: `host-admission:${root.runId}:${messageId}`,
     turnId: root.turnId,
@@ -470,11 +470,11 @@ function projectNewMessageAdmissionEvents(
   if (!root) return [];
   const previousIds =
     previous.rootTurn?.runId === root.runId
-      ? new Set(previous.rootTurnSourceMessageIds ?? [])
+      ? new Set(previous.rootTurnSourceMessageIds)
       : new Set<string>();
   return projectMessageAdmissionEvents(
     root,
-    (next.rootTurnSourceMessageIds ?? []).filter((messageId) => !previousIds.has(messageId)),
+    next.rootTurnSourceMessageIds.filter((messageId) => !previousIds.has(messageId)),
     ts,
   );
 }
@@ -489,7 +489,7 @@ function projectMessageRetractionEvents(
   const retained = new Set(
     [...next.queue.steering, ...next.queue.followup].map((entry) => entry.messageId),
   );
-  const admitted = new Set(next.rootTurnSourceMessageIds ?? []);
+  const admitted = new Set(next.rootTurnSourceMessageIds);
   return [...previous.queue.steering, ...previous.queue.followup]
     .filter(
       (entry) =>

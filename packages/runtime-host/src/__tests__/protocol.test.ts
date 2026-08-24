@@ -295,6 +295,9 @@ describe('Runtime Host bootstrap protocol', () => {
         }),
       isInvalidFrame,
     );
+    const { rootTurnSourceMessageIds: _missing, ...missingAdmissionTickets } =
+      continuitySnapshot('epoch-1');
+    assert.throws(() => decodeSessionContinuitySnapshot(missingAdmissionTickets), isInvalidFrame);
     const waiting = {
       ...continuitySnapshot('epoch-1'),
       rootTurn: {
@@ -1796,5 +1799,6 @@ function continuitySnapshot(hostEpoch: string) {
       followup: [],
     },
     interactions: { pending: [] },
+    rootTurnSourceMessageIds: [],
   };
 }

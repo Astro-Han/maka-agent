@@ -88,7 +88,7 @@ export interface SessionContinuitySnapshot {
   queue: SessionMessageQueueProjection;
   interactions: SessionInteractionProjection;
   /** Host-owned source message tickets admitted into the root Turn. */
-  rootTurnSourceMessageIds?: readonly string[];
+  rootTurnSourceMessageIds: readonly string[];
 }
 
 export interface SubscriptionOpenInput {
@@ -527,6 +527,7 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     'queue',
     'interactions',
     'rootTurnSourceMessageIds',
+    'rootTurnSourceMessageIds',
   ]);
   assertRequiredKeys(record, 'Session continuity snapshot', [
     'schemaVersion',
@@ -550,10 +551,6 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
   if (goal !== null && goal.sessionId !== session.sessionId) {
     throw invalidProtocolFrame('Session continuity Goal belongs to a different Session');
   }
-  const rootTurnSourceMessageIds =
-    record.rootTurnSourceMessageIds === undefined
-      ? undefined
-      : decodeRootTurnSourceMessageIds(record.rootTurnSourceMessageIds);
   return {
     schemaVersion: SESSION_CONTINUITY_SCHEMA_VERSION,
     session,
@@ -562,7 +559,7 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     goal,
     queue: decodeSessionMessageQueueProjection(record.queue),
     interactions,
-    ...(rootTurnSourceMessageIds === undefined ? {} : { rootTurnSourceMessageIds }),
+    rootTurnSourceMessageIds: decodeRootTurnSourceMessageIds(record.rootTurnSourceMessageIds),
   };
 }
 

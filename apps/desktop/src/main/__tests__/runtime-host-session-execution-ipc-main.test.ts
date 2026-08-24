@@ -1392,6 +1392,7 @@ function observerWithTranscript(
             followup: [],
           },
           interactions: { pending: [] },
+          rootTurnSourceMessageIds: [],
           ...overrides,
         },
         activeAssistantStreams: [],
