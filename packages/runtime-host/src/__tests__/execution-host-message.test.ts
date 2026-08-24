@@ -214,6 +214,7 @@ test('steering becomes durable and ordered followups automatically start the nex
     const chain = await fixture.readAdmissionChain();
     assert.equal(chain.length, 2);
     assert.equal(chain[1]?.previousRootTurnId, firstTurnId);
+    assert.equal(chain[1]?.userMessageId, null);
     assert.deepEqual(
       chain[1]?.sourceMessages.map(({ messageId, content, placement, disposition }) => ({
         messageId,

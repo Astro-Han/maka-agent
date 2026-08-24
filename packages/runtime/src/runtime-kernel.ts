@@ -34,12 +34,8 @@ import type {
 } from '@maka/core/runtime-event-store';
 import { isSessionInlineRun } from '@maka/core/agent-run';
 import {
-  messageContentDigest,
-  messageContentsEqual,
-  normalizeMessageContent,
   type ActiveInteractionRequestEvent,
   type CompleteEvent,
-  type MessageContent,
   type QueueEnqueueOutcome,
   type SessionEvent,
   type TokenUsageEvent,
@@ -188,16 +184,6 @@ export interface RuntimeKernelLike {
   respondToSandboxBoundary(sessionId: string, response: SandboxBoundaryResponse): Promise<void>;
   listActiveInteractions?(sessionId: string): ActiveInteractionRequestEvent[];
   respondToUserQuestion?(sessionId: string, response: UserQuestionResponse): Promise<void>;
-  materializeRootSourceMessages?(input: {
-    sessionId: string;
-    turnId: string;
-    messages: readonly {
-      messageId: string;
-      content: MessageContent;
-      submittedContentDigest?: `sha256:${string}`;
-      disposition: 'steering' | 'followup' | 'turn_started';
-    }[];
-  }): Promise<void>;
   /** Compatibility surface; durable message admission belongs to Runtime Host. */
   steer(sessionId: string, text: string): QueueEnqueueOutcome;
   queueMessage(sessionId: string, text: string): QueueEnqueueOutcome;
@@ -242,8 +228,7 @@ export class RuntimeContextCompactError extends Error {
 
 export interface TurnStartOptions {
   runId?: string;
-  userMessageId?: string;
-  recordInitialUserMessage?: boolean;
+  userMessageId?: string | null;
   durability?: AgentRunDurability;
   /**
    * Resolve turn admission after this Session has registered a pending start
@@ -694,7 +679,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
         userInput: input,
         runId: options.runId,
         userMessageId: options.userMessageId,
-        recordInitialUserMessage: options.recordInitialUserMessage,
         durability: options.durability,
         store: this.deps.store,
         runStore: this.deps.runStore,
@@ -2408,46 +2392,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
   retractQueue(sessionId: string): string {
     void sessionId;
     return '';
-  }
-
-  async materializeRootSourceMessages(input: {
-    sessionId: string;
-    turnId: string;
-    messages: readonly {
-      messageId: string;
-      content: MessageContent;
-      submittedContentDigest?: `sha256:${string}`;
-      disposition: 'steering' | 'followup' | 'turn_started';
-    }[];
-  }): Promise<void> {
-    const existingById = new Map(
-      (await this.deps.store.readMessages(input.sessionId)).map((message) => [message.id, message]),
-    );
-    for (const message of input.messages) {
-      const existing = existingById.get(message.messageId);
-      if (existing) {
-        if (
-          existing.type !== 'user' ||
-          (!messageContentsEqual(normalizeMessageContent(existing), message.content) &&
-            (message.submittedContentDigest === undefined ||
-              messageContentDigest(normalizeMessageContent(existing)) !==
-                message.submittedContentDigest)) ||
-          existing.turnId !== input.turnId
-        ) {
-          throw new Error(`Queued root source ${message.messageId} conflicts with its transcript`);
-        }
-        continue;
-      }
-      const materialized = {
-        type: 'user' as const,
-        id: message.messageId,
-        turnId: input.turnId,
-        ts: this.deps.now(),
-        ...structuredClone(message.content),
-      };
-      await this.deps.store.appendMessage(input.sessionId, materialized);
-      existingById.set(message.messageId, materialized);
-    }
   }
 
   hasActiveRuns(sessionId: string): boolean {

@@ -4820,21 +4820,6 @@ export class SessionManager {
       : this.runtimeKernel.stopSession(identity.sessionId, input);
   }
 
-  materializeRootSourceMessages(input: {
-    sessionId: string;
-    turnId: string;
-    messages: readonly {
-      messageId: string;
-      content: import('@maka/core/events').MessageContent;
-      submittedContentDigest?: `sha256:${string}`;
-      disposition: 'steering' | 'followup' | 'turn_started';
-    }[];
-  }): Promise<void> {
-    const materialize = this.runtimeKernel.materializeRootSourceMessages;
-    if (!materialize) throw new Error('Runtime root message materialization is unavailable');
-    return materialize.call(this.runtimeKernel, input);
-  }
-
   /** Queue a user message for mid-turn injection at the next step boundary. */
   steer(sessionId: string, text: string): QueueEnqueueOutcome {
     return this.runtimeKernel.steer(sessionId, text);

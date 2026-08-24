@@ -20,7 +20,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { messageContentDigest, type SessionEvent } from '@maka/core/events';
+import type { SessionEvent } from '@maka/core/events';
 
 import type { SessionHeader, StoredMessage } from '@maka/core/session';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
@@ -39,46 +39,6 @@ import {
 import { BackendRegistry, type SessionStore } from '../session-manager.js';
 
 describe('RuntimeKernel Interaction close cleanup', () => {
-  test('accepts submitted transcript content when the root source is model-prepared', async () => {
-    const store = memoryStore();
-    const submitted = { text: '/skill:writer inspect' };
-    await store.appendMessage(SESSION_ID, {
-      type: 'user',
-      id: 'submitted-message',
-      turnId: 'prepared-turn',
-      ts: 1,
-      ...submitted,
-    });
-    const kernel = new RuntimeKernel({
-      store,
-      backends: new BackendRegistry(),
-      newId: () => 'materialize-id',
-      now: () => 1,
-    });
-
-    await kernel.materializeRootSourceMessages({
-      sessionId: SESSION_ID,
-      turnId: 'prepared-turn',
-      messages: [
-        {
-          messageId: 'submitted-message',
-          content: { text: '<prepared-skill>inspect</prepared-skill>' },
-          submittedContentDigest: messageContentDigest(submitted),
-          disposition: 'turn_started',
-        },
-      ],
-    });
-    assert.deepEqual(await store.readMessages(SESSION_ID), [
-      {
-        type: 'user',
-        id: 'submitted-message',
-        turnId: 'prepared-turn',
-        ts: 1,
-        ...submitted,
-      },
-    ]);
-  });
-
   test('reserve followed by begin failure settles a concurrent stop claim', async () => {
     const store = memoryStore();
     const updateHeader = store.updateHeader;

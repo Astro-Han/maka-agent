@@ -157,7 +157,6 @@ interface ActiveRootTurn {
   residency: RuntimeHostResidency;
   stopRequested: boolean;
   messageTransitionCommitted: boolean;
-  initialUserMessagesMaterialized: boolean;
 }
 
 export type TurnStartOutcome = OperationOutcome<'turn.start'>;
@@ -1134,7 +1133,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           sessionId: input.sessionId,
           turnId,
           proposedRunId: randomUUID(),
-          proposedUserMessageId: randomUUID(),
+          proposedUserMessageId: input.sources.length === 1 ? input.sources[0]!.messageId : null,
           execution: {
             kind: 'external_message',
             inputDigest: messageContentDigest(input.submittedContent),
@@ -2014,21 +2013,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       userMessageId: admission.userMessageId,
       execution: admission.execution,
     });
-    const initialUserMessagesMaterialized = admission.sourceMessages.length > 0;
-    if (initialUserMessagesMaterialized) {
-      await this.manager.materializeRootSourceMessages({
-        sessionId: input.sessionId,
-        turnId: input.turnId,
-        messages: admission.sourceMessages.map((source) => ({
-          messageId: source.messageId,
-          content: source.content,
-          ...(source.submittedContentDigest
-            ? { submittedContentDigest: source.submittedContentDigest }
-            : {}),
-          disposition: source.disposition,
-        })),
-      });
-    }
     const { runId } = admission;
     const existingRun = await this.readRunIfPresent(input.sessionId, runId);
     if (replacing && existingRun) {
@@ -2121,7 +2105,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       residency,
       stopRequested: false,
       messageTransitionCommitted: false,
-      initialUserMessagesMaterialized,
     };
     if (replacing && this.#executions.get(input.sessionId) !== replacing) {
       residency.release();
@@ -2218,8 +2201,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
                 },
                 {
                   runId: active.runId,
-                  userMessageId: active.userMessageId ?? undefined,
-                  recordInitialUserMessage: !active.initialUserMessagesMaterialized,
+                  userMessageId: active.userMessageId,
                   durability: 'required',
                   onRunStarted: async (startedRunId) => {
                     if (startedRunId !== active.runId) {
@@ -2433,7 +2415,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       sessionId: batch.sessionId,
       turnId,
       proposedRunId: randomUUID(),
-      proposedUserMessageId: randomUUID(),
+      proposedUserMessageId: batch.sources.length === 1 ? batch.sources[0]!.messageId : null,
       execution: {
         kind: 'external_message',
         inputDigest: messageContentDigest(batch.submittedContent),

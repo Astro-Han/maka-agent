@@ -87,12 +87,18 @@ export async function prepareHostedExecutionRecovery(
           `Admitted Turn ${admission.turnId} has queue-independent execution with Message queue sources`,
         );
       }
-      if (executionContract.requiresUserMessage !== (admission.userMessageId !== null)) {
+      const requiresUserMessage =
+        executionContract.requiresUserMessage &&
+        !(admission.execution.kind === 'external_message' && admission.sourceMessages.length > 1);
+      if (requiresUserMessage !== (admission.userMessageId !== null)) {
         throw new Error(
           `Admitted Turn ${admission.turnId} has an invalid UserMessage execution contract`,
         );
       }
       if (admission.userMessageId === null) {
+        if (admission.sourceMessages.length > 0) {
+          verifyQueueSourceMessages(admission, messageIndex);
+        }
         if (rootUserMessages.length > 0) {
           throw new Error(`Admitted Turn ${admission.turnId} must not record a UserMessage`);
         }
@@ -299,6 +305,25 @@ function verifyOrRecoverUserMessage(
   const recoveredMessage = recoveryUserMessage(admission);
   missingMessages.push(recoveredMessage);
   indexRecoveryMessage(index, recoveredMessage);
+}
+
+function verifyQueueSourceMessages(
+  admission: RootTurnAdmission,
+  index: RecoveryMessageIndex,
+): void {
+  for (const source of admission.sourceMessages) {
+    const owners = index.messagesById.get(source.messageId) ?? [];
+    if (
+      owners.length !== 1 ||
+      owners[0]?.type !== 'user' ||
+      owners[0].turnId !== admission.turnId ||
+      !messageContentsEqual(normalizeMessageContent(owners[0]), source.content)
+    ) {
+      throw new Error(
+        `Admitted Turn ${admission.turnId} does not match queue source ${source.messageId}`,
+      );
+    }
+  }
 }
 
 function recoveryUserMessage(admission: RootTurnAdmission): RecoveryUserMessage {

@@ -145,7 +145,7 @@ export interface AgentRunInput {
   userInput: UserMessageInput;
   rootExecutionKind?: AgentRunHeader['rootExecutionKind'];
   runId?: string;
-  userMessageId?: string;
+  userMessageId?: string | null;
   durability?: AgentRunDurability;
   store: AgentRunSessionStore;
   runStore?: AgentRunStore;
@@ -161,7 +161,6 @@ export interface AgentRunInput {
   commitContinuationStart?: (startedAt: number) => Promise<{ startEventId: string; created: true }>;
   hooks: AgentRunHooks;
   recordSessionMessages?: boolean;
-  recordInitialUserMessage?: boolean;
   invocationId?: string;
   /** Pre-resolved snapshot used by continuations; normal turns derive it from header + input. */
   effectiveOrchestration?: EffectiveOrchestration;
@@ -647,28 +646,30 @@ export class AgentRun {
 
     let initialRuntimeEventId: string;
     if (this.recordsSessionMessages()) {
-      const userMessageId = this.input.userMessageId ?? this.input.newId();
       const userMessageTs = this.input.now();
-      initialRuntimeEventId = userMessageId;
-      const userMsg = cloneAndFreezeRuntimeSnapshot<UserMessage>({
-        type: 'user',
-        id: userMessageId,
-        turnId: this.turnId,
-        ts: userMessageTs,
-        text: this.input.userInput.text,
-        ...(this.input.userInput.displayText !== undefined
-          ? { displayText: this.input.userInput.displayText }
-          : {}),
-        ...(this.input.userInput.attachments
-          ? { attachments: this.input.userInput.attachments }
-          : {}),
-        ...(this.input.userInput.quotes ? { quotes: this.input.userInput.quotes } : {}),
-        ...(this.input.userInput.inlineReferences
-          ? { inlineReferences: this.input.userInput.inlineReferences }
-          : {}),
-        ...(this.input.userInput.origin ? { origin: this.input.userInput.origin } : {}),
-      });
-      if (this.input.recordInitialUserMessage !== false) {
+      if (this.input.userMessageId === null) {
+        initialRuntimeEventId = this.input.newId();
+      } else {
+        const userMessageId = this.input.userMessageId ?? this.input.newId();
+        initialRuntimeEventId = userMessageId;
+        const userMsg = cloneAndFreezeRuntimeSnapshot<UserMessage>({
+          type: 'user',
+          id: userMessageId,
+          turnId: this.turnId,
+          ts: userMessageTs,
+          text: this.input.userInput.text,
+          ...(this.input.userInput.displayText !== undefined
+            ? { displayText: this.input.userInput.displayText }
+            : {}),
+          ...(this.input.userInput.attachments
+            ? { attachments: this.input.userInput.attachments }
+            : {}),
+          ...(this.input.userInput.quotes ? { quotes: this.input.userInput.quotes } : {}),
+          ...(this.input.userInput.inlineReferences
+            ? { inlineReferences: this.input.userInput.inlineReferences }
+            : {}),
+          ...(this.input.userInput.origin ? { origin: this.input.userInput.origin } : {}),
+        });
         await appendUserMessageOnce(this.input.store, this.sessionId, userMsg);
       }
       await this.input.hooks.appendTurnState(this.sessionId, this.turnId, 'running', this.lineage);
