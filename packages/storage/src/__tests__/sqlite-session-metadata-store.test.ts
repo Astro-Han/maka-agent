@@ -45,6 +45,7 @@ import {
   type SessionConfigurationMetadataUpdate,
   type SqliteSessionMetadataStoreFailpoint,
 } from '../sqlite-session-metadata-store.js';
+import type { PendingMessageAdmission } from '../message-receipt-store.js';
 import {
   createSqliteRuntimeStore,
   SQLITE_RUNTIME_SCHEMA_VERSION,
@@ -84,7 +85,7 @@ describe('SqliteSessionMetadataStore', () => {
 
     const migrated = createSqliteSessionMetadataStore(path);
     try {
-      assert.equal(migrated.schemaVersion(), 29);
+      assert.equal(migrated.schemaVersion(), SQLITE_SESSION_METADATA_SCHEMA_VERSION);
       assert.equal((await migrated.read(legacyHeader.id)).header.externalOrigin, undefined);
     } finally {
       migrated.close();
@@ -234,6 +235,56 @@ describe('SqliteSessionMetadataStore', () => {
       }
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('atomically accepts a steering message and its canonical transcript', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    try {
+      await store.create(fullHeader({ id: 'session-1' }));
+      const admission: PendingMessageAdmission = {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        runId: 'run-1',
+        messageId: 'message-1',
+        content: { text: 'submitted', displayText: 'submitted' },
+        modelContent: { text: 'submitted', displayText: 'submitted' },
+        submittedPlacement: 'current_turn',
+        placement: 'current_turn',
+        disposition: 'steering',
+        admittedAt: 10,
+      };
+
+      const normalizedAdmission = {
+        ...admission,
+        content: { text: 'submitted' },
+        modelContent: { text: 'submitted' },
+      };
+      assert.deepEqual(await store.commitMessageAdmission(admission), normalizedAdmission);
+      assert.deepEqual(
+        await store.readMessageAdmission('session-1', 'message-1'),
+        normalizedAdmission,
+      );
+      assert.deepEqual(
+        (await store.readMessages('session-1')).map((message) => ({
+          id: message.id,
+          type: message.type,
+          turnId: message.turnId,
+          text: message.type === 'user' ? message.text : undefined,
+          steeringEventId: message.type === 'user' ? message.steeringEventId : undefined,
+        })),
+        [
+          {
+            id: 'message-1',
+            type: 'user',
+            turnId: 'turn-1',
+            text: 'submitted',
+            steeringEventId: 'message-1',
+          },
+        ],
+      );
+    } finally {
+      store.close();
     }
   });
 

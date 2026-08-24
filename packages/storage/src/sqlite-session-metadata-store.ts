@@ -97,6 +97,12 @@ import {
 } from '@maka/core/session';
 import { markPersisted } from '@maka/core/persisted-value';
 import {
+  normalizePendingMessageAdmission,
+  samePendingMessageAdmission,
+  type MessageLifecycleState,
+  type PendingMessageAdmission,
+} from './message-receipt-store.js';
+import {
   type AgentGraphIntentAdmissionSnapshot,
   type AgentGraphTimelineMetadataSnapshot,
 } from '@maka/core/agent-graph-timeline';
@@ -217,6 +223,59 @@ export interface SessionMetadataCatalogPage {
 export interface SessionCatalogMessageProjection {
   readonly lastMessageAt?: number;
   readonly lastMessagePreview?: string;
+}
+
+interface MessageAdmissionRow {
+  readonly turn_id?: unknown;
+  readonly run_id?: unknown;
+  readonly message_id?: unknown;
+  readonly content_json?: unknown;
+  readonly model_content_json?: unknown;
+  readonly submitted_placement?: unknown;
+  readonly placement?: unknown;
+  readonly disposition?: unknown;
+  readonly lifecycle_state?: unknown;
+  readonly queue_order?: unknown;
+  readonly admitted_at?: unknown;
+}
+
+function decodeMessageAdmissionRow(
+  sessionId: string,
+  row: MessageAdmissionRow,
+): { readonly admission: PendingMessageAdmission; readonly lifecycleState: MessageLifecycleState } {
+  if (
+    typeof row.turn_id !== 'string' ||
+    typeof row.run_id !== 'string' ||
+    typeof row.message_id !== 'string' ||
+    typeof row.content_json !== 'string' ||
+    typeof row.model_content_json !== 'string' ||
+    (row.submitted_placement !== 'current_turn' && row.submitted_placement !== 'next_turn') ||
+    (row.placement !== 'current_turn' && row.placement !== 'next_turn') ||
+    (row.disposition !== 'steering' && row.disposition !== 'followup') ||
+    (row.lifecycle_state !== 'accepted' &&
+      row.lifecycle_state !== 'handed_off' &&
+      row.lifecycle_state !== 'executed' &&
+      row.lifecycle_state !== 'cancelled') ||
+    typeof row.queue_order !== 'number' ||
+    !Number.isSafeInteger(row.queue_order) ||
+    row.queue_order < 0 ||
+    typeof row.admitted_at !== 'number'
+  ) {
+    throw new SessionMetadataConflictError(`Invalid Message admission row for ${sessionId}`);
+  }
+  const admission = normalizePendingMessageAdmission({
+    sessionId,
+    turnId: row.turn_id,
+    runId: row.run_id,
+    messageId: row.message_id,
+    content: JSON.parse(row.content_json) as PendingMessageAdmission['content'],
+    modelContent: JSON.parse(row.model_content_json) as PendingMessageAdmission['modelContent'],
+    submittedPlacement: row.submitted_placement,
+    placement: row.placement,
+    disposition: row.disposition,
+    admittedAt: row.admitted_at,
+  });
+  return { admission, lifecycleState: row.lifecycle_state };
 }
 
 export interface SessionAuthoritySnapshot {
@@ -1475,6 +1534,139 @@ export class SqliteSessionMetadataStore {
       const sequence = row.last_sequence + 1;
       this.insertSessionMessagesSync(sessionId, sequence, encoded);
       this.updateCatalogProjectionSync(sessionId, projection, false, lockConnection);
+    });
+  }
+
+  async commitMessageAdmission(
+    admission: PendingMessageAdmission,
+  ): Promise<PendingMessageAdmission> {
+    this.assertOpen();
+    const stored = normalizePendingMessageAdmission(admission);
+    return this.transaction(() => {
+      const record = this.readRecordSync(stored.sessionId);
+      if (!record) throw new SessionNotFoundError(stored.sessionId);
+      const existingRow = this.db
+        .prepare(
+          `
+          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+          FROM message_admissions
+          WHERE session_id = ? AND message_id = ?
+        `,
+        )
+        .get(stored.sessionId, stored.messageId) as MessageAdmissionRow | undefined;
+      if (existingRow) {
+        const existing = decodeMessageAdmissionRow(stored.sessionId, existingRow);
+        if (!samePendingMessageAdmission(existing.admission, stored)) {
+          throw new SessionMetadataConflictError('Message admission identity conflict');
+        }
+        if (existing.lifecycleState !== 'accepted') {
+          throw new SessionMetadataConflictError('Message admission identity is already settled');
+        }
+        return existing.admission;
+      }
+      const orderRow = this.db
+        .prepare(
+          `
+          SELECT COALESCE(MAX(queue_order), -1) + 1 AS next_order
+          FROM message_admissions
+          WHERE session_id = ? AND lifecycle_state = 'accepted'
+        `,
+        )
+        .get(stored.sessionId) as { next_order?: unknown };
+      if (typeof orderRow.next_order !== 'number' || !Number.isSafeInteger(orderRow.next_order)) {
+        throw new SessionMetadataConflictError('Invalid message admission order');
+      }
+      this.db
+        .prepare(
+          `
+          INSERT INTO message_admissions(
+            session_id, turn_id, run_id, message_id, content_json, model_content_json,
+            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?)
+        `,
+        )
+        .run(
+          stored.sessionId,
+          stored.turnId,
+          stored.runId,
+          stored.messageId,
+          JSON.stringify(stored.content),
+          JSON.stringify(stored.modelContent),
+          stored.submittedPlacement,
+          stored.placement,
+          stored.disposition,
+          orderRow.next_order,
+          stored.admittedAt,
+        );
+
+      if (stored.disposition === 'steering') {
+        const message = decodeCanonicalMessage({
+          type: 'user',
+          id: stored.messageId,
+          turnId: stored.turnId,
+          ts: stored.admittedAt,
+          ...stored.content,
+          steeringEventId: stored.messageId,
+        });
+        const existingMessages = this.readMessagesWith(stored.sessionId, decodeStoredMessage).filter(
+          (candidate) => candidate.id === stored.messageId,
+        );
+        if (existingMessages.length > 1) {
+          throw new SessionMetadataConflictError('Message admission transcript identity is ambiguous');
+        }
+        const existingMessage = existingMessages[0];
+        if (existingMessage && !isDeepStrictEqual(existingMessage, message)) {
+          throw new SessionMetadataConflictError('Message admission transcript identity conflict');
+        }
+        if (!existingMessage) {
+          const row = this.db
+            .prepare(
+              'SELECT COALESCE(MAX(sequence), -1) AS last_sequence FROM session_messages WHERE session_id = ?',
+            )
+            .get(stored.sessionId) as { last_sequence?: unknown };
+          if (typeof row.last_sequence !== 'number' || !Number.isSafeInteger(row.last_sequence)) {
+            throw new SessionMetadataConflictError('Invalid Session message sequence');
+          }
+          const json = JSON.stringify(message);
+          this.insertSessionMessagesSync(stored.sessionId, row.last_sequence + 1, [
+            { message, json },
+          ]);
+          this.updateCatalogProjectionSync(
+            stored.sessionId,
+            {
+              lastMessageAt: stored.admittedAt,
+              lastMessagePreview: message.type === 'user' ? message.displayText : undefined,
+            },
+            false,
+            !record.header.connectionLocked,
+          );
+        }
+      }
+      return stored;
+    });
+  }
+
+  async readMessageAdmission(
+    sessionId: string,
+    messageId: string,
+  ): Promise<PendingMessageAdmission | undefined> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    assertSafeSessionId(messageId);
+    return this.readTransaction(() => {
+      const row = this.db
+        .prepare(
+          `
+          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+          FROM message_admissions
+          WHERE session_id = ? AND message_id = ?
+            AND lifecycle_state = 'accepted'
+        `,
+        )
+        .get(sessionId, messageId) as MessageAdmissionRow | undefined;
+      return row ? decodeMessageAdmissionRow(sessionId, row).admission : undefined;
     });
   }
 

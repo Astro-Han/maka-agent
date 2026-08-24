@@ -20,6 +20,7 @@
 import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { DatabaseSync } from 'node:sqlite';
+import { normalizeMessageContent, type MessageContent } from '@maka/core/events';
 import {
   acquireOperationalStateDatabase,
   type OperationalStateDatabaseLease,
@@ -28,6 +29,75 @@ import {
 const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const RECEIPT_SCHEMA_VERSION = 1 as const;
 const RECEIPT_MAX_BYTES = 64 * 1024;
+
+export type MessageLifecycleState = 'accepted' | 'handed_off' | 'executed' | 'cancelled';
+
+export interface PendingMessageAdmission {
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly runId: string;
+  readonly messageId: string;
+  readonly content: MessageContent;
+  readonly modelContent: MessageContent;
+  readonly submittedPlacement: 'current_turn' | 'next_turn';
+  readonly placement: 'current_turn' | 'next_turn';
+  readonly disposition: 'steering' | 'followup';
+  readonly admittedAt: number;
+}
+
+export function normalizePendingMessageAdmission(
+  admission: PendingMessageAdmission,
+): PendingMessageAdmission {
+  for (const [name, value] of [
+    ['Session', admission.sessionId],
+    ['Turn', admission.turnId],
+    ['Run', admission.runId],
+    ['Message', admission.messageId],
+  ] as const) {
+    assertSafeId(value, `Invalid ${name} identity`);
+  }
+  if (
+    (admission.submittedPlacement !== 'current_turn' &&
+      admission.submittedPlacement !== 'next_turn') ||
+    (admission.placement !== 'current_turn' && admission.placement !== 'next_turn') ||
+    (admission.disposition !== 'steering' && admission.disposition !== 'followup') ||
+    (admission.placement === 'current_turn') !== (admission.disposition === 'steering')
+  ) {
+    throw new Error('Invalid pending Message placement');
+  }
+  if (!Number.isSafeInteger(admission.admittedAt) || admission.admittedAt < 0) {
+    throw new Error('Invalid message admission timestamp');
+  }
+  const normalized = Object.freeze({
+    ...admission,
+    content: normalizeMessageContent(admission.content),
+    modelContent: normalizeMessageContent(admission.modelContent),
+  });
+  if (Buffer.byteLength(JSON.stringify(normalized), 'utf8') > RECEIPT_MAX_BYTES) {
+    throw new Error('Pending message admission exceeds size limit');
+  }
+  return normalized;
+}
+
+export function samePendingMessageAdmission(
+  left: PendingMessageAdmission,
+  right: PendingMessageAdmission,
+): boolean {
+  const a = normalizePendingMessageAdmission(left);
+  const b = normalizePendingMessageAdmission(right);
+  return (
+    a.sessionId === b.sessionId &&
+    a.turnId === b.turnId &&
+    a.runId === b.runId &&
+    a.messageId === b.messageId &&
+    a.submittedPlacement === b.submittedPlacement &&
+    a.placement === b.placement &&
+    a.disposition === b.disposition &&
+    a.admittedAt === b.admittedAt &&
+    isDeepStrictEqual(a.content, b.content) &&
+    isDeepStrictEqual(a.modelContent, b.modelContent)
+  );
+}
 
 export type MessageReceiptOperation =
   | 'submit'

@@ -19,7 +19,7 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 
-export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 29;
+export const SQLITE_SESSION_METADATA_SCHEMA_VERSION = 30;
 export const SQLITE_SESSION_MESSAGE_CHUNK_BYTES = 64 * 1024;
 export const SQLITE_SESSION_MESSAGE_CHUNK_MARKER = '{"$maka":"session-message-chunks-v1"}';
 
@@ -818,6 +818,33 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
 
     CREATE INDEX session_messages_by_time
       ON session_messages(session_id, message_ts, sequence);
+  `,
+  ],
+  [
+    30,
+    `
+    CREATE TABLE IF NOT EXISTS message_admissions (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      content_json TEXT NOT NULL,
+      model_content_json TEXT NOT NULL,
+      submitted_placement TEXT NOT NULL
+        CHECK (submitted_placement IN ('current_turn', 'next_turn')),
+      placement TEXT NOT NULL CHECK (placement IN ('current_turn', 'next_turn')),
+      disposition TEXT NOT NULL CHECK (disposition IN ('steering', 'followup')),
+      lifecycle_state TEXT NOT NULL
+        CHECK (lifecycle_state IN ('accepted', 'handed_off', 'executed', 'cancelled')),
+      queue_order INTEGER NOT NULL CHECK (queue_order >= 0),
+      admitted_at INTEGER NOT NULL CHECK (admitted_at >= 0),
+      UNIQUE (session_id, message_id),
+      FOREIGN KEY(session_id) REFERENCES session_metadata(session_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS message_admissions_by_session_order
+      ON message_admissions(session_id, lifecycle_state, queue_order, sequence);
   `,
   ],
   [
