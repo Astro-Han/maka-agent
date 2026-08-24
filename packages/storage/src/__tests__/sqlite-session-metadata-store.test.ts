@@ -284,10 +284,20 @@ describe('SqliteSessionMetadataStore', () => {
         ],
       );
       assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'accepted');
+      assert.deepEqual(
+        (await store.listMessageAdmissions('session-1')).map((entry) => entry.messageId),
+        ['message-1'],
+      );
       await store.markMessagesHandedOff('session-1', ['message-1']);
       assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'handed_off');
+      assert.deepEqual(await store.listMessageAdmissions('session-1'), []);
+      assert.deepEqual(
+        (await store.listUnsettledMessageAdmissions('session-1')).map((entry) => entry.messageId),
+        ['message-1'],
+      );
       await store.markMessagesExecuted('session-1', ['message-1']);
       assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'executed');
+      assert.deepEqual(await store.listUnsettledMessageAdmissions('session-1'), []);
     } finally {
       store.close();
     }

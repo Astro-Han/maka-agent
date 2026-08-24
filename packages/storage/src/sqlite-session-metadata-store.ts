@@ -1692,6 +1692,27 @@ export class SqliteSessionMetadataStore {
     });
   }
 
+  async listUnsettledMessageAdmissions(
+    sessionId: string,
+  ): Promise<readonly PendingMessageAdmission[]> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    return this.readTransaction(() => {
+      const rows = this.db
+        .prepare(
+          `
+          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+          FROM message_admissions
+          WHERE session_id = ? AND lifecycle_state IN ('accepted', 'handed_off')
+          ORDER BY queue_order, sequence
+        `,
+        )
+        .all(sessionId) as MessageAdmissionRow[];
+      return rows.map((row) => decodeMessageAdmissionRow(sessionId, row).admission);
+    });
+  }
+
   async readMessageLifecycleState(
     sessionId: string,
     messageId: string,

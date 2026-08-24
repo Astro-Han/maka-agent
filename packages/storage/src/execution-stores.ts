@@ -436,6 +436,8 @@ async function createExecutionStoresForWrite<K extends StorageRootKind, E extend
         run(() => sessionStore.readMessageLifecycleState(sessionId, messageId)),
       listMessageAdmissions: (sessionId) =>
         run(() => sessionStore.listMessageAdmissions(sessionId)),
+      listUnsettledMessageAdmissions: (sessionId) =>
+        run(() => sessionStore.listUnsettledMessageAdmissions(sessionId)),
       updateMessageAdmission: (admission) =>
         run(() => sessionStore.updateMessageAdmission(admission)),
       reorderMessageAdmissions: (sessionId, messageIds) =>

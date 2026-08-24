@@ -531,12 +531,42 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     this.#draining = true;
   }
 
-  async markMessagesHandedOff(sessionId: string, messageIds: readonly string[]): Promise<void> {
-    await this.#lifecycle.markMessagesHandedOff(sessionId, messageIds);
-  }
-
-  async markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void> {
-    await this.#lifecycle.markMessagesExecuted(sessionId, messageIds);
+  /**
+   * Commit the root-admission proof before Runtime activation. The in-memory
+   * queue never owns this transition: it only projects the durable result.
+   */
+  async handoffRootSources(input: {
+    sessionId: string;
+    turnId: string;
+    runId: string;
+    messageIds: readonly string[];
+  }): Promise<void> {
+    const handoff: string[] = [];
+    for (const messageId of new Set(input.messageIds)) {
+      const proof = await this.#durableProof.readRootTurnSourceMessageReceipt(
+        input.sessionId,
+        messageId,
+      );
+      if (
+        !proof ||
+        proof.admission.turnId !== input.turnId ||
+        proof.admission.runId !== input.runId ||
+        proof.sourceMessage.messageId !== messageId
+      ) {
+        throw new RuntimeMessageAuthorityInvariantError(
+          `Root admission does not prove Message handoff ${messageId}`,
+        );
+      }
+      const state = await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId);
+      if (state === 'accepted') handoff.push(messageId);
+      else if (state === 'handed_off' || state === 'executed') continue;
+      else {
+        throw new RuntimeMessageAuthorityInvariantError(
+          `Message ${messageId} cannot be handed off from lifecycle state ${state ?? 'missing'}`,
+        );
+      }
+    }
+    await this.#lifecycle.markMessagesHandedOff(input.sessionId, handoff);
   }
 
   /**
@@ -552,9 +582,22 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     messageIds: readonly string[];
     terminalStatus?: 'completed' | 'failed' | 'cancelled';
   }): Promise<void> {
-    const messageIds = new Set(input.messageIds);
+    const messageIds = new Set<string>();
     const providerProofAfter = new Map<string, number>();
-    const admissions = await this.#lifecycle.listMessageAdmissions(input.sessionId);
+    const admissions = await this.#lifecycle.listUnsettledMessageAdmissions(input.sessionId);
+    for (const messageId of new Set(input.messageIds)) {
+      const proof = await this.#durableProof.readRootTurnSourceMessageReceipt(
+        input.sessionId,
+        messageId,
+      );
+      if (
+        proof?.admission.turnId === input.turnId &&
+        proof.admission.runId === input.runId &&
+        proof.sourceMessage.messageId === messageId
+      ) {
+        messageIds.add(messageId);
+      }
+    }
     for (const admission of admissions) {
       if (
         admission.turnId !== input.turnId ||
@@ -620,16 +663,20 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   async recoverPendingAfterHostRestart(sessionIds: readonly string[]): Promise<void> {
     for (const sessionId of sessionIds) {
       const admissions = await this.#lifecycle.listMessageAdmissions(sessionId);
-      if (admissions.length === 0) continue;
-      const rootState = await this.#root.readRootState(sessionId);
+      const unsettled = await this.#lifecycle.listUnsettledMessageAdmissions(sessionId);
+      if (unsettled.length === 0) continue;
+      const acceptedIds = new Set(admissions.map((admission) => admission.messageId));
       const pending = [] as PendingMessageAdmission[];
-      for (const admission of admissions) {
+      for (const admission of unsettled) {
         const source = await this.#durableProof.readRootTurnSourceMessageReceipt(
           sessionId,
           admission.messageId,
         );
-        if (source) {
-          await this.#lifecycle.markMessagesHandedOff(sessionId, [admission.messageId]);
+        if (
+          source?.admission.turnId === admission.turnId &&
+          source.admission.runId === admission.runId &&
+          source.sourceMessage.messageId === admission.messageId
+        ) {
           await this.settleMessagesAfterRoot({
             sessionId,
             turnId: source.admission.turnId,
@@ -646,7 +693,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
             steering?.event.turnId === admission.turnId &&
             steering.event.runId === admission.runId
           ) {
-            await this.#lifecycle.markMessagesHandedOff(sessionId, [admission.messageId]);
             await this.settleMessagesAfterRoot({
               sessionId,
               turnId: admission.turnId,
@@ -654,12 +700,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
               admittedAt: admission.admittedAt,
               messageIds: [admission.messageId],
             });
-          } else {
+          } else if (acceptedIds.has(admission.messageId)) {
             pending.push(admission);
           }
         }
       }
       if (pending.length === 0) continue;
+      const rootState = await this.#root.readRootState(sessionId);
       if (rootState.kind !== 'active') {
         if (rootState.kind !== 'idle') continue;
         if (!this.#root.startRecoveredMessages) {
@@ -882,7 +929,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
               'Started Turn identity is not encodable',
             );
           }
-          await this.#lifecycle.markMessagesHandedOff(input.sessionId, [input.messageId]);
           const result = { disposition: 'turn_started', turnId: started.turnId } as const;
           return success(result);
         }

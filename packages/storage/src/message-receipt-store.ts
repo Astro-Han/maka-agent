@@ -56,6 +56,7 @@ export interface MessageLifecycleStore {
     messageId: string,
   ): Promise<MessageLifecycleState | undefined>;
   listMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]>;
+  listUnsettledMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]>;
   updateMessageAdmission(admission: PendingMessageAdmission): Promise<void>;
   reorderMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;
   cancelMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;

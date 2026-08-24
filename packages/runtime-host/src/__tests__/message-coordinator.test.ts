@@ -2461,7 +2461,18 @@ function memoryMessageLifecycleStore(
     readMessageLifecycleState: async (_sessionId, messageId) => admissions.get(messageId)?.state,
     listMessageAdmissions: async (sessionId) =>
       [...admissions.values()]
-        .filter(({ admission }) => admission.sessionId === sessionId)
+        .filter(
+          ({ admission, state }) =>
+            admission.sessionId === sessionId && state === 'accepted',
+        )
+        .map(({ admission }) => admission),
+    listUnsettledMessageAdmissions: async (sessionId) =>
+      [...admissions.values()]
+        .filter(
+          ({ admission, state }) =>
+            admission.sessionId === sessionId &&
+            (state === 'accepted' || state === 'handed_off'),
+        )
         .map(({ admission }) => admission),
     updateMessageAdmission: async (admission) => {
       const existing = admissions.get(admission.messageId);

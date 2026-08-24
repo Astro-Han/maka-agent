@@ -880,6 +880,13 @@ class SqliteSessionStore implements SessionAuthorityStore {
     return this.metadata.listMessageAdmissions(sessionId);
   }
 
+  async listUnsettledMessageAdmissions(
+    sessionId: string,
+  ): Promise<readonly PendingMessageAdmission[]> {
+    await this.ensureReady();
+    return this.metadata.listUnsettledMessageAdmissions(sessionId);
+  }
+
   async readMessageLifecycleState(
     sessionId: string,
     messageId: string,

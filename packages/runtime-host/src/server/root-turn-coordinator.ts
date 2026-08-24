@@ -409,6 +409,12 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
             `Unable to recover admitted Turn ${admission.turnId}: ${continuation.plan.reason}`,
           );
         }
+        await this.messages.handoffRootSources({
+          sessionId,
+          turnId: admission.turnId,
+          runId: admission.runId,
+          messageIds: admission.sourceMessages.map((source) => source.messageId),
+        });
         return this.prepareAdmittedTurn(
           input,
           admission,
@@ -1074,6 +1080,12 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
             'Fresh Message root Turn identity already existed',
           );
         }
+        await this.messages.handoffRootSources({
+          sessionId: input.sessionId,
+          turnId,
+          runId,
+          messageIds: [input.sourceMessage.messageId],
+        });
         const disposition = await this.prepareAdmittedTurn(
           {
             sessionId: input.sessionId,
@@ -1130,6 +1142,12 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         if (admitted.kind !== 'admitted') {
           return { error: 'Recovered Message root identity already existed' };
         }
+        await this.messages.handoffRootSources({
+          sessionId: input.sessionId,
+          turnId,
+          runId: admitted.admission.runId,
+          messageIds: input.sources.map((source) => source.messageId),
+        });
         const disposition = await this.prepareAdmittedTurn(
           { sessionId: input.sessionId, turnId, content: input.content },
           admitted.admission,
@@ -1142,10 +1160,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         if (disposition.kind !== 'await_start') {
           return { error: 'Recovered Message root did not reserve execution' };
         }
-        await this.messages.markMessagesHandedOff(
-          input.sessionId,
-          input.sources.map((source) => source.messageId),
-        );
         return { turnId };
       } catch (error) {
         this.#admissions.release(reservation);
@@ -2431,10 +2445,12 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         'Fresh follow-up root Turn identity already existed',
       );
     }
-    await this.messages.markMessagesHandedOff(
-      batch.sessionId,
-      batch.sources.map((source) => source.messageId),
-    );
+    await this.messages.handoffRootSources({
+      sessionId: batch.sessionId,
+      turnId,
+      runId: admitted.admission.runId,
+      messageIds: batch.sources.map((source) => source.messageId),
+    });
 
     const nextIdentity = {
       sessionId: batch.sessionId,
