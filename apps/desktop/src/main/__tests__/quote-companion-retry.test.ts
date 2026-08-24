@@ -244,8 +244,9 @@ test('keeps Side Conversation events owned by the Host-admitted turn across an a
       ...defaults.sideChat,
       listTurns: async () => [settledTurn('source-turn')],
       branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
-      subscribeEvents: (_sessionId, handler) => {
+      subscribeEvents: (_sessionId, handler, onSeeded) => {
         eventHandler = handler;
+        onSeeded?.();
         return () => undefined;
       },
       send: async () => pendingSend.promise,
@@ -341,8 +342,9 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
       ...defaults.sideChat,
       listTurns: async () => [settledTurn('source-turn')],
       branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
-      subscribeEvents: (_sessionId, handler) => {
+      subscribeEvents: (_sessionId, handler, onSeeded) => {
         eventHandler = handler;
+        onSeeded?.();
         return () => undefined;
       },
       send: async () => pendingSend.promise,
@@ -405,6 +407,10 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+  assert.notEqual(
+    container.firstElementChild?.getAttribute('data-live-turn-id'),
+    'host-active-turn',
+  );
 
   await act(async () => {
     pendingSend.resolve({
@@ -416,7 +422,19 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
     assert.equal(await sendResult, true);
     await Promise.resolve();
   });
+  assert.notEqual(
+    container.firstElementChild?.getAttribute('data-live-turn-id'),
+    'host-active-turn',
+  );
   await act(async () => {
+    eventHandler?.({
+      type: 'steering_message',
+      id: 'accepted-steering-message',
+      messageId: 'accepted-message',
+      turnId: 'host-active-turn',
+      ts: 2.5,
+      content: { text: 'steer the active turn' },
+    });
     eventHandler?.({
       type: 'text_delta',
       id: 'accepted-text',
@@ -434,6 +452,144 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
   assert.equal(probe.getAttribute('data-live-text'), 'answer after steering');
   assert.equal(probe.getAttribute('data-streaming'), 'true');
   assert.equal(probe.getAttribute('data-processing'), 'false');
+});
+
+test('waits for Side Conversation observation readiness before sending', async () => {
+  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
+  const { document, window } = parsed;
+  Object.assign(globalThis, {
+    document,
+    window,
+    HTMLElement: window.HTMLElement,
+    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
+    Event: window.Event,
+    Node: window.Node,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  let sendCalls = 0;
+  let markSeeded: (() => void) | undefined;
+  const defaults = createFakeWorkbarServices();
+  const services: WorkbarServices = {
+    ...defaults,
+    sideChat: {
+      ...defaults.sideChat,
+      listTurns: async () => [settledTurn('source-turn')],
+      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+      subscribeEvents: (_sessionId, _handler, onSeeded) => {
+        markSeeded = onSeeded;
+        return () => undefined;
+      },
+      send: async () => {
+        sendCalls += 1;
+        return { ok: true as const, turnId: 'seeded-turn' };
+      },
+    },
+  };
+  const container = document.querySelector('#root');
+  assert.ok(container);
+  const root = createRoot(container);
+  mountedRoot = root;
+
+  await act(async () => {
+    root.render(
+      createElement(WorkbarServicesProvider, {
+        services,
+        children: createElement(QuoteCompanionOwnershipProbe, {
+          onSend: (value) => {
+            send = value;
+          },
+        }),
+      }),
+    );
+    await Promise.resolve();
+  });
+  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+  assert.ok(send);
+
+  let sendResult: Promise<boolean> | undefined;
+  await act(async () => {
+    sendResult = send?.('wait for the observer');
+    await Promise.resolve();
+  });
+  assert.equal(sendCalls, 0);
+
+  await act(async () => {
+    markSeeded?.();
+    await Promise.resolve();
+  });
+  await waitUntil(() => sendCalls === 1);
+  assert.equal(await sendResult, true);
+});
+
+test('releases a send waiting for observation when the Side Conversation is disposed', async () => {
+  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
+  const { document, window } = parsed;
+  Object.assign(globalThis, {
+    document,
+    window,
+    HTMLElement: window.HTMLElement,
+    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
+    Event: window.Event,
+    Node: window.Node,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  let sendCalls = 0;
+  let unsubscribed = false;
+  const defaults = createFakeWorkbarServices();
+  const services: WorkbarServices = {
+    ...defaults,
+    sideChat: {
+      ...defaults.sideChat,
+      listTurns: async () => [settledTurn('source-turn')],
+      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+      subscribeEvents: () => () => {
+        unsubscribed = true;
+      },
+      send: async () => {
+        sendCalls += 1;
+        return { ok: true as const, turnId: 'disposed-turn' };
+      },
+    },
+  };
+  const container = document.querySelector('#root');
+  assert.ok(container);
+  const root = createRoot(container);
+  mountedRoot = root;
+
+  await act(async () => {
+    root.render(
+      createElement(WorkbarServicesProvider, {
+        services,
+        children: createElement(QuoteCompanionOwnershipProbe, {
+          onSend: (value) => {
+            send = value;
+          },
+        }),
+      }),
+    );
+    await Promise.resolve();
+  });
+  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+  assert.ok(send);
+
+  let sendResult: Promise<boolean> | undefined;
+  await act(async () => {
+    sendResult = send?.('dispose while observing');
+    await Promise.resolve();
+  });
+  await act(async () => {
+    root.unmount();
+    await Promise.resolve();
+  });
+
+  assert.equal(await sendResult, false);
+  assert.equal(sendCalls, 0);
+  assert.equal(unsubscribed, true);
+  mountedRoot = undefined;
 });
 
 function QuoteCompanionProbe(props: { sourceSession?: SessionSummary }) {

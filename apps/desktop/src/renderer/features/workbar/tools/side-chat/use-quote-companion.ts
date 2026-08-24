@@ -162,7 +162,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const pendingAdmissionRef = useRef<{
     messageId: string | null;
     events: SessionEvent[];
+    kind?: 'steer';
+    restoreTurnId?: string | null;
+    cancelled?: boolean;
   } | null>(null);
+  const subscriptionReadyRef = useRef<Promise<void>>(Promise.resolve());
   const turnInFlightRef = useRef(false);
   const settlingTurnIdsRef = useRef<Set<string>>(new Set());
   const onForkVisibilityChangeRef = useRef(onForkVisibilityChange);
@@ -249,14 +253,20 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   );
 
   const bindAdmittedTurn = useCallback(
-    (forkId: string, turnId: string) => {
+    (
+      forkId: string,
+      turnId: string,
+      options: { readonly preserveLiveTurn?: boolean } = {},
+    ) => {
       const admission = pendingAdmissionRef.current;
       if (!admission) return;
       pendingAdmissionRef.current = null;
       activeTurnIdRef.current = turnId;
       ownTurnIdsRef.current.add(turnId);
       setOwnTurnTick((tick) => tick + 1);
-      setLiveTurn(armLiveTurn(turnId));
+      if (!(options.preserveLiveTurn && liveTurnRef.current?.turnId === turnId)) {
+        setLiveTurn(armLiveTurn(turnId));
+      }
       for (const event of admission.events) {
         if (event.turnId === turnId) applyOwnedEvent(forkId, event);
       }
@@ -268,14 +278,25 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     (event: SessionEvent, messageId: string): boolean =>
       (event.type === 'steering_message' && event.messageId === messageId) ||
       (event.type === 'queue_update' &&
-        event.steeringEntries?.some((entry) => entry.messageId === messageId) === true),
+        event.steeringEntries?.some(
+          (entry) => entry.messageId === messageId && entry.state === 'in_flight',
+        ) === true),
     [],
   );
 
   // Subscribe to the fork's event stream + load its transcript. Called
   // synchronously the moment the fork is committed, BEFORE the run starts, so
   // no boundary request / complete can be missed (the stream has no replay).
-  const subscribeToFork = useCallback((forkId: string) => {
+  const subscribeToFork = useCallback((forkId: string): Promise<void> => {
+    let resolveReady!: () => void;
+    let readySettled = false;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = () => {
+        if (readySettled) return;
+        readySettled = true;
+        resolve();
+      };
+    });
     void sideChat.readSettledMessages(forkId)
       .then(({ messages }) => {
         if (mountedRef.current) {
@@ -285,18 +306,32 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       .catch(() => {
         if (mountedRef.current) setError(copyRef.current.errors.settlementFailed);
       });
-    unsubscribeRef.current = sideChat.subscribeEvents(forkId, (event: SessionEvent) => {
-      if (!mountedRef.current) return;
-      const admission = pendingAdmissionRef.current;
-      if (admission) {
-        admission.events.push(event);
-        if (admission.messageId && eventAdmitsMessage(event, admission.messageId)) {
-          bindAdmittedTurn(forkId, event.turnId);
+    const unsubscribe = sideChat.subscribeEvents(
+      forkId,
+      (event: SessionEvent) => {
+        if (!mountedRef.current) return;
+        const admission = pendingAdmissionRef.current;
+        if (admission) {
+          admission.events.push(event);
+          if (admission.messageId && eventAdmitsMessage(event, admission.messageId)) {
+            bindAdmittedTurn(forkId, event.turnId, { preserveLiveTurn: true });
+          }
+          return;
         }
-        return;
-      }
-      applyOwnedEvent(forkId, event);
-    });
+        applyOwnedEvent(forkId, event);
+      },
+      resolveReady,
+    );
+    let disposed = false;
+    unsubscribeRef.current = () => {
+      if (disposed) return;
+      disposed = true;
+      unsubscribe();
+      // A send waiting for observation readiness must finish when the panel is
+      // disposed; its mounted check below then turns this into a clean no-op.
+      resolveReady();
+    };
+    return ready;
   }, [applyOwnedEvent, bindAdmittedTurn, eventAdmitsMessage, mountedRef, sideChat]);
 
   const commitFork = useCallback(
@@ -305,7 +340,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       companionIdRef.current = session.id;
       companionRef.current = session;
       setCompanion(session);
-      subscribeToFork(session.id);
+      subscriptionReadyRef.current = subscribeToFork(session.id);
     },
     [subscribeToFork],
   );
@@ -464,6 +499,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         turnInFlightRef.current = false;
         return false;
       }
+      await subscriptionReadyRef.current;
+      if (!mountedRef.current) {
+        turnInFlightRef.current = false;
+        return false;
+      }
       const result = await performCompanionTurn({
         api: sideChat,
         sourceSession,
@@ -568,29 +608,79 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     const id = companionIdRef.current;
     if (!id) return;
     stopRequestedRef.current = true;
+    const admission = pendingAdmissionRef.current;
     try {
       await sideChat.stop(id);
+      if (admission?.kind === 'steer' && pendingAdmissionRef.current === admission) {
+        admission.cancelled = true;
+        pendingAdmissionRef.current = null;
+        activeTurnIdRef.current = admission.restoreTurnId ?? null;
+        for (const event of admission.events) applyOwnedEvent(id, event);
+      }
     } catch {
       stopRequestedRef.current = false;
       // best-effort; the terminal event still reconciles state
     }
-  }, [sideChat]);
+  }, [applyOwnedEvent, sideChat]);
 
   const steer = useCallback(async (text: string): Promise<boolean> => {
     const id = companionIdRef.current;
     const trimmed = text.trim();
-    if (!mountedRef.current || !id || !trimmed || !turnInFlight) return false;
+    if (
+      !mountedRef.current ||
+      !id ||
+      !trimmed ||
+      !turnInFlight ||
+      pendingAdmissionRef.current
+    ) {
+      return false;
+    }
+    const previousTurnId = activeTurnIdRef.current;
+    const admission: {
+      messageId: string | null;
+      events: SessionEvent[];
+      kind: 'steer';
+      restoreTurnId: string | null;
+      cancelled: boolean;
+    } = {
+      messageId: null,
+      events: [],
+      kind: 'steer',
+      restoreTurnId: previousTurnId,
+      cancelled: false,
+    };
+    pendingAdmissionRef.current = admission;
+    activeTurnIdRef.current = null;
     try {
       const outcome = await sideChat.steer(id, trimmed);
       if (!mountedRef.current) return false;
-      if (outcome.kind !== 'queued') return false;
+      if (admission.cancelled) return false;
+      if (outcome.kind === 'started') {
+        bindAdmittedTurn(id, outcome.turnId, { preserveLiveTurn: true });
+      } else {
+        admission.messageId = outcome.messageId;
+        const admitted = admission.events.find((event) =>
+          eventAdmitsMessage(event, outcome.messageId),
+        );
+        if (admitted) {
+          bindAdmittedTurn(id, admitted.turnId, { preserveLiveTurn: true });
+        }
+      }
       setError(null);
       return true;
     } catch {
-      if (mountedRef.current) setError(copyRef.current.errors.sendFailed);
+      if (mountedRef.current) {
+        if (pendingAdmissionRef.current === admission) {
+          pendingAdmissionRef.current = null;
+          activeTurnIdRef.current = previousTurnId;
+          for (const event of admission.events) applyOwnedEvent(id, event);
+        }
+        if (admission.cancelled) return false;
+        setError(copyRef.current.errors.sendFailed);
+      }
       return false;
     }
-  }, [mountedRef, sideChat, turnInFlight]);
+  }, [applyOwnedEvent, bindAdmittedTurn, eventAdmitsMessage, mountedRef, sideChat, turnInFlight]);
 
   const setPermissionMode = useCallback(
     async (mode: PermissionMode): Promise<boolean> => {

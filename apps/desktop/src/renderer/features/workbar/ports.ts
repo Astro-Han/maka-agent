@@ -18,7 +18,6 @@
  */
 
 import type {
-  QueueEnqueueOutcome,
   QuoteRef,
   SessionEvent,
   ShellRunUpdate,
@@ -201,6 +200,10 @@ export type SideChatSendResult =
   | { ok: true; turnId: string; steered: true; messageId: string }
   | { ok: false; reason?: string };
 
+export type SideChatSteerResult =
+  | { kind: 'queued'; messageId: string }
+  | { kind: 'started'; turnId: string };
+
 export interface SideChatSessionPort {
   listSessions(): Promise<SessionSummary[]>;
   listTurns(sessionId: string): Promise<TurnRecord[]>;
@@ -233,7 +236,7 @@ export interface SideChatSessionPort {
     },
   ): Promise<SideChatSendResult>;
   stop(sessionId: string): Promise<void>;
-  steer(sessionId: string, text: string): Promise<QueueEnqueueOutcome>;
+  steer(sessionId: string, text: string): Promise<SideChatSteerResult>;
   setPermissionMode(
     sessionId: string,
     mode: PermissionMode,
@@ -250,6 +253,7 @@ export interface SideChatSessionPort {
   subscribeEvents(
     sessionId: string,
     handler: (event: SessionEvent) => void,
+    onSeeded?: () => void,
   ): WorkbarUnsubscribe;
   subscribeSessionChanges(handler: (event: SessionChangedEvent) => void): WorkbarUnsubscribe;
 }

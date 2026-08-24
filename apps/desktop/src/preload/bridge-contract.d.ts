@@ -48,7 +48,6 @@ import type {
   SessionCommand,
   SessionEvent,
   ShellRunUpdate,
-  QueueEnqueueOutcome,
 } from '@maka/core/events';
 import type { UserQuestionResponse } from '@maka/core/user-question';
 import type { PermissionMode } from '@maka/core/permission';
@@ -821,7 +820,10 @@ export interface MakaBridge {
       sessionId: string,
       input?: { source?: 'stop_button'; expectedTurnId?: string },
     ): Promise<void>;
-    steer(sessionId: string, text: string): Promise<QueueEnqueueOutcome>;
+    steer(
+      sessionId: string,
+      text: string,
+    ): Promise<{ kind: 'queued'; messageId: string } | { kind: 'started'; turnId: string }>;
     enqueue(
       sessionId: string,
       placement: 'current_turn' | 'next_turn',

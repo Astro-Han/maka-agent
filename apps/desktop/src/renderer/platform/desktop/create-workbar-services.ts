@@ -130,8 +130,8 @@ export function createDesktopWorkbarServices(
         bridge.sessions.respondToSandboxBoundary(sessionId, response),
       respondToUserQuestion: (sessionId, response) =>
         bridge.sessions.respondToUserQuestion(sessionId, response),
-      subscribeEvents: (sessionId, handler) =>
-        bridge.sessions.subscribeEvents(sessionId, handler),
+      subscribeEvents: (sessionId, handler, onSeeded) =>
+        bridge.sessions.subscribeEvents(sessionId, handler, onSeeded),
       subscribeSessionChanges: (handler) => bridge.sessions.subscribeChanges(handler),
     },
   };

@@ -30,7 +30,10 @@ import {
   SESSION_CONTINUITY_SCHEMA_VERSION,
   type SessionCatalogProjection,
 } from "@maka/runtime-host/protocol";
-import { RuntimeHostOperationError } from '@maka/runtime-host/client';
+import {
+  RuntimeHostOperationError,
+  RuntimeHostRequestInterruptedError,
+} from '@maka/runtime-host/client';
 import { createAttachmentApprovalRegistry } from "../attachment-approval.js";
 import type { DesktopRuntimeHostSession } from "../runtime-host-client.js";
 import {
@@ -628,6 +631,179 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
   ]);
 });
 
+test("retries a dispatched normal send with its original Turn identity", async () => {
+  const starts: unknown[] = [];
+  let reconnectQueries = 0;
+  const ipc = ipcHarness();
+  registerExecutionIpc(
+    {
+      client: executionClient({
+        getSession: async () => {
+          reconnectQueries += 1;
+          return session();
+        },
+        startTurn: async (input) => {
+          starts.push(input);
+          if (starts.length === 1) {
+            throw new RuntimeHostRequestInterruptedError(
+              "turn.start",
+              "command",
+              "dispatched",
+              "connection_lost",
+            );
+          }
+          return {
+            kind: "started",
+            turn: {
+              sessionId: input.sessionId,
+              turnId: input.turnId,
+              runId: "run-1",
+              status: "running",
+            },
+            skillInvocation: { loaded: [], failed: [], receipts: [] },
+          };
+        },
+      }),
+      observer: unusedObserver(),
+      attachmentApprovals: createAttachmentApprovalRegistry(),
+      emitSessionsChanged() {},
+      stat: async () => ({ size: 0 }),
+      resizeImage: async (bytes) => bytes,
+      beforeStop() {},
+      newId: () => "turn-1",
+    },
+    ipc,
+  );
+
+  const result = await ipc.invoke("sessions:send", "session-1", {
+    type: "send",
+    text: "keep this Turn identity",
+  });
+
+  assert.equal(reconnectQueries, 2, 'initial Session lookup plus reconnect probe');
+  assert.deepEqual(starts, [
+    {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      content: { text: "keep this Turn identity", inlineReferences: [] },
+    },
+    {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      content: { text: "keep this Turn identity", inlineReferences: [] },
+    },
+  ]);
+  assert.deepEqual(result, {
+    ok: true,
+    turnId: "turn-1",
+    attachments: [],
+    inlineReferences: [],
+    skillInvocation: { loaded: [], failed: [], receipts: [] },
+  });
+});
+
+test("retries a dispatched busy fallback with its original message identity", async () => {
+  const submits: unknown[] = [];
+  let reconnectQueries = 0;
+  const ipc = ipcHarness();
+  registerExecutionIpc(
+    {
+      client: executionClient({
+        getSession: async () => {
+          reconnectQueries += 1;
+          return session();
+        },
+        startTurn: async () => {
+          throw new RuntimeHostOperationError(
+            "turn.start",
+            "session_busy",
+            "Session already has an active root Turn",
+          );
+        },
+        submitMessage: async (input) => {
+          submits.push(input);
+          if (submits.length === 1) {
+            throw new RuntimeHostRequestInterruptedError(
+              "turn.message.submit",
+              "command",
+              "dispatched",
+              "connection_lost",
+            );
+          }
+          return { disposition: "steering", queueRevision: 1 };
+        },
+      }),
+      observer: unusedObserver(),
+      attachmentApprovals: createAttachmentApprovalRegistry(),
+      emitSessionsChanged() {},
+      stat: async () => ({ size: 0 }),
+      resizeImage: async (bytes) => bytes,
+      beforeStop() {},
+      newId: () => "id-1",
+    },
+    ipc,
+  );
+
+  const result = await ipc.invoke("sessions:send", "session-1", {
+    type: "send",
+    turnId: "turn-1",
+    text: "keep this message identity",
+  });
+
+  assert.equal(reconnectQueries, 2, 'initial Session lookup plus reconnect probe');
+  assert.deepEqual(submits, [
+    {
+      sessionId: "session-1",
+      messageId: "id-1",
+      content: { text: "keep this message identity", inlineReferences: [] },
+      placement: "current_turn",
+    },
+    {
+      sessionId: "session-1",
+      messageId: "id-1",
+      content: { text: "keep this message identity", inlineReferences: [] },
+      placement: "current_turn",
+    },
+  ]);
+  assert.deepEqual(result, {
+    ok: true,
+    steered: true,
+    turnId: "turn-1",
+    messageId: "id-1",
+    attachments: [],
+    inlineReferences: [],
+    skillInvocation: { loaded: [], failed: [], receipts: [] },
+  });
+});
+
+test("returns the Host-started Turn identity when a direct steer races idle", async () => {
+  const ipc = ipcHarness();
+  registerExecutionIpc(
+    {
+      client: executionClient({
+        getSession: async () => session(),
+        submitMessage: async () => ({
+          disposition: "turn_started",
+          turnId: "host-started-turn",
+        }),
+      }),
+      observer: unusedObserver(),
+      attachmentApprovals: createAttachmentApprovalRegistry(),
+      emitSessionsChanged() {},
+      stat: async () => ({ size: 0 }),
+      resizeImage: async (bytes) => bytes,
+      beforeStop() {},
+      newId: () => "steer-message-id",
+    },
+    ipc,
+  );
+
+  assert.deepEqual(await ipc.invoke("sessions:steer", "session-1", "continue now"), {
+    kind: "started",
+    turnId: "host-started-turn",
+  });
+});
+
 test("starts the turn from the queued message when the busy race resolves idle", async () => {
   const changes: unknown[] = [];
   const submits: unknown[] = [];
@@ -967,6 +1143,7 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
     await ipc.invoke("sessions:steer", "session-1", "  Continue  "),
     {
       kind: "queued",
+      messageId: "id-1",
     },
   );
   await ipc.invoke("sessions:stop", "session-1", {

@@ -20,7 +20,10 @@
 import { randomUUID } from "node:crypto";
 import type { IpcMainInvokeEvent } from "electron";
 import { MAX_ATTACHMENT_COUNT } from '@maka/core/attachments';
-import { RuntimeHostOperationError } from '@maka/runtime-host/client';
+import {
+  RuntimeHostOperationError,
+  RuntimeHostRequestInterruptedError,
+} from '@maka/runtime-host/client';
 import { SKILL_INVOCATION_TOKEN_SOURCE } from '@maka/core/skill-invocation-token';
 import {
   type SessionChangedEvent,
@@ -62,6 +65,24 @@ import { mergeWorkspaceFileInlineReferences } from "./session-workspace-inline-r
 type SideConversationBranchResult =
   | { readonly ok: true; readonly session: ReturnType<typeof toDesktopHostSessionSummary> }
   | { readonly ok: false; readonly reason: 'session_busy' | 'operation_unavailable' };
+
+async function retryDispatchedCommand<T>(
+  command: () => Promise<T>,
+  waitForReconnect: () => Promise<unknown>,
+): Promise<T> {
+  try {
+    return await command();
+  } catch (error) {
+    if (
+      !(error instanceof RuntimeHostRequestInterruptedError) ||
+      error.dispatch !== 'dispatched'
+    ) {
+      throw error;
+    }
+    await waitForReconnect();
+    return command();
+  }
+}
 
 type RuntimeHostSessionExecutionClient = Pick<
   DesktopRuntimeHostClient,
@@ -276,7 +297,10 @@ export function registerRuntimeHostSessionExecutionIpc(
       };
       let startResult;
       try {
-        startResult = await deps.client.startTurn(startInput);
+        startResult = await retryDispatchedCommand(
+          () => deps.client.startTurn(startInput),
+          () => deps.client.getSession(sessionId),
+        );
       } catch (error) {
         // The renderer routes text at a session it sees as running to
         // `sessions:steer`, but its view can lag the Host: another window, a
@@ -297,14 +321,18 @@ export function registerRuntimeHostSessionExecutionIpc(
         ) {
           throw error;
         }
-        const submitted = await deps.client.submitMessage({
-          sessionId,
-          // Preserve the renderer's command identity in the durable message so
-          // a lost IPC reply can be reconciled as root-vs-steering later.
-          messageId: turnId,
-          content: startInput.content,
-          placement: "current_turn",
-        });
+        const submitted = await retryDispatchedCommand(
+          () =>
+            deps.client.submitMessage({
+              sessionId,
+              // Preserve the renderer's command identity in the durable message so
+              // a lost IPC reply can be reconciled as root-vs-steering later.
+              messageId: turnId,
+              content: startInput.content,
+              placement: "current_turn",
+            }),
+          () => deps.client.getSession(sessionId),
+        );
         const emptySkillInvocation = { loaded: [], failed: [], receipts: [] };
         if (submitted.disposition === "turn_started") {
           deps.emitSessionsChanged("status-change", sessionId, {
@@ -354,13 +382,20 @@ export function registerRuntimeHostSessionExecutionIpc(
     "sessions:steer",
     async (_event, sessionId: string, text: unknown) => {
       const content = steeringContent(text);
-      await deps.client.submitMessage({
-        sessionId,
-        messageId: newId(),
-        content: { text: content },
-        placement: "current_turn",
-      });
-      return { kind: "queued" as const };
+      const messageId = newId();
+      const submitted = await retryDispatchedCommand(
+        () =>
+          deps.client.submitMessage({
+            sessionId,
+            messageId,
+            content: { text: content },
+            placement: "current_turn",
+          }),
+        () => deps.client.getSession(sessionId),
+      );
+      return submitted.disposition === "turn_started"
+        ? { kind: "started" as const, turnId: submitted.turnId }
+        : { kind: "queued" as const, messageId };
     },
   );
   ipcMain.handle(

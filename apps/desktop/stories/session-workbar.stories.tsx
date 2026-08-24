@@ -711,7 +711,7 @@ function bridge(options: {
       abandonSessionCopy: async () => undefined,
       send: async () => ({ ok: true, turnId: 'story-side-chat-turn' }),
       stop: async () => undefined,
-      steer: async () => ({ kind: 'queued' }),
+      steer: async () => ({ kind: 'queued', messageId: 'story-steer-message' }),
       setPermissionMode: async (_sessionId, mode) => ({
         ...SIDE_CHAT_SESSION,
         permissionMode: mode,
