@@ -38,7 +38,7 @@ export interface PendingMessageAdmission {
   readonly runId: string;
   readonly messageId: string;
   readonly content: MessageContent;
-  readonly modelContent: MessageContent;
+  readonly submittedContentDigest: `sha256:${string}`;
   readonly submittedPlacement: 'current_turn' | 'next_turn';
   readonly placement: 'current_turn' | 'next_turn';
   readonly disposition: 'steering' | 'followup';
@@ -96,10 +96,9 @@ export function normalizePendingMessageAdmission(
   const normalized = Object.freeze({
     ...admission,
     content: normalizeMessageContent(admission.content),
-    modelContent: normalizeMessageContent(admission.modelContent),
   });
-  if (Buffer.byteLength(JSON.stringify(normalized), 'utf8') > RECEIPT_MAX_BYTES) {
-    throw new Error('Pending message admission exceeds size limit');
+  if (!/^sha256:[a-f0-9]{64}$/u.test(normalized.submittedContentDigest)) {
+    throw new Error('Invalid pending Message submitted content digest');
   }
   return normalized;
 }
@@ -115,12 +114,12 @@ export function samePendingMessageAdmission(
     a.turnId === b.turnId &&
     a.runId === b.runId &&
     a.messageId === b.messageId &&
+    a.submittedContentDigest === b.submittedContentDigest &&
     a.submittedPlacement === b.submittedPlacement &&
     a.placement === b.placement &&
     a.disposition === b.disposition &&
     a.admittedAt === b.admittedAt &&
-    isDeepStrictEqual(a.content, b.content) &&
-    isDeepStrictEqual(a.modelContent, b.modelContent)
+    isDeepStrictEqual(a.content, b.content)
   );
 }
 

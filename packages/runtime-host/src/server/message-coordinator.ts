@@ -147,6 +147,7 @@ export interface HostMessageRootPort {
   startFromMessage(
     input: HostMessageStartInput,
     admission: SessionAdmissionLease,
+    commitAdmission: (canonicalContent: MessageContent) => Promise<void>,
   ): Promise<{ readonly turnId: string } | { readonly error: string }>;
   startRecoveredMessages?(
     input: HostMessageRecoveryBatch,
@@ -214,6 +215,7 @@ interface LiveEntry {
   readonly admittedAt: number;
   content: MessageContent;
   modelContent: MessageContent;
+  submittedContentDigest: `sha256:${string}`;
   readonly initiatingConnectionId: string;
   readonly placement: MessagePlacement;
   readonly disposition: 'steering' | 'followup';
@@ -725,7 +727,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           this.#root.startRecoveredMessages!(
             {
               sessionId,
-              content: aggregateMessageContents(pending.map((entry) => entry.modelContent)),
+              content: aggregateMessageContents(pending.map((entry) => entry.content)),
               submittedContent: aggregateMessageContents(pending.map((entry) => entry.content)),
               sources: pending.map(pendingMessageSource),
             },
@@ -756,8 +758,9 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           turnId: admission.turnId,
           runId: admission.runId,
           admittedAt: admission.admittedAt,
-          content: admission.content,
-          modelContent: admission.modelContent,
+          content: submittedProjectionContent(admission.content),
+          modelContent: admission.content,
+          submittedContentDigest: admission.submittedContentDigest,
           initiatingConnectionId: '',
           placement: admission.placement,
           disposition: admission.disposition,
@@ -896,26 +899,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           );
           if (
             pendingAdmission &&
-            (!messageContentsEqual(pendingAdmission.content, payload.content) ||
+            (pendingAdmission.submittedContentDigest !== messageContentDigest(payload.content) ||
               pendingAdmission.submittedPlacement !== input.placement)
           ) {
             return failure('operation_conflict', 'Message admission has a different payload');
           }
           const turnId = pendingAdmission?.turnId ?? this.#createId();
           const runId = pendingAdmission?.runId ?? this.#createId();
-          const messageAdmission: PendingMessageAdmission = {
-            sessionId: input.sessionId,
-            turnId,
-            runId,
-            messageId: input.messageId,
-            content: payload.content,
-            modelContent: payload.content,
-            submittedPlacement: input.placement,
-            placement: 'current_turn',
-            disposition: 'steering',
-            admittedAt: pendingAdmission?.admittedAt ?? Date.now(),
-          };
-          await this.#lifecycle.commitMessageAdmission(messageAdmission);
           const started = await this.#root.startFromMessage(
             {
               sessionId: input.sessionId,
@@ -926,9 +916,22 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
               runId,
             },
             admission,
+            async (canonicalContent) => {
+              await this.#lifecycle.commitMessageAdmission({
+                sessionId: input.sessionId,
+                turnId,
+                runId,
+                messageId: input.messageId,
+                content: canonicalContent,
+                submittedContentDigest: messageContentDigest(payload.content),
+                submittedPlacement: input.placement,
+                placement: 'current_turn',
+                disposition: 'steering',
+                admittedAt: pendingAdmission?.admittedAt ?? Date.now(),
+              });
+            },
           );
           if ('error' in started) {
-            await this.#lifecycle.cancelMessageAdmissions(input.sessionId, [input.messageId]);
             return failure('operation_conflict', started.error);
           }
           if (!isEntityId(started.turnId)) {
@@ -1037,8 +1040,8 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           turnId: rootState.turnId,
           runId: rootState.runId,
           messageId: input.messageId,
-          content: payload.content,
-          modelContent: prepared.content,
+          content: prepared.content,
+          submittedContentDigest: messageContentDigest(payload.content),
           submittedPlacement: input.placement,
           placement: input.placement,
           disposition,
@@ -1054,6 +1057,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           admittedAt: messageAdmission.admittedAt,
           content: payload.content,
           modelContent: prepared.content,
+          submittedContentDigest: messageAdmission.submittedContentDigest,
           initiatingConnectionId,
           placement: input.placement,
           disposition,
@@ -1347,8 +1351,8 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       turnId: entry.turnId,
       runId: entry.runId,
       messageId: entry.messageId,
-      content: entry.content,
-      modelContent: entry.modelContent,
+      content: entry.modelContent,
+      submittedContentDigest: entry.submittedContentDigest,
       submittedPlacement: 'next_turn',
       placement: 'current_turn',
       disposition: 'steering',
@@ -1453,8 +1457,8 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       turnId: queued.entry.turnId,
       runId: queued.entry.runId,
       messageId: queued.entry.messageId,
-      content,
-      modelContent,
+      content: modelContent,
+      submittedContentDigest: messageContentDigest(content),
       submittedPlacement: admission?.submittedPlacement ?? queued.entry.placement,
       placement: queued.entry.placement,
       disposition: queued.entry.disposition,
@@ -1462,6 +1466,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     });
     queued.entry.content = content;
     queued.entry.modelContent = modelContent;
+    queued.entry.submittedContentDigest = messageContentDigest(content);
     this.#mutated(state);
     const result = { queueRevision: state.revision };
     try {
@@ -1829,7 +1834,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         id: leaseId,
         messageId: entry.messageId,
         content: normalizeMessageContent(entry.modelContent),
-        submittedContentDigest: messageContentDigest(entry.content),
+        submittedContentDigest: entry.submittedContentDigest,
       };
     });
     this.#mutated(state);
@@ -2184,7 +2189,7 @@ function sourceFromEntry(entry: LiveEntry): RootFollowupSource {
   return {
     messageId: entry.messageId,
     content: normalizeMessageContent(entry.modelContent),
-    submittedContentDigest: messageContentDigest(entry.content),
+    submittedContentDigest: entry.submittedContentDigest,
     placement: entry.placement,
     disposition: entry.disposition,
   };
@@ -2193,11 +2198,17 @@ function sourceFromEntry(entry: LiveEntry): RootFollowupSource {
 function pendingMessageSource(admission: PendingMessageAdmission): RootTurnSourceMessage {
   return {
     messageId: admission.messageId,
-    content: normalizeMessageContent(admission.modelContent),
-    submittedContentDigest: messageContentDigest(admission.content),
+    content: normalizeMessageContent(admission.content),
+    submittedContentDigest: admission.submittedContentDigest,
     placement: admission.placement,
     disposition: admission.disposition,
   };
+}
+
+function submittedProjectionContent(content: MessageContent): MessageContent {
+  const normalized = normalizeMessageContent(content);
+  const text = normalized.displayText ?? normalized.text;
+  return normalizeMessageContent({ ...normalized, text, displayText: text });
 }
 
 function queuedSnapshot(entry: LiveEntry): QueuedMessageSnapshot {

@@ -830,7 +830,7 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
       run_id TEXT NOT NULL,
       message_id TEXT NOT NULL,
       content_json TEXT NOT NULL,
-      model_content_json TEXT NOT NULL,
+      submitted_content_digest TEXT NOT NULL,
       submitted_placement TEXT NOT NULL
         CHECK (submitted_placement IN ('current_turn', 'next_turn')),
       placement TEXT NOT NULL CHECK (placement IN ('current_turn', 'next_turn')),

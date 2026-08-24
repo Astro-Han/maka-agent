@@ -299,6 +299,64 @@ test('same idle Message submit is connection-independent and starts one canonica
   });
 });
 
+test('a rejected idle Message submit leaves no durable transcript entry', async () => {
+  await withExecutionRoot(async (fixture) => {
+    const host = await fixture.startHost();
+    const client = await connectClient(fixture.root);
+    const messageId = randomUUID();
+    try {
+      await assert.rejects(
+        () =>
+          client.request('turn.message.submit', {
+            originHostEpoch: host.hostEpoch,
+            sessionId: fixture.sessionId,
+            messageId,
+            content: { text: '/skill:missing reject this submit' },
+            placement: 'current_turn',
+          }),
+        operationError('operation_conflict'),
+      );
+    } finally {
+      await client.close();
+      await fixture.stopHost(host);
+    }
+
+    assert.deepEqual(
+      (await fixture.readSessionUserMessages())
+        .filter((message) => message.id === messageId)
+        .map((message) => message.id),
+      [],
+    );
+  });
+});
+
+test('an allowed 32 KiB idle Message crosses the durable admission boundary', async () => {
+  await withExecutionRoot(async (fixture) => {
+    const host = await fixture.startHost();
+    const client = await connectClient(fixture.root);
+    const messageId = randomUUID();
+    try {
+      const started = await client.request('turn.message.submit', {
+        originHostEpoch: host.hostEpoch,
+        sessionId: fixture.sessionId,
+        messageId,
+        content: { text: 'x'.repeat(32 * 1024) },
+        placement: 'current_turn',
+      });
+      assert.equal(started.disposition, 'turn_started');
+    } finally {
+      await client.close();
+      await fixture.stopHost(host);
+    }
+    assert.deepEqual(
+      (await fixture.readSessionUserMessages())
+        .filter((message) => message.id === messageId)
+        .map((message) => message.text),
+      ['x'.repeat(32 * 1024)],
+    );
+  });
+});
+
 test('stale Session operations return not_found across the SQLite-backed UDS Host boundary', async () => {
   await withExecutionRoot(async (fixture) => {
     const host = await fixture.startHost();

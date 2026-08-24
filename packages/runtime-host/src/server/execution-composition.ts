@@ -466,8 +466,8 @@ export async function createExecutionRuntimeHostComposition(
         requireRootCoordinator(rootCoordinator).readRootState(sessionId),
       claimStopFence: (input, commitQueueFence, admission) =>
         requireRootCoordinator(rootCoordinator).claimStopFence(input, commitQueueFence, admission),
-      startFromMessage: (input, admission) =>
-        requireRootCoordinator(rootCoordinator).startFromMessage(input, admission),
+      startFromMessage: (input, admission, commitAdmission) =>
+        requireRootCoordinator(rootCoordinator).startFromMessage(input, admission, commitAdmission),
       startRecoveredMessages: (input, admission) =>
         requireRootCoordinator(rootCoordinator).startRecoveredMessages(input, admission),
       prepareMessage: (input) => requireRootCoordinator(rootCoordinator).prepareMessage(input),

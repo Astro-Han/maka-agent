@@ -812,6 +812,66 @@ test('idle turn.message.submit applies hosted Skill preparation before durable a
   }
 });
 
+test('idle Skill admission persists only canonical content before root handoff', async () => {
+  const canonicalText = '<invoked-skill>Write clearly.</invoked-skill>\n\nDraft this.';
+  const fixture = await createFailureFixture({
+    registerBackend: (backends) =>
+      backends.register('ai-sdk', (context) => new FakeBackend(context)),
+    prepareSkillInvocation: async (): Promise<PreparedSkillInvocationMessage> => ({
+      disposition: 'ready',
+      sendText: canonicalText,
+      skillInvocation: {
+        loaded: [{ id: 'writer', name: 'Writer' }],
+        failed: [],
+        receipts: [],
+      },
+    }),
+    wrapAdmissionStore: (store) => ({
+      admitRootTurn: async () => {
+        throw new Error('injected root admission failure');
+      },
+      readRootTurnAdmission: (sessionId, turnId) => store.readRootTurnAdmission(sessionId, turnId),
+      readRootTurnSourceMessageReceipt: (sessionId, messageId) =>
+        store.readRootTurnSourceMessageReceipt(sessionId, messageId),
+      listRootTurnAdmissionsForRecovery: (sessionId) =>
+        store.listRootTurnAdmissionsForRecovery(sessionId),
+    }),
+  });
+  try {
+    await assert.rejects(
+      fixture.messages.handlers['turn.message.submit'](
+        {
+          originHostEpoch: fixture.hostEpoch,
+          sessionId: fixture.sessionId,
+          messageId: 'idle-skill-before-handoff',
+          content: { text: '/skill:writer Draft this.' },
+          placement: 'current_turn',
+        },
+        operationContext(fixture.hostEpoch, fixture.acquireResidency),
+      ),
+      /injected root admission failure/,
+    );
+    const admission = await fixture.stores.sessionStore.readMessageAdmission(
+      fixture.sessionId,
+      'idle-skill-before-handoff',
+    );
+    assert.deepEqual(admission?.content, {
+      text: canonicalText,
+      displayText: '/skill:writer Draft this.',
+      inlineReferences: [],
+    });
+    assert.deepEqual(
+      (await fixture.stores.sessionStore.readMessages(fixture.sessionId)).map((message) => ({
+        text: message.type === 'user' ? message.text : undefined,
+        displayText: message.type === 'user' ? message.displayText : undefined,
+      })),
+      [{ text: canonicalText, displayText: '/skill:writer Draft this.' }],
+    );
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 test('turn.start rejects oversized preparation before admission and preserves not-found semantics', async () => {
   let preparationCount = 0;
   let preparation: 'blocked' | 'oversized_content' | 'oversized_feedback' = 'blocked';
@@ -2159,8 +2219,8 @@ test('hosted linked child roots share admission, message, terminal, and stop aut
       readRootState: (sessionId) => requireCoordinator(coordinator).readRootState(sessionId),
       claimStopFence: (input, commitQueueFence, admission) =>
         requireCoordinator(coordinator).claimStopFence(input, commitQueueFence, admission),
-      startFromMessage: (input, admission) =>
-        requireCoordinator(coordinator).startFromMessage(input, admission),
+      startFromMessage: (input, admission, commitAdmission) =>
+        requireCoordinator(coordinator).startFromMessage(input, admission, commitAdmission),
       prepareMessage: (input) => requireCoordinator(coordinator).prepareMessage(input),
       claimStop: (input, commitQueueFence, admission) =>
         requireCoordinator(coordinator).claimStop(input, commitQueueFence, admission),
@@ -4780,8 +4840,8 @@ async function createFailureFixture(options: {
     readRootState: (sessionId) => requireCoordinator(coordinator).readRootState(sessionId),
     claimStopFence: (input, commitQueueFence, admission) =>
       requireCoordinator(coordinator).claimStopFence(input, commitQueueFence, admission),
-    startFromMessage: (input, admission) =>
-      requireCoordinator(coordinator).startFromMessage(input, admission),
+    startFromMessage: (input, admission, commitAdmission) =>
+      requireCoordinator(coordinator).startFromMessage(input, admission, commitAdmission),
     prepareMessage: (input) => requireCoordinator(coordinator).prepareMessage(input),
     claimStop: (input, commitQueueFence, admission) =>
       requireCoordinator(coordinator).claimStop(input, commitQueueFence, admission),

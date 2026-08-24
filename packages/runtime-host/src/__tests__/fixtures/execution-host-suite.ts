@@ -697,7 +697,7 @@ export class ExecutionFixture {
         runId,
         messageId: input.messageId,
         content,
-        modelContent: content,
+        submittedContentDigest: contentDigest,
         submittedPlacement: 'current_turn',
         placement: 'current_turn',
         disposition: 'steering',

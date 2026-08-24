@@ -120,7 +120,7 @@ test('submit re-runs admission when the queue revision moves during preflight', 
   owner.release();
 });
 
-test('keeps submitted Skill text durable while handing prepared content to steering and follow-up roots', async () => {
+test('persists prepared Skill content while projecting the submitted text', async () => {
   const fixture = createFixture();
   fixture.setMessagePreparation(async (input) => ({
     kind: 'ready',
@@ -272,7 +272,9 @@ test('recovered followups without a connection owner still form one successor ba
     runId: ROOT.runId,
     messageId: 'recovered-followup',
     content: { text: 'recover without a connection owner' },
-    modelContent: { text: 'recover without a connection owner' },
+    submittedContentDigest: messageContentDigest({
+      text: 'recover without a connection owner',
+    }),
     submittedPlacement: 'next_turn',
     placement: 'next_turn',
     disposition: 'followup',
@@ -315,7 +317,7 @@ test('recovery treats a durable steering event as the handoff proof', async () =
     runId: ROOT.runId,
     messageId: 'recovered-steering',
     content: { text: 'recover this steering event' },
-    modelContent: { text: 'recover this steering event' },
+    submittedContentDigest: messageContentDigest({ text: 'recover this steering event' }),
     submittedPlacement: 'current_turn',
     placement: 'current_turn',
     disposition: 'steering',
@@ -901,7 +903,10 @@ test('editing a promoted entry preserves its original submitted placement', asyn
   assert.equal(admission.placement, 'current_turn');
   assert.equal(admission.disposition, 'steering');
   assert.deepEqual(admission.content, { text: 'edited after promotion' });
-  assert.deepEqual(admission.modelContent, { text: 'edited after promotion' });
+  assert.equal(
+    admission.submittedContentDigest,
+    messageContentDigest({ text: 'edited after promotion' }),
+  );
 });
 
 test('entry promote requires an active Turn', async () => {

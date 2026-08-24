@@ -559,8 +559,8 @@ async function createFixture(options: { recoverAdmissions?: boolean } = {}): Pro
     readRootState: (sessionId) => requireCoordinator(coordinator).readRootState(sessionId),
     claimStopFence: (input, commitQueueFence, lease) =>
       requireCoordinator(coordinator).claimStopFence(input, commitQueueFence, lease),
-    startFromMessage: (input, lease) =>
-      requireCoordinator(coordinator).startFromMessage(input, lease),
+    startFromMessage: (input, lease, commitAdmission) =>
+      requireCoordinator(coordinator).startFromMessage(input, lease, commitAdmission),
     prepareMessage: (input) => requireCoordinator(coordinator).prepareMessage(input),
     claimStop: (input, commitQueueFence, lease) =>
       requireCoordinator(coordinator).claimStop(input, commitQueueFence, lease),

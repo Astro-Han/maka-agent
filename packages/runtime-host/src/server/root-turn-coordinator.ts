@@ -1001,6 +1001,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
   startFromMessage(
     input: HostMessageStartInput,
     admissionLease: SessionAdmissionLease,
+    commitAdmission: (canonicalContent: MessageContent) => Promise<void>,
   ): Promise<{ readonly turnId: string } | { readonly error: string }> {
     return this.runCommand(async () => {
       const content = normalizeMessageContent(input.content);
@@ -1057,6 +1058,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         }
 
         await this.prepareFreshAgentGraphEpoch(header);
+        await commitAdmission(canonicalContent.content);
 
         const admitted = await this.rootAdmissionOwner.admitRootTurn({
           sessionId: input.sessionId,

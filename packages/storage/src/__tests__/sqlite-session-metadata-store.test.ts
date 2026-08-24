@@ -25,6 +25,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { AgentGraphClientTerminalCursorError } from '@maka/core/agent-graph-client-projection';
+import { messageContentDigest } from '@maka/core/events';
 import {
   canReadPath,
   createReadOnlyPermissionProfile,
@@ -248,7 +249,7 @@ describe('SqliteSessionMetadataStore', () => {
         runId: 'run-1',
         messageId: 'message-1',
         content: { text: 'submitted', displayText: 'submitted' },
-        modelContent: { text: 'submitted', displayText: 'submitted' },
+        submittedContentDigest: messageContentDigest({ text: 'submitted' }),
         submittedPlacement: 'current_turn',
         placement: 'current_turn',
         disposition: 'steering',
@@ -258,7 +259,6 @@ describe('SqliteSessionMetadataStore', () => {
       const normalizedAdmission = {
         ...admission,
         content: { text: 'submitted' },
-        modelContent: { text: 'submitted' },
       };
       assert.deepEqual(await store.commitMessageAdmission(admission), normalizedAdmission);
       assert.deepEqual(
@@ -313,7 +313,9 @@ describe('SqliteSessionMetadataStore', () => {
         runId: 'run-current',
         messageId: 'message-followup',
         content: { text: 'queued before the successor root' },
-        modelContent: { text: 'queued before the successor root' },
+        submittedContentDigest: messageContentDigest({
+          text: 'queued before the successor root',
+        }),
         submittedPlacement: 'next_turn',
         placement: 'next_turn',
         disposition: 'followup',
@@ -365,7 +367,7 @@ describe('SqliteSessionMetadataStore', () => {
             runId: 'run-current',
             messageId,
             content: { text: messageId },
-            modelContent: { text: messageId },
+            submittedContentDigest: messageContentDigest({ text: messageId }),
             submittedPlacement: 'next_turn',
             placement: 'next_turn',
             disposition: 'followup',
@@ -393,32 +395,6 @@ describe('SqliteSessionMetadataStore', () => {
       }
     } finally {
       await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test('rejects an oversized durable Message admission before transcript mutation', async () => {
-    const store = createSqliteSessionMetadataStore(':memory:');
-    try {
-      await store.create(fullHeader({ id: 'session-oversized' }));
-      await assert.rejects(
-        () =>
-          store.commitMessageAdmission({
-            sessionId: 'session-oversized',
-            turnId: 'turn-oversized',
-            runId: 'run-oversized',
-            messageId: 'message-oversized',
-            content: { text: 'x'.repeat(70_000) },
-            modelContent: { text: 'x'.repeat(70_000) },
-            submittedPlacement: 'current_turn',
-            placement: 'current_turn',
-            disposition: 'steering',
-            admittedAt: 10,
-          }),
-        /exceeds size limit/,
-      );
-      assert.deepEqual(await store.readMessages('session-oversized'), []);
-    } finally {
-      store.close();
     }
   });
 

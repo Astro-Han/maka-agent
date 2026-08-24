@@ -231,7 +231,7 @@ interface MessageAdmissionRow {
   readonly run_id?: unknown;
   readonly message_id?: unknown;
   readonly content_json?: unknown;
-  readonly model_content_json?: unknown;
+  readonly submitted_content_digest?: unknown;
   readonly submitted_placement?: unknown;
   readonly placement?: unknown;
   readonly disposition?: unknown;
@@ -249,7 +249,7 @@ function decodeMessageAdmissionRow(
     typeof row.run_id !== 'string' ||
     typeof row.message_id !== 'string' ||
     typeof row.content_json !== 'string' ||
-    typeof row.model_content_json !== 'string' ||
+    typeof row.submitted_content_digest !== 'string' ||
     (row.submitted_placement !== 'current_turn' && row.submitted_placement !== 'next_turn') ||
     (row.placement !== 'current_turn' && row.placement !== 'next_turn') ||
     (row.disposition !== 'steering' && row.disposition !== 'followup') ||
@@ -270,7 +270,8 @@ function decodeMessageAdmissionRow(
     runId: row.run_id,
     messageId: row.message_id,
     content: JSON.parse(row.content_json) as PendingMessageAdmission['content'],
-    modelContent: JSON.parse(row.model_content_json) as PendingMessageAdmission['modelContent'],
+    submittedContentDigest:
+      row.submitted_content_digest as PendingMessageAdmission['submittedContentDigest'],
     submittedPlacement: row.submitted_placement,
     placement: row.placement,
     disposition: row.disposition,
@@ -1549,7 +1550,7 @@ export class SqliteSessionMetadataStore {
       const existingRow = this.db
         .prepare(
           `
-          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+          SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
             submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND message_id = ?
@@ -1582,7 +1583,7 @@ export class SqliteSessionMetadataStore {
         .prepare(
           `
           INSERT INTO message_admissions(
-            session_id, turn_id, run_id, message_id, content_json, model_content_json,
+            session_id, turn_id, run_id, message_id, content_json, submitted_content_digest,
             submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?)
         `,
@@ -1593,7 +1594,7 @@ export class SqliteSessionMetadataStore {
           stored.runId,
           stored.messageId,
           JSON.stringify(stored.content),
-          JSON.stringify(stored.modelContent),
+          stored.submittedContentDigest,
           stored.submittedPlacement,
           stored.placement,
           stored.disposition,
@@ -1662,7 +1663,7 @@ export class SqliteSessionMetadataStore {
       const row = this.db
         .prepare(
           `
-          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+          SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
             submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND message_id = ?
@@ -1681,7 +1682,7 @@ export class SqliteSessionMetadataStore {
       const rows = this.db
         .prepare(
           `
-          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+          SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
             submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND lifecycle_state = 'accepted'
@@ -1702,7 +1703,7 @@ export class SqliteSessionMetadataStore {
       const rows = this.db
         .prepare(
           `
-          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+          SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
             submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND lifecycle_state IN ('accepted', 'handed_off')
@@ -1763,7 +1764,7 @@ export class SqliteSessionMetadataStore {
         const admissionRow = this.db
           .prepare(
             `
-            SELECT turn_id, run_id, message_id, content_json, model_content_json,
+            SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
               submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
             FROM message_admissions
             WHERE session_id = ? AND message_id = ?
@@ -1838,7 +1839,7 @@ export class SqliteSessionMetadataStore {
       const currentRow = this.db
         .prepare(
           `
-          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+          SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
             submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND message_id = ?
@@ -1862,13 +1863,13 @@ export class SqliteSessionMetadataStore {
         .prepare(
           `
           UPDATE message_admissions
-          SET content_json = ?, model_content_json = ?, placement = ?, disposition = ?
+          SET content_json = ?, submitted_content_digest = ?, placement = ?, disposition = ?
           WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
         `,
         )
         .run(
           JSON.stringify(stored.content),
-          JSON.stringify(stored.modelContent),
+          stored.submittedContentDigest,
           stored.placement,
           stored.disposition,
           stored.sessionId,
