@@ -1820,8 +1820,8 @@ export class SqliteSessionMetadataStore {
         }
         if (message.turnId === input.turnId) continue;
         if (
-          input.previousRootTurnId === null ||
-          message.turnId !== input.previousRootTurnId
+          message.turnId !== admission.admission.turnId &&
+          (input.previousRootTurnId === null || message.turnId !== input.previousRootTurnId)
         ) {
           throw new SessionMetadataConflictError('Message admission transcript Turn conflict');
         }
