@@ -59,7 +59,6 @@ describe('RuntimeKernel Interaction close cleanup', () => {
     await kernel.materializeRootSourceMessages({
       sessionId: SESSION_ID,
       turnId: 'prepared-turn',
-      previousRootTurnId: null,
       messages: [
         {
           messageId: 'submitted-message',

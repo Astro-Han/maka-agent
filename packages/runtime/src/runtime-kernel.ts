@@ -191,7 +191,6 @@ export interface RuntimeKernelLike {
   materializeRootSourceMessages?(input: {
     sessionId: string;
     turnId: string;
-    previousRootTurnId: string | null;
     messages: readonly {
       messageId: string;
       content: MessageContent;
@@ -2414,7 +2413,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
   async materializeRootSourceMessages(input: {
     sessionId: string;
     turnId: string;
-    previousRootTurnId: string | null;
     messages: readonly {
       messageId: string;
       content: MessageContent;
@@ -2434,9 +2432,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
             (message.submittedContentDigest === undefined ||
               messageContentDigest(normalizeMessageContent(existing)) !==
                 message.submittedContentDigest)) ||
-          (existing.turnId !== input.turnId &&
-            ((message.disposition !== 'steering' && message.disposition !== 'followup') ||
-              existing.turnId !== input.previousRootTurnId))
+          existing.turnId !== input.turnId
         ) {
           throw new Error(`Queued root source ${message.messageId} conflicts with its transcript`);
         }

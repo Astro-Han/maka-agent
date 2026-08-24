@@ -4823,7 +4823,6 @@ export class SessionManager {
   materializeRootSourceMessages(input: {
     sessionId: string;
     turnId: string;
-    previousRootTurnId: string | null;
     messages: readonly {
       messageId: string;
       content: import('@maka/core/events').MessageContent;
