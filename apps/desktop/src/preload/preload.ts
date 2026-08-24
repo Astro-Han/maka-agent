@@ -1793,18 +1793,23 @@ const makaBridge = {
       let unsubscribeObservationSeed = () => {};
       const observeDispatch = runtimeHostSessionRef(sessionId).then((session) => {
         if (disposed) return { completion: Promise.resolve() };
+        const profileId = runtimeHostMetadata.get(session.scope.hostId)?.profileId;
+        if (!profileId) throw new Error('The Runtime Host profile for this task is unavailable');
         // Keep the renderer listener across Host target epochs. The observer
-        // registry restores this observer on the replacement target, while
-        // the dynamic subscription accepts the replacement scope.
+        // registry restores this observer on the replacement target. Profile
+        // identity admits that replacement without accepting another Host's
+        // same-named Session channel.
         unsubscribeEvents = subscribeEveryRuntimeHostEvent(
           `sessions:event:${session.sessionId}`,
           (scope, event: SessionEvent) => {
+            if (runtimeHostMetadata.get(scope.hostId)?.profileId !== profileId) return;
             handler(projectDesktopSessionEvent(scope, event));
           },
         );
         unsubscribeObservationSeed = subscribeEveryRuntimeHostEvent(
           'sessions:observation-seed',
-          (_scope, payload: { sessionId?: string; phase?: string }) => {
+          (scope, payload: { sessionId?: string; phase?: string }) => {
+            if (runtimeHostMetadata.get(scope.hostId)?.profileId !== profileId) return;
             if (payload.sessionId !== session.sessionId) return;
             if (payload.phase === 'pending' || payload.phase === 'ready') {
               onObservationSeed?.(payload.phase);
