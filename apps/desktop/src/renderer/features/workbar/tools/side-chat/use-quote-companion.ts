@@ -67,7 +67,7 @@ type PendingAdmission = {
   restoreTurnId: string | null;
   restoreLiveTurn: LiveTurnProjection | undefined;
   cancelled: boolean;
-  stopPromise?: Promise<void>;
+  stopPromise?: Promise<'confirmed' | 'unknown'>;
 };
 
 function admissionEventForMessage(
@@ -706,19 +706,26 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       setTurnInFlight(false);
     }
     if (admission) {
-      const stopPromise = sideChat.stop(id).catch(() => {
-        if (pendingAdmissionRef.current === admission) {
-          admission.cancelled = false;
-          admission.stopPromise = undefined;
-          activeTurnIdRef.current = admission.restoreTurnId;
-          setLiveTurn(admission.restoreLiveTurn);
-          setTurnInFlight(true);
-        }
-        stopRequestedRef.current = false;
-      });
+      const stopPromise = sideChat.stop(id).then(
+        () => 'confirmed' as const,
+        () => {
+          // A rejected Stop tells us nothing about whether the Host stopped
+          // the Turn. Keep the admission alive so a late Host outcome can
+          // still bind its own Turn; the user can retry Stop after this.
+          if (pendingAdmissionRef.current === admission) {
+            admission.cancelled = false;
+            admission.stopPromise = undefined;
+            activeTurnIdRef.current = admission.restoreTurnId;
+            setLiveTurn(admission.restoreLiveTurn);
+            setTurnInFlight(true);
+          }
+          stopRequestedRef.current = false;
+          return 'unknown' as const;
+        },
+      );
       admission.stopPromise = stopPromise;
-      await stopPromise;
-      if (pendingAdmissionRef.current === admission) {
+      const outcome = await stopPromise;
+      if (outcome === 'confirmed' && pendingAdmissionRef.current === admission) {
         abandonAdmission(id, admission);
       }
       return;

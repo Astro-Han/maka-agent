@@ -461,6 +461,54 @@ test('clears a queued Side Conversation send when Host stop cancels the admissio
   assert.equal(container.firstElementChild?.getAttribute('data-live-turn-id'), '');
 });
 
+test('keeps a Side Conversation admission when Host stop outcome is unknown', async () => {
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  let stop: (() => Promise<void>) | undefined;
+  const pendingSend = deferred<{ ok: true; turnId: string }>();
+  const { container } = await renderProbe(
+    {
+      subscribeEvents: (_sessionId, _handler, onSeeded) => {
+        onSeeded?.();
+        return () => undefined;
+      },
+      send: async () => pendingSend.promise,
+      stop: async () => {
+        throw new Error('Host stop result is unknown');
+      },
+    },
+    {
+      ownership: true,
+      onSend: (value) => (send = value),
+      onStop: (value) => (stop = value),
+    },
+  );
+  assert.ok(send);
+  assert.ok(stop);
+
+  let sendResult: Promise<boolean> | undefined;
+  await act(async () => {
+    sendResult = send?.('keep this admission');
+    await Promise.resolve();
+  });
+  let stopResult: Promise<void> | undefined;
+  await act(async () => {
+    stopResult = stop?.();
+    await stopResult;
+    await Promise.resolve();
+  });
+
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+  await act(async () => {
+    pendingSend.resolve({ ok: true, turnId: 'admitted-after-unknown-stop' });
+    assert.equal(await sendResult, true);
+    await Promise.resolve();
+  });
+  assert.equal(
+    container.firstElementChild?.getAttribute('data-live-turn-id'),
+    'admitted-after-unknown-stop',
+  );
+});
+
 test('releases a queued Side Conversation admission from the Host queue retract', async () => {
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let send: ((text: string) => Promise<boolean>) | undefined;
