@@ -129,11 +129,7 @@ export function mapSessionEventToRuntimeEvent(
   ctx: RuntimeEventMapContext,
   memory: SessionEventMapMemory = createSessionEventMapMemory(),
 ): RuntimeEvent {
-  if (
-    event.type === 'queue_update' ||
-    event.type === 'message_admitted' ||
-    event.type === 'message_retracted'
-  ) {
+  if (event.type === 'queue_update' || event.type === 'message_admission') {
     // These are Host/kernel projection facts, not backend events. The live
     // ingress drops them, so reaching this line bypassed that authority boundary.
     throw new Error(`${event.type} is not a backend event`);
@@ -148,8 +144,7 @@ export function mapSessionEventToRuntimeEvent(
 export function isLiveBackendSessionEvent(event: SessionEvent): event is BackendSessionEvent {
   return (
     event.type !== 'queue_update' &&
-    event.type !== 'message_admitted' &&
-    event.type !== 'message_retracted' &&
+    event.type !== 'message_admission' &&
     !isLegacyPermissionSessionEvent(event)
   );
 }

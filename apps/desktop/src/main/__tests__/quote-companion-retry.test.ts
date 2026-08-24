@@ -94,7 +94,7 @@ function messageAdmittedEvent(
   ts: number,
   messageId: string,
 ): SessionEvent {
-  return { type: 'message_admitted', id, messageId, turnId, ts };
+  return { type: 'message_admission', id, messageId, turnId, ts, outcome: 'admitted' };
 }
 
 function recoverableErrorEvent(id: string, turnId: string, ts: number): SessionEvent {
@@ -656,11 +656,12 @@ test('releases a queued Side Conversation admission from the Host queue retract'
 
   await act(async () => {
     eventHandler?.({
-      type: 'message_retracted',
+      type: 'message_admission',
       id: 'retracted-admission',
       turnId: 'old-turn',
       ts: 1,
       messageId: 'retracted-message',
+      outcome: 'retracted',
     });
     await Promise.resolve();
   });

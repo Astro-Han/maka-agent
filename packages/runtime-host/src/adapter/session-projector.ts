@@ -452,11 +452,12 @@ function projectMessageAdmissionEvents(
   ts: number,
 ): SessionEvent[] {
   return (messageIds ?? []).map((messageId) => ({
-    type: 'message_admitted' as const,
+    type: 'message_admission' as const,
     id: `host-admission:${root.runId}:${messageId}`,
     turnId: root.turnId,
     ts,
     messageId,
+    outcome: 'admitted' as const,
   }));
 }
 
@@ -497,11 +498,12 @@ function projectMessageRetractionEvents(
         !admitted.has(entry.messageId),
     )
     .map((entry) => ({
-      type: 'message_retracted' as const,
+      type: 'message_admission' as const,
       id: `host-retraction:${next.queue.hostEpoch}:${next.queue.queueRevision}:${entry.messageId}`,
       turnId: root.turnId,
       ts,
       messageId: entry.messageId,
+      outcome: 'retracted' as const,
     }));
 }
 

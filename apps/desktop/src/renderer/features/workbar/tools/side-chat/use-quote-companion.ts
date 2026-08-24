@@ -81,7 +81,9 @@ function admissionOutcomeForMessage(
 ): AdmissionOutcome | undefined {
   const admitted = events.find(
     (event) =>
-      ((event.type === 'steering_message' || event.type === 'message_admitted') &&
+      (event.type === 'steering_message' && event.messageId === messageId) ||
+      (event.type === 'message_admission' &&
+        event.outcome === 'admitted' &&
         event.messageId === messageId) ||
       (event.type === 'queue_update' &&
         event.steeringEntries?.some(
@@ -90,7 +92,10 @@ function admissionOutcomeForMessage(
   );
   if (admitted) return { kind: 'admitted', event: admitted };
   const retracted = events.some(
-    (event) => event.type === 'message_retracted' && event.messageId === messageId,
+    (event) =>
+      event.type === 'message_admission' &&
+      event.outcome === 'retracted' &&
+      event.messageId === messageId,
   );
   return retracted ? { kind: 'retracted' } : undefined;
 }

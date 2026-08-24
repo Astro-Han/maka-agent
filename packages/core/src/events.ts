@@ -505,8 +505,7 @@ export type SessionEvent =
   | PlanSubmittedEvent
   | TokenUsageEvent
   | SteeringMessageEvent
-  | MessageAdmittedEvent
-  | MessageRetractedEvent
+  | MessageAdmissionEvent
   | QueueUpdateEvent
   | ProviderRetryEvent
   | ErrorEvent
@@ -1091,15 +1090,10 @@ export interface SteeringMessageEvent extends BaseEvent {
  * event ledger, so a client can bind a queued admission without guessing from
  * timing or Turn ids returned by a stale command response.
  */
-export interface MessageAdmittedEvent extends BaseEvent {
-  type: 'message_admitted';
+export interface MessageAdmissionEvent extends BaseEvent {
+  type: 'message_admission';
   messageId: string;
-}
-
-/** Transient Host fact that a queued admission was explicitly removed. */
-export interface MessageRetractedEvent extends BaseEvent {
-  type: 'message_retracted';
-  messageId: string;
+  outcome: 'admitted' | 'retracted';
 }
 
 /**

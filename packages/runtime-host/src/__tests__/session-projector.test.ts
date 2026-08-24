@@ -19,6 +19,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { SessionEvent } from '@maka/core/events';
 import type { StoredMessage } from '@maka/core/session';
 import {
   createRuntimeHostSessionProjectionSeed,
@@ -81,7 +82,10 @@ test('emits the Host admission fact when a queued message enters a successor Tur
   assert.deepEqual(
     rejoined
       .seedActive(false)
-      .filter((event) => event.type === 'message_admitted')
+      .filter(
+        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
+          event.type === 'message_admission' && event.outcome === 'admitted',
+      )
       .map((event) => ({
         turnId: event.turnId,
         messageId: event.messageId,
@@ -139,14 +143,17 @@ test('emits the Host admission fact when a queued message enters a successor Tur
 
   assert.deepEqual(
     events
-      .filter((event) => event.type === 'message_admitted' || event.type === 'queue_update')
+      .filter((event) => event.type === 'message_admission' || event.type === 'queue_update')
       .map((event) => event.type),
-    ['message_admitted', 'queue_update'],
+    ['message_admission', 'queue_update'],
   );
 
   assert.deepEqual(
     events
-      .filter((event) => event.type === 'message_admitted')
+      .filter(
+        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
+          event.type === 'message_admission' && event.outcome === 'admitted',
+      )
       .map((event) => ({
         turnId: event.turnId,
         messageId: event.messageId,
@@ -169,7 +176,12 @@ test('emits the Host admission fact when a queued message enters a successor Tur
     }),
   }).events;
   assert.deepEqual(
-    retracted.filter((event) => event.type === 'message_retracted').map((event) => event.messageId),
+    retracted
+      .filter(
+        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
+          event.type === 'message_admission' && event.outcome === 'retracted',
+      )
+      .map((event) => event.messageId),
     ['ticket-1'],
   );
 });
