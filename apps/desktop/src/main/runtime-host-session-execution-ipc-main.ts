@@ -350,6 +350,13 @@ export function registerRuntimeHostSessionExecutionIpc(
           placement: "current_turn",
         });
         if (!submitted) {
+          if (command.intent !== 'side_conversation') {
+            throw new RuntimeHostOperationError(
+              'turn.message.submit',
+              'outcome_unknown',
+              'Message disposition cannot be proven in this Host Epoch',
+            );
+          }
           return {
             ok: false as const,
             reason: 'outcome_unknown' as const,

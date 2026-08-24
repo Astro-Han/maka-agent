@@ -119,7 +119,8 @@ export function createDesktopWorkbarServices(
         bridge.sessions.cleanupSessionCopy(sessionId),
       abandonSessionCopy: (sourceSessionId, copyId) =>
         bridge.sessions.abandonSessionCopy(sourceSessionId, copyId),
-      send: (sessionId, command) => bridge.sessions.send(sessionId, command),
+      send: (sessionId, command) =>
+        bridge.sessions.send(sessionId, { ...command, intent: 'side_conversation' }),
       stop: (sessionId, admissionId) =>
         bridge.sessions.stop(
           sessionId,

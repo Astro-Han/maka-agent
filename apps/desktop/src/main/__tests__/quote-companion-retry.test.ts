@@ -338,6 +338,7 @@ test('keeps Side Conversation events owned by the Host-admitted turn across an a
 test('binds a busy-raced Side Conversation send through its Host-admitted message identity', async () => {
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let send: ((text: string) => Promise<boolean>) | undefined;
+  let admissionId: string | undefined;
   const pendingSend = deferred<{
     ok: true;
     steered: true;
@@ -351,7 +352,10 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
         onSeeded?.();
         return () => undefined;
       },
-      send: async () => pendingSend.promise,
+      send: async (_sessionId, command) => {
+        admissionId = command.turnId;
+        return pendingSend.promise;
+      },
     },
     { ownership: true, onSend: (value) => (send = value) },
   );
@@ -369,7 +373,7 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
       queueUpdateEvent('accepted-queue', 'host-active-turn', 2, [
         {
           entryId: 'accepted-entry',
-          messageId: 'accepted-message',
+          messageId: admissionId as string,
           content: { text: 'steer the active turn' },
           placement: 'current_turn',
           state: 'queued',
@@ -389,7 +393,7 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
       ok: true,
       steered: true,
       turnId: 'requested-turn-is-not-the-owner',
-      messageId: 'accepted-message',
+      messageId: admissionId as string,
     });
     assert.equal(await sendResult, true);
     await Promise.resolve();
@@ -400,7 +404,12 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
   );
   await act(async () => {
     eventHandler?.(
-      steeringMessageEvent('accepted-steering-message', 'host-active-turn', 2.5, 'accepted-message'),
+      steeringMessageEvent(
+        'accepted-steering-message',
+        'host-active-turn',
+        2.5,
+        admissionId as string,
+      ),
     );
     eventHandler?.(textDeltaEvent('accepted-text', 'host-active-turn', 3, 'answer after steering'));
     await Promise.resolve();
@@ -579,6 +588,38 @@ test('keeps a Side Conversation admission when Host stop outcome is unknown', as
     container.firstElementChild?.getAttribute('data-live-turn-id'),
     'admitted-after-unknown-stop',
   );
+});
+
+test('stops a bound Side Conversation by its exact Host Turn identity', async () => {
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  let stop: (() => Promise<void>) | undefined;
+  let stoppedAdmissionId: string | undefined;
+  await renderProbe(
+    {
+      subscribeEvents: (_sessionId, _handler, onSeeded) => {
+        onSeeded?.();
+        return () => undefined;
+      },
+      send: async () => ({ ok: true as const, turnId: 'host-turn-1' }),
+      stop: async (_sessionId, admissionId) => {
+        stoppedAdmissionId = admissionId;
+      },
+    },
+    {
+      ownership: true,
+      onSend: (value) => (send = value),
+      onStop: (value) => (stop = value),
+    },
+  );
+  await act(async () => {
+    assert.equal(await send?.('start this exact turn'), true);
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await stop?.();
+    await Promise.resolve();
+  });
+  assert.equal(stoppedAdmissionId, 'host-turn-1');
 });
 
 test('releases a queued Side Conversation admission from the Host queue retract', async () => {

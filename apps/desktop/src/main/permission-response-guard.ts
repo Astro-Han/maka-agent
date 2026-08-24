@@ -52,6 +52,7 @@ export type RuntimeHostReviseBeforeTurnInput = ReviseBeforeTurnInput & { copyId:
 
 interface NormalizedSendSessionCommand {
   type: 'send';
+  intent?: 'side_conversation';
   turnId?: string;
   text: string;
   displayText?: string;
@@ -178,6 +179,7 @@ export function normalizeSessionSendCommand(input: unknown): NormalizedSendSessi
   }
   return {
     type: 'send',
+    ...(value.intent === 'side_conversation' ? { intent: 'side_conversation' as const } : {}),
     ...normalizeOptionalSendTurnId(value.turnId),
     text,
     ...(displayText !== undefined ? { displayText } : {}),

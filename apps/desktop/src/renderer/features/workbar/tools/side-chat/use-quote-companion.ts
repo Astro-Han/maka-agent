@@ -62,8 +62,7 @@ import {
 import type { CompanionForkVisibilityEvent } from './quote-companion-visibility.js';
 
 type PendingAdmission = {
-  admissionId: string;
-  messageId?: string;
+  messageId: string;
   events: SessionEvent[];
   restoreTurnId: string | null;
   restoreLiveTurn: LiveTurnProjection | undefined;
@@ -74,13 +73,12 @@ type PendingAdmission = {
 
 type AdmissionOutcome =
   | { kind: 'admitted'; event: SessionEvent }
-  | { kind: 'retracted' }
-  | { kind: 'pending' };
+  | { kind: 'retracted' };
 
 function admissionOutcomeForMessage(
   events: readonly SessionEvent[],
   messageId: string,
-): AdmissionOutcome {
+): AdmissionOutcome | undefined {
   const admitted = events.find(
     (event) =>
       ((event.type === 'steering_message' || event.type === 'message_admitted') &&
@@ -94,7 +92,7 @@ function admissionOutcomeForMessage(
   const retracted = events.some(
     (event) => event.type === 'message_retracted' && event.messageId === messageId,
   );
-  return retracted ? { kind: 'retracted' } : { kind: 'pending' };
+  return retracted ? { kind: 'retracted' } : undefined;
 }
 
 export interface UseQuoteCompanionInput {
@@ -377,13 +375,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         }
         if (admission) {
           admission.events.push(event);
-          if (admission.messageId) {
-            const outcome = admissionOutcomeForMessage(admission.events, admission.messageId);
-            if (outcome.kind === 'admitted' && !admission.cancelled) {
-              bindAdmittedTurn(forkId, outcome.event.turnId, { preserveLiveTurn: true });
-            } else if (outcome.kind === 'retracted') {
-              abandonAdmission(forkId, admission);
-            }
+          const outcome = admissionOutcomeForMessage(admission.events, admission.messageId);
+          if (outcome?.kind === 'admitted' && !admission.cancelled) {
+            bindAdmittedTurn(forkId, outcome.event.turnId, { preserveLiveTurn: true });
+          } else if (outcome?.kind === 'retracted') {
+            abandonAdmission(forkId, admission);
           }
           return;
         }
@@ -609,7 +605,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           const restoreTurnId = activeTurnIdRef.current;
           const restoreLiveTurn = liveTurnRef.current;
           const admission: PendingAdmission = {
-            admissionId: turnId,
+            messageId: turnId,
             events: [],
             restoreTurnId,
             restoreLiveTurn,
@@ -643,20 +639,18 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         if (admission) {
           if (result.status === 'pending') {
             admission.consumeOnAdmission = () => onQuotesConsumed(quoteSnapshot);
-            admission.messageId = result.messageId;
             const outcome = admissionOutcomeForMessage(admission.events, result.messageId);
-            if (outcome.kind === 'admitted' && !admission.cancelled) {
+            if (outcome?.kind === 'admitted' && !admission.cancelled) {
               bindAdmittedTurn(result.forkId, outcome.event.turnId);
-            } else if (outcome.kind === 'retracted') {
+            } else if (outcome?.kind === 'retracted') {
               abandonAdmission(result.forkId, admission);
               return false;
             }
           } else if (result.steered) {
-            admission.messageId = result.messageId;
             const outcome = admissionOutcomeForMessage(admission.events, result.messageId);
-            if (outcome.kind === 'admitted' && !admission.cancelled) {
+            if (outcome?.kind === 'admitted' && !admission.cancelled) {
               bindAdmittedTurn(result.forkId, outcome.event.turnId);
-            } else if (outcome.kind === 'retracted') {
+            } else if (outcome?.kind === 'retracted') {
               abandonAdmission(result.forkId, admission);
             }
           } else {
@@ -730,7 +724,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       setTurnInFlight(false);
     }
     if (admission) {
-      const stopPromise = sideChat.stop(id, admission.admissionId).then(
+      const stopPromise = sideChat.stop(id, admission.messageId).then(
         () => 'confirmed' as const,
         () => {
           // A rejected Stop tells us nothing about whether the Host stopped
@@ -755,7 +749,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       return;
     }
     try {
-      await sideChat.stop(id);
+      await sideChat.stop(id, activeTurnIdRef.current ?? undefined);
     } catch {
       stopRequestedRef.current = false;
       // best-effort; the terminal event still reconciles state
@@ -776,7 +770,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     }
     const admissionId = crypto.randomUUID();
     const admission: PendingAdmission = {
-      admissionId,
+      messageId: admissionId,
       events: [],
       restoreTurnId: activeTurnIdRef.current,
       restoreLiveTurn: liveTurnRef.current,
@@ -798,11 +792,10 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       if (outcome.kind === 'started') {
         bindAdmittedTurn(id, outcome.turnId, { preserveLiveTurn: true });
       } else {
-        admission.messageId = outcome.messageId;
         const resolution = admissionOutcomeForMessage(admission.events, outcome.messageId);
-        if (resolution.kind === 'admitted' && !admission.cancelled) {
+        if (resolution?.kind === 'admitted' && !admission.cancelled) {
           bindAdmittedTurn(id, resolution.event.turnId, { preserveLiveTurn: true });
-        } else if (resolution.kind === 'retracted') {
+        } else if (resolution?.kind === 'retracted') {
           abandonAdmission(id, admission);
           return false;
         }
