@@ -254,6 +254,7 @@ export interface SideChatSessionPort {
     sessionId: string,
     handler: (event: SessionEvent) => void,
     onSeeded?: () => void,
+    onSeedError?: (error: unknown) => void,
   ): WorkbarUnsubscribe;
   subscribeSessionChanges(handler: (event: SessionChangedEvent) => void): WorkbarUnsubscribe;
 }

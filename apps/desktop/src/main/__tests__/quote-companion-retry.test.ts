@@ -53,6 +53,114 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+type QueueUpdate = Extract<SessionEvent, { type: 'queue_update' }>;
+type QueueEntry = NonNullable<QueueUpdate['steeringEntries']>[number];
+
+function completeEvent(id: string, turnId: string, ts: number): SessionEvent {
+  return { type: 'complete', id, turnId, ts, stopReason: 'end_turn' };
+}
+
+function textDeltaEvent(id: string, turnId: string, ts: number, text: string): SessionEvent {
+  return { type: 'text_delta', id, messageId: 'assistant-message', turnId, ts, text };
+}
+
+function queueUpdateEvent(
+  id: string,
+  turnId: string,
+  ts: number,
+  steeringEntries: readonly QueueEntry[] = [],
+  followupEntries: readonly QueueEntry[] = [],
+): QueueUpdate {
+  return {
+    type: 'queue_update',
+    id,
+    turnId,
+    ts,
+    queueRevision: 1,
+    steering: steeringEntries.map((entry) => entry.content.text),
+    followup: followupEntries.map((entry) => entry.content.text),
+    steeringEntries: [...steeringEntries],
+    followupEntries: [...followupEntries],
+  };
+}
+
+function steeringMessageEvent(id: string, turnId: string, ts: number, messageId: string): SessionEvent {
+  return { type: 'steering_message', id, messageId, turnId, ts, content: { text: 'steer the active turn' } };
+}
+
+function recoverableErrorEvent(id: string, turnId: string, ts: number): SessionEvent {
+  return {
+    type: 'error',
+    id,
+    turnId,
+    ts,
+    recoverable: true,
+    reason: 'connection_closed',
+    message: 'connection closed',
+  };
+}
+
+function installDom() {
+  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
+  const { document, window } = parsed;
+  Object.assign(globalThis, {
+    document,
+    window,
+    HTMLElement: window.HTMLElement,
+    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
+    Event: window.Event,
+    Node: window.Node,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const container = document.querySelector('#root');
+  assert.ok(container);
+  return container;
+}
+
+async function renderProbe(
+  sideChat: Partial<WorkbarServices['sideChat']>,
+  options: {
+    ownership?: boolean;
+    sourceSession?: SessionSummary;
+    ready?: (container: Element) => boolean;
+    onSend?: (send: (text: string) => Promise<boolean>) => void;
+    onSteer?: (steer: (text: string) => Promise<boolean>) => void;
+    onStop?: (stop: () => Promise<void>) => void;
+  } = {},
+) {
+  const container = installDom();
+  const defaults = createFakeWorkbarServices();
+  const services: WorkbarServices = {
+    ...defaults,
+    sideChat: {
+      ...defaults.sideChat,
+      listTurns: async () => [settledTurn('source-turn')],
+      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+      ...sideChat,
+    },
+  };
+  const root = createRoot(container);
+  mountedRoot = root;
+  const children = options.ownership
+    ? createElement(QuoteCompanionOwnershipProbe, {
+        onSend: options.onSend ?? (() => undefined),
+        onSteer: options.onSteer,
+        onStop: options.onStop,
+      })
+    : createElement(QuoteCompanionProbe, { sourceSession: options.sourceSession });
+
+  await act(async () => {
+    root.render(createElement(WorkbarServicesProvider, { services, children }));
+    await Promise.resolve();
+  });
+  await waitUntil(
+    () =>
+      options.ready?.(container) ??
+      container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation',
+  );
+  return { container, root, services };
+}
+
 afterEach(async () => {
   if (mountedRoot) {
     await act(async () => {
@@ -65,27 +173,12 @@ afterEach(async () => {
 });
 
 test('retries a busy Side Conversation at the newest settled boundary and clears its banner', async () => {
-  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
-  const { document, window } = parsed;
-  Object.assign(globalThis, {
-    document,
-    window,
-    HTMLElement: window.HTMLElement,
-    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
-    Event: window.Event,
-    Node: window.Node,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-
   let listCount = 0;
   let sessionChange: ((event: SessionChangedEvent) => void) | undefined;
   let releaseRetry: (() => void) | undefined;
   const branchInputs: Array<{ sourceTurnId: string; copyId: string }> = [];
-  const defaults = createFakeWorkbarServices();
-  const services: WorkbarServices = {
-    ...defaults,
-    sideChat: {
-      ...defaults.sideChat,
+  const { container } = await renderProbe(
+    {
       listTurns: async () => {
         listCount += 1;
         return listCount === 1
@@ -109,22 +202,8 @@ test('retries a busy Side Conversation at the newest settled boundary and clears
         };
       },
     },
-  };
-  const container = document.querySelector('#root');
-  assert.ok(container);
-  const root = createRoot(container);
-  mountedRoot = root;
-
-  await act(async () => {
-    root.render(
-      createElement(WorkbarServicesProvider, {
-        services,
-        children: createElement(QuoteCompanionProbe),
-      }),
-    );
-    await Promise.resolve();
-  });
-  await waitUntil(() => branchInputs.length === 1 && sessionChange !== undefined);
+    { ready: () => branchInputs.length === 1 && sessionChange !== undefined },
+  );
   assert.match(container.textContent, /main conversation or a linked task is still running/i);
   const probe = container.firstElementChild;
   assert.ok(probe);
@@ -161,24 +240,9 @@ test('retries a busy Side Conversation at the newest settled boundary and clears
 });
 
 test('does not restart foreground setup when the source Session object refreshes', async () => {
-  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
-  const { document, window } = parsed;
-  Object.assign(globalThis, {
-    document,
-    window,
-    HTMLElement: window.HTMLElement,
-    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
-    Event: window.Event,
-    Node: window.Node,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-
   let branchCount = 0;
-  const defaults = createFakeWorkbarServices();
-  const services: WorkbarServices = {
-    ...defaults,
-    sideChat: {
-      ...defaults.sideChat,
+  const { container, root, services } = await renderProbe(
+    {
       listTurns: async () => [settledTurn('settled-turn')],
       branchFromTurn: async () => {
         branchCount += 1;
@@ -188,24 +252,8 @@ test('does not restart foreground setup when the source Session object refreshes
         return await new Promise<never>(() => undefined);
       },
     },
-  };
-  const container = document.querySelector('#root');
-  assert.ok(container);
-  const root = createRoot(container);
-  mountedRoot = root;
-
-  const render = (sourceSession: SessionSummary) =>
-    root.render(
-      createElement(WorkbarServicesProvider, {
-        services,
-        children: createElement(QuoteCompanionProbe, { sourceSession }),
-      }),
-    );
-
-  await act(async () => {
-    render(session('source-session'));
-    await Promise.resolve();
-  });
+    { sourceSession: session('source-session'), ready: () => branchCount === 1 },
+  );
   const probe = container.firstElementChild;
   assert.ok(probe);
   await waitUntil(
@@ -213,7 +261,14 @@ test('does not restart foreground setup when the source Session object refreshes
   );
 
   await act(async () => {
-    render(session('source-session'));
+    root.render(
+      createElement(WorkbarServicesProvider, {
+        services,
+        children: createElement(QuoteCompanionProbe, {
+          sourceSession: session('source-session'),
+        }),
+      }),
+    );
     await Promise.resolve();
   });
 
@@ -222,28 +277,11 @@ test('does not restart foreground setup when the source Session object refreshes
 });
 
 test('keeps Side Conversation events owned by the Host-admitted turn across an admission race', async () => {
-  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
-  const { document, window } = parsed;
-  Object.assign(globalThis, {
-    document,
-    window,
-    HTMLElement: window.HTMLElement,
-    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
-    Event: window.Event,
-    Node: window.Node,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let send: ((text: string) => Promise<boolean>) | undefined;
   const pendingSend = deferred<{ ok: true; turnId: string }>();
-  const defaults = createFakeWorkbarServices();
-  const services: WorkbarServices = {
-    ...defaults,
-    sideChat: {
-      ...defaults.sideChat,
-      listTurns: async () => [settledTurn('source-turn')],
-      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+  const { container } = await renderProbe(
+    {
       subscribeEvents: (_sessionId, handler, onSeeded) => {
         eventHandler = handler;
         onSeeded?.();
@@ -251,26 +289,8 @@ test('keeps Side Conversation events owned by the Host-admitted turn across an a
       },
       send: async () => pendingSend.promise,
     },
-  };
-  const container = document.querySelector('#root');
-  assert.ok(container);
-  const root = createRoot(container);
-  mountedRoot = root;
-
-  await act(async () => {
-    root.render(
-      createElement(WorkbarServicesProvider, {
-        services,
-        children: createElement(QuoteCompanionOwnershipProbe, {
-          onSend: (value) => {
-            send = value;
-          },
-        }),
-      }),
-    );
-    await Promise.resolve();
-  });
-  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+    { ownership: true, onSend: (value) => (send = value) },
+  );
   assert.ok(send);
   assert.ok(eventHandler);
 
@@ -281,26 +301,13 @@ test('keeps Side Conversation events owned by the Host-admitted turn across an a
   });
 
   await act(async () => {
-    eventHandler?.({
-      type: 'complete',
-      id: 'late-old-terminal',
-      turnId: 'old-turn',
-      ts: 1,
-      stopReason: 'end_turn',
-    });
+    eventHandler?.(completeEvent('late-old-terminal', 'old-turn', 1));
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
 
   await act(async () => {
-    eventHandler?.({
-      type: 'text_delta',
-      id: 'new-text-before-response',
-      messageId: 'assistant-message',
-      turnId: 'host-admitted-turn',
-      ts: 2,
-      text: 'answer',
-    });
+    eventHandler?.(textDeltaEvent('new-text-before-response', 'host-admitted-turn', 2, 'answer'));
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
@@ -320,28 +327,11 @@ test('keeps Side Conversation events owned by the Host-admitted turn across an a
 });
 
 test('binds a busy-raced Side Conversation send through its Host-admitted message identity', async () => {
-  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
-  const { document, window } = parsed;
-  Object.assign(globalThis, {
-    document,
-    window,
-    HTMLElement: window.HTMLElement,
-    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
-    Event: window.Event,
-    Node: window.Node,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let send: ((text: string) => Promise<boolean>) | undefined;
   const pendingSend = deferred<{ ok: true; steered: true; turnId: string; messageId: string }>();
-  const defaults = createFakeWorkbarServices();
-  const services: WorkbarServices = {
-    ...defaults,
-    sideChat: {
-      ...defaults.sideChat,
-      listTurns: async () => [settledTurn('source-turn')],
-      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+  const { container } = await renderProbe(
+    {
       subscribeEvents: (_sessionId, handler, onSeeded) => {
         eventHandler = handler;
         onSeeded?.();
@@ -349,26 +339,8 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
       },
       send: async () => pendingSend.promise,
     },
-  };
-  const container = document.querySelector('#root');
-  assert.ok(container);
-  const root = createRoot(container);
-  mountedRoot = root;
-
-  await act(async () => {
-    root.render(
-      createElement(WorkbarServicesProvider, {
-        services,
-        children: createElement(QuoteCompanionOwnershipProbe, {
-          onSend: (value) => {
-            send = value;
-          },
-        }),
-      }),
-    );
-    await Promise.resolve();
-  });
-  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+    { ownership: true, onSend: (value) => (send = value) },
+  );
   assert.ok(send);
   assert.ok(eventHandler);
 
@@ -378,22 +350,9 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
     await Promise.resolve();
   });
   await act(async () => {
-    eventHandler?.({
-      type: 'complete',
-      id: 'late-old-terminal',
-      turnId: 'old-turn',
-      ts: 1,
-      stopReason: 'end_turn',
-    });
-    eventHandler?.({
-      type: 'queue_update',
-      id: 'accepted-queue',
-      turnId: 'host-active-turn',
-      ts: 2,
-      queueRevision: 1,
-      steering: ['steer the active turn'],
-      followup: [],
-      steeringEntries: [
+    eventHandler?.(completeEvent('late-old-terminal', 'old-turn', 1));
+    eventHandler?.(
+      queueUpdateEvent('accepted-queue', 'host-active-turn', 2, [
         {
           entryId: 'accepted-entry',
           messageId: 'accepted-message',
@@ -401,9 +360,8 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
           placement: 'current_turn',
           state: 'queued',
         },
-      ],
-      followupEntries: [],
-    });
+      ]),
+    );
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
@@ -427,22 +385,10 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
     'host-active-turn',
   );
   await act(async () => {
-    eventHandler?.({
-      type: 'steering_message',
-      id: 'accepted-steering-message',
-      messageId: 'accepted-message',
-      turnId: 'host-active-turn',
-      ts: 2.5,
-      content: { text: 'steer the active turn' },
-    });
-    eventHandler?.({
-      type: 'text_delta',
-      id: 'accepted-text',
-      messageId: 'assistant-message',
-      turnId: 'host-active-turn',
-      ts: 3,
-      text: 'answer after steering',
-    });
+    eventHandler?.(
+      steeringMessageEvent('accepted-steering-message', 'host-active-turn', 2.5, 'accepted-message'),
+    );
+    eventHandler?.(textDeltaEvent('accepted-text', 'host-active-turn', 3, 'answer after steering'));
     await Promise.resolve();
   });
 
@@ -454,98 +400,298 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
   assert.equal(probe.getAttribute('data-processing'), 'false');
 });
 
-test('waits for Side Conversation observation readiness before sending', async () => {
-  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
-  const { document, window } = parsed;
-  Object.assign(globalThis, {
-    document,
-    window,
-    HTMLElement: window.HTMLElement,
-    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
-    Event: window.Event,
-    Node: window.Node,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-
+test('clears a queued Side Conversation send when Host stop cancels the admission', async () => {
   let send: ((text: string) => Promise<boolean>) | undefined;
-  let sendCalls = 0;
-  let markSeeded: (() => void) | undefined;
-  const defaults = createFakeWorkbarServices();
-  const services: WorkbarServices = {
-    ...defaults,
-    sideChat: {
-      ...defaults.sideChat,
-      listTurns: async () => [settledTurn('source-turn')],
-      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+  let stop: (() => Promise<void>) | undefined;
+  const pendingStop = deferred<void>();
+  const pendingSend = deferred<{
+    ok: true;
+    steered: true;
+    turnId: string;
+    messageId: string;
+  }>();
+  const { container } = await renderProbe(
+    {
       subscribeEvents: (_sessionId, _handler, onSeeded) => {
-        markSeeded = onSeeded;
+        onSeeded?.();
+        return () => undefined;
+      },
+      send: async () => pendingSend.promise,
+      stop: async () => pendingStop.promise,
+    },
+    {
+      ownership: true,
+      onSend: (value) => (send = value),
+      onStop: (value) => (stop = value),
+    },
+  );
+  assert.ok(send);
+  assert.ok(stop);
+
+  let sendResult: Promise<boolean> | undefined;
+  await act(async () => {
+    sendResult = send?.('stop this queued send');
+    await Promise.resolve();
+  });
+  let stopResult: Promise<void> | undefined;
+  await act(async () => {
+    stopResult = stop?.();
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
+
+  await act(async () => {
+    pendingStop.resolve();
+    await stopResult;
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
+
+  await act(async () => {
+    pendingSend.resolve({
+      ok: true,
+      steered: true,
+      turnId: 'old-turn',
+      messageId: 'retracted-message',
+    });
+    assert.equal(await sendResult, false);
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
+  assert.equal(container.firstElementChild?.getAttribute('data-live-turn-id'), '');
+});
+
+test('releases a queued Side Conversation admission from the Host queue retract', async () => {
+  let eventHandler: ((event: SessionEvent) => void) | undefined;
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  const { container } = await renderProbe(
+    {
+      subscribeEvents: (_sessionId, handler, onSeeded) => {
+        eventHandler = handler;
+        onSeeded?.();
+        return () => undefined;
+      },
+      send: async () => ({
+        ok: true as const,
+        steered: true as const,
+        turnId: 'not-the-owner',
+        messageId: 'retracted-message',
+      }),
+    },
+    {
+      ownership: true,
+      onSend: (value) => (send = value),
+    },
+  );
+  assert.ok(send);
+  assert.ok(eventHandler);
+
+  await act(async () => {
+    assert.equal(await send?.('retract this queued send'), true);
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+
+  await act(async () => {
+    eventHandler?.(queueUpdateEvent('retract-queue', 'old-turn', 1));
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
+});
+
+test('fails and re-observes a Side Conversation after a recoverable Host subscription error', async () => {
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  const handlers: Array<(event: SessionEvent) => void> = [];
+  let subscriptionCount = 0;
+  let sendCalls = 0;
+  const pendingSend = deferred<{ ok: true; turnId: string }>();
+  const pendingRetry = deferred<{ ok: true; turnId: string }>();
+  const { container } = await renderProbe(
+    {
+      subscribeEvents: (_sessionId, handler, onSeeded) => {
+        subscriptionCount += 1;
+        handlers.push(handler);
+        onSeeded?.();
         return () => undefined;
       },
       send: async () => {
         sendCalls += 1;
-        return { ok: true as const, turnId: 'seeded-turn' };
+        return sendCalls === 1
+          ? pendingSend.promise
+          : pendingRetry.promise;
       },
     },
-  };
-  const container = document.querySelector('#root');
-  assert.ok(container);
-  const root = createRoot(container);
-  mountedRoot = root;
+    { ownership: true, onSend: (value) => (send = value) },
+  );
+  assert.ok(send);
+  assert.equal(subscriptionCount, 1);
 
+  let failedResult: Promise<boolean> | undefined;
   await act(async () => {
-    root.render(
-      createElement(WorkbarServicesProvider, {
-        services,
-        children: createElement(QuoteCompanionOwnershipProbe, {
-          onSend: (value) => {
-            send = value;
-          },
-        }),
-      }),
-    );
+    failedResult = send?.('fail with a recoverable stream error');
     await Promise.resolve();
   });
-  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+  await waitUntil(() => container.firstElementChild?.getAttribute('data-processing') === 'true');
+  await act(async () => {
+    handlers[0]?.(recoverableErrorEvent('recoverable-subscription-error', 'old-turn', 1));
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
+  assert.notEqual(container.firstElementChild?.getAttribute('data-error'), '');
+
+  let reobserveResult: Promise<boolean> | undefined;
+  await act(async () => {
+    reobserveResult = send?.('re-observe before retrying');
+    assert.equal(await reobserveResult, false);
+    await Promise.resolve();
+  });
+  assert.equal(subscriptionCount, 2);
+
+  let retryResult: Promise<boolean> | undefined;
+  await act(async () => {
+    retryResult = send?.('retry after re-observing');
+    await Promise.resolve();
+  });
+  assert.equal(sendCalls, 2);
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+
+  await act(async () => {
+    pendingSend.resolve({ ok: true, turnId: 'late-turn' });
+    assert.equal(await failedResult, false);
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+
+  await act(async () => {
+    pendingRetry.resolve({ ok: true, turnId: 'retry-after-resubscribe' });
+    assert.equal(await retryResult, true);
+    await Promise.resolve();
+  });
+  await act(async () => {
+    handlers[1]?.(completeEvent('retry-complete', 'retry-after-resubscribe', 2));
+    await Promise.resolve();
+  });
+  await waitUntil(() => container.firstElementChild?.getAttribute('data-processing') === 'false');
+
+  await act(async () => {
+    handlers[1]?.(recoverableErrorEvent('idle-recoverable-error', 'retry-after-resubscribe', 3));
+    await Promise.resolve();
+  });
+  await act(async () => {
+    assert.equal(await send?.('re-observe while idle'), false);
+    await Promise.resolve();
+  });
+  assert.equal(subscriptionCount, 3);
+});
+
+test('cancels a pending Side Conversation steer after Host stop without losing the old Turn', async () => {
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  let steer: ((text: string) => Promise<boolean>) | undefined;
+  let stop: (() => Promise<void>) | undefined;
+  const pendingSteer = deferred<{ kind: 'queued'; messageId: string }>();
+  let stopCalls = 0;
+  const { container } = await renderProbe(
+    {
+      subscribeEvents: (_sessionId, _handler, onSeeded) => {
+        onSeeded?.();
+        return () => undefined;
+      },
+      send: async () => ({ ok: true as const, turnId: 'old-turn' }),
+      steer: async () => pendingSteer.promise,
+      stop: async () => {
+        stopCalls += 1;
+      },
+    },
+    {
+      ownership: true,
+      onSend: (value) => (send = value),
+      onSteer: (value) => (steer = value),
+      onStop: (value) => (stop = value),
+    },
+  );
   assert.ok(send);
 
-  let sendResult: Promise<boolean> | undefined;
   await act(async () => {
-    sendResult = send?.('wait for the observer');
+    assert.equal(await send?.('initial prompt'), true);
     await Promise.resolve();
   });
+  assert.ok(steer);
+  assert.ok(stop);
+
+  let steerResult: Promise<boolean> | undefined;
+  await act(async () => {
+    steerResult = steer?.('cancel this steer');
+    await Promise.resolve();
+  });
+  let stopResult: Promise<void> | undefined;
+  await act(async () => {
+    stopResult = stop?.();
+    await stopResult;
+    await Promise.resolve();
+  });
+  assert.equal(stopCalls, 1);
+  assert.equal(container.firstElementChild?.getAttribute('data-live-turn-id'), 'old-turn');
+
+  await act(async () => {
+    pendingSteer.resolve({ kind: 'queued', messageId: 'cancelled-steer' });
+    assert.equal(await steerResult, false);
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-live-turn-id'), 'old-turn');
+});
+
+test('fails a send when observation seed rejects and resubscribes for retry', async () => {
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  let sendCalls = 0;
+  let subscriptionCount = 0;
+  let rejectSeed: ((error: unknown) => void) | undefined;
+  let markSeeded: (() => void) | undefined;
+  const { container } = await renderProbe(
+    {
+      subscribeEvents: (_sessionId, _handler, onSeeded, onSeedError) => {
+        subscriptionCount += 1;
+        if (subscriptionCount === 1) rejectSeed = onSeedError;
+        else markSeeded = onSeeded;
+        return () => undefined;
+      },
+      send: async () => {
+        sendCalls += 1;
+        return { ok: true as const, turnId: 'retry-turn' };
+      },
+    },
+    { ownership: true, onSend: (value) => (send = value) },
+  );
+  assert.ok(send);
+  assert.ok(rejectSeed);
+
+  let failedResult: Promise<boolean> | undefined;
+  await act(async () => {
+    failedResult = send?.('observer failure');
+    rejectSeed?.(new Error('observer failed'));
+    assert.equal(await failedResult, false);
+  });
   assert.equal(sendCalls, 0);
+  assert.equal(subscriptionCount, 2);
+  assert.ok(markSeeded);
 
   await act(async () => {
     markSeeded?.();
     await Promise.resolve();
   });
-  await waitUntil(() => sendCalls === 1);
-  assert.equal(await sendResult, true);
+  let retryResult: Promise<boolean> | undefined;
+  await act(async () => {
+    retryResult = send?.('retry after observer failure');
+    assert.equal(await retryResult, true);
+  });
+  assert.equal(sendCalls, 1);
 });
 
 test('releases a send waiting for observation when the Side Conversation is disposed', async () => {
-  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
-  const { document, window } = parsed;
-  Object.assign(globalThis, {
-    document,
-    window,
-    HTMLElement: window.HTMLElement,
-    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
-    Event: window.Event,
-    Node: window.Node,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-
   let send: ((text: string) => Promise<boolean>) | undefined;
   let sendCalls = 0;
   let unsubscribed = false;
-  const defaults = createFakeWorkbarServices();
-  const services: WorkbarServices = {
-    ...defaults,
-    sideChat: {
-      ...defaults.sideChat,
-      listTurns: async () => [settledTurn('source-turn')],
-      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+  const { container, root } = await renderProbe(
+    {
       subscribeEvents: () => () => {
         unsubscribed = true;
       },
@@ -554,26 +700,8 @@ test('releases a send waiting for observation when the Side Conversation is disp
         return { ok: true as const, turnId: 'disposed-turn' };
       },
     },
-  };
-  const container = document.querySelector('#root');
-  assert.ok(container);
-  const root = createRoot(container);
-  mountedRoot = root;
-
-  await act(async () => {
-    root.render(
-      createElement(WorkbarServicesProvider, {
-        services,
-        children: createElement(QuoteCompanionOwnershipProbe, {
-          onSend: (value) => {
-            send = value;
-          },
-        }),
-      }),
-    );
-    await Promise.resolve();
-  });
-  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+    { ownership: true, onSend: (value) => (send = value) },
+  );
   assert.ok(send);
 
   let sendResult: Promise<boolean> | undefined;
@@ -609,6 +737,8 @@ function QuoteCompanionProbe(props: { sourceSession?: SessionSummary }) {
 
 function QuoteCompanionOwnershipProbe(props: {
   onSend: (send: (text: string) => Promise<boolean>) => void;
+  onSteer?: (steer: (text: string) => Promise<boolean>) => void;
+  onStop?: (stop: () => Promise<void>) => void;
 }) {
   const companion = useQuoteCompanion({
     panelId: 'ownership-panel',
@@ -618,8 +748,11 @@ function QuoteCompanionOwnershipProbe(props: {
     onQuotesConsumed: () => undefined,
   });
   props.onSend(companion.send);
+  props.onSteer?.(companion.steer);
+  props.onStop?.(companion.stop);
   return createElement('div', {
     'data-companion-id': companion.companionSession?.id ?? '',
+    'data-error': companion.error ?? '',
     'data-live-turn-id': companion.liveTurn?.turnId ?? '',
     'data-live-text': companion.liveTurn?.steps.find((step) => step.text)?.text?.text ?? '',
     'data-streaming': String(companion.streaming),
