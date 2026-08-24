@@ -550,21 +550,32 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     runId: string;
     admittedAt: number;
     messageIds: readonly string[];
+    terminalStatus?: 'completed' | 'failed' | 'cancelled';
   }): Promise<void> {
     if (!this.#lifecycle || input.messageIds.length === 0) return;
-    if (!this.#durableProof.readProviderRequestProof) return;
-    const proved = await this.#durableProof.readProviderRequestProof(input);
-    if (!proved) return;
-    const executed: string[] = [];
-    for (const messageId of input.messageIds) {
-      if (
-        (await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId)) ===
-        'handed_off'
-      ) {
-        executed.push(messageId);
+    const proved = this.#durableProof.readProviderRequestProof
+      ? await this.#durableProof.readProviderRequestProof(input)
+      : false;
+    if (proved) {
+      const executed: string[] = [];
+      for (const messageId of input.messageIds) {
+        if (
+          (await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId)) ===
+          'handed_off'
+        ) {
+          executed.push(messageId);
+        }
       }
+      await this.#lifecycle.markMessagesExecuted(input.sessionId, executed);
+      return;
     }
-    await this.#lifecycle.markMessagesExecuted(input.sessionId, executed);
+    if (input.terminalStatus !== 'cancelled') return;
+    const cancelled: string[] = [];
+    for (const messageId of input.messageIds) {
+      const state = await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId);
+      if (state === 'accepted' || state === 'handed_off') cancelled.push(messageId);
+    }
+    await this.#lifecycle.cancelMessageAdmissions(input.sessionId, cancelled);
   }
 
   async cancelMessages(sessionId: string, messageIds: readonly string[]): Promise<void> {

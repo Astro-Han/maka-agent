@@ -245,7 +245,7 @@ test('production UDS admission commits one transcript before the root handoff', 
         .map((message) => message.id),
       [messageId],
     );
-    assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
+    assert.equal(await fixture.readMessageLifecycleState(messageId), 'cancelled');
   });
 });
 

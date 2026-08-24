@@ -362,7 +362,18 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           admission.runId,
           run,
         );
-        if (!isTerminalSnapshot(snapshot)) {
+        if (isTerminalSnapshot(snapshot)) {
+          if (admission.sourceMessages.length > 0) {
+            await this.messages.settleMessagesAfterRoot({
+              sessionId,
+              turnId: admission.turnId,
+              runId: admission.runId,
+              admittedAt: admission.admittedAt,
+              messageIds: admission.sourceMessages.map((source) => source.messageId),
+              terminalStatus: snapshot.status,
+            });
+          }
+        } else {
           if (admission.execution.kind !== 'safe_boundary_continuation') {
             throw new Error(`Startup recovery left Turn ${admission.turnId} non-terminal`);
           }
@@ -2232,7 +2243,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       }
       this.observeExecutionCompletion(active, { kind: 'terminal', snapshot });
       await this.interruptPlanAfterUnsuccessfulTurn(input.sessionId, active, snapshot.status);
-      await this.settleExecutedMessageSources(active);
+      await this.settleExecutedMessageSources(active, snapshot.status);
       terminalTransitionStarted = true;
       await this.completeTerminalTransition(input.sessionId, active);
     } catch (error) {
@@ -2256,7 +2267,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
               snapshot,
             });
             await this.interruptPlanAfterUnsuccessfulTurn(input.sessionId, active, snapshot.status);
-            await this.settleExecutedMessageSources(active);
+            await this.settleExecutedMessageSources(active, snapshot.status);
             terminalTransitionStarted = true;
             await this.completeTerminalTransition(input.sessionId, active);
             containedRunFailure =
@@ -2312,7 +2323,10 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     }
   }
 
-  private async settleExecutedMessageSources(active: ActiveRootTurn): Promise<void> {
+  private async settleExecutedMessageSources(
+    active: ActiveRootTurn,
+    terminalStatus: 'completed' | 'failed' | 'cancelled',
+  ): Promise<void> {
     const admission = await this.stores.agentRunStore.readRootTurnAdmission(
       active.sessionId,
       active.turnId,
@@ -2324,6 +2338,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       runId: active.runId,
       admittedAt: admission.admittedAt,
       messageIds: admission.sourceMessages.map((source) => source.messageId),
+      terminalStatus,
     });
   }
 
@@ -2864,7 +2879,9 @@ function throwIfAborted(signal: AbortSignal): void {
     throw new DOMException('Agent graph supervisor Turn was aborted', 'AbortError');
 }
 
-function isTerminalSnapshot(snapshot: TurnSnapshot): boolean {
+function isTerminalSnapshot(
+  snapshot: TurnSnapshot,
+): snapshot is Extract<TurnSnapshot, { status: 'completed' | 'failed' | 'cancelled' }> {
   return (
     snapshot.status === 'completed' ||
     snapshot.status === 'failed' ||

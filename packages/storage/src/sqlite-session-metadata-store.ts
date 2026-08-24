@@ -1836,7 +1836,7 @@ export class SqliteSessionMetadataStore {
         `
         UPDATE message_admissions
         SET lifecycle_state = 'cancelled'
-        WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
+        WHERE session_id = ? AND message_id = ? AND lifecycle_state IN ('accepted', 'handed_off')
       `,
       );
       for (const messageId of unique) {
@@ -1914,12 +1914,14 @@ export class SqliteSessionMetadataStore {
     const unique = [...new Set(messageIds)];
     for (const messageId of unique) assertSafeSessionId(messageId);
     this.transaction(() => {
+      const allowedPreviousStates =
+        state === 'handed_off' ? "lifecycle_state = 'accepted'" : "lifecycle_state = 'handed_off'";
       const statement = this.db.prepare(
         `
         UPDATE message_admissions
         SET lifecycle_state = ?
         WHERE session_id = ? AND message_id = ?
-          AND lifecycle_state IN ('accepted', 'handed_off')
+          AND ${allowedPreviousStates}
       `,
       );
       for (const messageId of unique) {
