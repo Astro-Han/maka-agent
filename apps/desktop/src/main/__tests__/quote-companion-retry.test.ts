@@ -599,6 +599,8 @@ test('keeps a Side Conversation admission when Host stop outcome is unknown', as
     'admitted-after-unknown-stop',
   );
   assert.equal(container.firstElementChild?.getAttribute('data-live-text'), 'answer');
+  assert.equal(container.firstElementChild?.getAttribute('data-streaming'), 'true');
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
 });
 
 test('stops a bound Side Conversation by its exact Host Turn identity', async () => {
