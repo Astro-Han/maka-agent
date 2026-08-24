@@ -1826,11 +1826,7 @@ export class SqliteSessionMetadataStore {
           throw new SessionMetadataConflictError('Message admission transcript Turn conflict');
         }
         const rebound = decodeCanonicalMessage({ ...message, turnId: input.turnId });
-        this.db
-          .prepare(
-            'UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?',
-          )
-          .run(JSON.stringify(rebound), input.sessionId, sequence);
+        this.replaceSessionMessageSync(input.sessionId, sequence, rebound);
       }
     });
   }
@@ -1922,11 +1918,7 @@ export class SqliteSessionMetadataStore {
         if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence)) {
           throw new SessionMetadataConflictError('Invalid Message transcript sequence');
         }
-        this.db
-          .prepare(
-            'UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?',
-          )
-          .run(json, stored.sessionId, sequence);
+        this.replaceSessionMessageSync(stored.sessionId, sequence, message, json);
       }
       this.updateCatalogProjectionSync(
         stored.sessionId,
@@ -4762,6 +4754,62 @@ export class SqliteSessionMetadataStore {
           createHash('sha256').update(chunk).digest('hex'),
         );
       }
+    }
+  }
+
+  private replaceSessionMessageSync(
+    sessionId: string,
+    sequence: number,
+    message: StoredMessage,
+    json = JSON.stringify(message),
+  ): void {
+    const encoded = Buffer.from(json, 'utf8');
+    this.db
+      .prepare('DELETE FROM session_message_chunks WHERE session_id = ? AND sequence = ?')
+      .run(sessionId, sequence);
+    this.db
+      .prepare('DELETE FROM session_message_payloads WHERE session_id = ? AND sequence = ?')
+      .run(sessionId, sequence);
+    if (encoded.byteLength <= SQLITE_SESSION_MESSAGE_CHUNK_BYTES) {
+      this.db
+        .prepare(
+          'UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?',
+        )
+        .run(json, sessionId, sequence);
+      return;
+    }
+    this.db
+      .prepare(
+        'UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?',
+      )
+      .run(SQLITE_SESSION_MESSAGE_CHUNK_MARKER, sessionId, sequence);
+    this.db
+      .prepare(
+        'INSERT INTO session_message_payloads(session_id, sequence, record_bytes, sha256) VALUES (?, ?, ?, ?)',
+      )
+      .run(
+        sessionId,
+        sequence,
+        encoded.byteLength,
+        createHash('sha256').update(encoded).digest('hex'),
+      );
+    for (
+      let offset = 0;
+      offset < encoded.byteLength;
+      offset += SQLITE_SESSION_MESSAGE_CHUNK_BYTES
+    ) {
+      const chunk = encoded.subarray(offset, offset + SQLITE_SESSION_MESSAGE_CHUNK_BYTES);
+      this.db
+        .prepare(
+          'INSERT INTO session_message_chunks(session_id, sequence, chunk_index, data, sha256) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(
+          sessionId,
+          sequence,
+          offset / SQLITE_SESSION_MESSAGE_CHUNK_BYTES,
+          chunk,
+          createHash('sha256').update(chunk).digest('hex'),
+        );
     }
   }
 
