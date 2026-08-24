@@ -2331,7 +2331,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       active.sessionId,
       active.turnId,
     );
-    if (!admission || admission.sourceMessages.length === 0) return;
+    if (!admission) return;
     await this.messages.settleMessagesAfterRoot({
       sessionId: active.sessionId,
       turnId: active.turnId,

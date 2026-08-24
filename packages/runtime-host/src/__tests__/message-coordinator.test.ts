@@ -22,8 +22,10 @@ import { test } from 'node:test';
 import { messageContentDigest, type MessageContent } from '@maka/core/events';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
 import type {
+  MessageLifecycleStore,
   MessageOperationReceipt,
   MessageReceiptStore,
+  PendingMessageAdmission,
   RootTurnSourceMessageReceipt,
 } from '@maka/storage/execution-stores';
 import {
@@ -259,6 +261,77 @@ test('partitions a mixed-Client follow-up queue across root handoffs', async () 
       runId: 'run-3',
     }),
   );
+  await fixture.coordinator.close();
+});
+
+test('recovered followups without a connection owner still form one successor batch', async () => {
+  const fixture = createFixture();
+  await fixture.lifecycle.commitMessageAdmission({
+    sessionId: ROOT.sessionId,
+    turnId: ROOT.turnId,
+    runId: ROOT.runId,
+    messageId: 'recovered-followup',
+    content: { text: 'recover without a connection owner' },
+    modelContent: { text: 'recover without a connection owner' },
+    submittedPlacement: 'next_turn',
+    placement: 'next_turn',
+    disposition: 'followup',
+    admittedAt: 1,
+  });
+
+  await fixture.coordinator.recoverPendingAfterHostRestart([ROOT.sessionId]);
+  const owner = fixture.coordinator.bindRun(ROOT);
+  owner.release();
+  const batch = fixture.coordinator.beginTerminalTransition(ROOT);
+  assert.deepEqual(
+    batch.sources.map((source) => source.messageId),
+    ['recovered-followup'],
+  );
+  fixture.coordinator.commitNextRoot(batch, {
+    sessionId: ROOT.sessionId,
+    turnId: 'turn-recovered-successor',
+    runId: 'run-recovered-successor',
+  });
+  const successor = fixture.coordinator.bindRun({
+    sessionId: ROOT.sessionId,
+    turnId: 'turn-recovered-successor',
+    runId: 'run-recovered-successor',
+  });
+  successor.release();
+  fixture.coordinator.completeIdle(
+    fixture.coordinator.beginTerminalTransition({
+      sessionId: ROOT.sessionId,
+      turnId: 'turn-recovered-successor',
+      runId: 'run-recovered-successor',
+    }),
+  );
+});
+
+test('recovery treats a durable steering event as the handoff proof', async () => {
+  const fixture = createFixture();
+  await fixture.lifecycle.commitMessageAdmission({
+    sessionId: ROOT.sessionId,
+    turnId: ROOT.turnId,
+    runId: ROOT.runId,
+    messageId: 'recovered-steering',
+    content: { text: 'recover this steering event' },
+    modelContent: { text: 'recover this steering event' },
+    submittedPlacement: 'current_turn',
+    placement: 'current_turn',
+    disposition: 'steering',
+    admittedAt: 1,
+  });
+  fixture.events.push(steeringEvent('recovered-steering', 'recover this steering event'));
+
+  await fixture.coordinator.recoverPendingAfterHostRestart([ROOT.sessionId]);
+
+  assert.equal(fixture.readMessageLifecycleState('recovered-steering'), 'handed_off');
+  assert.deepEqual(fixture.coordinator.projection(ROOT.sessionId), {
+    hostEpoch: 'epoch-1',
+    queueRevision: 0,
+    steering: [],
+    followup: [],
+  });
   await fixture.coordinator.close();
 });
 
@@ -792,6 +865,43 @@ test('entry promote moves a follow-up into the steering queue', async () => {
   const batch = fixture.coordinator.beginTerminalTransition(ROOT);
   fixture.coordinator.completeIdle(batch);
   assert.equal(fixture.liveResidencies(), 0);
+});
+
+test('editing a promoted entry preserves its original submitted placement', async () => {
+  const fixture = createFixture();
+  fixture.coordinator.reserveRootTurn(ROOT);
+
+  await submit(fixture, 'follow-1', 'first', 'next_turn');
+  const promoted = await fixture.coordinator.handlers['queue.entry.promote'](
+    {
+      originHostEpoch: 'epoch-1',
+      sessionId: ROOT.sessionId,
+      entryId: 'id-1',
+      promoteId: 'promote-edit',
+    },
+    operationContext(),
+  );
+  assert.equal(promoted.ok, true);
+
+  const updated = await fixture.coordinator.handlers['queue.entry.update'](
+    {
+      originHostEpoch: 'epoch-1',
+      sessionId: ROOT.sessionId,
+      entryId: 'id-1',
+      updateId: 'update-promoted',
+      expectedQueueRevision: 2,
+      text: 'edited after promotion',
+    },
+    operationContext(),
+  );
+  assert.equal(updated.ok, true);
+  const admission = fixture.readMessageAdmission('follow-1');
+  assert.ok(admission);
+  assert.equal(admission.submittedPlacement, 'next_turn');
+  assert.equal(admission.placement, 'current_turn');
+  assert.equal(admission.disposition, 'steering');
+  assert.deepEqual(admission.content, { text: 'edited after promotion' });
+  assert.deepEqual(admission.modelContent, { text: 'edited after promotion' });
 });
 
 test('entry promote requires an active Turn', async () => {
@@ -1561,6 +1671,37 @@ test('terminal transition atomically folds messages submitted after run release'
   fixture.coordinator.completeIdle(empty);
 });
 
+test('terminal settlement executes only steering admissions with a provider proof', async () => {
+  const fixture = createFixture();
+  fixture.coordinator.reserveRootTurn(ROOT);
+  const owner = fixture.coordinator.bindRun(ROOT);
+  await submit(fixture, 'steer-proved', 'provider must see this', 'current_turn');
+  const [lease] = owner.pull();
+  assert.ok(lease);
+  owner.ack([lease.id]);
+  owner.release();
+  fixture.events.push(steeringEvent('steer-proved', 'provider must see this'));
+  let providerProofAfter = -1;
+  fixture.setProviderRequestProof((admittedAt) => {
+    providerProofAfter = admittedAt;
+    return true;
+  });
+
+  await fixture.coordinator.settleMessagesAfterRoot({
+    sessionId: ROOT.sessionId,
+    turnId: ROOT.turnId,
+    runId: ROOT.runId,
+    admittedAt: 0,
+    messageIds: [],
+    terminalStatus: 'completed',
+  });
+
+  assert.equal(fixture.readMessageLifecycleState('steer-proved'), 'executed');
+  assert.equal(providerProofAfter, 1);
+  const batch = fixture.coordinator.beginTerminalTransition(ROOT);
+  fixture.coordinator.completeIdle(batch);
+});
+
 test('administrative drain preserves accepted entries until the terminal stop fence', async () => {
   const fixture = createFixture();
   fixture.coordinator.reserveRootTurn(ROOT);
@@ -2091,6 +2232,7 @@ function createFixture(
   let drainRequests = 0;
   let receiptReads = 0;
   let rootReads = 0;
+  let providerRequestProof: boolean | ((admittedAt: number) => boolean) = false;
   let stopDeliveryError: Error | undefined;
   let prepareMessage: NonNullable<HostMessageRootPort['prepareMessage']> = async (input) => ({
     kind: 'ready',
@@ -2106,6 +2248,13 @@ function createFixture(
   const receipts = new Map<string, RootTurnSourceMessageReceipt>();
   const events: RuntimeEvent[] = [];
   const operationReceipts = new Map<string, MessageOperationReceipt>();
+  const messageAdmissions = new Map<
+    string,
+    {
+      admission: PendingMessageAdmission;
+      state: 'accepted' | 'handed_off' | 'executed' | 'cancelled';
+    }
+  >();
   const receiptDelays = new Map<
     string,
     {
@@ -2114,6 +2263,7 @@ function createFixture(
       readonly error?: Error;
     }
   >();
+  const lifecycle = memoryMessageLifecycleStore(messageAdmissions);
   const stopClaimed = deferred<void>();
   const terminal = deferred<TurnSnapshot>();
   let coordinator: HostMessageCoordinator;
@@ -2183,6 +2333,10 @@ function createFixture(
         );
         return event ? { event } : undefined;
       },
+      readProviderRequestProof: async ({ admittedAt }) =>
+        typeof providerRequestProof === 'function'
+          ? providerRequestProof(admittedAt)
+          : providerRequestProof,
     },
     receipts: memoryReceiptStore(
       operationReceipts,
@@ -2198,6 +2352,7 @@ function createFixture(
         receiptReads += 1;
       },
     ),
+    lifecycle,
     sessionAdmission: new SessionAdmissionGate(),
     acquireResidency: () => {
       liveResidencies += 1;
@@ -2220,6 +2375,7 @@ function createFixture(
   coordinator = new HostMessageCoordinator(options);
   return {
     coordinator,
+    lifecycle,
     setRootState: (state: HostMessageRootState) => {
       rootState = state;
     },
@@ -2229,12 +2385,17 @@ function createFixture(
     startCalls: () => startCalls,
     events,
     receipts,
+    readMessageAdmission: (messageId: string) => messageAdmissions.get(messageId)?.admission,
+    readMessageLifecycleState: (messageId: string) => messageAdmissions.get(messageId)?.state,
     stopClaimed,
     resolveTerminal: terminal.resolve,
     liveResidencies: () => liveResidencies,
     drainRequests: () => drainRequests,
     receiptReads: () => receiptReads,
     rootReads: () => rootReads,
+    setProviderRequestProof: (proved: boolean | ((admittedAt: number) => boolean)) => {
+      providerRequestProof = proved;
+    },
     failStopDelivery: (error: Error) => {
       stopDeliveryError = error;
     },
@@ -2276,6 +2437,57 @@ function memoryReceiptStore(
       const snapshot = structuredClone(receipt);
       receipts.set(receiptKey, snapshot);
       return snapshot;
+    },
+  };
+}
+
+function memoryMessageLifecycleStore(
+  admissions: Map<
+    string,
+    {
+      admission: PendingMessageAdmission;
+      state: 'accepted' | 'handed_off' | 'executed' | 'cancelled';
+    }
+  >,
+): MessageLifecycleStore {
+  return {
+    commitMessageAdmission: async (admission) => {
+      const existing = admissions.get(admission.messageId);
+      if (existing) return existing.admission;
+      admissions.set(admission.messageId, { admission, state: 'accepted' });
+      return admission;
+    },
+    readMessageAdmission: async (_sessionId, messageId) => admissions.get(messageId)?.admission,
+    readMessageLifecycleState: async (_sessionId, messageId) => admissions.get(messageId)?.state,
+    listMessageAdmissions: async (sessionId) =>
+      [...admissions.values()]
+        .filter(({ admission }) => admission.sessionId === sessionId)
+        .map(({ admission }) => admission),
+    updateMessageAdmission: async (admission) => {
+      const existing = admissions.get(admission.messageId);
+      if (!existing) throw new Error(`Missing admission ${admission.messageId}`);
+      existing.admission = admission;
+    },
+    reorderMessageAdmissions: async () => undefined,
+    cancelMessageAdmissions: async (_sessionId, messageIds) => {
+      for (const messageId of messageIds) {
+        const existing = admissions.get(messageId);
+        if (existing && (existing.state === 'accepted' || existing.state === 'handed_off')) {
+          existing.state = 'cancelled';
+        }
+      }
+    },
+    markMessagesHandedOff: async (_sessionId, messageIds) => {
+      for (const messageId of messageIds) {
+        const existing = admissions.get(messageId);
+        if (existing?.state === 'accepted') existing.state = 'handed_off';
+      }
+    },
+    markMessagesExecuted: async (_sessionId, messageIds) => {
+      for (const messageId of messageIds) {
+        const existing = admissions.get(messageId);
+        if (existing?.state === 'handed_off') existing.state = 'executed';
+      }
     },
   };
 }

@@ -2175,8 +2175,10 @@ test('hosted linked child roots share admission, message, terminal, and stop aut
           stores.agentRunStore.readRootTurnSourceMessageReceipt(sessionId, messageId),
         readImmutableSteeringMessageProof: (sessionId, messageId) =>
           stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
+        readProviderRequestProof: async () => false,
       },
       receipts: stores.messageReceiptStore,
+      lifecycle: stores.sessionStore,
       sessionAdmission,
       acquireResidency,
       requestDrain: () => {
@@ -4799,8 +4801,10 @@ async function createFailureFixture(options: {
         stores.agentRunStore.readRootTurnSourceMessageReceipt(sessionId, messageId),
       readImmutableSteeringMessageProof: (sessionId, messageId) =>
         stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
+      readProviderRequestProof: async () => false,
     },
     receipts: stores.messageReceiptStore,
+    lifecycle: stores.sessionStore,
     sessionAdmission,
     acquireResidency,
     requestDrain,

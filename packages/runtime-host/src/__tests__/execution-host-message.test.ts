@@ -195,6 +195,7 @@ test('steering becomes durable and ordered followups automatically start the nex
     await first.close();
     await second.close();
     await fixture.stopHost(host);
+    assert.equal(await fixture.readMessageLifecycleState(steeringId), 'handed_off');
 
     const firstLedger = await fixture.readTurn(firstTurnId);
     const steeringEvents = firstLedger.runtimeEvents.filter(
