@@ -198,10 +198,12 @@ export interface WorkbarAttachmentsService {
 export type SideChatSendResult =
   | { ok: true; turnId: string; steered?: false }
   | { ok: true; turnId: string; steered: true; messageId: string }
-  | { ok: false; reason?: string };
+  | { ok: false; reason: 'outcome_unknown'; messageId: string }
+  | { ok: false; reason?: string; messageId?: never };
 
 export type SideChatSteerResult =
   | { kind: 'queued'; messageId: string }
+  | { kind: 'outcome_unknown'; messageId: string }
   | { kind: 'started'; turnId: string };
 
 export interface SideChatSessionPort {
@@ -235,7 +237,7 @@ export interface SideChatSessionPort {
       attachmentItems?: WorkbarIngestInput[];
     },
   ): Promise<SideChatSendResult>;
-  stop(sessionId: string): Promise<void>;
+  stop(sessionId: string, admissionId?: string): Promise<void>;
   steer(sessionId: string, text: string, admissionId?: string): Promise<SideChatSteerResult>;
   setPermissionMode(
     sessionId: string,

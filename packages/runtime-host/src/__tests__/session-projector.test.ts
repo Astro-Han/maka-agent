@@ -99,7 +99,7 @@ test('emits the Host admission fact when a queued message enters a successor Tur
           messageId: 'ticket-1',
           content: { text: 'continue in successor' },
           placement: 'current_turn',
-          state: 'in_flight',
+          state: 'queued',
         },
       ],
       followup: [],
@@ -152,6 +152,25 @@ test('emits the Host admission fact when a queued message enters a successor Tur
         messageId: event.messageId,
       })),
     [{ turnId: 'turn-2', messageId: 'ticket-1' }],
+  );
+
+  const retracted = new RuntimeHostSessionProjector(
+    previous,
+    createRuntimeHostSessionProjectionSeed([], previous),
+    () => 10,
+  ).accept({
+    kind: 'subscription.session_projection',
+    hostEpoch: 'host-1',
+    subscriptionId: 'subscription-1',
+    sequence: 1,
+    snapshot: snapshot({
+      projectionRevision: 2,
+      queue: next.queue,
+    }),
+  }).events;
+  assert.deepEqual(
+    retracted.filter((event) => event.type === 'message_retracted').map((event) => event.messageId),
+    ['ticket-1'],
   );
 });
 

@@ -338,7 +338,12 @@ test('keeps Side Conversation events owned by the Host-admitted turn across an a
 test('binds a busy-raced Side Conversation send through its Host-admitted message identity', async () => {
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let send: ((text: string) => Promise<boolean>) | undefined;
-  const pendingSend = deferred<{ ok: true; steered: true; turnId: string; messageId: string }>();
+  const pendingSend = deferred<{
+    ok: true;
+    steered: true;
+    turnId: string;
+    messageId: string;
+  }>();
   const { container } = await renderProbe(
     {
       subscribeEvents: (_sessionId, handler, onSeeded) => {
@@ -413,9 +418,8 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let send: ((text: string) => Promise<boolean>) | undefined;
   const pendingSend = deferred<{
-    ok: true;
-    steered: true;
-    turnId: string;
+    ok: false;
+    reason: 'outcome_unknown';
     messageId: string;
   }>();
   const { container } = await renderProbe(
@@ -438,20 +442,19 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
     await Promise.resolve();
   });
   await act(async () => {
-    pendingSend.resolve({
-      ok: true,
-      steered: true,
-      turnId: 'requested-turn-is-not-the-owner',
-      messageId: 'ticket-1',
-    });
-    assert.equal(await sendResult, true);
+    eventHandler?.(messageAdmittedEvent('successor-admission', 'successor-root', 1, 'ticket-1'));
+    eventHandler?.(queueUpdateEvent('successor-queue', 'successor-root', 2));
+    eventHandler?.(textDeltaEvent('successor-text', 'successor-root', 3, 'answer from successor'));
     await Promise.resolve();
   });
 
   await act(async () => {
-    eventHandler?.(messageAdmittedEvent('successor-admission', 'successor-root', 1, 'ticket-1'));
-    eventHandler?.(queueUpdateEvent('successor-queue', 'successor-root', 2));
-    eventHandler?.(textDeltaEvent('successor-text', 'successor-root', 3, 'answer from successor'));
+    pendingSend.resolve({
+      ok: false,
+      reason: 'outcome_unknown',
+      messageId: 'ticket-1',
+    });
+    assert.equal(await sendResult, true);
     await Promise.resolve();
   });
 
@@ -465,6 +468,7 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
 test('clears a queued Side Conversation send when Host stop cancels the admission', async () => {
   let send: ((text: string) => Promise<boolean>) | undefined;
   let stop: (() => Promise<void>) | undefined;
+  let admissionId: string | undefined;
   const pendingStop = deferred<void>();
   const pendingSend = deferred<{
     ok: true;
@@ -478,8 +482,14 @@ test('clears a queued Side Conversation send when Host stop cancels the admissio
         onSeeded?.();
         return () => undefined;
       },
-      send: async () => pendingSend.promise,
-      stop: async () => pendingStop.promise,
+      send: async (_sessionId, command) => {
+        admissionId = command.turnId;
+        return pendingSend.promise;
+      },
+      stop: async (_sessionId, expectedAdmissionId) => {
+        assert.equal(expectedAdmissionId, admissionId);
+        return pendingStop.promise;
+      },
     },
     {
       ownership: true,
@@ -514,7 +524,7 @@ test('clears a queued Side Conversation send when Host stop cancels the admissio
       ok: true,
       steered: true,
       turnId: 'old-turn',
-      messageId: 'retracted-message',
+      messageId: admissionId as string,
     });
     assert.equal(await sendResult, false);
     await Promise.resolve();
@@ -574,6 +584,12 @@ test('keeps a Side Conversation admission when Host stop outcome is unknown', as
 test('releases a queued Side Conversation admission from the Host queue retract', async () => {
   let eventHandler: ((event: SessionEvent) => void) | undefined;
   let send: ((text: string) => Promise<boolean>) | undefined;
+  const pendingSend = deferred<{
+    ok: true;
+    steered: true;
+    turnId: string;
+    messageId: string;
+  }>();
   const { container } = await renderProbe(
     {
       subscribeEvents: (_sessionId, handler, onSeeded) => {
@@ -581,12 +597,7 @@ test('releases a queued Side Conversation admission from the Host queue retract'
         onSeeded?.();
         return () => undefined;
       },
-      send: async () => ({
-        ok: true as const,
-        steered: true as const,
-        turnId: 'not-the-owner',
-        messageId: 'retracted-message',
-      }),
+      send: async () => pendingSend.promise,
     },
     {
       ownership: true,
@@ -597,13 +608,30 @@ test('releases a queued Side Conversation admission from the Host queue retract'
   assert.ok(eventHandler);
 
   await act(async () => {
-    assert.equal(await send?.('retract this queued send'), true);
+    void send?.('retract this queued send');
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
 
   await act(async () => {
-    eventHandler?.(queueUpdateEvent('retract-queue', 'old-turn', 1));
+    eventHandler?.({
+      type: 'message_retracted',
+      id: 'retracted-admission',
+      turnId: 'old-turn',
+      ts: 1,
+      messageId: 'retracted-message',
+    });
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+
+  await act(async () => {
+    pendingSend.resolve({
+      ok: true,
+      steered: true,
+      turnId: 'not-the-owner',
+      messageId: 'retracted-message',
+    });
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
@@ -658,7 +686,10 @@ test('cancels a pending Side Conversation steer after Host stop without losing t
   let send: ((text: string) => Promise<boolean>) | undefined;
   let steer: ((text: string) => Promise<boolean>) | undefined;
   let stop: (() => Promise<void>) | undefined;
-  const pendingSteer = deferred<{ kind: 'queued'; messageId: string }>();
+  const pendingSteer = deferred<{
+    kind: 'queued';
+    messageId: string;
+  }>();
   let stopCalls = 0;
   const { container } = await renderProbe(
     {
@@ -703,7 +734,10 @@ test('cancels a pending Side Conversation steer after Host stop without losing t
   assert.equal(container.firstElementChild?.getAttribute('data-live-turn-id'), 'old-turn');
 
   await act(async () => {
-    pendingSteer.resolve({ kind: 'queued', messageId: 'cancelled-steer' });
+    pendingSteer.resolve({
+      kind: 'queued',
+      messageId: 'cancelled-steer',
+    });
     assert.equal(await steerResult, false);
     await Promise.resolve();
   });

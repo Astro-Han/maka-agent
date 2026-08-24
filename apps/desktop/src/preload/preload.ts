@@ -1591,6 +1591,12 @@ const makaBridge = {
           reason: 'skill_invocation_failed';
           skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
         }
+      | {
+          ok: false;
+          reason: 'outcome_unknown';
+          messageId: string;
+          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+        }
     > {
       const session = await runtimeHostSessionRef(sessionId);
       const send = async (input: SessionCommand | Record<string, unknown>) => {
@@ -1627,7 +1633,11 @@ const makaBridge = {
     },
     stop(
       sessionId: string,
-      input?: { source?: 'stop_button'; expectedTurnId?: string },
+      input?: {
+        source?: 'stop_button';
+        expectedTurnId?: string;
+        expectedAdmissionId?: string;
+      },
     ): Promise<void> {
       return invokeSessionRuntimeHost('sessions:stop', sessionId, input);
     },
@@ -1635,7 +1645,11 @@ const makaBridge = {
       sessionId: string,
       text: string,
       admissionId?: string,
-    ): Promise<{ kind: 'queued'; messageId: string } | { kind: 'started'; turnId: string }> {
+    ): Promise<
+      | { kind: 'queued'; messageId: string }
+      | { kind: 'outcome_unknown'; messageId: string }
+      | { kind: 'started'; turnId: string }
+    > {
       return invokeSessionRuntimeHost('sessions:steer', sessionId, text, admissionId);
     },
     async enqueue(

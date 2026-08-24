@@ -722,6 +722,13 @@ test("retries a dispatched busy fallback with its original message identity", as
         },
         submitMessage: async (input) => {
           submits.push(input);
+          if (input.messageId === "turn-unknown") {
+            throw new RuntimeHostOperationError(
+              "turn.message.submit",
+              "outcome_unknown",
+              "Message disposition cannot be proven in this Host Epoch",
+            );
+          }
           if (submits.length === 1) {
             throw new RuntimeHostRequestInterruptedError(
               "turn.message.submit",
@@ -774,6 +781,19 @@ test("retries a dispatched busy fallback with its original message identity", as
     inlineReferences: [],
     skillInvocation: { loaded: [], failed: [], receipts: [] },
   });
+  assert.deepEqual(
+    await ipc.invoke("sessions:send", "session-1", {
+      type: "send",
+      turnId: "turn-unknown",
+      text: "keep waiting for the Host outcome",
+    }),
+    {
+      ok: false,
+      reason: "outcome_unknown",
+      messageId: "turn-unknown",
+      skillInvocation: { loaded: [], failed: [], receipts: [] },
+    },
+  );
 });
 
 test("returns the Host-started Turn identity when a direct steer races idle", async () => {
@@ -1097,11 +1117,19 @@ test("routes per-entry queue mutations to the Runtime Host", async () => {
 test("binds steer and stop to Host-owned queue and active Turn identities", async () => {
   const submits: unknown[] = [];
   const interrupts: unknown[] = [];
+  const retractions: unknown[] = [];
   const stopLifecycle: string[] = [];
   let sequence = 0;
   const client = executionClient({
     submitMessage: async (input) => {
       submits.push(input);
+      if (input.messageId === 'unknown-ticket') {
+        throw new RuntimeHostOperationError(
+          'turn.message.submit',
+          'outcome_unknown',
+          'Message disposition cannot be proven in this Host Epoch',
+        );
+      }
       return { disposition: "steering", queueRevision: 2 };
     },
     interruptTurn: async (input) => {
@@ -1120,8 +1148,27 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
         },
       };
     },
+    retractQueueEntry: async (input) => {
+      retractions.push(input);
+      return { queueRevision: 3 };
+    },
   });
-  const observer = observerWithSnapshot();
+  const observer = observerWithSnapshot({
+    queue: {
+      hostEpoch: 'host-1',
+      queueRevision: 2,
+      steering: [
+        {
+          entryId: 'entry-1',
+          messageId: 'steer-ticket-1',
+          content: { text: 'Continue' },
+          placement: 'current_turn',
+          state: 'queued',
+        },
+      ],
+      followup: [],
+    },
+  });
   const ipc = ipcHarness();
   registerExecutionIpc(
     {
@@ -1146,6 +1193,22 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       messageId: "steer-ticket-1",
     },
   );
+  assert.deepEqual(
+    await ipc.invoke('sessions:steer', 'session-1', 'Continue', 'unknown-ticket'),
+    { kind: 'outcome_unknown', messageId: 'unknown-ticket' },
+  );
+  await ipc.invoke("sessions:stop", "session-1", {
+    source: "stop_button",
+    expectedAdmissionId: "steer-ticket-1",
+  });
+  assert.deepEqual(retractions, [
+    {
+      sessionId: 'session-1',
+      entryId: 'entry-1',
+      retractId: 'id-1',
+    },
+  ]);
+  assert.deepEqual(stopLifecycle, []);
   await ipc.invoke("sessions:stop", "session-1", {
     source: "stop_button",
     expectedTurnId: "turn-unrelated",
@@ -1164,11 +1227,17 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       content: { text: "Continue" },
       placement: "current_turn",
     },
+    {
+      sessionId: 'session-1',
+      messageId: 'unknown-ticket',
+      content: { text: 'Continue' },
+      placement: 'current_turn',
+    },
   ]);
   assert.deepEqual(interrupts, [
     {
       sessionId: "session-1",
-      interruptId: "id-1",
+      interruptId: "id-2",
       turnId: "turn-1",
       runId: "run-1",
     },
@@ -1219,12 +1288,15 @@ function unusedObserver(): RuntimeHostSessionObserver {
   });
 }
 
-function observerWithSnapshot(): RuntimeHostSessionObserver {
-  return observerWithTranscript([]);
+function observerWithSnapshot(
+  overrides: Partial<import('@maka/runtime-host/protocol').SessionContinuitySnapshot> = {},
+): RuntimeHostSessionObserver {
+  return observerWithTranscript([], overrides);
 }
 
 function observerWithTranscript(
   transcript: readonly import('@maka/core/session').StoredMessage[],
+  overrides: Partial<import('@maka/runtime-host/protocol').SessionContinuitySnapshot> = {},
 ): RuntimeHostSessionObserver {
   let finishEvents!: () => void;
   const eventsFinished = new Promise<void>((resolve) => {
@@ -1257,6 +1329,7 @@ function observerWithTranscript(
             followup: [],
           },
           interactions: { pending: [] },
+          ...overrides,
         },
         activeAssistantStreams: [],
         transcript: Promise.resolve([...transcript]),

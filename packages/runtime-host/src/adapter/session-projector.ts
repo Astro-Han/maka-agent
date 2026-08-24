@@ -363,6 +363,7 @@ export class RuntimeHostSessionProjector {
       events.push(...projectRuntimeHostInteractionRequest(interaction, this.#now()));
     }
     const root = next.rootTurn;
+    events.push(...projectMessageRetractionEvents(previousSnapshot, next, this.#now()));
     events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
     if (root && queueChanged(previousSnapshot.queue, next.queue)) {
       for (const entry of newlyInFlight(previousSnapshot.queue, next.queue)) {
@@ -475,6 +476,33 @@ function projectNewMessageAdmissionEvents(
     (next.rootTurnSourceMessageIds ?? []).filter((messageId) => !previousIds.has(messageId)),
     ts,
   );
+}
+
+function projectMessageRetractionEvents(
+  previous: SessionContinuitySnapshot,
+  next: SessionContinuitySnapshot,
+  ts: number,
+): SessionEvent[] {
+  const root = next.rootTurn ?? previous.rootTurn;
+  if (!root || previous.queue.hostEpoch !== next.queue.hostEpoch) return [];
+  const retained = new Set(
+    [...next.queue.steering, ...next.queue.followup].map((entry) => entry.messageId),
+  );
+  const admitted = new Set(next.rootTurnSourceMessageIds ?? []);
+  return [...previous.queue.steering, ...previous.queue.followup]
+    .filter(
+      (entry) =>
+        entry.state === 'queued' &&
+        !retained.has(entry.messageId) &&
+        !admitted.has(entry.messageId),
+    )
+    .map((entry) => ({
+      type: 'message_retracted' as const,
+      id: `host-retraction:${next.queue.hostEpoch}:${next.queue.queueRevision}:${entry.messageId}`,
+      turnId: root.turnId,
+      ts,
+      messageId: entry.messageId,
+    }));
 }
 
 export function projectRuntimeHostInteractionRequest(

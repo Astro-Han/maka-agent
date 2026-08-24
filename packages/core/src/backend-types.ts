@@ -192,6 +192,7 @@ export type BackendSessionEvent = Exclude<
       type:
         | 'queue_update'
         | 'message_admitted'
+        | 'message_retracted'
         | 'permission_request'
         | 'permission_answer_ack'
         | 'permission_closure_ack'

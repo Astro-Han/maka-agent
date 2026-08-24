@@ -109,6 +109,23 @@ type RuntimeHostSessionExecutionClient = Pick<
   | "updateSessionConfiguration"
 >;
 
+async function submitMessageWithReconnect(
+  client: Pick<RuntimeHostSessionExecutionClient, 'getSession' | 'submitMessage'>,
+  input: Parameters<RuntimeHostSessionExecutionClient['submitMessage']>[0],
+): Promise<Awaited<ReturnType<RuntimeHostSessionExecutionClient['submitMessage']>> | undefined> {
+  try {
+    return await retryDispatchedCommand(
+      () => client.submitMessage(input),
+      () => client.getSession(input.sessionId),
+    );
+  } catch (error) {
+    if (error instanceof RuntimeHostOperationError && error.code === 'outcome_unknown') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 export interface RuntimeHostSessionExecutionIpcDeps {
   client: RuntimeHostSessionExecutionClient;
   observer: RuntimeHostSessionObserver;
@@ -321,19 +338,25 @@ export function registerRuntimeHostSessionExecutionIpc(
         ) {
           throw error;
         }
-        const submitted = await retryDispatchedCommand(
-          () =>
-            deps.client.submitMessage({
-              sessionId,
-              // Preserve the renderer's command identity in the durable message so
-              // a lost IPC reply can be reconciled as root-vs-steering later.
-              messageId: turnId,
-              content: startInput.content,
-              placement: "current_turn",
-            }),
-          () => deps.client.getSession(sessionId),
-        );
+        // The requested Turn id is the submission/admission ticket. If the
+        // busy fallback queues this message and a successor root consumes it,
+        // the Host can report ownership with the same identity.
+        const messageId = turnId;
         const emptySkillInvocation = { loaded: [], failed: [], receipts: [] };
+        const submitted = await submitMessageWithReconnect(deps.client, {
+          sessionId,
+          messageId,
+          content: startInput.content,
+          placement: "current_turn",
+        });
+        if (!submitted) {
+          return {
+            ok: false as const,
+            reason: 'outcome_unknown' as const,
+            messageId,
+            skillInvocation: emptySkillInvocation,
+          };
+        }
         if (submitted.disposition === "turn_started") {
           deps.emitSessionsChanged("status-change", sessionId, {
             turnId: submitted.turnId,
@@ -383,19 +406,19 @@ export function registerRuntimeHostSessionExecutionIpc(
     async (_event, sessionId: string, text: unknown, admissionId: unknown) => {
       const content = steeringContent(text);
       const messageId = admissionId === undefined ? newId() : requiredId(admissionId, "Admission");
-      const submitted = await retryDispatchedCommand(
-        () =>
-          deps.client.submitMessage({
-            sessionId,
-            messageId,
-            content: { text: content },
-            placement: "current_turn",
-          }),
-        () => deps.client.getSession(sessionId),
-      );
+      const submitted = await submitMessageWithReconnect(deps.client, {
+        sessionId,
+        messageId,
+        content: { text: content },
+        placement: "current_turn",
+      });
+      if (!submitted) return { kind: 'outcome_unknown' as const, messageId };
       return submitted.disposition === "turn_started"
         ? { kind: "started" as const, turnId: submitted.turnId }
-        : { kind: "queued" as const, messageId };
+        : {
+            kind: "queued" as const,
+            messageId,
+          };
     },
   );
   ipcMain.handle(
@@ -548,7 +571,7 @@ export function registerRuntimeHostSessionExecutionIpc(
     "sessions:stop",
     async (_event, sessionId: string, input: unknown) => {
       const normalized = normalizeStopSessionInput(input);
-      return stopSession(sessionId, normalized.expectedTurnId);
+      return stopSession(sessionId, normalized);
     },
   );
 
@@ -772,8 +795,39 @@ function createRuntimeHostSessionStop(
     "beforeStop" | "client" | "observer" | "emitSessionsChanged"
   >,
   newId: () => string = randomUUID,
-): (sessionId: string, expectedTurnId?: string) => Promise<void> {
-  return async (sessionId, expectedTurnId) => {
+): (
+  sessionId: string,
+  target?: { readonly expectedTurnId?: string; readonly expectedAdmissionId?: string },
+) => Promise<void> {
+  return async (sessionId, target = {}) => {
+    let expectedTurnId = target.expectedTurnId;
+    if (target.expectedAdmissionId) {
+      const observed = await deps.observer.snapshot(sessionId);
+      const root = observed.rootTurn;
+      const entry = [...observed.queue.steering, ...observed.queue.followup].find(
+        (candidate) => candidate.messageId === target.expectedAdmissionId,
+      );
+      if (entry?.state === 'queued') {
+        await deps.client.retractQueueEntry({
+          sessionId,
+          entryId: entry.entryId,
+          retractId: newId(),
+        });
+        deps.emitSessionsChanged('status-change', sessionId);
+        return;
+      }
+      if (
+        root &&
+        !isTerminalStatus(root.status) &&
+        (root.turnId === target.expectedAdmissionId ||
+          observed.rootTurnSourceMessageIds?.includes(target.expectedAdmissionId) === true ||
+          entry?.state === 'in_flight')
+      ) {
+        expectedTurnId = root.turnId;
+      } else {
+        throw new Error('Host admission outcome is unknown');
+      }
+    }
     if (expectedTurnId) {
       const observed = (await deps.observer.snapshot(sessionId)).rootTurn;
       if (

@@ -62,19 +62,26 @@ import {
 import type { CompanionForkVisibilityEvent } from './quote-companion-visibility.js';
 
 type PendingAdmission = {
+  admissionId: string;
   messageId?: string;
   events: SessionEvent[];
   restoreTurnId: string | null;
   restoreLiveTurn: LiveTurnProjection | undefined;
   cancelled: boolean;
+  consumeOnAdmission?: () => void;
   stopPromise?: Promise<'confirmed' | 'unknown'>;
 };
 
-function admissionEventForMessage(
+type AdmissionOutcome =
+  | { kind: 'admitted'; event: SessionEvent }
+  | { kind: 'retracted' }
+  | { kind: 'pending' };
+
+function admissionOutcomeForMessage(
   events: readonly SessionEvent[],
   messageId: string,
-): SessionEvent | undefined {
-  return events.find(
+): AdmissionOutcome {
+  const admitted = events.find(
     (event) =>
       ((event.type === 'steering_message' || event.type === 'message_admitted') &&
         event.messageId === messageId) ||
@@ -83,6 +90,11 @@ function admissionEventForMessage(
           (entry) => entry.messageId === messageId && entry.state === 'in_flight',
         ) === true),
   );
+  if (admitted) return { kind: 'admitted', event: admitted };
+  const retracted = events.some(
+    (event) => event.type === 'message_retracted' && event.messageId === messageId,
+  );
+  return retracted ? { kind: 'retracted' } : { kind: 'pending' };
 }
 
 export interface UseQuoteCompanionInput {
@@ -281,6 +293,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       pendingAdmissionRef.current = null;
       activeTurnIdRef.current = turnId;
       ownTurnIdsRef.current.add(turnId);
+      admission.consumeOnAdmission?.();
       setError(null);
       setOwnTurnTick((tick) => tick + 1);
       if (!(options.preserveLiveTurn && liveTurnRef.current?.turnId === turnId)) {
@@ -365,17 +378,10 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         if (admission) {
           admission.events.push(event);
           if (admission.messageId) {
-            const admitted = admissionEventForMessage(admission.events, admission.messageId);
-            if (admitted && !admission.cancelled) {
-              bindAdmittedTurn(forkId, admitted.turnId, { preserveLiveTurn: true });
-            } else if (
-              event.type === 'queue_update' &&
-              event.steeringEntries &&
-              event.followupEntries &&
-              ![...event.steeringEntries, ...event.followupEntries].some(
-                (entry) => entry.messageId === admission.messageId,
-              )
-            ) {
+            const outcome = admissionOutcomeForMessage(admission.events, admission.messageId);
+            if (outcome.kind === 'admitted' && !admission.cancelled) {
+              bindAdmittedTurn(forkId, outcome.event.turnId, { preserveLiveTurn: true });
+            } else if (outcome.kind === 'retracted') {
               abandonAdmission(forkId, admission);
             }
           }
@@ -603,6 +609,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           const restoreTurnId = activeTurnIdRef.current;
           const restoreLiveTurn = liveTurnRef.current;
           const admission: PendingAdmission = {
+            admissionId: turnId,
             events: [],
             restoreTurnId,
             restoreLiveTurn,
@@ -617,7 +624,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         },
         onQuotesConsumed: () => onQuotesConsumed(quoteSnapshot),
       });
-      if (result.status === 'sent') {
+      if (result.status === 'sent' || result.status === 'pending') {
         const admission = sendAdmission;
         if (!admission || (admission.cancelled && pendingAdmissionRef.current !== admission)) {
           if (!pendingAdmissionRef.current) {
@@ -634,11 +641,23 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           }
         }
         if (admission) {
-          if (result.steered) {
+          if (result.status === 'pending') {
+            admission.consumeOnAdmission = () => onQuotesConsumed(quoteSnapshot);
             admission.messageId = result.messageId;
-            const admitted = admissionEventForMessage(admission.events, result.messageId);
-            if (admitted && !admission.cancelled) {
-              bindAdmittedTurn(result.forkId, admitted.turnId);
+            const outcome = admissionOutcomeForMessage(admission.events, result.messageId);
+            if (outcome.kind === 'admitted' && !admission.cancelled) {
+              bindAdmittedTurn(result.forkId, outcome.event.turnId);
+            } else if (outcome.kind === 'retracted') {
+              abandonAdmission(result.forkId, admission);
+              return false;
+            }
+          } else if (result.steered) {
+            admission.messageId = result.messageId;
+            const outcome = admissionOutcomeForMessage(admission.events, result.messageId);
+            if (outcome.kind === 'admitted' && !admission.cancelled) {
+              bindAdmittedTurn(result.forkId, outcome.event.turnId);
+            } else if (outcome.kind === 'retracted') {
+              abandonAdmission(result.forkId, admission);
             }
           } else {
             bindAdmittedTurn(result.forkId, result.turnId);
@@ -711,7 +730,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       setTurnInFlight(false);
     }
     if (admission) {
-      const stopPromise = sideChat.stop(id).then(
+      const stopPromise = sideChat.stop(id, admission.admissionId).then(
         () => 'confirmed' as const,
         () => {
           // A rejected Stop tells us nothing about whether the Host stopped
@@ -755,13 +774,14 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     ) {
       return false;
     }
+    const admissionId = crypto.randomUUID();
     const admission: PendingAdmission = {
+      admissionId,
       events: [],
       restoreTurnId: activeTurnIdRef.current,
       restoreLiveTurn: liveTurnRef.current,
       cancelled: false,
     };
-    const admissionId = crypto.randomUUID();
     pendingAdmissionRef.current = admission;
     activeTurnIdRef.current = null;
     try {
@@ -779,9 +799,12 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         bindAdmittedTurn(id, outcome.turnId, { preserveLiveTurn: true });
       } else {
         admission.messageId = outcome.messageId;
-        const admitted = admissionEventForMessage(admission.events, outcome.messageId);
-        if (admitted && !admission.cancelled) {
-          bindAdmittedTurn(id, admitted.turnId, { preserveLiveTurn: true });
+        const resolution = admissionOutcomeForMessage(admission.events, outcome.messageId);
+        if (resolution.kind === 'admitted' && !admission.cancelled) {
+          bindAdmittedTurn(id, resolution.event.turnId, { preserveLiveTurn: true });
+        } else if (resolution.kind === 'retracted') {
+          abandonAdmission(id, admission);
+          return false;
         }
       }
       setError(null);

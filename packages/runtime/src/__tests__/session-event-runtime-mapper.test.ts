@@ -625,20 +625,22 @@ const projectionRunHeader: AgentRunHeader = {
 
 describe('SessionEvent projection coverage', () => {
   test('keeps Host admission facts out of durable Runtime events', () => {
-    assert.throws(
-      () =>
-        mapSessionEventToRuntimeEvent(
-          {
-            type: 'message_admitted',
-            id: 'admission-1',
-            turnId: 'turn-1',
-            ts: 1,
-            messageId: 'message-1',
-          },
-          ctx,
-        ),
-      /message_admitted is not a backend event/,
-    );
+    for (const type of ['message_admitted', 'message_retracted'] as const) {
+      assert.throws(
+        () =>
+          mapSessionEventToRuntimeEvent(
+            {
+              type,
+              id: `${type}-1`,
+              turnId: 'turn-1',
+              ts: 1,
+              messageId: 'message-1',
+            },
+            ctx,
+          ),
+        new RegExp(`${type} is not a backend event`),
+      );
+    }
   });
 
   // The contract is over what a reader can actually meet: every mapped event

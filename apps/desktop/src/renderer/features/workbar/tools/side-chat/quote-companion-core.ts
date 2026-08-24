@@ -286,6 +286,7 @@ export async function ensureCompanionFork(
 export type CompanionTurnResult =
   | { status: 'sent'; forkId: string; turnId: string; steered?: false }
   | { status: 'sent'; forkId: string; turnId: string; steered: true; messageId: string }
+  | { status: 'pending'; forkId: string; messageId: string }
   | { status: 'disposed' }
   | { status: 'error'; code: CompanionErrorCode };
 
@@ -355,6 +356,9 @@ export async function performCompanionTurn(
   // run was started, so surface the error and keep the quotes for retry rather
   // than reporting success and hanging in the processing state.
   if (!result.ok) {
+    if (result.reason === 'outcome_unknown' && result.messageId) {
+      return { status: 'pending', forkId, messageId: result.messageId };
+    }
     return { status: 'error', code: 'send_rejected' };
   }
   deps.onQuotesConsumed();

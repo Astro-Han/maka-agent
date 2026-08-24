@@ -815,16 +815,30 @@ export interface MakaBridge {
           reason: 'skill_invocation_failed';
           skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
         }
+      | {
+          ok: false;
+          reason: 'outcome_unknown';
+          messageId: string;
+          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+        }
     >;
     stop(
       sessionId: string,
-      input?: { source?: 'stop_button'; expectedTurnId?: string },
+      input?: {
+        source?: 'stop_button';
+        expectedTurnId?: string;
+        expectedAdmissionId?: string;
+      },
     ): Promise<void>;
     steer(
       sessionId: string,
       text: string,
       admissionId?: string,
-    ): Promise<{ kind: 'queued'; messageId: string } | { kind: 'started'; turnId: string }>;
+    ): Promise<
+      | { kind: 'queued'; messageId: string }
+      | { kind: 'outcome_unknown'; messageId: string }
+      | { kind: 'started'; turnId: string }
+    >;
     enqueue(
       sessionId: string,
       placement: 'current_turn' | 'next_turn',

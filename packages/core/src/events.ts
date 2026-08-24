@@ -506,6 +506,7 @@ export type SessionEvent =
   | TokenUsageEvent
   | SteeringMessageEvent
   | MessageAdmittedEvent
+  | MessageRetractedEvent
   | QueueUpdateEvent
   | ProviderRetryEvent
   | ErrorEvent
@@ -1092,6 +1093,12 @@ export interface SteeringMessageEvent extends BaseEvent {
  */
 export interface MessageAdmittedEvent extends BaseEvent {
   type: 'message_admitted';
+  messageId: string;
+}
+
+/** Transient Host fact that a queued admission was explicitly removed. */
+export interface MessageRetractedEvent extends BaseEvent {
+  type: 'message_retracted';
   messageId: string;
 }
 
