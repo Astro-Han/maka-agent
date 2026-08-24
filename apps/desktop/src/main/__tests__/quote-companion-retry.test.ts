@@ -47,10 +47,12 @@ const SOURCE_SESSION = session('source-session');
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 type QueueUpdate = Extract<SessionEvent, { type: 'queue_update' }>;
@@ -437,13 +439,17 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
 });
 
 test('replays queued Side Conversation text after Host assigns the ticket to a successor Turn', async () => {
+  let admissionId: string | undefined;
   const pendingSend = deferred<{
     ok: false;
     reason: 'outcome_unknown';
     messageId: string;
   }>();
   const { container, emit, send } = await renderOwnershipProbe({
-    send: async () => pendingSend.promise,
+    send: async (_sessionId, command) => {
+      admissionId = command.turnId;
+      return pendingSend.promise;
+    },
   });
 
   let sendResult!: Promise<boolean>;
@@ -452,7 +458,14 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
     await Promise.resolve();
   });
   await act(async () => {
-    emit(messageAdmittedEvent('successor-admission', 'successor-root', 1, 'ticket-1'));
+    emit(
+      messageAdmittedEvent(
+        'successor-admission',
+        'successor-root',
+        1,
+        admissionId as string,
+      ),
+    );
     emit(queueUpdateEvent('successor-queue', 'successor-root', 2));
     emit(textDeltaEvent('successor-text', 'successor-root', 3, 'answer from successor'));
     await Promise.resolve();
@@ -462,7 +475,7 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
     pendingSend.resolve({
       ok: false,
       reason: 'outcome_unknown',
-      messageId: 'ticket-1',
+      messageId: admissionId as string,
     });
     assert.equal(await sendResult, true);
     await Promise.resolve();
@@ -529,34 +542,63 @@ test('clears a queued Side Conversation send when Host stop cancels the admissio
 });
 
 test('keeps a Side Conversation admission when Host stop outcome is unknown', async () => {
-  const pendingSend = deferred<{ ok: true; turnId: string }>();
-  const { container, send, stop } = await renderOwnershipProbe({
-    send: async () => pendingSend.promise,
-    stop: async () => {
-      throw new Error('Host stop result is unknown');
+  let admissionId: string | undefined;
+  const pendingStop = deferred<void>();
+  const { container, emit, send, stop } = await renderOwnershipProbe({
+    send: async (_sessionId, command) => {
+      admissionId = command.turnId;
+      return {
+        ok: false as const,
+        reason: 'outcome_unknown' as const,
+        messageId: admissionId as string,
+      };
     },
+    stop: async () => pendingStop.promise,
   });
 
-  let sendResult!: Promise<boolean>;
   await act(async () => {
-    sendResult = send('keep this admission');
+    assert.equal(await send('keep this admission'), true);
+    await Promise.resolve();
+  });
+  let stopResult!: Promise<void>;
+  await act(async () => {
+    stopResult = stop();
     await Promise.resolve();
   });
   await act(async () => {
-    await stop();
+    emit(
+      messageAdmittedEvent(
+        'admitted-during-unknown-stop',
+        'admitted-after-unknown-stop',
+        1,
+        admissionId as string,
+      ),
+    );
+    emit(
+      textDeltaEvent(
+        'text-during-unknown-stop',
+        'admitted-after-unknown-stop',
+        2,
+        'answer',
+      ),
+    );
     await Promise.resolve();
   });
-
-  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
   await act(async () => {
-    pendingSend.resolve({ ok: true, turnId: 'admitted-after-unknown-stop' });
-    assert.equal(await sendResult, true);
+    pendingStop.reject(new Error('Host stop result is unknown'));
+    await stopResult;
     await Promise.resolve();
   });
+  await waitUntil(
+    () =>
+      container.firstElementChild?.getAttribute('data-live-turn-id') ===
+      'admitted-after-unknown-stop',
+  );
   assert.equal(
     container.firstElementChild?.getAttribute('data-live-turn-id'),
     'admitted-after-unknown-stop',
   );
+  assert.equal(container.firstElementChild?.getAttribute('data-live-text'), 'answer');
 });
 
 test('stops a bound Side Conversation by its exact Host Turn identity', async () => {
@@ -579,6 +621,7 @@ test('stops a bound Side Conversation by its exact Host Turn identity', async ()
 });
 
 test('releases a queued Side Conversation admission from the Host queue retract', async () => {
+  let admissionId: string | undefined;
   const pendingSend = deferred<{
     ok: true;
     steered: true;
@@ -586,11 +629,15 @@ test('releases a queued Side Conversation admission from the Host queue retract'
     messageId: string;
   }>();
   const { container, emit, send } = await renderOwnershipProbe({
-    send: async () => pendingSend.promise,
+    send: async (_sessionId, command) => {
+      admissionId = command.turnId;
+      return pendingSend.promise;
+    },
   });
 
+  let sendResult!: Promise<boolean>;
   await act(async () => {
-    void send('retract this queued send');
+    sendResult = send('retract this queued send');
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
@@ -601,20 +648,21 @@ test('releases a queued Side Conversation admission from the Host queue retract'
       id: 'retracted-admission',
       turnId: 'old-turn',
       ts: 1,
-      messageId: 'retracted-message',
+      messageId: admissionId as string,
       outcome: 'retracted',
     });
     await Promise.resolve();
   });
-  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
 
   await act(async () => {
     pendingSend.resolve({
       ok: true,
       steered: true,
       turnId: 'not-the-owner',
-      messageId: 'retracted-message',
+      messageId: admissionId as string,
     });
+    assert.equal(await sendResult, false);
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');

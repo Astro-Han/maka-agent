@@ -744,6 +744,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
             activeTurnIdRef.current = admission.restoreTurnId;
             setLiveTurn(admission.restoreLiveTurn);
             setTurnInFlight(true);
+            resolveAdmission(id, admission, admission.messageId, true);
           }
           stopRequestedRef.current = false;
           return 'unknown' as const;
@@ -762,7 +763,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       stopRequestedRef.current = false;
       // best-effort; the terminal event still reconciles state
     }
-  }, [abandonAdmission, sideChat]);
+  }, [abandonAdmission, resolveAdmission, sideChat]);
 
   const steer = useCallback(async (text: string): Promise<boolean> => {
     const id = companionIdRef.current;
