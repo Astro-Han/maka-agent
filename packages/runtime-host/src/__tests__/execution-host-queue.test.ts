@@ -298,6 +298,29 @@ test('a Host crash after queue admission recovers the durable successor once', a
   });
 });
 
+test('restart replays an atomically admitted root without duplicating its transcript', async () => {
+  await withExecutionRoot(async (fixture) => {
+    const turnId = randomUUID();
+    const messageId = randomUUID();
+    const content = { text: 'recover the root after admission before Run creation' };
+    await fixture.seedAtomicRootAdmissionWithoutRun({ turnId, messageId, content });
+
+    const host = await fixture.startHost();
+    const client = await connectClient(fixture.root);
+    const terminal = await waitForTerminalTurn(client, fixture.sessionId, turnId);
+    assert.equal(terminal.status, 'completed');
+    await client.close();
+    await fixture.stopHost(host);
+
+    const ledger = await fixture.readTurn(turnId);
+    assert.deepEqual(
+      ledger.userMessages.filter((message) => message.id === messageId).map((message) => message.id),
+      [messageId],
+    );
+    assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
+  });
+});
+
 test('concurrent root admission for one Session has a single winner', async () => {
   await withExecutionRoot(async (fixture) => {
     const host = await fixture.startHost();

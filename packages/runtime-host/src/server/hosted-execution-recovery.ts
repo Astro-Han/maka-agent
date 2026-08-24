@@ -145,7 +145,16 @@ export async function prepareHostedExecutionRecovery(
         continue;
       }
       if (!run) {
-        if (rootUserMessages.length > 0 || messageIdOwner) {
+        if (executionContract.pendingWithoutRun === 'root_replay') {
+          verifyOrRecoverUserMessage(
+            admission,
+            rootUserMessages,
+            messageIdOwner,
+            missingMessages,
+            messageIndex,
+            false,
+          );
+        } else if (rootUserMessages.length > 0 || messageIdOwner) {
           throw new Error(`Admitted Turn ${admission.turnId} has a UserMessage but no Run`);
         }
         replayAdmissions.push(admission);
@@ -263,6 +272,7 @@ function verifyOrRecoverUserMessage(
   messageIdOwner: StoredMessage | undefined,
   missingMessages: RecoveryUserMessage[],
   index: RecoveryMessageIndex,
+  materializeMissing = true,
 ): void {
   if (rootUserMessages.length > 1) {
     throw new Error(`Admitted Turn ${admission.turnId} has multiple UserMessages`);
@@ -285,6 +295,7 @@ function verifyOrRecoverUserMessage(
   if (messageIdOwner) {
     throw new Error(`Admitted Turn ${admission.turnId} reuses another message identity`);
   }
+  if (!materializeMissing) return;
   const recoveredMessage = recoveryUserMessage(admission);
   missingMessages.push(recoveredMessage);
   indexRecoveryMessage(index, recoveredMessage);
