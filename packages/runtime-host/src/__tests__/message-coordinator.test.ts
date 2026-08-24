@@ -2474,6 +2474,7 @@ function memoryMessageLifecycleStore(
             (state === 'accepted' || state === 'handed_off'),
         )
         .map(({ admission }) => admission),
+    rebindMessageAdmissionTranscript: async () => undefined,
     updateMessageAdmission: async (admission) => {
       const existing = admissions.get(admission.messageId);
       if (!existing) throw new Error(`Missing admission ${admission.messageId}`);

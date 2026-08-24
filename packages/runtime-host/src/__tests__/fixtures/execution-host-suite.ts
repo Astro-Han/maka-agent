@@ -1000,6 +1000,20 @@ export class ExecutionFixture {
     }
   }
 
+  async readSessionUserMessages(): Promise<Array<Extract<StoredMessage, { type: 'user' }>>> {
+    const reader = await acquireReader(this.capability);
+    let stores: Awaited<ReturnType<typeof openInteractiveExecutionStoresForRead>> | undefined;
+    try {
+      stores = await openInteractiveExecutionStoresForRead(reader.lease);
+      return (await stores.sessionStore.readMessages(this.sessionId)).filter(
+        (message): message is Extract<StoredMessage, { type: 'user' }> => message.type === 'user',
+      );
+    } finally {
+      await stores?.sessionStore.close?.();
+      await reader.close();
+    }
+  }
+
   async readAdmissionChain() {
     const owner = await tryAcquireInteractiveRootOwner(this.capability);
     assert.ok(owner);

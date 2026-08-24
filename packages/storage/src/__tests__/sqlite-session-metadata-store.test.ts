@@ -327,6 +327,25 @@ describe('SqliteSessionMetadataStore', () => {
         })),
         [{ id: 'message-followup', turnId: 'turn-current' }],
       );
+      await store.rebindMessageAdmissionTranscript({
+        sessionId: 'session-followup-admission',
+        messageIds: ['message-followup'],
+        turnId: 'turn-successor',
+        previousRootTurnId: 'turn-current',
+      });
+      await store.rebindMessageAdmissionTranscript({
+        sessionId: 'session-followup-admission',
+        messageIds: ['message-followup'],
+        turnId: 'turn-successor',
+        previousRootTurnId: 'turn-current',
+      });
+      assert.deepEqual(
+        (await store.readMessages('session-followup-admission')).map((message) => ({
+          id: message.id,
+          turnId: message.turnId,
+        })),
+        [{ id: 'message-followup', turnId: 'turn-successor' }],
+      );
     } finally {
       store.close();
     }

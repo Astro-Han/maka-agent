@@ -413,6 +413,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           sessionId,
           turnId: admission.turnId,
           runId: admission.runId,
+          previousRootTurnId: admission.previousRootTurnId,
           messageIds: admission.sourceMessages.map((source) => source.messageId),
         });
         return this.prepareAdmittedTurn(
@@ -1084,6 +1085,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           sessionId: input.sessionId,
           turnId,
           runId,
+          previousRootTurnId: admitted.admission.previousRootTurnId,
           messageIds: [input.sourceMessage.messageId],
         });
         const disposition = await this.prepareAdmittedTurn(
@@ -1146,6 +1148,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           sessionId: input.sessionId,
           turnId,
           runId: admitted.admission.runId,
+          previousRootTurnId: admitted.admission.previousRootTurnId,
           messageIds: input.sources.map((source) => source.messageId),
         });
         const disposition = await this.prepareAdmittedTurn(
@@ -2009,9 +2012,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       userMessageId: admission.userMessageId,
       execution: admission.execution,
     });
-    const initialUserMessagesMaterialized =
-      admission.sourceMessages.length > 0 &&
-      admission.sourceMessages.every((source) => source.disposition === 'turn_started');
+    const initialUserMessagesMaterialized = admission.sourceMessages.length > 0;
     if (initialUserMessagesMaterialized) {
       await this.manager.materializeRootSourceMessages({
         sessionId: input.sessionId,
@@ -2449,6 +2450,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       sessionId: batch.sessionId,
       turnId,
       runId: admitted.admission.runId,
+      previousRootTurnId: admitted.admission.previousRootTurnId,
       messageIds: batch.sources.map((source) => source.messageId),
     });
 

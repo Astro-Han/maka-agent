@@ -539,6 +539,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     sessionId: string;
     turnId: string;
     runId: string;
+    previousRootTurnId: string | null;
     messageIds: readonly string[];
   }): Promise<void> {
     const handoff: string[] = [];
@@ -566,6 +567,12 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         );
       }
     }
+    await this.#lifecycle.rebindMessageAdmissionTranscript({
+      sessionId: input.sessionId,
+      messageIds: [...new Set(input.messageIds)],
+      turnId: input.turnId,
+      previousRootTurnId: input.previousRootTurnId,
+    });
     await this.#lifecycle.markMessagesHandedOff(input.sessionId, handoff);
   }
 

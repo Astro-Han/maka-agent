@@ -237,9 +237,23 @@ test('steering becomes durable and ordered followups automatically start the nex
     assert.ok(followupTurnId);
     const followupLedger = await fixture.readTurn(followupTurnId);
     const expectedQuotes = followupSources.flatMap((source) => source.content.quotes ?? []);
-    assert.equal(followupLedger.userMessages.length, 1);
-    assert.deepEqual(followupLedger.userMessages[0]?.quotes, expectedQuotes);
+    assert.equal(followupLedger.userMessages.length, followupSources.length);
+    assert.deepEqual(
+      followupLedger.userMessages.flatMap((message) => message.quotes ?? []),
+      expectedQuotes,
+    );
     assert.deepEqual(userRuntimeContent(followupLedger.runtimeEvents)?.quotes, expectedQuotes);
+    const sessionUserMessages = await fixture.readSessionUserMessages();
+    for (const source of followupSources) {
+      assert.equal(
+        sessionUserMessages.filter((message) => message.id === source.messageId).length,
+        1,
+      );
+    }
+    assert.equal(
+      sessionUserMessages.filter((message) => message.turnId === followupTurnId).length,
+      followupSources.length,
+    );
   });
 });
 

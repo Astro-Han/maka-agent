@@ -102,6 +102,7 @@ import {
   type MessageLifecycleState,
   type PendingMessageAdmission,
 } from './message-receipt-store.js';
+import { messageContentsEqual, normalizeMessageContent } from '@maka/core/events';
 import {
   type AgentGraphIntentAdmissionSnapshot,
   type AgentGraphTimelineMetadataSnapshot,
@@ -1740,6 +1741,97 @@ export class SqliteSessionMetadataStore {
         throw new SessionMetadataConflictError('Invalid Message admission lifecycle state');
       }
       return row.lifecycle_state;
+    });
+  }
+
+  async rebindMessageAdmissionTranscript(input: {
+    sessionId: string;
+    messageIds: readonly string[];
+    turnId: string;
+    previousRootTurnId: string | null;
+  }): Promise<void> {
+    this.assertOpen();
+    assertSafeSessionId(input.sessionId);
+    assertSafeSessionId(input.turnId);
+    if (input.previousRootTurnId !== null) {
+      assertSafeSessionId(input.previousRootTurnId);
+    }
+    const unique = [...new Set(input.messageIds)];
+    for (const messageId of unique) assertSafeSessionId(messageId);
+    this.transaction(() => {
+      for (const messageId of unique) {
+        const admissionRow = this.db
+          .prepare(
+            `
+            SELECT turn_id, run_id, message_id, content_json, model_content_json,
+              submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+            FROM message_admissions
+            WHERE session_id = ? AND message_id = ?
+          `,
+          )
+          .get(input.sessionId, messageId) as MessageAdmissionRow | undefined;
+        if (!admissionRow) {
+          throw new SessionMetadataConflictError('Message admission does not exist');
+        }
+        const admission = decodeMessageAdmissionRow(input.sessionId, admissionRow);
+        if (
+          admission.lifecycleState !== 'accepted' &&
+          admission.lifecycleState !== 'handed_off' &&
+          admission.lifecycleState !== 'executed'
+        ) {
+          throw new SessionMetadataConflictError('Message admission is already cancelled');
+        }
+        const rows = this.db
+          .prepare(
+            `
+            SELECT message.sequence, message.record_json, payload.record_bytes, payload.sha256
+            FROM session_messages AS message
+            LEFT JOIN session_message_payloads AS payload
+              ON payload.session_id = message.session_id AND payload.sequence = message.sequence
+            WHERE message.session_id = ? AND message.message_id = ?
+          `,
+          )
+          .all(input.sessionId, messageId) as Array<{
+          sequence?: unknown;
+          record_json?: unknown;
+          record_bytes?: unknown;
+          sha256?: unknown;
+        }>;
+        if (rows.length !== 1) {
+          throw new SessionMetadataConflictError(
+            rows.length === 0
+              ? 'Message admission transcript is missing'
+              : 'Message admission transcript identity is ambiguous',
+          );
+        }
+        const sequence = rows[0]?.sequence;
+        if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence)) {
+          throw new SessionMetadataConflictError('Invalid Message transcript sequence');
+        }
+        const row = rows[0]!;
+        const recordJson = readStoredMessageRecordJson(this.db, input.sessionId, sequence, row);
+        const message = decodeStoredMessage(JSON.parse(recordJson) as unknown);
+        if (
+          message.type !== 'user' ||
+          message.id !== messageId ||
+          !messageContentsEqual(normalizeMessageContent(message), admission.admission.content)
+        ) {
+          throw new SessionMetadataConflictError('Message admission transcript identity conflict');
+        }
+        if (message.turnId === input.turnId) continue;
+        if (
+          input.previousRootTurnId === null ||
+          message.turnId !== input.previousRootTurnId
+        ) {
+          throw new SessionMetadataConflictError('Message admission transcript Turn conflict');
+        }
+        const rebound = decodeCanonicalMessage({ ...message, turnId: input.turnId });
+        this.db
+          .prepare(
+            'UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?',
+          )
+          .run(JSON.stringify(rebound), input.sessionId, sequence);
+      }
     });
   }
 

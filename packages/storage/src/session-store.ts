@@ -887,6 +887,17 @@ class SqliteSessionStore implements SessionAuthorityStore {
     return this.metadata.listUnsettledMessageAdmissions(sessionId);
   }
 
+  async rebindMessageAdmissionTranscript(input: {
+    sessionId: string;
+    messageIds: readonly string[];
+    turnId: string;
+    previousRootTurnId: string | null;
+  }): Promise<void> {
+    await this.ensureReady();
+    await this.metadata.rebindMessageAdmissionTranscript(input);
+    for (const listener of this.transcriptChangeListeners) listener(input.sessionId);
+  }
+
   async readMessageLifecycleState(
     sessionId: string,
     messageId: string,
