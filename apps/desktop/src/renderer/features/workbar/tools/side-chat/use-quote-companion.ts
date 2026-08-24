@@ -281,6 +281,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       pendingAdmissionRef.current = null;
       activeTurnIdRef.current = turnId;
       ownTurnIdsRef.current.add(turnId);
+      setError(null);
       setOwnTurnTick((tick) => tick + 1);
       if (!(options.preserveLiveTurn && liveTurnRef.current?.turnId === turnId)) {
         setLiveTurn(armLiveTurn(turnId));
@@ -349,10 +350,13 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         const admission = pendingAdmissionRef.current;
         if (event.type === 'error' && event.recoverable) {
           if (admission) {
-            abandonAdmission(forkId, admission, copyRef.current.errors.sendFailed);
-          } else {
+            // Observation failure does not prove whether Host admitted the
+            // dispatched command. Keep its identity until Host events or the
+            // command result provide an authoritative outcome.
             setError(copyRef.current.errors.sendFailed);
+            return;
           }
+          setError(copyRef.current.errors.sendFailed);
           const retry = Promise.reject(new Error(event.message));
           void retry.catch(() => undefined);
           subscriptionReadyRef.current = retry;

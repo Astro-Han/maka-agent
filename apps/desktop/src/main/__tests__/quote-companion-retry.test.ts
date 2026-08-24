@@ -438,14 +438,6 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
     await Promise.resolve();
   });
   await act(async () => {
-    eventHandler?.(queueUpdateEvent('queued', 'old-root', 1));
-    eventHandler?.(completeEvent('old-root-terminal', 'old-root', 2));
-    eventHandler?.(messageAdmittedEvent('successor-admission', 'successor-root', 3, 'ticket-1'));
-    eventHandler?.(textDeltaEvent('successor-text', 'successor-root', 4, 'answer from successor'));
-    await Promise.resolve();
-  });
-
-  await act(async () => {
     pendingSend.resolve({
       ok: true,
       steered: true,
@@ -453,6 +445,13 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
       messageId: 'ticket-1',
     });
     assert.equal(await sendResult, true);
+    await Promise.resolve();
+  });
+
+  await act(async () => {
+    eventHandler?.(messageAdmittedEvent('successor-admission', 'successor-root', 1, 'ticket-1'));
+    eventHandler?.(queueUpdateEvent('successor-queue', 'successor-root', 2));
+    eventHandler?.(textDeltaEvent('successor-text', 'successor-root', 3, 'answer from successor'));
     await Promise.resolve();
   });
 
@@ -610,89 +609,49 @@ test('releases a queued Side Conversation admission from the Host queue retract'
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
 });
 
-test('fails and re-observes a Side Conversation after a recoverable Host subscription error', async () => {
+test('keeps the same Side Conversation admission across a recoverable subscription error', async () => {
   let send: ((text: string) => Promise<boolean>) | undefined;
-  const handlers: Array<(event: SessionEvent) => void> = [];
+  let eventHandler: ((event: SessionEvent) => void) | undefined;
   let subscriptionCount = 0;
-  let sendCalls = 0;
   const pendingSend = deferred<{ ok: true; turnId: string }>();
-  const pendingRetry = deferred<{ ok: true; turnId: string }>();
   const { container } = await renderProbe(
     {
       subscribeEvents: (_sessionId, handler, onSeeded) => {
         subscriptionCount += 1;
-        handlers.push(handler);
+        eventHandler = handler;
         onSeeded?.();
         return () => undefined;
       },
-      send: async () => {
-        sendCalls += 1;
-        return sendCalls === 1
-          ? pendingSend.promise
-          : pendingRetry.promise;
-      },
+      send: async () => pendingSend.promise,
     },
     { ownership: true, onSend: (value) => (send = value) },
   );
   assert.ok(send);
   assert.equal(subscriptionCount, 1);
 
-  let failedResult: Promise<boolean> | undefined;
+  let sendResult: Promise<boolean> | undefined;
   await act(async () => {
-    failedResult = send?.('fail with a recoverable stream error');
+    sendResult = send?.('survive a recoverable stream error');
     await Promise.resolve();
   });
   await waitUntil(() => container.firstElementChild?.getAttribute('data-processing') === 'true');
   await act(async () => {
-    handlers[0]?.(recoverableErrorEvent('recoverable-subscription-error', 'old-turn', 1));
+    eventHandler?.(recoverableErrorEvent('recoverable-subscription-error', 'old-turn', 1));
     await Promise.resolve();
   });
-  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
-  assert.notEqual(container.firstElementChild?.getAttribute('data-error'), '');
-
-  let reobserveResult: Promise<boolean> | undefined;
-  await act(async () => {
-    reobserveResult = send?.('re-observe before retrying');
-    assert.equal(await reobserveResult, false);
-    await Promise.resolve();
-  });
-  assert.equal(subscriptionCount, 2);
-
-  let retryResult: Promise<boolean> | undefined;
-  await act(async () => {
-    retryResult = send?.('retry after re-observing');
-    await Promise.resolve();
-  });
-  assert.equal(sendCalls, 2);
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+  assert.equal(subscriptionCount, 1);
 
   await act(async () => {
     pendingSend.resolve({ ok: true, turnId: 'late-turn' });
-    assert.equal(await failedResult, false);
-    await Promise.resolve();
-  });
-  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
-
-  await act(async () => {
-    pendingRetry.resolve({ ok: true, turnId: 'retry-after-resubscribe' });
-    assert.equal(await retryResult, true);
+    assert.equal(await sendResult, true);
     await Promise.resolve();
   });
   await act(async () => {
-    handlers[1]?.(completeEvent('retry-complete', 'retry-after-resubscribe', 2));
+    eventHandler?.(completeEvent('late-complete', 'late-turn', 2));
     await Promise.resolve();
   });
   await waitUntil(() => container.firstElementChild?.getAttribute('data-processing') === 'false');
-
-  await act(async () => {
-    handlers[1]?.(recoverableErrorEvent('idle-recoverable-error', 'retry-after-resubscribe', 3));
-    await Promise.resolve();
-  });
-  await act(async () => {
-    assert.equal(await send?.('re-observe while idle'), false);
-    await Promise.resolve();
-  });
-  assert.equal(subscriptionCount, 3);
 });
 
 test('cancels a pending Side Conversation steer after Host stop without losing the old Turn', async () => {

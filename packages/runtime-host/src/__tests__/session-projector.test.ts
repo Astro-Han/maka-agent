@@ -89,14 +89,36 @@ test('emits the Host admission fact when a queued message enters a successor Tur
     [{ turnId: 'turn-1', messageId: 'rejoined-ticket' }],
   );
 
+  const previous = snapshot({
+    queue: {
+      hostEpoch: 'host-1',
+      queueRevision: 1,
+      steering: [
+        {
+          entryId: 'entry-1',
+          messageId: 'ticket-1',
+          content: { text: 'continue in successor' },
+          placement: 'current_turn',
+          state: 'in_flight',
+        },
+      ],
+      followup: [],
+    },
+  });
   const projector = new RuntimeHostSessionProjector(
-    snapshot(),
-    createRuntimeHostSessionProjectionSeed([], snapshot()),
+    previous,
+    createRuntimeHostSessionProjectionSeed([], previous),
     () => 10,
   );
   const next = withRootSourceMessageIds(
     snapshot({
       projectionRevision: 2,
+      queue: {
+        hostEpoch: 'host-1',
+        queueRevision: 2,
+        steering: [],
+        followup: [],
+      },
       rootTurn: {
         sessionId: 'session-1',
         turnId: 'turn-2',
@@ -114,6 +136,13 @@ test('emits the Host admission fact when a queued message enters a successor Tur
     sequence: 1,
     snapshot: next,
   }).events;
+
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === 'message_admitted' || event.type === 'queue_update')
+      .map((event) => event.type),
+    ['message_admitted', 'queue_update'],
+  );
 
   assert.deepEqual(
     events

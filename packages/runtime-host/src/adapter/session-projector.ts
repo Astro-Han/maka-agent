@@ -363,6 +363,7 @@ export class RuntimeHostSessionProjector {
       events.push(...projectRuntimeHostInteractionRequest(interaction, this.#now()));
     }
     const root = next.rootTurn;
+    events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
     if (root && queueChanged(previousSnapshot.queue, next.queue)) {
       for (const entry of newlyInFlight(previousSnapshot.queue, next.queue)) {
         events.push({
@@ -379,7 +380,6 @@ export class RuntimeHostSessionProjector {
     const previousRoot = previousSnapshot.rootTurn;
     const startedTurn =
       root && (!previousRoot || root.runId !== previousRoot.runId) ? root : undefined;
-    events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
     if (startedTurn) this.#accumulators.clear();
     const retry = liveProviderRetryEvent(previousRoot, root, this.#now());
     if (retry) events.push(retry);
