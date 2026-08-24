@@ -161,6 +161,7 @@ export interface AgentRunInput {
   commitContinuationStart?: (startedAt: number) => Promise<{ startEventId: string; created: true }>;
   hooks: AgentRunHooks;
   recordSessionMessages?: boolean;
+  recordInitialUserMessage?: boolean;
   invocationId?: string;
   /** Pre-resolved snapshot used by continuations; normal turns derive it from header + input. */
   effectiveOrchestration?: EffectiveOrchestration;
@@ -667,7 +668,9 @@ export class AgentRun {
           : {}),
         ...(this.input.userInput.origin ? { origin: this.input.userInput.origin } : {}),
       });
-      await appendUserMessageOnce(this.input.store, this.sessionId, userMsg);
+      if (this.input.recordInitialUserMessage !== false) {
+        await appendUserMessageOnce(this.input.store, this.sessionId, userMsg);
+      }
       await this.input.hooks.appendTurnState(this.sessionId, this.turnId, 'running', this.lineage);
       this.lastTs = userMessageTs;
     } else {
