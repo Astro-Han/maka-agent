@@ -1984,7 +1984,9 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       userMessageId: admission.userMessageId,
       execution: admission.execution,
     });
-    const initialUserMessagesMaterialized = admission.sourceMessages.length > 0;
+    const initialUserMessagesMaterialized =
+      admission.sourceMessages.length > 0 &&
+      admission.sourceMessages.every((source) => source.disposition === 'turn_started');
     if (initialUserMessagesMaterialized) {
       await this.manager.materializeRootSourceMessages({
         sessionId: input.sessionId,

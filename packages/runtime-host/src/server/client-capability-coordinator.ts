@@ -249,6 +249,11 @@ export class HostClientCapabilityCoordinator implements ClientCapabilityService 
     execution: RootExecutionDescriptor;
   }): Promise<void> {
     if (input.execution.kind !== 'external_message' || input.userMessageId === null) return;
+    // A live root already selected its Client capabilities at admission. Only
+    // cold recovery needs to rebuild a missing in-memory binding from the
+    // durable root contract; reselecting here would discard the active
+    // connection/turn-affine binding and can make providers ambiguous.
+    if (this.#sessions.has(input.sessionId)) return;
     await this.#activation.runMutation(async () => {
       const selection = this.#selectSessionState(input.sessionId, '', 'degrade');
       if (!selection.ok) throw new Error(selection.message);

@@ -38,6 +38,8 @@ export interface RuntimeLedgerRepairDeps {
   runStore: AgentRunStore;
   runtimeEventStore: RuntimeEventStore;
   readMessages(sessionId: string): Promise<StoredMessage[]>;
+  readPendingMessageIds?(sessionId: string): Promise<readonly string[]>;
+  readMessageLifecycleState?(sessionId: string, messageId: string): Promise<string | undefined>;
   appendMessage(sessionId: string, message: StoredMessage): Promise<void>;
   appendTurnState(
     sessionId: string,
@@ -89,11 +91,24 @@ export class RuntimeLedgerRepair {
         this.deps.readMessages(sessionId),
         this.deps.runStore.listSessionRuns(sessionId),
       ]);
+      const pendingMessageIds = new Set((await this.deps.readPendingMessageIds?.(sessionId)) ?? []);
+      if (this.deps.readMessageLifecycleState) {
+        const lifecycleStates = await Promise.all(
+          messages.map(async (message) => ({
+            messageId: message.id,
+            state: await this.deps.readMessageLifecycleState!(sessionId, message.id),
+          })),
+        );
+        for (const { messageId, state } of lifecycleStates) {
+          if (state !== undefined) pendingMessageIds.add(messageId);
+        }
+      }
+      const ledgerMessages = messages.filter((message) => !pendingMessageIds.has(message.id));
       const inlineRunsByTurn = new Map(
         runs.filter(isSessionInlineRun).map((run) => [run.turnId, run] as const),
       );
-      const messagesByTurn = groupMessagesByTurn(messages);
-      const turns = deriveTurnRecords(messages).filter((turn) =>
+      const messagesByTurn = groupMessagesByTurn(ledgerMessages);
+      const turns = deriveTurnRecords(ledgerMessages).filter((turn) =>
         (messagesByTurn.get(turn.turnId) ?? []).some((message) => message.type === 'user'),
       );
       if (turns.length === 0) return;

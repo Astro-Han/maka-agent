@@ -1842,9 +1842,16 @@ export class SqliteSessionMetadataStore {
       for (const messageId of unique) {
         const result = statement.run(sessionId, messageId);
         if (result.changes !== 1) {
-          throw new SessionMetadataConflictError(
-            'Message admission cancellation identity conflict',
-          );
+          const existing = this.db
+            .prepare(
+              'SELECT lifecycle_state FROM message_admissions WHERE session_id = ? AND message_id = ?',
+            )
+            .get(sessionId, messageId) as { lifecycle_state?: unknown } | undefined;
+          if (existing?.lifecycle_state !== 'cancelled') {
+            throw new SessionMetadataConflictError(
+              'Message admission cancellation identity conflict',
+            );
+          }
         }
       }
     });

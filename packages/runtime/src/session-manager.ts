@@ -671,6 +671,11 @@ export interface SessionStore {
   list(filter?: SessionListFilter): Promise<SessionSummary[]>;
   readHeader(sessionId: string): Promise<SessionHeader>;
   readMessages(sessionId: string): Promise<StoredMessage[]>;
+  listMessageAdmissions?(sessionId: string): Promise<readonly { messageId: string }[]>;
+  readMessageLifecycleState?(
+    sessionId: string,
+    messageId: string,
+  ): Promise<'accepted' | 'handed_off' | 'executed' | 'cancelled' | undefined>;
   readMessagesSnapshot?(sessionId: string): Promise<StoredMessage[]>;
   listTurns(sessionId: string): Promise<TurnRecord[]>;
   appendMessage(sessionId: string, m: StoredMessage): Promise<void>;
@@ -938,6 +943,12 @@ export class SessionManager {
         runStore: deps.runStore,
         runtimeEventStore: deps.runtimeEventStore,
         readMessages: (sessionId) => deps.store.readMessages(sessionId),
+        readPendingMessageIds: async (sessionId) =>
+          (await deps.store.listMessageAdmissions?.(sessionId))?.map(
+            ({ messageId }) => messageId,
+          ) ?? [],
+        readMessageLifecycleState: async (sessionId, messageId) =>
+          deps.store.readMessageLifecycleState?.(sessionId, messageId) ?? undefined,
         appendMessage: (sessionId, message) => deps.store.appendMessage(sessionId, message),
         appendTurnState: (sessionId, turnId, status, lineage, options) =>
           this.appendTurnState(sessionId, turnId, status, lineage, options),

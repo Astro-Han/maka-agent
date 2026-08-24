@@ -69,7 +69,7 @@ export async function prepareHostedExecutionRecovery(
       const run = runsById.get(admission.runId);
       const rootUserMessages = (
         messageIndex.userMessagesByTurnId.get(admission.turnId) ?? []
-      ).filter((message) => message.steeringEventId === undefined);
+      ).filter((message) => message.id === admission.userMessageId);
       const messageIdOwners = admission.userMessageId
         ? (messageIndex.messagesById.get(admission.userMessageId) ?? [])
         : [];
