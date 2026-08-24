@@ -1979,6 +1979,11 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     if (unavailableReason) {
       return completedStart(operationUnavailable(unavailableReason));
     }
+    await this.clientCapabilities?.bindDurableRoot({
+      sessionId: admission.sessionId,
+      userMessageId: admission.userMessageId,
+      execution: admission.execution,
+    });
     const initialUserMessagesMaterialized = admission.sourceMessages.length > 0;
     if (initialUserMessagesMaterialized) {
       await this.manager.materializeRootSourceMessages({
@@ -2308,29 +2313,13 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       active.turnId,
     );
     if (!admission || admission.sourceMessages.length === 0) return;
-    const events = await this.stores.agentRunStore.readEvents(active.sessionId, active.runId);
-    if (
-      !events.some(
-        (event) =>
-          event.type === 'provider_request_captured' ||
-          event.type === 'provider_request_attempt_recorded' ||
-          event.type === 'model_call_attempt_recorded',
-      )
-    ) {
-      return;
-    }
-    const executed = [] as string[];
-    for (const source of admission.sourceMessages) {
-      if (
-        (await this.stores.sessionStore.readMessageLifecycleState(
-          active.sessionId,
-          source.messageId,
-        )) === 'handed_off'
-      ) {
-        executed.push(source.messageId);
-      }
-    }
-    await this.messages.markMessagesExecuted(active.sessionId, executed);
+    await this.messages.settleMessagesAfterRoot({
+      sessionId: active.sessionId,
+      turnId: active.turnId,
+      runId: active.runId,
+      admittedAt: admission.admittedAt,
+      messageIds: admission.sourceMessages.map((source) => source.messageId),
+    });
   }
 
   private observeExecutionCompletion(

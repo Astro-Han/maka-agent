@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { buildMcpTools, mcpProxyToolName, type McpToolProvider } from '@maka/runtime/mcp-tools';
 import { type MakaTool } from '@maka/runtime/tool-runtime';
+import type { RootExecutionDescriptor } from '@maka/core/agent-run';
 import { type ToolGroup } from '@maka/runtime/tool-availability';
 import {
   type ClientCapabilityOffer,
@@ -239,6 +240,21 @@ export class HostClientCapabilityCoordinator implements ClientCapabilityService 
     if (!result.ok) {
       throw new Error(`Confirmed follow-up capability binding failed: ${result.message}`);
     }
+  }
+
+  /** Rebuild Session-scoped capability bindings from a durable root contract. */
+  async bindDurableRoot(input: {
+    sessionId: string;
+    userMessageId: string | null;
+    execution: RootExecutionDescriptor;
+  }): Promise<void> {
+    if (input.execution.kind !== 'external_message' || input.userMessageId === null) return;
+    await this.#activation.runMutation(async () => {
+      const selection = this.#selectSessionState(input.sessionId, '', 'degrade');
+      if (!selection.ok) throw new Error(selection.message);
+      this.#storeSessionState(input.sessionId, selection.state);
+      if (selection.modelToolsChanged) this.#onModelToolsChanged();
+    });
   }
 
   async #bindSession(

@@ -175,6 +175,13 @@ export interface HostMessageDurableProofReader {
     sessionId: string,
     messageId: string,
   ): Promise<ImmutableSteeringMessageProof | undefined>;
+  /** True only when the admitted root has a durable downstream provider proof. */
+  readProviderRequestProof?(input: {
+    sessionId: string;
+    turnId: string;
+    runId: string;
+    admittedAt: number;
+  }): Promise<boolean>;
 }
 
 export interface HostMessageCoordinatorOptions {
@@ -532,6 +539,34 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     await this.#lifecycle?.markMessagesExecuted(sessionId, messageIds);
   }
 
+  /**
+   * One settlement owner for both the normal terminal path and Host recovery.
+   * A queued message becomes Executed only after the durable root has recorded
+   * a provider request downstream of its admitted root contract.
+   */
+  async settleMessagesAfterRoot(input: {
+    sessionId: string;
+    turnId: string;
+    runId: string;
+    admittedAt: number;
+    messageIds: readonly string[];
+  }): Promise<void> {
+    if (!this.#lifecycle || input.messageIds.length === 0) return;
+    if (!this.#durableProof.readProviderRequestProof) return;
+    const proved = await this.#durableProof.readProviderRequestProof(input);
+    if (!proved) return;
+    const executed: string[] = [];
+    for (const messageId of input.messageIds) {
+      if (
+        (await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId)) ===
+        'handed_off'
+      ) {
+        executed.push(messageId);
+      }
+    }
+    await this.#lifecycle.markMessagesExecuted(input.sessionId, executed);
+  }
+
   async cancelMessages(sessionId: string, messageIds: readonly string[]): Promise<void> {
     await this.#lifecycle?.cancelMessageAdmissions(sessionId, messageIds);
   }
@@ -550,6 +585,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         );
         if (source) {
           await this.#lifecycle.markMessagesHandedOff(sessionId, [admission.messageId]);
+          await this.settleMessagesAfterRoot({
+            sessionId,
+            turnId: source.admission.turnId,
+            runId: source.admission.runId,
+            admittedAt: source.admission.admittedAt,
+            messageIds: [admission.messageId],
+          });
         } else {
           pending.push(admission);
         }
@@ -562,7 +604,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
             'Message recovery authority is unavailable',
           );
         }
-        await this.#sessionAdmission.run(sessionId, (admission) =>
+        const started = await this.#sessionAdmission.run(sessionId, (admission) =>
           this.#root.startRecoveredMessages!(
             {
               sessionId,
@@ -573,6 +615,11 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
             admission,
           ),
         );
+        if ('error' in started) {
+          throw new RuntimeMessageAuthorityInvariantError(
+            `Durable Message recovery failed: ${started.error}`,
+          );
+        }
         continue;
       }
       if (!this.#sessions.has(sessionId)) this.#state(sessionId);
