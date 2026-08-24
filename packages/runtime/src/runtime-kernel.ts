@@ -2429,7 +2429,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
           existing.type !== 'user' ||
           !messageContentsEqual(normalizeMessageContent(existing), message.content) ||
           (existing.turnId !== input.turnId &&
-            (message.disposition !== 'steering' && message.disposition !== 'followup' ||
+            ((message.disposition !== 'steering' && message.disposition !== 'followup') ||
               existing.turnId !== input.previousRootTurnId))
         ) {
           throw new Error(`Queued root source ${message.messageId} conflicts with its transcript`);

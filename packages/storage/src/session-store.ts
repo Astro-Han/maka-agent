@@ -80,10 +80,7 @@ import {
   type TurnStateMessage,
   type UserMessage,
 } from '@maka/core/session';
-import type {
-  MessageLifecycleStore,
-  PendingMessageAdmission,
-} from './message-receipt-store.js';
+import type { MessageLifecycleStore, PendingMessageAdmission } from './message-receipt-store.js';
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -861,7 +858,9 @@ class SqliteSessionStore implements SessionAuthorityStore {
     for (const listener of this.transcriptChangeListeners) listener(sessionId);
   }
 
-  async commitMessageAdmission(admission: PendingMessageAdmission): Promise<PendingMessageAdmission> {
+  async commitMessageAdmission(
+    admission: PendingMessageAdmission,
+  ): Promise<PendingMessageAdmission> {
     await this.ensureReady();
     const committed = await this.metadata.commitMessageAdmission(admission);
     for (const listener of this.transcriptChangeListeners) listener(admission.sessionId);

@@ -1609,11 +1609,14 @@ export class SqliteSessionMetadataStore {
           ...stored.content,
           steeringEventId: stored.messageId,
         });
-        const existingMessages = this.readMessagesWith(stored.sessionId, decodeStoredMessage).filter(
-          (candidate) => candidate.id === stored.messageId,
-        );
+        const existingMessages = this.readMessagesWith(
+          stored.sessionId,
+          decodeStoredMessage,
+        ).filter((candidate) => candidate.id === stored.messageId);
         if (existingMessages.length > 1) {
-          throw new SessionMetadataConflictError('Message admission transcript identity is ambiguous');
+          throw new SessionMetadataConflictError(
+            'Message admission transcript identity is ambiguous',
+          );
         }
         const existingMessage = existingMessages[0];
         if (existingMessage && !isDeepStrictEqual(existingMessage, message)) {
@@ -1784,7 +1787,9 @@ export class SqliteSessionMetadataStore {
         record_json?: unknown;
       }>;
       if (rows.length > 1) {
-        throw new SessionMetadataConflictError('Message admission transcript identity is ambiguous');
+        throw new SessionMetadataConflictError(
+          'Message admission transcript identity is ambiguous',
+        );
       }
       const json = JSON.stringify(message);
       if (rows.length === 0) {
@@ -1837,7 +1842,9 @@ export class SqliteSessionMetadataStore {
       for (const messageId of unique) {
         const result = statement.run(sessionId, messageId);
         if (result.changes !== 1) {
-          throw new SessionMetadataConflictError('Message admission cancellation identity conflict');
+          throw new SessionMetadataConflictError(
+            'Message admission cancellation identity conflict',
+          );
         }
       }
     });
@@ -1848,7 +1855,9 @@ export class SqliteSessionMetadataStore {
     assertSafeSessionId(sessionId);
     const unique = [...new Set(messageIds)];
     if (unique.length !== messageIds.length) {
-      throw new SessionMetadataConflictError('Message admission reorder contains duplicate identities');
+      throw new SessionMetadataConflictError(
+        'Message admission reorder contains duplicate identities',
+      );
     }
     for (const messageId of unique) assertSafeSessionId(messageId);
     this.transaction(() => {

@@ -1497,7 +1497,9 @@ export async function createExecutionRuntimeHostComposition(
               ),
             );
             await coordinator.recover();
-            await messages.recoverPendingAfterHostRestart(recoverySessions.map((session) => session.id));
+            await messages.recoverPendingAfterHostRestart(
+              recoverySessions.map((session) => session.id),
+            );
             rootRecoveryCompleted = true;
           },
         },

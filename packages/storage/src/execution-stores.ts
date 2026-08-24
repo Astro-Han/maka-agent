@@ -428,13 +428,16 @@ async function createExecutionStoresForWrite<K extends StorageRootKind, E extend
         run(() => sessionStore.appendMessage(sessionId, message)),
       appendMessages: (sessionId, messages) =>
         run(() => sessionStore.appendMessages(sessionId, messages)),
-      commitMessageAdmission: (admission) => run(() => sessionStore.commitMessageAdmission(admission)),
+      commitMessageAdmission: (admission) =>
+        run(() => sessionStore.commitMessageAdmission(admission)),
       readMessageAdmission: (sessionId, messageId) =>
         run(() => sessionStore.readMessageAdmission(sessionId, messageId)),
       readMessageLifecycleState: (sessionId, messageId) =>
         run(() => sessionStore.readMessageLifecycleState(sessionId, messageId)),
-      listMessageAdmissions: (sessionId) => run(() => sessionStore.listMessageAdmissions(sessionId)),
-      updateMessageAdmission: (admission) => run(() => sessionStore.updateMessageAdmission(admission)),
+      listMessageAdmissions: (sessionId) =>
+        run(() => sessionStore.listMessageAdmissions(sessionId)),
+      updateMessageAdmission: (admission) =>
+        run(() => sessionStore.updateMessageAdmission(admission)),
       reorderMessageAdmissions: (sessionId, messageIds) =>
         run(() => sessionStore.reorderMessageAdmissions(sessionId, messageIds)),
       cancelMessageAdmissions: (sessionId, messageIds) =>

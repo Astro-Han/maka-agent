@@ -2387,10 +2387,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     // provider is unavailable. Lost tools are omitted while ephemeral
     // capabilities bind to the Client that submitted this follow-up.
     if (initiatingConnectionId) {
-      await this.clientCapabilities?.bindConfirmedFollowup(
-        batch.sessionId,
-        initiatingConnectionId,
-      );
+      await this.clientCapabilities?.bindConfirmedFollowup(batch.sessionId, initiatingConnectionId);
     }
 
     const turnId = randomUUID();

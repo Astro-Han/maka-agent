@@ -240,7 +240,9 @@ test('production UDS admission commits one transcript before the root handoff', 
     await fixture.stopHost(host);
     const ledger = await fixture.readTurn(started.turnId);
     assert.deepEqual(
-      ledger.userMessages.filter((message) => message.id === messageId).map((message) => message.id),
+      ledger.userMessages
+        .filter((message) => message.id === messageId)
+        .map((message) => message.id),
       [messageId],
     );
     assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
@@ -285,7 +287,8 @@ test('a Host crash after queue admission recovers the durable successor once', a
       'durable successor was not recovered after the Host crash',
     );
     assert.equal(successor.kind, 'subscription.session_projection');
-    if (successor.kind !== 'subscription.session_projection' || !successor.snapshot.rootTurn) return;
+    if (successor.kind !== 'subscription.session_projection' || !successor.snapshot.rootTurn)
+      return;
     await waitForTerminalTurn(second, fixture.sessionId, successor.snapshot.rootTurn.turnId);
     await subscription.close();
     await probe.done;
