@@ -314,10 +314,13 @@ export function registerRuntimeHostSessionExecutionIpc(
       };
       let startResult;
       try {
-        startResult = await retryDispatchedCommand(
-          () => deps.client.startTurn(startInput),
-          () => deps.client.getSession(sessionId),
-        );
+        startResult =
+          command.intent === 'side_conversation'
+            ? await retryDispatchedCommand(
+                () => deps.client.startTurn(startInput),
+                () => deps.client.getSession(sessionId),
+              )
+            : await deps.client.startTurn(startInput);
       } catch (error) {
         // The renderer routes text at a session it sees as running to
         // `sessions:steer`, but its view can lag the Host: another window, a
@@ -338,25 +341,22 @@ export function registerRuntimeHostSessionExecutionIpc(
         ) {
           throw error;
         }
-        // The requested Turn id is the submission/admission ticket. If the
-        // busy fallback queues this message and a successor root consumes it,
-        // the Host can report ownership with the same identity.
-        const messageId = turnId;
+        // Side Conversation keeps its requested Turn id as the admission
+        // ticket so a successor root can report ownership with that identity.
+        // Ordinary sends retain the pre-existing independent message id.
+        const sideConversation = command.intent === 'side_conversation';
+        const messageId = sideConversation ? turnId : newId();
         const emptySkillInvocation = { loaded: [], failed: [], receipts: [] };
-        const submitted = await submitMessageWithReconnect(deps.client, {
+        const submitInput = {
           sessionId,
           messageId,
           content: startInput.content,
-          placement: "current_turn",
-        });
+          placement: 'current_turn' as const,
+        };
+        const submitted = sideConversation
+          ? await submitMessageWithReconnect(deps.client, submitInput)
+          : await deps.client.submitMessage(submitInput);
         if (!submitted) {
-          if (command.intent !== 'side_conversation') {
-            throw new RuntimeHostOperationError(
-              'turn.message.submit',
-              'outcome_unknown',
-              'Message disposition cannot be proven in this Host Epoch',
-            );
-          }
           return {
             ok: false as const,
             reason: 'outcome_unknown' as const,
@@ -383,7 +383,7 @@ export function registerRuntimeHostSessionExecutionIpc(
           ok: true as const,
           steered: true as const,
           turnId,
-          messageId,
+          ...(sideConversation ? { messageId } : {}),
           attachments,
           inlineReferences,
           skillInvocation: emptySkillInvocation,

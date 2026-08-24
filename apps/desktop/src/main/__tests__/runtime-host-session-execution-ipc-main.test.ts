@@ -612,7 +612,7 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
   assert.deepEqual(submits, [
     {
       sessionId: "session-1",
-      messageId: "turn-1",
+      messageId: "id-1",
       content: { text: "also check the tests", inlineReferences: [] },
       placement: "current_turn",
     },
@@ -621,7 +621,6 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
     ok: true,
     steered: true,
     turnId: "turn-1",
-    messageId: "turn-1",
     attachments: [],
     inlineReferences: [],
     skillInvocation: { loaded: [], failed: [], receipts: [] },
@@ -677,6 +676,7 @@ test("retries a dispatched normal send with its original Turn identity", async (
 
   const result = await ipc.invoke("sessions:send", "session-1", {
     type: "send",
+    intent: "side_conversation",
     text: "keep this Turn identity",
   });
 
@@ -702,6 +702,49 @@ test("retries a dispatched normal send with its original Turn identity", async (
   });
 });
 
+test("does not add admission retry semantics to an ordinary send", async () => {
+  let starts = 0;
+  let sessionQueries = 0;
+  const ipc = ipcHarness();
+  registerExecutionIpc(
+    {
+      client: executionClient({
+        getSession: async () => {
+          sessionQueries += 1;
+          return session();
+        },
+        startTurn: async () => {
+          starts += 1;
+          throw new RuntimeHostRequestInterruptedError(
+            "turn.start",
+            "command",
+            "dispatched",
+            "connection_lost",
+          );
+        },
+      }),
+      observer: unusedObserver(),
+      attachmentApprovals: createAttachmentApprovalRegistry(),
+      emitSessionsChanged() {},
+      stat: async () => ({ size: 0 }),
+      resizeImage: async (bytes) => bytes,
+      beforeStop() {},
+      newId: () => "turn-1",
+    },
+    ipc,
+  );
+
+  await assert.rejects(
+    ipc.invoke("sessions:send", "session-1", {
+      type: "send",
+      text: "preserve the ordinary send contract",
+    }),
+    RuntimeHostRequestInterruptedError,
+  );
+  assert.equal(starts, 1);
+  assert.equal(sessionQueries, 1, "only the initial Session lookup runs");
+});
+
 test("retries a dispatched busy fallback with its original message identity", async () => {
   const submits: unknown[] = [];
   let reconnectQueries = 0;
@@ -722,7 +765,10 @@ test("retries a dispatched busy fallback with its original message identity", as
         },
         submitMessage: async (input) => {
           submits.push(input);
-          if (input.messageId === "turn-unknown") {
+          if (
+            input.messageId === "turn-unknown" ||
+            input.content.text === "ordinary chat keeps the existing failure contract"
+          ) {
             throw new RuntimeHostOperationError(
               "turn.message.submit",
               "outcome_unknown",
@@ -753,6 +799,7 @@ test("retries a dispatched busy fallback with its original message identity", as
 
   const result = await ipc.invoke("sessions:send", "session-1", {
     type: "send",
+    intent: "side_conversation",
     turnId: "turn-1",
     text: "keep this message identity",
   });
