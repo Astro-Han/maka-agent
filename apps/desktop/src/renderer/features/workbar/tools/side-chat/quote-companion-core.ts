@@ -31,6 +31,7 @@ import type { SessionSummary, TurnRecord } from '@maka/core/session';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type {
   SideChatSessionPort,
+  SideChatSendResult,
   WorkbarIngestInput,
 } from '../../ports.js';
 import {
@@ -283,7 +284,8 @@ export async function ensureCompanionFork(
 }
 
 export type CompanionTurnResult =
-  | { status: 'sent'; forkId: string }
+  | { status: 'sent'; forkId: string; turnId: string; steered?: false }
+  | { status: 'sent'; forkId: string; turnId: string; steered: true; messageId: string }
   | { status: 'disposed' }
   | { status: 'error'; code: CompanionErrorCode };
 
@@ -335,7 +337,7 @@ export async function performCompanionTurn(
     if (createdForkId) scheduleCompanionCleanup(deps, createdForkId);
     return { status: 'disposed' };
   }
-  let result: { ok: true } | { ok: false; reason?: string };
+  let result: SideChatSendResult;
   try {
     result = await deps.api.send(forkId, {
       type: 'send',
@@ -356,7 +358,9 @@ export async function performCompanionTurn(
     return { status: 'error', code: 'send_rejected' };
   }
   deps.onQuotesConsumed();
-  return { status: 'sent', forkId };
+  return result.steered
+    ? { status: 'sent', forkId, turnId: result.turnId, steered: true, messageId: result.messageId }
+    : { status: 'sent', forkId, turnId: result.turnId };
 }
 
 export function isCompanionTurnTerminal(event: SessionEvent): boolean {

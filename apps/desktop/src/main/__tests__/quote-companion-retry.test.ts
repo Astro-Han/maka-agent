@@ -22,6 +22,7 @@ import { afterEach, test } from 'node:test';
 import { parseHTML } from 'linkedom';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { SessionEvent } from '@maka/core/events';
 import type { SessionChangedEvent, SessionSummary, TurnRecord } from '@maka/core/session';
 import {
   createFakeWorkbarServices,
@@ -43,6 +44,14 @@ const originalGlobals = {
 
 let mountedRoot: Root | undefined;
 const SOURCE_SESSION = session('source-session');
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 afterEach(async () => {
   if (mountedRoot) {
@@ -212,6 +221,221 @@ test('does not restart foreground setup when the source Session object refreshes
   assert.equal(probe.getAttribute('data-preparing'), 'false');
 });
 
+test('keeps Side Conversation events owned by the Host-admitted turn across an admission race', async () => {
+  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
+  const { document, window } = parsed;
+  Object.assign(globalThis, {
+    document,
+    window,
+    HTMLElement: window.HTMLElement,
+    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
+    Event: window.Event,
+    Node: window.Node,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+
+  let eventHandler: ((event: SessionEvent) => void) | undefined;
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  const pendingSend = deferred<{ ok: true; turnId: string }>();
+  const defaults = createFakeWorkbarServices();
+  const services: WorkbarServices = {
+    ...defaults,
+    sideChat: {
+      ...defaults.sideChat,
+      listTurns: async () => [settledTurn('source-turn')],
+      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+      subscribeEvents: (_sessionId, handler) => {
+        eventHandler = handler;
+        return () => undefined;
+      },
+      send: async () => pendingSend.promise,
+    },
+  };
+  const container = document.querySelector('#root');
+  assert.ok(container);
+  const root = createRoot(container);
+  mountedRoot = root;
+
+  await act(async () => {
+    root.render(
+      createElement(WorkbarServicesProvider, {
+        services,
+        children: createElement(QuoteCompanionOwnershipProbe, {
+          onSend: (value) => {
+            send = value;
+          },
+        }),
+      }),
+    );
+    await Promise.resolve();
+  });
+  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+  assert.ok(send);
+  assert.ok(eventHandler);
+
+  let sendResult: Promise<boolean> | undefined;
+  await act(async () => {
+    sendResult = send?.('new prompt');
+    await Promise.resolve();
+  });
+
+  await act(async () => {
+    eventHandler?.({
+      type: 'complete',
+      id: 'late-old-terminal',
+      turnId: 'old-turn',
+      ts: 1,
+      stopReason: 'end_turn',
+    });
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+
+  await act(async () => {
+    eventHandler?.({
+      type: 'text_delta',
+      id: 'new-text-before-response',
+      messageId: 'assistant-message',
+      turnId: 'host-admitted-turn',
+      ts: 2,
+      text: 'answer',
+    });
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+
+  await act(async () => {
+    pendingSend.resolve({ ok: true, turnId: 'host-admitted-turn' });
+    assert.equal(await sendResult, true);
+    await Promise.resolve();
+  });
+
+  const probe = container.firstElementChild;
+  assert.ok(probe);
+  assert.equal(probe.getAttribute('data-live-turn-id'), 'host-admitted-turn');
+  assert.equal(probe.getAttribute('data-live-text'), 'answer');
+  assert.equal(probe.getAttribute('data-streaming'), 'true');
+  assert.equal(probe.getAttribute('data-processing'), 'false');
+});
+
+test('binds a busy-raced Side Conversation send through its Host-admitted message identity', async () => {
+  const parsed = parseHTML('<html><body><div id="root"></div></body></html>');
+  const { document, window } = parsed;
+  Object.assign(globalThis, {
+    document,
+    window,
+    HTMLElement: window.HTMLElement,
+    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
+    Event: window.Event,
+    Node: window.Node,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+
+  let eventHandler: ((event: SessionEvent) => void) | undefined;
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  const pendingSend = deferred<{ ok: true; steered: true; turnId: string; messageId: string }>();
+  const defaults = createFakeWorkbarServices();
+  const services: WorkbarServices = {
+    ...defaults,
+    sideChat: {
+      ...defaults.sideChat,
+      listTurns: async () => [settledTurn('source-turn')],
+      branchFromTurn: async () => ({ ok: true as const, session: session('side-conversation') }),
+      subscribeEvents: (_sessionId, handler) => {
+        eventHandler = handler;
+        return () => undefined;
+      },
+      send: async () => pendingSend.promise,
+    },
+  };
+  const container = document.querySelector('#root');
+  assert.ok(container);
+  const root = createRoot(container);
+  mountedRoot = root;
+
+  await act(async () => {
+    root.render(
+      createElement(WorkbarServicesProvider, {
+        services,
+        children: createElement(QuoteCompanionOwnershipProbe, {
+          onSend: (value) => {
+            send = value;
+          },
+        }),
+      }),
+    );
+    await Promise.resolve();
+  });
+  await waitUntil(() => container.firstElementChild?.getAttribute('data-companion-id') === 'side-conversation');
+  assert.ok(send);
+  assert.ok(eventHandler);
+
+  let sendResult: Promise<boolean> | undefined;
+  await act(async () => {
+    sendResult = send?.('steer the active turn');
+    await Promise.resolve();
+  });
+  await act(async () => {
+    eventHandler?.({
+      type: 'complete',
+      id: 'late-old-terminal',
+      turnId: 'old-turn',
+      ts: 1,
+      stopReason: 'end_turn',
+    });
+    eventHandler?.({
+      type: 'queue_update',
+      id: 'accepted-queue',
+      turnId: 'host-active-turn',
+      ts: 2,
+      queueRevision: 1,
+      steering: ['steer the active turn'],
+      followup: [],
+      steeringEntries: [
+        {
+          entryId: 'accepted-entry',
+          messageId: 'accepted-message',
+          content: { text: 'steer the active turn' },
+          placement: 'current_turn',
+          state: 'queued',
+        },
+      ],
+      followupEntries: [],
+    });
+    await Promise.resolve();
+  });
+  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
+
+  await act(async () => {
+    pendingSend.resolve({
+      ok: true,
+      steered: true,
+      turnId: 'requested-turn-is-not-the-owner',
+      messageId: 'accepted-message',
+    });
+    assert.equal(await sendResult, true);
+    await Promise.resolve();
+  });
+  await act(async () => {
+    eventHandler?.({
+      type: 'text_delta',
+      id: 'accepted-text',
+      messageId: 'assistant-message',
+      turnId: 'host-active-turn',
+      ts: 3,
+      text: 'answer after steering',
+    });
+    await Promise.resolve();
+  });
+
+  const probe = container.firstElementChild;
+  assert.ok(probe);
+  assert.equal(probe.getAttribute('data-live-turn-id'), 'host-active-turn');
+  assert.equal(probe.getAttribute('data-live-text'), 'answer after steering');
+  assert.equal(probe.getAttribute('data-streaming'), 'true');
+  assert.equal(probe.getAttribute('data-processing'), 'false');
+});
+
 function QuoteCompanionProbe(props: { sourceSession?: SessionSummary }) {
   const companion = useQuoteCompanion({
     panelId: 'retry-panel',
@@ -225,6 +449,26 @@ function QuoteCompanionProbe(props: { sourceSession?: SessionSummary }) {
     'data-companion-id': companion.companionSession?.id ?? '',
     'data-preparing': String(companion.preparing),
   }, companion.error);
+}
+
+function QuoteCompanionOwnershipProbe(props: {
+  onSend: (send: (text: string) => Promise<boolean>) => void;
+}) {
+  const companion = useQuoteCompanion({
+    panelId: 'ownership-panel',
+    pendingQuotes: [],
+    sourceSession: SOURCE_SESSION,
+    locale: 'en',
+    onQuotesConsumed: () => undefined,
+  });
+  props.onSend(companion.send);
+  return createElement('div', {
+    'data-companion-id': companion.companionSession?.id ?? '',
+    'data-live-turn-id': companion.liveTurn?.turnId ?? '',
+    'data-live-text': companion.liveTurn?.steps.find((step) => step.text)?.text?.text ?? '',
+    'data-streaming': String(companion.streaming),
+    'data-processing': String(companion.processing),
+  });
 }
 
 function session(id: string): SessionSummary {

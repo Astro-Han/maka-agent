@@ -159,6 +159,10 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const forkSetupPromiseRef = useRef<Promise<EnsureCompanionForkResult> | null>(null);
   const stopRequestedRef = useRef(false);
   const activeTurnIdRef = useRef<string | null>(null);
+  const pendingAdmissionRef = useRef<{
+    messageId: string | null;
+    events: SessionEvent[];
+  } | null>(null);
   const turnInFlightRef = useRef(false);
   const settlingTurnIdsRef = useRef<Set<string>>(new Set());
   const onForkVisibilityChangeRef = useRef(onForkVisibilityChange);
@@ -192,21 +196,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const mountedRef = useMountedRef();
   const dismissalGuardRef = useRef(createCompanionDismissalGuard());
 
-  // Subscribe to the fork's event stream + load its transcript. Called
-  // synchronously the moment the fork is committed, BEFORE the run starts, so
-  // no boundary request / complete can be missed (the stream has no replay).
-  const subscribeToFork = useCallback((forkId: string) => {
-    void sideChat.readSettledMessages(forkId)
-      .then(({ messages }) => {
-        if (mountedRef.current) {
-          setAllMessages((current) => mergeSettledMessages(current, messages));
-        }
-      })
-      .catch(() => {
-        if (mountedRef.current) setError(copyRef.current.errors.settlementFailed);
-      });
-    unsubscribeRef.current = sideChat.subscribeEvents(forkId, (event: SessionEvent) => {
-      if (!mountedRef.current) return;
+  const applyOwnedEvent = useCallback(
+    (forkId: string, event: SessionEvent) => {
       const effect = companionRunEventEffect(
         event,
         activeTurnIdRef.current,
@@ -253,8 +244,60 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
             settlingTurnIdsRef.current.delete(settledTurnId);
           });
       }
+    },
+    [mountedRef, sideChat],
+  );
+
+  const bindAdmittedTurn = useCallback(
+    (forkId: string, turnId: string) => {
+      const admission = pendingAdmissionRef.current;
+      if (!admission) return;
+      pendingAdmissionRef.current = null;
+      activeTurnIdRef.current = turnId;
+      ownTurnIdsRef.current.add(turnId);
+      setOwnTurnTick((tick) => tick + 1);
+      setLiveTurn(armLiveTurn(turnId));
+      for (const event of admission.events) {
+        if (event.turnId === turnId) applyOwnedEvent(forkId, event);
+      }
+    },
+    [applyOwnedEvent],
+  );
+
+  const eventAdmitsMessage = useCallback(
+    (event: SessionEvent, messageId: string): boolean =>
+      (event.type === 'steering_message' && event.messageId === messageId) ||
+      (event.type === 'queue_update' &&
+        event.steeringEntries?.some((entry) => entry.messageId === messageId) === true),
+    [],
+  );
+
+  // Subscribe to the fork's event stream + load its transcript. Called
+  // synchronously the moment the fork is committed, BEFORE the run starts, so
+  // no boundary request / complete can be missed (the stream has no replay).
+  const subscribeToFork = useCallback((forkId: string) => {
+    void sideChat.readSettledMessages(forkId)
+      .then(({ messages }) => {
+        if (mountedRef.current) {
+          setAllMessages((current) => mergeSettledMessages(current, messages));
+        }
+      })
+      .catch(() => {
+        if (mountedRef.current) setError(copyRef.current.errors.settlementFailed);
+      });
+    unsubscribeRef.current = sideChat.subscribeEvents(forkId, (event: SessionEvent) => {
+      if (!mountedRef.current) return;
+      const admission = pendingAdmissionRef.current;
+      if (admission) {
+        admission.events.push(event);
+        if (admission.messageId && eventAdmitsMessage(event, admission.messageId)) {
+          bindAdmittedTurn(forkId, event.turnId);
+        }
+        return;
+      }
+      applyOwnedEvent(forkId, event);
     });
-  }, [mountedRef, sideChat]);
+  }, [applyOwnedEvent, bindAdmittedTurn, eventAdmitsMessage, mountedRef, sideChat]);
 
   const commitFork = useCallback(
     (session: SessionSummary) => {
@@ -442,16 +485,30 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         // Arm the optimistic live turn right before the send.
         onBeforeSend: () => {
           stopRequestedRef.current = false;
-          activeTurnIdRef.current = turnId;
+          activeTurnIdRef.current = null;
+          pendingAdmissionRef.current = {
+            messageId: null,
+            events: [],
+          };
           turnInFlightRef.current = true;
           setTurnInFlight(true);
           setLiveTurn(armLiveTurn(turnId));
-          ownTurnIdsRef.current.add(turnId);
-          setOwnTurnTick((tick) => tick + 1);
         },
         onQuotesConsumed: () => onQuotesConsumed(quoteSnapshot),
       });
       if (result.status === 'sent') {
+        const admission = pendingAdmissionRef.current;
+        if (turnInFlightRef.current && admission) {
+          if (result.steered) {
+            admission.messageId = result.messageId;
+            const admitted = admission.events.find((event) =>
+              eventAdmitsMessage(event, result.messageId),
+            );
+            if (admitted) bindAdmittedTurn(result.forkId, admitted.turnId);
+          } else {
+            bindAdmittedTurn(result.forkId, result.turnId);
+          }
+        }
         setHasContent(true);
         // Surface the just-sent user message immediately, and reflect any
         // automatic connection/model rebound in the read-only model label.
@@ -485,6 +542,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         };
         setError(byCode[result.code]);
         activeTurnIdRef.current = null;
+        pendingAdmissionRef.current = null;
         turnInFlightRef.current = false;
         setTurnInFlight(false);
         setLiveTurn(undefined);
@@ -501,6 +559,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       ensureFork,
       mountedRef,
       sideChat,
+      bindAdmittedTurn,
+      eventAdmitsMessage,
     ],
   );
 

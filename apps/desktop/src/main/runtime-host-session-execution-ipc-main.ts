@@ -325,6 +325,7 @@ export function registerRuntimeHostSessionExecutionIpc(
           ok: true as const,
           steered: true as const,
           turnId,
+          messageId,
           attachments,
           inlineReferences,
           skillInvocation: emptySkillInvocation,

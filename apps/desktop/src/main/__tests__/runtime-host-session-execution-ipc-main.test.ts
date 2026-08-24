@@ -618,6 +618,7 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
     ok: true,
     steered: true,
     turnId: "turn-1",
+    messageId: "id-1",
     attachments: [],
     inlineReferences: [],
     skillInvocation: { loaded: [], failed: [], receipts: [] },

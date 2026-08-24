@@ -121,7 +121,7 @@ describe('quote companion disposal fencing', () => {
       ...defaults.sideChat,
       send: async () => {
         sends += 1;
-        return { ok: true as const };
+        return { ok: true as const, turnId: 'side-chat-turn' };
       },
     };
 
@@ -140,7 +140,7 @@ describe('quote companion disposal fencing', () => {
   });
 
   it('does not consume quotes or report success when disposal wins the send race', async () => {
-    const pendingSend = deferred<{ ok: true }>();
+    const pendingSend = deferred<{ ok: true; turnId: string }>();
     let disposed = false;
     let consumed = 0;
     const defaults = createFakeWorkbarServices();
@@ -158,7 +158,7 @@ describe('quote companion disposal fencing', () => {
     );
 
     disposed = true;
-    pendingSend.resolve({ ok: true });
+    pendingSend.resolve({ ok: true, turnId: 'side-chat-turn' });
 
     assert.deepEqual(await turn, { status: 'disposed' });
     assert.equal(consumed, 0);
@@ -179,7 +179,7 @@ describe('quote companion disposal fencing', () => {
       },
       send: async () => {
         sends += 1;
-        return { ok: true as const };
+        return { ok: true as const, turnId: 'side-chat-turn' };
       },
     };
     const turn = performCompanionTurn(

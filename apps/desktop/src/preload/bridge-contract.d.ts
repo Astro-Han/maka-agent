@@ -795,7 +795,18 @@ export interface MakaBridge {
            * The send raced a root Turn another client opened first and was
            * queued into it as steering instead of starting `turnId`.
            */
-          steered?: true;
+          steered?: never;
+          messageId?: never;
+          attachments: import('@maka/core/events').AttachmentRef[];
+          inlineReferences: import('@maka/core/events').InlineReference[];
+          skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
+        }
+      | {
+          ok: true;
+          turnId: string;
+          steered: true;
+          /** Host admission identity for the message queued as steering. */
+          messageId: string;
           attachments: import('@maka/core/events').AttachmentRef[];
           inlineReferences: import('@maka/core/events').InlineReference[];
           skillInvocation: import('@maka/runtime/skill-invocation').SkillInvocationResult;
