@@ -663,12 +663,6 @@ test("retries a dispatched normal send with its original Turn identity", async (
           };
         },
       }),
-      observer: unusedObserver(),
-      attachmentApprovals: createAttachmentApprovalRegistry(),
-      emitSessionsChanged() {},
-      stat: async () => ({ size: 0 }),
-      resizeImage: async (bytes) => bytes,
-      beforeStop() {},
       newId: () => "turn-1",
     },
     ipc,
@@ -723,12 +717,6 @@ test("does not add admission retry semantics to an ordinary send", async () => {
           );
         },
       }),
-      observer: unusedObserver(),
-      attachmentApprovals: createAttachmentApprovalRegistry(),
-      emitSessionsChanged() {},
-      stat: async () => ({ size: 0 }),
-      resizeImage: async (bytes) => bytes,
-      beforeStop() {},
       newId: () => "turn-1",
     },
     ipc,
@@ -786,12 +774,6 @@ test("retries a dispatched busy fallback with its original message identity", as
           return { disposition: "steering", queueRevision: 1 };
         },
       }),
-      observer: unusedObserver(),
-      attachmentApprovals: createAttachmentApprovalRegistry(),
-      emitSessionsChanged() {},
-      stat: async () => ({ size: 0 }),
-      resizeImage: async (bytes) => bytes,
-      beforeStop() {},
       newId: () => "id-1",
     },
     ipc,
@@ -864,12 +846,6 @@ test("returns the Host-started Turn identity when a direct steer races idle", as
           turnId: "host-started-turn",
         }),
       }),
-      observer: unusedObserver(),
-      attachmentApprovals: createAttachmentApprovalRegistry(),
-      emitSessionsChanged() {},
-      stat: async () => ({ size: 0 }),
-      resizeImage: async (bytes) => bytes,
-      beforeStop() {},
       newId: () => "steer-message-id",
     },
     ipc,
@@ -1222,19 +1198,23 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
           placement: 'current_turn',
           state: 'queued',
         },
+        {
+          entryId: 'entry-2',
+          messageId: 'in-flight-ticket',
+          content: { text: 'Already accepted' },
+          placement: 'current_turn',
+          state: 'in_flight',
+        },
       ],
       followup: [],
     },
+    rootTurnSourceMessageIds: ['successor-ticket'],
   });
   const ipc = ipcHarness();
   registerExecutionIpc(
     {
       client,
       observer,
-      attachmentApprovals: createAttachmentApprovalRegistry(),
-      emitSessionsChanged() {},
-      stat: async () => ({ size: 0 }),
-      resizeImage: async (bytes) => bytes,
       beforeStop() {
         stopLifecycle.push("teardown");
       },
@@ -1266,16 +1246,30 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
     },
   ]);
   assert.deepEqual(stopLifecycle, []);
+  for (const expectedAdmissionId of ['in-flight-ticket', 'successor-ticket']) {
+    await ipc.invoke('sessions:stop', 'session-1', {
+      source: 'stop_button',
+      expectedAdmissionId,
+    });
+  }
+  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt', 'teardown', 'interrupt']);
   await ipc.invoke("sessions:stop", "session-1", {
     source: "stop_button",
     expectedTurnId: "turn-unrelated",
   });
-  assert.deepEqual(stopLifecycle, []);
+  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt', 'teardown', 'interrupt']);
   await ipc.invoke("sessions:stop", "session-1", {
     source: "stop_button",
     expectedTurnId: "turn-1",
   });
-  assert.deepEqual(stopLifecycle, ["teardown", "interrupt"]);
+  assert.deepEqual(stopLifecycle, [
+    'teardown',
+    'interrupt',
+    'teardown',
+    'interrupt',
+    'teardown',
+    'interrupt',
+  ]);
 
   assert.deepEqual(submits, [
     {
@@ -1297,6 +1291,18 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       interruptId: "id-2",
       turnId: "turn-1",
       runId: "run-1",
+    },
+    {
+      sessionId: 'session-1',
+      interruptId: 'id-3',
+      turnId: 'turn-1',
+      runId: 'run-1',
+    },
+    {
+      sessionId: 'session-1',
+      interruptId: 'id-4',
+      turnId: 'turn-1',
+      runId: 'run-1',
     },
   ]);
   await observer.close();
@@ -1433,22 +1439,21 @@ function ipcHarness() {
 }
 
 function registerExecutionIpc(
-  deps: Omit<
-    RuntimeHostSessionExecutionIpcDeps,
-    'sessionCopyCleanup' | 'onBackgroundError' | 'observations'
-  > &
-    Partial<
-      Pick<
-        RuntimeHostSessionExecutionIpcDeps,
-        'sessionCopyCleanup' | 'onBackgroundError' | 'observations'
-      >
-    >,
+  deps: Pick<RuntimeHostSessionExecutionIpcDeps, 'client'> &
+    Partial<Omit<RuntimeHostSessionExecutionIpcDeps, 'client'>>,
   ipcMain: Pick<IpcMain, 'handle'>,
 ): (sessionId: string) => Promise<void> {
+  const observer = deps.observer ?? unusedObserver();
   return registerRuntimeHostSessionExecutionIpc(
     {
+      observer,
+      attachmentApprovals: createAttachmentApprovalRegistry(),
+      emitSessionsChanged() {},
+      stat: async () => ({ size: 0 }),
+      resizeImage: async (bytes) => bytes,
+      beforeStop() {},
       ...deps,
-      observations: deps.observations ?? deps.observer,
+      observations: deps.observations ?? observer,
       sessionCopyCleanup: deps.sessionCopyCleanup ?? unusedSessionCopyCleanup(),
       onBackgroundError: deps.onBackgroundError ?? (() => undefined),
     },
