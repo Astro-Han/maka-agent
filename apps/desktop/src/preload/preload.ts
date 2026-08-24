@@ -1799,14 +1799,12 @@ const makaBridge = {
         unsubscribeEvents = subscribeEveryRuntimeHostEvent(
           `sessions:event:${session.sessionId}`,
           (scope, event: SessionEvent) => {
-            if (scope.hostId !== session.scope.hostId) return;
             handler(projectDesktopSessionEvent(scope, event));
           },
         );
         unsubscribeObservationSeed = subscribeEveryRuntimeHostEvent(
           'sessions:observation-seed',
-          (scope, payload: { sessionId?: string; phase?: string }) => {
-            if (scope.hostId !== session.scope.hostId) return;
+          (_scope, payload: { sessionId?: string; phase?: string }) => {
             if (payload.sessionId !== session.sessionId) return;
             if (payload.phase === 'pending' || payload.phase === 'ready') {
               onObservationSeed?.(payload.phase);
