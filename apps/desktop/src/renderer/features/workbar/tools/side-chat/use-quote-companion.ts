@@ -72,7 +72,7 @@ type PendingAdmission = {
 };
 
 type AdmissionOutcome =
-  | { kind: 'admitted'; event: SessionEvent }
+  | { kind: 'admitted'; turnId: string }
   | { kind: 'retracted' };
 
 function admissionOutcomeForMessage(
@@ -90,7 +90,7 @@ function admissionOutcomeForMessage(
           (entry) => entry.messageId === messageId && entry.state === 'in_flight',
         ) === true),
   );
-  if (admitted) return { kind: 'admitted', event: admitted };
+  if (admitted) return { kind: 'admitted', turnId: admitted.turnId };
   const retracted = events.some(
     (event) =>
       event.type === 'message_admission' &&
@@ -328,6 +328,24 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     [applyOwnedEvent],
   );
 
+  const resolveAdmission = useCallback(
+    (
+      forkId: string,
+      admission: PendingAdmission,
+      messageId: string,
+      preserveLiveTurn = false,
+    ): AdmissionOutcome | undefined => {
+      const outcome = admissionOutcomeForMessage(admission.events, messageId);
+      if (outcome?.kind === 'admitted' && !admission.cancelled) {
+        bindAdmittedTurn(forkId, outcome.turnId, { preserveLiveTurn });
+      } else if (outcome?.kind === 'retracted') {
+        abandonAdmission(forkId, admission);
+      }
+      return outcome;
+    },
+    [abandonAdmission, bindAdmittedTurn],
+  );
+
   // Subscribe to the fork's event stream + load its transcript. Called
   // synchronously the moment the fork is committed, BEFORE the run starts, so
   // no boundary request / complete can be missed (the stream has no replay).
@@ -380,12 +398,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         }
         if (admission) {
           admission.events.push(event);
-          const outcome = admissionOutcomeForMessage(admission.events, admission.messageId);
-          if (outcome?.kind === 'admitted' && !admission.cancelled) {
-            bindAdmittedTurn(forkId, outcome.event.turnId, { preserveLiveTurn: true });
-          } else if (outcome?.kind === 'retracted') {
-            abandonAdmission(forkId, admission);
-          }
+          resolveAdmission(forkId, admission, admission.messageId, true);
           return;
         }
         applyOwnedEvent(forkId, event);
@@ -403,7 +416,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       resolveReady();
     };
     return ready;
-  }, [abandonAdmission, applyOwnedEvent, bindAdmittedTurn, mountedRef, sideChat]);
+  }, [applyOwnedEvent, mountedRef, resolveAdmission, sideChat]);
 
   const commitFork = useCallback(
     (session: SessionSummary) => {
@@ -641,26 +654,15 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
             return false;
           }
         }
-        if (admission) {
-          if (result.status === 'pending') {
-            admission.consumeOnAdmission = () => onQuotesConsumed(quoteSnapshot);
-            const outcome = admissionOutcomeForMessage(admission.events, result.messageId);
-            if (outcome?.kind === 'admitted' && !admission.cancelled) {
-              bindAdmittedTurn(result.forkId, outcome.event.turnId);
-            } else if (outcome?.kind === 'retracted') {
-              abandonAdmission(result.forkId, admission);
-              return false;
-            }
-          } else if (result.steered) {
-            const outcome = admissionOutcomeForMessage(admission.events, result.messageId);
-            if (outcome?.kind === 'admitted' && !admission.cancelled) {
-              bindAdmittedTurn(result.forkId, outcome.event.turnId);
-            } else if (outcome?.kind === 'retracted') {
-              abandonAdmission(result.forkId, admission);
-            }
-          } else {
-            bindAdmittedTurn(result.forkId, result.turnId);
+        if (result.status === 'pending') {
+          admission.consumeOnAdmission = () => onQuotesConsumed(quoteSnapshot);
+          if (resolveAdmission(result.forkId, admission, result.messageId)?.kind === 'retracted') {
+            return false;
           }
+        } else if (result.steered) {
+          resolveAdmission(result.forkId, admission, result.messageId);
+        } else {
+          bindAdmittedTurn(result.forkId, result.turnId);
         }
         setHasContent(true);
         // Surface the just-sent user message immediately, and reflect any
@@ -714,6 +716,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       sideChat,
       abandonAdmission,
       bindAdmittedTurn,
+      resolveAdmission,
     ],
   );
 
@@ -796,14 +799,8 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       }
       if (outcome.kind === 'started') {
         bindAdmittedTurn(id, outcome.turnId, { preserveLiveTurn: true });
-      } else {
-        const resolution = admissionOutcomeForMessage(admission.events, outcome.messageId);
-        if (resolution?.kind === 'admitted' && !admission.cancelled) {
-          bindAdmittedTurn(id, resolution.event.turnId, { preserveLiveTurn: true });
-        } else if (resolution?.kind === 'retracted') {
-          abandonAdmission(id, admission);
-          return false;
-        }
+      } else if (resolveAdmission(id, admission, outcome.messageId, true)?.kind === 'retracted') {
+        return false;
       }
       setError(null);
       return true;
@@ -817,7 +814,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       }
       return false;
     }
-  }, [abandonAdmission, bindAdmittedTurn, mountedRef, sideChat, turnInFlight]);
+  }, [abandonAdmission, bindAdmittedTurn, mountedRef, resolveAdmission, sideChat, turnInFlight]);
 
   const setPermissionMode = useCallback(
     async (mode: PermissionMode): Promise<boolean> => {
