@@ -351,6 +351,51 @@ describe('SqliteSessionMetadataStore', () => {
     }
   });
 
+  test('persists a follow-up reorder across SQLite restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-message-reorder-'));
+    const path = join(root, 'state.sqlite');
+    try {
+      const store = createSqliteSessionMetadataStore(path);
+      try {
+        await store.create(fullHeader({ id: 'session-reorder' }));
+        for (const [index, messageId] of ['message-first', 'message-second'].entries()) {
+          await store.commitMessageAdmission({
+            sessionId: 'session-reorder',
+            turnId: 'turn-current',
+            runId: 'run-current',
+            messageId,
+            content: { text: messageId },
+            modelContent: { text: messageId },
+            submittedPlacement: 'next_turn',
+            placement: 'next_turn',
+            disposition: 'followup',
+            admittedAt: 20 + index,
+          });
+        }
+        await store.reorderMessageAdmissions('session-reorder', [
+          'message-second',
+          'message-first',
+        ]);
+      } finally {
+        store.close();
+      }
+
+      const reopened = createSqliteSessionMetadataStore(path);
+      try {
+        assert.deepEqual(
+          (await reopened.listMessageAdmissions('session-reorder')).map(
+            (admission) => admission.messageId,
+          ),
+          ['message-second', 'message-first'],
+        );
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('rejects an oversized durable Message admission before transcript mutation', async () => {
     const store = createSqliteSessionMetadataStore(':memory:');
     try {

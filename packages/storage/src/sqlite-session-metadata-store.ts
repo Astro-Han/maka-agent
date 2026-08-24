@@ -1984,9 +1984,10 @@ export class SqliteSessionMetadataStore {
         )
         .all(sessionId) as Array<{ message_id?: unknown }>;
       const current = rows.map((row) => row.message_id);
+      const currentIds = new Set(current);
       if (
         current.length !== unique.length ||
-        current.some((messageId, index) => messageId !== unique[index])
+        unique.some((messageId) => !currentIds.has(messageId))
       ) {
         throw new SessionMetadataConflictError('Message admission reorder identity conflict');
       }
