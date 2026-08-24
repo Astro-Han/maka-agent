@@ -314,7 +314,9 @@ test('restart replays an atomically admitted root without duplicating its transc
 
     const ledger = await fixture.readTurn(turnId);
     assert.deepEqual(
-      ledger.userMessages.filter((message) => message.id === messageId).map((message) => message.id),
+      ledger.userMessages
+        .filter((message) => message.id === messageId)
+        .map((message) => message.id),
       [messageId],
     );
     assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');

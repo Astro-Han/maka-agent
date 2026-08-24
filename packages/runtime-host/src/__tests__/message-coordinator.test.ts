@@ -2461,17 +2461,13 @@ function memoryMessageLifecycleStore(
     readMessageLifecycleState: async (_sessionId, messageId) => admissions.get(messageId)?.state,
     listMessageAdmissions: async (sessionId) =>
       [...admissions.values()]
-        .filter(
-          ({ admission, state }) =>
-            admission.sessionId === sessionId && state === 'accepted',
-        )
+        .filter(({ admission, state }) => admission.sessionId === sessionId && state === 'accepted')
         .map(({ admission }) => admission),
     listUnsettledMessageAdmissions: async (sessionId) =>
       [...admissions.values()]
         .filter(
           ({ admission, state }) =>
-            admission.sessionId === sessionId &&
-            (state === 'accepted' || state === 'handed_off'),
+            admission.sessionId === sessionId && (state === 'accepted' || state === 'handed_off'),
         )
         .map(({ admission }) => admission),
     rebindMessageAdmissionTranscript: async () => undefined,

@@ -4779,9 +4779,7 @@ export class SqliteSessionMetadataStore {
       return;
     }
     this.db
-      .prepare(
-        'UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?',
-      )
+      .prepare('UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?')
       .run(SQLITE_SESSION_MESSAGE_CHUNK_MARKER, sessionId, sequence);
     this.db
       .prepare(
