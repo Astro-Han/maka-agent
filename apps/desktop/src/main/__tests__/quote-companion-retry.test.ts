@@ -88,6 +88,15 @@ function steeringMessageEvent(id: string, turnId: string, ts: number, messageId:
   return { type: 'steering_message', id, messageId, turnId, ts, content: { text: 'steer the active turn' } };
 }
 
+function messageAdmittedEvent(
+  id: string,
+  turnId: string,
+  ts: number,
+  messageId: string,
+): SessionEvent {
+  return { type: 'message_admitted', id, messageId, turnId, ts };
+}
+
 function recoverableErrorEvent(id: string, turnId: string, ts: number): SessionEvent {
   return {
     type: 'error',
@@ -397,6 +406,60 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
   assert.equal(probe.getAttribute('data-live-turn-id'), 'host-active-turn');
   assert.equal(probe.getAttribute('data-live-text'), 'answer after steering');
   assert.equal(probe.getAttribute('data-streaming'), 'true');
+  assert.equal(probe.getAttribute('data-processing'), 'false');
+});
+
+test('replays queued Side Conversation text after Host assigns the ticket to a successor Turn', async () => {
+  let eventHandler: ((event: SessionEvent) => void) | undefined;
+  let send: ((text: string) => Promise<boolean>) | undefined;
+  const pendingSend = deferred<{
+    ok: true;
+    steered: true;
+    turnId: string;
+    messageId: string;
+  }>();
+  const { container } = await renderProbe(
+    {
+      subscribeEvents: (_sessionId, handler, onSeeded) => {
+        eventHandler = handler;
+        onSeeded?.();
+        return () => undefined;
+      },
+      send: async () => pendingSend.promise,
+    },
+    { ownership: true, onSend: (value) => (send = value) },
+  );
+  assert.ok(send);
+  assert.ok(eventHandler);
+
+  let sendResult: Promise<boolean> | undefined;
+  await act(async () => {
+    sendResult = send?.('continue in the successor turn');
+    await Promise.resolve();
+  });
+  await act(async () => {
+    eventHandler?.(queueUpdateEvent('queued', 'old-root', 1));
+    eventHandler?.(completeEvent('old-root-terminal', 'old-root', 2));
+    eventHandler?.(messageAdmittedEvent('successor-admission', 'successor-root', 3, 'ticket-1'));
+    eventHandler?.(textDeltaEvent('successor-text', 'successor-root', 4, 'answer from successor'));
+    await Promise.resolve();
+  });
+
+  await act(async () => {
+    pendingSend.resolve({
+      ok: true,
+      steered: true,
+      turnId: 'requested-turn-is-not-the-owner',
+      messageId: 'ticket-1',
+    });
+    assert.equal(await sendResult, true);
+    await Promise.resolve();
+  });
+
+  const probe = container.firstElementChild;
+  assert.ok(probe);
+  assert.equal(probe.getAttribute('data-live-turn-id'), 'successor-root');
+  assert.equal(probe.getAttribute('data-live-text'), 'answer from successor');
   assert.equal(probe.getAttribute('data-processing'), 'false');
 });
 

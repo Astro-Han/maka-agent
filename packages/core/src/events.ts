@@ -505,6 +505,7 @@ export type SessionEvent =
   | PlanSubmittedEvent
   | TokenUsageEvent
   | SteeringMessageEvent
+  | MessageAdmittedEvent
   | QueueUpdateEvent
   | ProviderRetryEvent
   | ErrorEvent
@@ -1081,6 +1082,17 @@ export interface SteeringMessageEvent extends BaseEvent {
   messageId: string;
   content: MessageContent;
   submittedContentDigest?: `sha256:${string}`;
+}
+
+/**
+ * Transient Host projection fact: a submitted message now belongs to this
+ * Turn. It is emitted by the session projector, not by a backend or durable
+ * event ledger, so a client can bind a queued admission without guessing from
+ * timing or Turn ids returned by a stale command response.
+ */
+export interface MessageAdmittedEvent extends BaseEvent {
+  type: 'message_admitted';
+  messageId: string;
 }
 
 /**

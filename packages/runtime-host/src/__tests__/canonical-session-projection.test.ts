@@ -154,6 +154,51 @@ test('projects the canonical root lifecycle and the attachment queue from real S
   });
 });
 
+test('projects root admission source message tickets into continuity', async () => {
+  await withStores(async (root, stores) => {
+    const session = await stores.sessionStore.create(sessionInput(root));
+    const rootAdmissions = new RootAdmissionOwner(stores.agentRunStore);
+    await rootAdmissions.recoverSession(session.id);
+    const messages = createMessages(session.id, stores);
+    const reader = new CanonicalSessionProjectionReader({
+      stores,
+      rootAdmissions,
+      messages,
+    });
+    await rootAdmissions.admitRootTurn({
+      sessionId: session.id,
+      turnId: 'turn-successor',
+      proposedRunId: 'run-successor',
+      proposedUserMessageId: 'source-1',
+      execution: { kind: 'external_message' },
+      normalizedInput: { text: 'first\n\nsecond' },
+      sourceMessages: [
+        {
+          messageId: 'source-1',
+          content: { text: 'first' },
+          placement: 'current_turn',
+          disposition: 'steering',
+        },
+        {
+          messageId: 'source-2',
+          content: { text: 'second' },
+          placement: 'next_turn',
+          disposition: 'followup',
+        },
+      ],
+      admittedAt: 10,
+    });
+
+    const canonical = await reader.read(session.id);
+    assert.deepEqual(canonical?.rootTurnSourceMessageIds, ['source-1', 'source-2']);
+    assert.deepEqual(createSessionContinuitySnapshot(canonical!, 1).rootTurnSourceMessageIds, [
+      'source-1',
+      'source-2',
+    ]);
+    await messages.close();
+  });
+});
+
 test('projects pending Interactions and preflights their combined snapshot capacity', async () => {
   await withStores(async (root, stores) => {
     const session = await stores.sessionStore.create(sessionInput(root));

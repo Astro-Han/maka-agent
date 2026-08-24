@@ -621,7 +621,7 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
     ok: true,
     steered: true,
     turnId: "turn-1",
-    messageId: "id-1",
+    messageId: "turn-1",
     attachments: [],
     inlineReferences: [],
     skillInvocation: { loaded: [], failed: [], receipts: [] },
@@ -754,13 +754,13 @@ test("retries a dispatched busy fallback with its original message identity", as
   assert.deepEqual(submits, [
     {
       sessionId: "session-1",
-      messageId: "id-1",
+      messageId: "turn-1",
       content: { text: "keep this message identity", inlineReferences: [] },
       placement: "current_turn",
     },
     {
       sessionId: "session-1",
-      messageId: "id-1",
+      messageId: "turn-1",
       content: { text: "keep this message identity", inlineReferences: [] },
       placement: "current_turn",
     },
@@ -769,7 +769,7 @@ test("retries a dispatched busy fallback with its original message identity", as
     ok: true,
     steered: true,
     turnId: "turn-1",
-    messageId: "id-1",
+    messageId: "turn-1",
     attachments: [],
     inlineReferences: [],
     skillInvocation: { loaded: [], failed: [], receipts: [] },
@@ -1140,10 +1140,10 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
   );
 
   assert.deepEqual(
-    await ipc.invoke("sessions:steer", "session-1", "  Continue  "),
+    await ipc.invoke("sessions:steer", "session-1", "  Continue  ", "steer-ticket-1"),
     {
       kind: "queued",
-      messageId: "id-1",
+      messageId: "steer-ticket-1",
     },
   );
   await ipc.invoke("sessions:stop", "session-1", {
@@ -1160,7 +1160,7 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
   assert.deepEqual(submits, [
     {
       sessionId: "session-1",
-      messageId: "id-1",
+      messageId: "steer-ticket-1",
       content: { text: "Continue" },
       placement: "current_turn",
     },
@@ -1168,7 +1168,7 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
   assert.deepEqual(interrupts, [
     {
       sessionId: "session-1",
-      interruptId: "id-2",
+      interruptId: "id-1",
       turnId: "turn-1",
       runId: "run-1",
     },

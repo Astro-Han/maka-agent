@@ -72,6 +72,60 @@ test('applies authoritative replacement once and does not complete it again at T
   );
 });
 
+test('emits the Host admission fact when a queued message enters a successor Turn', () => {
+  const rejoined = new RuntimeHostSessionProjector(
+    withRootSourceMessageIds(snapshot(), ['rejoined-ticket']),
+    createRuntimeHostSessionProjectionSeed([], snapshot()),
+    () => 10,
+  );
+  assert.deepEqual(
+    rejoined
+      .seedActive(false)
+      .filter((event) => event.type === 'message_admitted')
+      .map((event) => ({
+        turnId: event.turnId,
+        messageId: event.messageId,
+      })),
+    [{ turnId: 'turn-1', messageId: 'rejoined-ticket' }],
+  );
+
+  const projector = new RuntimeHostSessionProjector(
+    snapshot(),
+    createRuntimeHostSessionProjectionSeed([], snapshot()),
+    () => 10,
+  );
+  const next = withRootSourceMessageIds(
+    snapshot({
+      projectionRevision: 2,
+      rootTurn: {
+        sessionId: 'session-1',
+        turnId: 'turn-2',
+        runId: 'run-2',
+        status: 'running',
+      },
+    }),
+    ['ticket-1'],
+  );
+
+  const events = projector.accept({
+    kind: 'subscription.session_projection',
+    hostEpoch: 'host-1',
+    subscriptionId: 'subscription-1',
+    sequence: 1,
+    snapshot: next,
+  }).events;
+
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === 'message_admitted')
+      .map((event) => ({
+        turnId: event.turnId,
+        messageId: event.messageId,
+      })),
+    [{ turnId: 'turn-2', messageId: 'ticket-1' }],
+  );
+});
+
 test('reseeds the latest provider retry when the active Turn still carries one', () => {
   const retry = {
     phase: 'scheduled' as const,
@@ -381,6 +435,13 @@ function snapshot(overrides: Partial<SessionContinuitySnapshot> = {}): SessionCo
     interactions: { pending: [] },
     ...overrides,
   };
+}
+
+function withRootSourceMessageIds(
+  value: SessionContinuitySnapshot,
+  rootTurnSourceMessageIds: readonly string[],
+): SessionContinuitySnapshot {
+  return { ...value, rootTurnSourceMessageIds } as unknown as SessionContinuitySnapshot;
 }
 
 function assistant(id: string, text: string): Extract<StoredMessage, { type: 'assistant' }> {

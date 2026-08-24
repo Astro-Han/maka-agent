@@ -141,8 +141,12 @@ export class RuntimeHostSessionProjector {
 
   seedActive(includeAssistantText: boolean): SessionEvent[] {
     const root = this.#snapshot.rootTurn;
-    if (!root || isRuntimeHostTerminalTurn(root)) return [];
+    if (!root) return [];
     const events: SessionEvent[] = [];
+    events.push(
+      ...projectMessageAdmissionEvents(root, this.#snapshot.rootTurnSourceMessageIds, this.#now()),
+    );
+    if (isRuntimeHostTerminalTurn(root)) return events;
     let seededAssistantText = false;
     if (includeAssistantText) {
       for (const accumulator of this.#accumulators.values()) {
@@ -192,7 +196,10 @@ export class RuntimeHostSessionProjector {
   }
 
   seedTerminal(turn: RuntimeHostTerminalTurn): SessionEvent[] {
-    return this.#terminalEvents(turn, true);
+    return [
+      ...projectMessageAdmissionEvents(turn, this.#snapshot.rootTurnSourceMessageIds, this.#now()),
+      ...this.#terminalEvents(turn, true),
+    ];
   }
 
   seedStoredTerminal(turnId: string, transcript: readonly StoredMessage[]): SessionEvent[] {
@@ -372,6 +379,7 @@ export class RuntimeHostSessionProjector {
     const previousRoot = previousSnapshot.rootTurn;
     const startedTurn =
       root && (!previousRoot || root.runId !== previousRoot.runId) ? root : undefined;
+    events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
     if (startedTurn) this.#accumulators.clear();
     const retry = liveProviderRetryEvent(previousRoot, root, this.#now());
     if (retry) events.push(retry);
@@ -435,6 +443,38 @@ export class RuntimeHostSessionProjector {
 
 function emptyUpdate(events: readonly SessionEvent[]): RuntimeHostProjectionUpdate {
   return { events, resolvedInteractions: [] };
+}
+
+function projectMessageAdmissionEvents(
+  root: TurnSnapshot,
+  messageIds: readonly string[] | undefined,
+  ts: number,
+): SessionEvent[] {
+  return (messageIds ?? []).map((messageId) => ({
+    type: 'message_admitted' as const,
+    id: `host-admission:${root.runId}:${messageId}`,
+    turnId: root.turnId,
+    ts,
+    messageId,
+  }));
+}
+
+function projectNewMessageAdmissionEvents(
+  previous: SessionContinuitySnapshot,
+  next: SessionContinuitySnapshot,
+  ts: number,
+): SessionEvent[] {
+  const root = next.rootTurn;
+  if (!root) return [];
+  const previousIds =
+    previous.rootTurn?.runId === root.runId
+      ? new Set(previous.rootTurnSourceMessageIds ?? [])
+      : new Set<string>();
+  return projectMessageAdmissionEvents(
+    root,
+    (next.rootTurnSourceMessageIds ?? []).filter((messageId) => !previousIds.has(messageId)),
+    ts,
+  );
 }
 
 export function projectRuntimeHostInteractionRequest(

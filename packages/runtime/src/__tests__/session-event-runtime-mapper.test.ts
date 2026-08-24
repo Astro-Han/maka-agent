@@ -624,6 +624,23 @@ const projectionRunHeader: AgentRunHeader = {
 };
 
 describe('SessionEvent projection coverage', () => {
+  test('keeps Host admission facts out of durable Runtime events', () => {
+    assert.throws(
+      () =>
+        mapSessionEventToRuntimeEvent(
+          {
+            type: 'message_admitted',
+            id: 'admission-1',
+            turnId: 'turn-1',
+            ts: 1,
+            messageId: 'message-1',
+          },
+          ctx,
+        ),
+      /message_admitted is not a backend event/,
+    );
+  });
+
   // The contract is over what a reader can actually meet: every mapped event
   // AgentRun admits to the ledger has to project. It asserts on the unclaimed
   // codes at either severity, not on the hard one alone — a control fact whose

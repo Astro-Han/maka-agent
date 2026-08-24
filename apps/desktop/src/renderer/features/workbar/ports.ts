@@ -236,7 +236,7 @@ export interface SideChatSessionPort {
     },
   ): Promise<SideChatSendResult>;
   stop(sessionId: string): Promise<void>;
-  steer(sessionId: string, text: string): Promise<SideChatSteerResult>;
+  steer(sessionId: string, text: string, admissionId?: string): Promise<SideChatSteerResult>;
   setPermissionMode(
     sessionId: string,
     mode: PermissionMode,

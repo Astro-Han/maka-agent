@@ -54,6 +54,7 @@ export interface CanonicalSessionProjection {
   readonly goal: GoalProjection | null;
   readonly queue: SessionMessageQueueProjection;
   readonly interactions: SessionInteractionProjection;
+  readonly rootTurnSourceMessageIds?: readonly string[];
 }
 
 export interface CanonicalSessionProjectionCandidate {
@@ -98,6 +99,7 @@ export class CanonicalSessionProjectionReader {
     }
 
     let rootTurn: TurnSnapshot | null = null;
+    let rootTurnSourceMessageIds: readonly string[] = [];
     if (admission) {
       const durableAdmission = await this.#stores.agentRunStore.readRootTurnAdmission(
         sessionId,
@@ -108,6 +110,7 @@ export class CanonicalSessionProjectionReader {
       }
       this.#rootAdmissions.assertKnownAdmission(durableAdmission);
       rootTurn = await readCanonicalTurnSnapshot(this.#stores, durableAdmission);
+      rootTurnSourceMessageIds = durableAdmission.sourceMessages.map(({ messageId }) => messageId);
     }
 
     const interactions = projectSessionInteractions(
@@ -124,7 +127,14 @@ export class CanonicalSessionProjectionReader {
       createdAt: header.createdAt,
       isArchived: header.isArchived,
     };
-    return { session, rootTurn, goal, queue, interactions };
+    return {
+      session,
+      rootTurn,
+      goal,
+      queue,
+      interactions,
+      ...(admission ? { rootTurnSourceMessageIds } : {}),
+    };
   }
 
   async fitsCandidate(
@@ -192,6 +202,7 @@ function sessionContinuitySnapshotInput(
     goal: canonical.goal,
     queue: canonical.queue,
     interactions: canonical.interactions,
+    rootTurnSourceMessageIds: canonical.rootTurnSourceMessageIds ?? [],
   };
 }
 

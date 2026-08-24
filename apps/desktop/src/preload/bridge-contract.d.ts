@@ -823,6 +823,7 @@ export interface MakaBridge {
     steer(
       sessionId: string,
       text: string,
+      admissionId?: string,
     ): Promise<{ kind: 'queued'; messageId: string } | { kind: 'started'; turnId: string }>;
     enqueue(
       sessionId: string,

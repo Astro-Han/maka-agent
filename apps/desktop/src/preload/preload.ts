@@ -1634,8 +1634,9 @@ const makaBridge = {
     steer(
       sessionId: string,
       text: string,
+      admissionId?: string,
     ): Promise<{ kind: 'queued'; messageId: string } | { kind: 'started'; turnId: string }> {
-      return invokeSessionRuntimeHost('sessions:steer', sessionId, text);
+      return invokeSessionRuntimeHost('sessions:steer', sessionId, text, admissionId);
     },
     async enqueue(
       sessionId: string,

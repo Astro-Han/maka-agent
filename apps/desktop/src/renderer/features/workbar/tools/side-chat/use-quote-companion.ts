@@ -76,7 +76,8 @@ function admissionEventForMessage(
 ): SessionEvent | undefined {
   return events.find(
     (event) =>
-      (event.type === 'steering_message' && event.messageId === messageId) ||
+      ((event.type === 'steering_message' || event.type === 'message_admitted') &&
+        event.messageId === messageId) ||
       (event.type === 'queue_update' &&
         event.steeringEntries?.some(
           (entry) => entry.messageId === messageId && entry.state === 'in_flight',
@@ -756,10 +757,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       restoreLiveTurn: liveTurnRef.current,
       cancelled: false,
     };
+    const admissionId = crypto.randomUUID();
     pendingAdmissionRef.current = admission;
     activeTurnIdRef.current = null;
     try {
-      const outcome = await sideChat.steer(id, trimmed);
+      const outcome = await sideChat.steer(id, trimmed, admissionId);
       if (!mountedRef.current) return false;
       if (admission.cancelled && pendingAdmissionRef.current !== admission) return false;
       if (admission.cancelled) {

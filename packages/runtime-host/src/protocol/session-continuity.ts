@@ -87,6 +87,8 @@ export interface SessionContinuitySnapshot {
   goal: GoalProjection | null;
   queue: SessionMessageQueueProjection;
   interactions: SessionInteractionProjection;
+  /** Host-owned source message tickets admitted into the root Turn. */
+  rootTurnSourceMessageIds?: readonly string[];
 }
 
 export interface SubscriptionOpenInput {
@@ -515,7 +517,18 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     'Session continuity snapshot',
     SESSION_CONTINUITY_SNAPSHOT_MAX_BYTES,
   );
-  const record = requireExactRecord(value, 'Session continuity snapshot', [
+  const record = requireRecord(value, 'Session continuity snapshot');
+  assertAllowedKeys(record, 'Session continuity snapshot', [
+    'schemaVersion',
+    'session',
+    'projectionRevision',
+    'rootTurn',
+    'goal',
+    'queue',
+    'interactions',
+    'rootTurnSourceMessageIds',
+  ]);
+  assertRequiredKeys(record, 'Session continuity snapshot', [
     'schemaVersion',
     'session',
     'projectionRevision',
@@ -537,6 +550,10 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
   if (goal !== null && goal.sessionId !== session.sessionId) {
     throw invalidProtocolFrame('Session continuity Goal belongs to a different Session');
   }
+  const rootTurnSourceMessageIds =
+    record.rootTurnSourceMessageIds === undefined
+      ? undefined
+      : decodeRootTurnSourceMessageIds(record.rootTurnSourceMessageIds);
   return {
     schemaVersion: SESSION_CONTINUITY_SCHEMA_VERSION,
     session,
@@ -545,7 +562,15 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     goal,
     queue: decodeSessionMessageQueueProjection(record.queue),
     interactions,
+    ...(rootTurnSourceMessageIds === undefined ? {} : { rootTurnSourceMessageIds }),
   };
+}
+
+function decodeRootTurnSourceMessageIds(value: unknown): string[] {
+  if (!Array.isArray(value)) throw invalidProtocolFrame('Invalid root Turn source message ids');
+  return value.map((messageId, index) =>
+    requireId(messageId, `root Turn source message id ${index}`),
+  );
 }
 
 function decodeSubscriptionOpenInput(value: unknown): SubscriptionOpenInput {

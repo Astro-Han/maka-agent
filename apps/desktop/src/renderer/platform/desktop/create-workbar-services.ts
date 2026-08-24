@@ -121,7 +121,7 @@ export function createDesktopWorkbarServices(
         bridge.sessions.abandonSessionCopy(sourceSessionId, copyId),
       send: (sessionId, command) => bridge.sessions.send(sessionId, command),
       stop: (sessionId) => bridge.sessions.stop(sessionId),
-      steer: (sessionId, text) => bridge.sessions.steer(sessionId, text),
+      steer: (sessionId, text, admissionId) => bridge.sessions.steer(sessionId, text, admissionId),
       setPermissionMode: (sessionId, mode) =>
         bridge.sessions.setPermissionMode(sessionId, mode),
       regenerateTurn: (sessionId, input) =>

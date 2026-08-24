@@ -380,9 +380,9 @@ export function registerRuntimeHostSessionExecutionIpc(
 
   ipcMain.handle(
     "sessions:steer",
-    async (_event, sessionId: string, text: unknown) => {
+    async (_event, sessionId: string, text: unknown, admissionId: unknown) => {
       const content = steeringContent(text);
-      const messageId = newId();
+      const messageId = admissionId === undefined ? newId() : requiredId(admissionId, "Admission");
       const submitted = await retryDispatchedCommand(
         () =>
           deps.client.submitMessage({
