@@ -58,7 +58,7 @@ import {
   resolveEffectiveOrchestration,
   type EffectiveOrchestration,
 } from '@maka/core/orchestration';
-import type { SessionEvent } from '@maka/core/events';
+import { messageContentsEqual, type SessionEvent } from '@maka/core/events';
 import type { AgentBackend, BackendSendInput } from '@maka/core/backend-types';
 import type { RunTraceEvent } from './run-trace.js';
 import type { StopSessionInput } from './session-manager.js';
@@ -667,7 +667,7 @@ export class AgentRun {
           : {}),
         ...(this.input.userInput.origin ? { origin: this.input.userInput.origin } : {}),
       });
-      await this.input.store.appendMessage(this.sessionId, userMsg);
+      await appendUserMessageOnce(this.input.store, this.sessionId, userMsg);
       await this.input.hooks.appendTurnState(this.sessionId, this.turnId, 'running', this.lineage);
       this.lastTs = userMessageTs;
     } else {
@@ -1896,6 +1896,28 @@ function redactTraceString(value: string): string {
 function errorMessage(error: unknown): string {
   return redactTraceString(error instanceof Error ? error.message : String(error));
 }
+
+async function appendUserMessageOnce(
+  store: AgentRunSessionStore,
+  sessionId: string,
+  message: UserMessage,
+): Promise<void> {
+  const existing = (await store.readMessages(sessionId)).find(
+    (candidate) => candidate.id === message.id,
+  );
+  if (!existing) {
+    await store.appendMessage(sessionId, message);
+    return;
+  }
+  if (
+    existing.type !== 'user' ||
+    existing.turnId !== message.turnId ||
+    !messageContentsEqual(existing, message)
+  ) {
+    throw new Error(`Durable UserMessage identity ${message.id} has conflicting content`);
+  }
+}
+
 function isInteractionResumeAck(event: SessionEvent): boolean {
   return (
     event.type === 'sandbox_boundary_decision_ack' || event.type === 'user_question_answer_ack'

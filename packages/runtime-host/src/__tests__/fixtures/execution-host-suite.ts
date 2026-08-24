@@ -957,6 +957,18 @@ export class ExecutionFixture {
     }
   }
 
+  async readMessageLifecycleState(messageId: string) {
+    const reader = await acquireReader(this.capability);
+    let stores: Awaited<ReturnType<typeof openInteractiveExecutionStoresForRead>> | undefined;
+    try {
+      stores = await openInteractiveExecutionStoresForRead(reader.lease);
+      return await stores.sessionStore.readMessageLifecycleState(this.sessionId, messageId);
+    } finally {
+      await stores?.sessionStore.close?.();
+      await reader.close();
+    }
+  }
+
   async readTurnFootprint(turnId: string): Promise<{
     admitted: boolean;
     runCount: number;

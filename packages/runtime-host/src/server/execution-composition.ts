@@ -468,6 +468,8 @@ export async function createExecutionRuntimeHostComposition(
         requireRootCoordinator(rootCoordinator).claimStopFence(input, commitQueueFence, admission),
       startFromMessage: (input, admission) =>
         requireRootCoordinator(rootCoordinator).startFromMessage(input, admission),
+      startRecoveredMessages: (input, admission) =>
+        requireRootCoordinator(rootCoordinator).startRecoveredMessages(input, admission),
       prepareMessage: (input) => requireRootCoordinator(rootCoordinator).prepareMessage(input),
       claimStop: (input, commitQueueFence, admission) =>
         requireRootCoordinator(rootCoordinator).claimStop(input, commitQueueFence, admission),
@@ -482,6 +484,7 @@ export async function createExecutionRuntimeHostComposition(
           stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
       },
       receipts: stores.messageReceiptStore,
+      lifecycle: stores.sessionStore,
       sessionAdmission,
       acquireResidency: () => context.acquireResidency('message-queue'),
       requestDrain: context.requestDrain,
@@ -1485,6 +1488,7 @@ export async function createExecutionRuntimeHostComposition(
               ),
             );
             await coordinator.recover();
+            await messages.recoverPendingAfterHostRestart(recoverySessions.map((session) => session.id));
             rootRecoveryCompleted = true;
           },
         },

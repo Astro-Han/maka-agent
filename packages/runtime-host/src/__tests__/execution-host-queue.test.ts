@@ -205,6 +205,7 @@ test('subscribed Clients share one canonical queue and ordered root handoff', as
     await waitForTerminalTurn(tui, fixture.sessionId, successor.snapshot.rootTurn.turnId);
     await tui.close();
     await fixture.stopHost(host);
+    assert.equal(await fixture.readMessageLifecycleState(followupId), 'handed_off');
 
     const chain = await fixture.readAdmissionChain();
     assert.deepEqual(
@@ -212,6 +213,85 @@ test('subscribed Clients share one canonical queue and ordered root handoff', as
       [firstTurnId, successor.snapshot.rootTurn.turnId],
     );
     assert.deepEqual(chain[1]?.normalizedInput, followupContent);
+  });
+});
+
+test('production UDS admission commits one transcript before the root handoff', async () => {
+  await withExecutionRoot(async (fixture) => {
+    const host = await fixture.startHost();
+    const client = await connectClient(fixture.root);
+    const messageId = randomUUID();
+    const started = await client.request('turn.message.submit', {
+      originHostEpoch: host.hostEpoch,
+      sessionId: fixture.sessionId,
+      messageId,
+      content: { text: FAKE_ASK_USER_QUESTION_PROMPT },
+      placement: 'current_turn',
+    });
+    assert.equal(started.disposition, 'turn_started');
+    if (started.disposition !== 'turn_started') return;
+    const active = await client.queryTurn({ sessionId: fixture.sessionId, turnId: started.turnId });
+    await client.stopTurn({
+      sessionId: fixture.sessionId,
+      turnId: started.turnId,
+      runId: active.runId,
+    });
+    await client.close();
+    await fixture.stopHost(host);
+    const ledger = await fixture.readTurn(started.turnId);
+    assert.deepEqual(
+      ledger.userMessages.filter((message) => message.id === messageId).map((message) => message.id),
+      [messageId],
+    );
+    assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
+  });
+});
+
+test('a Host crash after queue admission recovers the durable successor once', async () => {
+  await withExecutionRoot(async (fixture) => {
+    const firstHost = await fixture.startHost();
+    const first = await connectClient(fixture.root);
+    const started = requireStartedTurn(
+      await first.startTurn({
+        sessionId: fixture.sessionId,
+        turnId: randomUUID(),
+        content: { text: FAKE_ASK_USER_QUESTION_PROMPT },
+      }),
+    );
+    const messageId = randomUUID();
+    const queued = await first.request('turn.message.submit', {
+      originHostEpoch: firstHost.hostEpoch,
+      sessionId: fixture.sessionId,
+      messageId,
+      content: { text: 'recover this accepted successor' },
+      placement: 'next_turn',
+    });
+    assert.equal(queued.disposition, 'followup');
+    await fixture.killHost(firstHost);
+    await first.closed;
+
+    const secondHost = await fixture.startHost();
+    const second = await connectClient(fixture.root);
+    const subscription = await second.openSessionSubscription({
+      sessionId: fixture.sessionId,
+      transcript: { kind: 'none' },
+    });
+    const probe = new SubscriptionProbe(subscription);
+    const successor = await probe.waitFor(
+      (frame) =>
+        frame.kind === 'subscription.session_projection' &&
+        frame.snapshot.rootTurn !== null &&
+        frame.snapshot.rootTurn.turnId !== started.turnId,
+      'durable successor was not recovered after the Host crash',
+    );
+    assert.equal(successor.kind, 'subscription.session_projection');
+    if (successor.kind !== 'subscription.session_projection' || !successor.snapshot.rootTurn) return;
+    await waitForTerminalTurn(second, fixture.sessionId, successor.snapshot.rootTurn.turnId);
+    await subscription.close();
+    await probe.done;
+    await second.close();
+    await fixture.stopHost(secondHost);
+    assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
   });
 });
 

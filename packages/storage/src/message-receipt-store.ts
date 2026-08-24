@@ -45,6 +45,24 @@ export interface PendingMessageAdmission {
   readonly admittedAt: number;
 }
 
+export interface MessageLifecycleStore {
+  commitMessageAdmission(admission: PendingMessageAdmission): Promise<PendingMessageAdmission>;
+  readMessageAdmission(
+    sessionId: string,
+    messageId: string,
+  ): Promise<PendingMessageAdmission | undefined>;
+  readMessageLifecycleState(
+    sessionId: string,
+    messageId: string,
+  ): Promise<MessageLifecycleState | undefined>;
+  listMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]>;
+  updateMessageAdmission(admission: PendingMessageAdmission): Promise<void>;
+  reorderMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;
+  cancelMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;
+  markMessagesHandedOff(sessionId: string, messageIds: readonly string[]): Promise<void>;
+  markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void>;
+}
+
 export function normalizePendingMessageAdmission(
   admission: PendingMessageAdmission,
 ): PendingMessageAdmission {

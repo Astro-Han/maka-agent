@@ -1670,6 +1670,259 @@ export class SqliteSessionMetadataStore {
     });
   }
 
+  async listMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    return this.readTransaction(() => {
+      const rows = this.db
+        .prepare(
+          `
+          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+          FROM message_admissions
+          WHERE session_id = ? AND lifecycle_state = 'accepted'
+          ORDER BY queue_order, sequence
+        `,
+        )
+        .all(sessionId) as MessageAdmissionRow[];
+      return rows.map((row) => decodeMessageAdmissionRow(sessionId, row).admission);
+    });
+  }
+
+  async readMessageLifecycleState(
+    sessionId: string,
+    messageId: string,
+  ): Promise<MessageLifecycleState | undefined> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    assertSafeSessionId(messageId);
+    return this.readTransaction(() => {
+      const row = this.db
+        .prepare(
+          `
+          SELECT lifecycle_state
+          FROM message_admissions
+          WHERE session_id = ? AND message_id = ?
+        `,
+        )
+        .get(sessionId, messageId) as { lifecycle_state?: unknown } | undefined;
+      if (!row) return undefined;
+      if (
+        row.lifecycle_state !== 'accepted' &&
+        row.lifecycle_state !== 'handed_off' &&
+        row.lifecycle_state !== 'executed' &&
+        row.lifecycle_state !== 'cancelled'
+      ) {
+        throw new SessionMetadataConflictError('Invalid Message admission lifecycle state');
+      }
+      return row.lifecycle_state;
+    });
+  }
+
+  async updateMessageAdmission(admission: PendingMessageAdmission): Promise<void> {
+    this.assertOpen();
+    const stored = normalizePendingMessageAdmission(admission);
+    this.transaction(() => {
+      const currentRow = this.db
+        .prepare(
+          `
+          SELECT turn_id, run_id, message_id, content_json, model_content_json,
+            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+          FROM message_admissions
+          WHERE session_id = ? AND message_id = ?
+        `,
+        )
+        .get(stored.sessionId, stored.messageId) as MessageAdmissionRow | undefined;
+      if (!currentRow) throw new SessionMetadataConflictError('Message admission does not exist');
+      const current = decodeMessageAdmissionRow(stored.sessionId, currentRow);
+      if (current.lifecycleState !== 'accepted') {
+        throw new SessionMetadataConflictError('Message admission is already settled');
+      }
+      if (
+        current.admission.turnId !== stored.turnId ||
+        current.admission.runId !== stored.runId ||
+        current.admission.submittedPlacement !== stored.submittedPlacement ||
+        current.admission.admittedAt !== stored.admittedAt
+      ) {
+        throw new SessionMetadataConflictError('Message admission update identity conflict');
+      }
+      this.db
+        .prepare(
+          `
+          UPDATE message_admissions
+          SET content_json = ?, model_content_json = ?, placement = ?, disposition = ?
+          WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
+        `,
+        )
+        .run(
+          JSON.stringify(stored.content),
+          JSON.stringify(stored.modelContent),
+          stored.placement,
+          stored.disposition,
+          stored.sessionId,
+          stored.messageId,
+        );
+      if (stored.disposition !== 'steering') return;
+      const message = decodeCanonicalMessage({
+        type: 'user',
+        id: stored.messageId,
+        turnId: stored.turnId,
+        ts: stored.admittedAt,
+        ...stored.content,
+        steeringEventId: stored.messageId,
+      });
+      const rows = this.db
+        .prepare(
+          `
+          SELECT sequence, record_json
+          FROM session_messages
+          WHERE session_id = ? AND message_id = ?
+        `,
+        )
+        .all(stored.sessionId, stored.messageId) as Array<{
+        sequence?: unknown;
+        record_json?: unknown;
+      }>;
+      if (rows.length > 1) {
+        throw new SessionMetadataConflictError('Message admission transcript identity is ambiguous');
+      }
+      const json = JSON.stringify(message);
+      if (rows.length === 0) {
+        const row = this.db
+          .prepare(
+            'SELECT COALESCE(MAX(sequence), -1) AS last_sequence FROM session_messages WHERE session_id = ?',
+          )
+          .get(stored.sessionId) as { last_sequence?: unknown };
+        if (typeof row.last_sequence !== 'number' || !Number.isSafeInteger(row.last_sequence)) {
+          throw new SessionMetadataConflictError('Invalid Session message sequence');
+        }
+        this.insertSessionMessagesSync(stored.sessionId, row.last_sequence + 1, [
+          { message, json },
+        ]);
+      } else {
+        const sequence = rows[0]?.sequence;
+        if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence)) {
+          throw new SessionMetadataConflictError('Invalid Message transcript sequence');
+        }
+        this.db
+          .prepare(
+            'UPDATE session_messages SET record_json = ? WHERE session_id = ? AND sequence = ?',
+          )
+          .run(json, stored.sessionId, sequence);
+      }
+      this.updateCatalogProjectionSync(
+        stored.sessionId,
+        {
+          lastMessageAt: stored.admittedAt,
+          lastMessagePreview: message.type === 'user' ? message.displayText : undefined,
+        },
+        true,
+      );
+    });
+  }
+
+  async cancelMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    const unique = [...new Set(messageIds)];
+    for (const messageId of unique) assertSafeSessionId(messageId);
+    this.transaction(() => {
+      const statement = this.db.prepare(
+        `
+        UPDATE message_admissions
+        SET lifecycle_state = 'cancelled'
+        WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
+      `,
+      );
+      for (const messageId of unique) {
+        const result = statement.run(sessionId, messageId);
+        if (result.changes !== 1) {
+          throw new SessionMetadataConflictError('Message admission cancellation identity conflict');
+        }
+      }
+    });
+  }
+
+  async reorderMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    const unique = [...new Set(messageIds)];
+    if (unique.length !== messageIds.length) {
+      throw new SessionMetadataConflictError('Message admission reorder contains duplicate identities');
+    }
+    for (const messageId of unique) assertSafeSessionId(messageId);
+    this.transaction(() => {
+      const rows = this.db
+        .prepare(
+          `
+          SELECT message_id
+          FROM message_admissions
+          WHERE session_id = ? AND lifecycle_state = 'accepted' AND disposition = 'followup'
+          ORDER BY queue_order, sequence
+        `,
+        )
+        .all(sessionId) as Array<{ message_id?: unknown }>;
+      const current = rows.map((row) => row.message_id);
+      if (
+        current.length !== unique.length ||
+        current.some((messageId, index) => messageId !== unique[index])
+      ) {
+        throw new SessionMetadataConflictError('Message admission reorder identity conflict');
+      }
+      const update = this.db.prepare(
+        `
+        UPDATE message_admissions
+        SET queue_order = ?
+        WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
+      `,
+      );
+      unique.forEach((messageId, index) => update.run(index, sessionId, messageId));
+    });
+  }
+
+  async markMessagesHandedOff(sessionId: string, messageIds: readonly string[]): Promise<void> {
+    return this.markMessageLifecycle(sessionId, messageIds, 'handed_off');
+  }
+
+  async markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void> {
+    return this.markMessageLifecycle(sessionId, messageIds, 'executed');
+  }
+
+  private markMessageLifecycle(
+    sessionId: string,
+    messageIds: readonly string[],
+    state: 'handed_off' | 'executed',
+  ): Promise<void> {
+    this.assertOpen();
+    assertSafeSessionId(sessionId);
+    const unique = [...new Set(messageIds)];
+    for (const messageId of unique) assertSafeSessionId(messageId);
+    this.transaction(() => {
+      const statement = this.db.prepare(
+        `
+        UPDATE message_admissions
+        SET lifecycle_state = ?
+        WHERE session_id = ? AND message_id = ?
+          AND lifecycle_state IN ('accepted', 'handed_off')
+      `,
+      );
+      for (const messageId of unique) {
+        const result = statement.run(state, sessionId, messageId);
+        if (result.changes !== 1) {
+          const existing = this.db
+            .prepare(
+              'SELECT lifecycle_state FROM message_admissions WHERE session_id = ? AND message_id = ?',
+            )
+            .get(sessionId, messageId) as { lifecycle_state?: unknown } | undefined;
+          if (existing?.lifecycle_state !== state) {
+            throw new SessionMetadataConflictError('Message admission lifecycle identity conflict');
+          }
+        }
+      }
+    });
+    return Promise.resolve();
+  }
+
   async readMessages(sessionId: string): Promise<StoredMessage[]> {
     return this.readMessagesWith(sessionId, decodeStoredMessage);
   }

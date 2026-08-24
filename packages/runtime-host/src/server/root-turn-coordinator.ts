@@ -79,6 +79,7 @@ import type { HostInteractionCoordinator } from './interaction-coordinator.js';
 import {
   type HostMessageRootState,
   type HostMessagePreparationInput,
+  type HostMessageRecoveryBatch,
   type HostMessageSessionHeader,
   type HostMessageStartInput,
   type HostMessageStopClaim,
@@ -1003,7 +1004,8 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         const header = await this.stores.sessionStore.readHeaderSnapshot(input.sessionId);
         const unavailableReason = runtimeHostExternalTurnUnavailableReason(header);
         if (unavailableReason) return { error: unavailableReason };
-        const turnId = randomUUID();
+        const turnId = input.turnId ?? randomUUID();
+        const runId = input.runId ?? randomUUID();
         const hasSkillInvocation = parseSkillInvocationTokens(content.text).length > 0;
         const prepared = hasSkillInvocation
           ? await this.prepareHostedSkillInvocationContent(
@@ -1040,7 +1042,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         const admitted = await this.rootAdmissionOwner.admitRootTurn({
           sessionId: input.sessionId,
           turnId,
-          proposedRunId: randomUUID(),
+          proposedRunId: runId,
           proposedUserMessageId: input.sourceMessage.messageId,
           execution: {
             kind: 'external_message',
@@ -1081,6 +1083,61 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         return { turnId };
       } finally {
         this.releaseRootReservation(reservation);
+      }
+    });
+  }
+
+  startRecoveredMessages(
+    input: HostMessageRecoveryBatch,
+    admissionLease: SessionAdmissionLease,
+  ): Promise<{ readonly turnId: string } | { readonly error: string }> {
+    return this.runCommand(async () => {
+      if (this.#executions.has(input.sessionId)) {
+        return { error: 'A root Turn is still active' };
+      }
+      const header = await this.stores.sessionStore.readHeaderSnapshot(input.sessionId);
+      const unavailableReason = runtimeHostExternalTurnUnavailableReason(header);
+      if (unavailableReason) return { error: unavailableReason };
+      const reservation = this.reserveRootTurn(input.sessionId);
+      if (!reservation) return { error: 'Another root Turn is being admitted' };
+      try {
+        const turnId = randomUUID();
+        const admitted = await this.rootAdmissionOwner.admitRootTurn({
+          sessionId: input.sessionId,
+          turnId,
+          proposedRunId: randomUUID(),
+          proposedUserMessageId: randomUUID(),
+          execution: {
+            kind: 'external_message',
+            inputDigest: messageContentDigest(input.submittedContent),
+          },
+          normalizedInput: input.content,
+          sourceMessages: input.sources,
+          admittedAt: Date.now(),
+        });
+        if (admitted.kind !== 'admitted') {
+          return { error: 'Recovered Message root identity already existed' };
+        }
+        const disposition = await this.prepareAdmittedTurn(
+          { sessionId: input.sessionId, turnId, content: input.content },
+          admitted.admission,
+          this.acquireRecoveryResidency,
+          admissionLease,
+          undefined,
+          undefined,
+          reservation,
+        );
+        if (disposition.kind !== 'await_start') {
+          return { error: 'Recovered Message root did not reserve execution' };
+        }
+        await this.messages.markMessagesHandedOff(
+          input.sessionId,
+          input.sources.map((source) => source.messageId),
+        );
+        return { turnId };
+      } catch (error) {
+        this.#admissions.release(reservation);
+        throw error;
       }
     });
   }
@@ -1810,7 +1867,11 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     if (active.startSettled.phase === 'rejected') {
       return { active, deliverStop: () => Promise.resolve() };
     }
-    commitQueueFence();
+    const fence = commitQueueFence();
+    await this.messages.cancelMessages(
+      input.sessionId,
+      fence.retracted.map((message) => message.messageId),
+    );
     await this.interactions.claimRunClosure(input, 'turn_stopped', admission);
     const shouldDeliverStop = !active.stopRequested;
     active.stopRequested = true;
@@ -1845,7 +1906,11 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     const active = this.#executions.get(input.sessionId);
     if (isTerminalSnapshot(snapshot)) {
       if (active?.turnId === input.turnId && active.runId === input.runId) {
-        commitQueueFence();
+        const fence = commitQueueFence();
+        await this.messages.cancelMessages(
+          input.sessionId,
+          fence.retracted.map((message) => message.messageId),
+        );
         active.stopRequested = true;
         return { kind: 'await_terminal', active };
       }
@@ -1870,7 +1935,11 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       };
     }
 
-    commitQueueFence();
+    const fence = commitQueueFence();
+    await this.messages.cancelMessages(
+      input.sessionId,
+      fence.retracted.map((message) => message.messageId),
+    );
     await this.interactions.claimRunClosure(input, 'turn_stopped', admissionLease);
     const shouldRequestStop = !active.stopRequested;
     active.stopRequested = true;
@@ -2137,6 +2206,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       }
       this.observeExecutionCompletion(active, { kind: 'terminal', snapshot });
       await this.interruptPlanAfterUnsuccessfulTurn(input.sessionId, active, snapshot.status);
+      await this.settleExecutedMessageSources(active);
       terminalTransitionStarted = true;
       await this.completeTerminalTransition(input.sessionId, active);
     } catch (error) {
@@ -2160,6 +2230,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
               snapshot,
             });
             await this.interruptPlanAfterUnsuccessfulTurn(input.sessionId, active, snapshot.status);
+            await this.settleExecutedMessageSources(active);
             terminalTransitionStarted = true;
             await this.completeTerminalTransition(input.sessionId, active);
             containedRunFailure =
@@ -2213,6 +2284,37 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       active.completion.resolve(active.observedCompletion!);
       this.#executions.publish(active);
     }
+  }
+
+  private async settleExecutedMessageSources(active: ActiveRootTurn): Promise<void> {
+    const admission = await this.stores.agentRunStore.readRootTurnAdmission(
+      active.sessionId,
+      active.turnId,
+    );
+    if (!admission || admission.sourceMessages.length === 0) return;
+    const events = await this.stores.agentRunStore.readEvents(active.sessionId, active.runId);
+    if (
+      !events.some(
+        (event) =>
+          event.type === 'provider_request_captured' ||
+          event.type === 'provider_request_attempt_recorded' ||
+          event.type === 'model_call_attempt_recorded',
+      )
+    ) {
+      return;
+    }
+    const executed = [] as string[];
+    for (const source of admission.sourceMessages) {
+      if (
+        (await this.stores.sessionStore.readMessageLifecycleState(
+          active.sessionId,
+          source.messageId,
+        )) === 'handed_off'
+      ) {
+        executed.push(source.messageId);
+      }
+    }
+    await this.messages.markMessagesExecuted(active.sessionId, executed);
   }
 
   private observeExecutionCompletion(
@@ -2276,15 +2378,15 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     admissionLease: SessionAdmissionLease,
   ): Promise<void> {
     const initiatingConnectionId = batch.initiatingConnectionId;
-    if (!initiatingConnectionId) {
-      throw new RuntimeMessageAuthorityInvariantError(
-        'Follow-up batch lost its initiating Client identity',
-      );
-    }
     // A confirmed follow-up must become a durable root even when a Session
     // provider is unavailable. Lost tools are omitted while ephemeral
     // capabilities bind to the Client that submitted this follow-up.
-    await this.clientCapabilities?.bindConfirmedFollowup(batch.sessionId, initiatingConnectionId);
+    if (initiatingConnectionId) {
+      await this.clientCapabilities?.bindConfirmedFollowup(
+        batch.sessionId,
+        initiatingConnectionId,
+      );
+    }
 
     const turnId = randomUUID();
     const header = await this.stores.sessionStore.readHeaderSnapshot(batch.sessionId);
@@ -2307,6 +2409,10 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         'Fresh follow-up root Turn identity already existed',
       );
     }
+    await this.messages.markMessagesHandedOff(
+      batch.sessionId,
+      batch.sources.map((source) => source.messageId),
+    );
 
     const nextIdentity = {
       sessionId: batch.sessionId,

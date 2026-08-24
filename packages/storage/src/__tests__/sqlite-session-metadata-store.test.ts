@@ -283,6 +283,20 @@ describe('SqliteSessionMetadataStore', () => {
           },
         ],
       );
+      assert.equal(
+        await store.readMessageLifecycleState('session-1', 'message-1'),
+        'accepted',
+      );
+      await store.markMessagesHandedOff('session-1', ['message-1']);
+      assert.equal(
+        await store.readMessageLifecycleState('session-1', 'message-1'),
+        'handed_off',
+      );
+      await store.markMessagesExecuted('session-1', ['message-1']);
+      assert.equal(
+        await store.readMessageLifecycleState('session-1', 'message-1'),
+        'executed',
+      );
     } finally {
       store.close();
     }
