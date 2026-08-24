@@ -1600,7 +1600,7 @@ export class SqliteSessionMetadataStore {
           stored.admittedAt,
         );
 
-      if (stored.disposition === 'steering') {
+      if (stored.disposition === 'steering' || stored.disposition === 'followup') {
         const message = decodeCanonicalMessage({
           type: 'user',
           id: stored.messageId,
@@ -1762,7 +1762,7 @@ export class SqliteSessionMetadataStore {
           stored.sessionId,
           stored.messageId,
         );
-      if (stored.disposition !== 'steering') return;
+      if (stored.disposition !== 'steering' && stored.disposition !== 'followup') return;
       const message = decodeCanonicalMessage({
         type: 'user',
         id: stored.messageId,

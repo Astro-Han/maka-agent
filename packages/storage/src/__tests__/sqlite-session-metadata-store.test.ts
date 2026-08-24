@@ -302,6 +302,61 @@ describe('SqliteSessionMetadataStore', () => {
     }
   });
 
+  test('atomically accepts a follow-up message and its canonical transcript', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    try {
+      await store.create(fullHeader({ id: 'session-followup-admission' }));
+      const admission = await store.commitMessageAdmission({
+        sessionId: 'session-followup-admission',
+        turnId: 'turn-current',
+        runId: 'run-current',
+        messageId: 'message-followup',
+        content: { text: 'queued before the successor root' },
+        modelContent: { text: 'queued before the successor root' },
+        submittedPlacement: 'next_turn',
+        placement: 'next_turn',
+        disposition: 'followup',
+        admittedAt: 11,
+      });
+      assert.equal(admission.disposition, 'followup');
+      assert.deepEqual(
+        (await store.readMessages('session-followup-admission')).map((message) => ({
+          id: message.id,
+          turnId: message.turnId,
+        })),
+        [{ id: 'message-followup', turnId: 'turn-current' }],
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test('rejects an oversized durable Message admission before transcript mutation', async () => {
+    const store = createSqliteSessionMetadataStore(':memory:');
+    try {
+      await store.create(fullHeader({ id: 'session-oversized' }));
+      await assert.rejects(
+        () =>
+          store.commitMessageAdmission({
+            sessionId: 'session-oversized',
+            turnId: 'turn-oversized',
+            runId: 'run-oversized',
+            messageId: 'message-oversized',
+            content: { text: 'x'.repeat(70_000) },
+            modelContent: { text: 'x'.repeat(70_000) },
+            submittedPlacement: 'current_turn',
+            placement: 'current_turn',
+            disposition: 'steering',
+            admittedAt: 10,
+          }),
+        /exceeds size limit/,
+      );
+      assert.deepEqual(await store.readMessages('session-oversized'), []);
+    } finally {
+      store.close();
+    }
+  });
+
   test('migrates v24 legacy session statuses to active exactly once', async () => {
     const root = await mkdtemp(join(tmpdir(), 'maka-session-status-v24-'));
     const path = join(root, 'state.sqlite');
