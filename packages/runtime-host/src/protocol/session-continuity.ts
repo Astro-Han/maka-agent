@@ -527,7 +527,6 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     'queue',
     'interactions',
     'rootTurnSourceMessageIds',
-    'rootTurnSourceMessageIds',
   ]);
   assertRequiredKeys(record, 'Session continuity snapshot', [
     'schemaVersion',
@@ -537,6 +536,7 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     'goal',
     'queue',
     'interactions',
+    'rootTurnSourceMessageIds',
   ]);
   if (record.schemaVersion !== SESSION_CONTINUITY_SCHEMA_VERSION) {
     throw invalidProtocolFrame('Unsupported Session continuity snapshot schema');

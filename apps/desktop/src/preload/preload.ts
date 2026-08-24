@@ -1566,9 +1566,8 @@ const makaBridge = {
       sessionId: string,
       command:
         | SessionCommand
-        | {
+          | {
             type: 'send';
-            intent?: 'side_conversation';
             turnId: string;
             text: string;
             displayText?: string;

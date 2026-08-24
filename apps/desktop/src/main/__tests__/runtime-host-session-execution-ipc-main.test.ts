@@ -639,7 +639,7 @@ test("retries a dispatched normal send with its original Turn identity", async (
       client: executionClient({
         getSession: async () => {
           reconnectQueries += 1;
-          return session();
+          return sideConversationSession();
         },
         startTurn: async (input) => {
           starts.push(input);
@@ -670,7 +670,6 @@ test("retries a dispatched normal send with its original Turn identity", async (
 
   const result = await ipc.invoke("sessions:send", "session-1", {
     type: "send",
-    intent: "side_conversation",
     text: "keep this Turn identity",
   });
 
@@ -740,9 +739,11 @@ test("retries a dispatched busy fallback with its original message identity", as
   registerExecutionIpc(
     {
       client: executionClient({
-        getSession: async () => {
+        getSession: async (sessionId) => {
           reconnectQueries += 1;
-          return session();
+          return sessionId === 'side-session'
+            ? sideConversationSession(sessionId)
+            : session();
         },
         startTurn: async () => {
           throw new RuntimeHostOperationError(
@@ -779,9 +780,8 @@ test("retries a dispatched busy fallback with its original message identity", as
     ipc,
   );
 
-  const result = await ipc.invoke("sessions:send", "session-1", {
+  const result = await ipc.invoke("sessions:send", "side-session", {
     type: "send",
-    intent: "side_conversation",
     turnId: "turn-1",
     text: "keep this message identity",
   });
@@ -789,13 +789,13 @@ test("retries a dispatched busy fallback with its original message identity", as
   assert.equal(reconnectQueries, 2, 'initial Session lookup plus reconnect probe');
   assert.deepEqual(submits, [
     {
-      sessionId: "session-1",
+      sessionId: "side-session",
       messageId: "turn-1",
       content: { text: "keep this message identity", inlineReferences: [] },
       placement: "current_turn",
     },
     {
-      sessionId: "session-1",
+      sessionId: "side-session",
       messageId: "turn-1",
       content: { text: "keep this message identity", inlineReferences: [] },
       placement: "current_turn",
@@ -820,9 +820,8 @@ test("retries a dispatched busy fallback with its original message identity", as
       error instanceof RuntimeHostOperationError && error.code === 'outcome_unknown',
   );
   assert.deepEqual(
-    await ipc.invoke("sessions:send", "session-1", {
+    await ipc.invoke("sessions:send", "side-session", {
       type: "send",
-      intent: 'side_conversation',
       turnId: "turn-unknown",
       text: "keep waiting for the Host outcome",
     }),
@@ -1475,9 +1474,9 @@ function unusedSessionCopyCleanup(): RuntimeHostSessionExecutionIpcDeps['session
   };
 }
 
-function session(cwd = "/workspace"): SessionCatalogProjection {
+function session(cwd = "/workspace", id = 'session-1'): SessionCatalogProjection {
   return {
-    id: "session-1",
+    id,
     revision: 1,
     workspace: {
       target: { kind: 'host_path', path: cwd },
@@ -1500,4 +1499,8 @@ function session(cwd = "/workspace"): SessionCatalogProjection {
     collaborationMode: "agent",
     orchestrationMode: "default",
   };
+}
+
+function sideConversationSession(id = 'session-1'): SessionCatalogProjection {
+  return { ...session('/workspace', id), labels: [SIDE_CONVERSATION_SESSION_LABEL] };
 }

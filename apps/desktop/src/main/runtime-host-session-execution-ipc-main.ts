@@ -25,6 +25,7 @@ import {
   RuntimeHostRequestInterruptedError,
 } from '@maka/runtime-host/client';
 import { SKILL_INVOCATION_TOKEN_SOURCE } from '@maka/core/skill-invocation-token';
+import { isSideConversationSession } from '@maka/core/side-conversation';
 import {
   type SessionChangedEvent,
   type SessionChangedReason,
@@ -193,10 +194,15 @@ export function registerRuntimeHostSessionExecutionIpc(
     async (event, sessionId: unknown, observerId: unknown) => {
       const normalizedSessionId = requiredId(sessionId, "Session");
       const normalizedObserverId = requiredId(observerId, "Session observer");
+      const session = await deps.client.getSession(normalizedSessionId);
+      if (!session) {
+        throw new Error(`Runtime Host Session not found: ${normalizedSessionId}`);
+      }
       await deps.observations.observe(
         normalizedSessionId,
         normalizedObserverId,
         event.sender as RuntimeHostSessionObserverTarget,
+        isSideConversationSession(session.labels),
       );
     },
   );
@@ -254,6 +260,7 @@ export function registerRuntimeHostSessionExecutionIpc(
       const session = await deps.client.getSession(sessionId);
       if (!session)
         throw new Error(`Runtime Host Session not found: ${sessionId}`);
+      const sideConversation = isSideConversationSession(session.labels);
       const turnId = command.turnId ?? newId();
       let attachments = retainedAttachmentsForSession(
         sessionId,
@@ -314,13 +321,12 @@ export function registerRuntimeHostSessionExecutionIpc(
       };
       let startResult;
       try {
-        startResult =
-          command.intent === 'side_conversation'
-            ? await retryDispatchedCommand(
-                () => deps.client.startTurn(startInput),
-                () => deps.client.getSession(sessionId),
-              )
-            : await deps.client.startTurn(startInput);
+        startResult = sideConversation
+          ? await retryDispatchedCommand(
+              () => deps.client.startTurn(startInput),
+              () => deps.client.getSession(sessionId),
+            )
+          : await deps.client.startTurn(startInput);
       } catch (error) {
         // The renderer routes text at a session it sees as running to
         // `sessions:steer`, but its view can lag the Host: another window, a
@@ -344,7 +350,6 @@ export function registerRuntimeHostSessionExecutionIpc(
         // Side Conversation keeps its requested Turn id as the admission
         // ticket so a successor root can report ownership with that identity.
         // Ordinary sends retain the pre-existing independent message id.
-        const sideConversation = command.intent === 'side_conversation';
         const messageId = sideConversation ? turnId : newId();
         const emptySkillInvocation = { loaded: [], failed: [], receipts: [] };
         const submitInput = {

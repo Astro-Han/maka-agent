@@ -118,6 +118,7 @@ interface ObservedSessionState {
   snapshot?: SessionContinuitySnapshot;
   projector?: RuntimeHostSessionProjector;
   transcriptAccess: number;
+  messageAdmissions: boolean;
   closing: boolean;
 }
 
@@ -425,6 +426,7 @@ export class RuntimeHostSessionObserver {
     sessionId: string,
     observerId: string,
     target: RuntimeHostSessionObserverTarget,
+    messageAdmissions = false,
   ): Promise<void> {
     this.#assertOpen();
     const previous = this.#observers.get(observerId);
@@ -438,6 +440,10 @@ export class RuntimeHostSessionObserver {
       return;
     }
     const state = this.#state(sessionId);
+    if (messageAdmissions && !state.messageAdmissions) {
+      state.messageAdmissions = true;
+      state.projector?.enableMessageAdmissions();
+    }
     let group = state.targets.get(target.id);
     if (!group) {
       const destroyedListener = () => {
@@ -622,6 +628,7 @@ export class RuntimeHostSessionObserver {
       subscriptionOwner,
       pendingTranscriptConsumers: 0,
       transcriptAccess: 0,
+      messageAdmissions: false,
       closing: false,
     };
     this.#states.set(sessionId, state);
@@ -800,6 +807,7 @@ export class RuntimeHostSessionObserver {
       subscription.replica.projectionSeed,
       this.#now,
       subscription.activeAssistantStreams,
+      state.messageAdmissions,
     );
     const terminalTurnIds = new Set<string>();
     for (const turnId of state.watchedTurnIds) {

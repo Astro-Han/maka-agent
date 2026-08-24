@@ -85,16 +85,19 @@ export class RuntimeHostSessionProjector {
   readonly #now: () => number;
   readonly #transcriptIds: Set<string>;
   readonly #accumulators = new Map<string, AssistantAccumulator>();
+  #projectMessageAdmissions: boolean;
 
   constructor(
     snapshot: SessionContinuitySnapshot,
     seed: RuntimeHostSessionProjectionSeed,
     now: () => number = Date.now,
     activeAssistantStreams: readonly SessionAssistantStreamIdentity[] = [],
+    projectMessageAdmissions = false,
   ) {
     this.#snapshot = structuredClone(snapshot);
     this.#now = now;
     this.#transcriptIds = new Set(seed.durableInFlightMessageIds);
+    this.#projectMessageAdmissions = projectMessageAdmissions;
     const root = snapshot.rootTurn;
     if (!root) return;
     for (const message of seed.activeAssistantMessages) {
@@ -139,13 +142,23 @@ export class RuntimeHostSessionProjector {
     return structuredClone(this.#snapshot);
   }
 
+  enableMessageAdmissions(): void {
+    this.#projectMessageAdmissions = true;
+  }
+
   seedActive(includeAssistantText: boolean): SessionEvent[] {
     const root = this.#snapshot.rootTurn;
     if (!root) return [];
     const events: SessionEvent[] = [];
-    events.push(
-      ...projectMessageAdmissionEvents(root, this.#snapshot.rootTurnSourceMessageIds, this.#now()),
-    );
+    if (this.#projectMessageAdmissions) {
+      events.push(
+        ...projectMessageAdmissionEvents(
+          root,
+          this.#snapshot.rootTurnSourceMessageIds,
+          this.#now(),
+        ),
+      );
+    }
     if (isRuntimeHostTerminalTurn(root)) return events;
     let seededAssistantText = false;
     if (includeAssistantText) {
@@ -197,7 +210,9 @@ export class RuntimeHostSessionProjector {
 
   seedTerminal(turn: RuntimeHostTerminalTurn): SessionEvent[] {
     return [
-      ...projectMessageAdmissionEvents(turn, this.#snapshot.rootTurnSourceMessageIds, this.#now()),
+      ...(this.#projectMessageAdmissions
+        ? projectMessageAdmissionEvents(turn, this.#snapshot.rootTurnSourceMessageIds, this.#now())
+        : []),
       ...this.#terminalEvents(turn, true),
     ];
   }
@@ -363,8 +378,10 @@ export class RuntimeHostSessionProjector {
       events.push(...projectRuntimeHostInteractionRequest(interaction, this.#now()));
     }
     const root = next.rootTurn;
-    events.push(...projectMessageRetractionEvents(previousSnapshot, next, this.#now()));
-    events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
+    if (this.#projectMessageAdmissions) {
+      events.push(...projectMessageRetractionEvents(previousSnapshot, next, this.#now()));
+      events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
+    }
     if (root && queueChanged(previousSnapshot.queue, next.queue)) {
       for (const entry of newlyInFlight(previousSnapshot.queue, next.queue)) {
         events.push({

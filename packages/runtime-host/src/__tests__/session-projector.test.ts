@@ -74,10 +74,22 @@ test('applies authoritative replacement once and does not complete it again at T
 });
 
 test('emits the Host admission fact when a queued message enters a successor Turn', () => {
+  const ordinary = new RuntimeHostSessionProjector(
+    withRootSourceMessageIds(snapshot(), ['ordinary-ticket']),
+    createRuntimeHostSessionProjectionSeed([], snapshot()),
+    () => 10,
+  );
+  assert.equal(
+    ordinary.seedActive(false).some((event) => event.type === 'message_admission'),
+    false,
+  );
+
   const rejoined = new RuntimeHostSessionProjector(
     withRootSourceMessageIds(snapshot(), ['rejoined-ticket']),
     createRuntimeHostSessionProjectionSeed([], snapshot()),
     () => 10,
+    [],
+    true,
   );
   assert.deepEqual(
     rejoined
@@ -113,6 +125,8 @@ test('emits the Host admission fact when a queued message enters a successor Tur
     previous,
     createRuntimeHostSessionProjectionSeed([], previous),
     () => 10,
+    [],
+    true,
   );
   const next = withRootSourceMessageIds(
     snapshot({
@@ -165,6 +179,8 @@ test('emits the Host admission fact when a queued message enters a successor Tur
     previous,
     createRuntimeHostSessionProjectionSeed([], previous),
     () => 10,
+    [],
+    true,
   ).accept({
     kind: 'subscription.session_projection',
     hostEpoch: 'host-1',
