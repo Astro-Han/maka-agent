@@ -23,6 +23,7 @@ import type { BackendStopMode } from '@maka/core/backend-types';
 import type { AgentRunHeader, RootExecutionDescriptor } from '@maka/core/agent-run';
 import {
   INLINE_REFERENCE_MAX_COUNT,
+  messageContentDigest,
   messageContentsEqual,
   normalizeMessageContent,
   type AttachmentRef,
@@ -88,7 +89,6 @@ import {
   type QueueFenceResult,
   type RootFollowupBatch,
 } from './message-coordinator.js';
-import { messageContentDigest } from './message-content-digest.js';
 import type { ConnectionContext, TurnOperationHandlerMap } from './operation-dispatcher.js';
 import { RootAdmissionOwner } from './root-admission-owner.js';
 import { type SessionAdmissionLease, SessionAdmissionGate } from './session-admission-gate.js';
@@ -1995,6 +1995,9 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         messages: admission.sourceMessages.map((source) => ({
           messageId: source.messageId,
           content: source.content,
+          ...(source.submittedContentDigest
+            ? { submittedContentDigest: source.submittedContentDigest }
+            : {}),
           disposition: source.disposition,
         })),
       });

@@ -19,7 +19,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { MessageContent } from '@maka/core/events';
+import { messageContentDigest, type MessageContent } from '@maka/core/events';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
 import type {
   MessageOperationReceipt,
@@ -39,7 +39,6 @@ import {
   type HostMessageRootPort,
   type HostMessageRootState,
 } from '../server/message-coordinator.js';
-import { messageContentDigest } from '../server/message-content-digest.js';
 import { SessionAdmissionGate } from '../server/session-admission-gate.js';
 
 const ROOT = { sessionId: 'session-1', turnId: 'turn-1', runId: 'run-1' } as const;

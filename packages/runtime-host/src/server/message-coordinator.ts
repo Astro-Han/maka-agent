@@ -22,6 +22,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { SteeringLease } from '@maka/core/backend-types';
 import {
   aggregateMessageContents,
+  messageContentDigest,
   messageContentsEqual,
   normalizeMessageContent,
   type MessageContent,
@@ -72,7 +73,6 @@ import type { RuntimeHostResidency } from './host-kernel.js';
 import { worstCaseFailedTurnSnapshot } from './canonical-turn-snapshot.js';
 import { worstCaseMessageQueueProjection } from './message-queue-capacity.js';
 import type { ConnectionContext, MessageOperationHandlerMap } from './operation-dispatcher.js';
-import { messageContentDigest } from './message-content-digest.js';
 import { type SessionAdmissionLease, SessionAdmissionGate } from './session-admission-gate.js';
 
 type MessageOperationErrorCode =

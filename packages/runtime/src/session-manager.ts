@@ -4827,6 +4827,7 @@ export class SessionManager {
     messages: readonly {
       messageId: string;
       content: import('@maka/core/events').MessageContent;
+      submittedContentDigest?: `sha256:${string}`;
       disposition: 'steering' | 'followup' | 'turn_started';
     }[];
   }): Promise<void> {

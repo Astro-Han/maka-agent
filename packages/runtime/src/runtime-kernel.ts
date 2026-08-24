@@ -34,6 +34,7 @@ import type {
 } from '@maka/core/runtime-event-store';
 import { isSessionInlineRun } from '@maka/core/agent-run';
 import {
+  messageContentDigest,
   messageContentsEqual,
   normalizeMessageContent,
   type ActiveInteractionRequestEvent,
@@ -194,6 +195,7 @@ export interface RuntimeKernelLike {
     messages: readonly {
       messageId: string;
       content: MessageContent;
+      submittedContentDigest?: `sha256:${string}`;
       disposition: 'steering' | 'followup' | 'turn_started';
     }[];
   }): Promise<void>;
@@ -2416,6 +2418,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
     messages: readonly {
       messageId: string;
       content: MessageContent;
+      submittedContentDigest?: `sha256:${string}`;
       disposition: 'steering' | 'followup' | 'turn_started';
     }[];
   }): Promise<void> {
@@ -2427,7 +2430,10 @@ export class RuntimeKernel implements RuntimeKernelLike {
       if (existing) {
         if (
           existing.type !== 'user' ||
-          !messageContentsEqual(normalizeMessageContent(existing), message.content) ||
+          (!messageContentsEqual(normalizeMessageContent(existing), message.content) &&
+            (message.submittedContentDigest === undefined ||
+              messageContentDigest(normalizeMessageContent(existing)) !==
+                message.submittedContentDigest)) ||
           (existing.turnId !== input.turnId &&
             ((message.disposition !== 'steering' && message.disposition !== 'followup') ||
               existing.turnId !== input.previousRootTurnId))
