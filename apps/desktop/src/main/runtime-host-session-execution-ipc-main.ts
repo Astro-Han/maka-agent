@@ -823,11 +823,16 @@ function createRuntimeHostSessionStop(
         (candidate) => candidate.messageId === target.expectedAdmissionId,
       );
       if (entry?.state === 'queued') {
-        await deps.client.retractQueueEntry({
-          sessionId,
-          entryId: entry.entryId,
-          retractId: newId(),
-        });
+        const retractId = newId();
+        await retryDispatchedCommand(
+          () =>
+            deps.client.retractQueueEntry({
+              sessionId,
+              entryId: entry.entryId,
+              retractId,
+            }),
+          () => deps.client.getSession(sessionId),
+        );
         deps.emitSessionsChanged('status-change', sessionId);
         return { kind: 'retracted', messageId: entry.messageId };
       }
@@ -835,8 +840,7 @@ function createRuntimeHostSessionStop(
         root &&
         !isTerminalStatus(root.status) &&
         (root.turnId === target.expectedAdmissionId ||
-          observed.rootTurnSourceMessageIds.includes(target.expectedAdmissionId) ||
-          entry?.state === 'in_flight')
+          observed.rootTurnSourceMessageIds.includes(target.expectedAdmissionId))
       ) {
         expectedTurnId = root.turnId;
       } else {
@@ -859,7 +863,12 @@ function createRuntimeHostSessionStop(
       !turn ||
       isTerminalStatus(turn.status) ||
       (expectedTurnId && turn.turnId !== expectedTurnId)
-    ) return;
+    ) {
+      if (target.expectedAdmissionId) {
+        throw new Error('Host admission outcome is unknown');
+      }
+      return;
+    }
     await deps.client.interruptTurn({
       sessionId,
       interruptId: newId(),

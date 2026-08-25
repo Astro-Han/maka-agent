@@ -1160,6 +1160,7 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
   const stopLifecycle: string[] = [];
   let sequence = 0;
   const client = executionClient({
+    getSession: async () => sideConversationSession(),
     submitMessage: async (input) => {
       submits.push(input);
       if (input.messageId === 'unknown-ticket') {
@@ -1189,6 +1190,14 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
     },
     retractQueueEntry: async (input) => {
       retractions.push(input);
+      if (retractions.length === 1) {
+        throw new RuntimeHostRequestInterruptedError(
+          'queue.retract',
+          'command',
+          'dispatched',
+          'connection_lost',
+        );
+      }
       return { queueRevision: 3 };
     },
   });
@@ -1253,27 +1262,36 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       entryId: 'entry-1',
       retractId: 'id-1',
     },
+    {
+      sessionId: 'session-1',
+      entryId: 'entry-1',
+      retractId: 'id-1',
+    },
   ]);
   assert.deepEqual(stopLifecycle, []);
-  for (const expectedAdmissionId of ['in-flight-ticket', 'successor-ticket']) {
-    await ipc.invoke('sessions:stop', 'session-1', {
-      source: 'stop_button',
-      expectedAdmissionId,
-    });
-  }
-  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt', 'teardown', 'interrupt']);
+  await assert.rejects(
+    () =>
+      ipc.invoke('sessions:stop', 'session-1', {
+        source: 'stop_button',
+        expectedAdmissionId: 'in-flight-ticket',
+      }),
+    /Host admission outcome is unknown/,
+  );
+  await ipc.invoke('sessions:stop', 'session-1', {
+    source: 'stop_button',
+    expectedAdmissionId: 'successor-ticket',
+  });
+  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt']);
   await ipc.invoke("sessions:stop", "session-1", {
     source: "stop_button",
     expectedTurnId: "turn-unrelated",
   });
-  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt', 'teardown', 'interrupt']);
+  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt']);
   await ipc.invoke("sessions:stop", "session-1", {
     source: "stop_button",
     expectedTurnId: "turn-1",
   });
   assert.deepEqual(stopLifecycle, [
-    'teardown',
-    'interrupt',
     'teardown',
     'interrupt',
     'teardown',
@@ -1307,13 +1325,56 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       turnId: 'turn-1',
       runId: 'run-1',
     },
-    {
-      sessionId: 'session-1',
-      interruptId: 'id-4',
-      turnId: 'turn-1',
-      runId: 'run-1',
-    },
   ]);
+  await observer.close();
+});
+
+test('does not let an admitted Stop interrupt a replacement Turn', async () => {
+  const interrupts: unknown[] = [];
+  const observer = observerWithSnapshot({ rootTurnSourceMessageIds: ['ticket-1'] });
+  const originalSnapshot = observer.snapshot.bind(observer);
+  let replaced = false;
+  observer.snapshot = async (sessionId) => {
+    const current = await originalSnapshot(sessionId);
+    return replaced
+      ? {
+          ...current,
+          rootTurn: {
+            sessionId,
+            turnId: 'turn-2',
+            runId: 'run-2',
+            status: 'running',
+          },
+          rootTurnSourceMessageIds: ['ticket-2'],
+        }
+      : current;
+  };
+  const ipc = ipcHarness();
+  registerExecutionIpc(
+    {
+      client: executionClient({
+        interruptTurn: async (input) => {
+          interrupts.push(input);
+          throw new Error('replacement Turn must not be interrupted');
+        },
+      }),
+      observer,
+      beforeStop() {
+        replaced = true;
+      },
+    },
+    ipc,
+  );
+
+  await assert.rejects(
+    () =>
+      ipc.invoke('sessions:stop', 'session-1', {
+        source: 'stop_button',
+        expectedAdmissionId: 'ticket-1',
+      }),
+    /Host admission outcome is unknown/,
+  );
+  assert.deepEqual(interrupts, []);
   await observer.close();
 });
 

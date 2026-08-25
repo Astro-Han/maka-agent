@@ -206,6 +206,10 @@ export type SideChatSteerResult =
   | { kind: 'outcome_unknown'; messageId: string }
   | { kind: 'started'; turnId: string };
 
+export type SideChatStopTarget =
+  | { readonly kind: 'admission'; readonly messageId: string }
+  | { readonly kind: 'turn'; readonly turnId: string };
+
 export interface SideChatSessionPort {
   listSessions(): Promise<SessionSummary[]>;
   listTurns(sessionId: string): Promise<TurnRecord[]>;
@@ -239,7 +243,7 @@ export interface SideChatSessionPort {
   ): Promise<SideChatSendResult>;
   stop(
     sessionId: string,
-    admissionId?: string,
+    target?: SideChatStopTarget,
   ): Promise<{ kind: 'retracted'; messageId: string } | undefined>;
   steer(sessionId: string, text: string, admissionId?: string): Promise<SideChatSteerResult>;
   setPermissionMode(

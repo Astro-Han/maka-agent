@@ -713,7 +713,10 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     if (!id || stopRequestRef.current) return;
     const admission = pendingAdmissionRef.current;
     if (admission) {
-      const stopPromise = sideChat.stop(id, admission.messageId).then(
+      const stopPromise = sideChat.stop(id, {
+        kind: 'admission',
+        messageId: admission.messageId,
+      }).then(
         (outcome) => {
           if (
             outcome?.kind === 'retracted' &&
@@ -740,7 +743,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       await stopPromise;
       return;
     }
-    const stopPromise = sideChat.stop(id, activeTurnIdRef.current ?? undefined);
+    const activeTurnId = activeTurnIdRef.current;
+    const stopPromise = sideChat.stop(
+      id,
+      activeTurnId ? { kind: 'turn', turnId: activeTurnId } : undefined,
+    );
     stopRequestRef.current = stopPromise;
     try {
       await stopPromise;

@@ -46,6 +46,7 @@ const originalGlobals = {
 
 let mountedRoot: Root | undefined;
 const SOURCE_SESSION = session('source-session');
+type SideChatStopTarget = Parameters<WorkbarServices['sideChat']['stop']>[1];
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -574,8 +575,8 @@ test('clears a stopped Side Conversation admission when its live retraction is l
       admissionId = command.turnId;
       return pendingSend.promise;
     },
-    stop: async (_sessionId, expectedAdmissionId) => {
-      assert.equal(expectedAdmissionId, admissionId);
+    stop: async (_sessionId, target) => {
+      assert.deepEqual(target, { kind: 'admission', messageId: admissionId });
       return pendingStop.promise;
     },
   });
@@ -676,11 +677,11 @@ test('keeps a Side Conversation admission when Host stop outcome is unknown', as
 });
 
 test('stops a bound Side Conversation by its exact Host Turn identity', async () => {
-  let stoppedAdmissionId: string | undefined;
+  let stoppedTarget: SideChatStopTarget;
   const { send, stop } = await renderOwnershipProbe({
     send: async () => ({ ok: true as const, turnId: 'host-turn-1' }),
-    stop: async (_sessionId, admissionId) => {
-      stoppedAdmissionId = admissionId;
+    stop: async (_sessionId, target) => {
+      stoppedTarget = target;
     },
   });
   await act(async () => {
@@ -691,7 +692,7 @@ test('stops a bound Side Conversation by its exact Host Turn identity', async ()
     await stop();
     await Promise.resolve();
   });
-  assert.equal(stoppedAdmissionId, 'host-turn-1');
+  assert.deepEqual(stoppedTarget, { kind: 'turn', turnId: 'host-turn-1' });
 });
 
 test('releases a queued Side Conversation admission from the Host queue retract', async () => {
@@ -836,17 +837,17 @@ test('keeps the active Side Conversation streaming when Stop retracts a queued s
 test('stops the active Side Conversation after retracting its queued steer', async () => {
   const pendingSteer = deferred<{ kind: 'queued'; messageId: string }>();
   let admissionId: string | undefined;
-  const stoppedIds: Array<string | undefined> = [];
+  const stoppedTargets: SideChatStopTarget[] = [];
   const { send, steer, stop } = await renderOwnershipProbe({
     send: async () => ({ ok: true as const, turnId: 'old-turn' }),
     steer: async (_sessionId, _text, requestedAdmissionId) => {
       admissionId = requestedAdmissionId;
       return pendingSteer.promise;
     },
-    stop: async (_sessionId, expectedId) => {
-      stoppedIds.push(expectedId);
-      return expectedId && expectedId === admissionId
-        ? { kind: 'retracted' as const, messageId: expectedId }
+    stop: async (_sessionId, target) => {
+      stoppedTargets.push(target);
+      return target?.kind === 'admission' && target.messageId === admissionId
+        ? { kind: 'retracted' as const, messageId: target.messageId }
         : undefined;
     },
   });
@@ -870,7 +871,10 @@ test('stops the active Side Conversation after retracting its queued steer', asy
     await Promise.resolve();
   });
 
-  assert.deepEqual(stoppedIds, [admissionId, 'old-turn']);
+  assert.deepEqual(stoppedTargets, [
+    { kind: 'admission', messageId: admissionId },
+    { kind: 'turn', turnId: 'old-turn' },
+  ]);
   await act(async () => {
     pendingSteer.resolve({ kind: 'queued', messageId: admissionId as string });
     assert.equal(await steerResult, false);
@@ -883,16 +887,16 @@ test('does not let an older Stop failure release a newer active Turn Stop', asyn
   const queuedStop = deferred<undefined>();
   const activeStop = deferred<undefined>();
   let admissionId: string | undefined;
-  const stoppedIds: Array<string | undefined> = [];
+  const stoppedTargets: SideChatStopTarget[] = [];
   const { emit, send, steer, stop } = await renderOwnershipProbe({
     send: async () => ({ ok: true as const, turnId: 'old-turn' }),
     steer: async (_sessionId, _text, requestedAdmissionId) => {
       admissionId = requestedAdmissionId;
       return pendingSteer.promise;
     },
-    stop: async (_sessionId, expectedId) => {
-      stoppedIds.push(expectedId);
-      return stoppedIds.length === 1 ? queuedStop.promise : activeStop.promise;
+    stop: async (_sessionId, target) => {
+      stoppedTargets.push(target);
+      return stoppedTargets.length === 1 ? queuedStop.promise : activeStop.promise;
     },
   });
 
@@ -927,7 +931,10 @@ test('does not let an older Stop failure release a newer active Turn Stop', asyn
   const duplicateStopResult = stop();
   await Promise.resolve();
 
-  assert.deepEqual(stoppedIds, [admissionId, 'old-turn']);
+  assert.deepEqual(stoppedTargets, [
+    { kind: 'admission', messageId: admissionId },
+    { kind: 'turn', turnId: 'old-turn' },
+  ]);
   activeStop.resolve(undefined);
   await Promise.all([activeStopResult, duplicateStopResult]);
   await act(async () => {
