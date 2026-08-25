@@ -347,10 +347,9 @@ export function registerRuntimeHostSessionExecutionIpc(
         ) {
           throw error;
         }
-        // Side Conversation keeps its requested Turn id as the admission
-        // ticket so a successor root can report ownership with that identity.
-        // Ordinary sends retain the pre-existing independent message id.
-        const messageId = sideConversation ? turnId : newId();
+        // Preserve the renderer's command identity in the durable message so
+        // a lost IPC reply can be reconciled as root-vs-steering later.
+        const messageId = turnId;
         const emptySkillInvocation = { loaded: [], failed: [], receipts: [] };
         const submitInput = {
           sessionId,

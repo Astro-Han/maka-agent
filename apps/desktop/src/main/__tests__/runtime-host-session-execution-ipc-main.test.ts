@@ -612,7 +612,7 @@ test("queues a mid-turn send as steering when the Host reports the session busy"
   assert.deepEqual(submits, [
     {
       sessionId: "session-1",
-      messageId: "id-1",
+      messageId: "turn-1",
       content: { text: "also check the tests", inlineReferences: [] },
       placement: "current_turn",
     },
