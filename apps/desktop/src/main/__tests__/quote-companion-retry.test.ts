@@ -820,6 +820,65 @@ test('stops the active Side Conversation after retracting its queued steer', asy
   });
 });
 
+test('does not let an older Stop failure release a newer active Turn Stop', async () => {
+  const pendingSteer = deferred<{ kind: 'queued'; messageId: string }>();
+  const queuedStop = deferred<void>();
+  const activeStop = deferred<void>();
+  let admissionId: string | undefined;
+  const stoppedIds: Array<string | undefined> = [];
+  const { emit, send, steer, stop } = await renderOwnershipProbe({
+    send: async () => ({ ok: true as const, turnId: 'old-turn' }),
+    steer: async (_sessionId, _text, requestedAdmissionId) => {
+      admissionId = requestedAdmissionId;
+      return pendingSteer.promise;
+    },
+    stop: async (_sessionId, expectedId) => {
+      stoppedIds.push(expectedId);
+      return stoppedIds.length === 1 ? queuedStop.promise : activeStop.promise;
+    },
+  });
+
+  await act(async () => {
+    assert.equal(await send('initial prompt'), true);
+    await Promise.resolve();
+  });
+  let steerResult!: Promise<boolean>;
+  await act(async () => {
+    steerResult = steer('queue this steer');
+    await Promise.resolve();
+  });
+  await waitUntil(() => admissionId !== undefined);
+  const queuedStopResult = stop();
+  await act(async () => {
+    emit({
+      type: 'message_admission',
+      id: 'queued-steer-retracted-before-stop-reply',
+      turnId: 'old-turn',
+      ts: 1,
+      messageId: admissionId as string,
+      outcome: 'retracted',
+    });
+    await Promise.resolve();
+  });
+  const activeStopResult = stop();
+  await act(async () => {
+    queuedStop.reject(new Error('old Stop reply was lost'));
+    await queuedStopResult;
+    await Promise.resolve();
+  });
+  const duplicateStopResult = stop();
+  await Promise.resolve();
+
+  assert.deepEqual(stoppedIds, [admissionId, 'old-turn']);
+  activeStop.resolve();
+  await Promise.all([activeStopResult, duplicateStopResult]);
+  await act(async () => {
+    pendingSteer.resolve({ kind: 'queued', messageId: admissionId as string });
+    assert.equal(await steerResult, false);
+    await Promise.resolve();
+  });
+});
+
 test('continues projecting the active Turn while a steer awaits Host admission', async () => {
   const pendingSteer = deferred<{ kind: 'queued'; messageId: string }>();
   let admissionId: string | undefined;

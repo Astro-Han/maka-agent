@@ -188,7 +188,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const sourceSessionIdRef = useRef(sourceSession?.id);
   sourceSessionIdRef.current = sourceSessionId;
   const forkSetupPromiseRef = useRef<Promise<EnsureCompanionForkResult> | null>(null);
-  const stopRequestedRef = useRef(false);
+  const stopRequestRef = useRef<Promise<unknown> | null>(null);
   const activeTurnIdRef = useRef<string | null>(null);
   const pendingAdmissionRef = useRef<PendingAdmission | null>(null);
   const subscriptionReadyRef = useRef<Promise<void>>(Promise.resolve());
@@ -241,7 +241,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       const effect = companionRunEventEffect(
         event,
         activeTurnIdRef.current,
-        stopRequestedRef.current,
+        stopRequestRef.current !== null,
         localeRef.current,
       );
       if (effect.kind === 'ignore') return;
@@ -268,12 +268,12 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
             setAllMessages((current) => mergeSettledMessages(current, next));
             setLiveTurn((prev) => (prev ? reconcileTerminalLiveTurn(prev, next) : prev));
             activeTurnIdRef.current = null;
-            stopRequestedRef.current = false;
+            stopRequestRef.current = null;
           })
           .catch(() => {
             if (!mountedRef.current || activeTurnIdRef.current !== settledTurnId) return;
             activeTurnIdRef.current = null;
-            stopRequestedRef.current = false;
+            stopRequestRef.current = null;
             setError((current) => current ?? copyRef.current.errors.settlementFailed);
           })
           .finally(() => {
@@ -312,7 +312,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     (admission: PendingAdmission, message?: string) => {
       if (pendingAdmissionRef.current !== admission) return;
       setPendingAdmission(null);
-      stopRequestedRef.current = false;
+      if (stopRequestRef.current === admission.stopPromise) stopRequestRef.current = null;
       if (!activeTurnIdRef.current) setLiveTurn(undefined);
       if (message) setError(message);
     },
@@ -625,7 +625,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         onForkCommitted: () => {},
         // Arm the optimistic live turn right before the send.
         onBeforeSend: () => {
-          stopRequestedRef.current = false;
+          stopRequestRef.current = null;
           const admission: PendingAdmission = {
             messageId: turnId,
             events: [],
@@ -713,8 +713,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
 
   const stop = useCallback(async (): Promise<void> => {
     const id = companionIdRef.current;
-    if (!id || stopRequestedRef.current) return;
-    stopRequestedRef.current = true;
+    if (!id || stopRequestRef.current) return;
     const admission = pendingAdmissionRef.current;
     if (admission) {
       const stopPromise = sideChat.stop(id, admission.messageId).then(
@@ -727,18 +726,21 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
             admission.stopPromise = undefined;
             resolveAdmission(id, admission, admission.messageId, true);
           }
-          stopRequestedRef.current = false;
+          if (stopRequestRef.current === stopPromise) stopRequestRef.current = null;
           return 'unknown' as const;
         },
       );
       admission.stopPromise = stopPromise;
+      stopRequestRef.current = stopPromise;
       await stopPromise;
       return;
     }
+    const stopPromise = sideChat.stop(id, activeTurnIdRef.current ?? undefined);
+    stopRequestRef.current = stopPromise;
     try {
-      await sideChat.stop(id, activeTurnIdRef.current ?? undefined);
+      await stopPromise;
     } catch {
-      stopRequestedRef.current = false;
+      if (stopRequestRef.current === stopPromise) stopRequestRef.current = null;
       // best-effort; the terminal event still reconciles state
     }
   }, [resolveAdmission, sideChat]);
@@ -825,7 +827,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       if (!id || turnInFlight || regeneratePendingTurnId) return false;
       setRegeneratePendingTurnId(turnId);
       const regenerationTurnId = crypto.randomUUID();
-      stopRequestedRef.current = false;
+      stopRequestRef.current = null;
       activeTurnIdRef.current = regenerationTurnId;
       setError(null);
       setLiveTurn(armLiveTurn(regenerationTurnId));
