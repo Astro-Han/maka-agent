@@ -245,10 +245,9 @@ export class HostClientCapabilityCoordinator implements ClientCapabilityService 
   /** Rebuild Session-scoped capability bindings from a durable root contract. */
   async bindDurableRoot(input: {
     sessionId: string;
-    userMessageId: string | null;
     execution: RootExecutionDescriptor;
   }): Promise<void> {
-    if (input.execution.kind !== 'external_message' || input.userMessageId === null) return;
+    if (input.execution.kind !== 'external_message') return;
     // A live root already selected its Client capabilities at admission. Only
     // cold recovery needs to rebuild a missing in-memory binding from the
     // durable root contract; reselecting here would discard the active

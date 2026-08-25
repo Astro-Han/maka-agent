@@ -2010,7 +2010,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     }
     await this.clientCapabilities?.bindDurableRoot({
       sessionId: admission.sessionId,
-      userMessageId: admission.userMessageId,
       execution: admission.execution,
     });
     const { runId } = admission;
