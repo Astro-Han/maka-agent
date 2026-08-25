@@ -64,9 +64,6 @@ import type { CompanionForkVisibilityEvent } from './quote-companion-visibility.
 type PendingAdmission = {
   messageId: string;
   events: SessionEvent[];
-  restoreTurnId: string | null;
-  restoreLiveTurn: LiveTurnProjection | undefined;
-  cancelled: boolean;
   consumeOnAdmission?: () => void;
   stopPromise?: Promise<'confirmed' | 'unknown'>;
 };
@@ -81,14 +78,9 @@ function admissionOutcomeForMessage(
 ): AdmissionOutcome | undefined {
   const admitted = events.find(
     (event) =>
-      (event.type === 'steering_message' && event.messageId === messageId) ||
-      (event.type === 'message_admission' &&
-        event.outcome === 'admitted' &&
-        event.messageId === messageId) ||
-      (event.type === 'queue_update' &&
-        event.steeringEntries?.some(
-          (entry) => entry.messageId === messageId && entry.state === 'in_flight',
-        ) === true),
+      event.type === 'message_admission' &&
+      event.outcome === 'admitted' &&
+      event.messageId === messageId,
   );
   if (admitted) return { kind: 'admitted', turnId: admitted.turnId };
   const retracted = events.some(
@@ -200,7 +192,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const activeTurnIdRef = useRef<string | null>(null);
   const pendingAdmissionRef = useRef<PendingAdmission | null>(null);
   const subscriptionReadyRef = useRef<Promise<void>>(Promise.resolve());
-  const turnInFlightRef = useRef(false);
+  const submitLockRef = useRef(false);
   const settlingTurnIdsRef = useRef<Set<string>>(new Set());
   const onForkVisibilityChangeRef = useRef(onForkVisibilityChange);
   onForkVisibilityChangeRef.current = onForkVisibilityChange;
@@ -214,7 +206,13 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const liveTurnRef = useRef(liveTurn);
   liveTurnRef.current = liveTurn;
   const [interactions, setInteractions] = useState<InteractionQueues>({});
-  const [turnInFlight, setTurnInFlight] = useState(false);
+  const [pendingAdmission, setPendingAdmissionState] = useState<PendingAdmission | null>(null);
+  const { streaming, processing } = deriveCompanionComposerState(
+    pendingAdmission !== null,
+    activeTurnIdRef.current,
+    liveTurn,
+  );
+  const turnInFlight = streaming;
   const [preparing, setPreparing] = useState(Boolean(sourceSession));
   const [permissionModePending, setPermissionModePending] = useState(false);
   const [regeneratePendingTurnId, setRegeneratePendingTurnId] = useState<string | null>(
@@ -232,6 +230,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   // double-invoke; a hand-rolled disposed flag would stay tripped after replay).
   const mountedRef = useMountedRef();
   const dismissalGuardRef = useRef(createCompanionDismissalGuard());
+
+  const setPendingAdmission = useCallback((admission: PendingAdmission | null) => {
+    pendingAdmissionRef.current = admission;
+    setPendingAdmissionState(admission);
+  }, []);
 
   const applyOwnedEvent = useCallback(
     (forkId: string, event: SessionEvent) => {
@@ -265,16 +268,12 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
             setAllMessages((current) => mergeSettledMessages(current, next));
             setLiveTurn((prev) => (prev ? reconcileTerminalLiveTurn(prev, next) : prev));
             activeTurnIdRef.current = null;
-            turnInFlightRef.current = false;
             stopRequestedRef.current = false;
-            setTurnInFlight(false);
           })
           .catch(() => {
             if (!mountedRef.current || activeTurnIdRef.current !== settledTurnId) return;
             activeTurnIdRef.current = null;
-            turnInFlightRef.current = false;
             stopRequestedRef.current = false;
-            setTurnInFlight(false);
             setError((current) => current ?? copyRef.current.errors.settlementFailed);
           })
           .finally(() => {
@@ -293,7 +292,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     ) => {
       const admission = pendingAdmissionRef.current;
       if (!admission) return;
-      pendingAdmissionRef.current = null;
+      setPendingAdmission(null);
       activeTurnIdRef.current = turnId;
       ownTurnIdsRef.current.add(turnId);
       admission.consumeOnAdmission?.();
@@ -306,26 +305,18 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         if (event.turnId === turnId) applyOwnedEvent(forkId, event);
       }
     },
-    [applyOwnedEvent],
+    [applyOwnedEvent, setPendingAdmission],
   );
 
-  const abandonAdmission = useCallback(
-    (forkId: string, admission: PendingAdmission, message?: string) => {
+  const releaseAdmission = useCallback(
+    (admission: PendingAdmission, message?: string) => {
       if (pendingAdmissionRef.current !== admission) return;
-      admission.cancelled = true;
-      pendingAdmissionRef.current = null;
-      activeTurnIdRef.current = admission.restoreTurnId;
-      setLiveTurn(admission.restoreLiveTurn);
-      turnInFlightRef.current = false;
-      setTurnInFlight(false);
+      setPendingAdmission(null);
+      stopRequestedRef.current = false;
+      if (!activeTurnIdRef.current) setLiveTurn(undefined);
       if (message) setError(message);
-      if (admission.restoreTurnId) {
-        for (const event of admission.events) {
-          if (event.turnId === admission.restoreTurnId) applyOwnedEvent(forkId, event);
-        }
-      }
     },
-    [applyOwnedEvent],
+    [setPendingAdmission],
   );
 
   const resolveAdmission = useCallback(
@@ -336,14 +327,14 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       preserveLiveTurn = false,
     ): AdmissionOutcome | undefined => {
       const outcome = admissionOutcomeForMessage(admission.events, messageId);
-      if (outcome?.kind === 'admitted' && !admission.cancelled) {
+      if (outcome?.kind === 'admitted') {
         bindAdmittedTurn(forkId, outcome.turnId, { preserveLiveTurn });
       } else if (outcome?.kind === 'retracted') {
-        abandonAdmission(forkId, admission);
+        releaseAdmission(admission);
       }
       return outcome;
     },
-    [abandonAdmission, bindAdmittedTurn],
+    [bindAdmittedTurn, releaseAdmission],
   );
 
   // Subscribe to the fork's event stream + load its transcript. Called
@@ -397,8 +388,17 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           return;
         }
         if (admission) {
-          admission.events.push(event);
-          resolveAdmission(forkId, admission, admission.messageId, true);
+          if (
+            event.type === 'message_admission' &&
+            event.messageId === admission.messageId
+          ) {
+            admission.events.push(event);
+            resolveAdmission(forkId, admission, admission.messageId, true);
+          } else if (event.turnId === activeTurnIdRef.current) {
+            applyOwnedEvent(forkId, event);
+          } else {
+            admission.events.push(event);
+          }
           return;
         }
         applyOwnedEvent(forkId, event);
@@ -568,19 +568,25 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       attachmentItems?: WorkbarIngestInput[],
     ): Promise<boolean> => {
       const trimmed = text.trim();
-      if (!mountedRef.current || !trimmed || turnInFlightRef.current || !sourceSession) {
+      if (
+        !mountedRef.current ||
+        !trimmed ||
+        submitLockRef.current ||
+        activeTurnIdRef.current ||
+        pendingAdmissionRef.current ||
+        !sourceSession
+      ) {
         return false;
       }
-      // Close the same-frame double-submit window before the first await. The
-      // visible in-flight state still begins only when the run is armed.
-      turnInFlightRef.current = true;
+      // Close the same-frame double-submit window before fork readiness can yield.
+      submitLockRef.current = true;
       setError(null);
       const turnId = crypto.randomUUID();
       const quoteSnapshot = snapshotCompanionQuotes(panelId, pendingQuotes);
       const label = (quoteSnapshot.quotes[0]?.text ?? trimmed).slice(0, 24);
       const fork = await ensureFork(`${copyRef.current.namePrefix}${label}`);
       if (fork.status !== 'ready') {
-        turnInFlightRef.current = false;
+        submitLockRef.current = false;
         return false;
       }
       try {
@@ -591,11 +597,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           subscriptionReadyRef.current = subscribeToFork(fork.session.id);
           setError(copyRef.current.errors.sendFailed);
         }
-        turnInFlightRef.current = false;
+        submitLockRef.current = false;
         return false;
       }
       if (!mountedRef.current) {
-        turnInFlightRef.current = false;
+        submitLockRef.current = false;
         return false;
       }
       let sendAdmission: PendingAdmission | undefined;
@@ -620,50 +626,36 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         // Arm the optimistic live turn right before the send.
         onBeforeSend: () => {
           stopRequestedRef.current = false;
-          const restoreTurnId = activeTurnIdRef.current;
-          const restoreLiveTurn = liveTurnRef.current;
           const admission: PendingAdmission = {
             messageId: turnId,
             events: [],
-            restoreTurnId,
-            restoreLiveTurn,
-            cancelled: false,
           };
           sendAdmission = admission;
-          activeTurnIdRef.current = null;
-          pendingAdmissionRef.current = admission;
-          turnInFlightRef.current = true;
-          setTurnInFlight(true);
+          setPendingAdmission(admission);
+          submitLockRef.current = false;
           setLiveTurn(armLiveTurn(turnId));
         },
         onQuotesConsumed: () => onQuotesConsumed(quoteSnapshot),
       });
       if (result.status === 'sent' || result.status === 'pending') {
         const admission = sendAdmission;
-        if (!admission || (admission.cancelled && pendingAdmissionRef.current !== admission)) {
-          if (!pendingAdmissionRef.current) {
-            turnInFlightRef.current = false;
-            setTurnInFlight(false);
-          }
-          return false;
-        }
-        if (admission.cancelled) {
-          await admission.stopPromise;
-          if (admission.cancelled || pendingAdmissionRef.current !== admission) {
-            abandonAdmission(result.forkId, admission);
-            return false;
-          }
-        }
+        if (!admission) return false;
         if (result.status === 'pending') {
           admission.consumeOnAdmission = () => onQuotesConsumed(quoteSnapshot);
-          if (resolveAdmission(result.forkId, admission, result.messageId)?.kind === 'retracted') {
+          const wasPending = pendingAdmissionRef.current === admission;
+          const outcome = resolveAdmission(result.forkId, admission, result.messageId);
+          if (outcome?.kind === 'admitted' && !wasPending) admission.consumeOnAdmission();
+          if (outcome?.kind === 'retracted') {
             return false;
           }
         } else if (result.steered) {
-          resolveAdmission(result.forkId, admission, result.messageId);
+          if (resolveAdmission(result.forkId, admission, result.messageId)?.kind === 'retracted') {
+            return false;
+          }
         } else {
           bindAdmittedTurn(result.forkId, result.turnId);
         }
+        if ((await admission.stopPromise) === 'confirmed') return false;
         setHasContent(true);
         // Surface the just-sent user message immediately, and reflect any
         // automatic connection/model rebound in the read-only model label.
@@ -697,13 +689,11 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         };
         setError(byCode[result.code]);
         activeTurnIdRef.current = null;
-        pendingAdmissionRef.current = null;
-        turnInFlightRef.current = false;
-        setTurnInFlight(false);
+        if (sendAdmission) releaseAdmission(sendAdmission);
         setLiveTurn(undefined);
       }
       // 'disposed' → the panel unmounted mid-create; nothing to update.
-      turnInFlightRef.current = false;
+      submitLockRef.current = false;
       return false;
     },
     [
@@ -714,9 +704,10 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       ensureFork,
       mountedRef,
       sideChat,
-      abandonAdmission,
       bindAdmittedTurn,
+      releaseAdmission,
       resolveAdmission,
+      setPendingAdmission,
     ],
   );
 
@@ -726,12 +717,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     stopRequestedRef.current = true;
     const admission = pendingAdmissionRef.current;
     if (admission) {
-      admission.cancelled = true;
-      activeTurnIdRef.current = admission.restoreTurnId;
-      setLiveTurn(admission.restoreLiveTurn);
-      setTurnInFlight(false);
-    }
-    if (admission) {
       const stopPromise = sideChat.stop(id, admission.messageId).then(
         () => 'confirmed' as const,
         () => {
@@ -739,11 +724,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           // the Turn. Keep the admission alive so a late Host outcome can
           // still bind its own Turn; the user can retry Stop after this.
           if (pendingAdmissionRef.current === admission) {
-            admission.cancelled = false;
             admission.stopPromise = undefined;
-            activeTurnIdRef.current = admission.restoreTurnId;
-            setLiveTurn(admission.restoreLiveTurn);
-            setTurnInFlight(true);
             resolveAdmission(id, admission, admission.messageId, true);
           }
           stopRequestedRef.current = false;
@@ -751,10 +732,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
         },
       );
       admission.stopPromise = stopPromise;
-      const outcome = await stopPromise;
-      if (outcome === 'confirmed' && pendingAdmissionRef.current === admission) {
-        abandonAdmission(id, admission);
-      }
+      await stopPromise;
       return;
     }
     try {
@@ -763,7 +741,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       stopRequestedRef.current = false;
       // best-effort; the terminal event still reconciles state
     }
-  }, [abandonAdmission, resolveAdmission, sideChat]);
+  }, [resolveAdmission, sideChat]);
 
   const steer = useCallback(async (text: string): Promise<boolean> => {
     const id = companionIdRef.current;
@@ -781,22 +759,14 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     const admission: PendingAdmission = {
       messageId: admissionId,
       events: [],
-      restoreTurnId: activeTurnIdRef.current,
-      restoreLiveTurn: liveTurnRef.current,
-      cancelled: false,
     };
-    pendingAdmissionRef.current = admission;
-    activeTurnIdRef.current = null;
+    setPendingAdmission(admission);
     try {
       const outcome = await sideChat.steer(id, trimmed, admissionId);
       if (!mountedRef.current) return false;
-      if (admission.cancelled && pendingAdmissionRef.current !== admission) return false;
-      if (admission.cancelled) {
-        await admission.stopPromise;
-        if (admission.cancelled || pendingAdmissionRef.current !== admission) {
-          abandonAdmission(id, admission);
-          return false;
-        }
+      if ((await admission.stopPromise) === 'confirmed') return false;
+      if (admissionOutcomeForMessage(admission.events, admission.messageId)?.kind === 'retracted') {
+        return false;
       }
       if (outcome.kind === 'started') {
         bindAdmittedTurn(id, outcome.turnId, { preserveLiveTurn: true });
@@ -808,14 +778,24 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     } catch {
       if (mountedRef.current) {
         if (pendingAdmissionRef.current === admission) {
-          abandonAdmission(id, admission, copyRef.current.errors.sendFailed);
-        } else if (!admission.cancelled) {
+          releaseAdmission(admission, copyRef.current.errors.sendFailed);
+        } else if (
+          admissionOutcomeForMessage(admission.events, admission.messageId)?.kind !== 'retracted'
+        ) {
           setError(copyRef.current.errors.sendFailed);
         }
       }
       return false;
     }
-  }, [abandonAdmission, bindAdmittedTurn, mountedRef, resolveAdmission, sideChat, turnInFlight]);
+  }, [
+    bindAdmittedTurn,
+    mountedRef,
+    releaseAdmission,
+    resolveAdmission,
+    setPendingAdmission,
+    sideChat,
+    turnInFlight,
+  ]);
 
   const setPermissionMode = useCallback(
     async (mode: PermissionMode): Promise<boolean> => {
@@ -847,8 +827,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       const regenerationTurnId = crypto.randomUUID();
       stopRequestedRef.current = false;
       activeTurnIdRef.current = regenerationTurnId;
-      turnInFlightRef.current = true;
-      setTurnInFlight(true);
       setError(null);
       setLiveTurn(armLiveTurn(regenerationTurnId));
       ownTurnIdsRef.current.add(regenerationTurnId);
@@ -862,8 +840,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       } catch {
         if (mountedRef.current) {
           activeTurnIdRef.current = null;
-          turnInFlightRef.current = false;
-          setTurnInFlight(false);
           setLiveTurn(undefined);
           setError(copyRef.current.errors.sendFailed);
         }
@@ -906,7 +882,6 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
   const messages = allMessages.filter(
     (message) => message.turnId !== undefined && ownTurnIdsRef.current.has(message.turnId),
   );
-  const { streaming, processing } = deriveCompanionComposerState(turnInFlight, liveTurn);
   // Inherited model (read-only): the fork's once created, else the source's.
   const activeModel = companion
     ? { llmConnectionSlug: companion.llmConnectionSlug, model: companion.model }

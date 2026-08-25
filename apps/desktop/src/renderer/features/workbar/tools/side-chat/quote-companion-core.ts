@@ -168,19 +168,22 @@ export async function dismissCompanionCopy(
 }
 
 /**
- * The shared Composer's `streaming` input means "a turn is interruptible", not
- * merely "a text delta has arrived". Keep the companion interruptible from the
- * optimistic waiting projection through live output; `processing` only chooses
- * the quieter pre-first-token presentation inside that same in-flight window.
+ * The shared Composer's `streaming` input means Host work is interruptible, not
+ * merely that a text delta has arrived. A pending admission remains stoppable
+ * before it owns a Turn; an admitted Turn remains stoppable through live output.
  */
 export function deriveCompanionComposerState(
-  turnInFlight: boolean,
+  hasPendingAdmission: boolean,
+  activeTurnId: string | null,
   liveTurn: LiveTurnProjection | undefined,
 ): { streaming: boolean; processing: boolean } {
-  const streaming = turnInFlight && liveTurn?.terminal !== true;
+  const activeTurnStreaming = activeTurnId !== null && liveTurn?.terminal !== true;
+  const streaming = hasPendingAdmission || activeTurnStreaming;
   return {
     streaming,
-    processing: streaming && (!liveTurn || liveTurn.phase === 'waiting'),
+    processing:
+      streaming &&
+      (!activeTurnStreaming || !liveTurn || liveTurn.phase === 'waiting'),
   };
 }
 
