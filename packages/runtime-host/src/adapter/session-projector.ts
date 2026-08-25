@@ -154,7 +154,12 @@ export class RuntimeHostSessionProjector {
       events.push(
         ...projectMessageAdmissionEvents(
           root,
-          this.#snapshot.rootTurnSourceMessageIds,
+          [
+            ...new Set([
+              ...this.#snapshot.rootTurnSourceMessageIds,
+              ...rootQueueInFlight(this.#snapshot.queue).map((entry) => entry.messageId),
+            ]),
+          ],
           this.#now(),
         ),
       );
@@ -378,12 +383,16 @@ export class RuntimeHostSessionProjector {
       events.push(...projectRuntimeHostInteractionRequest(interaction, this.#now()));
     }
     const root = next.rootTurn;
+    const enteredActiveTurn =
+      root && queueChanged(previousSnapshot.queue, next.queue)
+        ? newlyInFlight(previousSnapshot.queue, next.queue)
+        : [];
     if (this.#projectMessageAdmissions) {
       events.push(...projectMessageRetractionEvents(previousSnapshot, next, this.#now()));
       events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
     }
     if (root && queueChanged(previousSnapshot.queue, next.queue)) {
-      for (const entry of newlyInFlight(previousSnapshot.queue, next.queue)) {
+      for (const entry of enteredActiveTurn) {
         events.push({
           type: 'steering_message',
           id: `host-queue:${next.queue.hostEpoch}:${next.queue.queueRevision}:${entry.entryId}`,
@@ -489,11 +498,11 @@ function projectNewMessageAdmissionEvents(
     previous.rootTurn?.runId === root.runId
       ? new Set(previous.rootTurnSourceMessageIds)
       : new Set<string>();
-  return projectMessageAdmissionEvents(
-    root,
+  const messageIds = new Set(
     next.rootTurnSourceMessageIds.filter((messageId) => !previousIds.has(messageId)),
-    ts,
   );
+  for (const entry of newlyInFlight(previous.queue, next.queue)) messageIds.add(entry.messageId);
+  return projectMessageAdmissionEvents(root, [...messageIds], ts);
 }
 
 function projectMessageRetractionEvents(

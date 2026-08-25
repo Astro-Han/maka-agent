@@ -202,6 +202,111 @@ test('emits the Host admission fact when a queued message enters a successor Tur
   );
 });
 
+test('emits the Host admission fact when a queued message enters the active Turn', () => {
+  const previous = snapshot({
+    queue: {
+      hostEpoch: 'host-1',
+      queueRevision: 1,
+      steering: [
+        {
+          entryId: 'entry-1',
+          messageId: 'ticket-1',
+          content: { text: 'continue here' },
+          placement: 'current_turn',
+          state: 'queued',
+        },
+      ],
+      followup: [],
+    },
+  });
+  const projector = new RuntimeHostSessionProjector(
+    previous,
+    createRuntimeHostSessionProjectionSeed([], previous),
+    () => 10,
+    [],
+    true,
+  );
+
+  const events = projector.accept({
+    kind: 'subscription.session_projection',
+    hostEpoch: 'host-1',
+    subscriptionId: 'subscription-1',
+    sequence: 1,
+    snapshot: snapshot({
+      projectionRevision: 2,
+      queue: {
+        hostEpoch: 'host-1',
+        queueRevision: 2,
+        steering: [
+          {
+            entryId: 'entry-1',
+            messageId: 'ticket-1',
+            content: { text: 'continue here' },
+            placement: 'current_turn',
+            state: 'in_flight',
+          },
+        ],
+        followup: [],
+      },
+    }),
+  }).events;
+
+  assert.deepEqual(
+    events
+      .filter(
+        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
+          event.type === 'message_admission',
+      )
+      .map((event) => ({
+        outcome: event.outcome,
+        turnId: event.turnId,
+        messageId: event.messageId,
+      })),
+    [{ outcome: 'admitted', turnId: 'turn-1', messageId: 'ticket-1' }],
+  );
+});
+
+test('reseeds the Host admission fact for a message already in the active Turn', () => {
+  const current = snapshot({
+    queue: {
+      hostEpoch: 'host-1',
+      queueRevision: 2,
+      steering: [
+        {
+          entryId: 'entry-1',
+          messageId: 'ticket-1',
+          content: { text: 'continue here' },
+          placement: 'current_turn',
+          state: 'in_flight',
+        },
+      ],
+      followup: [],
+    },
+  });
+  const projector = new RuntimeHostSessionProjector(
+    current,
+    createRuntimeHostSessionProjectionSeed([], current),
+    () => 10,
+    [],
+    true,
+  );
+
+  assert.deepEqual(
+    projector
+      .seedActive(false)
+      .filter(
+        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
+          event.type === 'message_admission',
+      )
+      .map((event) => ({
+        outcome: event.outcome,
+        turnId: event.turnId,
+        messageId: event.messageId,
+      })),
+    [{ outcome: 'admitted', turnId: 'turn-1', messageId: 'ticket-1' }],
+  );
+});
+
 test('reseeds the latest provider retry when the active Turn still carries one', () => {
   const retry = {
     phase: 'scheduled' as const,
