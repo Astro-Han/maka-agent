@@ -28,6 +28,8 @@ import {
   createFakeWorkbarServices,
   useQuoteCompanion,
   WorkbarServicesProvider,
+  type CompanionQuoteSnapshot,
+  type StagedCompanionQuote,
   type WorkbarServices,
 } from '../../renderer/features/workbar/testing.js';
 
@@ -133,6 +135,8 @@ async function renderProbe(
     onSend?: (send: (text: string) => Promise<boolean>) => void;
     onSteer?: (steer: (text: string) => Promise<boolean>) => void;
     onStop?: (stop: () => Promise<void>) => void;
+    pendingQuotes?: readonly StagedCompanionQuote[];
+    onQuotesConsumed?: (snapshot: CompanionQuoteSnapshot) => void;
   } = {},
 ) {
   const container = installDom();
@@ -153,6 +157,8 @@ async function renderProbe(
         onSend: options.onSend ?? (() => undefined),
         onSteer: options.onSteer,
         onStop: options.onStop,
+        pendingQuotes: options.pendingQuotes,
+        onQuotesConsumed: options.onQuotesConsumed,
       })
     : createElement(QuoteCompanionProbe, { sourceSession: options.sourceSession });
 
@@ -168,7 +174,13 @@ async function renderProbe(
   return { container, root, services };
 }
 
-async function renderOwnershipProbe(sideChat: Partial<WorkbarServices['sideChat']>) {
+async function renderOwnershipProbe(
+  sideChat: Partial<WorkbarServices['sideChat']>,
+  options: {
+    pendingQuotes?: readonly StagedCompanionQuote[];
+    onQuotesConsumed?: (snapshot: CompanionQuoteSnapshot) => void;
+  } = {},
+) {
   let send!: (text: string) => Promise<boolean>;
   let steer!: (text: string) => Promise<boolean>;
   let stop!: () => Promise<void>;
@@ -191,6 +203,7 @@ async function renderOwnershipProbe(sideChat: Partial<WorkbarServices['sideChat'
       onSend: (value) => (send = value),
       onSteer: (value) => (steer = value),
       onStop: (value) => (stop = value),
+      ...options,
     },
   );
   return {
@@ -360,18 +373,27 @@ test('keeps Side Conversation events owned by the Host-admitted turn across an a
 
 test('binds a busy-raced Side Conversation send through its Host-admitted message identity', async () => {
   let admissionId: string | undefined;
+  let consumed = 0;
   const pendingSend = deferred<{
     ok: true;
     steered: true;
     turnId: string;
     messageId: string;
   }>();
-  const { container, emit, send } = await renderOwnershipProbe({
-    send: async (_sessionId, command) => {
-      admissionId = command.turnId;
-      return pendingSend.promise;
+  const { container, emit, send } = await renderOwnershipProbe(
+    {
+      send: async (_sessionId, command) => {
+        admissionId = command.turnId;
+        return pendingSend.promise;
+      },
     },
-  });
+    {
+      pendingQuotes: [{ id: 'quote-1', value: { text: 'quoted context' } }],
+      onQuotesConsumed: () => {
+        consumed += 1;
+      },
+    },
+  );
 
   let sendResult!: Promise<boolean>;
   await act(async () => {
@@ -398,6 +420,7 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
     container.firstElementChild?.getAttribute('data-live-turn-id'),
     'host-active-turn',
   );
+  assert.equal(consumed, 0);
 
   await act(async () => {
     pendingSend.resolve({
@@ -432,6 +455,59 @@ test('binds a busy-raced Side Conversation send through its Host-admitted messag
   assert.equal(probe.getAttribute('data-live-text'), 'answer after steering');
   assert.equal(probe.getAttribute('data-streaming'), 'true');
   assert.equal(probe.getAttribute('data-processing'), 'false');
+  assert.equal(consumed, 1);
+});
+
+test('keeps staged quotes when Host retracts a busy-raced Side Conversation send', async () => {
+  let admissionId: string | undefined;
+  let consumed = 0;
+  const pendingSend = deferred<{
+    ok: true;
+    steered: true;
+    turnId: string;
+    messageId: string;
+  }>();
+  const { emit, send } = await renderOwnershipProbe(
+    {
+      send: async (_sessionId, command) => {
+        admissionId = command.turnId;
+        return pendingSend.promise;
+      },
+    },
+    {
+      pendingQuotes: [{ id: 'quote-1', value: { text: 'quoted context' } }],
+      onQuotesConsumed: () => {
+        consumed += 1;
+      },
+    },
+  );
+
+  let sendResult!: Promise<boolean>;
+  await act(async () => {
+    sendResult = send('do not consume this quote');
+    await Promise.resolve();
+  });
+  await waitUntil(() => admissionId !== undefined);
+  await act(async () => {
+    emit({
+      type: 'message_admission',
+      id: 'busy-raced-send-retracted',
+      turnId: 'old-turn',
+      ts: 1,
+      messageId: admissionId as string,
+      outcome: 'retracted',
+    });
+    pendingSend.resolve({
+      ok: true,
+      steered: true,
+      turnId: 'old-turn',
+      messageId: admissionId as string,
+    });
+    assert.equal(await sendResult, false);
+    await Promise.resolve();
+  });
+
+  assert.equal(consumed, 0);
 });
 
 test('replays queued Side Conversation text after Host assigns the ticket to a successor Turn', async () => {
@@ -987,13 +1063,15 @@ function QuoteCompanionOwnershipProbe(props: {
   onSend: (send: (text: string) => Promise<boolean>) => void;
   onSteer?: (steer: (text: string) => Promise<boolean>) => void;
   onStop?: (stop: () => Promise<void>) => void;
+  pendingQuotes?: readonly StagedCompanionQuote[];
+  onQuotesConsumed?: (snapshot: CompanionQuoteSnapshot) => void;
 }) {
   const companion = useQuoteCompanion({
     panelId: 'ownership-panel',
-    pendingQuotes: [],
+    pendingQuotes: props.pendingQuotes ?? [],
     sourceSession: SOURCE_SESSION,
     locale: 'en',
-    onQuotesConsumed: () => undefined,
+    onQuotesConsumed: props.onQuotesConsumed ?? (() => undefined),
   });
   props.onSend(companion.send);
   props.onSteer?.(companion.steer);

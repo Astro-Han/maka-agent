@@ -79,7 +79,6 @@ function turnDeps(
     quotes: undefined,
     onForkCommitted: () => undefined,
     onBeforeSend: () => undefined,
-    onQuotesConsumed: () => undefined,
     ...overrides,
   };
 }
@@ -139,10 +138,9 @@ describe('quote companion disposal fencing', () => {
     assert.equal(sends, 0);
   });
 
-  it('does not consume quotes or report success when disposal wins the send race', async () => {
+  it('does not report success when disposal wins the send race', async () => {
     const pendingSend = deferred<{ ok: true; turnId: string }>();
     let disposed = false;
-    let consumed = 0;
     const defaults = createFakeWorkbarServices();
     const sideChat = {
       ...defaults.sideChat,
@@ -151,9 +149,6 @@ describe('quote companion disposal fencing', () => {
     const turn = performCompanionTurn(
       turnDeps(sideChat, {
         isDisposed: () => disposed,
-        onQuotesConsumed: () => {
-          consumed += 1;
-        },
       }),
     );
 
@@ -161,7 +156,6 @@ describe('quote companion disposal fencing', () => {
     pendingSend.resolve({ ok: true, turnId: 'side-chat-turn' });
 
     assert.deepEqual(await turn, { status: 'disposed' });
-    assert.equal(consumed, 0);
   });
 
   it('cleans a fork that resolves after its panel was disposed and never sends', async () => {

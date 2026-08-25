@@ -304,16 +304,12 @@ export interface PerformCompanionTurnDeps extends EnsureCompanionForkDeps {
   onForkCommitted: (session: SessionSummary) => void;
   /** Fired right before the send — the caller arms the optimistic live turn here. */
   onBeforeSend: (forkId: string) => void;
-  /** Fired ONLY after `send` is accepted, so a failed send keeps the staged
-   *  quotes (and draft) in place for a retry. */
-  onQuotesConsumed: () => void;
 }
 
 /**
  * Ensure a fork exists (fail-closed, dispose-aware) then send the turn. The
- * staged quotes are consumed only after `send` resolves, and the result tells
- * the caller whether the send was accepted (so a failure can leave the draft +
- * chips for retry).
+ * result tells the caller whether the send was accepted so admission-owned
+ * resources can follow the exact Host outcome.
  */
 export async function performCompanionTurn(
   deps: PerformCompanionTurnDeps,
@@ -364,7 +360,6 @@ export async function performCompanionTurn(
     }
     return { status: 'error', code: 'send_rejected' };
   }
-  deps.onQuotesConsumed();
   return result.steered
     ? { status: 'sent', forkId, turnId: result.turnId, steered: true, messageId: result.messageId }
     : { status: 'sent', forkId, turnId: result.turnId };

@@ -629,22 +629,19 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
           const admission: PendingAdmission = {
             messageId: turnId,
             events: [],
+            consumeOnAdmission: () => onQuotesConsumed(quoteSnapshot),
           };
           sendAdmission = admission;
           setPendingAdmission(admission);
           submitLockRef.current = false;
           setLiveTurn(armLiveTurn(turnId));
         },
-        onQuotesConsumed: () => onQuotesConsumed(quoteSnapshot),
       });
       if (result.status === 'sent' || result.status === 'pending') {
         const admission = sendAdmission;
         if (!admission) return false;
         if (result.status === 'pending') {
-          admission.consumeOnAdmission = () => onQuotesConsumed(quoteSnapshot);
-          const wasPending = pendingAdmissionRef.current === admission;
           const outcome = resolveAdmission(result.forkId, admission, result.messageId);
-          if (outcome?.kind === 'admitted' && !wasPending) admission.consumeOnAdmission();
           if (outcome?.kind === 'retracted') {
             return false;
           }
