@@ -1181,11 +1181,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       const prepare = () =>
         this.prepareSkillInvocationContent(input.sessionId, input.turnId, content, []);
       if (input.placement === 'current_turn') return prepare();
-      const preview = await this.previewCapabilityBinding(
-        input.sessionId,
-        '',
-        prepare,
-      );
+      const preview = await this.previewCapabilityBinding(input.sessionId, '', prepare);
       return preview.ok ? preview.value : { kind: 'rejected', error: preview.message };
     });
   }
