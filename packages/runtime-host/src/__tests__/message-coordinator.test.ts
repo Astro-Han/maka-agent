@@ -2475,7 +2475,6 @@ function memoryMessageLifecycleStore(
             admission.sessionId === sessionId && (state === 'accepted' || state === 'handed_off'),
         )
         .map(({ admission }) => admission),
-    rebindMessageAdmissionTranscript: async () => undefined,
     updateMessageAdmission: async (admission) => {
       const existing = admissions.get(admission.messageId);
       if (!existing) throw new Error(`Missing admission ${admission.messageId}`);
@@ -2490,7 +2489,7 @@ function memoryMessageLifecycleStore(
         }
       }
     },
-    markMessagesHandedOff: async (_sessionId, messageIds) => {
+    markMessagesHandedOff: async ({ messageIds }) => {
       for (const messageId of messageIds) {
         const existing = admissions.get(messageId);
         if (existing?.state === 'accepted') existing.state = 'handed_off';

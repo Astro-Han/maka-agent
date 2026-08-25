@@ -81,6 +81,13 @@ import {
   type UserMessage,
 } from '@maka/core/session';
 import type { MessageLifecycleStore, PendingMessageAdmission } from './message-receipt-store.js';
+import {
+  isVisibleSessionMessage,
+  lastMessagePreviewForMessages,
+  latestVisibleMessageAt,
+  projectSessionCatalogMessages,
+} from './session-message-projection.js';
+export { projectSessionCatalogMessages };
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -862,9 +869,7 @@ class SqliteSessionStore implements SessionAuthorityStore {
     admission: PendingMessageAdmission,
   ): Promise<PendingMessageAdmission> {
     await this.ensureReady();
-    const committed = await this.metadata.commitMessageAdmission(admission);
-    for (const listener of this.transcriptChangeListeners) listener(admission.sessionId);
-    return committed;
+    return this.metadata.commitMessageAdmission(admission);
   }
 
   async readMessageAdmission(
@@ -887,14 +892,13 @@ class SqliteSessionStore implements SessionAuthorityStore {
     return this.metadata.listUnsettledMessageAdmissions(sessionId);
   }
 
-  async rebindMessageAdmissionTranscript(input: {
+  async markMessagesHandedOff(input: {
     sessionId: string;
     messageIds: readonly string[];
     turnId: string;
-    previousRootTurnId: string | null;
   }): Promise<void> {
     await this.ensureReady();
-    await this.metadata.rebindMessageAdmissionTranscript(input);
+    await this.metadata.markMessagesHandedOff(input);
     for (const listener of this.transcriptChangeListeners) listener(input.sessionId);
   }
 
@@ -909,7 +913,6 @@ class SqliteSessionStore implements SessionAuthorityStore {
   async updateMessageAdmission(admission: PendingMessageAdmission): Promise<void> {
     await this.ensureReady();
     await this.metadata.updateMessageAdmission(admission);
-    for (const listener of this.transcriptChangeListeners) listener(admission.sessionId);
   }
 
   async reorderMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void> {
@@ -920,11 +923,6 @@ class SqliteSessionStore implements SessionAuthorityStore {
   async cancelMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void> {
     await this.ensureReady();
     await this.metadata.cancelMessageAdmissions(sessionId, messageIds);
-  }
-
-  async markMessagesHandedOff(sessionId: string, messageIds: readonly string[]): Promise<void> {
-    await this.ensureReady();
-    await this.metadata.markMessagesHandedOff(sessionId, messageIds);
   }
 
   async markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void> {
@@ -1435,32 +1433,6 @@ function toCatalogSummary(
   };
 }
 
-export function projectSessionCatalogMessages(messages: readonly StoredMessage[]): {
-  readonly lastMessageAt?: number;
-  readonly lastMessagePreview?: string;
-} {
-  const lastMessageAt = latestVisibleMessageAt(messages);
-  const lastMessagePreview = lastMessagePreviewForMessages(messages);
-  return {
-    ...(lastMessageAt === undefined ? {} : { lastMessageAt }),
-    ...(lastMessagePreview === undefined ? {} : { lastMessagePreview }),
-  };
-}
-
-function latestVisibleMessageAt(messages: readonly StoredMessage[]): number | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]!;
-    if (isVisibleSessionMessage(message)) return message.ts;
-  }
-  return undefined;
-}
-
-function isVisibleSessionMessage(
-  message: StoredMessage,
-): message is Extract<StoredMessage, { type: 'user' | 'assistant' }> {
-  return message.type === 'user' || message.type === 'assistant';
-}
-
 function maxTimestamp(left: number | undefined, right: number | undefined): number | undefined {
   if (left === undefined) return right;
   if (right === undefined) return left;
@@ -1469,34 +1441,6 @@ function maxTimestamp(left: number | undefined, right: number | undefined): numb
 
 function normalizeSessionName(name: string): string {
   return name === 'New Session' ? DEFAULT_SESSION_NAME : name;
-}
-
-function lastMessagePreviewForMessages(messages: readonly StoredMessage[]): string | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]!;
-    if (message.type === 'user') {
-      // Prefer the human-facing view when the stored model text is a composed
-      // envelope (e.g. explicit skill invocation).
-      const text = normalizePreviewText(message.displayText ?? message.text);
-      if (text) return truncatePreview(text);
-      if (message.attachments && message.attachments.length > 0) return '附件';
-    }
-    if (message.type === 'assistant') {
-      const text = normalizePreviewText(message.text);
-      if (text) return truncatePreview(text);
-    }
-  }
-  return undefined;
-}
-
-function normalizePreviewText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function truncatePreview(text: string, maxLength = 96): string {
-  const chars = Array.from(text);
-  if (chars.length <= maxLength) return text;
-  return `${chars.slice(0, maxLength - 1).join('')}…`;
 }
 
 export function createUserMessage(input: {

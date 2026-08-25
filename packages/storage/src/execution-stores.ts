@@ -438,16 +438,13 @@ async function createExecutionStoresForWrite<K extends StorageRootKind, E extend
         run(() => sessionStore.listMessageAdmissions(sessionId)),
       listUnsettledMessageAdmissions: (sessionId) =>
         run(() => sessionStore.listUnsettledMessageAdmissions(sessionId)),
-      rebindMessageAdmissionTranscript: (input) =>
-        run(() => sessionStore.rebindMessageAdmissionTranscript(input)),
+      markMessagesHandedOff: (input) => run(() => sessionStore.markMessagesHandedOff(input)),
       updateMessageAdmission: (admission) =>
         run(() => sessionStore.updateMessageAdmission(admission)),
       reorderMessageAdmissions: (sessionId, messageIds) =>
         run(() => sessionStore.reorderMessageAdmissions(sessionId, messageIds)),
       cancelMessageAdmissions: (sessionId, messageIds) =>
         run(() => sessionStore.cancelMessageAdmissions(sessionId, messageIds)),
-      markMessagesHandedOff: (sessionId, messageIds) =>
-        run(() => sessionStore.markMessagesHandedOff(sessionId, messageIds)),
       markMessagesExecuted: (sessionId, messageIds) =>
         run(() => sessionStore.markMessagesExecuted(sessionId, messageIds)),
       subscribeTranscriptChanges: (listener) => sessionStore.subscribeTranscriptChanges(listener),

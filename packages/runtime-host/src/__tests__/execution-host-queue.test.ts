@@ -295,6 +295,12 @@ test('a Host crash after queue admission recovers the durable successor once', a
     await second.close();
     await fixture.stopHost(secondHost);
     assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
+    assert.deepEqual(
+      (await fixture.readSessionUserMessages())
+        .filter((message) => message.id === messageId)
+        .map((message) => message.id),
+      [messageId],
+    );
   });
 });
 

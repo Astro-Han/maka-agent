@@ -168,6 +168,23 @@ test('steering becomes durable and ordered followups automatically start the nex
         'followup',
       );
     }
+    const queueSubscription = await second.openSessionSubscription({
+      sessionId: fixture.sessionId,
+      transcript: { kind: 'none' },
+    });
+    const queuedFollowups = queueSubscription.snapshot.queue.followup;
+    assert.deepEqual(
+      queuedFollowups.map((entry) => entry.messageId),
+      followupSources.map((source) => source.messageId),
+    );
+    await second.request('queue.entries.reorder', {
+      originHostEpoch: host.hostEpoch,
+      sessionId: fixture.sessionId,
+      reorderId: randomUUID(),
+      entryIds: queuedFollowups.map((entry) => entry.entryId).reverse(),
+    });
+    await queueSubscription.close();
+    const orderedFollowupSources = [...followupSources].reverse();
     assert.equal(
       (
         await second.request('turn.message.submit', {
@@ -222,22 +239,22 @@ test('steering becomes durable and ordered followups automatically start the nex
         placement,
         disposition,
       })),
-      followupSources.map((source) => ({
+      orderedFollowupSources.map((source) => ({
         ...source,
         placement: 'next_turn',
         disposition: 'followup',
       })),
     );
     assert.deepEqual(chain[1]?.normalizedInput, {
-      text: `${followupSources[0].content.text}\n\n${followupSources[1].content.text}`,
-      displayText: `${followupSources[0].content.displayText}\n\n${followupSources[1].content.text}`,
-      attachments: followupSources[0].content.attachments,
-      quotes: followupSources.flatMap((source) => source.content.quotes ?? []),
+      text: `${orderedFollowupSources[0].content.text}\n\n${orderedFollowupSources[1].content.text}`,
+      displayText: `${orderedFollowupSources[0].content.text}\n\n${orderedFollowupSources[1].content.displayText}`,
+      attachments: orderedFollowupSources[1].content.attachments,
+      quotes: orderedFollowupSources.flatMap((source) => source.content.quotes ?? []),
     });
     const followupTurnId = chain[1]?.turnId;
     assert.ok(followupTurnId);
     const followupLedger = await fixture.readTurn(followupTurnId);
-    const expectedQuotes = followupSources.flatMap((source) => source.content.quotes ?? []);
+    const expectedQuotes = orderedFollowupSources.flatMap((source) => source.content.quotes ?? []);
     assert.equal(followupLedger.userMessages.length, followupSources.length);
     assert.deepEqual(
       followupLedger.userMessages.flatMap((message) => message.quotes ?? []),
@@ -245,7 +262,7 @@ test('steering becomes durable and ordered followups automatically start the nex
     );
     assert.deepEqual(userRuntimeContent(followupLedger.runtimeEvents)?.quotes, expectedQuotes);
     const sessionUserMessages = await fixture.readSessionUserMessages();
-    for (const source of followupSources) {
+    for (const source of orderedFollowupSources) {
       assert.equal(
         sessionUserMessages.filter((message) => message.id === source.messageId).length,
         1,
@@ -253,7 +270,13 @@ test('steering becomes durable and ordered followups automatically start the nex
     }
     assert.equal(
       sessionUserMessages.filter((message) => message.turnId === followupTurnId).length,
-      followupSources.length,
+      orderedFollowupSources.length,
+    );
+    assert.deepEqual(
+      sessionUserMessages
+        .filter((message) => message.turnId === followupTurnId)
+        .map((message) => message.id),
+      orderedFollowupSources.map((source) => source.messageId),
     );
   });
 });
@@ -306,6 +329,11 @@ test('explicit retract is durable across connections and prevents successor admi
     await retrying.close();
     await fixture.stopHost(host);
 
+    assert.equal(
+      (await fixture.readSessionUserMessages()).some((message) => message.id === messageId),
+      false,
+      'a retracted draft must not remain in the durable transcript',
+    );
     const chain = await fixture.readAdmissionChain();
     assert.deepEqual(
       chain.map((admission) => admission.turnId),
@@ -374,6 +402,12 @@ test('interrupt atomically retracts queued followup, stops the exact run, and is
     await first.close();
     await second.close();
     await fixture.stopHost(host);
+
+    assert.equal(
+      (await fixture.readSessionUserMessages()).some((message) => message.id === followupId),
+      false,
+      'an interrupted draft must not remain in the durable transcript',
+    );
 
     const chain = await fixture.readAdmissionChain();
     assert.equal(chain.length, 1);

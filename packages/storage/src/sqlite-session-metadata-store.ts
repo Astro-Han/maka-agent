@@ -134,6 +134,7 @@ import {
   isDiscardableConversationCopy,
   isValidConversationCopyTransition,
 } from './session-conversation-copy.js';
+import { catalogPreviewForUserMessage } from './session-message-projection.js';
 import {
   configureSqliteSessionMetadataDatabase,
   migrateSqliteSessionMetadataDatabase,
@@ -1545,8 +1546,7 @@ export class SqliteSessionMetadataStore {
     this.assertOpen();
     const stored = normalizePendingMessageAdmission(admission);
     return this.transaction(() => {
-      const record = this.readRecordSync(stored.sessionId);
-      if (!record) throw new SessionNotFoundError(stored.sessionId);
+      if (!this.readRecordSync(stored.sessionId)) throw new SessionNotFoundError(stored.sessionId);
       const existingRow = this.db
         .prepare(
           `
@@ -1602,52 +1602,6 @@ export class SqliteSessionMetadataStore {
           stored.admittedAt,
         );
 
-      if (stored.disposition === 'steering' || stored.disposition === 'followup') {
-        const message = decodeCanonicalMessage({
-          type: 'user',
-          id: stored.messageId,
-          turnId: stored.turnId,
-          ts: stored.admittedAt,
-          ...stored.content,
-          steeringEventId: stored.messageId,
-        });
-        const existingMessages = this.readMessagesWith(
-          stored.sessionId,
-          decodeStoredMessage,
-        ).filter((candidate) => candidate.id === stored.messageId);
-        if (existingMessages.length > 1) {
-          throw new SessionMetadataConflictError(
-            'Message admission transcript identity is ambiguous',
-          );
-        }
-        const existingMessage = existingMessages[0];
-        if (existingMessage && !isDeepStrictEqual(existingMessage, message)) {
-          throw new SessionMetadataConflictError('Message admission transcript identity conflict');
-        }
-        if (!existingMessage) {
-          const row = this.db
-            .prepare(
-              'SELECT COALESCE(MAX(sequence), -1) AS last_sequence FROM session_messages WHERE session_id = ?',
-            )
-            .get(stored.sessionId) as { last_sequence?: unknown };
-          if (typeof row.last_sequence !== 'number' || !Number.isSafeInteger(row.last_sequence)) {
-            throw new SessionMetadataConflictError('Invalid Session message sequence');
-          }
-          const json = JSON.stringify(message);
-          this.insertSessionMessagesSync(stored.sessionId, row.last_sequence + 1, [
-            { message, json },
-          ]);
-          this.updateCatalogProjectionSync(
-            stored.sessionId,
-            {
-              lastMessageAt: stored.admittedAt,
-              lastMessagePreview: message.type === 'user' ? message.displayText : undefined,
-            },
-            false,
-            !record.header.connectionLocked,
-          );
-        }
-      }
       return stored;
     });
   }
@@ -1745,21 +1699,30 @@ export class SqliteSessionMetadataStore {
     });
   }
 
-  async rebindMessageAdmissionTranscript(input: {
+  async markMessagesHandedOff(input: {
     sessionId: string;
     messageIds: readonly string[];
     turnId: string;
-    previousRootTurnId: string | null;
   }): Promise<void> {
     this.assertOpen();
     assertSafeSessionId(input.sessionId);
     assertSafeSessionId(input.turnId);
-    if (input.previousRootTurnId !== null) {
-      assertSafeSessionId(input.previousRootTurnId);
-    }
     const unique = [...new Set(input.messageIds)];
     for (const messageId of unique) assertSafeSessionId(messageId);
     this.transaction(() => {
+      const lastSequenceRow = this.db
+        .prepare(
+          'SELECT COALESCE(MAX(sequence), -1) AS last_sequence FROM session_messages WHERE session_id = ?',
+        )
+        .get(input.sessionId) as { last_sequence?: unknown };
+      if (
+        typeof lastSequenceRow.last_sequence !== 'number' ||
+        !Number.isSafeInteger(lastSequenceRow.last_sequence)
+      ) {
+        throw new SessionMetadataConflictError('Invalid Session message sequence');
+      }
+      let nextSequence = lastSequenceRow.last_sequence + 1;
+      const materialized: StoredMessage[] = [];
       for (const messageId of unique) {
         const admissionRow = this.db
           .prepare(
@@ -1775,11 +1738,7 @@ export class SqliteSessionMetadataStore {
           throw new SessionMetadataConflictError('Message admission does not exist');
         }
         const admission = decodeMessageAdmissionRow(input.sessionId, admissionRow);
-        if (
-          admission.lifecycleState !== 'accepted' &&
-          admission.lifecycleState !== 'handed_off' &&
-          admission.lifecycleState !== 'executed'
-        ) {
+        if (admission.lifecycleState === 'cancelled') {
           throw new SessionMetadataConflictError('Message admission is already cancelled');
         }
         const rows = this.db
@@ -1798,36 +1757,74 @@ export class SqliteSessionMetadataStore {
           record_bytes?: unknown;
           sha256?: unknown;
         }>;
-        if (rows.length !== 1) {
+        if (rows.length > 1) {
           throw new SessionMetadataConflictError(
-            rows.length === 0
-              ? 'Message admission transcript is missing'
-              : 'Message admission transcript identity is ambiguous',
+            'Message admission transcript identity is ambiguous',
           );
         }
-        const sequence = rows[0]?.sequence;
-        if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence)) {
-          throw new SessionMetadataConflictError('Invalid Message transcript sequence');
+        if (rows.length === 0) {
+          if (admission.lifecycleState !== 'accepted') {
+            throw new SessionMetadataConflictError('Handed-off Message transcript is missing');
+          }
+          const message = decodeCanonicalMessage({
+            type: 'user',
+            id: messageId,
+            turnId: input.turnId,
+            ts: admission.admission.admittedAt,
+            ...admission.admission.content,
+            steeringEventId: messageId,
+          });
+          const json = JSON.stringify(message);
+          this.insertSessionMessagesSync(input.sessionId, nextSequence, [{ message, json }]);
+          nextSequence += 1;
+          materialized.push(message);
+        } else {
+          const sequence = rows[0]?.sequence;
+          if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence)) {
+            throw new SessionMetadataConflictError('Invalid Message transcript sequence');
+          }
+          const row = rows[0]!;
+          const recordJson = readStoredMessageRecordJson(this.db, input.sessionId, sequence, row);
+          const message = decodeStoredMessage(JSON.parse(recordJson) as unknown);
+          if (
+            message.type !== 'user' ||
+            message.id !== messageId ||
+            !messageContentsEqual(normalizeMessageContent(message), admission.admission.content)
+          ) {
+            throw new SessionMetadataConflictError(
+              'Message admission transcript identity conflict',
+            );
+          }
+          if (message.turnId !== input.turnId) {
+            throw new SessionMetadataConflictError('Message admission transcript Turn conflict');
+          }
         }
-        const row = rows[0]!;
-        const recordJson = readStoredMessageRecordJson(this.db, input.sessionId, sequence, row);
-        const message = decodeStoredMessage(JSON.parse(recordJson) as unknown);
-        if (
-          message.type !== 'user' ||
-          message.id !== messageId ||
-          !messageContentsEqual(normalizeMessageContent(message), admission.admission.content)
-        ) {
-          throw new SessionMetadataConflictError('Message admission transcript identity conflict');
+        if (admission.lifecycleState === 'accepted') {
+          const transitioned = this.db
+            .prepare(
+              `
+              UPDATE message_admissions
+              SET lifecycle_state = 'handed_off'
+              WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
+            `,
+            )
+            .run(input.sessionId, messageId);
+          if (transitioned.changes !== 1) {
+            throw new SessionMetadataConflictError('Message admission lifecycle identity conflict');
+          }
         }
-        if (message.turnId === input.turnId) continue;
-        if (
-          message.turnId !== admission.admission.turnId &&
-          (input.previousRootTurnId === null || message.turnId !== input.previousRootTurnId)
-        ) {
-          throw new SessionMetadataConflictError('Message admission transcript Turn conflict');
-        }
-        const rebound = decodeCanonicalMessage({ ...message, turnId: input.turnId });
-        this.replaceSessionMessageSync(input.sessionId, sequence, rebound);
+      }
+      const latest = materialized.at(-1);
+      if (latest?.type === 'user') {
+        this.updateCatalogProjectionSync(
+          input.sessionId,
+          {
+            lastMessageAt: latest.ts,
+            lastMessagePreview: catalogPreviewForUserMessage(latest),
+          },
+          false,
+          true,
+        );
       }
     });
   }
@@ -1875,60 +1872,6 @@ export class SqliteSessionMetadataStore {
           stored.sessionId,
           stored.messageId,
         );
-      if (stored.disposition !== 'steering' && stored.disposition !== 'followup') return;
-      const message = decodeCanonicalMessage({
-        type: 'user',
-        id: stored.messageId,
-        turnId: stored.turnId,
-        ts: stored.admittedAt,
-        ...stored.content,
-        steeringEventId: stored.messageId,
-      });
-      const rows = this.db
-        .prepare(
-          `
-          SELECT sequence, record_json
-          FROM session_messages
-          WHERE session_id = ? AND message_id = ?
-        `,
-        )
-        .all(stored.sessionId, stored.messageId) as Array<{
-        sequence?: unknown;
-        record_json?: unknown;
-      }>;
-      if (rows.length > 1) {
-        throw new SessionMetadataConflictError(
-          'Message admission transcript identity is ambiguous',
-        );
-      }
-      const json = JSON.stringify(message);
-      if (rows.length === 0) {
-        const row = this.db
-          .prepare(
-            'SELECT COALESCE(MAX(sequence), -1) AS last_sequence FROM session_messages WHERE session_id = ?',
-          )
-          .get(stored.sessionId) as { last_sequence?: unknown };
-        if (typeof row.last_sequence !== 'number' || !Number.isSafeInteger(row.last_sequence)) {
-          throw new SessionMetadataConflictError('Invalid Session message sequence');
-        }
-        this.insertSessionMessagesSync(stored.sessionId, row.last_sequence + 1, [
-          { message, json },
-        ]);
-      } else {
-        const sequence = rows[0]?.sequence;
-        if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence)) {
-          throw new SessionMetadataConflictError('Invalid Message transcript sequence');
-        }
-        this.replaceSessionMessageSync(stored.sessionId, sequence, message, json);
-      }
-      this.updateCatalogProjectionSync(
-        stored.sessionId,
-        {
-          lastMessageAt: stored.admittedAt,
-          lastMessagePreview: message.type === 'user' ? message.displayText : undefined,
-        },
-        true,
-      );
     });
   }
 
@@ -2001,10 +1944,6 @@ export class SqliteSessionMetadataStore {
       );
       unique.forEach((messageId, index) => update.run(index, sessionId, messageId));
     });
-  }
-
-  async markMessagesHandedOff(sessionId: string, messageIds: readonly string[]): Promise<void> {
-    return this.markMessageLifecycle(sessionId, messageIds, 'handed_off');
   }
 
   async markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void> {

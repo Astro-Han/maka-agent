@@ -812,7 +812,7 @@ test('idle turn.message.submit applies hosted Skill preparation before durable a
   }
 });
 
-test('idle Skill admission persists only canonical content before root handoff', async () => {
+test('idle Skill admission persists a canonical draft without history before root handoff', async () => {
   const canonicalText = '<invoked-skill>Write clearly.</invoked-skill>\n\nDraft this.';
   const fixture = await createFailureFixture({
     registerBackend: (backends) =>
@@ -860,12 +860,13 @@ test('idle Skill admission persists only canonical content before root handoff',
       displayText: '/skill:writer Draft this.',
       inlineReferences: [],
     });
-    assert.deepEqual(
-      (await fixture.stores.sessionStore.readMessages(fixture.sessionId)).map((message) => ({
-        text: message.type === 'user' ? message.text : undefined,
-        displayText: message.type === 'user' ? message.displayText : undefined,
-      })),
-      [{ text: canonicalText, displayText: '/skill:writer Draft this.' }],
+    assert.deepEqual(await fixture.stores.sessionStore.readMessages(fixture.sessionId), []);
+    assert.equal(
+      await fixture.stores.sessionStore.readMessageLifecycleState(
+        fixture.sessionId,
+        'idle-skill-before-handoff',
+      ),
+      'accepted',
     );
   } finally {
     await fixture.dispose();

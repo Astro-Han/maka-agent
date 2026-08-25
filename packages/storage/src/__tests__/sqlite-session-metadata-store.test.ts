@@ -239,10 +239,10 @@ describe('SqliteSessionMetadataStore', () => {
     }
   });
 
-  test('atomically accepts a steering message and its canonical transcript', async () => {
+  test('materializes an accepted steering draft when it is handed off', async () => {
     const store = createSqliteSessionMetadataStore(':memory:');
     try {
-      await store.create(fullHeader({ id: 'session-1' }));
+      await store.create(fullHeader({ id: 'session-1', connectionLocked: false }));
       const admission: PendingMessageAdmission = {
         sessionId: 'session-1',
         turnId: 'turn-1',
@@ -265,6 +265,20 @@ describe('SqliteSessionMetadataStore', () => {
         await store.readMessageAdmission('session-1', 'message-1'),
         normalizedAdmission,
       );
+      assert.deepEqual(await store.readMessages('session-1'), []);
+      assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'accepted');
+      assert.equal((await store.read('session-1')).header.lastMessageAt, 3);
+      assert.equal((await store.readCatalogRecord('session-1')).lastMessagePreview, undefined);
+      assert.equal((await store.read('session-1')).header.connectionLocked, false);
+      assert.deepEqual(
+        (await store.listMessageAdmissions('session-1')).map((entry) => entry.messageId),
+        ['message-1'],
+      );
+      await store.markMessagesHandedOff({
+        sessionId: 'session-1',
+        messageIds: ['message-1'],
+        turnId: 'turn-1',
+      });
       assert.deepEqual(
         (await store.readMessages('session-1')).map((message) => ({
           id: message.id,
@@ -283,13 +297,10 @@ describe('SqliteSessionMetadataStore', () => {
           },
         ],
       );
-      assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'accepted');
-      assert.deepEqual(
-        (await store.listMessageAdmissions('session-1')).map((entry) => entry.messageId),
-        ['message-1'],
-      );
-      await store.markMessagesHandedOff('session-1', ['message-1']);
       assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'handed_off');
+      assert.equal((await store.read('session-1')).header.lastMessageAt, 10);
+      assert.equal((await store.readCatalogRecord('session-1')).lastMessagePreview, 'submitted');
+      assert.equal((await store.read('session-1')).header.connectionLocked, true);
       assert.deepEqual(await store.listMessageAdmissions('session-1'), []);
       assert.deepEqual(
         (await store.listUnsettledMessageAdmissions('session-1')).map((entry) => entry.messageId),
@@ -303,7 +314,7 @@ describe('SqliteSessionMetadataStore', () => {
     }
   });
 
-  test('atomically accepts a follow-up message and its canonical transcript', async () => {
+  test('materializes an accepted follow-up under its successor root', async () => {
     const store = createSqliteSessionMetadataStore(':memory:');
     try {
       await store.create(fullHeader({ id: 'session-followup-admission' }));
@@ -322,24 +333,16 @@ describe('SqliteSessionMetadataStore', () => {
         admittedAt: 11,
       });
       assert.equal(admission.disposition, 'followup');
-      assert.deepEqual(
-        (await store.readMessages('session-followup-admission')).map((message) => ({
-          id: message.id,
-          turnId: message.turnId,
-        })),
-        [{ id: 'message-followup', turnId: 'turn-current' }],
-      );
-      await store.rebindMessageAdmissionTranscript({
+      assert.deepEqual(await store.readMessages('session-followup-admission'), []);
+      await store.markMessagesHandedOff({
         sessionId: 'session-followup-admission',
         messageIds: ['message-followup'],
         turnId: 'turn-successor',
-        previousRootTurnId: 'turn-current',
       });
-      await store.rebindMessageAdmissionTranscript({
+      await store.markMessagesHandedOff({
         sessionId: 'session-followup-admission',
         messageIds: ['message-followup'],
         turnId: 'turn-successor',
-        previousRootTurnId: 'turn-current',
       });
       assert.deepEqual(
         (await store.readMessages('session-followup-admission')).map((message) => ({

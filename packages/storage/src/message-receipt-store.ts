@@ -57,16 +57,14 @@ export interface MessageLifecycleStore {
   ): Promise<MessageLifecycleState | undefined>;
   listMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]>;
   listUnsettledMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]>;
-  rebindMessageAdmissionTranscript(input: {
+  markMessagesHandedOff(input: {
     sessionId: string;
     messageIds: readonly string[];
     turnId: string;
-    previousRootTurnId: string | null;
   }): Promise<void>;
   updateMessageAdmission(admission: PendingMessageAdmission): Promise<void>;
   reorderMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;
   cancelMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;
-  markMessagesHandedOff(sessionId: string, messageIds: readonly string[]): Promise<void>;
   markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void>;
 }
 

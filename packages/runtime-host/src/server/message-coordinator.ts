@@ -569,13 +569,11 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         );
       }
     }
-    await this.#lifecycle.rebindMessageAdmissionTranscript({
+    await this.#lifecycle.markMessagesHandedOff({
       sessionId: input.sessionId,
-      messageIds: [...new Set(input.messageIds)],
+      messageIds: handoff,
       turnId: input.turnId,
-      previousRootTurnId: input.previousRootTurnId,
     });
-    await this.#lifecycle.markMessagesHandedOff(input.sessionId, handoff);
   }
 
   /**
@@ -632,7 +630,11 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         handedOff.push(messageId);
       }
     }
-    await this.#lifecycle.markMessagesHandedOff(input.sessionId, handedOff);
+    await this.#lifecycle.markMessagesHandedOff({
+      sessionId: input.sessionId,
+      messageIds: handedOff,
+      turnId: input.turnId,
+    });
     const proved: string[] = [];
     for (const messageId of messageIds) {
       if (
