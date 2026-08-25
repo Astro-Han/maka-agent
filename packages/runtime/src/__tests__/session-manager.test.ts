@@ -48,7 +48,7 @@ import type {
   UserMessageInput,
 } from '@maka/core/runtime-inputs';
 import type { ExecutionBoundary } from '@maka/core/sandbox-boundary';
-import type { QueueEnqueueOutcome, SessionEvent, ShellRunSnapshotResult } from '@maka/core/events';
+import type { SessionEvent, ShellRunSnapshotResult } from '@maka/core/events';
 import type {
   AgentGraphIntentClaim,
   AgentGraphIntentClaimStore,
@@ -15070,22 +15070,6 @@ class DelegatingRuntimeKernel implements RuntimeKernelLike {
     _response: Parameters<RuntimeKernelLike['respondToSandboxBoundary']>[1],
   ): Promise<void> {
     this.permissionResponses.push(sessionId);
-  }
-
-  steer(): QueueEnqueueOutcome {
-    return { kind: 'fallback' };
-  }
-
-  queueMessage(): QueueEnqueueOutcome {
-    return { kind: 'fallback' };
-  }
-
-  drainFollowup(): string | null {
-    return null;
-  }
-
-  retractQueue(): string {
-    return '';
   }
 
   hasActiveRuns(): boolean {

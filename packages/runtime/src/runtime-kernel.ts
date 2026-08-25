@@ -36,7 +36,6 @@ import { isSessionInlineRun } from '@maka/core/agent-run';
 import {
   type ActiveInteractionRequestEvent,
   type CompleteEvent,
-  type QueueEnqueueOutcome,
   type SessionEvent,
   type TokenUsageEvent,
 } from '@maka/core/events';
@@ -185,10 +184,6 @@ export interface RuntimeKernelLike {
   listActiveInteractions?(sessionId: string): ActiveInteractionRequestEvent[];
   respondToUserQuestion?(sessionId: string, response: UserQuestionResponse): Promise<void>;
   /** Compatibility surface; durable message admission belongs to Runtime Host. */
-  steer(sessionId: string, text: string): QueueEnqueueOutcome;
-  queueMessage(sessionId: string, text: string): QueueEnqueueOutcome;
-  drainFollowup(sessionId: string): string | null;
-  retractQueue(sessionId: string): string;
   hasActiveRuns(sessionId: string): boolean;
   /**
    * The turns of the runs in flight for this session. The same fact
@@ -2366,32 +2361,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
     await Promise.all(
       generations.map((active) => active.backend.respondToUserQuestion?.(response)),
     );
-  }
-
-  // --------------------------------------------------------------------------
-  // Steering / followup queues (authoritative source of truth)
-  // --------------------------------------------------------------------------
-
-  steer(sessionId: string, text: string): QueueEnqueueOutcome {
-    void sessionId;
-    void text;
-    return { kind: 'fallback' };
-  }
-
-  queueMessage(sessionId: string, text: string): QueueEnqueueOutcome {
-    void sessionId;
-    void text;
-    return { kind: 'fallback' };
-  }
-
-  drainFollowup(sessionId: string): string | null {
-    void sessionId;
-    return null;
-  }
-
-  retractQueue(sessionId: string): string {
-    void sessionId;
-    return '';
   }
 
   hasActiveRuns(sessionId: string): boolean {
