@@ -156,22 +156,33 @@ test('subscribed Clients share one canonical queue and ordered root handoff', as
       }
     }
 
-    const followupId = randomUUID();
-    const followupContent = { text: 'continue after the first root completes' };
-    const queued = await tui.request('turn.message.submit', {
+    const desktopFollowupId = randomUUID();
+    const desktopFollowupContent = { text: 'continue from the desktop' };
+    const desktopQueued = await desktop.request('turn.message.submit', {
       originHostEpoch: host.hostEpoch,
       sessionId: fixture.sessionId,
-      messageId: followupId,
-      content: followupContent,
+      messageId: desktopFollowupId,
+      content: desktopFollowupContent,
       placement: 'next_turn',
     });
-    assert.equal(queued.disposition, 'followup');
+    assert.equal(desktopQueued.disposition, 'followup');
+    const tuiFollowupId = randomUUID();
+    const tuiFollowupContent = { text: 'continue from the terminal' };
+    const tuiQueued = await tui.request('turn.message.submit', {
+      originHostEpoch: host.hostEpoch,
+      sessionId: fixture.sessionId,
+      messageId: tuiFollowupId,
+      content: tuiFollowupContent,
+      placement: 'next_turn',
+    });
+    assert.equal(tuiQueued.disposition, 'followup');
     for (const probe of [desktopProbe, tuiProbe]) {
       const queueProjection = await probe.waitFor(
         (frame) =>
           frame.kind === 'subscription.session_projection' &&
-          frame.snapshot.queue.followup.some((entry) => entry.messageId === followupId),
-        'continuity did not publish the accepted follow-up',
+          frame.snapshot.queue.followup.some((entry) => entry.messageId === desktopFollowupId) &&
+          frame.snapshot.queue.followup.some((entry) => entry.messageId === tuiFollowupId),
+        'continuity did not publish both accepted follow-ups',
       );
       assert.equal(queueProjection.kind, 'subscription.session_projection');
     }
@@ -210,7 +221,13 @@ test('subscribed Clients share one canonical queue and ordered root handoff', as
       chain.map((admission) => admission.turnId),
       [firstTurnId, successor.snapshot.rootTurn.turnId],
     );
-    assert.deepEqual(chain[1]?.normalizedInput, followupContent);
+    assert.deepEqual(
+      chain[1]?.sourceMessages.map((source) => source.messageId),
+      [desktopFollowupId, tuiFollowupId],
+    );
+    assert.deepEqual(chain[1]?.normalizedInput, {
+      text: `${desktopFollowupContent.text}\n\n${tuiFollowupContent.text}`,
+    });
   });
 });
 

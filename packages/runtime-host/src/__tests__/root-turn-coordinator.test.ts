@@ -70,6 +70,7 @@ import { HostArtifactCoordinator } from '../server/artifact-coordinator.js';
 import { HostCanonicalPermissionOutcomeReader } from '../server/canonical-permission-outcome-reader.js';
 import { CanonicalSessionProjectionReader } from '../server/canonical-session-projection.js';
 import { HostClientCapabilityCoordinator } from '../server/client-capability-coordinator.js';
+import { ClientCapabilityInvocationError } from '../server/client-capability-invocation-broker.js';
 import { HostContextCoordinator } from '../server/context-coordinator.js';
 import type { RuntimeHostResidency } from '../server/host-kernel.js';
 import type { HostedExecutionObserver } from '../server/hosted-execution-authority.js';
@@ -3277,7 +3278,7 @@ test('an exact active retry preserves the Client Capability admission binding', 
   }
 });
 
-test('mixed-Client queued follow-ups preserve each submitting connection through root handoff', {
+test('mixed-Client queued follow-ups use one Session successor without connection-local tools', {
   timeout: 20_000,
 }, async () => {
   const clientCapabilities = new HostClientCapabilityCoordinator({
@@ -3382,21 +3383,10 @@ test('mixed-Client queued follow-ups preserve each submitting connection through
     const firstFollowup = fixture.coordinator.readRootState(fixture.sessionId);
     assert.equal(firstFollowup.kind, 'active');
     if (firstFollowup.kind !== 'active') return;
-    const firstFollowupSnapshot = clientCapabilities.snapshotForSession(fixture.sessionId);
-    assert.deepEqual(firstFollowupSnapshot?.registrationIds, ['registration-b']);
-    firstFollowupSnapshot?.release();
+    const followupSnapshot = clientCapabilities.snapshotForSession(fixture.sessionId);
+    assert.equal(followupSnapshot, undefined);
 
     await waitUntil(() => backend?.sendCount === 2);
-    backend?.release();
-    await waitUntil(() => {
-      const state = fixture.coordinator.readRootState(fixture.sessionId);
-      return state.kind === 'active' && state.turnId !== firstFollowup.turnId;
-    });
-    const secondFollowupSnapshot = clientCapabilities.snapshotForSession(fixture.sessionId);
-    assert.deepEqual(secondFollowupSnapshot?.registrationIds, ['registration-a']);
-    secondFollowupSnapshot?.release();
-
-    await waitUntil(() => backend?.sendCount === 3);
     backend?.release();
     await waitUntil(
       () => fixture.coordinator.readRootState(fixture.sessionId).kind === 'idle',
@@ -3407,7 +3397,7 @@ test('mixed-Client queued follow-ups preserve each submitting connection through
     );
     assert.deepEqual(
       admissions.map((admission) => admission.sourceMessages.map((source) => source.messageId)),
-      [[], ['followup-from-provider-b'], ['followup-from-provider-a']],
+      [[], ['followup-from-provider-b', 'followup-from-provider-a']],
     );
   } finally {
     first.close();
@@ -3417,14 +3407,16 @@ test('mixed-Client queued follow-ups preserve each submitting connection through
   }
 });
 
-test('queued follow-up degrades lost Session tools and rebinds ephemeral tools to its Client', {
+test('queued follow-up does not bind lost or ambiguous connection-local tools', {
   timeout: 20_000,
 }, async () => {
-  await assertFollowupCapabilityRebinding('call');
-  await assertFollowupCapabilityRebinding('turn');
+  await assertSessionSuccessorCapabilityDegradation('call');
+  await assertSessionSuccessorCapabilityDegradation('turn');
 });
 
-async function assertFollowupCapabilityRebinding(affinity: 'call' | 'turn'): Promise<void> {
+async function assertSessionSuccessorCapabilityDegradation(
+  affinity: 'call' | 'turn',
+): Promise<void> {
   const clientCapabilities = new HostClientCapabilityCoordinator({
     activation: new RuntimePolicyActivationGate(),
     onModelToolsChanged: () => undefined,
@@ -3567,26 +3559,33 @@ async function assertFollowupCapabilityRebinding(affinity: 'call' | 'turn'): Pro
       return state.kind === 'active' && state.turnId !== firstTurnId;
     });
     const snapshot = clientCapabilities.snapshotForSession(fixture.sessionId);
-    assert.ok(snapshot);
-    assert.equal(
-      snapshot.tools.some((tool) => tool.name.endsWith('navigate_session')),
-      false,
-    );
-    const ephemeral = snapshot.tools.find((tool) => tool.name.endsWith('navigate_ephemeral'));
-    assert.ok(ephemeral);
-    await ephemeral.impl(
-      {},
-      {
-        sessionId: fixture.sessionId,
-        turnId: 'followup-turn',
-        cwd: '/tmp',
-        toolCallId: `followup-${affinity}`,
-        abortSignal: new AbortController().signal,
-        emitOutput: () => undefined,
-      },
-    );
-    assert.deepEqual(calls, ['provider-followup']);
-    snapshot.release();
+    if (affinity === 'turn') {
+      assert.equal(snapshot, undefined);
+    } else {
+      assert.ok(snapshot);
+      const ephemeral = snapshot.tools.find((tool) => tool.name.endsWith('navigate_ephemeral'));
+      assert.ok(ephemeral);
+      await assert.rejects(
+        () =>
+          Promise.resolve(
+            ephemeral.impl(
+              {},
+              {
+                sessionId: fixture.sessionId,
+                turnId: 'followup-turn',
+                cwd: '/tmp',
+                toolCallId: `followup-${affinity}`,
+                abortSignal: new AbortController().signal,
+                emitOutput: () => undefined,
+              },
+            ),
+          ),
+        (error: unknown) =>
+          error instanceof ClientCapabilityInvocationError && error.code === 'capability_ambiguous',
+      );
+      snapshot.release();
+    }
+    assert.deepEqual(calls, []);
 
     await waitUntil(() => backend?.sendCount === 2);
     backend?.release();

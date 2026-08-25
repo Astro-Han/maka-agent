@@ -235,10 +235,10 @@ export class HostClientCapabilityCoordinator implements ClientCapabilityService 
     return this.#bindSession(sessionId, initiatingConnectionId, 'strict');
   }
 
-  async bindConfirmedFollowup(sessionId: string, initiatingConnectionId: string): Promise<void> {
-    const result = await this.#bindSession(sessionId, initiatingConnectionId, 'degrade');
+  async bindSessionSuccessor(sessionId: string): Promise<void> {
+    const result = await this.#bindSession(sessionId, '', 'degrade');
     if (!result.ok) {
-      throw new Error(`Confirmed follow-up capability binding failed: ${result.message}`);
+      throw new Error(`Session successor capability binding failed: ${result.message}`);
     }
   }
 

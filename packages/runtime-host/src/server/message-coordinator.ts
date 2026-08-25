@@ -120,7 +120,6 @@ export interface HostMessagePreparationInput {
   readonly turnId: string;
   readonly content: MessageContent;
   readonly placement: MessagePlacement;
-  readonly initiatingConnectionId: string;
 }
 
 export interface HostMessageStopClaim {
@@ -206,7 +205,6 @@ interface LiveEntry {
   content: MessageContent;
   modelContent: MessageContent;
   submittedContentDigest: `sha256:${string}`;
-  readonly initiatingConnectionId: string;
   readonly placement: MessagePlacement;
   readonly disposition: 'steering' | 'followup';
   readonly generation: number;
@@ -294,7 +292,6 @@ export interface RootFollowupBatch {
   readonly transitionId: string;
   readonly sessionId: string;
   readonly previousTurnId: string;
-  readonly initiatingConnectionId: string | undefined;
   readonly content: MessageContent;
   readonly submittedContent: MessageContent;
   readonly sources: readonly RootFollowupSource[];
@@ -477,7 +474,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       this.#mutated(state);
     }
     state.run = undefined;
-    const entries = sameInitiatingClientPrefix(state.followup);
+    const entries = [...state.followup];
     const followup = canonicalFollowupBatch(entries);
     const transition: TerminalTransition = {
       transitionId: this.#createId(),
@@ -489,7 +486,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       transitionId: transition.transitionId,
       sessionId: identity.sessionId,
       previousTurnId: identity.turnId,
-      initiatingConnectionId: entries[0]?.initiatingConnectionId,
       content: followup.content,
       submittedContent: followup.submittedContent,
       sources: followup.sources,
@@ -533,7 +529,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     sessionId: string;
     turnId: string;
     runId: string;
-    previousRootTurnId: string | null;
     messageIds: readonly string[];
   }): Promise<void> {
     const handoff: string[] = [];
@@ -698,7 +693,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           content: submittedProjectionContent(admission.content),
           modelContent: admission.content,
           submittedContentDigest: admission.submittedContentDigest,
-          initiatingConnectionId: '',
           placement: admission.placement,
           disposition: admission.disposition,
           generation: state.generation,
@@ -897,7 +891,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           turnId: rootState.turnId,
           content: payload.content,
           placement: input.placement,
-          initiatingConnectionId,
         });
         if (prepared.kind === 'rejected') {
           return failure('operation_conflict', prepared.error);
@@ -992,7 +985,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           content: payload.content,
           modelContent: prepared.content,
           submittedContentDigest: messageAdmission.submittedContentDigest,
-          initiatingConnectionId,
           placement: input.placement,
           disposition,
           generation: state.generation,
@@ -1329,7 +1321,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       turnId: state.reservedRoot.turnId,
       content,
       placement: queued.entry.placement,
-      initiatingConnectionId: queued.entry.initiatingConnectionId,
     });
     if (prepared.kind === 'rejected') return failure('operation_conflict', prepared.error);
     const modelContent = prepared.content;
@@ -1875,7 +1866,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       !transition ||
       transition.transitionId !== batch.transitionId ||
       transition.identity.turnId !== batch.previousTurnId ||
-      transition.entries[0]?.initiatingConnectionId !== batch.initiatingConnectionId ||
       !isDeepStrictEqual(transition.entries.map(sourceFromEntry), batch.sources) ||
       !messageContentsEqual(
         aggregateMessageContent(transition.entries.map((entry) => entry.modelContent)),
@@ -2267,18 +2257,6 @@ function canonicalFollowupBatch(entries: readonly LiveEntry[]): {
       'Accepted follow-up batch violates the durable root admission contract',
     );
   }
-}
-
-function sameInitiatingClientPrefix(entries: readonly LiveEntry[]): LiveEntry[] {
-  const initiatingConnectionId = entries[0]?.initiatingConnectionId;
-  if (!initiatingConnectionId) {
-    const boundary = entries.findIndex((entry) => entry.initiatingConnectionId !== '');
-    return entries.slice(0, boundary === -1 ? entries.length : boundary);
-  }
-  const boundary = entries.findIndex(
-    (entry) => entry.initiatingConnectionId !== initiatingConnectionId,
-  );
-  return entries.slice(0, boundary === -1 ? entries.length : boundary);
 }
 
 function rootAdmissionPayloadFits(sources: readonly RootTurnSourceMessage[]): boolean {

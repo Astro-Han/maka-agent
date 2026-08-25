@@ -410,7 +410,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           sessionId,
           turnId: admission.turnId,
           runId: admission.runId,
-          previousRootTurnId: admission.previousRootTurnId,
           messageIds: admission.sourceMessages.map((source) => source.messageId),
         });
         return this.prepareAdmittedTurn(
@@ -1084,7 +1083,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           sessionId: input.sessionId,
           turnId,
           runId,
-          previousRootTurnId: admitted.admission.previousRootTurnId,
           messageIds: [input.sourceMessage.messageId],
         });
         const disposition = await this.prepareAdmittedTurn(
@@ -1147,7 +1145,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
           sessionId: input.sessionId,
           turnId,
           runId: admitted.admission.runId,
-          previousRootTurnId: admitted.admission.previousRootTurnId,
           messageIds: input.sources.map((source) => source.messageId),
         });
         const disposition = await this.prepareAdmittedTurn(
@@ -1186,7 +1183,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       if (input.placement === 'current_turn') return prepare();
       const preview = await this.previewCapabilityBinding(
         input.sessionId,
-        input.initiatingConnectionId,
+        '',
         prepare,
       );
       return preview.ok ? preview.value : { kind: 'rejected', error: preview.message };
@@ -2392,13 +2389,10 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     previous: ActiveRootTurn,
     admissionLease: SessionAdmissionLease,
   ): Promise<void> {
-    const initiatingConnectionId = batch.initiatingConnectionId;
     // A confirmed follow-up must become a durable root even when a Session
-    // provider is unavailable. Lost tools are omitted while ephemeral
-    // capabilities bind to the Client that submitted this follow-up.
-    if (initiatingConnectionId) {
-      await this.clientCapabilities?.bindConfirmedFollowup(batch.sessionId, initiatingConnectionId);
-    }
+    // provider is unavailable. Lost and ambiguous connection-local tools are
+    // omitted because a queued Message belongs to the durable Session.
+    await this.clientCapabilities?.bindSessionSuccessor(batch.sessionId);
 
     const turnId = randomUUID();
     const header = await this.stores.sessionStore.readHeaderSnapshot(batch.sessionId);
@@ -2425,7 +2419,6 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       sessionId: batch.sessionId,
       turnId,
       runId: admitted.admission.runId,
-      previousRootTurnId: admitted.admission.previousRootTurnId,
       messageIds: batch.sources.map((source) => source.messageId),
     });
 
