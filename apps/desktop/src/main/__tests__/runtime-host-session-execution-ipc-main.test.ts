@@ -43,6 +43,13 @@ import {
 import { RuntimeHostSessionObserver } from "../runtime-host-session-observer.js";
 import { runtimeHostSessionFixture } from "./runtime-host-session-test-fixture.js";
 
+test('registers Session observation as one reconnectable operation', () => {
+  const ipc = ipcHarness();
+  registerExecutionIpc({ client: executionClient({}) }, ipc);
+
+  assert.equal(ipc.reconnectableChannels.has('sessions:observe'), true);
+});
+
 test("keeps synthetic E2E interactions visible through Host hydration and retires their answer", async () => {
   const observer = observerWithSnapshot();
   const ipc = ipcHarness();
@@ -1414,15 +1421,24 @@ type IpcHandler = Parameters<Pick<IpcMain, "handle">["handle"]>[1];
 
 function ipcHarness() {
   const handlers = new Map<string, IpcHandler>();
+  const reconnectableChannels = new Set<string>();
   const sender = Object.assign(new EventEmitter(), { id: 9, send() {} });
+  const register = (channel: string, handler: IpcHandler) => {
+    assert.equal(
+      handlers.has(channel),
+      false,
+      `duplicate handler: ${channel}`,
+    );
+    handlers.set(channel, handler);
+  };
   return {
+    reconnectableChannels,
     handle(channel: string, handler: IpcHandler) {
-      assert.equal(
-        handlers.has(channel),
-        false,
-        `duplicate handler: ${channel}`,
-      );
-      handlers.set(channel, handler);
+      register(channel, handler);
+    },
+    handleReconnectableRead(channel: string, handler: IpcHandler) {
+      reconnectableChannels.add(channel);
+      register(channel, handler);
     },
     async invoke(channel: string, ...args: unknown[]): Promise<unknown> {
       const handler = handlers.get(channel);
@@ -1441,7 +1457,7 @@ function ipcHarness() {
 function registerExecutionIpc(
   deps: Pick<RuntimeHostSessionExecutionIpcDeps, 'client'> &
     Partial<Omit<RuntimeHostSessionExecutionIpcDeps, 'client'>>,
-  ipcMain: Pick<IpcMain, 'handle'>,
+  ipcMain: Pick<IpcMain, 'handle'> & { handleReconnectableRead?: IpcMain['handle'] },
 ): (sessionId: string) => Promise<void> {
   const observer = deps.observer ?? unusedObserver();
   return registerRuntimeHostSessionExecutionIpc(

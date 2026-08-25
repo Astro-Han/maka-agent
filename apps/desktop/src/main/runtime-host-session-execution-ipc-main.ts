@@ -189,7 +189,8 @@ export function registerRuntimeHostSessionExecutionIpc(
   const newId = deps.newId ?? randomUUID;
   const stopSession = createRuntimeHostSessionStop(deps, newId);
 
-  ipcMain.handle(
+  handleReconnectableRead(
+    ipcMain,
     "sessions:observe",
     async (event, sessionId: unknown, observerId: unknown) => {
       const normalizedSessionId = requiredId(sessionId, "Session");
