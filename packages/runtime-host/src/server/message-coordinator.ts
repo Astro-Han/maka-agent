@@ -682,7 +682,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       const state = this.#requireState(sessionId);
       if (!state.reservedRoot) this.reserveRootTurn(rootState);
       if (!sameRun(state.reservedRoot!, rootState)) continue;
-      for (const admission of admissions) {
+      for (const admission of pending) {
         if (admission.turnId !== rootState.turnId || admission.runId !== rootState.runId) continue;
         const existing = allLiveEntries(state).find(
           (entry) => entry.messageId === admission.messageId,

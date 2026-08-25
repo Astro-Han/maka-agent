@@ -335,6 +335,36 @@ test('recovery treats a durable steering event as the handoff proof', async () =
   await fixture.coordinator.close();
 });
 
+test('active recovery rebuilds only admissions without a durable proof', async () => {
+  const fixture = createFixture();
+  for (const [messageId, text] of [
+    ['proved-steering', 'already delivered'],
+    ['still-pending', 'deliver after recovery'],
+  ] as const) {
+    await fixture.admissions.commitMessageAdmission({
+      sessionId: ROOT.sessionId,
+      turnId: ROOT.turnId,
+      runId: ROOT.runId,
+      messageId,
+      content: { text },
+      submittedContentDigest: messageContentDigest({ text }),
+      submittedPlacement: 'current_turn',
+      placement: 'current_turn',
+      disposition: 'steering',
+      admittedAt: 1,
+    });
+  }
+  fixture.events.push(steeringEvent('proved-steering', 'already delivered'));
+
+  await fixture.coordinator.recoverPendingAfterHostRestart([ROOT.sessionId]);
+
+  assert.equal(fixture.readMessageAdmission('proved-steering'), undefined);
+  assert.deepEqual(
+    fixture.coordinator.projection(ROOT.sessionId).steering.map((entry) => entry.messageId),
+    ['still-pending'],
+  );
+});
+
 test('binds the exact reserved Run after a pre-bind stop fence', async () => {
   const fixture = createFixture();
   fixture.coordinator.reserveRootTurn(ROOT);
