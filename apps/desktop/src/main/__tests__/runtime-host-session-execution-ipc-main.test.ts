@@ -1240,10 +1240,13 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
     await ipc.invoke('sessions:steer', 'session-1', 'Continue', 'unknown-ticket'),
     { kind: 'outcome_unknown', messageId: 'unknown-ticket' },
   );
-  await ipc.invoke("sessions:stop", "session-1", {
-    source: "stop_button",
-    expectedAdmissionId: "steer-ticket-1",
-  });
+  assert.deepEqual(
+    await ipc.invoke("sessions:stop", "session-1", {
+      source: "stop_button",
+      expectedAdmissionId: "steer-ticket-1",
+    }),
+    { kind: 'retracted', messageId: 'steer-ticket-1' },
+  );
   assert.deepEqual(retractions, [
     {
       sessionId: 'session-1',

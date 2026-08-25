@@ -206,6 +206,10 @@ export type DesktopSideConversationBranchResult =
   | { ok: true; session: DesktopSessionSummary }
   | { ok: false; reason: 'session_busy' | 'operation_unavailable' };
 
+export type DesktopSessionStopResult =
+  | { kind: 'retracted'; messageId: string }
+  | undefined;
+
 export type DesktopReviseBeforeTurnInput = ReviseBeforeTurnInput & {
   /** Stable target identity for retrying one Desktop copy action. */
   copyId: string;
@@ -829,7 +833,7 @@ export interface MakaBridge {
         expectedTurnId?: string;
         expectedAdmissionId?: string;
       },
-    ): Promise<void>;
+    ): Promise<DesktopSessionStopResult>;
     steer(
       sessionId: string,
       text: string,

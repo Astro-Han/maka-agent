@@ -484,16 +484,16 @@ test('replays queued Side Conversation text after Host assigns the ticket to a s
   assert.equal(probe.getAttribute('data-processing'), 'false');
 });
 
-test('waits for Host retraction before clearing a stopped Side Conversation admission', async () => {
+test('clears a stopped Side Conversation admission when its live retraction is lost', async () => {
   let admissionId: string | undefined;
-  const pendingStop = deferred<void>();
+  const pendingStop = deferred<{ kind: 'retracted'; messageId: string }>();
   const pendingSend = deferred<{
     ok: true;
     steered: true;
     turnId: string;
     messageId: string;
   }>();
-  const { container, emit, send, stop } = await renderOwnershipProbe({
+  const { container, send, stop } = await renderOwnershipProbe({
     send: async (_sessionId, command) => {
       admissionId = command.turnId;
       return pendingSend.promise;
@@ -517,21 +517,8 @@ test('waits for Host retraction before clearing a stopped Side Conversation admi
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
 
   await act(async () => {
-    pendingStop.resolve();
+    pendingStop.resolve({ kind: 'retracted', messageId: admissionId as string });
     await stopResult;
-    await Promise.resolve();
-  });
-  assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'true');
-
-  await act(async () => {
-    emit({
-      type: 'message_admission',
-      id: 'stopped-admission-retracted',
-      turnId: 'old-turn',
-      ts: 1,
-      messageId: admissionId as string,
-      outcome: 'retracted',
-    });
     await Promise.resolve();
   });
   assert.equal(container.firstElementChild?.getAttribute('data-processing'), 'false');
@@ -552,7 +539,7 @@ test('waits for Host retraction before clearing a stopped Side Conversation admi
 
 test('keeps a Side Conversation admission when Host stop outcome is unknown', async () => {
   let admissionId: string | undefined;
-  const pendingStop = deferred<void>();
+  const pendingStop = deferred<undefined>();
   const { container, emit, send, stop } = await renderOwnershipProbe({
     send: async (_sessionId, command) => {
       admissionId = command.turnId;
@@ -774,7 +761,7 @@ test('stops the active Side Conversation after retracting its queued steer', asy
   const pendingSteer = deferred<{ kind: 'queued'; messageId: string }>();
   let admissionId: string | undefined;
   const stoppedIds: Array<string | undefined> = [];
-  const { emit, send, steer, stop } = await renderOwnershipProbe({
+  const { send, steer, stop } = await renderOwnershipProbe({
     send: async () => ({ ok: true as const, turnId: 'old-turn' }),
     steer: async (_sessionId, _text, requestedAdmissionId) => {
       admissionId = requestedAdmissionId;
@@ -782,6 +769,9 @@ test('stops the active Side Conversation after retracting its queued steer', asy
     },
     stop: async (_sessionId, expectedId) => {
       stoppedIds.push(expectedId);
+      return expectedId && expectedId === admissionId
+        ? { kind: 'retracted' as const, messageId: expectedId }
+        : undefined;
     },
   });
 
@@ -797,14 +787,6 @@ test('stops the active Side Conversation after retracting its queued steer', asy
   await waitUntil(() => admissionId !== undefined);
   await act(async () => {
     await stop();
-    emit({
-      type: 'message_admission',
-      id: 'queued-steer-retracted-before-active-stop',
-      turnId: 'old-turn',
-      ts: 1,
-      messageId: admissionId as string,
-      outcome: 'retracted',
-    });
     await Promise.resolve();
   });
   await act(async () => {
@@ -822,8 +804,8 @@ test('stops the active Side Conversation after retracting its queued steer', asy
 
 test('does not let an older Stop failure release a newer active Turn Stop', async () => {
   const pendingSteer = deferred<{ kind: 'queued'; messageId: string }>();
-  const queuedStop = deferred<void>();
-  const activeStop = deferred<void>();
+  const queuedStop = deferred<undefined>();
+  const activeStop = deferred<undefined>();
   let admissionId: string | undefined;
   const stoppedIds: Array<string | undefined> = [];
   const { emit, send, steer, stop } = await renderOwnershipProbe({
@@ -870,7 +852,7 @@ test('does not let an older Stop failure release a newer active Turn Stop', asyn
   await Promise.resolve();
 
   assert.deepEqual(stoppedIds, [admissionId, 'old-turn']);
-  activeStop.resolve();
+  activeStop.resolve(undefined);
   await Promise.all([activeStopResult, duplicateStopResult]);
   await act(async () => {
     pendingSteer.resolve({ kind: 'queued', messageId: admissionId as string });

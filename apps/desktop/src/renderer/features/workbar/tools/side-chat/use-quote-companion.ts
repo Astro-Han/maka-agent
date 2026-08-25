@@ -717,7 +717,15 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
     const admission = pendingAdmissionRef.current;
     if (admission) {
       const stopPromise = sideChat.stop(id, admission.messageId).then(
-        () => 'confirmed' as const,
+        (outcome) => {
+          if (
+            outcome?.kind === 'retracted' &&
+            outcome.messageId === admission.messageId
+          ) {
+            releaseAdmission(admission);
+          }
+          return 'confirmed' as const;
+        },
         () => {
           // A rejected Stop tells us nothing about whether the Host stopped
           // the Turn. Keep the admission alive so a late Host outcome can
@@ -743,7 +751,7 @@ export function useQuoteCompanion(input: UseQuoteCompanionInput): UseQuoteCompan
       if (stopRequestRef.current === stopPromise) stopRequestRef.current = null;
       // best-effort; the terminal event still reconciles state
     }
-  }, [resolveAdmission, sideChat]);
+  }, [releaseAdmission, resolveAdmission, sideChat]);
 
   const steer = useCallback(async (text: string): Promise<boolean> => {
     const id = companionIdRef.current;

@@ -34,6 +34,7 @@ import type {
   RendererIngestInput,
   DesktopBranchFromTurnInput,
   DesktopSideConversationBranchResult,
+  DesktopSessionStopResult,
   DesktopReviseBeforeTurnInput,
   AppUpdateInstallRequest,
   AppUpdateInstallResult,
@@ -1638,7 +1639,7 @@ const makaBridge = {
         expectedTurnId?: string;
         expectedAdmissionId?: string;
       },
-    ): Promise<void> {
+    ): Promise<DesktopSessionStopResult> {
       return invokeSessionRuntimeHost('sessions:stop', sessionId, input);
     },
     steer(

@@ -237,7 +237,10 @@ export interface SideChatSessionPort {
       attachmentItems?: WorkbarIngestInput[];
     },
   ): Promise<SideChatSendResult>;
-  stop(sessionId: string, admissionId?: string): Promise<void>;
+  stop(
+    sessionId: string,
+    admissionId?: string,
+  ): Promise<{ kind: 'retracted'; messageId: string } | undefined>;
   steer(sessionId: string, text: string, admissionId?: string): Promise<SideChatSteerResult>;
   setPermissionMode(
     sessionId: string,

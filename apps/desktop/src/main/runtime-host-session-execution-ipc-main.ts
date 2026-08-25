@@ -60,6 +60,7 @@ import {
   type RuntimeHostTranscriptTarget,
 } from "./runtime-host-session-observer.js";
 import type { DesktopTranscriptRangeRequest } from '../preload/transcript-contract.js';
+import type { DesktopSessionStopResult } from '../preload/bridge-contract.js';
 import { toDesktopHostSessionSummary } from "./runtime-host-session-catalog-ipc-main.js";
 import { mergeWorkspaceFileInlineReferences } from "./session-workspace-inline-references.js";
 
@@ -756,7 +757,9 @@ export function registerRuntimeHostSessionExecutionIpc(
       return toDesktopHostSessionSummary(revision);
     },
   );
-  return stopSession;
+  return async (sessionId) => {
+    await stopSession(sessionId);
+  };
 }
 
 function normalizeTranscriptRangeRequest(input: unknown): DesktopTranscriptRangeRequest {
@@ -810,7 +813,7 @@ function createRuntimeHostSessionStop(
 ): (
   sessionId: string,
   target?: { readonly expectedTurnId?: string; readonly expectedAdmissionId?: string },
-) => Promise<void> {
+) => Promise<DesktopSessionStopResult> {
   return async (sessionId, target = {}) => {
     let expectedTurnId = target.expectedTurnId;
     if (target.expectedAdmissionId) {
@@ -826,7 +829,7 @@ function createRuntimeHostSessionStop(
           retractId: newId(),
         });
         deps.emitSessionsChanged('status-change', sessionId);
-        return;
+        return { kind: 'retracted', messageId: entry.messageId };
       }
       if (
         root &&
