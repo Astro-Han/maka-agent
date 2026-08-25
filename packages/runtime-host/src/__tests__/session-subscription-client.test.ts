@@ -1286,7 +1286,6 @@ function openResult(
       goal: null,
       queue: { hostEpoch, queueRevision: 1, steering: [], followup: [] },
       interactions: { pending: [] },
-      rootTurnSourceMessageIds: [],
     },
   };
 }

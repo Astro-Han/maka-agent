@@ -159,14 +159,9 @@ export class RuntimeHostSessionProjector {
       events.push(
         ...projectMessageAdmissionEvents(
           root,
-          [
-            ...new Set([
-              ...this.#snapshot.rootTurnSourceMessageIds,
-              ...[...this.#durableSteeringTurnByMessage]
-                .filter(([, turnId]) => turnId === root.turnId)
-                .map(([messageId]) => messageId),
-            ]),
-          ],
+          [...this.#durableSteeringTurnByMessage]
+            .filter(([, turnId]) => turnId === root.turnId)
+            .map(([messageId]) => messageId),
           this.#now(),
         ),
       );
@@ -231,12 +226,7 @@ export class RuntimeHostSessionProjector {
   }
 
   seedTerminal(turn: RuntimeHostTerminalTurn): SessionEvent[] {
-    return [
-      ...(this.#projectMessageAdmissions
-        ? projectMessageAdmissionEvents(turn, this.#snapshot.rootTurnSourceMessageIds, this.#now())
-        : []),
-      ...this.#terminalEvents(turn, true),
-    ];
+    return this.#terminalEvents(turn, true);
   }
 
   seedStoredTerminal(turnId: string, transcript: readonly StoredMessage[]): SessionEvent[] {
@@ -402,7 +392,6 @@ export class RuntimeHostSessionProjector {
         : [];
     if (this.#projectMessageAdmissions) {
       events.push(...projectMessageRetractionEvents(previousSnapshot, next, this.#now()));
-      events.push(...projectNewMessageAdmissionEvents(previousSnapshot, next, this.#now()));
     }
     if (root && queueChanged(previousSnapshot.queue, next.queue)) {
       for (const entry of enteredActiveTurn) {
@@ -500,23 +489,6 @@ function projectMessageAdmissionEvents(
   }));
 }
 
-function projectNewMessageAdmissionEvents(
-  previous: SessionContinuitySnapshot,
-  next: SessionContinuitySnapshot,
-  ts: number,
-): SessionEvent[] {
-  const root = next.rootTurn;
-  if (!root) return [];
-  const previousIds =
-    previous.rootTurn?.runId === root.runId
-      ? new Set(previous.rootTurnSourceMessageIds)
-      : new Set<string>();
-  const messageIds = new Set(
-    next.rootTurnSourceMessageIds.filter((messageId) => !previousIds.has(messageId)),
-  );
-  return projectMessageAdmissionEvents(root, [...messageIds], ts);
-}
-
 function projectMessageRetractionEvents(
   previous: SessionContinuitySnapshot,
   next: SessionContinuitySnapshot,
@@ -527,13 +499,11 @@ function projectMessageRetractionEvents(
   const retained = new Set(
     [...next.queue.steering, ...next.queue.followup].map((entry) => entry.messageId),
   );
-  const admitted = new Set(next.rootTurnSourceMessageIds);
   return [...previous.queue.steering, ...previous.queue.followup]
     .filter(
       (entry) =>
         entry.state === 'queued' &&
-        !retained.has(entry.messageId) &&
-        !admitted.has(entry.messageId),
+        !retained.has(entry.messageId),
     )
     .map((entry) => ({
       type: 'message_admission' as const,

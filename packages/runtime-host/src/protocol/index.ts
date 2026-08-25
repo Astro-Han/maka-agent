@@ -92,9 +92,7 @@ export const RUNTIME_HOST_REGISTRATION_SCHEMA_VERSION = 1 as const;
 export const RUNTIME_HOST_PROTOCOL_VERSION = 0 as const;
 // Increment when the same protocol version no longer guarantees safe Client-Host
 // interoperability. Mismatches are rejected before domain commands are admitted.
-export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 50 as const;
-// 50: Session continuity snapshots carry Host-owned root source message
-// tickets so clients can bind queued admissions to successor Turns.
+export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 49 as const;
 // 49: WorkHub resolves one durable Coordination Session per Runtime Host.
 // Older peers do not know the operation or the hidden Session role.
 // 48: Session branch creation accepts an explicit Side Conversation intent.

@@ -87,8 +87,6 @@ export interface SessionContinuitySnapshot {
   goal: GoalProjection | null;
   queue: SessionMessageQueueProjection;
   interactions: SessionInteractionProjection;
-  /** Host-owned source message tickets admitted into the root Turn. */
-  rootTurnSourceMessageIds: readonly string[];
 }
 
 export interface SubscriptionOpenInput {
@@ -517,8 +515,7 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     'Session continuity snapshot',
     SESSION_CONTINUITY_SNAPSHOT_MAX_BYTES,
   );
-  const record = requireRecord(value, 'Session continuity snapshot');
-  assertAllowedKeys(record, 'Session continuity snapshot', [
+  const record = requireExactRecord(value, 'Session continuity snapshot', [
     'schemaVersion',
     'session',
     'projectionRevision',
@@ -526,17 +523,6 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     'goal',
     'queue',
     'interactions',
-    'rootTurnSourceMessageIds',
-  ]);
-  assertRequiredKeys(record, 'Session continuity snapshot', [
-    'schemaVersion',
-    'session',
-    'projectionRevision',
-    'rootTurn',
-    'goal',
-    'queue',
-    'interactions',
-    'rootTurnSourceMessageIds',
   ]);
   if (record.schemaVersion !== SESSION_CONTINUITY_SCHEMA_VERSION) {
     throw invalidProtocolFrame('Unsupported Session continuity snapshot schema');
@@ -559,15 +545,7 @@ export function decodeSessionContinuitySnapshot(value: unknown): SessionContinui
     goal,
     queue: decodeSessionMessageQueueProjection(record.queue),
     interactions,
-    rootTurnSourceMessageIds: decodeRootTurnSourceMessageIds(record.rootTurnSourceMessageIds),
   };
-}
-
-function decodeRootTurnSourceMessageIds(value: unknown): string[] {
-  if (!Array.isArray(value)) throw invalidProtocolFrame('Invalid root Turn source message ids');
-  return value.map((messageId, index) =>
-    requireId(messageId, `root Turn source message id ${index}`),
-  );
 }
 
 function decodeSubscriptionOpenInput(value: unknown): SubscriptionOpenInput {

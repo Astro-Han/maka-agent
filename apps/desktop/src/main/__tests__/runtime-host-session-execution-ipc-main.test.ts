@@ -1223,7 +1223,6 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       ],
       followup: [],
     },
-    rootTurnSourceMessageIds: ['successor-ticket'],
   });
   const ipc = ipcHarness();
   registerExecutionIpc(
@@ -1277,23 +1276,17 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
       }),
     /Host admission outcome is unknown/,
   );
-  await ipc.invoke('sessions:stop', 'session-1', {
-    source: 'stop_button',
-    expectedAdmissionId: 'successor-ticket',
-  });
-  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt']);
+  assert.deepEqual(stopLifecycle, []);
   await ipc.invoke("sessions:stop", "session-1", {
     source: "stop_button",
     expectedTurnId: "turn-unrelated",
   });
-  assert.deepEqual(stopLifecycle, ['teardown', 'interrupt']);
+  assert.deepEqual(stopLifecycle, []);
   await ipc.invoke("sessions:stop", "session-1", {
     source: "stop_button",
     expectedTurnId: "turn-1",
   });
   assert.deepEqual(stopLifecycle, [
-    'teardown',
-    'interrupt',
     'teardown',
     'interrupt',
   ]);
@@ -1316,12 +1309,6 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
     {
       sessionId: "session-1",
       interruptId: "id-2",
-      turnId: "turn-1",
-      runId: "run-1",
-    },
-    {
-      sessionId: 'session-1',
-      interruptId: 'id-3',
       turnId: 'turn-1',
       runId: 'run-1',
     },
@@ -1331,7 +1318,7 @@ test("binds steer and stop to Host-owned queue and active Turn identities", asyn
 
 test('does not let an admitted Stop interrupt a replacement Turn', async () => {
   const interrupts: unknown[] = [];
-  const observer = observerWithSnapshot({ rootTurnSourceMessageIds: ['ticket-1'] });
+  const observer = observerWithSnapshot();
   const originalSnapshot = observer.snapshot.bind(observer);
   let replaced = false;
   observer.snapshot = async (sessionId) => {
@@ -1345,7 +1332,6 @@ test('does not let an admitted Stop interrupt a replacement Turn', async () => {
             runId: 'run-2',
             status: 'running',
           },
-          rootTurnSourceMessageIds: ['ticket-2'],
         }
       : current;
   };
@@ -1370,7 +1356,7 @@ test('does not let an admitted Stop interrupt a replacement Turn', async () => {
     () =>
       ipc.invoke('sessions:stop', 'session-1', {
         source: 'stop_button',
-        expectedAdmissionId: 'ticket-1',
+        expectedAdmissionId: 'turn-1',
       }),
     /Host admission outcome is unknown/,
   );
@@ -1462,7 +1448,6 @@ function observerWithTranscript(
             followup: [],
           },
           interactions: { pending: [] },
-          rootTurnSourceMessageIds: [],
           ...overrides,
         },
         activeAssistantStreams: [],

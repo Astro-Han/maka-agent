@@ -467,7 +467,6 @@ function continuitySnapshot(rootTurn: TurnSnapshot | null): SessionContinuitySna
     goal: null,
     queue: { hostEpoch: 'host-1', queueRevision: 0, steering: [], followup: [] },
     interactions: { pending: [] },
-    rootTurnSourceMessageIds: [],
   };
 }
 

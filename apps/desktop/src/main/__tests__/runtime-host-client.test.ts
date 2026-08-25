@@ -181,7 +181,6 @@ function subscription(
       goal: null,
       queue: { hostEpoch: 'host-1', queueRevision: 0, steering: [], followup: [] },
       interactions: { pending: [] },
-      rootTurnSourceMessageIds: [],
     },
     loadTranscript: async <T>(_decodeMessage: (value: unknown) => T) => {
       lifecycle.push(`${sessionId}:transcript`);

@@ -1823,7 +1823,6 @@ function continuitySnapshot(
     queue: { hostEpoch: 'host-1', queueRevision: 0, steering: [], followup: [] },
     interactions: { pending: [] },
     ...overrides,
-    rootTurnSourceMessageIds: overrides.rootTurnSourceMessageIds ?? [],
   };
 }
 

@@ -365,7 +365,6 @@ function canonical(hostEpoch: string): CanonicalSessionProjection {
     goal: null,
     queue: { hostEpoch, queueRevision: 0, steering: [], followup: [] },
     interactions: { pending: [] },
-    rootTurnSourceMessageIds: [],
   };
 }
 

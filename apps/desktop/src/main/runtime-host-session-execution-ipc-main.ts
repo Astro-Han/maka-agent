@@ -839,8 +839,7 @@ function createRuntimeHostSessionStop(
       if (
         root &&
         !isTerminalStatus(root.status) &&
-        (root.turnId === target.expectedAdmissionId ||
-          observed.rootTurnSourceMessageIds.includes(target.expectedAdmissionId))
+        root.turnId === target.expectedAdmissionId
       ) {
         expectedTurnId = root.turnId;
       } else {

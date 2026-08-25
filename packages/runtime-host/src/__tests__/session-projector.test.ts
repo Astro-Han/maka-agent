@@ -73,135 +73,6 @@ test('applies authoritative replacement once and does not complete it again at T
   );
 });
 
-test('emits the Host admission fact when a queued message enters a successor Turn', () => {
-  const ordinary = new RuntimeHostSessionProjector(
-    withRootSourceMessageIds(snapshot(), ['ordinary-ticket']),
-    createRuntimeHostSessionProjectionSeed([], snapshot()),
-    () => 10,
-  );
-  assert.equal(
-    ordinary.seedActive(false).some((event) => event.type === 'message_admission'),
-    false,
-  );
-
-  const rejoined = new RuntimeHostSessionProjector(
-    withRootSourceMessageIds(snapshot(), ['rejoined-ticket']),
-    createRuntimeHostSessionProjectionSeed([], snapshot()),
-    () => 10,
-    [],
-    true,
-  );
-  assert.deepEqual(
-    rejoined
-      .seedActive(false)
-      .filter(
-        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
-          event.type === 'message_admission' && event.outcome === 'admitted',
-      )
-      .map((event) => ({
-        turnId: event.turnId,
-        messageId: event.messageId,
-      })),
-    [{ turnId: 'turn-1', messageId: 'rejoined-ticket' }],
-  );
-
-  const previous = snapshot({
-    queue: {
-      hostEpoch: 'host-1',
-      queueRevision: 1,
-      steering: [
-        {
-          entryId: 'entry-1',
-          messageId: 'ticket-1',
-          content: { text: 'continue in successor' },
-          placement: 'current_turn',
-          state: 'queued',
-        },
-      ],
-      followup: [],
-    },
-  });
-  const projector = new RuntimeHostSessionProjector(
-    previous,
-    createRuntimeHostSessionProjectionSeed([], previous),
-    () => 10,
-    [],
-    true,
-  );
-  const next = withRootSourceMessageIds(
-    snapshot({
-      projectionRevision: 2,
-      queue: {
-        hostEpoch: 'host-1',
-        queueRevision: 2,
-        steering: [],
-        followup: [],
-      },
-      rootTurn: {
-        sessionId: 'session-1',
-        turnId: 'turn-2',
-        runId: 'run-2',
-        status: 'running',
-      },
-    }),
-    ['ticket-1'],
-  );
-
-  const events = projector.accept({
-    kind: 'subscription.session_projection',
-    hostEpoch: 'host-1',
-    subscriptionId: 'subscription-1',
-    sequence: 1,
-    snapshot: next,
-  }).events;
-
-  assert.deepEqual(
-    events
-      .filter((event) => event.type === 'message_admission' || event.type === 'queue_update')
-      .map((event) => event.type),
-    ['message_admission', 'queue_update'],
-  );
-
-  assert.deepEqual(
-    events
-      .filter(
-        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
-          event.type === 'message_admission' && event.outcome === 'admitted',
-      )
-      .map((event) => ({
-        turnId: event.turnId,
-        messageId: event.messageId,
-      })),
-    [{ turnId: 'turn-2', messageId: 'ticket-1' }],
-  );
-
-  const retracted = new RuntimeHostSessionProjector(
-    previous,
-    createRuntimeHostSessionProjectionSeed([], previous),
-    () => 10,
-    [],
-    true,
-  ).accept({
-    kind: 'subscription.session_projection',
-    hostEpoch: 'host-1',
-    subscriptionId: 'subscription-1',
-    sequence: 1,
-    snapshot: snapshot({
-      projectionRevision: 2,
-      queue: next.queue,
-    }),
-  }).events;
-  assert.deepEqual(
-    retracted
-      .filter(
-        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
-          event.type === 'message_admission' && event.outcome === 'retracted',
-      )
-      .map((event) => event.messageId),
-    ['ticket-1'],
-  );
-});
-
 test('keeps a revocable in-flight lease pending', () => {
   const previous = snapshot({
     queue: {
@@ -677,16 +548,8 @@ function snapshot(overrides: Partial<SessionContinuitySnapshot> = {}): SessionCo
       followup: [],
     },
     interactions: { pending: [] },
-    rootTurnSourceMessageIds: [],
     ...overrides,
   };
-}
-
-function withRootSourceMessageIds(
-  value: SessionContinuitySnapshot,
-  rootTurnSourceMessageIds: readonly string[],
-): SessionContinuitySnapshot {
-  return { ...value, rootTurnSourceMessageIds };
 }
 
 function assistant(id: string, text: string): Extract<StoredMessage, { type: 'assistant' }> {
