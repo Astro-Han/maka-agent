@@ -202,7 +202,7 @@ test('emits the Host admission fact when a queued message enters a successor Tur
   );
 });
 
-test('emits the Host admission fact when a queued message enters the active Turn', () => {
+test('keeps a revocable in-flight lease pending', () => {
   const previous = snapshot({
     queue: {
       hostEpoch: 'host-1',
@@ -252,21 +252,12 @@ test('emits the Host admission fact when a queued message enters the active Turn
   }).events;
 
   assert.deepEqual(
-    events
-      .filter(
-        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
-          event.type === 'message_admission',
-      )
-      .map((event) => ({
-        outcome: event.outcome,
-        turnId: event.turnId,
-        messageId: event.messageId,
-      })),
-    [{ outcome: 'admitted', turnId: 'turn-1', messageId: 'ticket-1' }],
+    events.filter((event) => event.type === 'message_admission'),
+    [],
   );
 });
 
-test('reseeds the Host admission fact for a message already in the active Turn', () => {
+test('does not reseed a revocable in-flight lease as an admission', () => {
   const current = snapshot({
     queue: {
       hostEpoch: 'host-1',
@@ -292,18 +283,8 @@ test('reseeds the Host admission fact for a message already in the active Turn',
   );
 
   assert.deepEqual(
-    projector
-      .seedActive(false)
-      .filter(
-        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
-          event.type === 'message_admission',
-      )
-      .map((event) => ({
-        outcome: event.outcome,
-        turnId: event.turnId,
-        messageId: event.messageId,
-      })),
-    [{ outcome: 'admitted', turnId: 'turn-1', messageId: 'ticket-1' }],
+    projector.seedActive(false).filter((event) => event.type === 'message_admission'),
+    [],
   );
 });
 
@@ -343,6 +324,50 @@ test('reseeds the Host admission fact after an active Turn message leaves the qu
       })),
     [{ outcome: 'admitted', turnId: 'turn-1', messageId: 'ticket-1' }],
   );
+});
+
+test('admits an in-flight message only after its durable Turn ownership is recorded', () => {
+  const current = snapshot({
+    queue: {
+      hostEpoch: 'host-1',
+      queueRevision: 2,
+      steering: [
+        {
+          entryId: 'entry-1',
+          messageId: 'ticket-1',
+          content: { text: 'continue here' },
+          placement: 'current_turn',
+          state: 'in_flight',
+        },
+      ],
+      followup: [],
+    },
+  });
+  const projector = new RuntimeHostSessionProjector(
+    current,
+    createRuntimeHostSessionProjectionSeed([], current),
+    () => 10,
+    [],
+    true,
+  );
+  const durableMessage: StoredMessage = {
+    type: 'user',
+    id: 'ticket-1',
+    turnId: 'turn-1',
+    ts: 1,
+    text: 'continue here',
+    steeringEventId: 'steering-event-1',
+  };
+
+  assert.deepEqual(
+    projector.noteDurableTranscriptMessages([durableMessage]).map((event) => ({
+      type: event.type,
+      turnId: event.turnId,
+      messageId: 'messageId' in event ? event.messageId : undefined,
+    })),
+    [{ type: 'message_admission', turnId: 'turn-1', messageId: 'ticket-1' }],
+  );
+  assert.deepEqual(projector.noteDurableTranscriptMessages([durableMessage]), []);
 });
 
 test('reseeds the latest provider retry when the active Turn still carries one', () => {

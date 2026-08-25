@@ -86,8 +86,7 @@ export interface RuntimeHostProjectionUpdate {
 export class RuntimeHostSessionProjector {
   #snapshot: SessionContinuitySnapshot;
   readonly #now: () => number;
-  readonly #transcriptIds: Set<string>;
-  readonly #durableSteeringTurnByMessage: ReadonlyMap<string, string>;
+  readonly #durableSteeringTurnByMessage: Map<string, string>;
   readonly #accumulators = new Map<string, AssistantAccumulator>();
   #projectMessageAdmissions: boolean;
 
@@ -103,7 +102,6 @@ export class RuntimeHostSessionProjector {
     this.#durableSteeringTurnByMessage = new Map(
       seed.durableSteeringMessages.map(({ messageId, turnId }) => [messageId, turnId]),
     );
-    this.#transcriptIds = new Set(this.#durableSteeringTurnByMessage.keys());
     this.#projectMessageAdmissions = projectMessageAdmissions;
     const root = snapshot.rootTurn;
     if (!root) return;
@@ -164,7 +162,6 @@ export class RuntimeHostSessionProjector {
           [
             ...new Set([
               ...this.#snapshot.rootTurnSourceMessageIds,
-              ...rootQueueInFlight(this.#snapshot.queue).map((entry) => entry.messageId),
               ...[...this.#durableSteeringTurnByMessage]
                 .filter(([, turnId]) => turnId === root.turnId)
                 .map(([messageId]) => messageId),
@@ -198,7 +195,7 @@ export class RuntimeHostSessionProjector {
       events.push(...projectRuntimeHostInteractionRequest(interaction, this.#now()));
     }
     for (const entry of rootQueueInFlight(this.#snapshot.queue)) {
-      if (this.#transcriptIds.has(entry.messageId)) continue;
+      if (this.#durableSteeringTurnByMessage.has(entry.messageId)) continue;
       events.push({
         type: 'steering_message',
         id: `host-queue:${this.#snapshot.queue.hostEpoch}:${this.#snapshot.queue.queueRevision}:${entry.entryId}`,
@@ -214,13 +211,23 @@ export class RuntimeHostSessionProjector {
     return events;
   }
 
-  noteTranscriptMessageIds(messageIds: readonly string[]): void {
-    const inFlight = new Set(
-      rootQueueInFlight(this.#snapshot.queue).map((entry) => entry.messageId),
-    );
-    for (const messageId of messageIds) {
-      if (inFlight.has(messageId)) this.#transcriptIds.add(messageId);
+  noteDurableTranscriptMessages(messages: readonly StoredMessage[]): SessionEvent[] {
+    const events: SessionEvent[] = [];
+    for (const message of messages) {
+      if (message.type !== 'user' || message.steeringEventId === undefined) continue;
+      const previousTurnId = this.#durableSteeringTurnByMessage.get(message.id);
+      this.#durableSteeringTurnByMessage.set(message.id, message.turnId);
+      if (!this.#projectMessageAdmissions || previousTurnId === message.turnId) continue;
+      events.push({
+        type: 'message_admission',
+        id: `host-admission:${message.steeringEventId}`,
+        turnId: message.turnId,
+        ts: this.#now(),
+        messageId: message.id,
+        outcome: 'admitted',
+      });
     }
+    return events;
   }
 
   seedTerminal(turn: RuntimeHostTerminalTurn): SessionEvent[] {
@@ -384,10 +391,6 @@ export class RuntimeHostSessionProjector {
     const previousSnapshot = this.#snapshot;
     const next = frame.snapshot;
     this.#snapshot = structuredClone(next);
-    const nextInFlight = new Set(rootQueueInFlight(next.queue).map((entry) => entry.messageId));
-    for (const messageId of this.#transcriptIds) {
-      if (!nextInFlight.has(messageId)) this.#transcriptIds.delete(messageId);
-    }
     const resolvedInteractions = removedPendingInteractions(previousSnapshot, next);
     for (const interaction of newlyPendingInteractions(previousSnapshot, next)) {
       events.push(...projectRuntimeHostInteractionRequest(interaction, this.#now()));
@@ -511,7 +514,6 @@ function projectNewMessageAdmissionEvents(
   const messageIds = new Set(
     next.rootTurnSourceMessageIds.filter((messageId) => !previousIds.has(messageId)),
   );
-  for (const entry of newlyInFlight(previous.queue, next.queue)) messageIds.add(entry.messageId);
   return projectMessageAdmissionEvents(root, [...messageIds], ts);
 }
 

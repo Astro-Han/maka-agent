@@ -1063,9 +1063,12 @@ export class RuntimeHostSessionObserver {
     change: DesktopTranscriptReplicaChange,
   ): void {
     if (state.replica !== replica || state.closing) return;
-    state.projector?.noteTranscriptMessageIds(
-      change.durableUpserts.map((entry) => entry.message.id),
-    );
+    for (const event of
+      state.projector?.noteDurableTranscriptMessages(
+        change.durableUpserts.map((entry) => entry.message),
+      ) ?? []) {
+      this.#broadcast(state.sessionId, event);
+    }
     this.#sendTranscriptChange(state, replica, change);
     if (!change.hasNewer && change.durableUpserts.length > 0) {
       this.#markTranscriptRead(state, replica);
