@@ -500,11 +500,7 @@ function projectMessageRetractionEvents(
     [...next.queue.steering, ...next.queue.followup].map((entry) => entry.messageId),
   );
   return [...previous.queue.steering, ...previous.queue.followup]
-    .filter(
-      (entry) =>
-        entry.state === 'queued' &&
-        !retained.has(entry.messageId),
-    )
+    .filter((entry) => entry.state === 'queued' && !retained.has(entry.messageId))
     .map((entry) => ({
       type: 'message_admission' as const,
       id: `host-retraction:${next.queue.hostEpoch}:${next.queue.queueRevision}:${entry.messageId}`,
