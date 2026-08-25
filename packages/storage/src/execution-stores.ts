@@ -115,8 +115,7 @@ export type {
   RuntimeEventScanResult,
 } from './agent-run-store.js';
 export type {
-  MessageLifecycleState,
-  MessageLifecycleStore,
+  MessageAdmissionStore,
   MessageOperationReceipt,
   MessageReceiptOperation,
   MessageReceiptStore,
@@ -176,10 +175,6 @@ export interface ExecutionSessionReader {
   list(filter?: SessionListFilter): Promise<SessionSummary[]>;
   readHeader(sessionId: string): Promise<SessionHeader>;
   readMessages(sessionId: string): Promise<StoredMessage[]>;
-  readMessageLifecycleState(
-    sessionId: string,
-    messageId: string,
-  ): Promise<import('./message-receipt-store.js').MessageLifecycleState | undefined>;
   listTurns(sessionId: string): Promise<TurnRecord[]>;
   close?(): Promise<void>;
 }
@@ -432,12 +427,8 @@ async function createExecutionStoresForWrite<K extends StorageRootKind, E extend
         run(() => sessionStore.commitMessageAdmission(admission)),
       readMessageAdmission: (sessionId, messageId) =>
         run(() => sessionStore.readMessageAdmission(sessionId, messageId)),
-      readMessageLifecycleState: (sessionId, messageId) =>
-        run(() => sessionStore.readMessageLifecycleState(sessionId, messageId)),
       listMessageAdmissions: (sessionId) =>
         run(() => sessionStore.listMessageAdmissions(sessionId)),
-      listUnsettledMessageAdmissions: (sessionId) =>
-        run(() => sessionStore.listUnsettledMessageAdmissions(sessionId)),
       markMessagesHandedOff: (input) => run(() => sessionStore.markMessagesHandedOff(input)),
       updateMessageAdmission: (admission) =>
         run(() => sessionStore.updateMessageAdmission(admission)),
@@ -445,8 +436,6 @@ async function createExecutionStoresForWrite<K extends StorageRootKind, E extend
         run(() => sessionStore.reorderMessageAdmissions(sessionId, messageIds)),
       cancelMessageAdmissions: (sessionId, messageIds) =>
         run(() => sessionStore.cancelMessageAdmissions(sessionId, messageIds)),
-      markMessagesExecuted: (sessionId, messageIds) =>
-        run(() => sessionStore.markMessagesExecuted(sessionId, messageIds)),
       subscribeTranscriptChanges: (listener) => sessionStore.subscribeTranscriptChanges(listener),
       updateHeader: (sessionId, patch) => run(() => sessionStore.updateHeader(sessionId, patch)),
       updateHeaderVersioned: (sessionId, patch, expectedRevision) =>
@@ -634,8 +623,6 @@ async function openExecutionStoresForRead<K extends StorageRootKind, E extends o
       list: (filter) => run(() => sessionStore.list(filter)),
       readHeader: (sessionId) => run(() => sessionStore.readHeaderSnapshot(sessionId)),
       readMessages: (sessionId) => run(() => sessionStore.readMessagesSnapshot(sessionId)),
-      readMessageLifecycleState: (sessionId, messageId) =>
-        run(() => sessionStore.readMessageLifecycleState(sessionId, messageId)),
       listTurns: (sessionId) => run(() => sessionStore.listTurnsSnapshot(sessionId)),
       close: () =>
         closeExecutionStorePersistence(sessionStore, runtimePersistence, {

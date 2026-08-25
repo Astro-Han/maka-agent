@@ -543,10 +543,9 @@ function createMessages(
         stores.agentRunStore.readRootTurnSourceMessageReceipt(requestedSessionId, messageId),
       readImmutableSteeringMessageProof: (requestedSessionId, messageId) =>
         stores.runtimeEventStore.readImmutableSteeringMessageProof(requestedSessionId, messageId),
-      readProviderRequestProof: async () => false,
     },
     receipts: stores.messageReceiptStore,
-    lifecycle: stores.sessionStore,
+    admissions: stores.sessionStore,
     sessionAdmission: new SessionAdmissionGate(),
     acquireResidency: () => ({ release: () => undefined }),
     preflightSessionSnapshot: () => true,

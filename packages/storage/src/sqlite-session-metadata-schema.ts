@@ -835,8 +835,6 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
         CHECK (submitted_placement IN ('current_turn', 'next_turn')),
       placement TEXT NOT NULL CHECK (placement IN ('current_turn', 'next_turn')),
       disposition TEXT NOT NULL CHECK (disposition IN ('steering', 'followup')),
-      lifecycle_state TEXT NOT NULL
-        CHECK (lifecycle_state IN ('accepted', 'handed_off', 'executed', 'cancelled')),
       queue_order INTEGER NOT NULL CHECK (queue_order >= 0),
       admitted_at INTEGER NOT NULL CHECK (admitted_at >= 0),
       UNIQUE (session_id, message_id),
@@ -844,7 +842,17 @@ const MIGRATIONS: ReadonlyMap<number, string> = new Map([
     );
 
     CREATE INDEX IF NOT EXISTS message_admissions_by_session_order
-      ON message_admissions(session_id, lifecycle_state, queue_order, sequence);
+      ON message_admissions(session_id, queue_order, sequence);
+
+    CREATE TABLE IF NOT EXISTS cancelled_message_admissions (
+      session_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      submitted_content_digest TEXT NOT NULL,
+      submitted_placement TEXT NOT NULL
+        CHECK (submitted_placement IN ('current_turn', 'next_turn')),
+      PRIMARY KEY (session_id, message_id),
+      FOREIGN KEY(session_id) REFERENCES session_metadata(session_id) ON DELETE CASCADE
+    );
   `,
   ],
   [

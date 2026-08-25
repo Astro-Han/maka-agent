@@ -266,7 +266,6 @@ describe('SqliteSessionMetadataStore', () => {
         normalizedAdmission,
       );
       assert.deepEqual(await store.readMessages('session-1'), []);
-      assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'accepted');
       assert.equal((await store.read('session-1')).header.lastMessageAt, 3);
       assert.equal((await store.readCatalogRecord('session-1')).lastMessagePreview, undefined);
       assert.equal((await store.read('session-1')).header.connectionLocked, false);
@@ -297,20 +296,125 @@ describe('SqliteSessionMetadataStore', () => {
           },
         ],
       );
-      assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'handed_off');
       assert.equal((await store.read('session-1')).header.lastMessageAt, 10);
       assert.equal((await store.readCatalogRecord('session-1')).lastMessagePreview, 'submitted');
       assert.equal((await store.read('session-1')).header.connectionLocked, true);
       assert.deepEqual(await store.listMessageAdmissions('session-1'), []);
-      assert.deepEqual(
-        (await store.listUnsettledMessageAdmissions('session-1')).map((entry) => entry.messageId),
-        ['message-1'],
-      );
-      await store.markMessagesExecuted('session-1', ['message-1']);
-      assert.equal(await store.readMessageLifecycleState('session-1', 'message-1'), 'executed');
-      assert.deepEqual(await store.listUnsettledMessageAdmissions('session-1'), []);
     } finally {
       store.close();
+    }
+  });
+
+  test('removes the accepted payload after transcript handoff', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-message-handoff-'));
+    const path = join(root, 'state.sqlite');
+    const store = createSqliteSessionMetadataStore(path);
+    try {
+      await store.create(fullHeader({ id: 'session-1' }));
+      await store.commitMessageAdmission({
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        runId: 'run-1',
+        messageId: 'message-1',
+        content: { text: 'one durable copy' },
+        submittedContentDigest: messageContentDigest({ text: 'one durable copy' }),
+        submittedPlacement: 'current_turn',
+        placement: 'current_turn',
+        disposition: 'steering',
+        admittedAt: 10,
+      });
+      await store.markMessagesHandedOff({
+        sessionId: 'session-1',
+        messageIds: ['message-1'],
+        turnId: 'turn-1',
+      });
+    } finally {
+      store.close();
+    }
+
+    const persisted = new DatabaseSync(path);
+    try {
+      assert.equal(
+        persisted
+          .prepare(
+            'SELECT COUNT(*) AS count FROM message_admissions WHERE session_id = ? AND message_id = ?',
+          )
+          .get('session-1', 'message-1')?.count,
+        0,
+      );
+      assert.equal(
+        persisted
+          .prepare(
+            'SELECT COUNT(*) AS count FROM session_messages WHERE session_id = ? AND message_id = ?',
+          )
+          .get('session-1', 'message-1')?.count,
+        1,
+      );
+    } finally {
+      persisted.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('retract replaces an accepted payload with a minimal identity tombstone', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-message-retract-'));
+    const path = join(root, 'state.sqlite');
+    const store = createSqliteSessionMetadataStore(path);
+    try {
+      await store.create(fullHeader({ id: 'session-1' }));
+      const admission: PendingMessageAdmission = {
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        runId: 'run-1',
+        messageId: 'message-1',
+        content: { text: 'discard this draft' },
+        submittedContentDigest: messageContentDigest({ text: 'discard this draft' }),
+        submittedPlacement: 'next_turn',
+        placement: 'next_turn',
+        disposition: 'followup',
+        admittedAt: 10,
+      };
+      await store.commitMessageAdmission(admission);
+      await store.cancelMessageAdmissions('session-1', ['message-1']);
+      assert.deepEqual(await store.listMessageAdmissions('session-1'), []);
+      await assert.rejects(
+        store.commitMessageAdmission(admission),
+        /identity is already cancelled/,
+      );
+    } finally {
+      store.close();
+    }
+
+    const persisted = new DatabaseSync(path);
+    try {
+      assert.deepEqual(
+        persisted
+          .prepare(
+            `
+            SELECT message_id, submitted_content_digest, submitted_placement
+            FROM cancelled_message_admissions
+            WHERE session_id = ?
+          `,
+          )
+          .all('session-1')
+          .map((row) => ({ ...row })),
+        [
+          {
+            message_id: 'message-1',
+            submitted_content_digest: messageContentDigest({ text: 'discard this draft' }),
+            submitted_placement: 'next_turn',
+          },
+        ],
+      );
+      assert.equal(
+        persisted
+          .prepare('SELECT COUNT(*) AS count FROM message_admissions WHERE session_id = ?')
+          .get('session-1')?.count,
+        0,
+      );
+    } finally {
+      persisted.close();
+      await rm(root, { recursive: true, force: true });
     }
   });
 

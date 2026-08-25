@@ -99,7 +99,6 @@ import { markPersisted } from '@maka/core/persisted-value';
 import {
   normalizePendingMessageAdmission,
   samePendingMessageAdmission,
-  type MessageLifecycleState,
   type PendingMessageAdmission,
 } from './message-receipt-store.js';
 import { messageContentsEqual, normalizeMessageContent } from '@maka/core/events';
@@ -236,7 +235,6 @@ interface MessageAdmissionRow {
   readonly submitted_placement?: unknown;
   readonly placement?: unknown;
   readonly disposition?: unknown;
-  readonly lifecycle_state?: unknown;
   readonly queue_order?: unknown;
   readonly admitted_at?: unknown;
 }
@@ -244,7 +242,7 @@ interface MessageAdmissionRow {
 function decodeMessageAdmissionRow(
   sessionId: string,
   row: MessageAdmissionRow,
-): { readonly admission: PendingMessageAdmission; readonly lifecycleState: MessageLifecycleState } {
+): PendingMessageAdmission {
   if (
     typeof row.turn_id !== 'string' ||
     typeof row.run_id !== 'string' ||
@@ -254,10 +252,6 @@ function decodeMessageAdmissionRow(
     (row.submitted_placement !== 'current_turn' && row.submitted_placement !== 'next_turn') ||
     (row.placement !== 'current_turn' && row.placement !== 'next_turn') ||
     (row.disposition !== 'steering' && row.disposition !== 'followup') ||
-    (row.lifecycle_state !== 'accepted' &&
-      row.lifecycle_state !== 'handed_off' &&
-      row.lifecycle_state !== 'executed' &&
-      row.lifecycle_state !== 'cancelled') ||
     typeof row.queue_order !== 'number' ||
     !Number.isSafeInteger(row.queue_order) ||
     row.queue_order < 0 ||
@@ -265,7 +259,7 @@ function decodeMessageAdmissionRow(
   ) {
     throw new SessionMetadataConflictError(`Invalid Message admission row for ${sessionId}`);
   }
-  const admission = normalizePendingMessageAdmission({
+  return normalizePendingMessageAdmission({
     sessionId,
     turnId: row.turn_id,
     runId: row.run_id,
@@ -278,7 +272,6 @@ function decodeMessageAdmissionRow(
     disposition: row.disposition,
     admittedAt: row.admitted_at,
   });
-  return { admission, lifecycleState: row.lifecycle_state };
 }
 
 export interface SessionAuthoritySnapshot {
@@ -1551,7 +1544,7 @@ export class SqliteSessionMetadataStore {
         .prepare(
           `
           SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
-            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+            submitted_placement, placement, disposition, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND message_id = ?
         `,
@@ -1559,20 +1552,25 @@ export class SqliteSessionMetadataStore {
         .get(stored.sessionId, stored.messageId) as MessageAdmissionRow | undefined;
       if (existingRow) {
         const existing = decodeMessageAdmissionRow(stored.sessionId, existingRow);
-        if (!samePendingMessageAdmission(existing.admission, stored)) {
+        if (!samePendingMessageAdmission(existing, stored)) {
           throw new SessionMetadataConflictError('Message admission identity conflict');
         }
-        if (existing.lifecycleState !== 'accepted') {
-          throw new SessionMetadataConflictError('Message admission identity is already settled');
-        }
-        return existing.admission;
+        return existing;
+      }
+      const cancelled = this.db
+        .prepare(
+          'SELECT 1 AS present FROM cancelled_message_admissions WHERE session_id = ? AND message_id = ?',
+        )
+        .get(stored.sessionId, stored.messageId);
+      if (cancelled) {
+        throw new SessionMetadataConflictError('Message admission identity is already cancelled');
       }
       const orderRow = this.db
         .prepare(
           `
           SELECT COALESCE(MAX(queue_order), -1) + 1 AS next_order
           FROM message_admissions
-          WHERE session_id = ? AND lifecycle_state = 'accepted'
+          WHERE session_id = ?
         `,
         )
         .get(stored.sessionId) as { next_order?: unknown };
@@ -1584,8 +1582,8 @@ export class SqliteSessionMetadataStore {
           `
           INSERT INTO message_admissions(
             session_id, turn_id, run_id, message_id, content_json, submitted_content_digest,
-            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?)
+            submitted_placement, placement, disposition, queue_order, admitted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         )
         .run(
@@ -1618,14 +1616,13 @@ export class SqliteSessionMetadataStore {
         .prepare(
           `
           SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
-            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+            submitted_placement, placement, disposition, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND message_id = ?
-            AND lifecycle_state = 'accepted'
         `,
         )
         .get(sessionId, messageId) as MessageAdmissionRow | undefined;
-      return row ? decodeMessageAdmissionRow(sessionId, row).admission : undefined;
+      return row ? decodeMessageAdmissionRow(sessionId, row) : undefined;
     });
   }
 
@@ -1637,65 +1634,14 @@ export class SqliteSessionMetadataStore {
         .prepare(
           `
           SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
-            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+            submitted_placement, placement, disposition, queue_order, admitted_at
           FROM message_admissions
-          WHERE session_id = ? AND lifecycle_state = 'accepted'
+          WHERE session_id = ?
           ORDER BY queue_order, sequence
         `,
         )
         .all(sessionId) as MessageAdmissionRow[];
-      return rows.map((row) => decodeMessageAdmissionRow(sessionId, row).admission);
-    });
-  }
-
-  async listUnsettledMessageAdmissions(
-    sessionId: string,
-  ): Promise<readonly PendingMessageAdmission[]> {
-    this.assertOpen();
-    assertSafeSessionId(sessionId);
-    return this.readTransaction(() => {
-      const rows = this.db
-        .prepare(
-          `
-          SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
-            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
-          FROM message_admissions
-          WHERE session_id = ? AND lifecycle_state IN ('accepted', 'handed_off')
-          ORDER BY queue_order, sequence
-        `,
-        )
-        .all(sessionId) as MessageAdmissionRow[];
-      return rows.map((row) => decodeMessageAdmissionRow(sessionId, row).admission);
-    });
-  }
-
-  async readMessageLifecycleState(
-    sessionId: string,
-    messageId: string,
-  ): Promise<MessageLifecycleState | undefined> {
-    this.assertOpen();
-    assertSafeSessionId(sessionId);
-    assertSafeSessionId(messageId);
-    return this.readTransaction(() => {
-      const row = this.db
-        .prepare(
-          `
-          SELECT lifecycle_state
-          FROM message_admissions
-          WHERE session_id = ? AND message_id = ?
-        `,
-        )
-        .get(sessionId, messageId) as { lifecycle_state?: unknown } | undefined;
-      if (!row) return undefined;
-      if (
-        row.lifecycle_state !== 'accepted' &&
-        row.lifecycle_state !== 'handed_off' &&
-        row.lifecycle_state !== 'executed' &&
-        row.lifecycle_state !== 'cancelled'
-      ) {
-        throw new SessionMetadataConflictError('Invalid Message admission lifecycle state');
-      }
-      return row.lifecycle_state;
+      return rows.map((row) => decodeMessageAdmissionRow(sessionId, row));
     });
   }
 
@@ -1728,17 +1674,23 @@ export class SqliteSessionMetadataStore {
           .prepare(
             `
             SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
-              submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+              submitted_placement, placement, disposition, queue_order, admitted_at
             FROM message_admissions
             WHERE session_id = ? AND message_id = ?
           `,
           )
           .get(input.sessionId, messageId) as MessageAdmissionRow | undefined;
-        if (!admissionRow) {
-          throw new SessionMetadataConflictError('Message admission does not exist');
-        }
-        const admission = decodeMessageAdmissionRow(input.sessionId, admissionRow);
-        if (admission.lifecycleState === 'cancelled') {
+        const admission = admissionRow
+          ? decodeMessageAdmissionRow(input.sessionId, admissionRow)
+          : undefined;
+        if (
+          !admission &&
+          this.db
+            .prepare(
+              'SELECT 1 AS present FROM cancelled_message_admissions WHERE session_id = ? AND message_id = ?',
+            )
+            .get(input.sessionId, messageId)
+        ) {
           throw new SessionMetadataConflictError('Message admission is already cancelled');
         }
         const rows = this.db
@@ -1763,15 +1715,14 @@ export class SqliteSessionMetadataStore {
           );
         }
         if (rows.length === 0) {
-          if (admission.lifecycleState !== 'accepted') {
-            throw new SessionMetadataConflictError('Handed-off Message transcript is missing');
-          }
+          if (!admission)
+            throw new SessionMetadataConflictError('Message admission does not exist');
           const message = decodeCanonicalMessage({
             type: 'user',
             id: messageId,
             turnId: input.turnId,
-            ts: admission.admission.admittedAt,
-            ...admission.admission.content,
+            ts: admission.admittedAt,
+            ...admission.content,
             steeringEventId: messageId,
           });
           const json = JSON.stringify(message);
@@ -1789,7 +1740,8 @@ export class SqliteSessionMetadataStore {
           if (
             message.type !== 'user' ||
             message.id !== messageId ||
-            !messageContentsEqual(normalizeMessageContent(message), admission.admission.content)
+            (admission !== undefined &&
+              !messageContentsEqual(normalizeMessageContent(message), admission.content))
           ) {
             throw new SessionMetadataConflictError(
               'Message admission transcript identity conflict',
@@ -1799,18 +1751,12 @@ export class SqliteSessionMetadataStore {
             throw new SessionMetadataConflictError('Message admission transcript Turn conflict');
           }
         }
-        if (admission.lifecycleState === 'accepted') {
-          const transitioned = this.db
-            .prepare(
-              `
-              UPDATE message_admissions
-              SET lifecycle_state = 'handed_off'
-              WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
-            `,
-            )
+        if (admission) {
+          const deleted = this.db
+            .prepare('DELETE FROM message_admissions WHERE session_id = ? AND message_id = ?')
             .run(input.sessionId, messageId);
-          if (transitioned.changes !== 1) {
-            throw new SessionMetadataConflictError('Message admission lifecycle identity conflict');
+          if (deleted.changes !== 1) {
+            throw new SessionMetadataConflictError('Message admission handoff identity conflict');
           }
         }
       }
@@ -1837,7 +1783,7 @@ export class SqliteSessionMetadataStore {
         .prepare(
           `
           SELECT turn_id, run_id, message_id, content_json, submitted_content_digest,
-            submitted_placement, placement, disposition, lifecycle_state, queue_order, admitted_at
+            submitted_placement, placement, disposition, queue_order, admitted_at
           FROM message_admissions
           WHERE session_id = ? AND message_id = ?
         `,
@@ -1845,14 +1791,11 @@ export class SqliteSessionMetadataStore {
         .get(stored.sessionId, stored.messageId) as MessageAdmissionRow | undefined;
       if (!currentRow) throw new SessionMetadataConflictError('Message admission does not exist');
       const current = decodeMessageAdmissionRow(stored.sessionId, currentRow);
-      if (current.lifecycleState !== 'accepted') {
-        throw new SessionMetadataConflictError('Message admission is already settled');
-      }
       if (
-        current.admission.turnId !== stored.turnId ||
-        current.admission.runId !== stored.runId ||
-        current.admission.submittedPlacement !== stored.submittedPlacement ||
-        current.admission.admittedAt !== stored.admittedAt
+        current.turnId !== stored.turnId ||
+        current.runId !== stored.runId ||
+        current.submittedPlacement !== stored.submittedPlacement ||
+        current.admittedAt !== stored.admittedAt
       ) {
         throw new SessionMetadataConflictError('Message admission update identity conflict');
       }
@@ -1861,7 +1804,7 @@ export class SqliteSessionMetadataStore {
           `
           UPDATE message_admissions
           SET content_json = ?, submitted_content_digest = ?, placement = ?, disposition = ?
-          WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
+          WHERE session_id = ? AND message_id = ?
         `,
         )
         .run(
@@ -1881,26 +1824,59 @@ export class SqliteSessionMetadataStore {
     const unique = [...new Set(messageIds)];
     for (const messageId of unique) assertSafeSessionId(messageId);
     this.transaction(() => {
-      const statement = this.db.prepare(
-        `
-        UPDATE message_admissions
-        SET lifecycle_state = 'cancelled'
-        WHERE session_id = ? AND message_id = ? AND lifecycle_state IN ('accepted', 'handed_off')
-      `,
-      );
       for (const messageId of unique) {
-        const result = statement.run(sessionId, messageId);
-        if (result.changes !== 1) {
-          const existing = this.db
+        const admission = this.db
+          .prepare(
+            `
+            SELECT submitted_content_digest, submitted_placement
+            FROM message_admissions
+            WHERE session_id = ? AND message_id = ?
+          `,
+          )
+          .get(sessionId, messageId) as
+          | { submitted_content_digest?: unknown; submitted_placement?: unknown }
+          | undefined;
+        if (!admission) {
+          const cancelled = this.db
             .prepare(
-              'SELECT lifecycle_state FROM message_admissions WHERE session_id = ? AND message_id = ?',
+              'SELECT 1 AS present FROM cancelled_message_admissions WHERE session_id = ? AND message_id = ?',
             )
-            .get(sessionId, messageId) as { lifecycle_state?: unknown } | undefined;
-          if (existing?.lifecycle_state !== 'cancelled') {
+            .get(sessionId, messageId);
+          if (!cancelled) {
             throw new SessionMetadataConflictError(
               'Message admission cancellation identity conflict',
             );
           }
+          continue;
+        }
+        if (
+          typeof admission.submitted_content_digest !== 'string' ||
+          (admission.submitted_placement !== 'current_turn' &&
+            admission.submitted_placement !== 'next_turn')
+        ) {
+          throw new SessionMetadataConflictError('Invalid Message admission cancellation identity');
+        }
+        this.db
+          .prepare(
+            `
+            INSERT INTO cancelled_message_admissions(
+              session_id, message_id, submitted_content_digest, submitted_placement
+            ) VALUES (?, ?, ?, ?)
+          `,
+          )
+          .run(
+            sessionId,
+            messageId,
+            admission.submitted_content_digest,
+            admission.submitted_placement,
+          );
+        const deleted = this.db
+          .prepare('DELETE FROM message_admissions WHERE session_id = ? AND message_id = ?')
+          .run(sessionId, messageId);
+        if (deleted.changes !== 1) {
+          throw new SessionMetadataConflictError(
+            'Message admission cancellation identity conflict',
+          );
         }
       }
     });
@@ -1922,7 +1898,7 @@ export class SqliteSessionMetadataStore {
           `
           SELECT message_id
           FROM message_admissions
-          WHERE session_id = ? AND lifecycle_state = 'accepted' AND disposition = 'followup'
+          WHERE session_id = ? AND disposition = 'followup'
           ORDER BY queue_order, sequence
         `,
         )
@@ -1939,52 +1915,11 @@ export class SqliteSessionMetadataStore {
         `
         UPDATE message_admissions
         SET queue_order = ?
-        WHERE session_id = ? AND message_id = ? AND lifecycle_state = 'accepted'
+        WHERE session_id = ? AND message_id = ?
       `,
       );
       unique.forEach((messageId, index) => update.run(index, sessionId, messageId));
     });
-  }
-
-  async markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void> {
-    return this.markMessageLifecycle(sessionId, messageIds, 'executed');
-  }
-
-  private markMessageLifecycle(
-    sessionId: string,
-    messageIds: readonly string[],
-    state: 'handed_off' | 'executed',
-  ): Promise<void> {
-    this.assertOpen();
-    assertSafeSessionId(sessionId);
-    const unique = [...new Set(messageIds)];
-    for (const messageId of unique) assertSafeSessionId(messageId);
-    this.transaction(() => {
-      const allowedPreviousStates =
-        state === 'handed_off' ? "lifecycle_state = 'accepted'" : "lifecycle_state = 'handed_off'";
-      const statement = this.db.prepare(
-        `
-        UPDATE message_admissions
-        SET lifecycle_state = ?
-        WHERE session_id = ? AND message_id = ?
-          AND ${allowedPreviousStates}
-      `,
-      );
-      for (const messageId of unique) {
-        const result = statement.run(state, sessionId, messageId);
-        if (result.changes !== 1) {
-          const existing = this.db
-            .prepare(
-              'SELECT lifecycle_state FROM message_admissions WHERE session_id = ? AND message_id = ?',
-            )
-            .get(sessionId, messageId) as { lifecycle_state?: unknown } | undefined;
-          if (existing?.lifecycle_state !== state) {
-            throw new SessionMetadataConflictError('Message admission lifecycle identity conflict');
-          }
-        }
-      }
-    });
-    return Promise.resolve();
   }
 
   async readMessages(sessionId: string): Promise<StoredMessage[]> {

@@ -37,7 +37,7 @@ import {
 import {
   normalizeRootTurnAdmissionPayload,
   type ImmutableSteeringMessageProof,
-  type MessageLifecycleStore,
+  type MessageAdmissionStore,
   type MessageReceiptOperation,
   type MessageReceiptStore,
   type PendingMessageAdmission,
@@ -176,13 +176,6 @@ export interface HostMessageDurableProofReader {
     sessionId: string,
     messageId: string,
   ): Promise<ImmutableSteeringMessageProof | undefined>;
-  /** True only when the admitted root has a durable downstream provider proof. */
-  readProviderRequestProof(input: {
-    sessionId: string;
-    turnId: string;
-    runId: string;
-    admittedAt: number;
-  }): Promise<boolean>;
 }
 
 export interface HostMessageCoordinatorOptions {
@@ -190,7 +183,7 @@ export interface HostMessageCoordinatorOptions {
   readonly root: HostMessageRootPort;
   readonly durableProof: HostMessageDurableProofReader;
   readonly receipts: MessageReceiptStore;
-  readonly lifecycle: MessageLifecycleStore;
+  readonly admissions: MessageAdmissionStore;
   readonly sessionAdmission: SessionAdmissionGate;
   readonly acquireResidency: () => RuntimeHostResidency;
   readonly requestDrain?: () => void;
@@ -338,7 +331,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   readonly #root: HostMessageRootPort;
   readonly #durableProof: HostMessageDurableProofReader;
   readonly #receipts: MessageReceiptStore;
-  readonly #lifecycle: MessageLifecycleStore;
+  readonly #admissions: MessageAdmissionStore;
   readonly #sessionAdmission: SessionAdmissionGate;
   readonly #acquireResidency: () => RuntimeHostResidency;
   readonly #requestDrain: () => void;
@@ -359,7 +352,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     this.#root = options.root;
     this.#durableProof = options.durableProof;
     this.#receipts = options.receipts;
-    this.#lifecycle = options.lifecycle;
+    this.#admissions = options.admissions;
     this.#sessionAdmission = options.sessionAdmission;
     this.#acquireResidency = options.acquireResidency;
     this.#requestDrain = options.requestDrain ?? (() => undefined);
@@ -560,38 +553,24 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           `Root admission does not prove Message handoff ${messageId}`,
         );
       }
-      const state = await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId);
-      if (state === 'accepted') handoff.push(messageId);
-      else if (state === 'handed_off' || state === 'executed') continue;
-      else {
-        throw new RuntimeMessageAuthorityInvariantError(
-          `Message ${messageId} cannot be handed off from lifecycle state ${state ?? 'missing'}`,
-        );
-      }
+      handoff.push(messageId);
     }
-    await this.#lifecycle.markMessagesHandedOff({
+    await this.#admissions.markMessagesHandedOff({
       sessionId: input.sessionId,
       messageIds: handoff,
       turnId: input.turnId,
     });
   }
 
-  /**
-   * One settlement owner for both the normal terminal path and Host recovery.
-   * A queued message becomes Executed only after the durable root has recorded
-   * a provider request downstream of its admitted root contract.
-   */
-  async settleMessagesAfterRoot(input: {
+  /** Materialize proof-owned transcript history in both normal and recovery paths. */
+  async materializeMessageHandoffsForRun(input: {
     sessionId: string;
     turnId: string;
     runId: string;
-    admittedAt: number;
     messageIds: readonly string[];
-    terminalStatus?: 'completed' | 'failed' | 'cancelled';
   }): Promise<void> {
     const messageIds = new Set<string>();
-    const providerProofAfter = new Map<string, number>();
-    const admissions = await this.#lifecycle.listUnsettledMessageAdmissions(input.sessionId);
+    const admissions = await this.#admissions.listMessageAdmissions(input.sessionId);
     for (const messageId of new Set(input.messageIds)) {
       const proof = await this.#durableProof.readRootTurnSourceMessageReceipt(
         input.sessionId,
@@ -619,66 +598,25 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       );
       if (proof?.event.turnId === input.turnId && proof.event.runId === input.runId) {
         messageIds.add(admission.messageId);
-        providerProofAfter.set(admission.messageId, proof.event.ts);
       }
     }
-    const handedOff: string[] = [];
-    for (const messageId of messageIds) {
-      if (
-        (await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId)) === 'accepted'
-      ) {
-        handedOff.push(messageId);
-      }
-    }
-    await this.#lifecycle.markMessagesHandedOff({
+    await this.#admissions.markMessagesHandedOff({
       sessionId: input.sessionId,
-      messageIds: handedOff,
+      messageIds: [...messageIds],
       turnId: input.turnId,
     });
-    const proved: string[] = [];
-    for (const messageId of messageIds) {
-      if (
-        await this.#durableProof.readProviderRequestProof({
-          ...input,
-          admittedAt: providerProofAfter.get(messageId) ?? input.admittedAt,
-        })
-      ) {
-        proved.push(messageId);
-      }
-    }
-    if (proved.length > 0) {
-      const executed: string[] = [];
-      for (const messageId of proved) {
-        if (
-          (await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId)) ===
-          'handed_off'
-        ) {
-          executed.push(messageId);
-        }
-      }
-      await this.#lifecycle.markMessagesExecuted(input.sessionId, executed);
-    }
-    if (input.terminalStatus !== 'cancelled') return;
-    const cancelled: string[] = [];
-    for (const messageId of messageIds) {
-      const state = await this.#lifecycle.readMessageLifecycleState(input.sessionId, messageId);
-      if (state === 'accepted' || state === 'handed_off') cancelled.push(messageId);
-    }
-    await this.#lifecycle.cancelMessageAdmissions(input.sessionId, cancelled);
   }
 
   async cancelMessages(sessionId: string, messageIds: readonly string[]): Promise<void> {
-    await this.#lifecycle.cancelMessageAdmissions(sessionId, messageIds);
+    await this.#admissions.cancelMessageAdmissions(sessionId, messageIds);
   }
 
   async recoverPendingAfterHostRestart(sessionIds: readonly string[]): Promise<void> {
     for (const sessionId of sessionIds) {
-      const admissions = await this.#lifecycle.listMessageAdmissions(sessionId);
-      const unsettled = await this.#lifecycle.listUnsettledMessageAdmissions(sessionId);
-      if (unsettled.length === 0) continue;
-      const acceptedIds = new Set(admissions.map((admission) => admission.messageId));
+      const admissions = await this.#admissions.listMessageAdmissions(sessionId);
+      if (admissions.length === 0) continue;
       const pending = [] as PendingMessageAdmission[];
-      for (const admission of unsettled) {
+      for (const admission of admissions) {
         const source = await this.#durableProof.readRootTurnSourceMessageReceipt(
           sessionId,
           admission.messageId,
@@ -688,11 +626,10 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           source.admission.runId === admission.runId &&
           source.sourceMessage.messageId === admission.messageId
         ) {
-          await this.settleMessagesAfterRoot({
+          await this.materializeMessageHandoffsForRun({
             sessionId,
             turnId: source.admission.turnId,
             runId: source.admission.runId,
-            admittedAt: source.admission.admittedAt,
             messageIds: [admission.messageId],
           });
         } else {
@@ -704,14 +641,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
             steering?.event.turnId === admission.turnId &&
             steering.event.runId === admission.runId
           ) {
-            await this.settleMessagesAfterRoot({
+            await this.materializeMessageHandoffsForRun({
               sessionId,
               turnId: admission.turnId,
               runId: admission.runId,
-              admittedAt: admission.admittedAt,
               messageIds: [admission.messageId],
             });
-          } else if (acceptedIds.has(admission.messageId)) {
+          } else {
             pending.push(admission);
           }
         }
@@ -895,7 +831,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
             placement: input.placement,
             disposition: 'turn_started',
           };
-          const pendingAdmission = await this.#lifecycle.readMessageAdmission(
+          const pendingAdmission = await this.#admissions.readMessageAdmission(
             input.sessionId,
             input.messageId,
           );
@@ -919,7 +855,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
             },
             admission,
             async (canonicalContent) => {
-              await this.#lifecycle.commitMessageAdmission({
+              await this.#admissions.commitMessageAdmission({
                 sessionId: input.sessionId,
                 turnId,
                 runId,
@@ -1049,7 +985,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           disposition,
           admittedAt: Date.now(),
         };
-        await this.#lifecycle.commitMessageAdmission(messageAdmission);
+        await this.#admissions.commitMessageAdmission(messageAdmission);
         const residency = this.#acquireResidency();
         const entry: LiveEntry = {
           entryId,
@@ -1114,7 +1050,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       queueRevision: state.revision + (queued.length > 0 ? 1 : 0),
       retracted: queued.map(retractedSnapshot),
     };
-    await this.#lifecycle.cancelMessageAdmissions(
+    await this.#admissions.cancelMessageAdmissions(
       input.sessionId,
       queued.map((entry) => entry.messageId),
     );
@@ -1294,7 +1230,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       }
       return failure('not_found', 'Message queue entry does not exist');
     }
-    await this.#lifecycle.cancelMessageAdmissions(input.sessionId, [queued.entry.messageId]);
+    await this.#admissions.cancelMessageAdmissions(input.sessionId, [queued.entry.messageId]);
     queued.remove();
     this.#releaseEntry(queued.entry);
     this.#mutated(state);
@@ -1348,7 +1284,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       }
       return failure('not_found', 'Message queue entry does not exist');
     }
-    await this.#lifecycle.updateMessageAdmission({
+    await this.#admissions.updateMessageAdmission({
       sessionId: input.sessionId,
       turnId: entry.turnId,
       runId: entry.runId,
@@ -1450,11 +1386,11 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     ) {
       return failure('session_busy', 'Message queue changed during update');
     }
-    const admission = await this.#lifecycle.readMessageAdmission(
+    const admission = await this.#admissions.readMessageAdmission(
       input.sessionId,
       queued.entry.messageId,
     );
-    await this.#lifecycle.updateMessageAdmission({
+    await this.#admissions.updateMessageAdmission({
       sessionId: input.sessionId,
       turnId: queued.entry.turnId,
       runId: queued.entry.runId,
@@ -1507,7 +1443,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       reordered.push(entry);
     }
     if (reordered.some((entry, index) => current[index] !== entry)) {
-      await this.#lifecycle.reorderMessageAdmissions(
+      await this.#admissions.reorderMessageAdmissions(
         input.sessionId,
         reordered.map((entry) => entry.messageId),
       );

@@ -861,13 +861,6 @@ test('idle Skill admission persists a canonical draft without history before roo
       inlineReferences: [],
     });
     assert.deepEqual(await fixture.stores.sessionStore.readMessages(fixture.sessionId), []);
-    assert.equal(
-      await fixture.stores.sessionStore.readMessageLifecycleState(
-        fixture.sessionId,
-        'idle-skill-before-handoff',
-      ),
-      'accepted',
-    );
   } finally {
     await fixture.dispose();
   }
@@ -2236,10 +2229,9 @@ test('hosted linked child roots share admission, message, terminal, and stop aut
           stores.agentRunStore.readRootTurnSourceMessageReceipt(sessionId, messageId),
         readImmutableSteeringMessageProof: (sessionId, messageId) =>
           stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
-        readProviderRequestProof: async () => false,
       },
       receipts: stores.messageReceiptStore,
-      lifecycle: stores.sessionStore,
+      admissions: stores.sessionStore,
       sessionAdmission,
       acquireResidency,
       requestDrain: () => {
@@ -4862,10 +4854,9 @@ async function createFailureFixture(options: {
         stores.agentRunStore.readRootTurnSourceMessageReceipt(sessionId, messageId),
       readImmutableSteeringMessageProof: (sessionId, messageId) =>
         stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
-      readProviderRequestProof: async () => false,
     },
     receipts: stores.messageReceiptStore,
-    lifecycle: stores.sessionStore,
+    admissions: stores.sessionStore,
     sessionAdmission,
     acquireResidency,
     requestDrain,

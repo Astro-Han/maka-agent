@@ -482,18 +482,9 @@ export async function createExecutionRuntimeHostComposition(
           stores.agentRunStore.readRootTurnSourceMessageReceipt(sessionId, messageId),
         readImmutableSteeringMessageProof: (sessionId, messageId) =>
           stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
-        readProviderRequestProof: async ({ sessionId, turnId, runId, admittedAt }) => {
-          const events = await stores.agentRunStore.readEvents(sessionId, runId);
-          return events.some(
-            (event) =>
-              event.turnId === turnId &&
-              event.ts >= admittedAt &&
-              event.type === 'model_call_attempt_recorded',
-          );
-        },
       },
       receipts: stores.messageReceiptStore,
-      lifecycle: stores.sessionStore,
+      admissions: stores.sessionStore,
       sessionAdmission,
       acquireResidency: () => context.acquireResidency('message-queue'),
       requestDrain: context.requestDrain,

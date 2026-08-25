@@ -30,8 +30,6 @@ const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const RECEIPT_SCHEMA_VERSION = 1 as const;
 const RECEIPT_MAX_BYTES = 64 * 1024;
 
-export type MessageLifecycleState = 'accepted' | 'handed_off' | 'executed' | 'cancelled';
-
 export interface PendingMessageAdmission {
   readonly sessionId: string;
   readonly turnId: string;
@@ -45,18 +43,13 @@ export interface PendingMessageAdmission {
   readonly admittedAt: number;
 }
 
-export interface MessageLifecycleStore {
+export interface MessageAdmissionStore {
   commitMessageAdmission(admission: PendingMessageAdmission): Promise<PendingMessageAdmission>;
   readMessageAdmission(
     sessionId: string,
     messageId: string,
   ): Promise<PendingMessageAdmission | undefined>;
-  readMessageLifecycleState(
-    sessionId: string,
-    messageId: string,
-  ): Promise<MessageLifecycleState | undefined>;
   listMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]>;
-  listUnsettledMessageAdmissions(sessionId: string): Promise<readonly PendingMessageAdmission[]>;
   markMessagesHandedOff(input: {
     sessionId: string;
     messageIds: readonly string[];
@@ -65,7 +58,6 @@ export interface MessageLifecycleStore {
   updateMessageAdmission(admission: PendingMessageAdmission): Promise<void>;
   reorderMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;
   cancelMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void>;
-  markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void>;
 }
 
 export function normalizePendingMessageAdmission(

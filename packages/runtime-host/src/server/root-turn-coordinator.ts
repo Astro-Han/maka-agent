@@ -363,13 +363,11 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
         );
         if (isTerminalSnapshot(snapshot)) {
           if (admission.sourceMessages.length > 0) {
-            await this.messages.settleMessagesAfterRoot({
+            await this.messages.materializeMessageHandoffsForRun({
               sessionId,
               turnId: admission.turnId,
               runId: admission.runId,
-              admittedAt: admission.admittedAt,
               messageIds: admission.sourceMessages.map((source) => source.messageId),
-              terminalStatus: snapshot.status,
             });
           }
         } else {
@@ -2240,7 +2238,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
       }
       this.observeExecutionCompletion(active, { kind: 'terminal', snapshot });
       await this.interruptPlanAfterUnsuccessfulTurn(input.sessionId, active, snapshot.status);
-      await this.settleExecutedMessageSources(active, snapshot.status);
+      await this.materializeAdmittedMessageSources(active);
       terminalTransitionStarted = true;
       await this.completeTerminalTransition(input.sessionId, active);
     } catch (error) {
@@ -2264,7 +2262,7 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
               snapshot,
             });
             await this.interruptPlanAfterUnsuccessfulTurn(input.sessionId, active, snapshot.status);
-            await this.settleExecutedMessageSources(active, snapshot.status);
+            await this.materializeAdmittedMessageSources(active);
             terminalTransitionStarted = true;
             await this.completeTerminalTransition(input.sessionId, active);
             containedRunFailure =
@@ -2320,22 +2318,17 @@ export class RootTurnCoordinator implements HostedExecutionAuthority {
     }
   }
 
-  private async settleExecutedMessageSources(
-    active: ActiveRootTurn,
-    terminalStatus: 'completed' | 'failed' | 'cancelled',
-  ): Promise<void> {
+  private async materializeAdmittedMessageSources(active: ActiveRootTurn): Promise<void> {
     const admission = await this.stores.agentRunStore.readRootTurnAdmission(
       active.sessionId,
       active.turnId,
     );
     if (!admission) return;
-    await this.messages.settleMessagesAfterRoot({
+    await this.messages.materializeMessageHandoffsForRun({
       sessionId: active.sessionId,
       turnId: active.turnId,
       runId: active.runId,
-      admittedAt: admission.admittedAt,
       messageIds: admission.sourceMessages.map((source) => source.messageId),
-      terminalStatus,
     });
   }
 

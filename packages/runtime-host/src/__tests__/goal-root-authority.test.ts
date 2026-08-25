@@ -575,10 +575,9 @@ async function createFixture(options: { recoverAdmissions?: boolean } = {}): Pro
         stores.agentRunStore.readRootTurnSourceMessageReceipt(sessionId, messageId),
       readImmutableSteeringMessageProof: (sessionId, messageId) =>
         stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
-      readProviderRequestProof: async () => false,
     },
     receipts: stores.messageReceiptStore,
-    lifecycle: stores.sessionStore,
+    admissions: stores.sessionStore,
     sessionAdmission: admission,
     acquireResidency,
     requestDrain: () => {

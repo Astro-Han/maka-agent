@@ -205,8 +205,6 @@ test('subscribed Clients share one canonical queue and ordered root handoff', as
     await waitForTerminalTurn(tui, fixture.sessionId, successor.snapshot.rootTurn.turnId);
     await tui.close();
     await fixture.stopHost(host);
-    assert.equal(await fixture.readMessageLifecycleState(followupId), 'handed_off');
-
     const chain = await fixture.readAdmissionChain();
     assert.deepEqual(
       chain.map((admission) => admission.turnId),
@@ -245,7 +243,6 @@ test('production UDS admission commits one transcript before the root handoff', 
         .map((message) => message.id),
       [messageId],
     );
-    assert.equal(await fixture.readMessageLifecycleState(messageId), 'cancelled');
   });
 });
 
@@ -294,7 +291,6 @@ test('a Host crash after queue admission recovers the durable successor once', a
     await probe.done;
     await second.close();
     await fixture.stopHost(secondHost);
-    assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
     assert.deepEqual(
       (await fixture.readSessionUserMessages())
         .filter((message) => message.id === messageId)
@@ -325,7 +321,6 @@ test('restart replays an atomically admitted root without duplicating its transc
         .map((message) => message.id),
       [messageId],
     );
-    assert.equal(await fixture.readMessageLifecycleState(messageId), 'handed_off');
   });
 });
 

@@ -80,7 +80,7 @@ import {
   type TurnStateMessage,
   type UserMessage,
 } from '@maka/core/session';
-import type { MessageLifecycleStore, PendingMessageAdmission } from './message-receipt-store.js';
+import type { MessageAdmissionStore, PendingMessageAdmission } from './message-receipt-store.js';
 import {
   isVisibleSessionMessage,
   lastMessagePreviewForMessages,
@@ -307,7 +307,7 @@ export interface SessionStore {
   close?(): Promise<void>;
 }
 
-export interface SessionAuthorityStore extends SessionStore, MessageLifecycleStore {
+export interface SessionAuthorityStore extends SessionStore, MessageAdmissionStore {
   /** Read a bounded set of durable messages at an inclusive transcript watermark. */
   readTranscriptMessagesSnapshot(
     sessionId: string,
@@ -885,13 +885,6 @@ class SqliteSessionStore implements SessionAuthorityStore {
     return this.metadata.listMessageAdmissions(sessionId);
   }
 
-  async listUnsettledMessageAdmissions(
-    sessionId: string,
-  ): Promise<readonly PendingMessageAdmission[]> {
-    await this.ensureReady();
-    return this.metadata.listUnsettledMessageAdmissions(sessionId);
-  }
-
   async markMessagesHandedOff(input: {
     sessionId: string;
     messageIds: readonly string[];
@@ -900,14 +893,6 @@ class SqliteSessionStore implements SessionAuthorityStore {
     await this.ensureReady();
     await this.metadata.markMessagesHandedOff(input);
     for (const listener of this.transcriptChangeListeners) listener(input.sessionId);
-  }
-
-  async readMessageLifecycleState(
-    sessionId: string,
-    messageId: string,
-  ): Promise<import('./message-receipt-store.js').MessageLifecycleState | undefined> {
-    await this.ensureReady();
-    return this.metadata.readMessageLifecycleState(sessionId, messageId);
   }
 
   async updateMessageAdmission(admission: PendingMessageAdmission): Promise<void> {
@@ -923,11 +908,6 @@ class SqliteSessionStore implements SessionAuthorityStore {
   async cancelMessageAdmissions(sessionId: string, messageIds: readonly string[]): Promise<void> {
     await this.ensureReady();
     await this.metadata.cancelMessageAdmissions(sessionId, messageIds);
-  }
-
-  async markMessagesExecuted(sessionId: string, messageIds: readonly string[]): Promise<void> {
-    await this.ensureReady();
-    await this.metadata.markMessagesExecuted(sessionId, messageIds);
   }
 
   subscribeTranscriptChanges(listener: (sessionId: string) => void): () => void {
