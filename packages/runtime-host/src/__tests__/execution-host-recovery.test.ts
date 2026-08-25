@@ -330,32 +330,71 @@ test('a rejected idle Message submit leaves no durable transcript entry', async 
   });
 });
 
-test('an allowed 32 KiB idle Message crosses the durable admission boundary', async () => {
-  await withExecutionRoot(async (fixture) => {
-    const host = await fixture.startHost();
-    const client = await connectClient(fixture.root);
-    const messageId = randomUUID();
-    try {
-      const started = await client.request('turn.message.submit', {
-        originHostEpoch: host.hostEpoch,
-        sessionId: fixture.sessionId,
-        messageId,
-        content: { text: 'x'.repeat(32 * 1024) },
-        placement: 'current_turn',
-      });
-      assert.equal(started.disposition, 'turn_started');
-    } finally {
-      await client.close();
-      await fixture.stopHost(host);
-    }
-    assert.deepEqual(
-      (await fixture.readSessionUserMessages())
-        .filter((message) => message.id === messageId)
-        .map((message) => message.text),
-      ['x'.repeat(32 * 1024)],
-    );
+for (const kibibytes of [31, 32]) {
+  test(`an allowed ${kibibytes} KiB idle Message crosses the durable admission boundary`, async () => {
+    await withExecutionRoot(async (fixture) => {
+      const host = await fixture.startHost();
+      const client = await connectClient(fixture.root);
+      const messageId = randomUUID();
+      const text = 'x'.repeat(kibibytes * 1024);
+      try {
+        const started = await client.request('turn.message.submit', {
+          originHostEpoch: host.hostEpoch,
+          sessionId: fixture.sessionId,
+          messageId,
+          content: { text },
+          placement: 'current_turn',
+        });
+        assert.equal(started.disposition, 'turn_started');
+      } finally {
+        await client.close();
+        await fixture.stopHost(host);
+      }
+      assert.deepEqual(
+        (await fixture.readSessionUserMessages())
+          .filter((message) => message.id === messageId)
+          .map((message) => message.text),
+        [text],
+      );
+    });
   });
-});
+}
+
+for (const kibibytes of [49, 50]) {
+  test(`a ${kibibytes} KiB idle Message is rejected before durable admission`, async () => {
+    await withExecutionRoot(async (fixture) => {
+      const host = await fixture.startHost();
+      const client = await connectClient(fixture.root);
+      const messageId = randomUUID();
+      try {
+        await assert.rejects(
+          () =>
+            client.request('turn.message.submit', {
+              originHostEpoch: host.hostEpoch,
+              sessionId: fixture.sessionId,
+              messageId,
+              content: { text: 'x'.repeat(kibibytes * 1024) },
+              placement: 'current_turn',
+            }),
+          (error: unknown) =>
+            error instanceof Error &&
+            'code' in error &&
+            error.code === 'invalid_frame' &&
+            error.message === 'Invalid Message text',
+        );
+      } finally {
+        await client.close();
+        await fixture.stopHost(host);
+      }
+      assert.deepEqual(
+        (await fixture.readSessionUserMessages())
+          .filter((message) => message.id === messageId)
+          .map((message) => message.id),
+        [],
+      );
+    });
+  });
+}
 
 test('stale Session operations return not_found across the SQLite-backed UDS Host boundary', async () => {
   await withExecutionRoot(async (fixture) => {
