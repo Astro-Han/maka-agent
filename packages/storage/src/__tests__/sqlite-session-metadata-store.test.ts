@@ -46,7 +46,7 @@ import {
   type SessionConfigurationMetadataUpdate,
   type SqliteSessionMetadataStoreFailpoint,
 } from '../sqlite-session-metadata-store.js';
-import type { PendingMessageAdmission } from '../message-receipt-store.js';
+import type { PendingMessageAdmission } from '../message-admission-store.js';
 import {
   createSqliteRuntimeStore,
   SQLITE_RUNTIME_SCHEMA_VERSION,

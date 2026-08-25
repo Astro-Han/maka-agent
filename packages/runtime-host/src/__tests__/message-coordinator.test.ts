@@ -23,8 +23,6 @@ import { messageContentDigest, type MessageContent } from '@maka/core/events';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
 import type {
   MessageAdmissionStore,
-  MessageOperationReceipt,
-  MessageReceiptStore,
   PendingMessageAdmission,
   RootTurnSourceMessageReceipt,
 } from '@maka/storage/execution-stores';
@@ -370,7 +368,7 @@ test('queue projection capacity is rejected before mutation or residency acquisi
   await fixture.coordinator.close();
 });
 
-test('full snapshot preflight rejection leaves queue, receipt, residency, and publication unchanged', async () => {
+test('full snapshot preflight rejection leaves queue, replay outcome, residency, and publication unchanged', async () => {
   let fits = false;
   let observedQueue: SessionMessageQueueProjection | undefined;
   const changedSessions: string[] = [];
@@ -480,7 +478,7 @@ test('pull crosses the retract commit cut and only queued entries are retracted'
   assert.equal(fixture.liveResidencies(), 0);
 });
 
-test('entry retract removes one queued entry, replays its receipt, and rejects stale targets', async () => {
+test('entry retract removes one queued entry, replays its outcome, and rejects stale targets', async () => {
   const fixture = createFixture();
   fixture.coordinator.reserveRootTurn(ROOT);
 
@@ -593,7 +591,7 @@ test('entry retract of an in-flight steering lease conflicts', async () => {
   assert.equal(fixture.liveResidencies(), 0);
 });
 
-test('entry update preserves queue identity, order, and placement and replays its receipt', async () => {
+test('entry update preserves queue identity, order, and placement and replays its outcome', async () => {
   const fixture = createFixture();
   fixture.coordinator.reserveRootTurn(ROOT);
 
@@ -1055,12 +1053,10 @@ test('queued mutations reject a queue that is draining into the next Turn', asyn
   await fixture.coordinator.close();
 });
 
-test('submit mutation is visible before its receipt and concurrent retries share the cut', async () => {
+test('concurrent and completed submit retries share one Host-Epoch outcome', async () => {
   const fixture = createFixture();
   fixture.coordinator.reserveRootTurn(ROOT);
   const owner = fixture.coordinator.bindRun(ROOT);
-  const receipt = fixture.delayReceipt('submit', 'delayed-submit');
-
   const submitted = submit(fixture, 'delayed-submit', 'steer now', 'current_turn');
   const retry = submit(fixture, 'delayed-submit', 'steer now', 'current_turn');
   assert.equal(retry, submitted);
@@ -1068,16 +1064,6 @@ test('submit mutation is visible before its receipt and concurrent retries share
   assert.equal(conflict.ok, false);
   if (!conflict.ok) assert.equal(conflict.error.code, 'operation_conflict');
 
-  await receipt.started.promise;
-  assert.deepEqual(
-    fixture.coordinator.projection(ROOT.sessionId).steering.map((entry) => entry.messageId),
-    ['delayed-submit'],
-  );
-  const [lease] = owner.pull();
-  assert.ok(lease);
-  owner.nack([lease.id]);
-
-  receipt.release.resolve(undefined);
   const outcome = await submitted;
   assert.deepEqual(outcome, {
     ok: true,
@@ -1086,7 +1072,7 @@ test('submit mutation is visible before its receipt and concurrent retries share
   assert.deepEqual(await submit(fixture, 'delayed-submit', 'steer now', 'current_turn'), outcome);
   assert.deepEqual(fixture.coordinator.projection(ROOT.sessionId), {
     hostEpoch: 'epoch-1',
-    queueRevision: 3,
+    queueRevision: 1,
     steering: [
       {
         entryId: 'id-1',
@@ -1108,7 +1094,7 @@ test('submit mutation is visible before its receipt and concurrent retries share
   fixture.coordinator.completeIdle(batch);
 });
 
-test('retract mutation is visible while its receipt waits and preserves its exact cut', async () => {
+test('concurrent and completed retract retries preserve one exact cut', async () => {
   const fixture = createFixture();
   fixture.coordinator.reserveRootTurn(ROOT);
   const owner = fixture.coordinator.bindRun(ROOT);
@@ -1117,8 +1103,6 @@ test('retract mutation is visible while its receipt waits and preserves its exac
   await submit(fixture, 'follow-1', 'later', 'next_turn');
   const leases = owner.pull();
   assert.equal(leases.length, 2);
-  const receipt = fixture.delayReceipt('retract', 'delayed-retract');
-
   const retracted = fixture.coordinator.handlers['queue.retract'](
     {
       originHostEpoch: 'epoch-1',
@@ -1137,17 +1121,6 @@ test('retract mutation is visible while its receipt waits and preserves its exac
   );
   assert.equal(retry, retracted);
 
-  await receipt.started.promise;
-  assert.deepEqual(owner.pull(), []);
-  owner.ack([leases[0]!.id]);
-  owner.nack([leases[1]!.id]);
-  assert.deepEqual(
-    fixture.coordinator.projection(ROOT.sessionId).steering.map((entry) => entry.messageId),
-    ['steer-2'],
-  );
-  assert.deepEqual(fixture.coordinator.projection(ROOT.sessionId).followup, []);
-
-  receipt.release.resolve(undefined);
   const outcome = await retracted;
   assert.deepEqual(outcome, {
     ok: true,
@@ -1165,6 +1138,8 @@ test('retract mutation is visible while its receipt waits and preserves its exac
     },
   });
   assert.deepEqual(await retry, outcome);
+  owner.ack([leases[0]!.id]);
+  owner.nack([leases[1]!.id]);
 
   await fixture.coordinator.handlers['queue.retract'](
     { originHostEpoch: 'epoch-1', sessionId: ROOT.sessionId, retractId: 'cleanup-retract-cut' },
@@ -1173,96 +1148,6 @@ test('retract mutation is visible while its receipt waits and preserves its exac
   owner.release();
   const batch = fixture.coordinator.beginTerminalTransition(ROOT);
   fixture.coordinator.completeIdle(batch);
-});
-
-test('post-effect receipt failure fail-stops the Host Epoch and drains retained residency', async () => {
-  const fixture = createFixture();
-  fixture.coordinator.reserveRootTurn(ROOT);
-  const owner = fixture.coordinator.bindRun(ROOT);
-  const receipt = fixture.delayReceipt('submit', 'receipt-failure', new Error('disk failed'));
-
-  const submitted = submit(fixture, 'receipt-failure', 'accepted effect', 'current_turn');
-  await receipt.started.promise;
-  assert.equal(fixture.liveResidencies(), 1);
-  receipt.release.resolve(undefined);
-  await assert.rejects(submitted, /disk failed/);
-
-  assert.equal(fixture.drainRequests(), 1);
-  const rejected = await submit(fixture, 'after-failure', 'must not serve', 'current_turn');
-  assert.equal(rejected.ok, false);
-  if (!rejected.ok) assert.equal(rejected.error.code, 'host_draining');
-  const rejectedRetract = await fixture.coordinator.handlers['queue.retract'](
-    { originHostEpoch: 'epoch-1', sessionId: ROOT.sessionId, retractId: 'after-failure' },
-    operationContext(),
-  );
-  assert.equal(rejectedRetract.ok, false);
-  if (!rejectedRetract.ok) assert.equal(rejectedRetract.error.code, 'host_draining');
-  const rejectedInterrupt = await fixture.coordinator.handlers['turn.interrupt'](
-    {
-      originHostEpoch: 'epoch-1',
-      sessionId: ROOT.sessionId,
-      interruptId: 'after-failure',
-      turnId: ROOT.turnId,
-      runId: ROOT.runId,
-    },
-    operationContext(),
-  );
-  assert.equal(rejectedInterrupt.ok, false);
-  if (!rejectedInterrupt.ok) assert.equal(rejectedInterrupt.error.code, 'host_draining');
-
-  owner.release();
-  const batch = fixture.coordinator.beginTerminalTransition(ROOT);
-  assert.deepEqual(batch.sources, []);
-  assert.equal(fixture.liveResidencies(), 0);
-  fixture.coordinator.completeIdle(batch);
-  await fixture.coordinator.close();
-});
-
-test('operations queued behind a receipt failure recheck fail-stop before reads or mutation', async () => {
-  const fixture = createFixture();
-  fixture.coordinator.reserveRootTurn(ROOT);
-  const owner = fixture.coordinator.bindRun(ROOT);
-  const receipt = fixture.delayReceipt('submit', 'poison-authority', new Error('disk failed'));
-
-  const poisoning = submit(fixture, 'poison-authority', 'accepted effect', 'current_turn');
-  await receipt.started.promise;
-  const queuedSubmit = submit(fixture, 'queued-submit', 'must not land', 'current_turn');
-  const queuedRetract = fixture.coordinator.handlers['queue.retract'](
-    { originHostEpoch: 'epoch-1', sessionId: ROOT.sessionId, retractId: 'queued-retract' },
-    operationContext(),
-  );
-  const queuedInterrupt = fixture.coordinator.handlers['turn.interrupt'](
-    {
-      originHostEpoch: 'epoch-1',
-      sessionId: ROOT.sessionId,
-      interruptId: 'queued-interrupt',
-      turnId: ROOT.turnId,
-      runId: ROOT.runId,
-    },
-    operationContext(),
-  );
-  await Promise.resolve();
-  const readsBeforeFailure = fixture.receiptReads();
-  const rootReadsBeforeFailure = fixture.rootReads();
-  const projectionBeforeFailure = structuredClone(fixture.coordinator.projection(ROOT.sessionId));
-
-  receipt.release.resolve(undefined);
-  await assert.rejects(poisoning, /disk failed/);
-  const outcomes = await Promise.all([queuedSubmit, queuedRetract, queuedInterrupt]);
-
-  for (const outcome of outcomes) {
-    assert.equal(outcome.ok, false);
-    if (!outcome.ok) assert.equal(outcome.error.code, 'host_draining');
-  }
-  assert.equal(fixture.receiptReads(), readsBeforeFailure);
-  assert.equal(fixture.rootReads(), rootReadsBeforeFailure);
-  assert.deepEqual(fixture.coordinator.projection(ROOT.sessionId), projectionBeforeFailure);
-  assert.equal(fixture.drainRequests(), 1);
-
-  owner.release();
-  const batch = fixture.coordinator.beginTerminalTransition(ROOT);
-  fixture.coordinator.completeIdle(batch);
-  await fixture.coordinator.close();
 });
 
 test('stop delivery failure after the queue fence fail-stops and retry is prompt', async () => {
@@ -1387,47 +1272,6 @@ test('an interrupt generation fence makes a late nack discard its in-flight entr
   owner.release();
   const batch = fixture.coordinator.beginTerminalTransition(ROOT);
   fixture.coordinator.completeIdle(batch);
-});
-
-test('interrupt receipt deletion reclaims state after terminal completion wins the race', async () => {
-  const fixture = createFixture();
-  fixture.coordinator.reserveRootTurn(ROOT);
-  const owner = fixture.coordinator.bindRun(ROOT);
-  await submit(fixture, 'queued-before-interrupt', 'later', 'next_turn');
-  const receipt = fixture.delayReceipt('interrupt', 'interrupt-terminal-first');
-
-  const interrupted = fixture.coordinator.handlers['turn.interrupt'](
-    {
-      originHostEpoch: 'epoch-1',
-      sessionId: ROOT.sessionId,
-      interruptId: 'interrupt-terminal-first',
-      turnId: ROOT.turnId,
-      runId: ROOT.runId,
-    },
-    operationContext(),
-  );
-  await fixture.stopClaimed.promise;
-  fixture.resolveTerminal({
-    ...ROOT,
-    status: 'cancelled',
-    terminalEventId: 'terminal-first',
-    abortSource: 'user_interrupt',
-  });
-  await receipt.started.promise;
-
-  owner.release();
-  const batch = fixture.coordinator.beginTerminalTransition(ROOT);
-  fixture.coordinator.completeIdle(batch);
-  assert.notEqual(fixture.coordinator.projection(ROOT.sessionId).queueRevision, 0);
-
-  receipt.release.resolve(undefined);
-  assert.equal((await interrupted).ok, true);
-  assert.deepEqual(fixture.coordinator.projection(ROOT.sessionId), {
-    hostEpoch: 'epoch-1',
-    queueRevision: 0,
-    steering: [],
-    followup: [],
-  });
 });
 
 test('stale interrupt deletion reclaims state after terminal transition completes first', async () => {
@@ -1779,7 +1623,7 @@ test('semantic retry history does not become a permanent Session admission cap',
   }
 });
 
-test('submit retries use keyed receipts and durable proof while old-Epoch rich conflicts fail', async () => {
+test('submit retries use keyed Host-Epoch outcomes and durable proof while old-Epoch rich conflicts fail', async () => {
   const fixture = createFixture();
   fixture.coordinator.reserveRootTurn(ROOT);
   const owner = fixture.coordinator.bindRun(ROOT);
@@ -2260,8 +2104,6 @@ function createFixture(
   let liveResidencies = 0;
   let startCalls = 0;
   let drainRequests = 0;
-  let receiptReads = 0;
-  let rootReads = 0;
   let stopDeliveryError: Error | undefined;
   let prepareMessage: NonNullable<HostMessageRootPort['prepareMessage']> = async (input) => ({
     kind: 'ready',
@@ -2276,20 +2118,11 @@ function createFixture(
     | undefined;
   const receipts = new Map<string, RootTurnSourceMessageReceipt>();
   const events: RuntimeEvent[] = [];
-  const operationReceipts = new Map<string, MessageOperationReceipt>();
   const messageAdmissions = new Map<
     string,
     {
       admission: PendingMessageAdmission;
       state: 'accepted' | 'handed_off' | 'executed' | 'cancelled';
-    }
-  >();
-  const receiptDelays = new Map<
-    string,
-    {
-      readonly started: ReturnType<typeof deferred<void>>;
-      readonly release: ReturnType<typeof deferred<void>>;
-      readonly error?: Error;
     }
   >();
   const admissions = memoryMessageAdmissionStore(messageAdmissions);
@@ -2298,11 +2131,9 @@ function createFixture(
   let coordinator: HostMessageCoordinator;
   const root: HostMessageRootPort = {
     readSessionHeader: async () => {
-      rootReads += 1;
       return { isArchived: false };
     },
     readRootState: async () => {
-      rootReads += 1;
       const delay = rootStateDelay;
       if (delay) {
         rootStateDelay = undefined;
@@ -2363,20 +2194,6 @@ function createFixture(
         return event ? { event } : undefined;
       },
     },
-    receipts: memoryReceiptStore(
-      operationReceipts,
-      async (operation, operationId) => {
-        const delay = receiptDelays.get(`${operation}:${operationId}`);
-        if (!delay) return;
-        receiptDelays.delete(`${operation}:${operationId}`);
-        delay.started.resolve(undefined);
-        await delay.release.promise;
-        if (delay.error) throw delay.error;
-      },
-      () => {
-        receiptReads += 1;
-      },
-    ),
     admissions,
     sessionAdmission: new SessionAdmissionGate(),
     acquireResidency: () => {
@@ -2415,49 +2232,13 @@ function createFixture(
     resolveTerminal: terminal.resolve,
     liveResidencies: () => liveResidencies,
     drainRequests: () => drainRequests,
-    receiptReads: () => receiptReads,
-    rootReads: () => rootReads,
     failStopDelivery: (error: Error) => {
       stopDeliveryError = error;
-    },
-    delayReceipt: (
-      operation: 'submit' | 'retract' | 'interrupt',
-      operationId: string,
-      error?: Error,
-    ) => {
-      const delay = { started: deferred<void>(), release: deferred<void>(), error };
-      receiptDelays.set(`${operation}:${operationId}`, delay);
-      return delay;
     },
     delayRootState: () => {
       const delay = { started: deferred<void>(), release: deferred<void>() };
       rootStateDelay = delay;
       return delay;
-    },
-  };
-}
-
-function memoryReceiptStore(
-  receipts: Map<string, MessageOperationReceipt>,
-  beforeCommit?: (operation: string, operationId: string) => Promise<void>,
-  onRead?: () => void,
-): MessageReceiptStore {
-  const key = (hostEpoch: string, operation: string, sessionId: string, operationId: string) =>
-    `${hostEpoch}:${operation}:${sessionId}:${operationId}`;
-  return {
-    beginHostEpoch: async () => undefined,
-    read: async (hostEpoch, operation, sessionId, operationId) => {
-      onRead?.();
-      return receipts.get(key(hostEpoch, operation, sessionId, operationId));
-    },
-    commit: async (hostEpoch, operation, sessionId, operationId, receipt) => {
-      await beforeCommit?.(operation, operationId);
-      const receiptKey = key(hostEpoch, operation, sessionId, operationId);
-      const existing = receipts.get(receiptKey);
-      if (existing) return existing;
-      const snapshot = structuredClone(receipt);
-      receipts.set(receiptKey, snapshot);
-      return snapshot;
     },
   };
 }

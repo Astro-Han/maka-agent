@@ -249,7 +249,6 @@ export async function createExecutionRuntimeHostComposition(
     const worktreeChildExecutor = createGitWorktreeChildExecutor({
       storageRoot: context.owner.capability.canonicalPath,
     });
-    await stores.messageReceiptStore.beginHostEpoch(context.hostEpoch);
     const backends = new BackendRegistry();
     // `fake` is a retired backend kind: this build never writes it, but a
     // session or Automation persisted by an older one still can, and activation
@@ -483,7 +482,6 @@ export async function createExecutionRuntimeHostComposition(
         readImmutableSteeringMessageProof: (sessionId, messageId) =>
           stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
       },
-      receipts: stores.messageReceiptStore,
       admissions: stores.sessionStore,
       sessionAdmission,
       acquireResidency: () => context.acquireResidency('message-queue'),

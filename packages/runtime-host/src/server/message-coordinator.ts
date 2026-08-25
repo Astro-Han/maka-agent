@@ -38,8 +38,6 @@ import {
   normalizeRootTurnAdmissionPayload,
   type ImmutableSteeringMessageProof,
   type MessageAdmissionStore,
-  type MessageReceiptOperation,
-  type MessageReceiptStore,
   type PendingMessageAdmission,
   type RootTurnSourceMessage,
   type RootTurnSourceMessageReceipt,
@@ -182,7 +180,6 @@ export interface HostMessageCoordinatorOptions {
   readonly hostEpoch: string;
   readonly root: HostMessageRootPort;
   readonly durableProof: HostMessageDurableProofReader;
-  readonly receipts: MessageReceiptStore;
   readonly admissions: MessageAdmissionStore;
   readonly sessionAdmission: SessionAdmissionGate;
   readonly acquireResidency: () => RuntimeHostResidency;
@@ -223,7 +220,7 @@ interface BoundRun extends RuntimeMessageRunIdentity {
   released: boolean;
 }
 
-interface InterruptReceipt {
+interface PendingInterrupt {
   readonly payload: TurnInterruptInput;
   readonly result: Promise<MessageOutcome<TurnInterruptResult>>;
 }
@@ -233,16 +230,18 @@ interface PendingSubmit {
   readonly result: Promise<MessageOutcome<TurnMessageSubmitResult>>;
 }
 
-type QueuedMutationReceiptKind =
-  | 'retract'
-  | 'retract_entry'
-  | 'promote'
-  | 'update_entry'
-  | 'reorder';
+type QueuedMutationKind = 'retract' | 'retract_entry' | 'promote' | 'update_entry' | 'reorder';
+
+type MessageOperationKind = QueuedMutationKind | 'submit' | 'interrupt';
 
 interface PendingQueuedMutation {
   readonly payload: object;
   readonly result: Promise<MessageOutcome<unknown>>;
+}
+
+interface CompletedOperation {
+  readonly payload: object;
+  readonly result: object;
 }
 
 interface QueuedMutationOptions<
@@ -250,7 +249,7 @@ interface QueuedMutationOptions<
   R,
 > {
   readonly spec: OperationSpec<I, R, HostOperationErrorCode>;
-  readonly receiptKind: QueuedMutationReceiptKind;
+  readonly operationKind: QueuedMutationKind;
   readonly operationId: string;
   readonly verb: string;
   readonly input: I;
@@ -284,7 +283,7 @@ interface SessionState {
     readonly identity: RuntimeMessageRunIdentity;
     readonly result: QueueFenceResult;
   };
-  interruptReceipts: Map<string, InterruptReceipt>;
+  pendingInterrupts: Map<string, PendingInterrupt>;
 }
 
 export type RootFollowupSource = RootTurnSourceMessage & {
@@ -330,7 +329,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   readonly #hostEpoch: string;
   readonly #root: HostMessageRootPort;
   readonly #durableProof: HostMessageDurableProofReader;
-  readonly #receipts: MessageReceiptStore;
   readonly #admissions: MessageAdmissionStore;
   readonly #sessionAdmission: SessionAdmissionGate;
   readonly #acquireResidency: () => RuntimeHostResidency;
@@ -341,6 +339,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   readonly #sessions = new Map<string, SessionState>();
   readonly #pendingSubmits = new Map<string, PendingSubmit>();
   readonly #pendingQueuedMutations = new Map<string, PendingQueuedMutation>();
+  readonly #completedOperations = new Map<string, CompletedOperation>();
   #draining = false;
   #failStopped = false;
 
@@ -351,7 +350,6 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     this.#hostEpoch = options.hostEpoch;
     this.#root = options.root;
     this.#durableProof = options.durableProof;
-    this.#receipts = options.receipts;
     this.#admissions = options.admissions;
     this.#sessionAdmission = options.sessionAdmission;
     this.#acquireResidency = options.acquireResidency;
@@ -775,10 +773,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       }
       const isCurrentEpoch = input.originHostEpoch === this.#hostEpoch;
       if (isCurrentEpoch) {
-        const receipt = await this.#readSubmitReceipt(input.sessionId, input.messageId);
-        if (this.#failStopped) {
-          return failure('host_draining', 'Runtime Host message authority has failed');
-        }
+        const receipt = await this.#readCompletedSubmit(input.sessionId, input.messageId);
         if (receipt) {
           return samePayload(receipt.payload, payload)
             ? success(receipt.result)
@@ -1006,12 +1001,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         if (disposition === 'steering') state.steering.push(entry);
         else state.followup.push(entry);
         this.#mutated(state);
-        try {
-          await this.#commitReceipt('submit', input.sessionId, input.messageId, payload, result);
-        } catch (error) {
-          this.#failStop();
-          throw error;
-        }
+        this.#rememberCompletedOperation(
+          'submit',
+          input.sessionId,
+          input.messageId,
+          payload,
+          result,
+        );
         return success(result);
       }
     });
@@ -1020,7 +1016,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   private retract(input: QueueRetractInput): Promise<MessageOutcome<QueueRetractResult>> {
     return this.#runQueuedMutation({
       spec: MESSAGE_OPERATION_SPECS['queue.retract'],
-      receiptKind: 'retract',
+      operationKind: 'retract',
       operationId: input.retractId,
       verb: 'Retract',
       input,
@@ -1062,12 +1058,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       );
     }
     this.#maybeReclaim(input.sessionId, state);
-    try {
-      await this.#commitReceipt('retract', input.sessionId, input.retractId, input, result);
-    } catch (error) {
-      this.#failStop();
-      throw error;
-    }
+    this.#rememberCompletedOperation('retract', input.sessionId, input.retractId, input, result);
     return success(result);
   }
 
@@ -1076,7 +1067,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   ): Promise<MessageOutcome<QueueMutationResult>> {
     return this.#runQueuedMutation({
       spec: MESSAGE_OPERATION_SPECS['queue.entry.retract'],
-      receiptKind: 'retract_entry',
+      operationKind: 'retract_entry',
       operationId: input.retractId,
       verb: 'Retract',
       input,
@@ -1089,7 +1080,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   ): Promise<MessageOutcome<QueueMutationResult>> {
     return this.#runQueuedMutation({
       spec: MESSAGE_OPERATION_SPECS['queue.entry.promote'],
-      receiptKind: 'promote',
+      operationKind: 'promote',
       operationId: input.promoteId,
       verb: 'Promote',
       input,
@@ -1102,7 +1093,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   ): Promise<MessageOutcome<QueueMutationResult>> {
     return this.#runQueuedMutation({
       spec: MESSAGE_OPERATION_SPECS['queue.entry.update'],
-      receiptKind: 'update_entry',
+      operationKind: 'update_entry',
       operationId: input.updateId,
       verb: 'Update',
       input,
@@ -1115,7 +1106,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   ): Promise<MessageOutcome<QueueMutationResult>> {
     return this.#runQueuedMutation({
       spec: MESSAGE_OPERATION_SPECS['queue.entries.reorder'],
-      receiptKind: 'reorder',
+      operationKind: 'reorder',
       operationId: input.reorderId,
       verb: 'Reorder',
       input,
@@ -1128,7 +1119,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   ): Promise<MessageOutcome<R>> {
     const { input } = options;
     const isCurrentEpoch = input.originHostEpoch === this.#hostEpoch;
-    const key = queuedMutationKey(options.receiptKind, input.sessionId, options.operationId);
+    const key = queuedMutationKey(options.operationKind, input.sessionId, options.operationId);
     if (isCurrentEpoch) {
       const pending = this.#pendingQueuedMutations.get(key);
       if (pending) {
@@ -1164,10 +1155,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       if (this.#failStopped) {
         return failure('host_draining', 'Runtime Host message authority has failed');
       }
-      const receipt = await this.#readQueuedMutationReceipt(options);
-      if (this.#failStopped) {
-        return failure('host_draining', 'Runtime Host message authority has failed');
-      }
+      const receipt = await this.#readCompletedQueuedMutation(options);
       if (receipt) {
         return samePayload(receipt.payload, options.input)
           ? success(receipt.result)
@@ -1177,17 +1165,14 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     });
   }
 
-  async #readQueuedMutationReceipt<
+  async #readCompletedQueuedMutation<
     I extends { readonly originHostEpoch: string; readonly sessionId: string },
     R,
   >(
     options: QueuedMutationOptions<I, R>,
   ): Promise<{ readonly payload: I; readonly result: R } | undefined> {
-    const receipt = await this.#receipts.read(
-      this.#hostEpoch,
-      options.receiptKind,
-      options.input.sessionId,
-      options.operationId,
+    const receipt = this.#completedOperations.get(
+      queuedMutationKey(options.operationKind, options.input.sessionId, options.operationId),
     );
     if (!receipt) return undefined;
     try {
@@ -1197,7 +1182,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       };
     } catch (error) {
       throw new RuntimeMessageAuthorityInvariantError(
-        `Invalid durable queued mutation receipt: ${
+        `Invalid queued mutation replay outcome: ${
           error instanceof Error ? error.message : 'malformed'
         }`,
       );
@@ -1236,12 +1221,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     this.#mutated(state);
     this.#maybeReclaim(input.sessionId, state);
     const result = { queueRevision: state.revision };
-    try {
-      await this.#commitReceipt('retract_entry', input.sessionId, input.retractId, input, result);
-    } catch (error) {
-      this.#failStop();
-      throw error;
-    }
+    this.#rememberCompletedOperation(
+      'retract_entry',
+      input.sessionId,
+      input.retractId,
+      input,
+      result,
+    );
     return success(result);
   }
 
@@ -1300,12 +1286,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     state.steering.push({ ...entry, placement: 'current_turn', disposition: 'steering' });
     this.#mutated(state);
     const result = { queueRevision: state.revision };
-    try {
-      await this.#commitReceipt('promote', input.sessionId, input.promoteId, input, result);
-    } catch (error) {
-      this.#failStop();
-      throw error;
-    }
+    this.#rememberCompletedOperation('promote', input.sessionId, input.promoteId, input, result);
     return success(result);
   }
 
@@ -1407,12 +1388,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     queued.entry.submittedContentDigest = messageContentDigest(content);
     this.#mutated(state);
     const result = { queueRevision: state.revision };
-    try {
-      await this.#commitReceipt('update_entry', input.sessionId, input.updateId, input, result);
-    } catch (error) {
-      this.#failStop();
-      throw error;
-    }
+    this.#rememberCompletedOperation(
+      'update_entry',
+      input.sessionId,
+      input.updateId,
+      input,
+      result,
+    );
     return success(result);
   }
 
@@ -1451,12 +1433,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       this.#mutated(state);
     }
     const result = { queueRevision: state.revision };
-    try {
-      await this.#commitReceipt('reorder', input.sessionId, input.reorderId, input, result);
-    } catch (error) {
-      this.#failStop();
-      throw error;
-    }
+    this.#rememberCompletedOperation('reorder', input.sessionId, input.reorderId, input, result);
     return success(result);
   }
 
@@ -1467,13 +1444,10 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     if (this.#failStopped) {
       return failure('host_draining', 'Runtime Host message authority has failed');
     }
-    const durableReceipt = await this.#readInterruptReceipt(input.sessionId, input.interruptId);
-    if (this.#failStopped) {
-      return failure('host_draining', 'Runtime Host message authority has failed');
-    }
-    if (durableReceipt) {
-      return samePayload(durableReceipt.payload, input)
-        ? durableReceipt.result
+    const completed = await this.#readCompletedInterrupt(input.sessionId, input.interruptId);
+    if (completed) {
+      return samePayload(completed.payload, input)
+        ? completed.result
         : failure('operation_conflict', 'Interrupt identity has a different payload');
     }
     const admitted = await this.#sessionAdmission.run(input.sessionId, async (admission) => {
@@ -1483,10 +1457,10 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           result: failure('host_draining', 'Runtime Host message authority has failed'),
         };
       }
-      const prior = this.#sessions.get(input.sessionId)?.interruptReceipts.get(input.interruptId);
+      const prior = this.#sessions.get(input.sessionId)?.pendingInterrupts.get(input.interruptId);
       if (prior) {
         return samePayload(prior.payload, input)
-          ? { kind: 'receipt' as const, result: prior.result }
+          ? { kind: 'replay' as const, result: prior.result }
           : {
               kind: 'conflict' as const,
               result: failure('operation_conflict', 'Interrupt identity has a different payload'),
@@ -1514,7 +1488,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       }
       const state = this.#state(input.sessionId);
       const deferred = interruptDeferred();
-      state.interruptReceipts.set(input.interruptId, {
+      state.pendingInterrupts.set(input.interruptId, {
         payload: input,
         result: deferred.promise,
       });
@@ -1522,9 +1496,9 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         const rootState = await this.#root.readRootState(input.sessionId);
         if (this.#failStopped) {
           const result = failure('host_draining', 'Runtime Host message authority has failed');
-          this.#deleteInterruptReceipt(input.sessionId, state, input.interruptId);
+          this.#deletePendingInterrupt(input.sessionId, state, input.interruptId);
           deferred.resolve(result);
-          return { kind: 'receipt' as const, result: deferred.promise };
+          return { kind: 'replay' as const, result: deferred.promise };
         }
         if (
           rootState.kind !== 'active' ||
@@ -1536,10 +1510,16 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
             'operation_conflict',
             'Interrupt does not match the active root Turn',
           );
-          await this.#commitReceipt('interrupt', input.sessionId, input.interruptId, input, result);
-          this.#deleteInterruptReceipt(input.sessionId, state, input.interruptId);
+          this.#rememberCompletedOperation(
+            'interrupt',
+            input.sessionId,
+            input.interruptId,
+            input,
+            result,
+          );
+          this.#deletePendingInterrupt(input.sessionId, state, input.interruptId);
           deferred.resolve(result);
-          return { kind: 'receipt' as const, result: deferred.promise };
+          return { kind: 'replay' as const, result: deferred.promise };
         }
         let fence: QueueFenceResult | undefined;
         const stopFence = await this.#root.claimStopFence(
@@ -1568,14 +1548,14 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
           deferred,
         };
       } catch (error) {
-        this.#deleteInterruptReceipt(input.sessionId, state, input.interruptId);
+        this.#deletePendingInterrupt(input.sessionId, state, input.interruptId);
         deferred.reject(error);
         throw error;
       }
     });
 
     if (admitted.kind === 'conflict') return admitted.result;
-    if (admitted.kind === 'receipt') return admitted.result;
+    if (admitted.kind === 'replay') return admitted.result;
     let claim: HostMessageStopClaim;
     try {
       try {
@@ -1599,26 +1579,27 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       });
     } catch (error) {
       const state = this.#sessions.get(input.sessionId);
-      if (state) this.#deleteInterruptReceipt(input.sessionId, state, input.interruptId);
+      if (state) this.#deletePendingInterrupt(input.sessionId, state, input.interruptId);
       admitted.deferred.reject(error);
       throw error;
     }
     try {
       const turn = await claim.terminal;
       const result = success({ ...admitted.fence, turn });
-      try {
-        await this.#commitReceipt('interrupt', input.sessionId, input.interruptId, input, result);
-      } catch (error) {
-        this.#failStop();
-        throw error;
-      }
+      this.#rememberCompletedOperation(
+        'interrupt',
+        input.sessionId,
+        input.interruptId,
+        input,
+        result,
+      );
       const state = this.#sessions.get(input.sessionId);
-      if (state) this.#deleteInterruptReceipt(input.sessionId, state, input.interruptId);
+      if (state) this.#deletePendingInterrupt(input.sessionId, state, input.interruptId);
       admitted.deferred.resolve(result);
       return result;
     } catch (error) {
       const state = this.#sessions.get(input.sessionId);
-      if (state) this.#deleteInterruptReceipt(input.sessionId, state, input.interruptId);
+      if (state) this.#deletePendingInterrupt(input.sessionId, state, input.interruptId);
       admitted.deferred.reject(error);
       throw error;
     }
@@ -1672,11 +1653,13 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     return undefined;
   }
 
-  async #readSubmitReceipt(
+  async #readCompletedSubmit(
     sessionId: string,
     messageId: string,
   ): Promise<{ payload: CanonicalSubmitPayload; result: TurnMessageSubmitResult } | undefined> {
-    const receipt = await this.#receipts.read(this.#hostEpoch, 'submit', sessionId, messageId);
+    const receipt = this.#completedOperations.get(
+      queuedMutationKey('submit', sessionId, messageId),
+    );
     if (!receipt) return undefined;
     try {
       return {
@@ -1687,51 +1670,49 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       };
     } catch (error) {
       throw new RuntimeMessageAuthorityInvariantError(
-        `Invalid durable submit receipt: ${error instanceof Error ? error.message : 'malformed'}`,
+        `Invalid submit replay outcome: ${error instanceof Error ? error.message : 'malformed'}`,
       );
     }
   }
 
-  async #readInterruptReceipt(
+  async #readCompletedInterrupt(
     sessionId: string,
     interruptId: string,
   ): Promise<
     { payload: TurnInterruptInput; result: MessageOutcome<TurnInterruptResult> } | undefined
   > {
-    const receipt = await this.#receipts.read(this.#hostEpoch, 'interrupt', sessionId, interruptId);
+    const receipt = this.#completedOperations.get(
+      queuedMutationKey('interrupt', sessionId, interruptId),
+    );
     if (!receipt) return undefined;
     try {
       return {
         payload: MESSAGE_OPERATION_SPECS['turn.interrupt'].decodeInput(receipt.payload),
-        result: decodeInterruptReceiptOutcome(receipt.result),
+        result: decodeCompletedInterruptOutcome(receipt.result),
       };
     } catch (error) {
       throw new RuntimeMessageAuthorityInvariantError(
-        `Invalid durable interrupt receipt: ${error instanceof Error ? error.message : 'malformed'}`,
+        `Invalid interrupt replay outcome: ${error instanceof Error ? error.message : 'malformed'}`,
       );
     }
   }
 
-  async #commitReceipt(
-    operation: MessageReceiptOperation,
+  #rememberCompletedOperation(
+    operation: MessageOperationKind,
     sessionId: string,
     operationId: string,
     payload: object,
     result: object,
-  ): Promise<void> {
-    const receipt = { payload, result };
-    const committed = await this.#receipts.commit(
-      this.#hostEpoch,
-      operation,
-      sessionId,
-      operationId,
-      receipt,
-    );
-    if (!isDeepStrictEqual(committed, receipt)) {
+  ): void {
+    const key = queuedMutationKey(operation, sessionId, operationId);
+    const receipt = { payload: structuredClone(payload), result: structuredClone(result) };
+    const committed = this.#completedOperations.get(key);
+    if (committed && !isDeepStrictEqual(committed, receipt)) {
       throw new RuntimeMessageAuthorityInvariantError(
-        'Durable message receipt publication returned an ambiguous outcome',
+        'Message operation replay identity has an ambiguous outcome',
       );
     }
+    this.#completedOperations.set(key, committed ?? receipt);
   }
 
   #deletePendingSubmit(
@@ -1741,8 +1722,8 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
     if (this.#pendingSubmits.get(key)?.result === result) this.#pendingSubmits.delete(key);
   }
 
-  #deleteInterruptReceipt(sessionId: string, state: SessionState, interruptId: string): void {
-    state.interruptReceipts.delete(interruptId);
+  #deletePendingInterrupt(sessionId: string, state: SessionState, interruptId: string): void {
+    state.pendingInterrupts.delete(interruptId);
     this.#maybeReclaim(sessionId, state);
   }
 
@@ -1929,7 +1910,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
         steering: [],
         inFlight: new Map(),
         followup: [],
-        interruptReceipts: new Map(),
+        pendingInterrupts: new Map(),
       };
       this.#sessions.set(sessionId, state);
     }
@@ -1953,7 +1934,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
       this.#sessions.get(sessionId) === state &&
       !hasLiveMessageState(state) &&
       !state.stopFence &&
-      state.interruptReceipts.size === 0
+      state.pendingInterrupts.size === 0
     ) {
       this.#sessions.delete(sessionId);
     }
@@ -2002,7 +1983,7 @@ function operationKey(sessionId: string, operationId: string): string {
 }
 
 function queuedMutationKey(
-  kind: QueuedMutationReceiptKind,
+  kind: MessageOperationKind,
   sessionId: string,
   operationId: string,
 ): string {
@@ -2050,9 +2031,9 @@ function relocateInlineReferences(
   return nonOverlapping;
 }
 
-function decodeInterruptReceiptOutcome(value: unknown): MessageOutcome<TurnInterruptResult> {
+function decodeCompletedInterruptOutcome(value: unknown): MessageOutcome<TurnInterruptResult> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Interrupt receipt outcome is not an object');
+    throw new Error('Interrupt replay outcome is not an object');
   }
   const record = value as Record<string, unknown>;
   if (record.ok === true && Object.keys(record).length === 2 && Object.hasOwn(record, 'result')) {
@@ -2065,7 +2046,7 @@ function decodeInterruptReceiptOutcome(value: unknown): MessageOutcome<TurnInter
     typeof record.error !== 'object' ||
     Array.isArray(record.error)
   ) {
-    throw new Error('Invalid interrupt receipt outcome');
+    throw new Error('Invalid interrupt replay outcome');
   }
   const error = record.error as Record<string, unknown>;
   if (
@@ -2073,7 +2054,7 @@ function decodeInterruptReceiptOutcome(value: unknown): MessageOutcome<TurnInter
     error.code !== 'operation_conflict' ||
     typeof error.message !== 'string'
   ) {
-    throw new Error('Invalid interrupt receipt error');
+    throw new Error('Invalid interrupt replay error');
   }
   return failure(error.code, error.message);
 }

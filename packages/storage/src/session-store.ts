@@ -80,7 +80,7 @@ import {
   type TurnStateMessage,
   type UserMessage,
 } from '@maka/core/session';
-import type { MessageAdmissionStore, PendingMessageAdmission } from './message-receipt-store.js';
+import type { MessageAdmissionStore, PendingMessageAdmission } from './message-admission-store.js';
 import {
   isVisibleSessionMessage,
   lastMessagePreviewForMessages,

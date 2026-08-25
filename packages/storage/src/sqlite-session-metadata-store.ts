@@ -100,7 +100,7 @@ import {
   normalizePendingMessageAdmission,
   samePendingMessageAdmission,
   type PendingMessageAdmission,
-} from './message-receipt-store.js';
+} from './message-admission-store.js';
 import { messageContentsEqual, normalizeMessageContent } from '@maka/core/events';
 import {
   type AgentGraphIntentAdmissionSnapshot,

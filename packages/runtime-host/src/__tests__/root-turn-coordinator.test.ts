@@ -2220,7 +2220,6 @@ test('hosted linked child roots share admission, message, terminal, and stop aut
         requireCoordinator(coordinator).claimStop(input, commitQueueFence, admission),
     };
     const hostEpoch = 'epoch-linked-root';
-    await stores.messageReceiptStore.beginHostEpoch(hostEpoch);
     const messages = new HostMessageCoordinator({
       hostEpoch,
       root: rootPort,
@@ -2230,7 +2229,6 @@ test('hosted linked child roots share admission, message, terminal, and stop aut
         readImmutableSteeringMessageProof: (sessionId, messageId) =>
           stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
       },
-      receipts: stores.messageReceiptStore,
       admissions: stores.sessionStore,
       sessionAdmission,
       acquireResidency,
@@ -4840,7 +4838,6 @@ async function createFailureFixture(options: {
       requireCoordinator(coordinator).claimStop(input, commitQueueFence, admission),
   };
   const hostEpoch = 'epoch-message-failure';
-  await stores.messageReceiptStore.beginHostEpoch(hostEpoch);
   const requestDrain = () => {
     drainRequested = true;
     messages?.beginDrain();
@@ -4855,7 +4852,6 @@ async function createFailureFixture(options: {
       readImmutableSteeringMessageProof: (sessionId, messageId) =>
         stores.runtimeEventStore.readImmutableSteeringMessageProof(sessionId, messageId),
     },
-    receipts: stores.messageReceiptStore,
     admissions: stores.sessionStore,
     sessionAdmission,
     acquireResidency,
