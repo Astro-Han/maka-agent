@@ -313,6 +313,7 @@ export interface QueueFenceResult {
  * contended submit waits before reporting session_busy.
  */
 const SUBMIT_ADMISSION_RETRY_LIMIT = 4;
+const HOST_EPOCH_PATTERN = /^[A-Za-z0-9_-]{1,128}$/u;
 
 /** The sole in-memory message authority for one Runtime Host Epoch. */
 export class HostMessageCoordinator implements RuntimeMessageAuthority {
@@ -344,7 +345,7 @@ export class HostMessageCoordinator implements RuntimeMessageAuthority {
   #failStopped = false;
 
   constructor(options: HostMessageCoordinatorOptions) {
-    if (options.hostEpoch.length === 0 || options.hostEpoch.length > 128) {
+    if (!HOST_EPOCH_PATTERN.test(options.hostEpoch)) {
       throw new RuntimeMessageAuthorityInvariantError('Invalid Host Epoch identity');
     }
     this.#hostEpoch = options.hostEpoch;
