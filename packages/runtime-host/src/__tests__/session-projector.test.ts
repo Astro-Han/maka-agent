@@ -307,6 +307,44 @@ test('reseeds the Host admission fact for a message already in the active Turn',
   );
 });
 
+test('reseeds the Host admission fact after an active Turn message leaves the queue', () => {
+  const current = snapshot();
+  const projector = new RuntimeHostSessionProjector(
+    current,
+    createRuntimeHostSessionProjectionSeed(
+      [
+        {
+          type: 'user',
+          id: 'ticket-1',
+          turnId: 'turn-1',
+          ts: 1,
+          text: 'continue here',
+          steeringEventId: 'steering-event-1',
+        },
+      ],
+      current,
+    ),
+    () => 10,
+    [],
+    true,
+  );
+
+  assert.deepEqual(
+    projector
+      .seedActive(false)
+      .filter(
+        (event): event is Extract<SessionEvent, { type: 'message_admission' }> =>
+          event.type === 'message_admission',
+      )
+      .map((event) => ({
+        outcome: event.outcome,
+        turnId: event.turnId,
+        messageId: event.messageId,
+      })),
+    [{ outcome: 'admitted', turnId: 'turn-1', messageId: 'ticket-1' }],
+  );
+});
+
 test('reseeds the latest provider retry when the active Turn still carries one', () => {
   const retry = {
     phase: 'scheduled' as const,

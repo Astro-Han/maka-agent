@@ -42,7 +42,10 @@ interface AssistantAccumulator {
 }
 
 export interface RuntimeHostSessionProjectionSeed {
-  readonly durableInFlightMessageIds: readonly string[];
+  readonly durableSteeringMessages: readonly {
+    readonly messageId: string;
+    readonly turnId: string;
+  }[];
   readonly activeAssistantMessages: readonly Extract<StoredMessage, { type: 'assistant' }>[];
 }
 
@@ -50,13 +53,13 @@ export function createRuntimeHostSessionProjectionSeed(
   transcript: readonly StoredMessage[],
   snapshot: SessionContinuitySnapshot,
 ): RuntimeHostSessionProjectionSeed {
-  const inFlightMessageIds = new Set(
-    rootQueueInFlight(snapshot.queue).map((entry) => entry.messageId),
-  );
   return {
-    durableInFlightMessageIds: transcript
-      .filter((message) => inFlightMessageIds.has(message.id))
-      .map((message) => message.id),
+    durableSteeringMessages: transcript
+      .filter(
+        (message): message is Extract<StoredMessage, { type: 'user' }> =>
+          message.type === 'user' && message.steeringEventId !== undefined,
+      )
+      .map((message) => ({ messageId: message.id, turnId: message.turnId })),
     activeAssistantMessages:
       snapshot.rootTurn === null
         ? []
@@ -84,6 +87,7 @@ export class RuntimeHostSessionProjector {
   #snapshot: SessionContinuitySnapshot;
   readonly #now: () => number;
   readonly #transcriptIds: Set<string>;
+  readonly #durableSteeringTurnByMessage: ReadonlyMap<string, string>;
   readonly #accumulators = new Map<string, AssistantAccumulator>();
   #projectMessageAdmissions: boolean;
 
@@ -96,7 +100,10 @@ export class RuntimeHostSessionProjector {
   ) {
     this.#snapshot = structuredClone(snapshot);
     this.#now = now;
-    this.#transcriptIds = new Set(seed.durableInFlightMessageIds);
+    this.#durableSteeringTurnByMessage = new Map(
+      seed.durableSteeringMessages.map(({ messageId, turnId }) => [messageId, turnId]),
+    );
+    this.#transcriptIds = new Set(this.#durableSteeringTurnByMessage.keys());
     this.#projectMessageAdmissions = projectMessageAdmissions;
     const root = snapshot.rootTurn;
     if (!root) return;
@@ -158,6 +165,9 @@ export class RuntimeHostSessionProjector {
             ...new Set([
               ...this.#snapshot.rootTurnSourceMessageIds,
               ...rootQueueInFlight(this.#snapshot.queue).map((entry) => entry.messageId),
+              ...[...this.#durableSteeringTurnByMessage]
+                .filter(([, turnId]) => turnId === root.turnId)
+                .map(([messageId]) => messageId),
             ]),
           ],
           this.#now(),
