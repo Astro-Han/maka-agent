@@ -1139,7 +1139,10 @@ function buildSessionHeader(
     hasUnread: false,
     backend: 'ai-sdk',
     llmConnectionSlug: input.llmConnectionSlug,
-    connectionLocked: false,
+    // A subagent Session's route is chosen by the spawn that created it and is
+    // never re-targeted, so it is born frozen. Every other Session freezes on
+    // its first user Message.
+    connectionLocked: input.subagentParent !== undefined,
     model: input.model ?? 'default',
     ...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
     permissionMode: input.permissionMode,

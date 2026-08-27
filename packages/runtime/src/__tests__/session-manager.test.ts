@@ -16529,7 +16529,7 @@ class MemorySessionStore implements SessionStore {
       hasUnread: false,
       backend: 'ai-sdk',
       llmConnectionSlug: input.llmConnectionSlug,
-      connectionLocked: false,
+      connectionLocked: input.subagentParent !== undefined,
       model: input.model ?? 'fake-model',
       ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       permissionMode: input.permissionMode,
