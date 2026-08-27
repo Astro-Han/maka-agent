@@ -288,6 +288,33 @@ test('Session recap keeps accounting failures non-terminal and unsafe to retry',
   );
 });
 
+test('Naming writes what the title model generated, not the Message', async () => {
+  const named = gate();
+  const titles: string[] = [];
+  await withHarness(
+    async ({ coordinator }) => {
+      coordinator.nameSessionFromRootMessage({
+        sessionId: 'session-1',
+        content: { text: 'hello world' },
+      });
+      await named.promise;
+      assert.deepEqual(titles, ['Model title']);
+    },
+    {
+      generateTitle: async () => 'Model title',
+      generateRecap: async () => assert.fail('naming must not call recap'),
+    },
+    {
+      readSessionHeader: async () => unnamedHeader(),
+      nameSessionIfUnnamed: async (_sessionId, title) => {
+        titles.push(title);
+        return unnamedHeader();
+      },
+      onSessionNamed: () => named.release(),
+    },
+  );
+});
+
 test('Naming falls back to the Message when the title model is unreachable', async () => {
   const named = gate();
   const titles: string[] = [];

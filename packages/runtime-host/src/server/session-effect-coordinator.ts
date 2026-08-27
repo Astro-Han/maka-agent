@@ -135,6 +135,12 @@ export class HostSessionEffectCoordinator {
     if (!this.#accepting) return;
     const sourceText = sessionTitleSource(input.content);
     if (!sourceText.trim()) return;
+    // One naming attempt per Session at a time: a queued Message can open its
+    // Turn while the first title call is still out, and the second call could
+    // only ever lose the write.
+    for (const titleSessionId of this.#titleAborts.values()) {
+      if (titleSessionId === input.sessionId) return;
+    }
     const residency = this.#acquireResidency();
     const abort = new AbortController();
     this.#titleAborts.set(abort, input.sessionId);
@@ -165,14 +171,15 @@ export class HostSessionEffectCoordinator {
       // An unreachable title model is not a Session failure; the fallback name
       // below still beats leaving the Session unnamed.
     }
+    const title = generated ?? fallbackSessionTitle(sourceText);
+    if (!title) return;
     try {
-      const title = generated ?? fallbackSessionTitle(sourceText);
-      if (!title) return;
+      // A racing rename simply wins: the write is conditional, so losing it is
+      // an answer, not a failure. A store that cannot answer at all is.
       if (!(await this.#nameSessionIfUnnamed(sessionId, title))) return;
       this.#onSessionNamed(sessionId);
     } catch {
-      // Losing the name to a racing rename or a closed store leaves the
-      // Session exactly as it was.
+      this.#requestDrain();
     }
   }
 

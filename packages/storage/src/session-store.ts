@@ -1045,7 +1045,8 @@ class SqliteSessionStore implements SessionAuthorityStore {
   async setGeneratedTitleIfAbsent(sessionId: string, title: string): Promise<SessionHeader | null> {
     const normalized = normalizeUserSessionName(title);
     if (!normalized.ok) return null;
-    const current = await this.readHeaderSnapshot(sessionId);
+    const record = await this.readHeaderRecordSnapshot(sessionId);
+    const current = record.header;
     if (
       current.titleIsManual ||
       current.name !== DEFAULT_SESSION_NAME ||
@@ -1053,7 +1054,17 @@ class SqliteSessionStore implements SessionAuthorityStore {
     ) {
       return null;
     }
-    return this.updateHeader(sessionId, { name: normalized.value });
+    try {
+      // A generated title only ever fills an absence. Writing at the revision
+      // the check read makes a rename that lands between the two a winner
+      // rather than something this silently overwrites.
+      return (
+        await this.updateHeaderVersioned(sessionId, { name: normalized.value }, record.revision)
+      ).header;
+    } catch (error) {
+      if (error instanceof SessionMetadataVersionConflictError) return null;
+      throw error;
+    }
   }
 
   async remove(sessionId: string): Promise<void> {
