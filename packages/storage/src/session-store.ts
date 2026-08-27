@@ -1064,9 +1064,11 @@ class SqliteSessionStore implements SessionAuthorityStore {
           await this.updateHeaderVersioned(sessionId, { name: normalized.value }, record.revision)
         ).header;
       } catch (error) {
-        if (!(error instanceof SessionMetadataVersionConflictError) || attempt === 2) throw error;
+        if (!(error instanceof SessionMetadataVersionConflictError)) throw error;
       }
     }
+    // Losing the race every attempt reads the same as losing it once: the
+    // Session keeps whichever name the writer that won gave it.
     return null;
   }
 

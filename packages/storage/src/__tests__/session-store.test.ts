@@ -515,6 +515,21 @@ describe('SQLite SessionStore', () => {
         (await store.setGeneratedTitleIfAbsent(flagged.id, 'generated survives'))?.name,
         'generated survives',
       );
+
+      // A Session whose revision moves under every attempt answers null like any
+      // other lost race, so a caller reading null never has to also expect a throw.
+      const busy = await store.create(makeInput({ cwd: root, name: DEFAULT_SESSION_NAME }));
+      let flips = 0;
+      store.readHeaderRecordSnapshot = async (sessionId: string) => {
+        const record = await readHeaderRecordSnapshot(sessionId);
+        if (sessionId === busy.id) {
+          flips += 1;
+          await store.setFlagged(sessionId, flips % 2 === 1);
+        }
+        return record;
+      };
+      assert.equal(await store.setGeneratedTitleIfAbsent(busy.id, 'never lands'), null);
+      assert.equal((await readHeaderRecordSnapshot(busy.id)).header.name, DEFAULT_SESSION_NAME);
     } finally {
       await store.close?.();
       await rm(root, { recursive: true, force: true });

@@ -171,6 +171,9 @@ export class HostSessionEffectCoordinator {
       // An unreachable title model is not a Session failure; the fallback name
       // below still beats leaving the Session unnamed.
     }
+    // Shutdown aborts the call, and an abort retires the effect rather than
+    // downgrading it: the next root Message names the Session.
+    if (abortSignal.aborted) return;
     const title = generated ?? fallbackSessionTitle(sourceText);
     if (!title) return;
     try {

@@ -204,7 +204,6 @@ test('Session effect leaves Turn admission free and drain aborts accepted recap 
 
 test('Automatic naming fences retirement until the effect settles', async () => {
   const started = gate();
-  const named = gate();
   await withHarness(
     async ({ coordinator }) => {
       coordinator.nameSessionFromRootMessage({
@@ -216,7 +215,6 @@ test('Automatic naming fences retirement until the effect settles', async () => 
       assert.equal(coordinator.hasLiveSessionState('session-2'), false);
 
       coordinator.beginDrain();
-      await named.promise;
       await coordinator.close();
       assert.equal(coordinator.hasLiveSessionState('session-1'), false);
     },
@@ -232,12 +230,9 @@ test('Automatic naming fences retirement until the effect settles', async () => 
     },
     {
       readSessionHeader: async () => unnamedHeader(),
-      // An aborted title model still falls back to the Message's first line.
-      nameSessionIfUnnamed: async (_sessionId, title) => {
-        assert.equal(title, 'A first user message');
-        named.release();
-        return null;
-      },
+      // Draining retires the effect rather than downgrading it: the fallback
+      // name answers an unreachable model, not a Host that is shutting down.
+      nameSessionIfUnnamed: async () => assert.fail('an aborted naming must not write'),
     },
   );
 });
