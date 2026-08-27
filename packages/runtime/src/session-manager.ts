@@ -2067,12 +2067,12 @@ export class SessionManager {
     const onRunStarted = this.deps.generateSessionTitle
       ? async (runId: string, header: SessionHeader) => {
           await options.onRunStarted?.(runId, header);
-          if (
-            !header.connectionLocked &&
-            !header.titleIsManual &&
-            header.name === DEFAULT_SESSION_NAME &&
-            sourceText
-          ) {
+          // The name is the only authority for "this Session is still
+          // unnamed". The connection lock used to stand in for "first Turn",
+          // but durable Message handoff materializes the admitted user
+          // Message — and locks the connection — before the Run starts, so a
+          // lock check now rejects every Turn that could ever be the first.
+          if (!header.titleIsManual && header.name === DEFAULT_SESSION_NAME && sourceText) {
             void this.generateTitleInBackground(sessionId, header, sourceText);
           }
         }
