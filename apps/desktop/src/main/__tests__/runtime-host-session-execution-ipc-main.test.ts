@@ -923,7 +923,7 @@ test("answers a send with the Turn the Host started for it", async () => {
   ]);
 });
 
-test("propagates a busy Skill send instead of degrading it to steering", async () => {
+test("propagates a busy explicit Skill send instead of degrading it to steering", async () => {
   const submits: unknown[] = [];
   const ipc = ipcHarness();
   registerExecutionIpc(
@@ -939,37 +939,114 @@ test("propagates a busy Skill send instead of degrading it to steering", async (
           );
         },
       }),
-      observer: unusedObserver(),
-      attachmentApprovals: createAttachmentApprovalRegistry(),
-      emitSessionsChanged() {},
-      stat: async () => ({ size: 0 }),
-      resizeImage: async (bytes) => bytes,
-      beforeStop() {},
       newId: () => "id-1",
     },
     ipc,
   );
 
-  // The Desktop composer carries Skills as canonical /skill: tokens in the
-  // text; explicit skillIds is the protocol-level variant. Neither shape is
-  // routed here — the Host admits the Message and owns the refusal.
-  for (const command of [
-    { type: "send", turnId: "turn-1", text: "/skill:review explain the tests" },
-    {
+  // Explicit skillIds are exact-Turn intent, so the Host refuses on a busy
+  // Session. The Desktop no longer carves that case out — it just reports it.
+  await assert.rejects(
+    ipc.invoke("sessions:send", "session-1", {
       type: "send",
       turnId: "turn-1",
       text: "",
       displayText: "/skill:review",
       skillIds: ["review"],
+    }),
+    (error: unknown) =>
+      error instanceof RuntimeHostOperationError && error.code === "session_busy",
+  );
+  assert.deepEqual(submits, [
+    {
+      sessionId: "session-1",
+      messageId: "turn-1",
+      placement: "current_turn",
+      content: {
+        text: "",
+        displayText: "/skill:review",
+        inlineReferences: [],
+      },
+      skillIds: ["review"],
     },
-  ] as const) {
-    await assert.rejects(
-      ipc.invoke("sessions:send", "session-1", command),
-      (error: unknown) =>
-        error instanceof RuntimeHostOperationError && error.code === "session_busy",
-    );
-  }
-  assert.equal(submits.length, 2);
+  ]);
+});
+
+test("lets the Host queue a textual Skill token as steering", async () => {
+  const submits: unknown[] = [];
+  const ipc = ipcHarness();
+  registerExecutionIpc(
+    {
+      client: executionClient({
+        getSession: async () => session(),
+        submitMessage: async (input) => {
+          submits.push(input);
+          return { disposition: "steering", queueRevision: 1 };
+        },
+      }),
+      newId: () => "id-1",
+    },
+    ipc,
+  );
+
+  // A `/skill:` token in the text is not exact-Turn intent: Host message
+  // preparation expands it on the queued path too. The Desktop stopped
+  // sniffing content for it, so this send is reported as the steering the
+  // Host made of it.
+  assert.deepEqual(
+    await ipc.invoke("sessions:send", "session-1", {
+      type: "send",
+      turnId: "turn-1",
+      text: "/skill:review explain the tests",
+    }),
+    {
+      ok: true,
+      steered: true,
+      turnId: "turn-1",
+      attachments: [],
+      inlineReferences: [],
+      skillInvocation: { loaded: [], failed: [], receipts: [] },
+    },
+  );
+  assert.equal(submits.length, 1);
+});
+
+test("reports a Host-blocked Skill send as a Skill failure", async () => {
+  const ipc = ipcHarness();
+  registerExecutionIpc(
+    {
+      client: executionClient({
+        getSession: async () => session(),
+        submitMessage: async () => ({
+          disposition: "blocked",
+          skillInvocation: {
+            loaded: [],
+            failed: [{ request: "missing", reason: "not_found" }],
+            receipts: [],
+          },
+        }),
+      }),
+      newId: () => "id-1",
+    },
+    ipc,
+  );
+
+  assert.deepEqual(
+    await ipc.invoke("sessions:send", "session-1", {
+      type: "send",
+      turnId: "turn-1",
+      text: "/skill:missing inspect this",
+    }),
+    {
+      ok: false,
+      reason: "skill_invocation_failed",
+      skillInvocation: {
+        loaded: [],
+        failed: [{ request: "missing", reason: "not_found" }],
+        receipts: [],
+      },
+    },
+  );
 });
 
 test("queues explicit Desktop follow-ups", async () => {

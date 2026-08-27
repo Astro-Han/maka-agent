@@ -328,7 +328,9 @@ export function registerRuntimeHostSessionExecutionIpc(
       // keeps the Message identity it rendered and never routes on content —
       // an explicit Skill or orchestration still fails closed on a busy
       // Session, in the Host.
-      const messageId = command.messageId ?? turnId;
+      // The Message identity is the Turn id the caller reserved: one submit,
+      // one durable Message, and a retry that the Host can recognize.
+      const messageId = turnId;
       const submitted = await submitMessageWithReconnect(deps.client, {
         sessionId,
         messageId,
@@ -358,8 +360,7 @@ export function registerRuntimeHostSessionExecutionIpc(
       if (submitted.disposition === "blocked") {
         return {
           ok: false as const,
-          attachments,
-          inlineReferences,
+          reason: "skill_invocation_failed" as const,
           skillInvocation: submitted.skillInvocation,
         };
       }
