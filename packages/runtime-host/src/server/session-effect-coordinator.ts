@@ -22,7 +22,7 @@ import type { MessageContent } from '@maka/core/events';
 import type { SessionHeader } from '@maka/core/session';
 import { DEFAULT_SESSION_NAME } from '@maka/core/session-name';
 import { cleanSessionRecapText } from '@maka/runtime/session-recap';
-import { fallbackSessionTitle, sessionTitleSource } from '@maka/runtime/session-title';
+import { fallbackSessionTitle, sessionTitleSource } from './session-title.js';
 import { type RuntimeReadModelSessionView } from '@maka/runtime/runtime-read-model';
 import {
   authenticateInteractiveArtifactStoreWriter,

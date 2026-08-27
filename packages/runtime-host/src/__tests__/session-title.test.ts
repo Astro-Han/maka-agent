@@ -23,7 +23,7 @@ import {
   cleanGeneratedSessionTitle,
   fallbackSessionTitle,
   sessionTitleSource,
-} from '../session-title.js';
+} from '../server/session-title.js';
 
 describe('session title helper', () => {
   test('uses display text, strips system reminders, and truncates input on a UTF-8 boundary', () => {
