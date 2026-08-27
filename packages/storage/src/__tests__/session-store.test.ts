@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { CreateSessionInput } from '@maka/core/runtime-inputs';
+import { DEFAULT_SESSION_NAME } from '@maka/core/session-name';
 import {
   WORKHUB_COORDINATION_SESSION_ID,
   WORKHUB_COORDINATION_SESSION_ROLE,
@@ -460,6 +461,59 @@ describe('SQLite SessionStore', () => {
       assert.equal(page.hasMore, false);
       await assert.rejects(store.readCatalogRecord(staging[0]!.id), (error) =>
         isSessionNotFoundError(error),
+      );
+    } finally {
+      await store.close?.();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a generated title fills an absence and never overwrites a rename', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-session-generated-title-'));
+    const store = createSessionStore(root);
+    try {
+      const unnamed = await store.create(makeInput({ cwd: root, name: DEFAULT_SESSION_NAME }));
+      assert.equal(
+        (await store.setGeneratedTitleIfAbsent(unnamed.id, 'draft the release notes'))?.name,
+        'draft the release notes',
+      );
+      assert.equal((await store.readHeaderSnapshot(unnamed.id)).name, 'draft the release notes');
+      // An already-named Session is never renamed by a later generation.
+      assert.equal(await store.setGeneratedTitleIfAbsent(unnamed.id, 'a second guess'), null);
+
+      // A rename landing between the check and the write wins: the write is
+      // conditional on the revision the check read.
+      const raced = await store.create(makeInput({ cwd: root, name: DEFAULT_SESSION_NAME }));
+      const readHeaderRecordSnapshot = store.readHeaderRecordSnapshot.bind(store);
+      let renamed = false;
+      store.readHeaderRecordSnapshot = async (sessionId: string) => {
+        const record = await readHeaderRecordSnapshot(sessionId);
+        if (sessionId === raced.id && !renamed) {
+          renamed = true;
+          await store.rename(sessionId, '我自己起的名字');
+        }
+        return record;
+      };
+      assert.equal(await store.setGeneratedTitleIfAbsent(raced.id, 'generated loses'), null);
+      const header = await readHeaderRecordSnapshot(raced.id);
+      assert.equal(header.header.name, '我自己起的名字');
+      assert.equal(header.header.titleIsManual, true);
+
+      // A revision that moved for any other reason is re-read, not mistaken
+      // for a rename.
+      const flagged = await store.create(makeInput({ cwd: root, name: DEFAULT_SESSION_NAME }));
+      let flaggedOnce = false;
+      store.readHeaderRecordSnapshot = async (sessionId: string) => {
+        const record = await readHeaderRecordSnapshot(sessionId);
+        if (sessionId === flagged.id && !flaggedOnce) {
+          flaggedOnce = true;
+          await store.setFlagged(sessionId, true);
+        }
+        return record;
+      };
+      assert.equal(
+        (await store.setGeneratedTitleIfAbsent(flagged.id, 'generated survives'))?.name,
+        'generated survives',
       );
     } finally {
       await store.close?.();
