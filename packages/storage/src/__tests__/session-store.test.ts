@@ -467,6 +467,55 @@ describe('SQLite SessionStore', () => {
     }
   });
 
+  test('a Session freezes its route on the first user message, a subagent at birth', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'maka-session-route-freeze-'));
+    const store = createSessionStore(root);
+    try {
+      const ordinary = await store.create(makeInput({ cwd: root }));
+      assert.equal(ordinary.connectionLocked, false);
+
+      // A subagent's route is chosen by the spawn that created it and is never
+      // re-targeted, so it needs no first Message to be frozen.
+      const child = await store.createSubagent(
+        makeInput({
+          cwd: root,
+          name: 'Child',
+          subagentParent: {
+            kind: 'subagent',
+            parentSessionId: ordinary.id,
+            spawnedBy: {
+              parentRunId: 'parent-run',
+              parentTurnId: 'parent-turn',
+              toolCallId: 'tool-call',
+            },
+            lifecycle: 'foreground',
+          },
+          subagentRuntime: {
+            schemaVersion: 1,
+            definitionVersion: 1,
+            agentId: 'local-read',
+            agentName: 'Local Read',
+            profile: 'local_read',
+            systemPrompt: 'Read the assigned workspace task.',
+            toolNames: ['Read'],
+            categoryPolicy: { read: 'allow' },
+          },
+          subagentSpawn: {
+            schemaVersion: 1,
+            requestFingerprint: 'a'.repeat(64),
+            initialTurnId: 'child-turn',
+            initialRunId: 'child-run',
+          },
+        }),
+      );
+      assert.equal(child.header.connectionLocked, true);
+      assert.equal((await store.readHeaderSnapshot(child.header.id)).connectionLocked, true);
+    } finally {
+      await store.close?.();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('appending the first user message locks the session before any read', async () => {
     const root = await mkdtemp(join(tmpdir(), 'maka-session-lock-heal-'));
     const store = createSessionStore(root);

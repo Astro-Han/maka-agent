@@ -226,7 +226,7 @@ export class AgentRun {
   readonly toolMode: ToolMode;
 
   private readonly input: AgentRunInput;
-  private header: SessionHeader;
+  private readonly header: SessionHeader;
   private active: AgentRunActiveSession | undefined;
   private stopped = false;
   private abortSource: string | undefined;
