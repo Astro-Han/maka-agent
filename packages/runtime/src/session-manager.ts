@@ -207,7 +207,6 @@ import {
   type ResumeContinuationOptions,
   type TurnStartOptions,
 } from './runtime-kernel.js';
-import { fallbackSessionTitle, sessionTitleSource } from './session-title.js';
 import type { HistoryCompactCleanupRequest } from './history-compact-checkpoint-coordinator.js';
 import { fingerprintAgentGraphRunnableIntent } from './stream-graph-admission.js';
 import type { AgentGraphRunnableIntent } from './stream-graph-readiness.js';
@@ -687,7 +686,6 @@ export interface SessionStore {
   ): Promise<VersionedSessionHeader>;
   setFlagged(sessionId: string, isFlagged: boolean): Promise<void>;
   rename(sessionId: string, name: string): Promise<void>;
-  setGeneratedTitleIfAbsent?(sessionId: string, title: string): Promise<SessionHeader | null>;
   remove(sessionId: string): Promise<void>;
 }
 
@@ -854,12 +852,6 @@ interface SessionManagerBaseDeps {
   /** Trusted Host-owned graph readers. Hosted graph execution fails closed without them. */
   hostedAgentGraphExecution?: RuntimeHostedAgentGraphExecutionCapability;
   onContinuationLifecycleEvent?: (event: RuntimeContinuationLifecycleEvent) => void | Promise<void>;
-  generateSessionTitle?: (input: {
-    sessionId: string;
-    header: SessionHeader;
-    sourceText: string;
-  }) => Promise<string | undefined>;
-  onSessionTitleChanged?: (sessionId: string) => void;
 }
 
 export interface ResolvedChildToolActivation {
@@ -2063,40 +2055,7 @@ export class SessionManager {
           return (await options.admitTurn?.()) ?? 'admitted';
         }
       : options.admitTurn;
-    const sourceText = sessionTitleSource(input);
-    const onRunStarted = this.deps.generateSessionTitle
-      ? async (runId: string, header: SessionHeader) => {
-          await options.onRunStarted?.(runId, header);
-          // The name is the only authority for "this Session is still
-          // unnamed". The connection lock used to stand in for "first Turn",
-          // but durable Message handoff materializes the admitted user
-          // Message — and locks the connection — before the Run starts, so a
-          // lock check now rejects every Turn that could ever be the first.
-          if (!header.titleIsManual && header.name === DEFAULT_SESSION_NAME && sourceText) {
-            void this.generateTitleInBackground(sessionId, header, sourceText);
-          }
-        }
-      : options.onRunStarted;
-    yield* this.runtimeKernel.startTurn(sessionId, input, { ...options, admitTurn, onRunStarted });
-  }
-
-  private async generateTitleInBackground(
-    sessionId: string,
-    header: SessionHeader,
-    sourceText: string,
-  ): Promise<void> {
-    let generated: string | undefined;
-    try {
-      generated = await this.deps.generateSessionTitle?.({ sessionId, header, sourceText });
-    } catch {}
-    try {
-      const title = generated ?? fallbackSessionTitle(sourceText);
-      if (!title) return;
-      const next = await this.deps.store.setGeneratedTitleIfAbsent?.(sessionId, title);
-      if (!next) return;
-      this.runtimeKernel.updateCachedHeader(sessionId, next);
-      this.deps.onSessionTitleChanged?.(sessionId);
-    } catch {}
+    yield* this.runtimeKernel.startTurn(sessionId, input, { ...options, admitTurn });
   }
 
   async planSafeBoundaryContinuation(

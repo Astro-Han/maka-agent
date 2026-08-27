@@ -20,8 +20,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
+  cleanGeneratedSessionTitle,
   fallbackSessionTitle,
-  generateSessionTitle,
   sessionTitleSource,
 } from '../session-title.js';
 
@@ -52,92 +52,18 @@ describe('session title helper', () => {
     assert.equal(fallbackSessionTitle(' \n\t'), undefined);
   });
 
-  test('cleans model reasoning, prefixes, quotes, and extra lines', async () => {
-    let request: Record<string, unknown> | undefined;
-    const title = await generateSessionTitle({
-      model: {} as never,
-      sourceText: 'Analyze the production logs',
-      providerOptions: { provider: { required: true } },
-      generateText: async (options) => {
-        request = options;
-        return {
-          text: '<think>reasoning</think>\nTitle: "Production log analysis"\nextra',
-          finishReason: 'stop',
-        };
-      },
-    });
-
-    assert.equal(title, 'Production log analysis');
-    assert.equal(request?.maxOutputTokens, 1024);
-    assert.deepEqual(request?.providerOptions, { provider: { required: true } });
-    assert.equal('tools' in (request ?? {}), false);
+  test('cleans model reasoning, prefixes, quotes, and extra lines', () => {
+    assert.equal(
+      cleanGeneratedSessionTitle(
+        '<think>reasoning</think>\nTitle: "Production log analysis"\nextra',
+      ),
+      'Production log analysis',
+    );
+    assert.equal(cleanGeneratedSessionTitle('「生产日志分析」'), '生产日志分析');
   });
 
-  test('returns undefined for empty, truncated, invalid, or failed model output', async () => {
-    const model = {} as never;
-    assert.equal(
-      await generateSessionTitle({
-        model,
-        sourceText: '',
-        generateText: async () => ({ text: 'unused', finishReason: 'stop' }),
-      }),
-      undefined,
-    );
-    assert.equal(
-      await generateSessionTitle({
-        model,
-        sourceText: 'hello',
-        generateText: async () => ({ text: 'Title', finishReason: 'length' }),
-      }),
-      undefined,
-    );
-    assert.equal(
-      await generateSessionTitle({
-        model,
-        sourceText: 'hello',
-        generateText: async () => ({ text: '<think>x</think>', finishReason: 'stop' }),
-      }),
-      undefined,
-    );
-    assert.equal(
-      await generateSessionTitle({
-        model,
-        sourceText: 'hello',
-        generateText: async () => {
-          throw new Error('offline');
-        },
-      }),
-      undefined,
-    );
-  });
-
-  test('aborts title generation when the provider exceeds its deadline', async () => {
-    let signal: AbortSignal | undefined;
-    let watchdog: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const result = await Promise.race([
-        generateSessionTitle({
-          model: {} as never,
-          sourceText: 'hello',
-          timeoutMs: 10,
-          generateText: (options: Record<string, unknown>) => {
-            signal = options.abortSignal as AbortSignal;
-            // Never settles: verifies the internal deadline, not provider cooperation.
-            return new Promise<never>(() => {});
-          },
-        }),
-        new Promise<never>((_resolve, reject) => {
-          watchdog = setTimeout(
-            () => reject(new Error('title generation did not respect its deadline')),
-            250,
-          );
-        }),
-      ]);
-
-      assert.equal(result, undefined);
-      assert.equal(signal?.aborted, true);
-    } finally {
-      if (watchdog) clearTimeout(watchdog);
-    }
+  test('refuses model output that carries no usable name', () => {
+    assert.equal(cleanGeneratedSessionTitle('<think>x</think>'), undefined);
+    assert.equal(cleanGeneratedSessionTitle('   \n\t'), undefined);
   });
 });
