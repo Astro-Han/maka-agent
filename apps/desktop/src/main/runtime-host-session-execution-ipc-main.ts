@@ -324,12 +324,11 @@ export function registerRuntimeHostSessionExecutionIpc(
         workspaceFileReferences: command.workspaceFileReferences,
       });
       // Runtime Host is the sole admission authority: one submit answers
-      // whether the words opened a Turn or joined the running one. The Desktop
-      // keeps the Message identity it rendered and never routes on content —
-      // an explicit Skill or orchestration still fails closed on a busy
-      // Session, in the Host.
-      // The Message identity is the Turn id the caller reserved: one submit,
-      // one durable Message, and a retry that the Host can recognize.
+      // whether the words opened a Turn or joined the running one, and the
+      // Desktop never routes on content — an explicit Skill or orchestration
+      // still fails closed on a busy Session, in the Host. The Message identity
+      // is the Turn id the caller reserved: one submit, one durable Message,
+      // and a retry the Host recognizes as the same one.
       const messageId = turnId;
       const submitted = await submitMessageWithReconnect(deps.client, {
         sessionId,

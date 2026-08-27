@@ -174,12 +174,13 @@ export class HostSessionEffectCoordinator {
     const title = generated ?? fallbackSessionTitle(sourceText);
     if (!title) return;
     try {
-      // A racing rename simply wins: the write is conditional, so losing it is
-      // an answer, not a failure. A store that cannot answer at all is.
+      // Naming answers no caller, so nothing here is a Host-level outcome: a
+      // racing rename wins the conditional write, and a store that cannot
+      // answer leaves the Session unnamed for the next root Message to retry.
       if (!(await this.#nameSessionIfUnnamed(sessionId, title))) return;
       this.#onSessionNamed(sessionId);
     } catch {
-      this.#requestDrain();
+      // The Session keeps the name it already had.
     }
   }
 

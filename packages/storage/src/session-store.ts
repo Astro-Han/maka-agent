@@ -1045,26 +1045,29 @@ class SqliteSessionStore implements SessionAuthorityStore {
   async setGeneratedTitleIfAbsent(sessionId: string, title: string): Promise<SessionHeader | null> {
     const normalized = normalizeUserSessionName(title);
     if (!normalized.ok) return null;
-    const record = await this.readHeaderRecordSnapshot(sessionId);
-    const current = record.header;
-    if (
-      current.titleIsManual ||
-      current.name !== DEFAULT_SESSION_NAME ||
-      normalized.value === current.name
-    ) {
-      return null;
+    // A generated title only ever fills an absence. Writing at the revision the
+    // check read makes a rename that lands between the two a winner rather than
+    // something this silently overwrites; a revision that moved for any other
+    // reason is re-read, so losing the race stays the only way to answer null.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const record = await this.readHeaderRecordSnapshot(sessionId);
+      const current = record.header;
+      if (
+        current.titleIsManual ||
+        current.name !== DEFAULT_SESSION_NAME ||
+        normalized.value === current.name
+      ) {
+        return null;
+      }
+      try {
+        return (
+          await this.updateHeaderVersioned(sessionId, { name: normalized.value }, record.revision)
+        ).header;
+      } catch (error) {
+        if (!(error instanceof SessionMetadataVersionConflictError) || attempt === 2) throw error;
+      }
     }
-    try {
-      // A generated title only ever fills an absence. Writing at the revision
-      // the check read makes a rename that lands between the two a winner
-      // rather than something this silently overwrites.
-      return (
-        await this.updateHeaderVersioned(sessionId, { name: normalized.value }, record.revision)
-      ).header;
-    } catch (error) {
-      if (error instanceof SessionMetadataVersionConflictError) return null;
-      throw error;
-    }
+    return null;
   }
 
   async remove(sessionId: string): Promise<void> {
