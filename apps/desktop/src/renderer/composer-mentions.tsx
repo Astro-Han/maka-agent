@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { ChatDefaultPermissionMode } from '@maka/core/settings';
 import type { InvocableSkillEntry } from '@maka/runtime/skill-invocation';
 import type { DesktopNewTaskTarget } from '../preload/bridge-contract.js';
@@ -46,15 +46,16 @@ function invocableSkillListsEqual(
   });
 }
 
-/**
- * Owns the composer mention popup wiring so app-shell.tsx keeps no inline
- * `window.maka` state (app-shell-composer-attachment-owner-contract). Derives
- * the `/` popup's skill list from Runtime's authoritative invocable projection, and
- * exposes a fail-soft file-search callback backed by the `workspace:searchFiles`
- * IPC. Both return values are memoized so the Composer props keep stable
- * identities across renders.
- */
-export function useComposerMentions(options: {
+/** What the composer needs to render its `/` and `@` popups. */
+export interface ComposerMentions {
+  mentionSkills: ReadonlyArray<{ ref?: string; id: string; name: string; description?: string }>;
+  mentionSkillsUnavailable: boolean;
+  mentionSkillsLoading: boolean;
+  searchMentionFiles(query: string): Promise<ReadonlyArray<{ relativePath: string }>>;
+}
+
+/** Which backend surface the popups should describe. */
+export interface ComposerMentionsSurface {
   /** Invalidates Runtime's invocable projection after installed Skills settle. */
   skillCatalogRevision: number;
   sessionId?: string;
@@ -63,12 +64,17 @@ export function useComposerMentions(options: {
   newSessionCollaborationMode?: 'agent' | 'plan';
   newSessionPermissionMode?: ChatDefaultPermissionMode;
   newTaskTarget?: DesktopNewTaskTarget;
-}): {
-  mentionSkills: ReadonlyArray<{ ref?: string; id: string; name: string; description?: string }>;
-  mentionSkillsUnavailable: boolean;
-  mentionSkillsLoading: boolean;
-  searchMentionFiles(query: string): Promise<ReadonlyArray<{ relativePath: string }>>;
-} {
+}
+
+/**
+ * Owns the composer mention popup wiring so app-shell.tsx keeps no inline
+ * `window.maka` state (app-shell-composer-attachment-owner-contract). Derives
+ * the `/` popup's skill list from Runtime's authoritative invocable projection, and
+ * exposes a fail-soft file-search callback backed by the `workspace:searchFiles`
+ * IPC. Both return values are memoized so the Composer props keep stable
+ * identities across renders.
+ */
+function useComposerMentions(options: ComposerMentionsSurface): ComposerMentions {
   const {
     projectPath,
     sessionId,
@@ -242,4 +248,45 @@ export function useComposerMentions(options: {
     mentionSkillsLoading: liveCatalog.loading,
     searchMentionFiles,
   };
+}
+
+/** No provider — a composer rendered outside the shell simply has no popups. */
+const NO_MENTIONS: ComposerMentions = {
+  mentionSkills: EMPTY_SKILLS,
+  mentionSkillsUnavailable: false,
+  mentionSkillsLoading: false,
+  searchMentionFiles: async () => [],
+};
+
+const ComposerMentionsContext = createContext<ComposerMentions>(NO_MENTIONS);
+
+/**
+ * Publishes the mention projection to whichever composers are on screen.
+ *
+ * The catalog reloads on every session switch and on every MCP or session
+ * change event, several times per switch. Holding it in AppShell put those
+ * reloads above the whole tree, so each one re-rendered ~1600 components to
+ * repaint two popups. Owning it here keeps the reload inside this provider:
+ * `children` is the element AppShell already built, so React bails out of the
+ * subtree and only the composers that read the context re-render.
+ */
+export function ComposerMentionsProvider({
+  children,
+  ...surface
+}: ComposerMentionsSurface & { children: ReactNode }) {
+  const mentions = useComposerMentions(surface);
+  const value = useMemo(
+    () => mentions,
+    [
+      mentions.mentionSkills,
+      mentions.mentionSkillsUnavailable,
+      mentions.mentionSkillsLoading,
+      mentions.searchMentionFiles,
+    ],
+  );
+  return <ComposerMentionsContext.Provider value={value}>{children}</ComposerMentionsContext.Provider>;
+}
+
+export function useComposerMentionsContext(): ComposerMentions {
+  return useContext(ComposerMentionsContext);
 }

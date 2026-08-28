@@ -29,7 +29,7 @@ import {
 import type { QuoteRef } from '@maka/core/events';
 import type { SessionSummary } from '@maka/core/session';
 import { Composer, useUiLocale } from '@maka/ui';
-import type { ChatModelChoice, ComposerProps } from '@maka/ui';
+import type { ChatModelChoice } from '@maka/ui';
 import { safeLocalStorageGet, safeLocalStorageSet } from '../../../browser-storage.js';
 import { getDesktopConversationCopy } from '../../../locales/conversation-copy.js';
 import { localizedShellErrorMessage } from '../../../locales/shell-copy.js';
@@ -91,10 +91,6 @@ export interface UseWorkbarControllerInput {
   authoritativeSessionIds: ReadonlySet<string> | undefined;
   shellObscured: boolean;
   modelChoices: readonly ChatModelChoice[];
-  mentionSkills?: ComposerProps['mentionSkills'];
-  mentionSkillsUnavailable?: ComposerProps['mentionSkillsUnavailable'];
-  mentionSkillsLoading?: ComposerProps['mentionSkillsLoading'];
-  searchMentionFiles?: ComposerProps['onSearchMentionFiles'];
   reportError(title: string, description: string, sessionId: string): void;
 }
 
@@ -729,10 +725,6 @@ export function useWorkbarController(
       onActivityStateChange: sideConversations.setActive,
       sourceSession: input.activeSession,
       modelChoices: input.modelChoices,
-      mentionSkills: input.mentionSkills,
-      mentionSkillsUnavailable: input.mentionSkillsUnavailable,
-      mentionSkillsLoading: input.mentionSkillsLoading,
-      onSearchMentionFiles: input.searchMentionFiles,
       closeConfirmation: {
         key:
           pendingSideChatClose.map(({ tab }) => tab.id).join(':') || 'closed',

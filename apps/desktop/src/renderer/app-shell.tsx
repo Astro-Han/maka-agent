@@ -204,7 +204,7 @@ import { loadComposerDefaults, saveComposerDefaults } from './composer-defaults'
 import { useKeyedPendingRegistry } from './use-pending-action-registry';
 import { useComposerAttachments } from './use-composer-attachments';
 import { useAppShellComposerQuotes } from './use-app-shell-composer-quotes';
-import { useComposerMentions } from './use-composer-mentions';
+import { ComposerMentionsProvider, type ComposerMentionsSurface } from './composer-mentions';
 import { useAppShellSessionWorkspace } from './use-app-shell-session-workspace';
 import { useShellMemoryPill } from './use-shell-memory-pill';
 import { useShellConnections } from './use-shell-connections';
@@ -1584,8 +1584,10 @@ function AppShellContent({
 
   // Composer mention popups: `/` uses Runtime's session/project-aware,
   // host-compatible projection; `@` uses workspace file search. Keep the
-  // resolved project path as a refresh key for new-chat project changes.
-  const { mentionSkills, mentionSkillsUnavailable, mentionSkillsLoading, searchMentionFiles } = useComposerMentions({
+  // resolved project path as a refresh key for new-chat project changes. Only
+  // the SURFACE is named here — the projection itself is owned by
+  // `ComposerMentionsProvider` below, so its reloads do not re-render the shell.
+  const composerMentionsSurface: ComposerMentionsSurface = {
     skillCatalogRevision: moduleHub.selectors.skillCatalogRevision,
     sessionId: activeId,
     projectPath: activeId ? projectInfo?.projectPath : taskEntry.selectors.projectPath,
@@ -1595,7 +1597,7 @@ function AppShellContent({
     // Refresh only; Desktop Main re-reads the authoritative default before
     // constructing the Runtime Host preview target.
     newSessionPermissionMode: newTaskPermissionMode,
-  });
+  };
 
   const hasModalOpen = helpOpen || paletteOpen || searchModalOpen;
   const shellObscured = hasModalOpen || settingsOpen;
@@ -1628,10 +1630,6 @@ function AppShellContent({
     authoritativeSessionIds: authoritativeSessionIds ?? undefined,
     shellObscured,
     modelChoices: chatModelChoices,
-    mentionSkills,
-    mentionSkillsUnavailable,
-    mentionSkillsLoading,
-    searchMentionFiles,
     reportError: reportWorkbarError,
   });
 
@@ -2654,6 +2652,10 @@ function AppShellContent({
         : 'im_hub';
 
   return (
+    // Wraps the whole frame rather than each composer, so one projection serves
+    // the main composer and every side-chat panel. Left un-indented on purpose:
+    // re-indenting 500 lines of JSX would bury the change that matters.
+    <ComposerMentionsProvider {...composerMentionsSurface}>
     <div
       className="appFrame agents-layout-root"
       data-agents-page
@@ -2901,11 +2903,7 @@ function AppShellContent({
                         }
                       : undefined
                   }
-                  mentionSkills={mentionSkills}
-                  mentionSkillsUnavailable={mentionSkillsUnavailable}
-                  mentionSkillsLoading={mentionSkillsLoading}
                   slashCommands={desktopSlashCommands}
-                  onSearchMentionFiles={searchMentionFiles}
                   pendingAttachments={pendingAttachments}
                   onRemoveAttachment={removeAttachment}
                   pendingQuotes={pendingQuotes}
@@ -3219,5 +3217,6 @@ function AppShellContent({
         onSelectedRuntimeHostProfileIdChange={setSettingsDiagnosticProfileId}
       />
     </div>
+    </ComposerMentionsProvider>
   );
 }

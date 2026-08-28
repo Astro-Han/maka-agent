@@ -81,7 +81,6 @@ const ALLOWED = {
   useAppShellTurnPresentation: 1,
   useCommandPalette: 1,
   useComposerAttachments: 1,
-  useComposerMentions: 1,
   useEffect: 14,
   useGoalController: 1,
   useKeyboardHelp: 1,
