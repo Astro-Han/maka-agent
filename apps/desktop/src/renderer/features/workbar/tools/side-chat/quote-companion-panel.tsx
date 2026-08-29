@@ -34,7 +34,7 @@ import {
 import type { SessionSummary } from '@maka/core/session';
 import { useQuoteCompanion } from './use-quote-companion';
 import { useComposerAttachments } from '../../../../use-composer-attachments';
-import { useComposerMentionsContext } from '../../../../composer-mentions';
+import { useComposerMentionsContext } from '../../../../composer-mentions.js';
 import { preflightAttachmentItems } from '../../../../attachment-preflight';
 import { toComposerIngestItems } from '../../../../composer-attachments';
 import { getDesktopConversationCopy } from '../../../../locales/conversation-copy.js';
@@ -266,11 +266,11 @@ export function QuoteCompanionPanel(props: {
               onAttachFilePaths={attachFilePaths}
               pendingAttachments={pendingAttachments}
               onRemoveAttachment={removeAttachment}
-              mentionSkills={mentions.mentionSkills}
-              onSearchMentionFiles={mentions.searchMentionFiles}
+              mentionSkills={mentions?.mentionSkills}
+              onSearchMentionFiles={mentions?.searchMentionFiles}
               pendingQuotes={props.quotes.map((quote) => quote.value)}
-              mentionSkillsUnavailable={mentions.mentionSkillsUnavailable}
-              mentionSkillsLoading={mentions.mentionSkillsLoading}
+              mentionSkillsUnavailable={mentions?.mentionSkillsUnavailable}
+              mentionSkillsLoading={mentions?.mentionSkillsLoading}
               contextDrawerDefaultCollapsed
               showStaticModelUnavailableStatus={false}
               onRemoveQuote={(index) => {

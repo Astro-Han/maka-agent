@@ -20,7 +20,7 @@
 import { useLayoutEffect, useRef, type ComponentProps, type RefObject } from 'react';
 import { Button, Composer, SandboxBoundaryPrompt, UserQuestionPrompt, Banner } from '@maka/ui';
 import type { ComposerHandle, ComposerInteraction } from '@maka/ui';
-import { useComposerMentionsContext } from './composer-mentions';
+import { useComposerMentionsContext } from './composer-mentions.js';
 import {
   readNewTaskReloadDraft,
   readNewTaskReloadIntent,
@@ -217,10 +217,10 @@ export function ChatComposerRegion({
       <Composer
         ref={composerRef}
         {...composerRest}
-        mentionSkills={mentions.mentionSkills}
-        mentionSkillsUnavailable={mentions.mentionSkillsUnavailable}
-        mentionSkillsLoading={mentions.mentionSkillsLoading}
-        onSearchMentionFiles={mentions.searchMentionFiles}
+        mentionSkills={mentions?.mentionSkills}
+        mentionSkillsUnavailable={mentions?.mentionSkillsUnavailable}
+        mentionSkillsLoading={mentions?.mentionSkillsLoading}
+        onSearchMentionFiles={mentions?.searchMentionFiles}
         hidden={!active || onboardingComposerHidden || Boolean(activeInteraction)}
         draftKey={activeId ?? newTaskDraftKey}
         draftPersistence={newTaskDraftPersistence}

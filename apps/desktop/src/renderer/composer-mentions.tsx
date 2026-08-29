@@ -122,7 +122,7 @@ function useComposerMentions(options: ComposerMentionsSurface): ComposerMentions
     loading: boolean;
     settled?: 'empty' | 'populated';
     skills: InvocableSkillEntry[];
-  }>({ contextKey, loading: true, skills: [] });
+  }>({ contextKey, loading: true, skills: EMPTY_SKILLS });
   const liveCatalog = catalog.contextKey === contextKey
     ? catalog
     : { contextKey, loading: true, settled: undefined, skills: EMPTY_SKILLS };
@@ -145,7 +145,7 @@ function useComposerMentions(options: ComposerMentionsSurface): ComposerMentions
             { ...previous, loading: true }
           : // A context switch has nothing settled to hold, and its Skills
             // belong to the surface being left behind.
-            { contextKey, loading: true, settled: undefined, skills: [] },
+            { contextKey, loading: true, settled: undefined, skills: EMPTY_SKILLS },
       );
       const context = {
         ...(newSessionModel ?? {}),
@@ -180,7 +180,7 @@ function useComposerMentions(options: ComposerMentionsSurface): ComposerMentions
           // Fail soft: an unavailable projection leaves `/` with no suggestions.
           // Direct `/skill:<id>` input still reaches the same Runtime resolver.
           if (cancelled || version !== requestVersion) return;
-          setCatalog({ contextKey, loading: false, settled: 'empty', skills: [] });
+          setCatalog({ contextKey, loading: false, settled: 'empty', skills: EMPTY_SKILLS });
         },
       );
     };
@@ -250,15 +250,15 @@ function useComposerMentions(options: ComposerMentionsSurface): ComposerMentions
   };
 }
 
-/** No provider — a composer rendered outside the shell simply has no popups. */
-const NO_MENTIONS: ComposerMentions = {
-  mentionSkills: EMPTY_SKILLS,
-  mentionSkillsUnavailable: false,
-  mentionSkillsLoading: false,
-  searchMentionFiles: async () => [],
-};
-
-const ComposerMentionsContext = createContext<ComposerMentions>(NO_MENTIONS);
+/**
+ * Undefined, not an empty projection. A composer rendered outside the shell —
+ * the draft-handoff suite mounts `ChatComposerRegion` on its own — must see
+ * exactly what it saw when these arrived as optional props: nothing. Standing
+ * in an empty catalog instead flips `onSearchMentionFiles` from absent to
+ * present, and the Composer mounts the mention popup's layer for a surface
+ * that has no catalog behind it.
+ */
+const ComposerMentionsContext = createContext<ComposerMentions | undefined>(undefined);
 
 /**
  * Publishes the mention projection to whichever composers are on screen.
@@ -274,19 +274,28 @@ export function ComposerMentionsProvider({
   children,
   ...surface
 }: ComposerMentionsSurface & { children: ReactNode }) {
-  const mentions = useComposerMentions(surface);
+  const {
+    mentionSkills,
+    mentionSkillsUnavailable,
+    mentionSkillsLoading,
+    searchMentionFiles,
+  } = useComposerMentions(surface);
+  // Destructured so the dependencies ARE the materials. Memoizing the returned
+  // object against a hand-listed mirror of its fields reads the same until a
+  // fifth field is added and not mirrored — then consumers keep a wholly stale
+  // value, and no lint rule can see it.
   const value = useMemo(
-    () => mentions,
-    [
-      mentions.mentionSkills,
-      mentions.mentionSkillsUnavailable,
-      mentions.mentionSkillsLoading,
-      mentions.searchMentionFiles,
-    ],
+    () => ({
+      mentionSkills,
+      mentionSkillsUnavailable,
+      mentionSkillsLoading,
+      searchMentionFiles,
+    }),
+    [mentionSkills, mentionSkillsUnavailable, mentionSkillsLoading, searchMentionFiles],
   );
   return <ComposerMentionsContext.Provider value={value}>{children}</ComposerMentionsContext.Provider>;
 }
 
-export function useComposerMentionsContext(): ComposerMentions {
+export function useComposerMentionsContext(): ComposerMentions | undefined {
   return useContext(ComposerMentionsContext);
 }

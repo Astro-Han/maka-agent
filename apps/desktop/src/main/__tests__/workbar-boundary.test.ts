@@ -163,14 +163,20 @@ describe('Workbar feature boundary', () => {
       ),
       true,
     );
+    // The catalog reaches the panel through ComposerMentionsProvider rather
+    // than through props (#4109), so what this guards is the context read, not
+    // the prop names. Both facets still have to arrive together: a panel that
+    // showed the skills without their loading verdict would advertise a
+    // catalog it cannot honour.
+    assert.equal(quotePanel.includes('useComposerMentionsContext()'), true);
     assert.equal(
       quotePanel.includes(
-        'mentionSkillsUnavailable={props.mentionSkillsUnavailable}',
+        'mentionSkillsUnavailable={mentions?.mentionSkillsUnavailable}',
       ),
       true,
     );
     assert.equal(
-      quotePanel.includes('mentionSkillsLoading={props.mentionSkillsLoading}'),
+      quotePanel.includes('mentionSkillsLoading={mentions?.mentionSkillsLoading}'),
       true,
     );
   });

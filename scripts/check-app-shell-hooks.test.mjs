@@ -18,65 +18,169 @@
  */
 
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  ALLOWED,
   compareToInventory,
   countHooks,
-  readRenderBody,
+  findComponentBody,
   stripNonCode,
 } from './check-app-shell-hooks.mjs';
 
-const SHELL = [
-  'export function AppShell() {',
-  '  return <AppShellContent />;',
-  '}',
-  '',
-  'function AppShellContent({ prop }: Props) {',
-  '  const [value, setValue] = useState(0);',
-  '  const derived = useMemo(() => value, [value]);',
-  '  const chat = useShellChatModel({ value });',
-  '  return <div>{derived}</div>;',
-  '}',
-  '',
-  'function AfterTheShell() {',
-  '  useSomethingElse();',
-  '}',
-  '',
-].join('\n');
+/** Counts hooks the way the gate does: blank first, then delimit, then match. */
+function countIn(source, component) {
+  const body = findComponentBody(stripNonCode(source), component);
+  return body === null ? null : countHooks(body);
+}
 
-test('the render body stops at the component that follows it', () => {
-  const body = readRenderBody(SHELL, 'AppShellContent');
-  assert.match(body, /useShellChatModel/);
-  assert.doesNotMatch(body, /useSomethingElse/);
-  assert.doesNotMatch(body, /AppShell\(\)/);
+const SHELL = `
+export function AppShell() {
+  const [locale, setLocale] = useState<UiLocalePreference>('auto');
+  useSystemUiLocale();
+  return <AppShellContent />;
+}
+
+function AppShellContent({ prop }: Props) {
+  const [value, setValue] = useState(0);
+  const derived = useMemo(() => value, [value]);
+  const chat = useShellChatModel({ value });
+  return <div>{derived}</div>;
+}
+
+function AfterTheShell() {
+  useSomethingElse();
+}
+`;
+
+test('each shell component is delimited by its own braces', () => {
+  assert.deepEqual(countIn(SHELL, 'AppShellContent'), {
+    useState: 1,
+    useShellChatModel: 1,
+  });
+  assert.deepEqual(countIn(SHELL, 'AppShell'), {
+    useState: 1,
+    useSystemUiLocale: 1,
+  });
+});
+
+test('a destructured parameter is not mistaken for the body', () => {
+  // `function C({ a, b }: Props) {` opens a brace before the body does.
+  const source = 'function C({ a, b }: Props) {\n  useToast();\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
 });
 
 test('an unknown component is reported rather than guessed at', () => {
-  assert.equal(readRenderBody(SHELL, 'NoSuchComponent'), null);
+  assert.equal(findComponentBody(stripNonCode(SHELL), 'NoSuchComponent'), null);
+});
+
+test('an arrow component is found too, so a refactor cannot silence the gate', () => {
+  const source = 'const C = ({ a }: Props) => {\n  useToast();\n};\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('an exported declaration is found', () => {
+  const source = 'export function C() {\n  useToast();\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('a brace in column zero does not end the body early', () => {
+  // Formatting can leave a closing brace at column zero inside a body; the old
+  // `\n}\n` delimiter stopped there and silently dropped every later hook.
+  const source = [
+    'function C() {',
+    '  const style = {',
+    '  a: 1,',
+    '};',
+    '  useToast();',
+    '}',
+    '',
+  ].join('\n');
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('an explicit type argument is still a call site', () => {
+  // The gate under-counted 12 real call sites in app-shell.tsx by requiring a
+  // `(` directly after the name.
+  const source = [
+    'function C() {',
+    '  const [a, setA] = useState<string | null>(null);',
+    '  const b = useNewTaskChoice<ChatDefaultPermissionMode>(key);',
+    '  const c = useSessionSettingIntent<Record<string, number>>({});',
+    '}',
+    '',
+  ].join('\n');
+  assert.deepEqual(countIn(source, 'C'), {
+    useState: 1,
+    useNewTaskChoice: 1,
+    useSessionSettingIntent: 1,
+  });
+});
+
+test('a member call is not a hook', () => {
+  const source =
+    'function C() {\n  copy.useSkillPrompt(name);\n  React.useState(0);\n  useToast();\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('a type position is not a call site', () => {
+  const source =
+    'function C() {\n  const x: ReturnType<typeof useShellSearch> = y;\n  useToast();\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('a call split across lines is still a call site', () => {
+  const source = 'function C() {\n  const x = useToast\n    ({});\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
 });
 
 test('prose naming a hook is not a call site', () => {
-  const body = [
-    '// The model itself lives in useShellChatModel (a pure derivation).',
-    '/* See useGoalController () for the other half. */',
-    "const label = 'useToast ()';",
-    '  const chat = useShellChatModel({});',
+  const source = [
+    'function C() {',
+    '  // The model lives in useShellChatModel (a pure derivation).',
+    '  /* See useGoalController () for the other half. */',
+    "  const label = 'useToast ()';",
+    '  useSettingsModal({});',
+    '}',
+    '',
   ].join('\n');
-  assert.deepEqual(countHooks(body), { useShellChatModel: 1 });
+  assert.deepEqual(countIn(source, 'C'), { useSettingsModal: 1 });
 });
 
-test('an escaped quote does not swallow the rest of the file', () => {
-  const body = ["const label = 'it\\'s here';", 'useToast();'].join('\n');
-  assert.deepEqual(countHooks(body), { useToast: 1 });
+test('an apostrophe in JSX text does not swallow the rest of the body', () => {
+  const source = "function C() {\n  const t = <span>don't</span>;\n  useToast();\n}\n";
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('a regex literal containing a quote does not swallow the rest of the body', () => {
+  const source = 'function C() {\n  const re = /[\'"]/g;\n  useToast();\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('a JSX closing tag is not the start of a regex literal', () => {
+  const source = 'function C() {\n  const t = <div></div>;\n  useToast();\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
+});
+
+test('an escaped quote does not swallow the rest of the body', () => {
+  const source = "function C() {\n  const label = 'it\\'s here';\n  useToast();\n}\n";
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
 });
 
 test('a URL is not mistaken for a line comment', () => {
   assert.match(stripNonCode('const url = ok; // https://example.com\nuseToast();'), /useToast/);
 });
 
+test('blanking preserves offsets, so a body keeps its shape', () => {
+  const source = "const a = 'xxxx'; // yyyy\nuseToast();\n";
+  assert.equal(stripNonCode(source).length, source.length);
+  assert.equal(stripNonCode(source).split('\n').length, source.split('\n').length);
+});
+
 test('purely derived hooks do not widen a scope, so they are not counted', () => {
-  const counts = countHooks(readRenderBody(SHELL, 'AppShellContent'));
-  assert.deepEqual(counts, { useState: 1, useShellChatModel: 1 });
+  const source =
+    'function C() {\n  useMemo(() => 1, []);\n  useCallback(() => {}, []);\n  useRef(null);\n  useId();\n  useToast();\n}\n';
+  assert.deepEqual(countIn(source, 'C'), { useToast: 1 });
 });
 
 test('a new hook in the render body fails the gate', () => {
@@ -95,13 +199,33 @@ test('a migrated hook fails until its entry is deleted, so the gate converges', 
 });
 
 test('the committed inventory matches the shell as it stands', async () => {
-  const { readFile } = await import('node:fs/promises');
   const source = await readFile(
     new URL('../apps/desktop/src/renderer/app-shell.tsx', import.meta.url),
     'utf8',
   );
-  const body = readRenderBody(source, 'AppShellContent');
-  assert.notEqual(body, null, 'AppShellContent must still be a top-level function declaration');
-  const { added, grown, stale } = compareToInventory(countHooks(body));
-  assert.deepEqual({ added, grown, stale }, { added: [], grown: [], stale: [] });
+  const blanked = stripNonCode(source);
+  for (const [component, allowed] of Object.entries(ALLOWED)) {
+    const body = findComponentBody(blanked, component);
+    assert.notEqual(body, null, `${component} must still be a top-level component`);
+    assert.deepEqual(compareToInventory(countHooks(body), allowed), {
+      added: [],
+      grown: [],
+      stale: [],
+    });
+  }
+});
+
+test('the shell body is delimited to something plausible, not to the whole file', async () => {
+  // A delimiter that ran to end-of-file would still satisfy the inventory while
+  // silently counting whatever follows the component.
+  const source = await readFile(
+    new URL('../apps/desktop/src/renderer/app-shell.tsx', import.meta.url),
+    'utf8',
+  );
+  const blanked = stripNonCode(source);
+  const outer = findComponentBody(blanked, 'AppShell');
+  const inner = findComponentBody(blanked, 'AppShellContent');
+  assert.ok(outer.length < inner.length, 'the wrapper is far smaller than the content');
+  assert.ok(inner.length < blanked.length, 'the content body is not the entire file');
+  assert.doesNotMatch(outer, /useShellChatModel/, 'the wrapper must not absorb the content');
 });

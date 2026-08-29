@@ -19,14 +19,14 @@
  */
 
 /**
- * Convergence gate for #4109: which hooks are still called in the render body
- * of `AppShellContent`.
+ * Convergence gate for #4109: which hooks are still called in the render bodies
+ * of the shell components that sit above the whole tree.
  *
- * In React the position in the tree IS the scope of the state. A hook called
- * in the shell's render body has the whole tree as its scope; the same hook
- * called in a provider has its readers as its scope. `AppShellContent` today
- * carries 536 hooks above the entire tree, so a session switch produces ~19
- * commits, ~14 of them full-tree renders, of which 96-99% is recoverable work.
+ * In React the position in the tree IS the scope of the state. A hook called in
+ * the shell's render body has the whole tree as its scope; the same hook called
+ * in a provider has its readers as its scope. `AppShellContent` today carries
+ * 536 hooks above the entire tree, so a session switch produces ~19 commits,
+ * ~14 of them full-tree renders, of which 96-99% is recoverable work.
  *
  * The fix is to move call sites, one feature at a time. That is slow, and a
  * checklist cannot tell whether it is progressing — extracting a feature into
@@ -35,13 +35,46 @@
  * controller is still invoked from this render body.
  *
  * A call site does have a definition of done, so this gate counts them. The
- * inventory below is an upper bound that may only shrink: a migration deletes
- * an entry and its own diff shows the gate converging. Adding a hook here is
- * not forbidden, but it cannot be done silently.
+ * inventory below is EXACT, not a ceiling: growing past an entry fails, and so
+ * does falling below one. Only failing on growth would let the counts drift
+ * quietly downward and record no progress, which is the one thing this gate
+ * exists to make visible. The cost is real — a change that removes an effect
+ * has to edit this file — and that edit IS the record.
  *
- * Deliberately NOT a `--write` mode. Regenerating the inventory on demand
- * would let a new hook be accepted by rerunning a command, and the friction of
- * editing it by hand is the point.
+ * Deliberately NOT a `--write` mode. Regenerating the inventory on demand would
+ * let a new hook be accepted by rerunning a command, and the friction of
+ * editing it by hand is the point. This is the opposite shape from
+ * `check-astryx-surface-inventory.mjs`, whose invariant is "regenerate and
+ * compare bytes, never a hand-written list". That is right for an inventory
+ * that only has to describe the tree; this one has to RESIST it.
+ *
+ * Two shapes of migration, because the failure message cannot tell them apart:
+ * when nothing in the shell body reads the feature, the call site moves into a
+ * provider and React bails out of `children` (the mention catalog, #4109) — the
+ * entry disappears. When the shell body DOES read it, moving the call site
+ * still leaves a selector read behind, and the honest outcome is a smaller
+ * entry rather than none. "Call it from the provider" is not advice to follow
+ * blindly: cross-feature intent the shell issues must stay an explicit command,
+ * never an implicit subscription bought to lower a number.
+ *
+ * The count is unweighted, so it measures migration progress and not render
+ * cost: a subscription that fires five times per session switch and a hook that
+ * runs once at mount both count as one. Falling counts do not by themselves
+ * demonstrate a faster switch.
+ *
+ * Both `AppShell` and `AppShellContent` are counted. `AppShell` wraps the
+ * content in the root providers, so a hook hoisted one level up has if anything
+ * a WIDER scope — an inventory that watched only the inner component would
+ * accept that move as progress.
+ *
+ * The counting is textual, because TypeScript 7 exposes no stable parser to
+ * JavaScript (only `typescript/unstable/*`), and a gate that goes red whenever
+ * a dependency moves is its own kind of noise. Textual counting is therefore
+ * written to fail closed: `stripNonCode` blanks comments, strings and regex
+ * literals in place, the body is delimited by brace balancing over that blanked
+ * text rather than by a `\n}\n` guess, and a hook name is only counted where a
+ * call actually follows it — including through an explicit type argument, which
+ * an earlier version of this gate silently skipped over.
  *
  * Purely derived hooks (`useMemo`, `useCallback`, `useRef`, `useId`) are
  * ignored: they hold no state and subscribe to nothing, so they cannot widen
@@ -57,109 +90,233 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = join(fileURLToPath(new URL('..', import.meta.url)));
 const shellFile = 'apps/desktop/src/renderer/app-shell.tsx';
-const component = 'AppShellContent';
 
 /** Hooks that hold no state and subscribe to nothing. */
 const DERIVED_HOOKS = new Set(['useMemo', 'useCallback', 'useRef', 'useId']);
 
 /**
- * Hooks still called in `AppShellContent`'s render body, with the number of
+ * Hooks still called in each shell component's render body, with the number of
  * call sites. This inventory may only shrink. Each entry is one scope that is
  * still the whole tree rather than its readers.
  */
-const ALLOWED = {
-  useActiveExecutionBoundary: 1,
-  useActiveSessionEvents: 1,
-  useAppShellBootstrapSubscriptions: 1,
-  useAppShellComposerQuotes: 1,
-  useAppShellHostEffects: 1,
-  useAppShellNavRefSync: 1,
-  useAppShellPersistenceEffects: 1,
-  useAppShellProjectContext: 1,
-  useAppShellSessionUiReads: 1,
-  useAppShellSessionWorkspace: 1,
-  useAppShellTurnPresentation: 1,
-  useCommandPalette: 1,
-  useComposerAttachments: 1,
-  useEffect: 14,
-  useGoalController: 1,
-  useKeyboardHelp: 1,
-  useKeyedPendingRegistry: 3,
-  useLayoutEffect: 2,
-  useModuleHubController: 1,
-  useOnboardingSnapshot: 1,
-  usePlanModeState: 1,
-  useSessionEventHealthPolling: 1,
-  useSessionNavigationController: 1,
-  useSettingsModal: 1,
-  useShellAppearance: 1,
-  useShellChatModel: 1,
-  useShellConnections: 3,
-  useShellLiveTurn: 1,
-  useShellMemoryPill: 1,
-  useShellResume: 1,
-  useShellRunUpdates: 1,
-  useShellSearch: 1,
-  useSkillPrompt: 1,
-  useStableActions: 7,
-  useState: 7,
-  useTaskEntryController: 1,
-  useTaskSubmissionReadiness: 1,
-  useToast: 1,
-  useWorkbarController: 1,
+export const ALLOWED = {
+  AppShell: {
+    useState: 2,
+    useSystemUiLocale: 1,
+  },
+  AppShellContent: {
+    useActiveExecutionBoundary: 1,
+    useActiveSessionEvents: 1,
+    useAppShellBootstrapSubscriptions: 1,
+    useAppShellComposerQuotes: 1,
+    useAppShellHostEffects: 1,
+    useAppShellNavRefSync: 1,
+    useAppShellPersistenceEffects: 1,
+    useAppShellProjectContext: 1,
+    useAppShellSessionUiReads: 1,
+    useAppShellSessionWorkspace: 1,
+    useAppShellTurnPresentation: 1,
+    useCommandPalette: 1,
+    useComposerAttachments: 1,
+    useEffect: 14,
+    useGoalController: 1,
+    useKeyboardHelp: 1,
+    useKeyedPendingRegistry: 3,
+    useLayoutEffect: 2,
+    useModuleHubController: 1,
+    useNewTaskChoice: 1,
+    useOnboardingSnapshot: 1,
+    usePlanModeState: 1,
+    useSessionEventHealthPolling: 1,
+    useSessionNavigationController: 1,
+    useSessionSettingIntent: 2,
+    useSettingsModal: 1,
+    useShellAppearance: 1,
+    useShellChatModel: 1,
+    useShellConnections: 3,
+    useShellLiveTurn: 1,
+    useShellMemoryPill: 1,
+    useShellResume: 1,
+    useShellRunUpdates: 1,
+    useShellSearch: 1,
+    useStableActions: 7,
+    useState: 16,
+    useTaskEntryController: 1,
+    useTaskSubmissionReadiness: 1,
+    useToast: 1,
+    useWorkbarController: 1,
+  },
 };
 
 /**
- * The render body of a top-level function declaration. Its closing brace is
- * the first `}` in column zero after the declaration, which is cheaper and
- * more predictable here than balancing braces through TSX and template
- * literals.
+ * After these, a `/` opens a regex literal; anywhere else it is division.
+ *
+ * `<` and `>` are deliberately absent. They would qualify in expression
+ * position, but in TSX they are far more often a tag: treating the `/` of
+ * `</div>` as the start of a regex swallows everything up to the next slash,
+ * which is exactly the silent under-count this gate must not have.
  */
-export function readRenderBody(source, componentName) {
-  const start = source.indexOf(`\nfunction ${componentName}(`);
-  if (start === -1) return null;
-  const end = source.indexOf('\n}\n', start);
-  return end === -1 ? null : source.slice(start, end);
-}
+const REGEX_MAY_FOLLOW = new Set([
+  '(',
+  ',',
+  '=',
+  ':',
+  '[',
+  '!',
+  '&',
+  '|',
+  '?',
+  '{',
+  '}',
+  ';',
+  '+',
+  '-',
+  '*',
+  '%',
+  '^',
+  '~',
+  '\n',
+]);
 
 /**
- * Blanks out comments and string bodies, so that prose naming a hook — which
- * the shell's comments do, at length — is not counted as a call site. Lengths
- * are preserved only incidentally; nothing downstream reads offsets.
+ * Blanks comments, string bodies and regex literals, replacing each with spaces
+ * so that offsets and line numbers still line up with the original.
+ *
+ * Prose naming a hook is not a call site, and the shell's comments name hooks
+ * at length. The two cases worth spelling out are the ones that break a naive
+ * scanner: an apostrophe in JSX text (`<span>don't</span>`) is not a string
+ * delimiter, and a regex literal may contain quotes (`/['"]/`) that would
+ * otherwise swallow the rest of the file. Both would UNDER-count, which is the
+ * dangerous direction for a gate whose only product is a number.
  */
 export function stripNonCode(source) {
-  let out = '';
+  const out = [...source];
   let index = 0;
+  let lastMeaningful = '\n';
+  const blank = (from, to) => {
+    for (let i = from; i < to && i < out.length; i += 1) {
+      if (out[i] !== '\n') out[i] = ' ';
+    }
+  };
   while (index < source.length) {
     const char = source[index];
     const next = source[index + 1];
     if (char === '/' && next === '/') {
       const end = source.indexOf('\n', index);
-      index = end === -1 ? source.length : end;
+      const stop = end === -1 ? source.length : end;
+      blank(index, stop);
+      index = stop;
       continue;
     }
     if (char === '/' && next === '*') {
       const end = source.indexOf('*/', index + 2);
-      index = end === -1 ? source.length : end + 2;
+      const stop = end === -1 ? source.length : end + 2;
+      blank(index, stop);
+      index = stop;
       continue;
+    }
+    if (char === '/' && REGEX_MAY_FOLLOW.has(lastMeaningful)) {
+      let scan = index + 1;
+      let inClass = false;
+      while (scan < source.length) {
+        const c = source[scan];
+        if (c === '\\') scan += 2;
+        else if (c === '[') (inClass = true), (scan += 1);
+        else if (c === ']') (inClass = false), (scan += 1);
+        else if (c === '\n') break;
+        else if (c === '/' && !inClass) break;
+        else scan += 1;
+      }
+      // An unterminated candidate was division after all; leave it alone.
+      if (scan < source.length && source[scan] === '/') {
+        blank(index, scan + 1);
+        lastMeaningful = '/';
+        index = scan + 1;
+        continue;
+      }
     }
     if (char === "'" || char === '"' || char === '`') {
-      index += 1;
-      while (index < source.length && source[index] !== char) {
-        index += source[index] === '\\' ? 2 : 1;
+      // In JSX text an apostrophe follows a word or a closing bracket, and no
+      // JavaScript expression can put a string literal there.
+      if (char === "'" && /[A-Za-z0-9_$>)\]}]/.test(lastMeaningful)) {
+        lastMeaningful = char;
+        index += 1;
+        continue;
       }
-      index += 1;
+      let scan = index + 1;
+      while (scan < source.length && source[scan] !== char) {
+        scan += source[scan] === '\\' ? 2 : 1;
+      }
+      blank(index + 1, scan);
+      lastMeaningful = char;
+      index = Math.min(scan + 1, source.length);
       continue;
     }
-    out += char;
+    if (!/\s/.test(char) || char === '\n') lastMeaningful = char;
     index += 1;
   }
-  return out;
+  return out.join('');
 }
+
+/**
+ * The body of a top-level component, delimited by brace balancing over text
+ * whose strings and comments are already blanked. A `\n}\n` guess would stop at
+ * the first brace that formatting happened to put in column zero.
+ */
+export function findComponentBody(blanked, name) {
+  const declaration = new RegExp(
+    String.raw`^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+${name}\b|^(?:export\s+)?(?:default\s+)?const\s+${name}\s*(?::[^=]+)?=`,
+    'm',
+  );
+  const match = declaration.exec(blanked);
+  if (match === null) return null;
+  // Skip the parameter list. `function AppShellContent({ ... })` opens a brace
+  // for its destructured parameter, and balancing from there returns the
+  // parameter object rather than the body.
+  const paren = blanked.indexOf('(', match.index);
+  if (paren === -1) return null;
+  let parens = 0;
+  let afterParams = -1;
+  for (let i = paren; i < blanked.length; i += 1) {
+    if (blanked[i] === '(') parens += 1;
+    else if (blanked[i] === ')') {
+      parens -= 1;
+      if (parens === 0) {
+        afterParams = i + 1;
+        break;
+      }
+    }
+  }
+  if (afterParams === -1) return null;
+  const open = blanked.indexOf('{', afterParams);
+  if (open === -1) return null;
+  let depth = 0;
+  for (let i = open; i < blanked.length; i += 1) {
+    if (blanked[i] === '{') depth += 1;
+    else if (blanked[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return blanked.slice(open, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * `useX(`, `useX<T>(` and `useX\n  (` all call a hook; `obj.useX(` and
+ * `ReturnType<typeof useX>` do not.
+ */
+// One level of nesting is enough for `useX<Record<string, number>>(...)`;
+// deeper generics in a hook call do not occur here and would only cost a
+// miscount in the safe direction (a failure, not a silent pass).
+const TYPE_ARGUMENTS = String.raw`<(?:[^<>()]|<[^<>()]*>)*>`;
+const HOOK_CALL = new RegExp(
+  String.raw`(?<![.\w$])use[A-Z][A-Za-z0-9]*(?=\s*(?:${TYPE_ARGUMENTS}\s*)?\()`,
+  'g',
+);
 
 export function countHooks(body) {
   const counts = {};
-  for (const match of stripNonCode(body).matchAll(/\buse[A-Z][A-Za-z0-9]*(?=\s*\()/g)) {
+  for (const match of body.matchAll(HOOK_CALL)) {
     const name = match[0];
     if (DERIVED_HOOKS.has(name)) continue;
     counts[name] = (counts[name] ?? 0) + 1;
@@ -167,7 +324,7 @@ export function countHooks(body) {
   return counts;
 }
 
-export function compareToInventory(counts, allowed = ALLOWED) {
+export function compareToInventory(counts, allowed) {
   const added = [];
   const grown = [];
   const stale = [];
@@ -184,43 +341,56 @@ export function compareToInventory(counts, allowed = ALLOWED) {
 }
 
 function main() {
-  const source = readFileSync(join(root, shellFile), 'utf8');
-  const body = readRenderBody(source, component);
-  if (body === null) {
-    console.error(`${shellFile}: could not find the render body of ${component}`);
-    process.exit(1);
+  const blanked = stripNonCode(readFileSync(join(root, shellFile), 'utf8'));
+  const failures = [];
+  let hooks = 0;
+  let callSites = 0;
+
+  for (const [component, allowed] of Object.entries(ALLOWED)) {
+    const body = findComponentBody(blanked, component);
+    if (body === null) {
+      console.error(`${shellFile}: could not find the render body of ${component}`);
+      process.exit(1);
+    }
+
+    const counts = countHooks(body);
+    hooks += Object.keys(counts).length;
+    callSites += Object.values(counts).reduce((sum, n) => sum + n, 0);
+    const { added, grown, stale } = compareToInventory(counts, allowed);
+
+    for (const name of added) {
+      failures.push(
+        `${shellFile}: ${name} is a new hook in ${component}'s render body.\n` +
+          '  Its state would be scoped to the whole tree. Call it from the feature\n' +
+          '  provider instead; add it to the inventory only if it genuinely belongs\n' +
+          '  to the shell, and say why in the pull request (#4109).',
+      );
+    }
+    for (const { name, budget, count } of grown) {
+      failures.push(
+        `${shellFile}: ${name} has ${count} call sites in ${component}, inventory allows ${budget}.`,
+      );
+    }
+    for (const { name, budget, count } of stale) {
+      // Deliberately not phrased as an instruction to lower the number. A drop
+      // is usually a migration, but it is also what a mis-count looks like, and
+      // a gate that tells you to shrink its own inventory can be talked into
+      // emptying itself.
+      failures.push(
+        `${shellFile}: ${name} has ${count} call sites in ${component}, inventory says ${budget}.\n` +
+          '  If a migration moved it, update the entry in scripts/check-app-shell-hooks.mjs.\n' +
+          '  If you did not move it, the gate is miscounting — fix the gate, not the number.',
+      );
+    }
   }
 
-  const counts = countHooks(body);
-  const { added, grown, stale } = compareToInventory(counts);
-  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
-
-  if (added.length === 0 && grown.length === 0 && stale.length === 0) {
+  if (failures.length === 0) {
     console.log(
-      `app-shell hook scope: ok (${Object.keys(counts).length} hooks, ${total} call sites in ${component})`,
+      `app-shell hook scope: ok (${hooks} hooks, ${callSites} call sites across ${Object.keys(ALLOWED).join(' + ')})`,
     );
     return;
   }
-
-  for (const name of added) {
-    console.error(
-      `${shellFile}: ${name} is a new hook in ${component}'s render body.\n` +
-        '  Its state would be scoped to the whole tree. Call it from the feature\n' +
-        '  provider instead; add it to the inventory only if it genuinely belongs\n' +
-        '  to the shell, and say why in the pull request (#4109).',
-    );
-  }
-  for (const { name, budget, count } of grown) {
-    console.error(
-      `${shellFile}: ${name} has ${count} call sites in ${component}, inventory allows ${budget}.`,
-    );
-  }
-  for (const { name, budget, count } of stale) {
-    console.error(
-      `${shellFile}: ${name} is down to ${count} call sites (inventory says ${budget}).\n` +
-        `  The gate converged — ${count === 0 ? 'delete its entry' : `lower it to ${count}`} in scripts/check-app-shell-hooks.mjs.`,
-    );
-  }
+  for (const failure of failures) console.error(failure);
   process.exit(1);
 }
 
