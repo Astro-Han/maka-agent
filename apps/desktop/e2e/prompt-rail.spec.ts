@@ -253,9 +253,11 @@ test('the first click of a session lands on its prompt and holds', async ({
   // Bounded on both sides: below is the turn never arriving, above is it
   // arriving and then being pulled off the top of the scrollport.
   await expect
-    .poll(async () => (await landing())?.offset, { message: 'the clicked prompt reaches the top' })
-    .toBeGreaterThan(-24);
-  expect((await landing())?.offset).toBeLessThan(24);
+    .poll(async () => {
+      const offset = (await landing())?.offset;
+      return offset === undefined ? Number.POSITIVE_INFINITY : Math.abs(offset);
+    }, { message: 'the clicked prompt reaches the top' })
+    .toBeLessThan(24);
   expect((await landing())?.tickIsCurrent).toBe(true);
 
   // And stays: turns keep resolving their content and remeasuring after the
