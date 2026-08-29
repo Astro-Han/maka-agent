@@ -348,6 +348,41 @@ test('keeps an oversized latest Turn visible after bootstrap eviction', async ()
   assert.equal(replica.snapshot().hasOlder, true);
 });
 
+test('keeps an oversized latest Turn visible before a trailing session note', async () => {
+  const latest = {
+    identity: 0,
+    message: assistantMessage('x'.repeat(DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES + 1), 'assistant-0'),
+  };
+  const trailingNote = {
+    identity: 1,
+    message: {
+      type: 'system_note' as const,
+      id: 'mode-change-1',
+      ts: 2,
+      kind: 'mode_change' as const,
+    },
+  };
+  const bootstrapPage = transcriptPage('older', null, trailingNote.identity);
+  const handle = runtimeHostSessionFixture({
+    snapshot: continuitySnapshot(),
+    transcript: Promise.resolve([]),
+    events: { async *[Symbol.asyncIterator]() {} },
+    transcriptBootstrap: {
+      throughSequence: trailingNote.identity,
+      overlayMessageCount: 0,
+      durable: bootstrapPage,
+      overlay: { ...bootstrapPage, source: 'overlay' },
+    },
+    loadTranscriptOverlay: async () => [],
+    decodeTranscriptPage: async () => ({ messages: [latest, trailingNote], nextCursor: null }),
+    async close() {},
+  });
+
+  const replica = await DesktopTranscriptReplica.prepare(handle);
+
+  assert.ok(replica.snapshot().durable.some(({ sequence }) => sequence === latest.identity));
+});
+
 test('keeps a bounded contiguous window while moving between history and the tail', async () => {
   const messages = [0, 1, 2, 3, 4].map((sequence) => ({
     identity: sequence,
@@ -559,6 +594,52 @@ test('keeps an oversized streaming Turn visible when its overlay settles', async
 
   const snapshot = replica.snapshot();
   assert.deepEqual(snapshot.durable.map(({ sequence }) => sequence), [latest.identity]);
+  assert.deepEqual(snapshot.overlay, []);
+});
+
+test('keeps an oversized settled Turn visible before a trailing session note', async () => {
+  const older = {
+    identity: 0,
+    message: { ...assistantMessage('older', 'assistant-0'), turnId: 'turn-0' },
+  };
+  const latest = {
+    identity: 1,
+    message: assistantMessage('x'.repeat(DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES + 1), 'assistant-1'),
+  };
+  const trailingNote = {
+    identity: 2,
+    message: {
+      type: 'system_note' as const,
+      id: 'mode-change-2',
+      ts: 3,
+      kind: 'mode_change' as const,
+    },
+  };
+  const bootstrapPage = transcriptPage('older', null, older.identity);
+  const newerPage = transcriptPage('newer', null, trailingNote.identity);
+  const handle = runtimeHostSessionFixture({
+    snapshot: continuitySnapshot(),
+    transcript: Promise.resolve([]),
+    events: { async *[Symbol.asyncIterator]() {} },
+    transcriptBootstrap: {
+      throughSequence: older.identity,
+      overlayMessageCount: 1,
+      durable: bootstrapPage,
+      overlay: { ...bootstrapPage, source: 'overlay' },
+    },
+    loadTranscriptOverlay: async () => [latest.message],
+    decodeTranscriptPage: async (page) => page === bootstrapPage
+      ? { messages: [older], nextCursor: null }
+      : { messages: [latest, trailingNote], nextCursor: null },
+    loadTranscriptPage: async () => newerPage,
+    async close() {},
+  });
+  const replica = await DesktopTranscriptReplica.prepare(handle);
+
+  await replica.advance(trailingNote.identity);
+
+  const snapshot = replica.snapshot();
+  assert.ok(snapshot.durable.some(({ sequence }) => sequence === latest.identity));
   assert.deepEqual(snapshot.overlay, []);
 });
 

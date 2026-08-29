@@ -140,7 +140,11 @@ export class DesktopTranscriptReplica {
         replica.#installDurable(durable.messages);
         replica.#hasOlder = durable.nextCursor !== null;
       });
-      replica.#evictToBudget(undefined, 'oldest', replica.#durableThrough ?? undefined);
+      replica.#evictToBudget(
+        undefined,
+        'oldest',
+        replica.#newestTurnSequence() ?? replica.#durableThrough ?? undefined,
+      );
       if (replica.#overlayBytes > replica.#maxOverlayBytes) {
         throw new RangeError('Desktop transcript overlay exceeds the session cache limit');
       }
@@ -425,7 +429,7 @@ export class DesktopTranscriptReplica {
           const evictedDurableSequences = this.#evictToBudget(
             undefined,
             'oldest',
-            decoded.messages.at(-1)?.identity,
+            this.#newestTurnSequence() ?? decoded.messages.at(-1)?.identity,
           );
           this.#publish(decoded.messages, completedOverlayMessageIds, evictedDurableSequences);
           cursor = decoded.nextCursor;
@@ -624,6 +628,15 @@ export class DesktopTranscriptReplica {
     return oldest;
   }
 
+  #newestTurnSequence(): number | undefined {
+    let newest: number | undefined;
+    for (const [sequence, entry] of this.#durable) {
+      if (messageTurnId(entry.message) === undefined) continue;
+      if (newest === undefined || sequence > newest) newest = sequence;
+    }
+    return newest;
+  }
+
   #clearDurable(): void {
     for (const entry of this.#durable.values()) this.#adjustResidentBytes(-entry.encodedBytes);
     this.#durable.clear();
@@ -700,8 +713,13 @@ function encodedMessageBytes(message: StoredMessage): number {
 }
 
 function residentTurnKey(entry: ResidentMessage): string {
-  const turnId = 'turnId' in entry.message ? entry.message.turnId : undefined;
-  return typeof turnId === 'string' ? `turn:${turnId}` : `sequence:${entry.sequence}`;
+  const turnId = messageTurnId(entry.message);
+  return turnId === undefined ? `sequence:${entry.sequence}` : `turn:${turnId}`;
+}
+
+function messageTurnId(message: StoredMessage): string | undefined {
+  const turnId = 'turnId' in message ? message.turnId : undefined;
+  return typeof turnId === 'string' ? turnId : undefined;
 }
 
 function correlationError(message: string): RuntimeHostSubscriptionError {
