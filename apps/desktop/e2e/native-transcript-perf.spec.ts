@@ -19,7 +19,7 @@
 
 import type { CDPSession, Page } from '@playwright/test';
 import { PROMPT_RAIL_PROMPT_COUNT } from '../src/main/e2e-fixture/seed-helpers';
-import { DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS } from '../src/preload/transcript-contract';
+import * as transcriptContract from '../src/preload/transcript-contract';
 import { ensureSidebarExpanded, expect, test } from './fixtures';
 
 const PERF_ENABLED = process.env.MAKA_TRANSCRIPT_PERF === '1';
@@ -316,7 +316,7 @@ test('600+ Turn repeated paging keeps the active range on a memory plateau', asy
       ...counters,
     };
     expect(sample.mountedTurns).toBeLessThanOrEqual(
-      DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
+      transcriptContract.DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
     );
     return sample;
   };
