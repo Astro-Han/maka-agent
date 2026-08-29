@@ -43,12 +43,11 @@
 import type { UiLocale } from '@maka/core/ui-locale';
 import { getConversationCopy } from './conversation-copy.js';
 
-/* `formatAbsoluteTimestamp` used to be a second copy of the same `Intl` options
-   `@maka/core/relative-time` already owned, and it built a formatter per call —
-   the sidebar renders one per row for the row tooltip and one for the row's
-   accessible name. Re-exported rather than reimplemented so the two readings of
-   a timestamp cannot drift apart. */
-export { formatAbsoluteTimestamp } from '@maka/core/relative-time';
+/* `formatAbsoluteTimestamp` used to live here as a second copy of the same
+   `Intl` options `@maka/core/relative-time` already owned, and it built a
+   formatter per call — the sidebar renders one per row for the row tooltip and
+   one for the row's accessible name. Its callers now read the core module
+   directly, so there is no second reading of a timestamp to keep in step. */
 
 /* `formatClockTime` (a 24-hour `HH:mm` for the user-message time) lived here
    until the meta row moved to Astryx's `Timestamp`. Locking the hour cycle was
