@@ -26,6 +26,7 @@ import {
   encodeDesktopTranscriptSnapshot,
 } from '../desktop-transcript-ipc.js';
 import {
+  DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
   DESKTOP_TRANSCRIPT_FRAGMENT_MAX_BYTES,
   DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES,
 } from '../../preload/transcript-contract.js';
@@ -206,10 +207,123 @@ test('drops stale transcript batches after a generation reset', () => {
   assert.deepEqual(store.snapshot().messages, [nextMessage]);
 });
 
+test('keeps unchanged message references stable across immutable range snapshots', () => {
+  const identity = {
+    sessionId: 'session-1',
+    generation: 'generation-1',
+    hostEpoch: 'host-1',
+  };
+  const firstMessage = userMessage('first', 'user-1');
+  const secondMessage = assistantMessage('second', 'assistant-2');
+  const store = transcriptStore();
+  for (const batch of encodeDesktopTranscriptSnapshot({
+    ...identity,
+    durableThrough: 1,
+    durable: [{ sequence: 1, message: firstMessage }],
+    overlay: [],
+    hasOlder: false,
+    hasNewer: false,
+  })) store.accept(batch);
+
+  const first = store.snapshot();
+  assert.strictEqual(store.snapshot(), first);
+  assert.ok(Object.isFrozen(first));
+  assert.ok(Object.isFrozen(first.messages));
+  assert.ok(Object.isFrozen(first.messages[0]));
+
+  for (const batch of encodeDesktopTranscriptChange(identity, {
+    durableThrough: 2,
+    durableUpserts: [{ sequence: 2, message: secondMessage }],
+    evictedDurableSequences: [],
+    completedOverlayMessageIds: [],
+    hasOlder: false,
+    hasNewer: false,
+  })) store.accept(batch);
+
+  const second = store.snapshot();
+  assert.notStrictEqual(second, first);
+  assert.strictEqual(second.messages[0], first.messages[0]);
+  assert.deepEqual(second.messages, [firstMessage, secondMessage]);
+});
+
+test('bounds the default active transcript range by Turn identities', async () => {
+  const messages = Array.from({ length: 200 }, (_, sequence) => ({
+    identity: sequence,
+    message: {
+      ...assistantMessage(String(sequence), `assistant-${sequence}`),
+      turnId: `turn-${sequence}`,
+    },
+  }));
+  const bootstrapPage = transcriptPage('older', null, messages.length - 1);
+  const handle = runtimeHostSessionFixture({
+    snapshot: continuitySnapshot(),
+    transcript: Promise.resolve([]),
+    events: { async *[Symbol.asyncIterator]() {} },
+    transcriptBootstrap: {
+      throughSequence: messages.length - 1,
+      overlayMessageCount: 0,
+      durable: bootstrapPage,
+      overlay: { ...transcriptPage('older', null, messages.length - 1), source: 'overlay' },
+    },
+    loadTranscriptOverlay: async () => [],
+    decodeTranscriptPage: async () => ({ messages, nextCursor: null }),
+    async close() {},
+  });
+
+  const replica = await DesktopTranscriptReplica.prepare(handle);
+
+  const snapshot = replica.snapshot();
+  assert.equal(
+    new Set(snapshot.durable.map(({ message }) => message.turnId)).size,
+    DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
+  );
+  assert.equal(
+    snapshot.durable[0]?.sequence,
+    messages.length - DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
+  );
+  assert.equal(snapshot.durable.at(-1)?.sequence, 199);
+  assert.equal(snapshot.hasOlder, true);
+  assert.equal(snapshot.hasNewer, false);
+});
+
+test('bounds the default active transcript range by presentation bytes', async () => {
+  const messages = syntheticLargeTranscript();
+  const bootstrapPage = transcriptPage('older', null, messages.length - 1);
+  const handle = runtimeHostSessionFixture({
+    snapshot: continuitySnapshot(),
+    transcript: Promise.resolve([]),
+    events: { async *[Symbol.asyncIterator]() {} },
+    transcriptBootstrap: {
+      throughSequence: messages.length - 1,
+      overlayMessageCount: 0,
+      durable: bootstrapPage,
+      overlay: { ...transcriptPage('older', null, messages.length - 1), source: 'overlay' },
+    },
+    loadTranscriptOverlay: async () => [],
+    decodeTranscriptPage: async () => ({ messages, nextCursor: null }),
+    async close() {},
+  });
+
+  const replica = await DesktopTranscriptReplica.prepare(handle);
+
+  const snapshot = replica.snapshot();
+  const bytes = snapshot.durable.reduce(
+    (total, { message }) => total + Buffer.byteLength(JSON.stringify(message), 'utf8'),
+    0,
+  );
+  assert.ok(bytes <= DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES);
+  assert.deepEqual(snapshot.durable.map(({ sequence }) => sequence), [12, 13, 14, 15]);
+  assert.equal(snapshot.hasOlder, true);
+  assert.equal(snapshot.hasNewer, false);
+});
+
 test('keeps a bounded contiguous window while moving between history and the tail', async () => {
   const messages = [0, 1, 2, 3, 4].map((sequence) => ({
     identity: sequence,
-    message: assistantMessage(String(sequence), `assistant-${sequence}`),
+    message: {
+      ...assistantMessage(String(sequence), `assistant-${sequence}`),
+      turnId: `turn-${sequence}`,
+    },
   }));
   const page = (nextCursor: string | null) => ({
     kind: 'page' as const,
@@ -239,25 +353,70 @@ test('keeps a bounded contiguous window while moving between history and the tai
     decodeTranscriptPage: async (candidate) => candidate === bootstrapPage
       ? { messages: messages.slice(3), nextCursor: 'older' }
       : candidate === olderPage
-        ? { messages: messages.slice(2, 4), nextCursor: 'older' }
+        ? { messages: messages.slice(1, 3), nextCursor: 'older' }
         : { messages: messages.slice(4), nextCursor: null },
-    loadTranscriptPage: async (input) => input.anchorSequence === 4 ? olderPage : latestPage,
+    loadTranscriptPage: async (input) => input.anchorSequence === 3 ? olderPage : latestPage,
     async close() {},
   });
-  const maxResidentBytes = Buffer.byteLength(JSON.stringify(messages[0]!.message), 'utf8') + 1;
+  const maxResidentBytes = (
+    Buffer.byteLength(JSON.stringify(messages[0]!.message), 'utf8')
+    + Buffer.byteLength(JSON.stringify(messages[1]!.message), 'utf8')
+    + 1
+  );
   const replica = await DesktopTranscriptReplica.prepare(handle, {
     maxResidentBytes,
   });
 
-  assert.deepEqual(replica.snapshot().durable.map(({ sequence }) => sequence), [4]);
-  await replica.loadBefore(4, 128 * 1024);
-  assert.deepEqual(replica.snapshot().durable.map(({ sequence }) => sequence), [2]);
+  assert.deepEqual(replica.snapshot().durable.map(({ sequence }) => sequence), [3, 4]);
+  await replica.loadBefore(3, 128 * 1024);
+  assert.deepEqual(replica.snapshot().durable.map(({ sequence }) => sequence), [2, 3]);
   assert.equal(replica.snapshot().hasNewer, true);
 
   await replica.loadAround(4, 128 * 1024);
   assert.deepEqual(replica.snapshot().durable.map(({ sequence }) => sequence), [4]);
   assert.equal(replica.snapshot().hasNewer, false);
   assert.ok(replica.residentBytes <= maxResidentBytes);
+});
+
+test('retains the reading anchor while an older page replaces the far edges', async () => {
+  const messages = Array.from({ length: 8 }, (_, sequence) => ({
+    identity: sequence,
+    message: {
+      ...assistantMessage(String(sequence), `assistant-${sequence}`),
+      turnId: `turn-${sequence}`,
+    },
+  }));
+  const bootstrapPage = transcriptPage('older', 'older', 7);
+  const olderPage = transcriptPage('older', null, 7);
+  const handle = runtimeHostSessionFixture({
+    snapshot: continuitySnapshot(),
+    transcript: Promise.resolve([]),
+    events: { async *[Symbol.asyncIterator]() {} },
+    transcriptBootstrap: {
+      throughSequence: 7,
+      overlayMessageCount: 0,
+      durable: bootstrapPage,
+      overlay: { ...transcriptPage('older', null, 7), source: 'overlay' },
+    },
+    loadTranscriptOverlay: async () => [],
+    decodeTranscriptPage: async (page) => ({
+      messages: page === bootstrapPage ? messages.slice(4) : messages.slice(0, 4),
+      nextCursor: page === bootstrapPage ? 'older' : null,
+    }),
+    loadTranscriptPage: async () => olderPage,
+    async close() {},
+  });
+  const replica = await DesktopTranscriptReplica.prepare(handle, {
+    maxResidentBytes: 1024 * 1024,
+    maxResidentTurns: 4,
+  });
+
+  await replica.loadBefore(4, DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES);
+
+  const snapshot = replica.snapshot();
+  assert.deepEqual(snapshot.durable.map(({ sequence }) => sequence), [2, 3, 4, 5]);
+  assert.equal(snapshot.hasOlder, true);
+  assert.equal(snapshot.hasNewer, true);
 });
 
 test('delivers a mid-session tail append even while a history window is resident', async () => {
@@ -270,7 +429,10 @@ test('delivers a mid-session tail append even while a history window is resident
   // and only a fresh subscription (session switch) re-read it.
   const messages = [0, 1, 2, 3, 4].map((sequence) => ({
     identity: sequence,
-    message: assistantMessage(String(sequence), `assistant-${sequence}`),
+    message: {
+      ...assistantMessage(String(sequence), `assistant-${sequence}`),
+      turnId: `turn-${sequence}`,
+    },
   }));
   const appended = { identity: 5, message: assistantMessage('5', 'assistant-5') };
   const page = (nextCursor: string | null) => ({
@@ -305,17 +467,21 @@ test('delivers a mid-session tail append even while a history window is resident
       ? { messages: messages.slice(3), nextCursor: 'older' }
       : candidate === tailPage
         ? { messages: [appended], nextCursor: 'older' }
-        : { messages: messages.slice(2, 4), nextCursor: 'older' },
+        : { messages: messages.slice(1, 3), nextCursor: 'older' },
     loadTranscriptPage: async (input) => input.throughSequence === 5 ? tailPage : olderPage,
     async close() {},
   });
-  const maxResidentBytes = Buffer.byteLength(JSON.stringify(messages[0]!.message), 'utf8') + 1;
+  const maxResidentBytes = (
+    Buffer.byteLength(JSON.stringify(messages[0]!.message), 'utf8')
+    + Buffer.byteLength(JSON.stringify(messages[1]!.message), 'utf8')
+    + 1
+  );
   const replica = await DesktopTranscriptReplica.prepare(handle, {
     maxResidentBytes,
     onChange: (_replica, change) => changes.push(change),
   });
 
-  await replica.loadBefore(4, 128 * 1024);
+  await replica.loadBefore(3, 128 * 1024);
   assert.equal(replica.snapshot().hasNewer, true);
   changes.splice(0);
 
@@ -335,7 +501,10 @@ test('does not resurrect a discarded replica when a tail re-anchor is in flight'
   // would undo the eviction and blow the memory bound.
   const messages = [0, 1, 2, 3, 4].map((sequence) => ({
     identity: sequence,
-    message: assistantMessage(String(sequence), `assistant-${sequence}`),
+    message: {
+      ...assistantMessage(String(sequence), `assistant-${sequence}`),
+      turnId: `turn-${sequence}`,
+    },
   }));
   const appended = { identity: 5, message: assistantMessage('5', 'assistant-5') };
   const page = (nextCursor: string | null) => ({
@@ -376,7 +545,7 @@ test('does not resurrect a discarded replica when a tail re-anchor is in flight'
       ? { messages: messages.slice(3), nextCursor: 'older' }
       : candidate === tailPage
         ? { messages: [appended], nextCursor: 'older' }
-        : { messages: messages.slice(2, 4), nextCursor: 'older' },
+        : { messages: messages.slice(1, 3), nextCursor: 'older' },
     loadTranscriptPage: async (input) => {
       if (input.throughSequence === 5) {
         // Signal that catch-up is now parked inside the re-anchor's page await,
@@ -389,13 +558,17 @@ test('does not resurrect a discarded replica when a tail re-anchor is in flight'
     },
     async close() {},
   });
-  const maxResidentBytes = Buffer.byteLength(JSON.stringify(messages[0]!.message), 'utf8') + 1;
+  const maxResidentBytes = (
+    Buffer.byteLength(JSON.stringify(messages[0]!.message), 'utf8')
+    + Buffer.byteLength(JSON.stringify(messages[1]!.message), 'utf8')
+    + 1
+  );
   const replica = await DesktopTranscriptReplica.prepare(handle, {
     maxResidentBytes,
     onChange: (_replica, change) => changes.push(change),
   });
 
-  await replica.loadBefore(4, 128 * 1024);
+  await replica.loadBefore(3, 128 * 1024);
   assert.equal(replica.snapshot().hasNewer, true);
   changes.splice(0);
 
@@ -849,8 +1022,14 @@ test('forwards a larger logical history range without changing batch size', asyn
     sessionId: 'session-1',
     generation: 'generation-1',
     hostEpoch: 'host-1',
-    durableThrough: 1,
-    durable: [{ sequence: 1, message: assistantMessage('latest') }],
+    durableThrough: 2,
+    durable: [
+      { sequence: 1, message: assistantMessage('earlier') },
+      {
+        sequence: 2,
+        message: { ...assistantMessage('latest', 'assistant-2'), turnId: 'turn-2' },
+      },
+    ],
     overlay: [],
     hasOlder: true,
     hasNewer: false,
@@ -868,9 +1047,9 @@ test('forwards a larger logical history range without changing batch size', asyn
     async close() {},
   }));
 
-  await controller.loadBefore(512 * 1024);
+  await controller.loadBefore(512 * 1024, 'turn-2');
 
-  assert.deepEqual(request, { anchorSequence: 1, maxBytes: 512 * 1024 });
+  assert.deepEqual(request, { anchorSequence: 2, maxBytes: 512 * 1024 });
   await controller.close();
 });
 

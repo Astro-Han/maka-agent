@@ -43,7 +43,7 @@ export function useChatScroll(input: {
   target?: { turnId: string; nonce: number };
   behavior: ScrollBehavior;
   hasOlderHistory?: boolean;
-  onLoadEarlierHistory?(): Promise<void> | void;
+  onLoadEarlierHistory?(anchorTurnId?: string): Promise<void> | void;
 }) {
   const [highlightedTurnId, setHighlightedTurnId] = useState<string | null>(null);
   const authority = useTranscriptScrollAuthority();
@@ -72,13 +72,17 @@ export function useChatScroll(input: {
     // request while one is in flight, and asking for history the reader
     // already has is idempotent anyway.
     const requestEarlier = (): void => {
+      const rootTop = root.getBoundingClientRect().top;
+      const anchor = [...root.querySelectorAll<HTMLElement>('[data-turn-id]')].find(
+        (turn) => turn.getBoundingClientRect().bottom > rootTop,
+      );
       // The browser anchors the reader against everything that lands above
       // them, with one exception: it declines while the scroller sits at zero,
       // which is exactly where a wheel asks for history. One pixel is the whole
       // fix — measured in Chromium, an insert of 501px above the reader moves
       // `scrollTop` by 501 at an offset of 1 and by 0 at an offset of 0.
       if (root.scrollTop < 1) root.scrollTop = 1;
-      void Promise.resolve(loadEarlierRef.current?.()).catch(() => undefined);
+      void Promise.resolve(loadEarlierRef.current?.(anchor?.dataset.turnId)).catch(() => undefined);
     };
     /** Close enough to the start that the reader is about to reach it. */
     const nearStart = (): boolean =>

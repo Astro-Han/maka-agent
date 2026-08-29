@@ -26,9 +26,10 @@ import {
 import { RuntimeHostSubscriptionError } from '@maka/runtime-host/client';
 import type { SessionTranscriptPage } from '@maka/runtime-host/protocol';
 import {
+  DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
   DESKTOP_TRANSCRIPT_MESSAGE_MAX_BYTES,
   DESKTOP_TRANSCRIPT_OVERLAY_CACHE_MAX_BYTES,
-  DESKTOP_TRANSCRIPT_SESSION_CACHE_MAX_BYTES,
+  DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES,
 } from '../preload/transcript-contract.js';
 import type { DesktopRuntimeHostSession } from './runtime-host-client.js';
 
@@ -36,6 +37,7 @@ export interface DesktopTranscriptReplicaOptions {
   readonly generation?: string;
   readonly maxMessageBytes?: number;
   readonly maxResidentBytes?: number;
+  readonly maxResidentTurns?: number;
   readonly maxOverlayBytes?: number;
   readonly accountPreparationBytes?: (deltaBytes: number) => void;
   readonly onChange?: (
@@ -79,6 +81,7 @@ export class DesktopTranscriptReplica {
   readonly hostEpoch: string;
   readonly #handle: DesktopRuntimeHostSession;
   readonly #maxResidentBytes: number;
+  readonly #maxResidentTurns: number;
   readonly #maxOverlayBytes: number;
   readonly #maxMessageBytes: number;
   readonly #accountPreparationBytes: (deltaBytes: number) => void;
@@ -109,7 +112,9 @@ export class DesktopTranscriptReplica {
     this.generation = options.generation ?? randomUUID();
     this.hostEpoch = handle.hostEpoch;
     this.#maxResidentBytes =
-      options.maxResidentBytes ?? DESKTOP_TRANSCRIPT_SESSION_CACHE_MAX_BYTES;
+      options.maxResidentBytes ?? DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES;
+    this.#maxResidentTurns =
+      options.maxResidentTurns ?? DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS;
     this.#maxOverlayBytes =
       options.maxOverlayBytes ?? DESKTOP_TRANSCRIPT_OVERLAY_CACHE_MAX_BYTES;
     this.#maxMessageBytes = options.maxMessageBytes ?? DESKTOP_TRANSCRIPT_MESSAGE_MAX_BYTES;
@@ -248,7 +253,11 @@ export class DesktopTranscriptReplica {
       }
       const completedOverlayMessageIds = this.#installDurable(decoded.messages);
       this.#hasOlder = decoded.nextCursor !== null;
-      const evictedDurableSequences = this.#evictToBudget(undefined, 'newest');
+      const evictedDurableSequences = this.#evictToBudget(
+        undefined,
+        'newest',
+        anchor ?? undefined,
+      );
       this.#publish(decoded.messages, completedOverlayMessageIds, evictedDurableSequences);
     });
   }
@@ -303,7 +312,7 @@ export class DesktopTranscriptReplica {
       this.#hasOlder = loadTail ? decoded.nextCursor !== null : sequence > 0;
       this.#hasNewer = loadTail ? false : decoded.nextCursor !== null;
       evictedDurableSequences.push(
-        ...this.#evictToBudget(undefined, loadTail ? 'oldest' : 'newest'),
+        ...this.#evictToBudget(undefined, loadTail ? 'oldest' : 'newest', sequence),
       );
       this.#publish(decoded.messages, completedOverlayMessageIds, evictedDurableSequences);
     });
@@ -525,19 +534,71 @@ export class DesktopTranscriptReplica {
   #evictToBudget(
     budget: number | undefined = undefined,
     edge: 'oldest' | 'newest' = 'oldest',
+    protectedSequence?: number,
   ): number[] {
     const residentBudget = budget ?? this.#maxResidentBytes + this.#overlayBytes;
     const evicted: number[] = [];
-    const direction = edge === 'oldest' ? 1 : -1;
-    for (const sequence of [...this.#durable.keys()].sort((left, right) => direction * (left - right))) {
-      if (this.#residentBytes <= residentBudget) break;
+    const sequences = [...this.#durable.keys()].sort((left, right) => left - right);
+    const turnGroups = new Map<string, number[]>();
+    for (const sequence of sequences) {
       const entry = this.#durable.get(sequence);
       if (!entry) continue;
-      this.#durable.delete(sequence);
-      this.#adjustResidentBytes(-entry.encodedBytes);
-      if (edge === 'oldest') this.#hasOlder = true;
+      const turnKey = residentTurnKey(entry);
+      const group = turnGroups.get(turnKey);
+      if (group) group.push(sequence);
+      else turnGroups.set(turnKey, [sequence]);
+    }
+    const orderedTurns = [...turnGroups.entries()];
+    let oldestIndex = 0;
+    let newestIndex = orderedTurns.length - 1;
+    let residentTurns = orderedTurns.length;
+    const protectedEntry = protectedSequence === undefined
+      ? undefined
+      : this.#durable.get(protectedSequence);
+    const protectedTurnKey = protectedEntry === undefined
+      ? undefined
+      : residentTurnKey(protectedEntry);
+    const protectedIndex = protectedTurnKey === undefined
+      ? -1
+      : orderedTurns.findIndex(([turnKey]) => turnKey === protectedTurnKey);
+    const take = (
+      candidateEdge: 'oldest' | 'newest',
+    ): readonly [string, number[]] | undefined => {
+      const index = candidateEdge === 'oldest' ? oldestIndex : newestIndex;
+      if (oldestIndex > newestIndex) return undefined;
+      const turn = orderedTurns[index];
+      if (!turn || turn[0] === protectedTurnKey) return undefined;
+      if (candidateEdge === 'oldest') oldestIndex += 1;
+      else newestIndex -= 1;
+      return turn;
+    };
+    while (
+      this.#residentBytes > residentBudget
+      || residentTurns > this.#maxResidentTurns
+    ) {
+      let evictionEdge = protectedIndex < 0
+        ? edge
+        : protectedIndex - oldestIndex > newestIndex - protectedIndex
+          ? 'oldest'
+          : protectedIndex - oldestIndex < newestIndex - protectedIndex
+            ? 'newest'
+            : edge;
+      let turn = take(evictionEdge);
+      if (turn === undefined) {
+        evictionEdge = edge === 'oldest' ? 'newest' : 'oldest';
+        turn = take(evictionEdge);
+      }
+      if (turn === undefined) break;
+      for (const sequence of turn[1]) {
+        const entry = this.#durable.get(sequence);
+        if (!entry) continue;
+        this.#durable.delete(sequence);
+        this.#adjustResidentBytes(-entry.encodedBytes);
+        evicted.push(sequence);
+      }
+      residentTurns -= 1;
+      if (evictionEdge === 'oldest') this.#hasOlder = true;
       else this.#hasNewer = true;
-      evicted.push(sequence);
     }
     return evicted;
   }
@@ -632,6 +693,11 @@ export class DesktopTranscriptReplica {
 
 function encodedMessageBytes(message: StoredMessage): number {
   return Buffer.byteLength(JSON.stringify(message), 'utf8');
+}
+
+function residentTurnKey(entry: ResidentMessage): string {
+  const turnId = 'turnId' in entry.message ? entry.message.turnId : undefined;
+  return typeof turnId === 'string' ? `turn:${turnId}` : `sequence:${entry.sequence}`;
 }
 
 function correlationError(message: string): RuntimeHostSubscriptionError {
