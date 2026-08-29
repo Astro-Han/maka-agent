@@ -33,21 +33,19 @@ import { useAppShellSessionWorkspace } from '../../renderer/use-app-shell-sessio
  * for a single session switch. Identity is a contract, not an implementation
  * detail, so it is asserted here rather than left to review.
  */
-const ACTION_KEYS = [
-  'setActiveId',
-  'startNewSession',
-  'clearOwnedSessionState',
-  'setMessages',
-  'addTransientMessage',
-  'updateTransientMessage',
-  'projectQueuedTransientMessages',
-  'retireCancelledTransientMessages',
-  'removeTransientMessage',
-  'refreshSessions',
-  'seedSessions',
-] as const;
-
 type Workspace = ReturnType<typeof useAppShellSessionWorkspace>;
+
+/**
+ * Every function the hook returns, read off the first render rather than
+ * listed here. A hand-kept list covers what someone remembered on the day it
+ * was written and silently stops covering whatever is added later, which is
+ * the opposite of what a contract test is for.
+ */
+function actionKeys(workspace: Workspace): string[] {
+  return Object.keys(workspace).filter(
+    (key) => typeof (workspace as Record<string, unknown>)[key] === 'function',
+  );
+}
 
 describe('session workspace action identity', () => {
   afterEach(cleanupFakeDom);
@@ -75,11 +73,15 @@ describe('session workspace action identity', () => {
     assert.ok(reads.length > 1, 'the probe should have re-rendered');
 
     const first = reads[0]!;
-    for (const key of ACTION_KEYS) {
+    const keys = actionKeys(first);
+    // A guard on the guard: if the hook's shape ever collapses, the loop below
+    // would pass by having nothing to check.
+    assert.ok(keys.length > 10, `expected the workspace to expose actions, saw ${keys.length}`);
+    for (const key of keys) {
       for (const later of reads.slice(1)) {
         assert.equal(
-          later[key],
-          first[key],
+          (later as Record<string, unknown>)[key],
+          (first as Record<string, unknown>)[key],
           `${key} changed identity between renders`,
         );
       }
