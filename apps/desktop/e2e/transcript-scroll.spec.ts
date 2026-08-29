@@ -364,11 +364,8 @@ test('a nested scroller near the history boundary does not request an earlier ra
 
   const nestedBefore = await page.evaluate((selector) => {
     const root = document.querySelector<HTMLElement>(selector);
-    const rootTop = root?.getBoundingClientRect().top ?? 0;
-    const turn = [...(root?.querySelectorAll<HTMLElement>('[data-turn-id]') ?? [])].find(
-      (candidate) => candidate.getBoundingClientRect().bottom > rootTop,
-    );
-    if (!root || !turn) throw new Error('the active transcript range is missing');
+    const list = root?.querySelector<HTMLElement>('.maka-chat-message-list');
+    if (!root || !list) throw new Error('the active transcript range is missing');
     const box = document.createElement('div');
     box.dataset.nestedHistoryScroller = 'true';
     box.style.cssText = [
@@ -383,12 +380,23 @@ test('a nested scroller near the history boundary does not request an earlier ra
     const filler = document.createElement('div');
     filler.style.height = '2000px';
     box.append(filler);
-    turn.append(box);
+    // A Turn uses `content-visibility:auto`, whose paint containment prevents
+    // a fixed descendant from reliably winning hit testing over sibling Turns
+    // on Linux/Xvfb. Keep the fixture inside the transcript event path without
+    // putting it inside the product containment boundary being tested.
+    list.append(box);
     box.scrollTop = 600;
     return box.scrollTop;
   }, SCROLLER);
 
-  await page.locator('[data-nested-history-scroller="true"]').hover();
+  const nested = page.locator('[data-nested-history-scroller="true"]');
+  const box = await nested.boundingBox();
+  if (!box) throw new Error('the nested history scroller is not rendered');
+  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  expect(await page.evaluate(({ x, y }) =>
+    document.elementFromPoint(x, y)?.closest('[data-nested-history-scroller="true"]') !== null,
+  point)).toBe(true);
+  await page.mouse.move(point.x, point.y);
   await page.mouse.wheel(0, -400);
   await waitForPaintedFrames(page);
 
