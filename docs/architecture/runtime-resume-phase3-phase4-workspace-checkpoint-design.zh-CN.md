@@ -165,12 +165,6 @@ composite replay 存在时，它是 tool-state 与 provider suffix 的唯一 gat
 `buildResumePlanFromRuntimeEvents()` 只服务无 composite boundary 的 legacy 路径，不能在外层
 再次把已经安全裁掉的 `definitely_not_dispatched` call 判为 dangling。
 
-`retryChildAgentWithExecution()` 同样通过 `RuntimeContinuationPlanner` 构造 immutable
-composite boundary。旧 child 的 `retriedFromRunId/resumedFromRunId` 边从对应 immutable prefix
-严格派生临时 V1 segment；新 child retry 持久化 V2 `continuationSource`。该路径不再使用
-`readRuntimeEvents()`、`events.length` 或独立的 `buildResumePlanFromRuntimeEvents()` 组装
-provider history。
-
 最终同时冻结：
 
 - `providerProjectionVersion = 1`；
@@ -287,9 +281,9 @@ sequenceDiagram
 5. 通过 dedicated writer 提交 `continuation_start_v2`，必须是 target `event_seq=1`；
 6. 才允许 append running turn state、reserve backend、标记 running、调用 provider。
 
-linked child 与 legacy child 的 provider retry 也按这套顺序执行：重新验证 boundary/replay、
-workspace/background/tool catalog，竞争同一个 SQLite boundary claim，再写 continuation-start。
-`retriedFromRunId` 继续承担产品查询与展示语义，但不承担并发执行所有权。
+linked child 当前通过普通 Session turn 执行，不再有 same-session child AgentRun 的 provider
+retry 入口。历史 `linked_child_resume` / `linked_child_provider_retry` descriptor 与
+`retriedFromRunId` 只保留重启关闭、查询和展示兼容，不会重新触发 provider。
 
 live continuation-start 同时绑定 claim id、boundary digest、immediate source identity/high-water/prefix
 digest、replay manifest、provider projection version 和 provider replay digest。V2 AgentRun header 的
@@ -327,11 +321,10 @@ failed terminal，failureClass 为
 另一个进程擅自补 terminal，因为原 provider 可能仍存活。SQLite writer 同时拒绝 terminal 后追加
 任何 immutable event，作为最终写侧防线。
 
-linked-child 的 generic admission repair 在发现 target identity 已由 continuation claim 占有时
-必须 defer，不能抢先创建一个缺少 V2 source 的同 id Run。只有同时证明 claim target、B2.1
-deterministic repair start、deterministic terminal 与 target header 全部一致，才允许把
-`continuation_abandoned_before_provider_dispatch` Run 作为 child provider retry source。仅凭
-字符串 failureClass 或 V2 header 不构成证明。
+历史 linked-child admission closure 在发现 target identity 已由 continuation claim 占有时必须
+defer，不能抢先创建一个缺少 V2 source 的同 id Run。没有 claim owner 时，该 closure 只保留旧
+descriptor 的 lineage 并物化 durable failed terminal fact，provider 调用数为 0；它不会把 repaired
+Run 重新变成 child provider retry source。
 
 canonical continuation authority 读取失败时，best-effort startup 必须隔离整个 session，不允许
 退回 generic/legacy repair。否则一个暂时读不到 claim 的 host 可能把 claim-owned target 当成普通
@@ -377,18 +370,17 @@ lease/fencing 或 append-if-absent 解决。
 #### B3：明确延后
 
 本 PR 不实现通用 provider retry、ShellRun reattach、Bash 重放、conversation clone identity
-rewrite 或其他 typed continuation branch。authority-capable SessionManager 内已有的
-linked-child RateLimit retry 与 B2.1 repair retry 是窄协议，不代表 runtime-host 已获得生产启用
-资格。其他能力必须在各自拥有 durable handle/幂等协议后独立设计，不能复用 B2 的普通
-continuation claim 来暗示副作用可重跑。
+rewrite 或其他 typed continuation branch。linked-child RateLimit retry 入口已经删除；B2.1
+repair retry 只修复已持久化的 continuation authority，不会重新调用 provider。其他能力必须在
+各自拥有 durable handle/幂等协议后独立设计，不能复用 B2 的普通 continuation claim 来暗示
+副作用可重跑。
 
 兼容约束：早期的 `legacy_provider_retry` lane（只允许 continuation authority 与 safety
 inspector 同时缺席的组合，半配置状态 fail closed；执行前重验 immutable immediate-source
 replay，但不产生 claim/start，也不能承接
 `continuation_abandoned_before_provider_dispatch`）已在 host authority lifecycle
-integration 接入 typed SQLite authority owner 后移除。child provider RateLimit retry 现在
-只走 durable continuation 准入：authority 或 safety inspector 任一缺席时在 claim/Run/T1
-之前 fail closed，没有降级模式。
+integration 接入 typed SQLite authority owner 后移除。历史 child admission descriptor 在
+恢复时只会被收敛为 durable terminal fact，不存在 provider retry 降级模式。
 
 B3 之前，branch/revision preflight 必须在创建目标 Session 之前拒绝任何 V1/V2
 `continuationSource` 与 continuation-start，稳定返回
@@ -517,7 +509,7 @@ Host owner 使用显式 `opening -> ready -> closing -> closed` 状态机；`clo
 
 ```text
 continuation claim repair
-→ linked-child admission repair
+→ historical linked-child admission closure
 → generic AgentRun ledger repair
 → ordinary continuation planning / auto-resume
 ```

@@ -77,7 +77,6 @@ import type {
   BackendSendInput,
   HostedInteractionBridge,
 } from '@maka/core/backend-types';
-import type { AgentSpec } from '@maka/core/runtime-inputs';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { UserQuestionResponse } from '@maka/core/user-question';
@@ -155,7 +154,6 @@ import {
   type ToolRuntimeInput,
 } from './tool-runtime.js';
 import type { RuntimeCommitSink } from './runtime-commit-sink.js';
-import type { SubagentExecutionRef } from './subagent-execution.js';
 import {
   ModelAdapter,
   type ModelFactoryInput,
@@ -763,35 +761,7 @@ export interface AiSdkBackendInput extends AiSdkCompactionCapabilities {
   ) => void | Promise<void>;
   /** Optional pricing lookup shared with telemetry; defaults to builtin public pricing. */
   lookupPricing?: (modelKey: string) => PricingConfig | null;
-  spawnChildAgent?: (input: {
-    parentRunId: string;
-    spec: AgentSpec;
-    prompt: string;
-    abortSignal: AbortSignal;
-    onReady?: (input: {
-      turnId: string;
-      agentId: string;
-      agentName: string;
-    }) => void | Promise<void>;
-    onEvent?: (event: SessionEvent) => void;
-  }) => Promise<unknown>;
   spawnChildSession?: ToolRuntimeInput['spawnChildSession'];
-  prepareChildAgentResume?: ToolRuntimeInput['prepareChildAgentResume'];
-  resumeChildAgent?: ToolRuntimeInput['resumeChildAgent'];
-  retryChildAgent?: (input: {
-    parentRunId: string;
-    sourceRunId: string;
-    execution?: SubagentExecutionRef;
-    abortSignal: AbortSignal;
-    onReady?: (input: {
-      childSessionId?: string;
-      turnId: string;
-      runId?: string;
-      agentId: string;
-      agentName: string;
-    }) => void | Promise<void>;
-    onEvent?: (event: SessionEvent) => void;
-  }) => Promise<unknown>;
   listChildAgents?: () => Promise<unknown>;
   readChildAgentOutput?: ToolRuntimeInput['readChildAgentOutput'];
   /** Optional diagnostic trace hook for explaining a runtime turn without changing renderer events. */
@@ -1368,11 +1338,7 @@ export class AiSdkBackend implements AgentBackend {
       ...(identity.invocationId ? { invocationId: identity.invocationId } : {}),
       materializeDefaultToolResultOutput: ({ toolCallId, output }) =>
         this.materializeToolResultOutput(identity.scope().imageBudget, output, false, toolCallId),
-      spawnChildAgent: input.spawnChildAgent,
       spawnChildSession: input.spawnChildSession,
-      prepareChildAgentResume: input.prepareChildAgentResume,
-      resumeChildAgent: input.resumeChildAgent,
-      retryChildAgent: input.retryChildAgent,
       listChildAgents: input.listChildAgents,
       readChildAgentOutput: input.readChildAgentOutput,
       getRunTrace: () => identity.scope().runTrace,
