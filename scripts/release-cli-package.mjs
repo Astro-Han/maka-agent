@@ -48,6 +48,7 @@ import {
   releaseNpmEnvironment,
   resolveReleaseWorkspacePackages,
   resolveWorkspaceReleaseFiles,
+  workspaceReleaseManifest,
 } from './release-cli-file-policy.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '..');
@@ -425,27 +426,7 @@ function dependencyDestination(dependency) {
 function copyInternalPackage(source, destination) {
   mkdirSync(destination, { recursive: true, mode: 0o755 });
   const manifest = readJson(join(source, 'package.json'));
-  const allowedFields = [
-    'name',
-    'version',
-    'description',
-    'license',
-    'type',
-    'sideEffects',
-    'main',
-    'exports',
-    'bin',
-    'engines',
-    'dependencies',
-    'optionalDependencies',
-    'peerDependencies',
-    'peerDependenciesMeta',
-  ];
-  const releaseManifest = Object.fromEntries(
-    allowedFields
-      .filter((field) => manifest[field] !== undefined)
-      .map((field) => [field, manifest[field]]),
-  );
+  const releaseManifest = workspaceReleaseManifest(manifest);
   writeFileSync(join(destination, 'package.json'), `${JSON.stringify(releaseManifest, null, 2)}\n`);
   for (const releaseFile of resolveWorkspaceReleaseFiles(source, manifest)) {
     if (releaseFile === 'dist') copyRuntimeDist(source, destination, manifest.name);

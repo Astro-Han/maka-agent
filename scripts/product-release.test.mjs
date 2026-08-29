@@ -175,6 +175,32 @@ test('Desktop packaging derives the Runtime Host setup package from product mani
   ]);
 });
 
+test('Desktop stages release manifests before electron-builder builds the archive', async (t) => {
+  const stage = await mkdtemp(join(tmpdir(), 'maka-desktop-release-manifests-'));
+  t.after(() => rm(stage, { recursive: true, force: true }));
+  const files = [{ filter: [...desktopBuilderConfig.files] }];
+
+  await desktopBuilderConfig.beforePack({
+    packager: {
+      config: { files },
+      info: { tempDirManager: { createTempDir: async () => stage } },
+    },
+  });
+
+  assert.equal(files.length, 2);
+  assert.ok(
+    files[0].filter.includes('!node_modules/@maka/{mcp,runtime,runtime-host}/package.json'),
+  );
+  assert.deepEqual(files.at(-1), { from: stage, to: 'node_modules/@maka' });
+  for (const name of ['mcp', 'runtime', 'runtime-host']) {
+    const projected = JSON.parse(await readFile(join(stage, name, 'package.json')));
+    assert.equal(
+      Object.keys(projected.exports).some((subpath) => subpath.startsWith('./test-only/')),
+      false,
+    );
+  }
+});
+
 test('Desktop packaging does not distribute the retired bundled Git runtime', () => {
   const resources = desktopBuilderConfig.extraResources.map(({ from, to }) => ({ from, to }));
   assert.equal(
@@ -554,14 +580,22 @@ test('standalone packaging applies the shared CLI file policy to dependencies', 
   }
 });
 
-test('standalone workspace staging keeps runtime files and removes Maka development output', async () => {
+test('standalone workspace staging keeps manifests consistent with copied files', async () => {
   const root = await mkdtemp(join(tmpdir(), 'maka-standalone-workspace-'));
   const workspace = join(root, 'workspace');
   const install = join(root, 'install');
   try {
+    const manifest = {
+      name: '@maka/example',
+      exports: {
+        '.': './dist/index.js',
+        './test-only/fixture': './dist/__tests__/fixture.js',
+      },
+      scripts: { build: 'tsc' },
+    };
     await mkdir(join(workspace, 'dist', '__tests__'), { recursive: true });
     await mkdir(install);
-    await writeFile(join(workspace, 'package.json'), '{}\n');
+    await writeFile(join(workspace, 'package.json'), `${JSON.stringify(manifest)}\n`);
     await writeFile(join(workspace, 'dist', 'index.js'), 'runtime\n');
     await writeFile(join(workspace, 'dist', 'dev-cli.js'), 'development\n');
     await writeFile(join(workspace, 'dist', 'index.d.ts'), 'development\n');
@@ -571,11 +605,15 @@ test('standalone workspace staging keeps runtime files and removes Maka developm
     await stageWorkspacePackages(install, [
       {
         directory: workspace,
-        manifest: { name: '@maka/example' },
+        manifest,
         workspacePath: 'packages/example',
       },
     ]);
 
+    assert.deepEqual(JSON.parse(await readFile(join(install, 'packages/example/package.json'))), {
+      name: '@maka/example',
+      exports: { '.': './dist/index.js' },
+    });
     const staged = join(install, 'packages', 'example', 'dist');
     assert.equal(await readFile(join(staged, 'index.js'), 'utf8'), 'runtime\n');
     for (const path of ['dev-cli.js', 'index.d.ts', 'index.js.map', '__tests__/fixture.js']) {
