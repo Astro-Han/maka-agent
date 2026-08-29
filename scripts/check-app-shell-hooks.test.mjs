@@ -96,7 +96,10 @@ test('a migrated hook fails until its entry is deleted, so the gate converges', 
 
 test('the committed inventory matches the shell as it stands', async () => {
   const { readFile } = await import('node:fs/promises');
-  const source = await readFile(new URL('../apps/desktop/src/renderer/app-shell.tsx', import.meta.url), 'utf8');
+  const source = await readFile(
+    new URL('../apps/desktop/src/renderer/app-shell.tsx', import.meta.url),
+    'utf8',
+  );
   const body = readRenderBody(source, 'AppShellContent');
   assert.notEqual(body, null, 'AppShellContent must still be a top-level function declaration');
   const { added, grown, stale } = compareToInventory(countHooks(body));

@@ -206,12 +206,14 @@ function main() {
     console.error(
       `${shellFile}: ${name} is a new hook in ${component}'s render body.\n` +
         '  Its state would be scoped to the whole tree. Call it from the feature\n' +
-        "  provider instead; add it to the inventory only if it genuinely belongs\n" +
+        '  provider instead; add it to the inventory only if it genuinely belongs\n' +
         '  to the shell, and say why in the pull request (#4109).',
     );
   }
   for (const { name, budget, count } of grown) {
-    console.error(`${shellFile}: ${name} has ${count} call sites in ${component}, inventory allows ${budget}.`);
+    console.error(
+      `${shellFile}: ${name} has ${count} call sites in ${component}, inventory allows ${budget}.`,
+    );
   }
   for (const { name, budget, count } of stale) {
     console.error(

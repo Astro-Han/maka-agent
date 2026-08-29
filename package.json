@@ -53,7 +53,7 @@
     "release:cli:smoke": "node scripts/smoke-release-cli-package.mjs",
     "release:cli:eval": "node scripts/release-cli-eval-package.mjs",
     "check:app-shell-hooks": "node scripts/check-app-shell-hooks.mjs",
-  "check:asf-headers": "node scripts/asf-license-headers.mjs check",
+    "check:asf-headers": "node scripts/asf-license-headers.mjs check",
     "write:asf-headers": "node scripts/asf-license-headers.mjs write",
     "release:asf:source": "node scripts/asf-source-release.mjs create",
     "release:asf:verify": "node scripts/asf-source-release.mjs verify",
