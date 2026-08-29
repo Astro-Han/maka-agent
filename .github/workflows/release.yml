@@ -462,7 +462,7 @@ jobs:
 
           These files are convenience binaries built from the approved ASF source release; they are not ASF release artifacts.
 
-          Known limitations: Computer Use and managed-workspace execution are not included in this release. The Desktop convenience artifacts do not distribute a Git runtime."
+          Known limitations: Computer Use and Gitoxide-backed workspace execution are not included in this release. The Desktop convenience artifacts do not distribute a Git runtime."
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             is_draft="$(gh release view "$TAG" --json isDraft --jq .isDraft)"

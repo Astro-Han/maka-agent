@@ -249,7 +249,6 @@ function isE2eProductPath(path) {
 
 const STORAGE_STRESS_FILES = new Set([
   'packages/storage/src/agent-run-store.ts',
-  'packages/storage/src/git-workspace-service.ts',
   'packages/storage/src/runtime-event-invariants.ts',
   'packages/storage/src/root-authority.ts',
   'packages/storage/src/operational-state-store.ts',
@@ -260,10 +259,8 @@ const STORAGE_STRESS_FILES = new Set([
   'packages/storage/src/sqlite-usage-schema.ts',
   'packages/storage/src/sqlite-workflow-schema.ts',
   'packages/storage/src/__tests__/agent-run-store.test.ts',
-  'packages/storage/src/__tests__/git-workspace-service.test.ts',
   'packages/storage/src/__tests__/root-authority.test.ts',
   'packages/storage/src/__tests__/sqlite-recovery-concurrency.test.ts',
-  'packages/storage/src/__tests__/fixtures/git-workspace-service-crash-child.ts',
   'packages/storage/src/__tests__/fixtures/sqlite-recovery-concurrency-child.ts',
   'packages/storage/src/__tests__/fixtures/root-lock-holder.ts',
   'packages/storage/src/__tests__/fixtures/root-resolver.ts',

@@ -86,7 +86,6 @@ import { runWithStorageRootLease } from '@maka/storage/root-authority';
 import { openStorageWriterComposition } from '@maka/storage/storage-writer-composition';
 import type { RuntimePolicyStoresWriter } from '@maka/storage/runtime-policy-stores';
 import { resolveWorkspaceIdentity } from '@maka/storage/workspace-identity';
-import { type ManagedWorkspaceFilesystemWorker } from '@maka/storage/managed-workspace-owner';
 import { CanonicalSessionProjectionReader } from './canonical-session-projection.js';
 import {
   bindHostChildAgentBackend,
@@ -190,6 +189,7 @@ import {
   createRuntimeHostWorkspaceExecutionComposition,
   RuntimeHostWorkspaceExecutionError,
   type RuntimeHostWorkspaceExecutionComposition,
+  type RuntimeHostWorkspaceFilesystemWorker,
 } from './workspace-execution-composition.js';
 
 export interface ExecutionRuntimeHostComposition extends RuntimeHostComposition {
@@ -328,11 +328,11 @@ export async function createExecutionRuntimeHostComposition(
             getLaunchSpec: filesystemWorkerLaunchSpecProvider,
           })
         : undefined;
-    const managedFilesystemWorker = filesystemWorker
-      ? adaptManagedWorkspaceFilesystemWorker(filesystemWorker)
+    const workspaceFilesystemWorker = filesystemWorker
+      ? adaptWorkspaceFilesystemWorker(filesystemWorker)
       : undefined;
     workspaceExecution = createRuntimeHostWorkspaceExecutionComposition({
-      ...(managedFilesystemWorker ? { filesystemWorker: managedFilesystemWorker } : {}),
+      ...(workspaceFilesystemWorker ? { filesystemWorker: workspaceFilesystemWorker } : {}),
     });
     const taskLedger = new HostTaskLedgerCoordinator(
       taskLedgerStore,
@@ -1817,9 +1817,9 @@ function requireWorkspaceExecution(
   return composition;
 }
 
-function adaptManagedWorkspaceFilesystemWorker(
+function adaptWorkspaceFilesystemWorker(
   worker: Pick<FilesystemWorkerClient, 'execute'>,
-): ManagedWorkspaceFilesystemWorker {
+): RuntimeHostWorkspaceFilesystemWorker {
   return {
     async execute(input) {
       // Read-only operations never participate in CAS; the adapter says so

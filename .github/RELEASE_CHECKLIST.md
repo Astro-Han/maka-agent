@@ -33,8 +33,8 @@ Phase 1 requires:
 - checksums generated after each artifact reaches its final form.
 
 The convenience Desktop artifacts must not contain a Git runtime, a bundled-Git manifest, or Git/Dugite
-redistribution notices. Managed-workspace execution remains unavailable until a separately reviewed,
-ASF-compatible verified runtime is connected before admission/T1.
+redistribution notices. The retired Git executable-backed managed-workspace path must not be restored;
+future workspace execution requires a separately reviewed Gitoxide production composition before admission/T1.
 
 The first product release also requires the exact `maka-agent@<version>` npm package. The product
 tag and Draft must exist before npm staging, but the Draft must remain unpublished until npm is
