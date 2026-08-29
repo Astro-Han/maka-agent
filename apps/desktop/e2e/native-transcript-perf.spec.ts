@@ -36,6 +36,7 @@ interface BrowserCounters {
 interface FrameSample {
   intervals: number[];
   loafDurations: number[];
+  loafSupported: boolean;
 }
 
 interface StressSample extends BrowserCounters {
@@ -103,18 +104,22 @@ async function prepareFrameRecorder(page: Page): Promise<void> {
     const state: FrameSample & { lastFrame: number | null; running: boolean } = {
       intervals: [],
       loafDurations: [],
+      loafSupported: PerformanceObserver.supportedEntryTypes
+        .includes('long-animation-frame'),
       lastFrame: null,
       running: false,
     };
     Object.assign(window, { __makaTranscriptPerf: state });
-    try {
-      const observer = new PerformanceObserver((list) => {
-        if (!state.running) return;
-        state.loafDurations.push(...list.getEntries().map((entry) => entry.duration));
-      });
-      observer.observe({ type: 'long-animation-frame', buffered: false });
-    } catch {
-      // Older Chromium builds do not expose LoAF; an empty list is reported.
+    if (state.loafSupported) {
+      try {
+        const observer = new PerformanceObserver((list) => {
+          if (!state.running) return;
+          state.loafDurations.push(...list.getEntries().map((entry) => entry.duration));
+        });
+        observer.observe({ type: 'long-animation-frame', buffered: false });
+      } catch {
+        state.loafSupported = false;
+      }
     }
   });
 }
@@ -151,6 +156,7 @@ async function scrollGesture(page: Page, delta: number, frames = 240): Promise<F
     return {
       intervals: [...recorder.intervals],
       loafDurations: [...recorder.loafDurations],
+      loafSupported: recorder.loafSupported,
     };
   }, { selector: SCROLLER, delta, frames });
 }
@@ -216,6 +222,21 @@ async function measureSessionSwitch(page: Page): Promise<number> {
   return performance.now() - start;
 }
 
+test('LoAF capability is explicit when Chromium cannot measure it', async ({
+  promptRailWindow: page,
+}) => {
+  test.skip(!PERF_ENABLED, 'manual same-build CDP A/B harness');
+  await page.evaluate(() => {
+    Object.defineProperty(PerformanceObserver, 'supportedEntryTypes', {
+      configurable: true,
+      value: [],
+    });
+  });
+  await prepareFrameRecorder(page);
+  const frames = await scrollGesture(page, -1, 2);
+  expect(frames.loafSupported).toBe(false);
+});
+
 test('warm native transcript scroll metrics', async ({ promptRailWindow: page }) => {
   test.skip(!PERF_ENABLED, 'manual same-build CDP A/B harness');
   test.setTimeout(90_000);
@@ -237,6 +258,10 @@ test('warm native transcript scroll metrics', async ({ promptRailWindow: page })
   ));
   const before = await performanceMetrics(cdp);
   const frames = await scrollGesture(page, -600);
+  expect(
+    frames.loafSupported,
+    'Chromium does not support the long-animation-frame release metric',
+  ).toBe(true);
   const after = await performanceMetrics(cdp);
   await collectGarbage(cdp);
   const counters = await browserCounters(cdp);
@@ -264,6 +289,7 @@ test('warm native transcript scroll metrics', async ({ promptRailWindow: page })
     framesOver12_5Ms: frames.intervals.filter((duration) => duration > 12.5).length,
     loafOver50Ms: frames.loafDurations.filter((duration) => duration > 50).length,
     loafMaxMs: Math.max(0, ...frames.loafDurations),
+    loafSupported: frames.loafSupported,
     sessionSwitchMs,
   };
   console.log(`TRANSCRIPT_PERF ${JSON.stringify(result)}`);
