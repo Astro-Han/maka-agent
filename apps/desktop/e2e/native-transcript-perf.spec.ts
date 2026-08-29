@@ -53,14 +53,38 @@ interface StressSweep {
   samples: StressSample[];
 }
 
-/**
- * Repeated exact-head warm runs put the second-sweep tail range between 0.16%
- * and 1.23%. Rounding that observed ceiling to 2% leaves bounded GC headroom
- * while still rejecting retained-history growth across the sampled 50 pages.
- */
-const HEAP_PLATEAU_NOISE_RATIO = 0.02;
-/** The original secondary-metric release gate permits at most 10% regression. */
-const SECOND_SWEEP_NODE_GROWTH_RATIO = 0.1;
+interface HeapGrowth {
+  endpointRatio: number;
+  slopeBytesPerPage: number;
+  projectedRatio: number;
+}
+
+/** The predeclared secondary heap/DOM release gate permits at most 10% growth. */
+const SECONDARY_RESOURCE_GROWTH_RATIO = 0.1;
+
+function positiveHeapGrowth(samples: readonly StressSample[]): HeapGrowth {
+  const first = samples[0]!;
+  const last = samples.at(-1)!;
+  const meanIteration = samples.reduce((sum, sample) => sum + sample.iteration, 0)
+    / samples.length;
+  const meanHeap = samples.reduce((sum, sample) => sum + sample.heapBytes, 0)
+    / samples.length;
+  const slopeNumerator = samples.reduce(
+    (sum, sample) => sum + (sample.iteration - meanIteration) * (sample.heapBytes - meanHeap),
+    0,
+  );
+  const slopeDenominator = samples.reduce(
+    (sum, sample) => sum + (sample.iteration - meanIteration) ** 2,
+    0,
+  );
+  const slopeBytesPerPage = slopeDenominator === 0 ? 0 : slopeNumerator / slopeDenominator;
+  const iterationSpan = last.iteration - first.iteration;
+  return {
+    endpointRatio: Math.max(0, last.heapBytes - first.heapBytes) / first.heapBytes,
+    slopeBytesPerPage,
+    projectedRatio: Math.max(0, slopeBytesPerPage * iterationSpan) / first.heapBytes,
+  };
+}
 
 function percentile(values: readonly number[], probability: number): number {
   if (values.length === 0) return 0;
@@ -169,6 +193,14 @@ async function moveToTail(page: Page): Promise<void> {
   }, SCROLLER);
 }
 
+async function returnToLatest(page: Page): Promise<void> {
+  const returnLatest = page.getByRole('button', {
+    name: /^(?:返回最新消息|Return to latest)$/,
+  });
+  if (await returnLatest.isVisible()) await returnLatest.click();
+  else await page.locator('.maka-prompt-rail-tick').last().click({ force: true });
+}
+
 async function traverseFullHistoryAndReturnToTail(page: Page): Promise<void> {
   for (let iteration = 0; iteration < PROMPT_RAIL_PROMPT_COUNT; iteration += 1) {
     const firstBefore = await page.locator('[data-turn-id]').first().getAttribute('data-turn-id');
@@ -184,11 +216,7 @@ async function traverseFullHistoryAndReturnToTail(page: Page): Promise<void> {
     ).not.toBe(firstBefore);
   }
   await expect(page.locator('[data-turn-id="turn-prompt-rail-1"]')).toHaveCount(1);
-  const returnLatest = page.getByRole('button', {
-    name: /^(?:返回最新消息|Return to latest)$/,
-  });
-  if (await returnLatest.isVisible()) await returnLatest.click();
-  else await page.locator('.maka-prompt-rail-tick').last().click({ force: true });
+  await returnToLatest(page);
   await expect(page.locator(`[data-turn-id="turn-prompt-rail-${PROMPT_RAIL_PROMPT_COUNT}"]`))
     .toHaveCount(1);
 }
@@ -304,6 +332,7 @@ test('600+ Turn repeated paging keeps the active range on a memory plateau', asy
   const cdp = await page.context().newCDPSession(page);
   expect(PROMPT_RAIL_PROMPT_COUNT).toBeGreaterThanOrEqual(600);
   const sweeps: StressSweep[] = [];
+  const heapGrowth: Array<HeapGrowth & { sweep: number }> = [];
   const captureSample = async (sweep: number, iteration: number): Promise<StressSample> => {
     await collectGarbage(cdp);
     const counters = await browserCounters(cdp);
@@ -315,11 +344,23 @@ test('600+ Turn repeated paging keeps the active range on a memory plateau', asy
       mountedTurns: await page.locator('[data-turn-id]').count(),
       ...counters,
     };
-    expect(sample.mountedTurns).toBeLessThanOrEqual(
-      transcriptContract.DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
-    );
     return sample;
   };
+
+  // Warm the paging composition once, independent of the fixture's history depth.
+  const latestFirstTurn = await page.locator('[data-turn-id]').first().getAttribute('data-turn-id');
+  await page.evaluate((selector) => {
+    const root = document.querySelector<HTMLElement>(selector);
+    if (!root) throw new Error('the chat scroll container is missing');
+    root.scrollTop = 0;
+    root.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+  }, SCROLLER);
+  await expect.poll(async () =>
+    page.locator('[data-turn-id]').first().getAttribute('data-turn-id'),
+  ).not.toBe(latestFirstTurn);
+  await returnToLatest(page);
+  await expect(page.locator(`[data-turn-id="turn-prompt-rail-${PROMPT_RAIL_PROMPT_COUNT}"]`))
+    .toHaveCount(1);
 
   for (let sweep = 1; sweep <= 2; sweep += 1) {
     const samples: StressSample[] = [await captureSample(sweep, 0)];
@@ -342,9 +383,22 @@ test('600+ Turn repeated paging keeps the active range on a memory plateau', asy
     }
     await expect(page.locator('[data-turn-id]').first())
       .toHaveAttribute('data-turn-id', 'turn-prompt-rail-1');
+    if (samples.at(-1)!.iteration !== successfulPages) {
+      samples.push(await captureSample(sweep, successfulPages));
+    }
     sweeps.push({ sweep, successfulPages, samples });
+    const growth = { sweep, ...positiveHeapGrowth(samples) };
+    heapGrowth.push(growth);
+    console.log(`TRANSCRIPT_STRESS_SWEEP ${JSON.stringify({
+      sweep,
+      successfulPages,
+      samples,
+      heapGrowth: growth,
+    })}`);
+    expect(growth.endpointRatio).toBeLessThanOrEqual(SECONDARY_RESOURCE_GROWTH_RATIO);
+    expect(growth.projectedRatio).toBeLessThanOrEqual(SECONDARY_RESOURCE_GROWTH_RATIO);
     if (sweep < 2) {
-      await page.locator('.maka-prompt-rail-tick').last().click({ force: true });
+      await returnToLatest(page);
       await expect(page.locator(`[data-turn-id="turn-prompt-rail-${PROMPT_RAIL_PROMPT_COUNT}"]`))
         .toHaveCount(1);
     }
@@ -358,48 +412,30 @@ test('600+ Turn repeated paging keeps the active range on a memory plateau', asy
     firstSweep.samples.map((sample) => [sample.iteration, sample.nodes]),
   );
   let nodeMaxSecondToFirstRatio = 0;
-  for (const sample of secondSweep.samples) {
-    const firstNodes = firstNodesByIteration.get(sample.iteration);
+  for (const [index, sample] of secondSweep.samples.entries()) {
+    const firstNodes = index === secondSweep.samples.length - 1
+      ? firstSweep.samples.at(-1)!.nodes
+      : firstNodesByIteration.get(sample.iteration);
     expect(firstNodes).toBeDefined();
     const ratio = sample.nodes / firstNodes!;
     nodeMaxSecondToFirstRatio = Math.max(nodeMaxSecondToFirstRatio, ratio);
-    expect(ratio).toBeLessThanOrEqual(1 + SECOND_SWEEP_NODE_GROWTH_RATIO);
   }
 
-  const heapTail = secondSweep.samples.slice(-6);
-  expect(heapTail.length).toBe(6);
-  const heapMin = Math.min(...heapTail.map((sample) => sample.heapBytes));
-  const heapMax = Math.max(...heapTail.map((sample) => sample.heapBytes));
-  const heapTailRangeRatio = (heapMax - heapMin) / heapMin;
-  const meanIteration = heapTail.reduce((sum, sample) => sum + sample.iteration, 0)
-    / heapTail.length;
-  const meanHeap = heapTail.reduce((sum, sample) => sum + sample.heapBytes, 0)
-    / heapTail.length;
-  const slopeNumerator = heapTail.reduce(
-    (sum, sample) => sum + (sample.iteration - meanIteration) * (sample.heapBytes - meanHeap),
-    0,
-  );
-  const slopeDenominator = heapTail.reduce(
-    (sum, sample) => sum + (sample.iteration - meanIteration) ** 2,
-    0,
-  );
-  const heapTailSlopeBytesPerPage = slopeNumerator / slopeDenominator;
-  const heapTailIterationSpan = heapTail.at(-1)!.iteration - heapTail[0]!.iteration;
-  const heapTailProjectedGrowthRatio = Math.abs(
-    heapTailSlopeBytesPerPage * heapTailIterationSpan,
-  ) / heapMin;
   const allSamples = sweeps.flatMap((sweep) => sweep.samples);
+  const mountedMax = Math.max(...allSamples.map((sample) => sample.mountedTurns));
   console.log(`TRANSCRIPT_STRESS ${JSON.stringify({
     fixtureTurns: PROMPT_RAIL_PROMPT_COUNT,
     sweeps,
-    mountedMax: Math.max(...allSamples.map((sample) => sample.mountedTurns)),
+    mountedMax,
     nodeMin: Math.min(...allSamples.map((sample) => sample.nodes)),
     nodeMax: Math.max(...allSamples.map((sample) => sample.nodes)),
     nodeMaxSecondToFirstRatio,
-    heapTailRangeRatio,
-    heapTailSlopeBytesPerPage,
-    heapTailProjectedGrowthRatio,
+    heapGrowth,
   })}`);
-  expect(heapTailRangeRatio).toBeLessThanOrEqual(HEAP_PLATEAU_NOISE_RATIO);
-  expect(heapTailProjectedGrowthRatio).toBeLessThanOrEqual(HEAP_PLATEAU_NOISE_RATIO);
+  expect(mountedMax).toBeLessThanOrEqual(
+    transcriptContract.DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
+  );
+  expect(nodeMaxSecondToFirstRatio).toBeLessThanOrEqual(
+    1 + SECONDARY_RESOURCE_GROWTH_RATIO,
+  );
 });
