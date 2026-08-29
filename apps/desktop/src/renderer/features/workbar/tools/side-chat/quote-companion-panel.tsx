@@ -208,7 +208,7 @@ export function QuoteCompanionPanel(props: {
       data-preparing={companion.preparing || undefined}
     >
       <ChatSurfaceLayout
-        conversationKey={companion.companionSession?.id ?? props.sourceSession?.id}
+        scrollOwner="host"
         scrollToBottomLabel={copy.scrollToBottom}
         composer={
           <>
