@@ -140,7 +140,7 @@ export class DesktopTranscriptReplica {
         replica.#installDurable(durable.messages);
         replica.#hasOlder = durable.nextCursor !== null;
       });
-      replica.#evictToBudget();
+      replica.#evictToBudget(undefined, 'oldest', replica.#durableThrough ?? undefined);
       if (replica.#overlayBytes > replica.#maxOverlayBytes) {
         throw new RangeError('Desktop transcript overlay exceeds the session cache limit');
       }
@@ -422,7 +422,11 @@ export class DesktopTranscriptReplica {
             expectedSequence = decoded.messages.at(-1)!.identity + 1;
           }
           const completedOverlayMessageIds = this.#installDurable(decoded.messages);
-          const evictedDurableSequences = this.#evictToBudget();
+          const evictedDurableSequences = this.#evictToBudget(
+            undefined,
+            'oldest',
+            decoded.messages.at(-1)?.identity,
+          );
           this.#publish(decoded.messages, completedOverlayMessageIds, evictedDurableSequences);
           cursor = decoded.nextCursor;
         });
