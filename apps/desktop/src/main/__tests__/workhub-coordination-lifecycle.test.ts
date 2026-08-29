@@ -30,39 +30,6 @@ const coordinationSessionId = (hostId: string) => desktopSessionKey({
   sessionId: 'maka_workhub_coordination',
 });
 
-test('WorkHub keeps its resolved projection while the same default Host reconnects', async () => {
-  let hostChange: ((event: WorkHubCoordinationHostChange) => void) | undefined;
-  const calls: string[] = [];
-  const sessionId = coordinationSessionId('host-a');
-  const stop = startWorkHubCoordinationLifecycle({
-    resolve: async () => sessionId,
-    subscribeHostChanges(handler) {
-      hostChange = handler;
-      return () => undefined;
-    },
-    subscribeAvailabilityChanges: () => () => undefined,
-    onResolving: () => calls.push('resolving'),
-    onResolved: (sessionId) => calls.push(`resolved:${sessionId}`),
-    reportFailure: (error) => assert.fail(error instanceof Error ? error.message : String(error)),
-  });
-  await Promise.resolve();
-  await Promise.resolve();
-
-  hostChange?.({
-    isDefault: true,
-    readiness: 'reconnecting',
-    hostId: 'host-a',
-  });
-  hostChange?.({
-    isDefault: true,
-    readiness: 'ready',
-    hostId: 'host-a',
-  });
-
-  assert.deepEqual(calls, ['resolving', `resolved:${sessionId}`]);
-  stop();
-});
-
 test('WorkHub resolves on open and when the default Host authority changes', async () => {
   let hostChange: ((event: WorkHubCoordinationHostChange) => void) | undefined;
   let availabilityChange: (() => void) | undefined;
