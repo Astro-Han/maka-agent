@@ -43,6 +43,27 @@ describe('Navigation selection persistence', () => {
     );
   });
 
+  it('migrates plan reminders written by the oldest supported version', () => {
+    assert.deepEqual(
+      parseNavigationState(
+        JSON.stringify({
+          selection: { section: 'automations', module: 'plan-reminders' },
+          moduleMemory: {
+            extensions: 'skills',
+            automations: 'plan-reminders',
+          },
+        }),
+      ),
+      {
+        selection: { section: 'automations', module: 'scheduled-tasks' },
+        moduleMemory: {
+          extensions: 'skills',
+          automations: 'scheduled-tasks',
+        },
+      },
+    );
+  });
+
   it('ignores pre-hub selections from versions outside the support window', () => {
     const legacySelections = [
       { section: 'skills' },

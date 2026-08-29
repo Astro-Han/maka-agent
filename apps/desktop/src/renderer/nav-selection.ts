@@ -63,6 +63,9 @@ function parseSelection(value: unknown): NavSelection | null {
   if (candidate.section === 'automations' && isAutomationModule(candidate.module)) {
     return { section: 'automations', module: candidate.module };
   }
+  if (candidate.section === 'automations' && candidate.module === 'plan-reminders') {
+    return { section: 'automations', module: 'scheduled-tasks' };
+  }
   return null;
 }
 
