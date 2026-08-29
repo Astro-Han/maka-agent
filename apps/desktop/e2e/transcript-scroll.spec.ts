@@ -353,6 +353,60 @@ test('a gesture a nested scroller consumed does not release the tail', async ({
   expect(await scrollButtonOffered(page)).toBe(false);
 });
 
+test('a nested scroller near the history boundary does not request an earlier range', async ({
+  promptRailWindow: page,
+}) => {
+  await page.setViewportSize({ width: 900, height: 1500 });
+  await waitForPaintedFrames(page, 6);
+  const metrics = await scrollMetrics(page);
+  expect(metrics.scrollTop).toBeLessThanOrEqual(Math.max(640, metrics.clientHeight * 2));
+  expect(metrics.distance).toBeLessThanOrEqual(4);
+
+  const nestedBefore = await page.evaluate((selector) => {
+    const root = document.querySelector<HTMLElement>(selector);
+    const rootTop = root?.getBoundingClientRect().top ?? 0;
+    const turn = [...(root?.querySelectorAll<HTMLElement>('[data-turn-id]') ?? [])].find(
+      (candidate) => candidate.getBoundingClientRect().bottom > rootTop,
+    );
+    if (!root || !turn) throw new Error('the active transcript range is missing');
+    const box = document.createElement('div');
+    box.dataset.nestedHistoryScroller = 'true';
+    box.style.cssText = [
+      'position:fixed',
+      'top:160px',
+      'left:160px',
+      'width:240px',
+      'height:120px',
+      'overflow-y:auto',
+      'z-index:9999',
+    ].join(';');
+    const filler = document.createElement('div');
+    filler.style.height = '2000px';
+    box.append(filler);
+    turn.append(box);
+    box.scrollTop = 600;
+    return box.scrollTop;
+  }, SCROLLER);
+
+  await page.locator('[data-nested-history-scroller="true"]').hover();
+  await page.mouse.wheel(0, -400);
+  await waitForPaintedFrames(page);
+
+  const nestedAfter = await page.evaluate(() =>
+    document.querySelector<HTMLElement>('[data-nested-history-scroller="true"]')?.scrollTop ?? -1,
+  );
+  expect(nestedAfter).toBeLessThan(nestedBefore);
+  await page.evaluate(() => {
+    const list = document.querySelector('.maka-chat-message-list');
+    if (!list) throw new Error('the transcript content box is missing');
+    const grown = document.createElement('div');
+    grown.style.height = '600px';
+    list.append(grown);
+  });
+  await waitForPaintedFrames(page, 6);
+  expect(await distanceToTail(page)).toBeLessThanOrEqual(4);
+});
+
 test('the dock affordance returns the reader to the tail', async ({ window: page }) => {
   test.slow();
   await page.setViewportSize({ width: 900, height: 700 });
