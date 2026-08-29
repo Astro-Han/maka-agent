@@ -63,17 +63,6 @@ function parseSelection(value: unknown): NavSelection | null {
   if (candidate.section === 'automations' && isAutomationModule(candidate.module)) {
     return { section: 'automations', module: candidate.module };
   }
-
-  // Migrate the pre-hub destinations written by maka-nav-selection-v1.
-  if (candidate.section === 'skills' || candidate.section === 'mcp') {
-    return { section: 'extensions', module: candidate.section };
-  }
-  if (candidate.section === 'daily-review') {
-    return { section: 'automations', module: 'daily-review' };
-  }
-  if (candidate.section === 'automations') {
-    return { section: 'automations', module: 'scheduled-tasks' };
-  }
   return null;
 }
 
