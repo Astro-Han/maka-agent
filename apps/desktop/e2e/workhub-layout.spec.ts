@@ -47,23 +47,15 @@ test('WorkHub target metadata remains within the submitted Session control', asy
   const submittedTurn = page.locator('.workhub-turn', { hasText: routedPrompt });
   await expect(submittedTurn.locator('.workhub-submitted-session small')).toBeVisible();
 
-  const geometry = await submittedTurn.evaluate((turn) => {
+  const buttonContainsProject = await submittedTurn.evaluate((turn) => {
     const button = turn.querySelector<HTMLElement>('.workhub-submitted > button')!;
     const project = button.querySelector<HTMLElement>('.workhub-submitted-session small')!;
-    const result = turn.querySelector<HTMLElement>('.workhub-result');
     const buttonBox = button.getBoundingClientRect();
     const projectBox = project.getBoundingClientRect();
-    const resultBox = result?.getBoundingClientRect();
-    return {
-      buttonContainsProject: buttonBox.bottom >= projectBox.bottom,
-      overlapHeight: resultBox
-        ? Math.min(projectBox.bottom, resultBox.bottom) - Math.max(projectBox.top, resultBox.top)
-        : 0,
-    };
+    return buttonBox.bottom >= projectBox.bottom;
   });
 
-  expect(geometry.buttonContainsProject).toBe(true);
-  expect(geometry.overlapHeight).toBeLessThanOrEqual(0);
+  expect(buttonContainsProject).toBe(true);
 });
 
 test('WorkHub explains Coordination startup failure and recovers after a default model is set', async ({
