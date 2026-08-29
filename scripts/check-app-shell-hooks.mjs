@@ -128,7 +128,16 @@ export const ALLOWED = {
     useOnboardingSnapshot: 1,
     usePlanModeState: 1,
     useSessionEventHealthPolling: 1,
-    useSessionNavigationController: 1,
+    // Replaces `useSessionNavigationController`, which is now called inside
+    // `SessionNavigationProvider`. The entry shrinks rather than disappearing,
+    // because the shell body does read the rail: the command palette lists the
+    // same visible sessions, the titlebar shows the linked parent, and the
+    // frame publishes the rail's width as `--maka-sidenav-width`. What is left
+    // holds nothing — three `useMemo`s over the catalog the shell already reads
+    // and one subscription to the rail's geometry — where the controller it
+    // replaces put three `useState`, four effects and a `useStableActions`
+    // facade on this fiber.
+    useSessionNavigationReads: 1,
     useSessionSettingIntent: 2,
     useSettingsModal: 1,
     useShellAppearance: 1,

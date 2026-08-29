@@ -17,11 +17,16 @@
  * under the License.
  */
 
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { StoredMessage } from '@maka/core/session';
 import type { TransientUserMessageProjection } from '@maka/ui';
 import { MESSAGE_QUEUE_MAX_ENTRIES } from '@maka/runtime-host/protocol';
 import { useAppShellSessionUiState } from './app-shell-session-ui-state';
+import {
+  selectActiveSessionId,
+  useSessionCatalogController,
+} from './session-catalog-state.js';
+import { useExternalStoreSelector } from './use-external-store-selector.js';
 import { useAppShellSessionList } from './use-app-shell-session-list';
 import { createBootstrapSelectionLease } from './bootstrap-selection-lease';
 import {
@@ -47,10 +52,15 @@ type MessageListUpdater = (
 type TransientUserMessage = TransientUserMessageProjection;
 
 export function useAppShellSessionWorkspace(toastApi: ToastApi) {
-  const [activeId, setActiveIdState] = useState<string | undefined>();
+  // The catalog and the selection are one authority, and it is a store: the
+  // Session rail subscribes to it directly instead of receiving it from the
+  // shell's render (#4109).
+  const catalog = useSessionCatalogController();
+  const activeId = useExternalStoreSelector(catalog, selectActiveSessionId);
   const activeIdRef = useRef<string | undefined>(undefined);
   const sessionUi = useAppShellSessionUiState();
   const sessionList = useAppShellSessionList(toastApi, {
+    catalog,
     activeIdRef,
     liveTurnBySessionRef: sessionUi.liveTurnBySessionRef,
     clearTurnTransientStateIfCurrent: sessionUi.clearTurnTransientStateIfCurrent,
@@ -68,10 +78,13 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
   const messageRetryPendingRef = useRef<Set<string>>(new Set());
   const stopPendingRef = useRef<Set<string>>(new Set());
 
-  function projectTransientMessages(
+  // Reads only refs, so it can be created once. Row actions and the selection
+  // are built from it, and a factory that changed identity per render was what
+  // put the whole rail back on the shell's render (#4109).
+  const projectTransientMessages = useCallback((
     sessionId: string,
     durable: readonly StoredMessage[],
-  ): TransientUserMessage[] {
+  ): TransientUserMessage[] => {
     const pending = transientMessagesBySessionRef.current.get(sessionId);
     if (!pending || pending.size === 0) return [];
     let includeTransient = true;
@@ -86,15 +99,18 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
       transientMessagesBySessionRef.current.delete(sessionId);
     }
     return projected;
-  }
+  }, []);
 
-  const setMessagesForActiveSession: MessageListUpdater = (next) => {
+  // Stable, like `setActiveId`: the rail's row actions clear the active
+  // transcript through it, and a per-render identity there rebuilt them and
+  // every row under them (#4109).
+  const setMessagesForActiveSession = useCallback<MessageListUpdater>((next) => {
     const projected = typeof next === 'function' ? next([...messagesRef.current]) : next;
     messagesRef.current = projected;
     setMessages(projected);
     const sessionId = activeIdRef.current;
     setTransientMessages(sessionId ? projectTransientMessages(sessionId, projected) : []);
-  };
+  }, [projectTransientMessages]);
 
   function addTransientMessage(sessionId: string, message: TransientUserMessage): void {
     let pending = transientMessagesBySessionRef.current.get(sessionId);
@@ -171,7 +187,7 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
     }
   }
 
-  function setActiveId(next: string | undefined): void {
+  const setActiveId = useCallback((next: string | undefined): void => {
     selectionRevisionRef.current += 1;
     // Clear here, not in the read effect: a layout-effect clear would wipe an
     // optimistic first message before the first paint.
@@ -185,8 +201,8 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
     }
     activeIdRef.current = next;
     if (next) clearNewTaskReloadIntent();
-    setActiveIdState(next);
-  }
+    catalog.setActiveSessionId(next);
+  }, [catalog, projectTransientMessages]);
 
   if (!bootstrapSelectionLeaseRef.current) {
     bootstrapSelectionLeaseRef.current = createBootstrapSelectionLease({
@@ -197,13 +213,13 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
     if (hasNewTaskReloadIntent()) bootstrapSelectionLeaseRef.current.release();
   }
 
-  function startNewSession(): void {
+  const startNewSession = useCallback((): void => {
     markNewTaskReloadIntent();
     setActiveId(undefined);
     messagesRef.current = [];
     setMessages([]);
     setTransientMessages([]);
-  }
+  }, [setActiveId]);
 
   function clearOwnedSessionState(sessionId: string): void {
     messageRetryPendingRef.current.delete(sessionId);
@@ -215,6 +231,7 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
 
   return {
     ...sessionList,
+    sessionCatalogController: catalog,
     activeId,
     activeIdRef,
     bootstrapSelectionLease: bootstrapSelectionLeaseRef.current,

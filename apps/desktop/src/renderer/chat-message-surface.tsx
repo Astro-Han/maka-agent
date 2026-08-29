@@ -39,7 +39,7 @@ import type { TaskReadinessNotice } from './task-readiness-notice';
 import { getShellCopy } from './locales/shell-copy';
 import { getDesktopConversationCopy } from './locales/conversation-copy';
 import { selectLiveTurn } from './use-app-shell-session-ui-reads';
-import { useAppShellSessionUiSelector } from './use-app-shell-session-ui-selector';
+import { useExternalStoreSelector } from './use-external-store-selector';
 import { useDeepResearchRun } from './use-deep-research-run';
 
 const selectShellRunRecord = (state: AppShellSessionUiState, sessionId: string | undefined) =>
@@ -159,7 +159,7 @@ export function ChatMessageSurface({
     activeSession?.id,
     isDeepResearchSession(activeSession?.labels),
   );
-  const liveTurn = useAppShellSessionUiSelector(sessionUiController, selectLiveTurn, activeSessionId);
+  const liveTurn = useExternalStoreSelector(sessionUiController, selectLiveTurn, activeSessionId);
   const seededLiveTurn = liveContentSeedRevision > 0 ? liveTurn : undefined;
   const [activation, setActivation] = useState(() => ({
     sessionId: activeSessionId,
@@ -193,7 +193,7 @@ export function ChatMessageSurface({
   // change to any OTHER map cannot rebuild the array. Deriving it in the
   // selector would need a comparator to say the same thing, and would still
   // recompute once per store change.
-  const shellRunUpdateRecord = useAppShellSessionUiSelector(
+  const shellRunUpdateRecord = useExternalStoreSelector(
     sessionUiController,
     selectShellRunRecord,
     activeSessionId,

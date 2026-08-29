@@ -18,15 +18,20 @@
  */
 
 import { useMemo, useSyncExternalStore } from 'react';
-import type { AppShellSessionUiState, AppShellSessionUiStateController } from './app-shell-session-ui-state.js';
+
+/** The reading half of a renderer store: `app-shell-session-ui-state`, `session-catalog-state`. */
+export interface ExternalStore<S> {
+  getState(): S;
+  subscribe(listener: () => void): () => void;
+}
 
 /**
- * Subscribe to one derived reading of session UI state (#1985).
+ * Subscribe to one derived reading of a renderer store (#1985, #4109).
  *
- * The controller is a single external store whose maps change at very different
- * rates — `liveTurnBySession` moves once per streamed token, the rest at human
- * speed. A component re-renders only when the value IT selects changes, so the
- * chat transcript can follow every delta while the shell around it stays still.
+ * A store's parts change at very different rates — `liveTurnBySession` moves
+ * once per streamed token, the session catalog at human speed. A component
+ * re-renders only when the value IT selects changes, so the chat transcript can
+ * follow every delta while the shell around it stays still.
  *
  * `select` must be a stable (module-level) function, and whatever it varies by
  * — a session id, say — is passed as `arg` rather than captured. That is what
@@ -43,16 +48,16 @@ import type { AppShellSessionUiState, AppShellSessionUiStateController } from '.
  * fewer-renders optimization: it carries a value's identity ACROSS a state the
  * selection did not actually change.
  */
-export function useAppShellSessionUiSelector<T, A = undefined>(
-  controller: AppShellSessionUiStateController,
-  select: (state: AppShellSessionUiState, arg: A) => T,
+export function useExternalStoreSelector<S, T, A = undefined>(
+  store: ExternalStore<S>,
+  select: (state: S, arg: A) => T,
   arg?: A,
   isEqual?: (a: T, b: T) => boolean,
 ): T {
   const getSnapshot = useMemo(() => {
-    let cache: { state: AppShellSessionUiState; value: T } | null = null;
+    let cache: { state: S; value: T } | null = null;
     return (): T => {
-      const state = controller.getState();
+      const state = store.getState();
       if (cache && cache.state === state) return cache.value;
       const next = select(state, arg as A);
       const value = cache && (Object.is(cache.value, next) || isEqual?.(cache.value, next) === true)
@@ -61,7 +66,7 @@ export function useAppShellSessionUiSelector<T, A = undefined>(
       cache = { state, value };
       return value;
     };
-  }, [controller, select, arg, isEqual]);
+  }, [store, select, arg, isEqual]);
 
-  return useSyncExternalStore(controller.subscribe, getSnapshot, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }

@@ -58,6 +58,8 @@ import {
   type ToastDiagnosticTarget,
   type ToastErrorAction,
   type NavSelection,
+  type ProjectRowActions,
+  SessionListPanel,
   TitlebarSessionIdentity,
   type TurnFooterActionMeta,
   useToast,
@@ -91,8 +93,12 @@ import {
 import { GoalHost, useGoalController } from './features/goals';
 import { ModuleHubHost, useModuleHubController } from './features/module-hub';
 import {
-  SessionNavigationHost,
-  useSessionNavigationController,
+  SessionNavigationProvider,
+  createSessionOpenCommand,
+  sessionRailLayoutStore,
+  useSessionNavigationReads,
+  type SessionNavigationPorts,
+  type SessionNavigationRowActions,
 } from './features/session-navigation';
 import {
   TaskEntryHost,
@@ -183,6 +189,7 @@ import {
 import { createAppShellSessionStartActions } from './app-shell-session-start-actions';
 import { createAppShellSessionSettingsActions } from './app-shell-session-settings-actions';
 import { createAppShellStopAction } from './app-shell-stop-action';
+import { useExternalStoreSelector } from './use-external-store-selector';
 import { useStableActions } from './use-stable-actions';
 import {
   useActiveSessionEvents,
@@ -311,6 +318,17 @@ export function AppShell({ initialOnboardingSnapshot = null }: AppShellProps = {
   );
 }
 
+/**
+ * The Session rail, as one element built once.
+ *
+ * AppShell re-renders about fourteen times per session switch. Written inline
+ * in the JSX below, each of those rebuilt this element and re-rendered the
+ * rail's ~1,000 fibers with it; hoisted here, React sees the same element and
+ * skips the subtree, and what reaches the rail is the two rail contexts alone.
+ * The panel takes no props for exactly this reason (#4109).
+ */
+const SESSION_RAIL = <SessionListPanel />;
+
 function AppShellContent({
   initialOnboardingSnapshot = null,
   uiLocale,
@@ -386,6 +404,10 @@ function AppShellContent({
   const taskEntry = useTaskEntryController({
     reportError: reportTaskEntryError,
   });
+  // Named on its own because the rail depends on it: `taskEntry.commands` is a
+  // fresh object every render, so depending on the bag rather than the command
+  // would rebuild the rail's Project rows on every AppShell commit (#4109).
+  const { selectLocalProject } = taskEntry.commands;
   const currentNewTaskDraftKey = taskEntry.selectors.draftKey;
   // Staged files and quotes do NOT take the target-scoped key: they belong to
   // the composer the user is looking at, and an in-flight send needs an owner
@@ -934,15 +956,6 @@ function AppShellContent({
     setPendingBySession?.((current) => omitSessionKey(current, sessionId));
   }
 
-  function clearSessionRendererState(sessionId: string): void {
-    clearOwnedSessionState(sessionId);
-    turnActionRegistry.clearForSession(sessionId);
-    permissionModeChangeRegistry.keysRef.current.delete(sessionId);
-    planModeIntent.clear(sessionId);
-    orchestrationModeIntent.clear(sessionId);
-    sessionModelChangeRegistry.keysRef.current.delete(sessionId);
-  }
-
   const {
     setPermissionMode,
     setSessionModel,
@@ -996,6 +1009,24 @@ function AppShellContent({
       );
     },
   });
+
+  // Stable: the rail's row actions are built from it, and it only reaches
+  // registries and refs that are themselves stable (#4109).
+  const clearSessionRendererState = useCallback((sessionId: string): void => {
+    clearOwnedSessionState(sessionId);
+    turnActionRegistry.clearForSession(sessionId);
+    permissionModeChangeRegistry.keysRef.current.delete(sessionId);
+    planModeIntent.clear(sessionId);
+    orchestrationModeIntent.clear(sessionId);
+    sessionModelChangeRegistry.keysRef.current.delete(sessionId);
+  }, [
+    clearOwnedSessionState,
+    orchestrationModeIntent,
+    permissionModeChangeRegistry.keysRef,
+    planModeIntent,
+    sessionModelChangeRegistry.keysRef,
+    turnActionRegistry,
+  ]);
 
   /**
    * Enter or leave Plan for one Session — the only path that writes
@@ -1564,23 +1595,63 @@ function AppShellContent({
     showModelSetupToast,
     toastApi,
   });
+  const openNewTaskSurface = useCallback(() => {
+    startNewSession();
+    // Only Plan resets: a new task starts out of Plan, in whatever
+    // orchestration the last one was set to.
+    setNewChatPlanModeActive(false);
+    setNavSelection({ section: 'sessions' });
+    setSearchScrollTarget(null);
+    // New-task affordances reset to the empty-state composer; move focus
+    // there so the user can start typing immediately.
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }, [setNavSelection, setSearchScrollTarget, startNewSession]);
+
+  const createSession = useCallback(async () => {
+    openNewTaskSurface();
+  }, [openNewTaskSurface]);
+
+  // Stable, because the rail's Project rows carry it: a fresh identity here
+  // rebuilt the whole list on every AppShell commit (#4109).
+  const createSessionInProject = useCallback(
+    async (projectId: string) => {
+      if (!selectLocalProject(projectId)) return;
+      openNewTaskSurface();
+    },
+    [openNewTaskSurface, selectLocalProject],
+  );
+
   // Sidebar Project groups are Local. Their catalog mutations remain on the
   // default-scoped bridge until Settings receives its own Host selector.
-  const projectRowActions: ComponentProps<typeof SessionNavigationHost>['projectActions'] =
-    projectCapabilities.setLocalDefault
-      ? {
-          onNew: createSessionInProject,
-          onRename: renameProject,
-          onArchive: archiveProject,
-          onRestore: restoreProject,
-          ...(projectCapabilities.chooseClientDirectory
-            ? {
-                onRelink: (projectId: string) =>
-                  relinkProject(projectId).then(() => undefined),
-              }
-            : {}),
-        }
-      : undefined;
+  //
+  // Memoized because the rail reads it: rebuilt per render, this one object
+  // would put the whole list back on every AppShell commit (#4109).
+  const projectRowActions = useMemo<ProjectRowActions | undefined>(
+    () =>
+      projectCapabilities.setLocalDefault
+        ? {
+            onNew: createSessionInProject,
+            onRename: renameProject,
+            onArchive: archiveProject,
+            onRestore: restoreProject,
+            ...(projectCapabilities.chooseClientDirectory
+              ? {
+                  onRelink: (projectId: string) =>
+                    relinkProject(projectId).then(() => undefined),
+                }
+              : {}),
+          }
+        : undefined,
+    [
+      archiveProject,
+      createSessionInProject,
+      projectCapabilities.chooseClientDirectory,
+      projectCapabilities.setLocalDefault,
+      relinkProject,
+      renameProject,
+      restoreProject,
+    ],
+  );
 
   // Composer mention popups: `/` uses Runtime's session/project-aware,
   // host-compatible projection; `@` uses workspace file search. Keep the
@@ -1639,48 +1710,70 @@ function AppShellContent({
     [setNavSelection],
   );
   const clearActiveMessages = useCallback(() => setMessages([]), [setMessages]);
-  const sessionNavigation = useSessionNavigationController({
-    sessions,
-    activeSessionId: activeId,
-    hiddenSessionIds: workbar.selectors.hiddenSessionIds,
-    projects: localProjects,
+  const openSession = useMemo(
+    () =>
+      createSessionOpenCommand({
+        activateSession: setActiveId,
+        exitWorkHub,
+        selectSessionSurface,
+        setSearchTarget: setSearchScrollTarget,
+      }),
+    [exitWorkHub, selectSessionSurface, setActiveId, setSearchScrollTarget],
+  );
+  useLayoutEffect(() => {
+    openSessionInChatRef.current = openSession;
+  }, [openSession]);
+  const pendingSessionRowActionsRef = useRef(new Set<string>());
+  const sessionNavigationCommandsRef = useRef<SessionNavigationRowActions | null>(null);
+  // Built inline: the rail reads these through a ref published on commit, so
+  // their identity carries no information and this object never has to be
+  // held still by hand (#4109).
+  const sessionNavigationPorts: SessionNavigationPorts = {
+    activeIdRef,
+    sessionsRef,
+    pendingSessionRowActionsRef,
     activateSession: setActiveId,
     clearActiveMessages,
     clearSessionRendererState,
-    exitWorkHub,
     refreshSessions,
-    selectSessionSurface,
-    setSearchTarget: setSearchScrollTarget,
     toastApi,
+  };
+  const {
+    rail: sessionRail,
+    branchBanner,
+    revisionNavigation,
+    layout: railLayout,
+  } = useSessionNavigationReads({
+    sessions,
+    activeSessionId: activeId,
+    activeSession,
+    hiddenSessionIds: workbar.selectors.hiddenSessionIds,
   });
-  useLayoutEffect(() => {
-    openSessionInChatRef.current = sessionNavigation.commands.openSession;
-  }, [sessionNavigation.commands.openSession]);
-  const visibleSessions = sessionNavigation.selectors.visibleSessions;
-  const sessionListCollapsed = sessionNavigation.layout.collapsed;
-  const sessionListWidth = sessionNavigation.layout.width;
-  const sessionSideNavHandleRef = sessionNavigation.layout.collapseHandleRef;
+  const visibleSessions = sessionRail.sessions;
+  const sessionListCollapsed = railLayout.collapsed;
+  const sessionListWidth = railLayout.width;
+  const sessionSideNavHandleRef = sessionRailLayoutStore.collapseHandleRef;
   const titlebarParentSession = useMemo(() => {
-    const parent = sessionNavigation.selectors.activeParentSession;
+    const parent = sessionRail.activeParentSession;
     if (!parent) return undefined;
     const parentId = parent.id;
     return {
       name: parent.name,
       onOpen: () => openSessionInChatRef.current(parentId),
     };
-  }, [sessionNavigation.selectors.activeParentSession]);
+  }, [sessionRail.activeParentSession]);
   const archivedTasksBridge = useMemo<ArchivedTasksBridge>(
     () => ({
       sessions,
       projects: localProjects,
       onRestore: (sessionId) =>
-        void sessionNavigation.commands.unarchiveSession(sessionId),
+        void sessionNavigationCommandsRef.current?.unarchiveSession(sessionId),
       onDelete: (sessionId) =>
-        void sessionNavigation.commands.deleteSession(sessionId),
+        void sessionNavigationCommandsRef.current?.deleteSession(sessionId),
       onPurge: (sessionIds) =>
-        sessionNavigation.commands.purgeSessions(sessionIds),
+        sessionNavigationCommandsRef.current!.purgeSessions(sessionIds),
     }),
-    [sessions, localProjects, sessionNavigation.commands],
+    [sessions, localProjects],
   );
 
   const firstSendObservationWaitersRef = useRef(
@@ -1731,7 +1824,7 @@ function AppShellContent({
     setActiveId,
     setNavSelection,
     setSearchModalOpen,
-    setSessionListCollapsed: sessionNavigation.layout.setCollapsed,
+    setSessionListCollapsed: sessionRailLayoutStore.setCollapsed,
     workbar: {
       rightCollapsed: workbar.selectors.rightCollapsed,
       toggleRight: workbar.commands.toggleRight,
@@ -2441,27 +2534,6 @@ function AppShellContent({
     bootstrapSelectionLease.release();
   }
 
-  function openNewTaskSurface() {
-    startNewSession();
-    // Only Plan resets: a new task starts out of Plan, in whatever
-    // orchestration the last one was set to.
-    setNewChatPlanModeActive(false);
-    setNavSelection({ section: 'sessions' });
-    setSearchScrollTarget(null);
-    // New-task affordances reset to the empty-state composer; move focus
-    // there so the user can start typing immediately.
-    window.requestAnimationFrame(() => composerRef.current?.focus());
-  }
-
-  async function createSession() {
-    openNewTaskSurface();
-  }
-
-  async function createSessionInProject(projectId: string) {
-    if (!taskEntry.commands.selectLocalProject(projectId)) return;
-    openNewTaskSurface();
-  }
-
   /**
    * PR-UI-RENDER-2 - single chokepoint for the Markdown internal-URI
    * router. Receives a typed `MakaUriDest` from the link override in
@@ -2730,7 +2802,7 @@ function AppShellContent({
                 key={activeSessionForView.id}
                 sessionName={activeSessionForView.name}
                 onRenameSession={(name) => {
-                  void sessionNavigation.commands.renameSession(activeSessionForView.id, name);
+                  void sessionNavigationCommandsRef.current?.renameSession(activeSessionForView.id, name);
                 }}
                 project={
                   titlebarProjectName
@@ -2768,14 +2840,18 @@ function AppShellContent({
         aria-hidden={shellObscured ? 'true' : undefined}
         inert={shellObscured ? true : undefined}
         sideNav={
-          <SessionNavigationHost
-            controller={sessionNavigation}
+          <SessionNavigationProvider
+            rail={sessionRail}
+            projects={localProjects}
+            streamingSessionIds={streamingSessionIds}
+            staleSessionIds={staleSessionIds}
+            ports={sessionNavigationPorts}
+            commandsRef={sessionNavigationCommandsRef}
             onExitWorkHub={exitWorkHub}
+            onSelectSession={openSession}
             workHubActive={workHubActive}
             selection={navSelection}
             scheduledTasks={moduleHub.selectors.scheduledTasks}
-            streamingSessionIds={streamingSessionIds}
-            staleSessionIds={staleSessionIds}
             moduleMemory={navigationState.moduleMemory}
             onSelect={setNavSelection}
             onOpenSettings={openSettings}
@@ -2788,7 +2864,9 @@ function AppShellContent({
               onSelect: openWorkHub,
             } : undefined}
             projectActions={projectRowActions}
-          />
+          >
+            {SESSION_RAIL}
+          </SessionNavigationProvider>
         }
       >
         <AppShellDetailPanel agentsView={agentsView}>
@@ -3071,9 +3149,9 @@ function AppShellContent({
                   ? (target) => openSessionInChat(activeId, target.turnId, target.sequence)
                   : undefined}
                 scrollBehavior={readScrollMotionBehavior()}
-                branchBanner={sessionNavigation.selectors.branchBanner}
+                branchBanner={branchBanner}
                 onBranchBannerClick={openSessionInChat}
-                revisionNavigation={sessionNavigation.selectors.revisionNavigation}
+                revisionNavigation={revisionNavigation}
                 onRevisionNavigate={openSessionInChat}
                 onNew={createSession}
                 onPromptSuggestion={(prompt) => composerRef.current?.appendText(prompt)}

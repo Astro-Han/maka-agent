@@ -222,7 +222,7 @@ export type AppShellSessionUiStateController = ReturnType<typeof createAppShellS
 /**
  * Owns the controller for the component's lifetime. Deliberately does NOT
  * subscribe: readers select what they need through
- * `useAppShellSessionUiSelector`, so no single component re-renders for every
+ * `useExternalStoreSelector`, so no single component re-renders for every
  * write to the store (#1985).
  */
 export function useAppShellSessionUiState() {
