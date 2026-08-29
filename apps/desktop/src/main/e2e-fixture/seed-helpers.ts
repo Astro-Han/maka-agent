@@ -36,7 +36,9 @@ export const TURN_SESSION_ID = 'e2e-fixture-turn';
 export const PROMPT_RAIL_SESSION_ID = 'e2e-fixture-prompt-rail';
 export const PARTIAL_HISTORY_SESSION_ID = 'e2e-fixture-partial-history';
 /** Exceeds both the 64-tick rail and the bounded active transcript range. */
-export const PROMPT_RAIL_PROMPT_COUNT = 120;
+export const PROMPT_RAIL_PROMPT_COUNT = process.env.MAKA_TRANSCRIPT_STRESS === '1'
+  ? 640
+  : 120;
 export const LONG_SIDEBAR_SESSION_PREFIX = 'e2e-fixture-sidebar-long-';
 export const LONG_SIDEBAR_SESSION_COUNT = 60;
 export const LONG_SIDEBAR_PROJECT_ID = 'e2e-fixture-project';
