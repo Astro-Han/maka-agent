@@ -46,6 +46,7 @@ import {
 import { RelativeTime } from './relative-time.js';
 import { formatAbsoluteTimestamp } from '@maka/core/relative-time';
 import { Badge } from '@astryxdesign/core/Badge';
+import { IconButton } from '@astryxdesign/core/IconButton';
 import { MoreMenu } from '@astryxdesign/core/MoreMenu';
 import {
   SideNavItem,
@@ -596,6 +597,19 @@ function ProjectItemActions(props: {
 
   return (
     <span className="maka-session-row-action" data-position={props.position} ref={trailingRef}>
+      {project.available ? (
+        <span className="maka-project-quick-action">
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={<SquarePen size={ICON_SIZE.control} aria-hidden="true" />}
+            label={copy.projectNewTask}
+            tooltip={copy.projectNewTask}
+            isDisabled={pendingAction !== null}
+            onClick={() => runProjectAction('new', () => actions.onNew(project.id))}
+          />
+        </span>
+      ) : null}
       <MoreMenu
         size="sm"
         label={copy.projectActionsAriaLabel(project.name)}

@@ -363,6 +363,27 @@
   visibility: hidden;
 }
 
+/* MOCKUP for discussion #3488: project-row quick action (New task) reveals on
+   hover/focus, mirroring the session-row action contract above. The permanent
+   MoreMenu keeps its slot; the quick action appears to its left. */
+.maka-project-row .maka-project-quick-action {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.maka-project-row:hover .maka-project-quick-action,
+.maka-project-row:focus-within .maka-project-quick-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .maka-project-row .maka-project-quick-action {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 /* Nothing here can reveal the menu later, so it takes the slot outright and the
    timestamp yields. */
 @media (hover: none) {
