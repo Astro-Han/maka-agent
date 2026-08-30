@@ -827,6 +827,19 @@ function reasoningSignatureFromChunk(chunk: AiSdkStreamChunk): string | undefine
   return typeof signature === 'string' && signature.length > 0 ? signature : undefined;
 }
 
+function anthropicRedactedThinkingProviderOptionsFromChunk(
+  chunk: AiSdkStreamChunk,
+): NonNullable<ModelMessage['providerOptions']> | undefined {
+  const meta = chunk.providerMetadata;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return undefined;
+  const anthropic = (meta as { anthropic?: unknown }).anthropic;
+  if (!anthropic || typeof anthropic !== 'object' || Array.isArray(anthropic)) return undefined;
+  const redactedData = (anthropic as { redactedData?: unknown }).redactedData;
+  return typeof redactedData === 'string'
+    ? (meta as NonNullable<ModelMessage['providerOptions']>)
+    : undefined;
+}
+
 function openAiResponsesReasoningProviderOptionsFromChunk(
   chunk: AiSdkStreamChunk,
   runtime: ResolvedModelRuntime,
@@ -962,7 +975,20 @@ function translateChunk(
   switch (chunk.type) {
     case 'reasoning-start': {
       const reasoningItemId = plaintextSummaryItemIdFromChunk(chunk, runtime);
-      return reasoningItemId ? [{ kind: 'thinking', text: '', reasoningItemId }] : [];
+      const redactedThinkingProviderOptions =
+        anthropicRedactedThinkingProviderOptionsFromChunk(chunk);
+      return reasoningItemId || redactedThinkingProviderOptions
+        ? [
+            {
+              kind: 'thinking',
+              text: '',
+              ...(redactedThinkingProviderOptions
+                ? { providerOptions: redactedThinkingProviderOptions }
+                : {}),
+              ...(reasoningItemId ? { reasoningItemId } : {}),
+            },
+          ]
+        : [];
     }
     case 'text-start':
       return [{ kind: 'text-start' }];

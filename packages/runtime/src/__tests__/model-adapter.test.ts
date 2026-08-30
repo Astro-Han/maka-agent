@@ -66,6 +66,35 @@ describe('ModelAdapter stream and error normalization', () => {
     assert.equal(adapter.runtimeEventReplaySupport().signedThinking, true);
   });
 
+  test('preserves Anthropic redacted thinking metadata at the model boundary', () => {
+    const adapter = new ModelAdapter({
+      connection: {
+        slug: 'anthropic-main',
+        providerType: 'anthropic',
+        defaultModel: 'claude-sonnet-4-5-20250929',
+      },
+      apiKey: 'anthropic-token',
+      modelId: 'claude-sonnet-4-5-20250929',
+      modelFactory: () => ({}),
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    assert.deepEqual(
+      adapter.translateChunk({
+        type: 'reasoning-start',
+        providerMetadata: { anthropic: { redactedData: 'opaque-redacted-thinking' } },
+      }),
+      [
+        {
+          kind: 'thinking',
+          text: '',
+          providerOptions: { anthropic: { redactedData: 'opaque-redacted-thinking' } },
+        },
+      ],
+    );
+  });
+
   test('supports unsigned-thinking replay on Kimi models using the OpenAI wire', () => {
     const adapter = new ModelAdapter({
       connection: {

@@ -3695,6 +3695,23 @@ export class AiSdkBackend implements AgentBackend {
             }
           : undefined;
       }
+      const anthropic = item.providerOptions?.anthropic;
+      if (
+        anthropic &&
+        typeof anthropic === 'object' &&
+        !Array.isArray(anthropic) &&
+        typeof (anthropic as { redactedData?: unknown }).redactedData === 'string'
+      ) {
+        return replaySupport.signedThinking
+          ? {
+              part: {
+                type: 'reasoning' as const,
+                text: item.text,
+                providerOptions: item.providerOptions,
+              },
+            }
+          : undefined;
+      }
       if (
         typeof replaySupport.responsesReasoning === 'object' &&
         replaySupport.responsesReasoning.kind === 'plaintext-item'

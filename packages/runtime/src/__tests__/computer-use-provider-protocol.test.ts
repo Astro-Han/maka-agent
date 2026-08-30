@@ -49,6 +49,98 @@ after(async () => {
 });
 
 describe('Anthropic-compatible Computer Use product loops', () => {
+  test('replays same-route redacted thinking through the Anthropic SDK converter', async () => {
+    const sessionId = 'session-anthropic-redacted-replay';
+    const firstTurn = createDurableTurnHarness({
+      sessionId,
+      runId: 'run-prev',
+      turnId: 'turn-prev',
+      text: 'Inspect first.',
+    });
+    const secondTurn = createDurableTurnHarness({
+      sessionId,
+      runId: 'run-current',
+      turnId: 'turn-current',
+      text: 'Continue.',
+    });
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const server = await startJsonServer(async (request, response) => {
+      assert.equal(request.method, 'POST');
+      assert.equal(request.url, '/v1/messages');
+      requestBodies.push(JSON.parse(await readBody(request)) as Record<string, unknown>);
+      if (requestBodies.length === 1) {
+        respondAnthropicRedactedStream(
+          response,
+          'claude-sonnet-4-5-20250929',
+          'opaque-redacted-thinking',
+        );
+      } else {
+        respondAnthropicStream(response, 'claude-sonnet-4-5-20250929', 2, undefined);
+      }
+    });
+    const providerConnection = connection('anthropic', server.url, 'claude-sonnet-4-5-20250929');
+    const createRuntime = () =>
+      createTestAiSdkBackend({
+        sessionId,
+        header: {
+          ...header('anthropic', 'claude-sonnet-4-5-20250929'),
+          llmConnectionId: 'connection-anthropic',
+        },
+        appendMessage: async () => {},
+        connection: providerConnection,
+        apiKey: 'test-key',
+        modelId: 'claude-sonnet-4-5-20250929',
+        modelFactory: (input) => getAIModel(input),
+        tools: [],
+        maxSteps: 1,
+        loadTurnRuntimeEvents: async (turnId) =>
+          [...firstTurn.ledger, ...secondTurn.ledger].filter((event) => event.turnId === turnId),
+        newId: idGenerator(),
+        now: monotonicClock(),
+      });
+    const sourceRun = {
+      runId: 'run-prev',
+      sessionId,
+      turnId: 'turn-prev',
+      status: 'completed',
+      backendKind: 'ai-sdk',
+      llmConnectionId: 'connection-anthropic',
+      llmConnectionSlug: 'anthropic',
+      modelId: 'claude-sonnet-4-5-20250929',
+      cwd: '/tmp/maka',
+      permissionMode: 'bypass',
+      createdAt: 1,
+      updatedAt: 2,
+      completedAt: 2,
+    } satisfies AgentRunHeader;
+    for await (const event of createRuntime().send(firstTurn.sendInput())) firstTurn.record(event);
+    assert.ok(
+      firstTurn.ledger.some(
+        (event) =>
+          event.content?.kind === 'thinking' &&
+          isRecord(event.content.providerOptions?.anthropic) &&
+          event.content.providerOptions.anthropic.redactedData === 'opaque-redacted-thinking',
+      ),
+      'ModelAdapter metadata must survive the RuntimeEvent durability boundary',
+    );
+
+    for await (const event of createRuntime().send(
+      secondTurn.sendInput({
+        runtimeContext: firstTurn.ledger,
+        runtimeContextRunHeaders: [sourceRun],
+      }),
+    )) {
+      secondTurn.record(event);
+    }
+
+    assert.equal(requestBodies.length, 2);
+    assert.ok(
+      collectRecords(requestBodies[1]!.messages).some(
+        (block) => block.type === 'redacted_thinking' && block.data === 'opaque-redacted-thinking',
+      ),
+    );
+  });
+
   for (const provider of [
     {
       providerType: 'kimi-coding-plan',
@@ -1188,6 +1280,52 @@ function respondOpenAiTextStream(
     },
   });
   response.write('data: [DONE]\n\n');
+  response.end();
+}
+
+function respondAnthropicRedactedStream(
+  response: ServerResponse,
+  model: string,
+  redactedData: string,
+) {
+  response.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+  });
+  const send = (event: string, data: unknown) => {
+    response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  send('message_start', {
+    type: 'message_start',
+    message: {
+      id: 'msg-redacted',
+      type: 'message',
+      role: 'assistant',
+      model,
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: 10, output_tokens: 0 },
+    },
+  });
+  send('content_block_start', {
+    type: 'content_block_start',
+    index: 0,
+    content_block: { type: 'redacted_thinking', data: redactedData },
+  });
+  send('content_block_stop', { type: 'content_block_stop', index: 0 });
+  send('content_block_start', {
+    type: 'content_block_start',
+    index: 1,
+    content_block: { type: 'text', text: 'Inspection complete.' },
+  });
+  send('content_block_stop', { type: 'content_block_stop', index: 1 });
+  send('message_delta', {
+    type: 'message_delta',
+    delta: { stop_reason: 'end_turn', stop_sequence: null },
+    usage: { output_tokens: 5 },
+  });
+  send('message_stop', { type: 'message_stop' });
   response.end();
 }
 
