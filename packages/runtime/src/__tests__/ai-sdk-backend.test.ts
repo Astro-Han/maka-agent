@@ -6757,6 +6757,101 @@ describe('AiSdkBackend model history', () => {
     assert.match(promptJson, /legacy visible answer/);
   });
 
+  test('drops cross-model Copilot reasoning while preserving text and tools', async () => {
+    const model = completionModel();
+    const copilotConnection: LlmConnection = {
+      ...connection(),
+      slug: 'github-copilot',
+      providerType: 'github-copilot',
+      defaultModel: 'gpt-5.4',
+      models: [{ id: 'gpt-5.4', apiProtocol: 'openai-chat' }],
+    };
+    const backend = createTestAiSdkBackend({
+      sessionId: 'session-1',
+      header: {
+        ...header(),
+        llmConnectionId: 'connection-copilot',
+        llmConnectionSlug: 'github-copilot',
+        model: 'gpt-5.4',
+      },
+      appendMessage: async () => {},
+      connection: copilotConnection,
+      apiKey: 'sk-test',
+      modelId: 'gpt-5.4',
+      modelFactory: () => model,
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+
+    await drain(
+      backend.send({
+        turnId: 'turn-current',
+        text: 'continue',
+        context: [],
+        runtimeContextRunHeaders: [
+          priorModelRunHeader({
+            connectionId: 'connection-copilot',
+            connectionSlug: 'github-copilot',
+            modelId: 'gpt-5.5',
+          }),
+        ],
+        runtimeContext: [
+          runtimeEvent({
+            id: 'rt-thinking',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: {
+              kind: 'thinking',
+              text: 'copilot provider reasoning',
+              providerOptions: {
+                maka: { openAiChatReasoningField: 'reasoning_content' },
+              },
+            },
+          }),
+          runtimeEvent({
+            id: 'rt-call',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: {
+              kind: 'function_call',
+              id: 'tool-1',
+              name: 'Read',
+              args: { path: 'package.json' },
+            },
+          }),
+          runtimeEvent({
+            id: 'rt-result',
+            turnId: 'turn-prev',
+            role: 'tool',
+            author: 'tool',
+            content: {
+              kind: 'function_response',
+              id: 'tool-1',
+              name: 'Read',
+              result: 'copilot file contents',
+            },
+          }),
+          runtimeTextEvent({
+            id: 'rt-a',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            text: 'copilot visible answer',
+          }),
+        ],
+      }),
+    );
+
+    const promptJson = JSON.stringify(compactPrompt(model));
+    assert.equal(promptJson.includes('copilot provider reasoning'), false);
+    assert.match(promptJson, /copilot visible answer/);
+    assert.match(promptJson, /"toolCallId":"tool-1"/);
+    assert.match(promptJson, /copilot file contents/);
+  });
+
   test('keeps same-route OpenAI Responses reasoning replay', async () => {
     const model = completionModel();
     const openAiConnection: LlmConnection = {

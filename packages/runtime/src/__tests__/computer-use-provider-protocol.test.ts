@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { after, describe, test } from 'node:test';
 import type { AgentRunHeader } from '@maka/core/agent-run';
+import type { RuntimeEvent } from '@maka/core/runtime-event';
 
 import type { LlmConnection } from '@maka/core/llm-connections';
 
@@ -421,6 +422,122 @@ describe('Anthropic-compatible Computer Use product loops', () => {
 });
 
 describe('OpenAI-compatible product loops', () => {
+  test('github-copilot replays same-route reasoning_content on its OpenAI Chat wire', async () => {
+    const sessionId = 'session-github-copilot-reasoning-replay';
+    const currentTurn = createDurableTurnHarness({
+      sessionId,
+      runId: 'run-current',
+      turnId: 'turn-current',
+      text: 'Continue.',
+    });
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const server = await startJsonServer(async (request, response) => {
+      assert.equal(request.method, 'POST');
+      assert.equal(request.url, '/v1/chat/completions');
+      requestBodies.push(JSON.parse(await readBody(request)) as Record<string, unknown>);
+      respondOpenAiTextStream(response, 'gpt-5.4', 1, 'reasoning_content', 'next step');
+    });
+    const providerConnection = connection(
+      'github-copilot',
+      `${server.url}/v1`,
+      'gpt-5.4',
+      'openai-chat',
+    );
+    const runtime = createTestAiSdkBackend({
+      sessionId,
+      header: {
+        ...header('github-copilot', 'gpt-5.4'),
+        llmConnectionId: 'connection-copilot',
+      },
+      appendMessage: async () => {},
+      connection: providerConnection,
+      apiKey: 'test-key',
+      modelId: 'gpt-5.4',
+      modelFactory: (input) => getAIModel(input),
+      tools: [],
+      maxSteps: 1,
+      loadTurnRuntimeEvents: currentTurn.loadTurnRuntimeEvents,
+      newId: idGenerator(),
+      now: monotonicClock(),
+    });
+    const sourceRun = {
+      runId: 'run-prev',
+      sessionId,
+      turnId: 'turn-prev',
+      status: 'completed',
+      backendKind: 'ai-sdk',
+      llmConnectionId: 'connection-copilot',
+      llmConnectionSlug: 'github-copilot',
+      modelId: 'gpt-5.4',
+      cwd: '/tmp/maka',
+      permissionMode: 'bypass',
+      createdAt: 1,
+      updatedAt: 2,
+      completedAt: 2,
+    } satisfies AgentRunHeader;
+    const priorEvents = [
+      {
+        id: 'rt-user-prev',
+        invocationId: 'inv-prev',
+        runId: 'run-prev',
+        sessionId,
+        turnId: 'turn-prev',
+        ts: 1,
+        partial: false,
+        role: 'user',
+        author: 'user',
+        content: { kind: 'text', text: 'Inspect first.' },
+      },
+      {
+        id: 'rt-thinking-prev',
+        invocationId: 'inv-prev',
+        runId: 'run-prev',
+        sessionId,
+        turnId: 'turn-prev',
+        ts: 2,
+        partial: false,
+        role: 'model',
+        author: 'agent',
+        content: {
+          kind: 'thinking',
+          text: 'copilot reasoning',
+          providerOptions: { maka: { openAiChatReasoningField: 'reasoning_content' } },
+        },
+        refs: { providerEventId: 'step-prev' },
+      },
+      {
+        id: 'rt-text-prev',
+        invocationId: 'inv-prev',
+        runId: 'run-prev',
+        sessionId,
+        turnId: 'turn-prev',
+        ts: 3,
+        partial: false,
+        role: 'model',
+        author: 'agent',
+        content: { kind: 'text', text: 'Inspection complete.' },
+        refs: { providerEventId: 'step-prev' },
+      },
+    ] satisfies RuntimeEvent[];
+
+    for await (const event of runtime.send(
+      currentTurn.sendInput({
+        runtimeContext: priorEvents,
+        runtimeContextRunHeaders: [sourceRun],
+      }),
+    )) {
+      currentTurn.record(event);
+    }
+
+    assert.equal(requestBodies.length, 1);
+    const replayedAssistant = (requestBodies[0]!.messages as unknown[]).find(
+      (message) => isRecord(message) && message.role === 'assistant',
+    );
+    assert.ok(replayedAssistant && isRecord(replayedAssistant));
+    assert.equal(replayedAssistant.reasoning_content, 'copilot reasoning');
+    assert.equal(replayedAssistant.content, 'Inspection complete.');
+  });
+
   for (const provider of [
     {
       providerType: 'deepseek',
@@ -432,6 +549,12 @@ describe('OpenAI-compatible product loops', () => {
       providerType: 'ollama-cloud',
       modelId: 'glm-5.2',
       responseField: 'reasoning_content',
+      requestField: 'reasoning',
+    },
+    {
+      providerType: 'github-copilot',
+      modelId: 'gpt-5.4',
+      responseField: 'reasoning',
       requestField: 'reasoning',
     },
   ] as const) {
@@ -493,7 +616,10 @@ describe('OpenAI-compatible product loops', () => {
           message.tool_calls.some((toolCall) => isRecord(toolCall) && toolCall.id === 'call-1'),
       );
       assert.ok(replayedAssistant && isRecord(replayedAssistant));
-      assert.equal(replayedAssistant[provider.requestField], 'reasoning-step-1');
+      assert.equal(
+        replayedAssistant[provider.requestField],
+        provider.responseField === 'reasoning' ? '' : 'reasoning-step-1',
+      );
       assert.equal(
         replayedAssistant[
           provider.requestField === 'reasoning' ? 'reasoning_content' : 'reasoning'
