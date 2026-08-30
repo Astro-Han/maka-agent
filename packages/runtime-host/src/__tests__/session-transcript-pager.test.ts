@@ -417,6 +417,55 @@ test('admits a latest Turn exactly at the Host range message bound', async () =>
   }
 });
 
+test('excludes a partial far-edge Turn when the complete range would exceed its bound', async () => {
+  const durable: StoredMessage[] = [
+    ...Array.from({ length: 3 }, (_, index) => ({
+      ...assistantMessage(index),
+      turnId: 'turn-far-edge',
+    })),
+    ...Array.from({ length: 254 }, (_, index) => assistantMessage(index + 3)),
+  ];
+  const reader = transcriptReader(durable);
+  const { bootstrap, state } = await createSessionTranscriptBootstrap({
+    reader,
+    sessionId: 'session-1',
+    subscriptionId: 'subscription-1',
+    throughSequence: durable.length - 1,
+    rootTurn: null,
+    activeAssistantStreams: [],
+    maxBytes: 512 * 1024,
+    projection: 'owner',
+  });
+
+  assert.deepEqual(
+    bootstrap.durable.fragments.map((fragment) => fragment.kind === 'durable' && fragment.sequence),
+    Array.from({ length: 254 }, (_, index) => 256 - index),
+  );
+  assert.equal(bootstrap.durable.rangeBoundarySequence, 3);
+  assert.equal(bootstrap.durable.protectedTurnSequence, 256);
+  assert.ok(bootstrap.durable.nextCursor);
+
+  const page = await readSessionTranscriptPage({
+    reader,
+    state,
+    request: {
+      subscriptionId: 'subscription-1',
+      source: 'durable',
+      direction: 'older',
+      throughSequence: durable.length - 1,
+      cursor: bootstrap.durable.nextCursor,
+      anchorSequence: null,
+      maxBytes: 512 * 1024,
+    },
+  });
+  assert.deepEqual(
+    page.fragments.map((fragment) => fragment.kind === 'durable' && fragment.sequence),
+    [2, 1, 0],
+  );
+  assert.equal(page.rangeBoundarySequence, 0);
+  assert.equal(page.protectedTurnSequence, 2);
+});
+
 test('admits a forward Turn exactly at the Host range message bound', async () => {
   for (const projection of ['owner', 'shared'] as const) {
     const durable: StoredMessage[] = [{ ...assistantMessage(0), turnId: 'turn-before' }];
@@ -458,6 +507,73 @@ test('admits a forward Turn exactly at the Host range message bound', async () =
     assert.equal(page.rangeBoundarySequence, 256);
     assert.equal(page.protectedTurnSequence, 256);
     assert.ok(page.nextCursor);
+  }
+});
+
+test('defers a partial forward edge Turn to the next complete range', async () => {
+  for (const projection of ['owner', 'shared'] as const) {
+    const durable: StoredMessage[] = [{ ...assistantMessage(0), turnId: 'turn-before' }];
+    const reader = transcriptReader(durable);
+    const subscriptionId = `subscription-${projection}`;
+    const { state } = await createSessionTranscriptBootstrap({
+      reader,
+      sessionId: 'session-1',
+      subscriptionId,
+      throughSequence: 0,
+      rootTurn: null,
+      activeAssistantStreams: [],
+      maxBytes: 16 * 1024,
+      projection,
+    });
+    durable.push(
+      ...Array.from({ length: 254 }, (_, index) => assistantMessage(index + 1)),
+      ...Array.from({ length: 3 }, (_, index) => ({
+        ...assistantMessage(index + 255),
+        turnId: 'turn-far-edge',
+      })),
+    );
+    assert.equal(updateSubscriberTranscriptHighWater(state, durable.length - 1), true);
+
+    const first = await readSessionTranscriptPage({
+      reader,
+      state,
+      request: {
+        subscriptionId,
+        source: 'durable',
+        direction: 'newer',
+        throughSequence: durable.length - 1,
+        cursor: null,
+        anchorSequence: 0,
+        maxBytes: 512 * 1024,
+      },
+    });
+    assert.deepEqual(
+      first.fragments.map((fragment) => fragment.kind === 'durable' && fragment.sequence),
+      Array.from({ length: 254 }, (_, index) => index + 1),
+    );
+    assert.equal(first.rangeBoundarySequence, 254);
+    assert.equal(first.protectedTurnSequence, 254);
+    assert.ok(first.nextCursor);
+
+    const second = await readSessionTranscriptPage({
+      reader,
+      state,
+      request: {
+        subscriptionId,
+        source: 'durable',
+        direction: 'newer',
+        throughSequence: durable.length - 1,
+        cursor: first.nextCursor,
+        anchorSequence: null,
+        maxBytes: 512 * 1024,
+      },
+    });
+    assert.deepEqual(
+      second.fragments.map((fragment) => fragment.kind === 'durable' && fragment.sequence),
+      [255, 256, 257],
+    );
+    assert.equal(second.rangeBoundarySequence, 257);
+    assert.equal(second.protectedTurnSequence, 257);
   }
 });
 
