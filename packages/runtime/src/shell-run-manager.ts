@@ -65,7 +65,6 @@ import {
   DEFAULT_SHELL_RUN_FLUSH_INTERVAL_MS,
   MAX_FOREGROUND_BASH_TIMEOUT_MS,
   MAX_SHELL_RUN_TIMEOUT_MS,
-  SHELL_RUN_CONTEXT_SUMMARY_LIMIT,
   ShellRunPtyControlClosedError,
   parseShellRunResourceRef,
   shellRunResourceRef,
@@ -571,35 +570,6 @@ export class ShellRunProcessManager
     }
     const record = await this.markObserved(await live.finished.join());
     return shellRunContent(record, { kind: 'stop', applied });
-  }
-
-  async buildContextSummary(sessionId: string): Promise<string | undefined> {
-    const records = (await this.actionableRecords(sessionId)).filter(
-      (record) => record.visibility !== 'user',
-    );
-    if (records.length === 0) return undefined;
-    const visible = records.slice(0, SHELL_RUN_CONTEXT_SUMMARY_LIMIT);
-    const lines = [
-      'Background tasks for this session:',
-      ...visible.map((record) => {
-        const completed =
-          record.completedAt !== undefined ? ` completedAt=${record.completedAt}` : '';
-        return `- ref=${shellRunResourceRef(record.shellRunId)} mode=${record.output.mode} status=${record.status} cwd=${record.cwd} updatedAt=${record.updatedAt}${completed} command=${JSON.stringify(record.command)}`;
-      }),
-    ];
-    const overflow = records.length - visible.length;
-    if (overflow > 0)
-      lines.push(`- ${overflow} more background task(s) not shown in this turn tail.`);
-    const hasControllablePty = records.some((record) => {
-      const live = this.liveResource(sessionId, record.shellRunId);
-      return live?.mode === 'pty' && isPtyControlOpen(live);
-    });
-    lines.push(
-      hasControllablePty
-        ? 'Use Read on a ref for its bounded output snapshot; use WriteStdin to control a running PTY task.'
-        : 'Use Read on a ref for its bounded output snapshot.',
-    );
-    return lines.join('\n');
   }
 
   async listSessionUpdates(sessionId: string): Promise<ShellRunUpdate[]> {
