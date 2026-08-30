@@ -24,10 +24,12 @@ import {
   type RuntimeHostSessionProjectionSeed,
 } from '@maka/runtime-host/adapter';
 import { RuntimeHostSubscriptionError } from '@maka/runtime-host/client';
-import type { SessionTranscriptPage } from '@maka/runtime-host/protocol';
+import {
+  SESSION_TRANSCRIPT_RANGE_MAX_BYTES,
+  type SessionTranscriptPage,
+} from '@maka/runtime-host/protocol';
 import {
   DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS,
-  DESKTOP_TRANSCRIPT_MESSAGE_MAX_BYTES,
   DESKTOP_TRANSCRIPT_OVERLAY_CACHE_MAX_BYTES,
   DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES,
 } from '../preload/transcript-contract.js';
@@ -117,7 +119,7 @@ export class DesktopTranscriptReplica {
       options.maxResidentTurns ?? DESKTOP_TRANSCRIPT_ACTIVE_RANGE_MAX_TURNS;
     this.#maxOverlayBytes =
       options.maxOverlayBytes ?? DESKTOP_TRANSCRIPT_OVERLAY_CACHE_MAX_BYTES;
-    this.#maxMessageBytes = options.maxMessageBytes ?? DESKTOP_TRANSCRIPT_MESSAGE_MAX_BYTES;
+    this.#maxMessageBytes = options.maxMessageBytes ?? SESSION_TRANSCRIPT_RANGE_MAX_BYTES;
     this.#accountPreparationBytes = options.accountPreparationBytes ?? (() => undefined);
     this.#onChange = options.onChange ?? (() => undefined);
     this.#durableThrough = handle.transcriptBootstrap.throughSequence;
@@ -143,7 +145,9 @@ export class DesktopTranscriptReplica {
       replica.#evictToBudget(
         undefined,
         'oldest',
-        replica.#newestTurnSequence() ?? replica.#durableThrough ?? undefined,
+        handle.transcriptBootstrap.durable.protectedTurnSequence ??
+          replica.#durableThrough ??
+          undefined,
       );
       if (replica.#overlayBytes > replica.#maxOverlayBytes) {
         throw new RangeError('Desktop transcript overlay exceeds the session cache limit');
@@ -316,7 +320,11 @@ export class DesktopTranscriptReplica {
       this.#hasOlder = loadTail ? decoded.nextCursor !== null : sequence > 0;
       this.#hasNewer = loadTail ? false : decoded.nextCursor !== null;
       evictedDurableSequences.push(
-        ...this.#evictToBudget(undefined, loadTail ? 'oldest' : 'newest', sequence),
+        ...this.#evictToBudget(
+          undefined,
+          loadTail ? 'oldest' : 'newest',
+          loadTail ? (page.protectedTurnSequence ?? sequence) : sequence,
+        ),
       );
       this.#publish(decoded.messages, completedOverlayMessageIds, evictedDurableSequences);
     });
@@ -429,7 +437,7 @@ export class DesktopTranscriptReplica {
           const evictedDurableSequences = this.#evictToBudget(
             undefined,
             'oldest',
-            this.#newestTurnSequence() ?? decoded.messages.at(-1)?.identity,
+            page.protectedTurnSequence ?? decoded.messages.at(-1)?.identity,
           );
           this.#publish(decoded.messages, completedOverlayMessageIds, evictedDurableSequences);
           cursor = decoded.nextCursor;
@@ -626,15 +634,6 @@ export class DesktopTranscriptReplica {
       if (oldest === null || sequence < oldest) oldest = sequence;
     }
     return oldest;
-  }
-
-  #newestTurnSequence(): number | undefined {
-    let newest: number | undefined;
-    for (const [sequence, entry] of this.#durable) {
-      if (messageTurnId(entry.message) === undefined) continue;
-      if (newest === undefined || sequence > newest) newest = sequence;
-    }
-    return newest;
   }
 
   #clearDurable(): void {

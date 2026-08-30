@@ -261,6 +261,7 @@ test('bounds the default active transcript range by Turn identities', async () =
     events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: {
       throughSequence: messages.length - 1,
+      durableCoverage: 'complete',
       overlayMessageCount: 0,
       durable: bootstrapPage,
       overlay: { ...transcriptPage('older', null, messages.length - 1), source: 'overlay' },
@@ -295,6 +296,7 @@ test('bounds the default active transcript range by presentation bytes', async (
     events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: {
       throughSequence: messages.length - 1,
+      durableCoverage: 'complete',
       overlayMessageCount: 0,
       durable: bootstrapPage,
       overlay: { ...transcriptPage('older', null, messages.length - 1), source: 'overlay' },
@@ -333,6 +335,7 @@ test('keeps an oversized latest Turn visible after bootstrap eviction', async ()
     events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: {
       throughSequence: latest.identity,
+      durableCoverage: 'complete',
       overlayMessageCount: 0,
       durable: bootstrapPage,
       overlay: { ...transcriptPage('older', null, latest.identity), source: 'overlay' },
@@ -362,16 +365,26 @@ test('keeps an oversized latest Turn visible before a trailing session note', as
       kind: 'mode_change' as const,
     },
   };
-  const bootstrapPage = transcriptPage('older', null, trailingNote.identity);
+  const bootstrapPage = {
+    ...transcriptPage('older', null, trailingNote.identity),
+    rangeBoundarySequence: latest.identity,
+    protectedTurnSequence: latest.identity,
+  };
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
     transcript: Promise.resolve([]),
     events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: {
       throughSequence: trailingNote.identity,
+      durableCoverage: 'complete',
       overlayMessageCount: 0,
       durable: bootstrapPage,
-      overlay: { ...bootstrapPage, source: 'overlay' },
+      overlay: {
+        ...bootstrapPage,
+        source: 'overlay',
+        rangeBoundarySequence: null,
+        protectedTurnSequence: null,
+      },
     },
     loadTranscriptOverlay: async () => [],
     decodeTranscriptPage: async () => ({ messages: [latest, trailingNote], nextCursor: null }),
@@ -379,6 +392,79 @@ test('keeps an oversized latest Turn visible before a trailing session note', as
   });
 
   const replica = await DesktopTranscriptReplica.prepare(handle);
+
+  assert.ok(replica.snapshot().durable.some(({ sequence }) => sequence === latest.identity));
+});
+
+test('keeps an oversized latest Turn when returning from history to a trailing session note', async () => {
+  const older = {
+    identity: 0,
+    message: { ...assistantMessage('older', 'assistant-older'), turnId: 'turn-older' },
+  };
+  const latest = {
+    identity: 1,
+    message: {
+      ...assistantMessage('x'.repeat(DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES + 1), 'assistant-latest'),
+      turnId: 'turn-latest',
+    },
+  };
+  const trailingNote = {
+    identity: 2,
+    message: {
+      type: 'system_note' as const,
+      id: 'mode-change-latest',
+      ts: 3,
+      kind: 'mode_change' as const,
+    },
+  };
+  const bootstrapPage = {
+    ...transcriptPage('older', 'older', trailingNote.identity),
+    rangeBoundarySequence: latest.identity,
+    protectedTurnSequence: latest.identity,
+  };
+  const olderPage = {
+    ...transcriptPage('older', null, trailingNote.identity),
+    rangeBoundarySequence: older.identity,
+    protectedTurnSequence: older.identity,
+  };
+  const latestPage = {
+    ...transcriptPage('older', null, trailingNote.identity),
+    rangeBoundarySequence: latest.identity,
+    protectedTurnSequence: latest.identity,
+  };
+  const handle = runtimeHostSessionFixture({
+    snapshot: continuitySnapshot(),
+    transcript: Promise.resolve([]),
+    events: { async *[Symbol.asyncIterator]() {} },
+    transcriptBootstrap: {
+      throughSequence: trailingNote.identity,
+      durableCoverage: 'complete',
+      overlayMessageCount: 0,
+      durable: bootstrapPage,
+      overlay: {
+        ...bootstrapPage,
+        source: 'overlay',
+        rangeBoundarySequence: null,
+        protectedTurnSequence: null,
+      },
+    },
+    loadTranscriptOverlay: async () => [],
+    decodeTranscriptPage: async (page) => page === bootstrapPage
+      ? { messages: [latest, trailingNote], nextCursor: 'older' }
+      : page === olderPage
+        ? { messages: [older], nextCursor: null }
+        : { messages: [latest, trailingNote], nextCursor: null },
+    loadTranscriptPage: async (input) => input.anchorSequence === latest.identity
+      ? olderPage
+      : latestPage,
+    async close() {},
+  });
+  const replica = await DesktopTranscriptReplica.prepare(handle);
+
+  await replica.loadBefore(latest.identity, 128 * 1024);
+  assert.equal(replica.snapshot().hasNewer, true);
+
+  await replica.loadAround(trailingNote.identity, 128 * 1024);
 
   assert.ok(replica.snapshot().durable.some(({ sequence }) => sequence === latest.identity));
 });
@@ -399,6 +485,8 @@ test('keeps a bounded contiguous window while moving between history and the tai
     throughSequence: 4,
     rawBytes: 1,
     fragments: [],
+    rangeBoundarySequence: null,
+    protectedTurnSequence: null,
     nextCursor,
   });
   const bootstrapPage = page('older');
@@ -460,6 +548,7 @@ test('retains the reading anchor while an older page replaces the far edges', as
     events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: {
       throughSequence: 7,
+      durableCoverage: 'complete',
       overlayMessageCount: 0,
       durable: bootstrapPage,
       overlay: { ...transcriptPage('older', null, 7), source: 'overlay' },
@@ -509,6 +598,8 @@ test('delivers a mid-session tail append even while a history window is resident
     throughSequence: 4,
     rawBytes: 1,
     fragments: [],
+    rangeBoundarySequence: null,
+    protectedTurnSequence: null,
     nextCursor,
   });
   const bootstrapPage = page('older');
@@ -569,13 +660,18 @@ test('keeps an oversized streaming Turn visible when its overlay settles', async
     message: assistantMessage('x'.repeat(DESKTOP_TRANSCRIPT_RANGE_MAX_BYTES + 1), 'assistant-1'),
   };
   const bootstrapPage = transcriptPage('older', null, older.identity);
-  const newerPage = transcriptPage('newer', null, latest.identity);
+  const newerPage = {
+    ...transcriptPage('newer', null, latest.identity),
+    rangeBoundarySequence: latest.identity,
+    protectedTurnSequence: latest.identity,
+  };
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
     transcript: Promise.resolve([]),
     events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: {
       throughSequence: older.identity,
+      durableCoverage: 'complete',
       overlayMessageCount: 1,
       durable: bootstrapPage,
       overlay: { ...transcriptPage('older', null, older.identity), source: 'overlay' },
@@ -616,13 +712,18 @@ test('keeps an oversized settled Turn visible before a trailing session note', a
     },
   };
   const bootstrapPage = transcriptPage('older', null, older.identity);
-  const newerPage = transcriptPage('newer', null, trailingNote.identity);
+  const newerPage = {
+    ...transcriptPage('newer', null, trailingNote.identity),
+    rangeBoundarySequence: trailingNote.identity,
+    protectedTurnSequence: latest.identity,
+  };
   const handle = runtimeHostSessionFixture({
     snapshot: continuitySnapshot(),
     transcript: Promise.resolve([]),
     events: { async *[Symbol.asyncIterator]() {} },
     transcriptBootstrap: {
       throughSequence: older.identity,
+      durableCoverage: 'complete',
       overlayMessageCount: 1,
       durable: bootstrapPage,
       overlay: { ...bootstrapPage, source: 'overlay' },
@@ -665,6 +766,8 @@ test('does not resurrect a discarded replica when a tail re-anchor is in flight'
     throughSequence: 4,
     rawBytes: 1,
     fragments: [],
+    rangeBoundarySequence: null,
+    protectedTurnSequence: null,
     nextCursor,
   });
   const bootstrapPage = page('older');
@@ -753,6 +856,8 @@ test('does not resurrect a discarded replica when a history load is in flight', 
     throughSequence: 4,
     rawBytes: 1,
     fragments: [],
+    rangeBoundarySequence: null,
+    protectedTurnSequence: null,
     nextCursor,
   });
   const bootstrapPage = page('older');
@@ -826,6 +931,8 @@ test('does not drive a discarded replica terminal when a contiguous catch-up is 
     throughSequence,
     rawBytes: 1,
     fragments: [],
+    rangeBoundarySequence: null,
+    protectedTurnSequence: null,
     nextCursor,
   });
   const bootstrapPage = page(null, 4);
@@ -1291,6 +1398,8 @@ function transcriptPage(
     throughSequence,
     rawBytes: 1,
     fragments: [],
+    rangeBoundarySequence: null,
+    protectedTurnSequence: null,
     nextCursor,
   };
 }
