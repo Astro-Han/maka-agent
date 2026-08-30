@@ -198,6 +198,7 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
       ? withOpenAiCodexHistoryCompactionFallback(
           buildOpenAiCodexHistoryCompactor({
             resolveModel: resolveHistoryCompactModel,
+            connectionId: input.context.header.llmConnectionId,
             connectionSlug: target.connection.slug,
             modelId: target.model,
             providerOptions,

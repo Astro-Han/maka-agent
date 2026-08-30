@@ -37,6 +37,8 @@ import {
 import { PROVIDER_DEFAULTS } from '@maka/core/llm-connections';
 import { createWorkspaceWritePermissionProfile } from '@maka/core/permission-profile';
 import { decodeRunCompositionSnapshot } from '@maka/core/run-composition';
+import type { AgentRunHeader } from '@maka/core/agent-run';
+import type { BackendCompactHistoryInput } from '@maka/core/backend-types';
 import { decodeCanonicalToolResultContent } from '@maka/core/tool-result-record-schema';
 import { type ModelCallAttempt, type ModelCallKind } from '@maka/core/model-call-attempt';
 import { type RuntimeEvent } from '@maka/core/runtime-event';
@@ -920,6 +922,48 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
         'agent',
         'b'.repeat(8_000),
       ),
+      {
+        id: 'compact-old-reasoning',
+        invocationId: 'compact-invocation',
+        runId: 'compact-source-run',
+        sessionId: 'backend-creation-session',
+        turnId: 'turn-old-model',
+        ts: 2,
+        partial: false,
+        role: 'model',
+        author: 'agent',
+        content: {
+          kind: 'thinking',
+          text: 'CROSS_MODEL_PROVIDER_REASONING',
+          providerOptions: {
+            openai: {
+              itemId: 'cross-model-reasoning-item',
+              reasoningEncryptedContent: 'CROSS_MODEL_ENCRYPTED_REASONING',
+            },
+          },
+        },
+      },
+      {
+        id: 'compact-current-route-reasoning',
+        invocationId: 'compact-invocation',
+        runId: 'compact-same-route-run',
+        sessionId: 'backend-creation-session',
+        turnId: 'turn-current-route-model',
+        ts: 3,
+        partial: false,
+        role: 'model',
+        author: 'agent',
+        content: {
+          kind: 'thinking',
+          text: 'SAME_ROUTE_PROVIDER_REASONING',
+          providerOptions: {
+            openai: {
+              itemId: 'same-route-reasoning-item',
+              reasoningEncryptedContent: 'SAME_ROUTE_ENCRYPTED_REASONING',
+            },
+          },
+        },
+      },
       compactRuntimeTextEvent(
         'compact-recent-user',
         'turn-recent-user',
@@ -928,11 +972,44 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
         'recent context',
       ),
     ];
-    const result = await backend.compactHistory({
+    const compactInput = {
       turnId: 'turn-compact',
       runId: 'run-compact',
       runtimeContext,
-    });
+      runtimeContextRunHeaders: [
+        {
+          runId: 'compact-source-run',
+          sessionId: 'backend-creation-session',
+          turnId: 'turn-old-model',
+          status: 'completed',
+          backendKind: 'ai-sdk',
+          llmConnectionId: '11111111-1111-4111-8111-111111111111',
+          llmConnectionSlug: 'backend-creation-connection',
+          modelId: 'gpt-5.2',
+          cwd: '/workspace',
+          permissionMode: 'bypass',
+          createdAt: 1,
+          updatedAt: 2,
+          completedAt: 2,
+        } satisfies AgentRunHeader,
+        {
+          runId: 'compact-same-route-run',
+          sessionId: 'backend-creation-session',
+          turnId: 'turn-current-route-model',
+          status: 'completed',
+          backendKind: 'ai-sdk',
+          llmConnectionId: '11111111-1111-4111-8111-111111111111',
+          llmConnectionSlug: 'backend-creation-connection',
+          modelId,
+          cwd: '/workspace',
+          permissionMode: 'bypass',
+          createdAt: 2,
+          updatedAt: 3,
+          completedAt: 3,
+        } satisfies AgentRunHeader,
+      ],
+    } satisfies BackendCompactHistoryInput;
+    const result = await backend.compactHistory(compactInput);
 
     assert.equal(requests.length, 2, JSON.stringify(result));
     assert.match(requests[0]!.url, /\/codex\/responses$/);
@@ -940,6 +1017,11 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
     const nativeRequestText = JSON.stringify(requests[0]!.body);
     const fallbackRequestText = JSON.stringify(requests[1]!.body);
     assert.match(nativeRequestText, /"type":"compaction_trigger"/);
+    assert.doesNotMatch(nativeRequestText, /CROSS_MODEL_PROVIDER_REASONING/);
+    assert.doesNotMatch(nativeRequestText, /CROSS_MODEL_ENCRYPTED_REASONING/);
+    assert.match(nativeRequestText, /SAME_ROUTE_PROVIDER_REASONING/);
+    assert.match(nativeRequestText, /SAME_ROUTE_ENCRYPTED_REASONING/);
+    assert.match(nativeRequestText, /recent context/);
     assert.doesNotMatch(nativeRequestText, /context summarization assistant/i);
     assert.doesNotMatch(fallbackRequestText, /"type":"compaction_trigger"/);
     assert.match(fallbackRequestText, /context summarization assistant/i);

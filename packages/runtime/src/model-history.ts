@@ -63,6 +63,7 @@ import {
 } from '@maka/core/runtime-event';
 import { formatAttachmentResourceRef } from '@maka/core/attachments';
 import type { AttachmentRef, QuoteRef } from '@maka/core/events';
+import type { AgentRunHeader } from '@maka/core/agent-run';
 import type {
   ModelMessage,
   ToolResultOutput,
@@ -77,6 +78,31 @@ import { estimateTokens, stableJsonLength, turnKey } from './context-budget-help
 import type { DurableToolResultProjection } from '@maka/core/durable-tool-result-projection';
 
 export const PROVIDER_REPLAY_PROJECTION_VERSION = 1;
+
+/**
+ * Resolve the RuntimeEvents whose provider-owned reasoning may cross the
+ * current provider boundary. Route provenance remains on AgentRunHeader;
+ * current-run events are same-route by construction during mid-turn replay.
+ */
+export function compatibleProviderReasoningReplayEventIds(
+  events: readonly RuntimeEvent[],
+  runHeaders: readonly AgentRunHeader[] | undefined,
+  targetConnectionId: string | undefined,
+  targetModelId: string,
+  currentRunId?: string,
+): ReadonlySet<string> {
+  const compatibleRunIds = new Set(currentRunId ? [currentRunId] : []);
+  if (targetConnectionId && runHeaders) {
+    for (const run of runHeaders) {
+      if (run.llmConnectionId === targetConnectionId && run.modelId === targetModelId) {
+        compatibleRunIds.add(run.runId);
+      }
+    }
+  }
+  return new Set(
+    events.filter((event) => compatibleRunIds.has(event.runId)).map((event) => event.id),
+  );
+}
 
 // ============================================================================
 // Effective model-history sizing

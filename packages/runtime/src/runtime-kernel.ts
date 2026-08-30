@@ -880,6 +880,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
     this.attachExecutionClaim(execution, run);
     yield* this.runAgentContinuation(
       continuation,
+      sessionRuns,
       run,
       execution,
       {
@@ -1007,6 +1008,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
         turnId: run.turnId,
         runId: run.runId,
         runtimeContext: begin.runtimeContext,
+        runtimeContextRunHeaders: begin.runtimeContextRunHeaders,
       });
       if (run.isStopped()) return;
       const tokenUsageEvent: TokenUsageEvent = {
@@ -1247,6 +1249,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
 
   private async *runAgentContinuation(
     continuation: RuntimeContinuation,
+    runtimeContextRunHeaders: AgentRunHeader[],
     run: AgentRun,
     execution: PendingExecutionClaim,
     messageOwner?: RuntimeMessageRunIdentity,
@@ -1329,6 +1332,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
         text: '',
         context: [],
         runtimeContext: continuation.runtimeContext,
+        runtimeContextRunHeaders,
         continuation: continuationMetadata,
       },
       onSessionEvent: async (sessionEvent, runtimeEvent) => {

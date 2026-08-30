@@ -72,7 +72,11 @@ import type {
 } from '@maka/core/runtime-event-store';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
 import type { SessionHeader, SessionSummary, StoredMessage, TurnRecord } from '@maka/core/session';
-import type { BackendSendInput, BackendStopMode } from '@maka/core/backend-types';
+import type {
+  BackendCompactHistoryInput,
+  BackendSendInput,
+  BackendStopMode,
+} from '@maka/core/backend-types';
 import { PlanConflictError, emptyPlanSessionState, type PlanStore } from '@maka/core/plan';
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { createTestAiSdkBackend } from './execution-boundary-test-helpers.js';
@@ -3348,15 +3352,33 @@ describe('SessionManager manual compaction and quiescent session changes', () =>
       newId: nextId(),
       now: nextNow(10_000),
     });
-    const session = await manager.createSession(makeInput({ permissionMode: 'bypass' }));
+    const session = await manager.createSession(
+      makeInput({ permissionMode: 'bypass', llmConnectionId: 'connection-compact' }),
+    );
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
+    const sourceRun = (await runStore.listSessionRuns(session.id)).find(
+      (run) => run.turnId === 'turn-1',
+    );
+    assert.ok(sourceRun);
     runStore.operations = [];
     const events = await collectSessionEvents(
       manager.compactSession(session.id, { turnId: 'turn-compact' }),
     );
 
-    assert.deepStrictEqual(compactCalls, [{ turnId: 'turn-compact', runtimeContextCount: 3 }]);
+    assert.deepStrictEqual(compactCalls, [
+      {
+        turnId: 'turn-compact',
+        runtimeContextCount: 3,
+        sourceRoutes: [
+          {
+            runId: sourceRun.runId,
+            connectionId: sourceRun.llmConnectionId,
+            modelId: sourceRun.modelId,
+          },
+        ],
+      },
+    ]);
     assert.deepStrictEqual(
       events.map((event) => event.type),
       ['token_usage', 'complete'],
@@ -5139,14 +5161,21 @@ describe('SessionManager permission mode updates', () => {
       runtimeEventStore: runStore,
       toolBoundaryProtocol: 't1_after_preflight_v1',
       backends,
-      inspectContinuationSafety: inspectStableContinuationSafety,
+      childTools: [testTool('Read')],
+      inspectContinuationSafety: async () => ({
+        workspaceIdentity: 'workspace-1',
+        backgroundOperationsSettled: true,
+        availableToolNames: ['Read'],
+      }),
       onContinuationLifecycleEvent: (event) => {
         lifecycleEvents.push(event);
       },
       newId: nextId(),
       now: nextNow(6_550),
     });
-    const session = await manager.createSession(makeInput());
+    const session = await manager.createSession(
+      makeInput({ llmConnectionId: 'connection-continuation' }),
+    );
     const header = await store.readHeader(session.id);
     const sourceRunId = 'source-run';
     const sourceTurnId = 'source-turn';
@@ -5159,6 +5188,7 @@ describe('SessionManager permission mode updates', () => {
       status: 'failed',
       failureClass: 'runtime_interrupted',
       backendKind: header.backend,
+      llmConnectionId: header.llmConnectionId,
       llmConnectionSlug: header.llmConnectionSlug,
       modelId: header.model,
       cwd: header.cwd,
@@ -5185,12 +5215,64 @@ describe('SessionManager permission mode updates', () => {
         content: { kind: 'text', text: 'continue safely' },
       },
       {
-        id: 'source-terminal',
+        id: 'source-thinking',
         sessionId: session.id,
         invocationId: sourceInvocationId,
         runId: sourceRunId,
         turnId: sourceTurnId,
         ts: 2,
+        partial: false,
+        author: 'agent',
+        role: 'model',
+        content: {
+          kind: 'thinking',
+          text: 'same-route provider reasoning',
+          signature: 'same-route-signature',
+        },
+        refs: { stepId: 'source-step' },
+      },
+      {
+        id: 'source-tool-call',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 3,
+        partial: false,
+        author: 'agent',
+        role: 'model',
+        content: {
+          kind: 'function_call',
+          id: 'source-read',
+          name: 'Read',
+          args: { path: 'package.json' },
+        },
+        refs: { stepId: 'source-step' },
+      },
+      {
+        id: 'source-tool-result',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 4,
+        partial: false,
+        author: 'tool',
+        role: 'tool',
+        content: {
+          kind: 'function_response',
+          id: 'source-read',
+          name: 'Read',
+          result: 'package contents',
+        },
+      },
+      {
+        id: 'source-terminal',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 5,
         partial: false,
         author: 'system',
         role: 'system',
@@ -5208,7 +5290,7 @@ describe('SessionManager permission mode updates', () => {
       sourceWorkspaceIdentity: 'workspace-1',
       currentWorkspaceIdentity: 'workspace-1',
       backgroundOperationsSettled: true,
-      availableToolNames: [],
+      availableToolNames: ['Read'],
     });
     assert.strictEqual(plan.disposition, 'continue');
     if (!plan.continuation) throw new Error('expected continuation');
@@ -5237,6 +5319,20 @@ describe('SessionManager permission mode updates', () => {
       toolMode: 'code_mode',
     });
     assert.strictEqual(backend?.sendInputs[0]?.toolMode, 'code_mode');
+    assert.deepStrictEqual(
+      backend?.sendInputs[0]?.runtimeContextRunHeaders?.map((runHeader) => ({
+        runId: runHeader.runId,
+        llmConnectionId: runHeader.llmConnectionId,
+        modelId: runHeader.modelId,
+      })),
+      [
+      {
+        runId: sourceRunId,
+        llmConnectionId: header.llmConnectionId,
+        modelId: header.model,
+      },
+      ],
+    );
     const continuationEvents = await runStore.readRuntimeEvents(
       session.id,
       plan.continuation.runId,
@@ -12000,15 +12096,24 @@ class CountingFinalTextBackend extends FinalTextTestBackend {
 class CompactingTestBackend extends TestBackend {
   constructor(
     ctx: BackendFactoryContext,
-    private readonly compactCalls: Array<{ turnId: string; runtimeContextCount: number }>,
+    private readonly compactCalls: Array<{
+      turnId: string;
+      runtimeContextCount: number;
+      sourceRoutes?: Array<{ runId: string; connectionId?: string; modelId: string }>;
+    }>,
   ) {
     super(ctx);
   }
 
-  async compactHistory(input: { turnId: string; runtimeContext: readonly RuntimeEvent[] }) {
+  async compactHistory(input: BackendCompactHistoryInput) {
     this.compactCalls.push({
       turnId: input.turnId,
       runtimeContextCount: input.runtimeContext.length,
+      sourceRoutes: (input.runtimeContextRunHeaders ?? []).map((run) => ({
+        runId: run.runId,
+        ...(run.llmConnectionId ? { connectionId: run.llmConnectionId } : {}),
+        modelId: run.modelId,
+      })),
     });
     return compactHistoryResult();
   }

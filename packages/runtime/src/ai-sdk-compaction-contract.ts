@@ -20,6 +20,7 @@
 import type { RuntimeExecutionConnection } from '@maka/core/llm-connections';
 import type { HistoryCompactRoute } from '@maka/core/model-call-attempt';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
+import type { AgentRunHeader } from '@maka/core/agent-run';
 
 import type { ProviderRequestTracker } from './provider-request-telemetry.js';
 import type { ActiveToolResultArchiveCandidate } from './active-tool-result-prune.js';
@@ -34,7 +35,12 @@ import type { ToolResultArchiveCapability } from './tool-result-archive-capabili
 export interface HistoryCompactSummaryInput {
   sessionId: string;
   turnId: string;
-  source: { foldedRuntimeEvents: RuntimeEvent[] };
+  /** Run issuing this compaction; its events are same-route by construction. */
+  runId?: string;
+  source: {
+    foldedRuntimeEvents: RuntimeEvent[];
+    runHeaders?: readonly AgentRunHeader[];
+  };
   previousCheckpoint?: HistoryCompactCheckpoint;
   newlyFoldedRuntimeEvents?: RuntimeEvent[];
   /**

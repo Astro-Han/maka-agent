@@ -29,6 +29,7 @@
  */
 
 import type { RuntimeEvent } from '@maka/core/runtime-event';
+import type { AgentRunHeader } from '@maka/core/agent-run';
 import type {
   BackendCompactHistoryInput,
   BackendCompactHistoryResult,
@@ -327,7 +328,13 @@ export class AiSdkCompaction {
           await this.summarizeWithFailureCircuit(summarizer, {
             sessionId: this.sessionId,
             turnId: input.turnId,
-            source: { foldedRuntimeEvents: [...coveredRuntimeEvents] },
+            runId: input.runId,
+            source: {
+              foldedRuntimeEvents: [...coveredRuntimeEvents],
+              ...(input.runtimeContextRunHeaders
+                ? { runHeaders: input.runtimeContextRunHeaders }
+                : {}),
+            },
             newlyFoldedRuntimeEvents: [...newlyFoldedRuntimeEvents],
             ...(previousCheckpoint ? { previousCheckpoint } : {}),
             inputBudget: {
@@ -441,15 +448,30 @@ export class AiSdkCompaction {
     summarizer: HistoryCompactSummarizer,
     input: HistoryCompactSummaryInput,
   ): Promise<string | HistoryCompactProviderState | undefined> {
+    const foldedRunIds = new Set(input.source.foldedRuntimeEvents.map((event) => event.runId));
+    const sourceRunRoutes = input.source.runHeaders
+      ?.filter((run) => foldedRunIds.has(run.runId))
+      .map((run) => ({
+        runId: run.runId,
+        connectionId: run.llmConnectionId,
+        modelId: run.modelId,
+      }))
+      .sort((left, right) => left.runId.localeCompare(right.runId));
     const fingerprint = sha256(
       stableStringifyForSignature({
-        version: 1,
+        version: 2,
         connection: this.input.connection,
         modelId: this.input.modelId,
         historyCompactRoute: this.input.historyCompactRoute,
         contextBudget: this.input.contextBudget,
         inputBudget: input.inputBudget,
         previousCheckpoint: input.previousCheckpoint,
+        currentRunEventIds: input.runId
+          ? input.source.foldedRuntimeEvents
+              .filter((event) => event.runId === input.runId)
+              .map((event) => event.id)
+          : [],
+        sourceRunRoutes,
         foldedRuntimeEvents: input.source.foldedRuntimeEvents,
         newlyFoldedRuntimeEvents: input.newlyFoldedRuntimeEvents,
       }),
@@ -646,7 +668,12 @@ export class AiSdkCompaction {
     const priorContentEvents = (input.runtimeContext ?? [])
       .filter((event) => event.turnId !== input.turnId)
       .filter(isHistoryCompactContentEvent);
-    return new MidTurnCapacityCompactState(headAnchor, priorContentEvents, capacity);
+    return new MidTurnCapacityCompactState(
+      headAnchor,
+      priorContentEvents,
+      input.runtimeContextRunHeaders ?? [],
+      capacity,
+    );
   }
 
   /**
@@ -987,7 +1014,11 @@ export class AiSdkCompaction {
         return await this.summarizeWithFailureCircuit(summarizer, {
           sessionId: this.sessionId,
           turnId,
-          source: { foldedRuntimeEvents: [...coveredRuntimeEvents] },
+          ...(input.origin.runId ? { runId: input.origin.runId } : {}),
+          source: {
+            foldedRuntimeEvents: [...coveredRuntimeEvents],
+            runHeaders: state.priorRunHeaders,
+          },
           ...(previousCheckpoint ? { previousCheckpoint } : {}),
           newlyFoldedRuntimeEvents: [...newlyFoldedRuntimeEvents],
           inputBudget: {
@@ -1562,6 +1593,7 @@ export class MidTurnCapacityCompactState {
   constructor(
     readonly headAnchor: RuntimeEvent,
     readonly priorContentEvents: readonly RuntimeEvent[],
+    readonly priorRunHeaders: readonly AgentRunHeader[],
     readonly capacity: ContextBudgetCapacity,
   ) {}
 }

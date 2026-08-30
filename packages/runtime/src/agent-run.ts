@@ -198,6 +198,7 @@ export interface AgentRunBeginResult {
 export interface AgentRunOperationBeginResult {
   backend: AgentBackend;
   runtimeContext: RuntimeEvent[];
+  runtimeContextRunHeaders: AgentRunHeader[];
   startedAt: number;
 }
 
@@ -655,7 +656,12 @@ export class AgentRun {
           : {}),
         ...(this.input.userInput.quotes ? { quotes: this.input.userInput.quotes } : {}),
         context: projectionContext,
-        ...(priorRuntimeContext ? { runtimeContext: priorRuntimeContext.events } : {}),
+        ...(priorRuntimeContext
+          ? {
+              runtimeContext: priorRuntimeContext.events,
+              runtimeContextRunHeaders: priorRuntimeContext.runs,
+            }
+          : {}),
       }),
       initialRuntimeEvent,
     };
@@ -680,6 +686,7 @@ export class AgentRun {
     return {
       backend: this.active.backend,
       runtimeContext: priorRuntimeContext?.events ?? [],
+      runtimeContextRunHeaders: priorRuntimeContext?.runs ?? [],
       startedAt,
     };
   }

@@ -210,6 +210,7 @@ import {
   buildRuntimeEventModelReplayPlan,
   buildSteeringEnvelope,
   collectToolActivityTurnIds,
+  compatibleProviderReasoningReplayEventIds,
   formatTextWithInlineRefs,
   steeringMessagesMissingFromBase,
   steeringModelMessage,
@@ -3358,6 +3359,12 @@ export class AiSdkBackend implements AgentBackend {
     const priorRuntimeContext = input.runtimeContext.filter(
       (event) => event.turnId !== input.turnId,
     );
+    const providerReasoningReplayEventIds = compatibleProviderReasoningReplayEventIds(
+      priorRuntimeContext,
+      input.runtimeContextRunHeaders,
+      this.input.header.llmConnectionId,
+      this.input.modelId,
+    );
     const projectedMessages = await this.materializePriorMessages(
       scope.imageBudget,
       priorStored,
@@ -3399,6 +3406,7 @@ export class AiSdkBackend implements AgentBackend {
           turnId: input.turnId,
           runId: scope.runId,
           runtimeContext: priorRuntimeContext,
+          runtimeContextRunHeaders: input.runtimeContextRunHeaders,
         },
         automaticMemorySource
           ? {
@@ -3528,6 +3536,7 @@ export class AiSdkBackend implements AgentBackend {
           plan,
           scope.imageBudget,
           projectedHistoryCompactCheckpoint,
+          providerReasoningReplayEventIds,
         ),
         gate: 'runtime_replay_text_only',
         diagnostics: plan.diagnostics,
@@ -3551,6 +3560,7 @@ export class AiSdkBackend implements AgentBackend {
                 degradedPlan,
                 scope.imageBudget,
                 projectedHistoryCompactCheckpoint,
+                providerReasoningReplayEventIds,
               )
             : await materializeReplayFallback(),
         gate: input.continuation
@@ -3569,6 +3579,7 @@ export class AiSdkBackend implements AgentBackend {
         plan,
         scope.imageBudget,
         projectedHistoryCompactCheckpoint,
+        providerReasoningReplayEventIds,
       ),
       gate: 'runtime_replay_provider_native',
       diagnostics: plan.diagnostics,
@@ -3640,6 +3651,7 @@ export class AiSdkBackend implements AgentBackend {
     plan: RuntimeEventModelReplayPlan,
     budget: ProviderImageBudget,
     historyCompactCheckpoint?: HistoryCompactCheckpoint,
+    providerReasoningReplayEventIds?: ReadonlySet<string>,
   ): Promise<ModelMessage[]> {
     type ToolCallItem = Extract<RuntimeEventModelReplayItem, { kind: 'tool_call' }>;
     type ToolResultItem = Extract<RuntimeEventModelReplayItem, { kind: 'tool_result' }>;
@@ -3666,6 +3678,12 @@ export class AiSdkBackend implements AgentBackend {
 
     const replaySupport = this.modelAdapter.runtimeEventReplaySupport();
     const reasoningReplay = (item: ThinkingItem): ReplayReasoning | undefined => {
+      if (
+        providerReasoningReplayEventIds !== undefined &&
+        !providerReasoningReplayEventIds.has(item.eventId)
+      ) {
+        return undefined;
+      }
       if (item.signature) {
         return replaySupport.signedThinking
           ? {

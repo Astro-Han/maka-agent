@@ -433,22 +433,24 @@ describe('OpenAI-compatible product loops', () => {
       'openai-chat',
       131_072,
     );
+    const sourceRun = {
+      runId: 'run-kimi-openai-recovered-tool-step',
+      invocationId: 'invocation-kimi-openai-recovered-tool-step',
+      sessionId,
+      turnId: previousTurnId,
+      status: 'completed',
+      backendKind: 'ai-sdk',
+      llmConnectionId: 'test-connection-id',
+      llmConnectionSlug: providerConnection.slug,
+      modelId: 'k3',
+      cwd: '/tmp/maka',
+      permissionMode: 'ask',
+      createdAt: 1,
+      updatedAt: 5,
+      completedAt: 5,
+    } satisfies AgentRunHeader;
     const recovered = backfillRuntimeEventsFromStoredMessages({
-      run: {
-        runId: 'run-kimi-openai-recovered-tool-step',
-        invocationId: 'invocation-kimi-openai-recovered-tool-step',
-        sessionId,
-        turnId: previousTurnId,
-        status: 'completed',
-        backendKind: 'ai-sdk',
-        llmConnectionSlug: providerConnection.slug,
-        modelId: 'k3',
-        cwd: '/tmp/maka',
-        permissionMode: 'ask',
-        createdAt: 1,
-        updatedAt: 5,
-        completedAt: 5,
-      } satisfies AgentRunHeader,
+      run: sourceRun,
       messages: [
         {
           type: 'user',
@@ -509,7 +511,10 @@ describe('OpenAI-compatible product loops', () => {
     });
 
     for await (const event of runtime.send(
-      currentTurn.sendInput({ runtimeContext: recovered.events }),
+      currentTurn.sendInput({
+        runtimeContext: recovered.events,
+        runtimeContextRunHeaders: [sourceRun],
+      }),
     )) {
       currentTurn.record(event);
     }
@@ -573,6 +578,22 @@ describe('OpenAI-compatible product loops', () => {
       'openai-chat',
       131_072,
     );
+    const sourceRun = {
+      runId: firstTurn.anchor.runId,
+      invocationId: firstTurn.anchor.invocationId,
+      sessionId,
+      turnId: firstTurn.anchor.turnId,
+      status: 'completed',
+      backendKind: 'ai-sdk',
+      llmConnectionId: 'test-connection-id',
+      llmConnectionSlug: providerConnection.slug,
+      modelId: 'k3',
+      cwd: '/tmp/maka',
+      permissionMode: 'ask',
+      createdAt: firstTurn.anchor.ts,
+      updatedAt: firstTurn.anchor.ts + 1,
+      completedAt: firstTurn.anchor.ts + 1,
+    } satisfies AgentRunHeader;
     const createRuntime = () =>
       createTestAiSdkBackend({
         testProjectionArtifacts: true,
@@ -603,21 +624,7 @@ describe('OpenAI-compatible product loops', () => {
     );
 
     const recovered = backfillRuntimeEventsFromStoredMessages({
-      run: {
-        runId: firstTurn.anchor.runId,
-        invocationId: firstTurn.anchor.invocationId,
-        sessionId,
-        turnId: firstTurn.anchor.turnId,
-        status: 'completed',
-        backendKind: 'ai-sdk',
-        llmConnectionSlug: providerConnection.slug,
-        modelId: 'k3',
-        cwd: '/tmp/maka',
-        permissionMode: 'ask',
-        createdAt: firstTurn.anchor.ts,
-        updatedAt: firstTurn.anchor.ts + 1,
-        completedAt: firstTurn.anchor.ts + 1,
-      } satisfies AgentRunHeader,
+      run: sourceRun,
       messages: storedMessages,
       newId: idGenerator(),
       now: monotonicClock(),
@@ -633,7 +640,10 @@ describe('OpenAI-compatible product loops', () => {
     );
 
     for await (const event of createRuntime().send(
-      secondTurn.sendInput({ runtimeContext: recovered.events }),
+      secondTurn.sendInput({
+        runtimeContext: recovered.events,
+        runtimeContextRunHeaders: [sourceRun],
+      }),
     )) {
       secondTurn.record(event);
     }
@@ -1196,6 +1206,7 @@ function header(providerType: LlmConnection['providerType'], model: string): Ses
     statusUpdatedAt: 1,
     hasUnread: false,
     backend: 'ai-sdk',
+    llmConnectionId: 'test-connection-id',
     llmConnectionSlug: providerType,
     connectionLocked: true,
     model,
