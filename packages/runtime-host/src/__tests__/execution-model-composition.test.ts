@@ -3165,7 +3165,6 @@ test('backend composition survives a moved saved Git Bash executable while Bash 
     sessionId: 'session',
     turnId: 'turn-1',
     cwd: '/workspace',
-    workspaceRoot: '/workspace',
   });
   assert.ok(prompt.sourceRevisions.length > 0);
 
@@ -3349,7 +3348,6 @@ test('the headless coding profile freezes the Eval prompt and tool ceiling', asy
         sessionId: 'profiled-session',
         turnId: 'profiled-turn',
         cwd: '/workspace',
-        workspaceRoot: '/workspace',
       })
     ).text,
     [

@@ -1785,17 +1785,6 @@ export class ShellRunProcessManager
     }
   }
 
-  private async actionableRecords(sessionId: string): Promise<ShellRunRecord[]> {
-    const records = await this.input.store.listSessionShellRuns(sessionId);
-    return records
-      .filter(
-        (record) =>
-          isActiveShellRunStatus(record.status) ||
-          (record.observedAt === undefined && isTerminalShellRunStatus(record.status)),
-      )
-      .sort(compareActionableShellRuns);
-  }
-
   private notifyShellRunUpdate(record: ShellRunRecord): void {
     try {
       this.input.onShellRunUpdate?.(shellRunUpdate(record));
@@ -2009,16 +1998,6 @@ function startupCleanupError(startupError: Error, cleanupFailure: unknown): Erro
   return new Error(
     `Shell process startup failed: ${safeFailureMessage(startupError)}; startup cleanup failed: ${safeFailureMessage(cleanupError)}`,
     { cause: new AggregateError([startupError, cleanupError]) },
-  );
-}
-
-function compareActionableShellRuns(a: ShellRunRecord, b: ShellRunRecord): number {
-  const rank = (record: ShellRunRecord) => (isActiveShellRunStatus(record.status) ? 1 : 0);
-  return (
-    rank(a) - rank(b) ||
-    b.updatedAt - a.updatedAt ||
-    b.startedAt - a.startedAt ||
-    a.shellRunId.localeCompare(b.shellRunId)
   );
 }
 

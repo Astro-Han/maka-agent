@@ -296,15 +296,12 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
   const recordProviderRequestAttempt = input.context.recordProviderRequestAttempt ?? (() => {});
   const resolveRunPrompt = async (context: {
     readonly turnId: string;
-    readonly runId?: string;
     readonly emitSkillCatalogTrace?: (message: string, data?: Record<string, unknown>) => void;
   }) => {
     const resolved = await modelComposition.resolveSystemPrompt({
       sessionId: input.context.sessionId,
       turnId: context.turnId,
-      ...(context.runId ? { runId: context.runId } : {}),
       cwd: input.context.header.cwd,
-      workspaceRoot: input.context.workspaceRoot,
       ...(context.emitSkillCatalogTrace
         ? { emitSkillCatalogTrace: context.emitSkillCatalogTrace }
         : {}),
@@ -432,7 +429,6 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
         systemPrompt: async (context) => {
           const resolved = await resolveRunPrompt({
             turnId: context.turnId,
-            ...(context.runId ? { runId: context.runId } : {}),
             ...(context.emitSkillCatalogTrace
               ? { emitSkillCatalogTrace: context.emitSkillCatalogTrace }
               : {}),
