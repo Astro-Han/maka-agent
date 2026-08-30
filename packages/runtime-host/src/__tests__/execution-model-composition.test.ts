@@ -1563,7 +1563,7 @@ test('production Host executes a canonical ai-sdk Session against a real provide
     assert.match(requestText, /HOSTED_SKILL_DESCRIPTION_SENTINEL/);
     assert.doesNotMatch(requestText, /HOSTED_SKILL_BODY_MUST_STAY_LAZY/);
     assert.match(requestText, /HOSTED_WORKSPACE_SENTINEL/);
-    assert.match(requestText, /HOSTED_TASK_LEDGER_SENTINEL/);
+    assert.doesNotMatch(requestText, /HOSTED_TASK_LEDGER_SENTINEL/);
     assert.match(requestText, /HOSTED_PERSONALIZATION_SENTINEL/);
     assert.match(requestText, /HOSTED_MEMORY_SENTINEL/);
     assert.match(JSON.stringify(mainRequests[1]?.body), /HOSTED_SKILL_BODY_MUST_STAY_LAZY/);
