@@ -6709,6 +6709,59 @@ describe('AiSdkBackend model history', () => {
     assert.match(promptJson, /file contents/);
   });
 
+  test('drops Anthropic reasoning after provider state changes under the same route id', async () => {
+    const model = completionModel();
+    const backend = createTestAiSdkBackend({
+      sessionId: 'session-1',
+      header: { ...header(), llmConnectionId: 'connection-a', model: 'claude-a' },
+      appendMessage: async () => {},
+      connection: connection(),
+      apiKey: 'sk-test',
+      modelId: 'claude-a',
+      modelFactory: () => model,
+      tools: [],
+      newId: idGenerator(),
+      now: monotonicClock(),
+      providerStateIdentity: `sha256:${'b'.repeat(64)}`,
+    });
+
+    await drain(
+      backend.send({
+        turnId: 'turn-current',
+        text: 'continue',
+        context: [],
+        runtimeContextRunHeaders: [
+          priorModelRunHeader({
+            connectionId: 'connection-a',
+            modelId: 'claude-a',
+            providerStateIdentity: `sha256:${'a'.repeat(64)}`,
+          }),
+        ],
+        runtimeContext: [
+          runtimeEvent({
+            id: 'rt-thinking',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            content: { kind: 'thinking', text: 'old account reasoning', signature: 'old-sig' },
+          }),
+          runtimeTextEvent({
+            id: 'rt-a',
+            turnId: 'turn-prev',
+            role: 'model',
+            author: 'agent',
+            text: 'portable answer',
+          }),
+        ],
+      }),
+    );
+
+    const promptJson = JSON.stringify(compactPrompt(model));
+    assert.equal(promptJson.includes('old account reasoning'), false);
+    assert.equal(promptJson.includes('old-sig'), false);
+    assert.match(promptJson, /portable answer/);
+  });
+
   test('fails closed for provider reasoning with no source run provenance', async () => {
     const model = completionModel();
     const backend = createTestAiSdkBackend({
@@ -16029,6 +16082,7 @@ function priorModelRunHeader(input: {
   modelId: string;
   connectionSlug?: string;
   runId?: string;
+  providerStateIdentity?: `sha256:${string}`;
 }): AgentRunHeader {
   return {
     runId: input.runId ?? 'run-prev',
@@ -16037,6 +16091,7 @@ function priorModelRunHeader(input: {
     status: 'completed',
     backendKind: 'ai-sdk',
     ...(input.connectionId ? { llmConnectionId: input.connectionId } : {}),
+    providerStateIdentity: input.providerStateIdentity ?? `sha256:${'1'.repeat(64)}`,
     llmConnectionSlug: input.connectionSlug ?? 'anthropic-main',
     modelId: input.modelId,
     cwd: '/tmp/maka',

@@ -637,7 +637,7 @@ export class RuntimeContinuationPlanner {
       startKind: 'runtime_admission' | 'claim_repair';
       claimId: string;
       boundaryDigest: RuntimeBoundaryDigest;
-      providerProjectionVersion: typeof PROVIDER_REPLAY_PROJECTION_VERSION;
+      providerProjectionVersion: 1 | typeof PROVIDER_REPLAY_PROJECTION_VERSION;
       providerReplayDigest: RuntimeBoundaryDigest;
     }> = [];
     let childRun = sourceRun;
@@ -782,6 +782,12 @@ export class RuntimeContinuationPlanner {
           `durable continuation claim does not authenticate ${edge.childRunId}`,
         );
       }
+      if (edge.providerProjectionVersion !== PROVIDER_REPLAY_PROJECTION_VERSION) {
+        throw new RuntimeLineageError(
+          'runtime_lineage_replay_mismatch',
+          `continuation provider replay version is unsupported for ${edge.childRunId}`,
+        );
+      }
       const edgeReplay = buildContinuationReplayPlan({
         prefixes: segments.slice(0, childIndex) as [
           ImmutableRuntimePrefixV1,
@@ -790,7 +796,7 @@ export class RuntimeContinuationPlanner {
         providerProjectionVersion: edge.providerProjectionVersion,
         admissionRoute: {
           runHeaders,
-          targetConnectionId: state.claim.targetRunHeader.llmConnectionId,
+          targetProviderStateIdentity: state.claim.targetRunHeader.providerStateIdentity,
           targetModelId: state.claim.targetRunHeader.modelId,
         },
       });

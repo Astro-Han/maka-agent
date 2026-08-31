@@ -162,6 +162,20 @@ test('backend creation resolves a bound Session by immutable Connection identity
   });
 });
 
+test('backend creation rejects provider state drift after Run admission', async () => {
+  await assert.rejects(
+    createHostAiSdkBackend(
+      backendCreationFixture({
+        abortSignal: new AbortController().signal,
+        providerStateIdentity: `sha256:${'f'.repeat(64)}`,
+        resolveExecutionConnection: async () => readyExecutionConnection(),
+        readPricing: async () => ({ revision: 0, overrides: [] }),
+      }),
+    ),
+    /Provider state changed after AgentRun admission/,
+  );
+});
+
 test('backend creation aborts a stalled canonical connection read', async () => {
   const abort = new AbortController();
   const creating = createHostAiSdkBackend(
@@ -3887,6 +3901,7 @@ async function publishConnectionModel(
 function backendCreationFixture(input: {
   abortSignal: AbortSignal;
   connectionId?: string;
+  providerStateIdentity?: `sha256:${string}`;
   resolveExecutionConnection: (ref?: unknown) => Promise<unknown>;
   readPricing: () => Promise<unknown>;
   runtimePolicy?: RuntimePolicyStoresWriter;
@@ -3956,6 +3971,9 @@ function backendCreationFixture(input: {
         permissionMode: 'bypass',
       },
       abortSignal: input.abortSignal,
+      ...(input.providerStateIdentity
+        ? { providerStateIdentity: input.providerStateIdentity }
+        : {}),
       ...(input.tools ? { tools: input.tools } : {}),
       ...(input.loadTurnRuntimeEvents
         ? { loadTurnRuntimeEvents: input.loadTurnRuntimeEvents }

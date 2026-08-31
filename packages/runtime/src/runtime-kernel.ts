@@ -269,6 +269,7 @@ export interface RuntimeKernelDeps {
   safeBoundaryResumeEnabled?: boolean;
   continuationFailpoint?: (point: RuntimeContinuationFailpoint) => Promise<void>;
   runBackendActivation?: BackendActivationBoundary;
+  resolveProviderStateIdentity?: (header: SessionHeader) => Promise<`sha256:${string}` | undefined>;
   /** Hosted composition capability. When present, the Host owns all message queues. */
   messageAuthority?: RuntimeMessageAuthority;
   /** Hosted composition capability. Omit for embedded interaction ownership. */
@@ -658,6 +659,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
         repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
         newId: this.deps.newId,
         now: this.deps.now,
+        resolveProviderStateIdentity: this.deps.resolveProviderStateIdentity,
         ...(workspaceIdentity ? { workspaceIdentity } : {}),
         hooks: {
           reserveRun: async (targetSessionId, nextHeader, activeRun) => {
@@ -742,9 +744,10 @@ export class RuntimeKernel implements RuntimeKernelLike {
       this.deps.runStore.readRun(continuation.sessionId, continuation.sourceRunId),
       this.deps.runStore.listSessionRuns(continuation.sessionId),
     ]);
+    const targetProviderStateIdentity = await this.deps.resolveProviderStateIdentity?.(header);
     const admissionRoute: ContinuationReplayAdmissionRoute = {
       runHeaders: sessionRuns,
-      targetConnectionId: header.llmConnectionId,
+      targetProviderStateIdentity,
       targetModelId: header.model,
     };
     const sourceEvents = await revalidateContinuationBoundary(
@@ -770,6 +773,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
       workspaceIdentity: continuation.safetySnapshot.workspaceIdentity,
       effectiveOrchestration,
       effectiveToolMode,
+      targetProviderStateIdentity,
       claimedAt,
     });
     const claim = continuationClaimForExecution(continuation, claimedAt, targetRunHeader);
@@ -819,6 +823,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
       repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
       newId: this.deps.newId,
       now: this.deps.now,
+      resolveProviderStateIdentity: this.deps.resolveProviderStateIdentity,
       workspaceIdentity: continuation.safetySnapshot.workspaceIdentity,
       effectiveOrchestration,
       claimedRunHeader: claim.targetRunHeader,
@@ -972,6 +977,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
       repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
       newId: this.deps.newId,
       now: this.deps.now,
+      resolveProviderStateIdentity: this.deps.resolveProviderStateIdentity,
       effectiveOrchestration: resolveEffectiveOrchestration('default', undefined),
       hooks: {
         reserveRun: async (targetSessionId, nextHeader, activeRun) => {
@@ -2298,6 +2304,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
     header: SessionHeader,
     execution: PendingExecutionClaim,
   ): Promise<BackendGeneration> {
+    const providerStateIdentity = execution.run?.resolvedProviderStateIdentity();
     await this.clearBackendQuarantineForActivation(sessionId, execution);
     let existing = this.active.get(sessionId);
     if (existing) {
@@ -2318,6 +2325,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
         sessionId,
         workspaceRoot: header.workspaceRoot,
         header,
+        ...(providerStateIdentity ? { providerStateIdentity } : {}),
         store: this.deps.store,
         abortSignal: execution.abortController.signal,
         ...(subagent
@@ -2794,6 +2802,7 @@ function continuationTargetRunHeaderForExecution(input: {
   workspaceIdentity: string;
   effectiveOrchestration: EffectiveOrchestration;
   effectiveToolMode: ToolMode;
+  targetProviderStateIdentity: `sha256:${string}` | undefined;
   claimedAt: number;
 }): AgentRunHeader {
   const {
@@ -2821,6 +2830,9 @@ function continuationTargetRunHeaderForExecution(input: {
     ...(sessionHeader.llmConnectionId === undefined
       ? {}
       : { llmConnectionId: sessionHeader.llmConnectionId }),
+    ...(input.targetProviderStateIdentity
+      ? { providerStateIdentity: input.targetProviderStateIdentity }
+      : {}),
     llmConnectionSlug: sessionHeader.llmConnectionSlug,
     modelId: sessionHeader.model,
     cwd: sessionHeader.cwd,
@@ -2909,7 +2921,7 @@ function consumeAdmittedRuntimeContinuation(input: {
   const providerReasoningReplayEventIds = compatibleProviderReasoningReplayEventIds(
     continuation.runtimeContext,
     input.admissionRoute.runHeaders,
-    input.admissionRoute.targetConnectionId,
+    input.admissionRoute.targetProviderStateIdentity,
     input.admissionRoute.targetModelId,
   );
   const admittedItems = admitProviderReasoningReplayItems(
@@ -2919,7 +2931,7 @@ function consumeAdmittedRuntimeContinuation(input: {
   if (
     digestProviderReplayAdmission({
       providerProjectionVersion: continuation.providerProjectionVersion,
-      targetConnectionId: input.admissionRoute.targetConnectionId,
+      targetProviderStateIdentity: input.admissionRoute.targetProviderStateIdentity,
       targetModelId: input.admissionRoute.targetModelId,
       items: admittedItems,
     }) !== continuation.providerReplayDigest

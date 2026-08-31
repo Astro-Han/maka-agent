@@ -77,7 +77,7 @@ import {
 import { estimateTokens, stableJsonLength, turnKey } from './context-budget-helpers.js';
 import type { DurableToolResultProjection } from '@maka/core/durable-tool-result-projection';
 
-export const PROVIDER_REPLAY_PROJECTION_VERSION = 1;
+export const PROVIDER_REPLAY_PROJECTION_VERSION = 2;
 
 /**
  * Resolve the RuntimeEvents whose provider-owned reasoning may cross the
@@ -87,14 +87,17 @@ export const PROVIDER_REPLAY_PROJECTION_VERSION = 1;
 export function compatibleProviderReasoningReplayEventIds(
   events: readonly RuntimeEvent[],
   runHeaders: readonly AgentRunHeader[] | undefined,
-  targetConnectionId: string | undefined,
+  targetProviderStateIdentity: `sha256:${string}` | undefined,
   targetModelId: string,
   currentRunId?: string,
 ): ReadonlySet<string> {
   const compatibleRunIds = new Set(currentRunId ? [currentRunId] : []);
-  if (targetConnectionId && runHeaders) {
+  if (targetProviderStateIdentity && runHeaders) {
     for (const run of runHeaders) {
-      if (run.llmConnectionId === targetConnectionId && run.modelId === targetModelId) {
+      if (
+        run.providerStateIdentity === targetProviderStateIdentity &&
+        run.modelId === targetModelId
+      ) {
         compatibleRunIds.add(run.runId);
       }
     }

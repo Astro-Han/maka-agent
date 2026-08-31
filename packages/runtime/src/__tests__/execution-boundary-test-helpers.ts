@@ -41,6 +41,7 @@ export function createTestAiSdkBackend(input: TestAiSdkBackendInput): AiSdkBacke
   let nextArtifactId = 0;
   return new AiSdkBackend({
     readExecutionBoundary: readExternalExecutionBoundary,
+    providerStateIdentity: `sha256:${'1'.repeat(64)}`,
     ...backendInput,
     ...(testProjectionArtifacts
       ? {

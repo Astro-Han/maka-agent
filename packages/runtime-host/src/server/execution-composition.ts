@@ -110,6 +110,7 @@ import { HostClientCapabilityCoordinator } from './client-capability-coordinator
 import { HostDeepResearchCoordinator } from './deep-research-coordinator.js';
 import { HostDailyReviewCoordinator } from './daily-review-coordinator.js';
 import { createHostAiSdkBackend } from './execution-model-composition.js';
+import { resolveExecutionProviderStateIdentity } from './execution-model-authority.js';
 import {
   createInteractiveRunComposer,
   createInteractiveRunComposerFactory,
@@ -981,6 +982,8 @@ export async function createExecutionRuntimeHostComposition(
         },
       }),
       runBackendActivation: (operation) => runtimePolicyActivation.runBackendActivation(operation),
+      resolveProviderStateIdentity: (header) =>
+        resolveExecutionProviderStateIdentity(header, runtimePolicyStores),
       messageAuthority: runtimeAuthority,
       hostedAgentGraphExecution: {
         readAgentGraphIntentClaim: (graphId, intentId) =>

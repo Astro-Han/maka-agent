@@ -155,6 +155,7 @@ export interface AiSdkCompactionDeps {
   input: AiSdkCompactionCapabilities;
   sessionId: string;
   targetConnectionId: string | undefined;
+  targetProviderStateIdentity: `sha256:${string}` | undefined;
   now: () => number;
   modelAdapter: ModelAdapter;
   /**
@@ -187,6 +188,7 @@ export class AiSdkCompaction {
   private readonly input: AiSdkCompactionCapabilities;
   private readonly sessionId: string;
   private readonly targetConnectionId: string | undefined;
+  private readonly targetProviderStateIdentity: `sha256:${string}` | undefined;
   private readonly now: () => number;
   private readonly modelAdapter: ModelAdapter;
   private readonly createProviderRequestTracker: (input: {
@@ -218,6 +220,7 @@ export class AiSdkCompaction {
     this.input = deps.input;
     this.sessionId = deps.sessionId;
     this.targetConnectionId = deps.targetConnectionId;
+    this.targetProviderStateIdentity = deps.targetProviderStateIdentity;
     this.now = deps.now;
     this.modelAdapter = deps.modelAdapter;
     this.createProviderRequestTracker = deps.createProviderRequestTracker;
@@ -1080,7 +1083,7 @@ export class AiSdkCompaction {
       compatibleProviderReasoningReplayEventIds(
         plan.replacementEvents,
         state.priorRunHeaders,
-        this.targetConnectionId,
+        this.targetProviderStateIdentity,
         this.input.modelId,
         input.origin.runId,
       ),

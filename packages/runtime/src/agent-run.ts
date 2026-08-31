@@ -150,6 +150,7 @@ export interface AgentRunInput {
   newId: () => string;
   now: () => number;
   workspaceIdentity?: string;
+  resolveProviderStateIdentity?: (header: SessionHeader) => Promise<`sha256:${string}` | undefined>;
   continuationFailpoint?: (point: RuntimeContinuationFailpoint) => Promise<void>;
   /** Exact target header already committed inside the durable continuation claim. */
   claimedRunHeader?: AgentRunHeader;
@@ -247,6 +248,7 @@ export class AgentRun {
   private finalized = false;
   private terminalRunHeaderCommitted = false;
   private continuationActive = false;
+  private providerStateIdentity: `sha256:${string}` | undefined;
   private terminalClaim:
     | {
         owner: 'event' | 'stop';
@@ -322,6 +324,10 @@ export class AgentRun {
 
   isStopped(): boolean {
     return this.stopped;
+  }
+
+  resolvedProviderStateIdentity(): `sha256:${string}` | undefined {
+    return this.providerStateIdentity;
   }
 
   isSessionInline(): boolean {
@@ -1052,6 +1058,10 @@ export class AgentRun {
       continuation && this.input.claimedRunHeader
         ? this.input.claimedRunHeader.createdAt
         : this.input.now();
+    const providerStateIdentity =
+      this.input.claimedRunHeader?.providerStateIdentity ??
+      (await this.input.resolveProviderStateIdentity?.(this.header));
+    this.providerStateIdentity = providerStateIdentity;
     const computedHeader: AgentRunHeader = {
       runId: this.runId,
       invocationId: this.invocationId,
@@ -1062,6 +1072,7 @@ export class AgentRun {
       ...(this.header.llmConnectionId === undefined
         ? {}
         : { llmConnectionId: this.header.llmConnectionId }),
+      ...(providerStateIdentity ? { providerStateIdentity } : {}),
       llmConnectionSlug: this.header.llmConnectionSlug,
       modelId: this.header.model,
       cwd: this.header.cwd,

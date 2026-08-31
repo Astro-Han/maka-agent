@@ -696,6 +696,8 @@ export interface AiSdkBackendInput extends AiSdkCompactionCapabilities {
   // ── Session context ────────────────────────────────────────────────────
   sessionId: string;
   header: SessionHeader;
+  /** Host-frozen provider endpoint and credential ownership for this backend generation. */
+  providerStateIdentity?: `sha256:${string}`;
   /** Append-message function bound to this session (e.g. SessionStore wrapper). */
   appendMessage: AppendMessageFn;
   /** Reads the authoritative session boundary immediately before every local tool invocation. */
@@ -1114,6 +1116,7 @@ export class AiSdkBackend implements AgentBackend {
       input,
       sessionId: this.sessionId,
       targetConnectionId: input.header.llmConnectionId,
+      targetProviderStateIdentity: input.providerStateIdentity,
       now: this.now,
       modelAdapter: this.modelAdapter,
       createProviderRequestTracker: (trackerInput) =>
@@ -1913,7 +1916,7 @@ export class AiSdkBackend implements AgentBackend {
             compatibleProviderReasoningReplayEventIds(
               replayEvents,
               input.runtimeContextRunHeaders,
-              this.input.header.llmConnectionId,
+              this.input.providerStateIdentity,
               this.input.modelId,
               scope.runId,
             ),
@@ -3383,7 +3386,7 @@ export class AiSdkBackend implements AgentBackend {
     const providerReasoningReplayEventIds = compatibleProviderReasoningReplayEventIds(
       priorRuntimeContext,
       input.runtimeContextRunHeaders,
-      this.input.header.llmConnectionId,
+      this.input.providerStateIdentity,
       this.input.modelId,
     );
     const projectedMessages = await this.materializePriorMessages(

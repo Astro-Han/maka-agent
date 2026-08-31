@@ -5151,6 +5151,7 @@ describe('SessionManager permission mode updates', () => {
     const backends = new BackendRegistry();
     const lifecycleEvents: Array<{ type: string }> = [];
     let backend: FinalTextTestBackend | undefined;
+    const providerStateIdentity = `sha256:${'c'.repeat(64)}` as const;
     backends.register('ai-sdk', (ctx) => {
       backend = new FinalTextTestBackend(ctx);
       return backend;
@@ -5167,6 +5168,7 @@ describe('SessionManager permission mode updates', () => {
         backgroundOperationsSettled: true,
         availableToolNames: ['Read'],
       }),
+      resolveProviderStateIdentity: async () => providerStateIdentity,
       onContinuationLifecycleEvent: (event) => {
         lifecycleEvents.push(event);
       },
@@ -5189,6 +5191,7 @@ describe('SessionManager permission mode updates', () => {
       failureClass: 'runtime_interrupted',
       backendKind: header.backend,
       llmConnectionId: header.llmConnectionId,
+      providerStateIdentity,
       llmConnectionSlug: header.llmConnectionSlug,
       modelId: header.model,
       cwd: header.cwd,
@@ -5312,6 +5315,7 @@ describe('SessionManager permission mode updates', () => {
     assert.strictEqual(continuationRun.parentTurnId, sourceTurnId);
     assert.strictEqual(continuationRun.cwd, movedCwd);
     assert.strictEqual(continuationRun.status, 'completed');
+    assert.strictEqual(continuationRun.providerStateIdentity, providerStateIdentity);
     assert.partialDeepStrictEqual(continuationRun, {
       orchestrationMode: 'swarm',
       orchestrationSource: 'turn_override',
@@ -5324,13 +5328,15 @@ describe('SessionManager permission mode updates', () => {
         runId: runHeader.runId,
         llmConnectionId: runHeader.llmConnectionId,
         modelId: runHeader.modelId,
+        providerStateIdentity: runHeader.providerStateIdentity,
       })),
       [
-      {
-        runId: sourceRunId,
-        llmConnectionId: header.llmConnectionId,
-        modelId: header.model,
-      },
+        {
+          runId: sourceRunId,
+          llmConnectionId: header.llmConnectionId,
+          modelId: header.model,
+          providerStateIdentity,
+        },
       ],
     );
     const continuationEvents = await runStore.readRuntimeEvents(
@@ -5341,14 +5347,7 @@ describe('SessionManager permission mode updates', () => {
       protocol: 'continuation_start_v2',
       claimId: plan.continuation.claimId,
       boundaryDigest: plan.continuation.boundary?.manifestDigest,
-      replayManifestDigest: plan.continuation.boundary?.manifestDigest,
-      providerProjectionVersion: 1,
-      providerReplayDigest: plan.continuation.providerReplayDigest,
-    });
-    assert.deepStrictEqual(
-      (continuationEvents[0]?.actions?.continuationStart as Record<string, unknown> | undefined)
-        ?.immediateSource,
-      {
+      immediateSource: {
         sessionId: session.id,
         invocationId: sourceInvocationId,
         runId: sourceRunId,
@@ -5356,7 +5355,10 @@ describe('SessionManager permission mode updates', () => {
         highWater: sourceEvents.length,
         prefixDigest: plan.continuation.boundary?.segments.at(-1)?.prefixDigest,
       },
-    );
+      replayManifestDigest: plan.continuation.boundary?.manifestDigest,
+      providerProjectionVersion: 2,
+      providerReplayDigest: plan.continuation.providerReplayDigest,
+    });
     assert.deepStrictEqual(continuationEvents[0]?.actions?.runtimeProtocol, {
       toolBoundary: 't1_after_preflight_v1',
     });
@@ -5386,6 +5388,10 @@ describe('SessionManager permission mode updates', () => {
       followUpContext.some((event) => event.runId === plan.continuation?.runId),
       true,
     );
+    const followUpRun = (await runStore.listSessionRuns(session.id)).find(
+      (runHeader) => runHeader.turnId === 'turn-after-continuation',
+    );
+    assert.strictEqual(followUpRun?.providerStateIdentity, providerStateIdentity);
   });
 
   test('authenticates the exact target-aware continuation projection that reaches the provider', async () => {

@@ -115,6 +115,12 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
       ),
     input.context.abortSignal,
   );
+  if (
+    input.context.providerStateIdentity !== undefined &&
+    input.context.providerStateIdentity !== target.providerStateIdentity
+  ) {
+    throw new Error('Provider state changed after AgentRun admission');
+  }
   const pricingSnapshot = await readDuringBackendCreation(
     () => input.usage.pricing.snapshot(),
     input.context.abortSignal,
@@ -199,6 +205,7 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
           buildOpenAiCodexHistoryCompactor({
             resolveModel: resolveHistoryCompactModel,
             connectionId: input.context.header.llmConnectionId,
+            providerStateIdentity: target.providerStateIdentity,
             modelId: target.model,
             providerOptions,
           }),
@@ -356,6 +363,7 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
             }
           : {}),
         connection: target.connection,
+        providerStateIdentity: target.providerStateIdentity,
         apiKey,
         modelId: target.model,
         modelFactory,

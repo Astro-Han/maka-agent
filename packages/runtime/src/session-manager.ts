@@ -637,6 +637,8 @@ export interface BackendFactoryContext {
   sessionId: string;
   workspaceRoot: string;
   header: SessionHeader;
+  /** Provider state identity already frozen into the activating AgentRun. */
+  providerStateIdentity?: `sha256:${string}`;
   store: SessionStore;
   /** Process-local cancellation for the execution that owns this activation. */
   abortSignal?: AbortSignal;
@@ -764,6 +766,7 @@ interface SessionManagerBaseDeps {
   inspectContinuationSafety?: (sessionId: string) => Promise<RuntimeContinuationSafetyObservation>;
   continuationFailpoint?: (point: RuntimeContinuationFailpoint) => Promise<void>;
   runBackendActivation?: BackendActivationBoundary;
+  resolveProviderStateIdentity?: (header: SessionHeader) => Promise<`sha256:${string}` | undefined>;
   safeBoundaryResumeEnabled?: boolean;
   /** Hosted composition capability. Omit for the production embedded queue. */
   messageAuthority?: RuntimeMessageAuthority;
@@ -1987,9 +1990,10 @@ export class SessionManager {
         this.deps.store.readHeader(sessionId),
         this.deps.runStore.listSessionRuns(sessionId),
       ]);
+      const targetProviderStateIdentity = await this.deps.resolveProviderStateIdentity?.(header);
       admissionRoute = {
         runHeaders,
-        targetConnectionId: header.llmConnectionId,
+        targetProviderStateIdentity,
         targetModelId: header.model,
       };
     } catch {

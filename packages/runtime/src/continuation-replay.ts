@@ -84,7 +84,7 @@ export type ContinuationReplayPlanResult =
 
 export interface ContinuationReplayAdmissionRoute {
   runHeaders: readonly AgentRunHeader[];
-  targetConnectionId: string | undefined;
+  targetProviderStateIdentity: `sha256:${string}` | undefined;
   targetModelId: string;
 }
 
@@ -113,7 +113,7 @@ export function buildContinuationReplayPlan(input: {
   const providerReasoningReplayEventIds = compatibleProviderReasoningReplayEventIds(
     runtimeContext,
     input.admissionRoute.runHeaders,
-    input.admissionRoute.targetConnectionId,
+    input.admissionRoute.targetProviderStateIdentity,
     input.admissionRoute.targetModelId,
   );
   const providerItems = admitProviderReasoningReplayItems(
@@ -128,7 +128,7 @@ export function buildContinuationReplayPlan(input: {
       boundary: createRuntimeBoundaryCursor(boundaries),
       providerReplayDigest: digestProviderReplayAdmission({
         providerProjectionVersion: input.providerProjectionVersion,
-        targetConnectionId: input.admissionRoute.targetConnectionId,
+        targetProviderStateIdentity: input.admissionRoute.targetProviderStateIdentity,
         targetModelId: input.admissionRoute.targetModelId,
         items: providerItems,
       }),
@@ -141,7 +141,7 @@ export function buildContinuationReplayPlan(input: {
 
 export function buildContinuationReplaySegment(input: {
   prefix: ImmutableRuntimePrefixV1;
-  providerProjectionVersion: typeof PROVIDER_REPLAY_PROJECTION_VERSION;
+  providerProjectionVersion: number;
 }): ContinuationReplaySegmentResult {
   const recovery = resolveRuntimeRecovery(input.prefix.events);
   if (
@@ -271,15 +271,15 @@ function isBlockingProjectionDiagnostic(diagnostic: RuntimeEventReplayDiagnostic
 
 export function digestProviderReplayAdmission(input: {
   providerProjectionVersion: number;
-  targetConnectionId: string | undefined;
+  targetProviderStateIdentity: `sha256:${string}` | undefined;
   targetModelId: string;
   items: readonly RuntimeEventModelReplayItem[];
 }): RuntimeBoundaryDigest {
   const json = stableJsonStringify({
-    protocol: 'provider_replay_admission_v1',
+    protocol: 'provider_replay_admission_v2',
     providerProjectionVersion: input.providerProjectionVersion,
     target: {
-      connectionId: input.targetConnectionId ?? null,
+      providerStateIdentity: input.targetProviderStateIdentity ?? null,
       modelId: input.targetModelId,
     },
     items: input.items,

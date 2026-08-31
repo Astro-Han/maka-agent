@@ -44,6 +44,7 @@ import { providerFailureDiagnostic } from './provider-error-classification.js';
 export interface BuildOpenAiCodexHistoryCompactorOptions {
   resolveModel: () => unknown;
   connectionId: string;
+  providerStateIdentity?: `sha256:${string}`;
   modelId: string;
   providerOptions?: Record<string, unknown>;
 }
@@ -79,7 +80,7 @@ export function buildOpenAiCodexHistoryCompactor(options: BuildOpenAiCodexHistor
       const providerReasoningReplayEventIds = compatibleProviderReasoningReplayEventIds(
         events,
         input.source.runHeaders,
-        options.connectionId,
+        options.providerStateIdentity,
         options.modelId,
         input.runId,
       );

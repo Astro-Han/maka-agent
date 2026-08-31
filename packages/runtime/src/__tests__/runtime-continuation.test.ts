@@ -120,7 +120,7 @@ test('RuntimeContinuationPlanner reads the durable source boundary and allocates
       manifestDigest: plan.continuation?.boundary?.manifestDigest,
     },
     providerReplayDigest: plan.continuation?.providerReplayDigest,
-    providerProjectionVersion: 1,
+    providerProjectionVersion: PROVIDER_REPLAY_PROJECTION_VERSION,
     safetySnapshot: {
       workspaceIdentity: 'workspace-1',
       backgroundOperationsSettled: true,
@@ -884,7 +884,7 @@ function sameRouteAdmission() {
     runHeaders: ['run-1', 'run-2', 'run-3'].map((runId) =>
       runHeader(runId, { llmConnectionId: 'connection-1' }),
     ),
-    targetConnectionId: 'connection-1',
+    targetProviderStateIdentity: undefined,
     targetModelId: 'test-model',
   };
 }
