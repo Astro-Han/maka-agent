@@ -51,14 +51,6 @@ test('a nightly package embeds only the Apache GitHub dev update authority', () 
   });
 });
 
-test('a dev Nightly identity writes the GitHub dev feed', () => {
-  const config = resolveDesktopBuilderConfig({
-    MAKA_DESKTOP_NIGHTLY_VERSION: '0.2.0-dev.42.20260829',
-  });
-
-  assert.equal(config.publish[0].channel, 'dev');
-});
-
 test('a packaged Nightly accepts the pinned GitHub dev update channel', async () => {
   const packagedConfiguration = `provider: github
 owner: apache
@@ -105,7 +97,7 @@ test('the GitHub dev provider resolves each platform payload to its absolute Rel
   }
 });
 
-test('GitHub differential updates derive the previous blockmap from the previous immutable tag', () => {
+test('GitHub differential updates derive the previous blockmap from the previous versioned tag', () => {
   const previous = '0.2.0-dev.41.20260828';
   const current = '0.2.0-dev.42.20260829';
   const provider = new GitHubProvider(

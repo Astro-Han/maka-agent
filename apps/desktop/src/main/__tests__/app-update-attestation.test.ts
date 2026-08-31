@@ -108,7 +108,7 @@ test('download verification accepts only a trusted exact artifact subject', asyn
   );
 });
 
-test('nightly verification fetches provenance from the immutable GitHub Release asset', async (t) => {
+test('nightly verification fetches provenance from the versioned GitHub Release asset', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'maka-nightly-attestation-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const artifact = join(directory, 'cached-update.zip');

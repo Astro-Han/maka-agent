@@ -225,7 +225,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.identity.outputs.source_commit }}
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js
@@ -244,57 +243,14 @@ jobs:
           path: ${{ github.workspace }}/.nightly-input
           merge-multiple: true
 
-      - name: Stage the GitHub Release and compatibility bridge
+      - name: Stage the exact GitHub Release assets
         env:
           NIGHTLY_VERSION: ${{ needs.identity.outputs.version }}
-          SOURCE_COMMIT: ${{ needs.identity.outputs.source_commit }}
         run: |
           node scripts/desktop-nightly.mjs stage \
             "$GITHUB_WORKSPACE/.nightly-input" \
             "$GITHUB_WORKSPACE/.nightly-stage" \
-            "$NIGHTLY_VERSION" \
-            "$SOURCE_COMMIT"
-
-      - name: Read the public legacy Nightlies feed
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/.nightly-current-feed"
-          curl --fail --location --retry 3 \
-            --output "$GITHUB_WORKSPACE/.nightly-current-feed/latest-mac.yml" \
-            https://nightlies.apache.org/maka/desktop/latest-mac.yml
-          curl --fail --location --retry 3 \
-            --output "$GITHUB_WORKSPACE/.nightly-current-feed/latest.yml" \
-            https://nightlies.apache.org/maka/desktop/latest.yml
-          marker_status=$(curl --silent --show-error --location --retry 3 \
-            --output "$GITHUB_WORKSPACE/.nightly-current-feed/github-cutover.json" \
-            --write-out '%{http_code}' \
-            https://nightlies.apache.org/maka/desktop/github-cutover.json)
-          if [[ "$marker_status" == 404 ]]; then
-            rm -f "$GITHUB_WORKSPACE/.nightly-current-feed/github-cutover.json"
-          elif [[ "$marker_status" != 200 ]]; then
-            echo "Unexpected Nightlies cutover marker status: $marker_status" >&2
-            exit 1
-          fi
-
-      - name: Read the live GitHub Release history
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh api --paginate --slurp
-          "repos/$GITHUB_REPOSITORY/releases?per_page=100"
-          > "$RUNNER_TEMP/desktop-nightly-releases.json"
-
-      - name: Resolve the one-time Nightlies cutover
-        id: cutover
-        env:
-          DESKTOP_NIGHTLY_GITHUB_CUTOVER_SOURCE_SHA: ${{ vars.DESKTOP_NIGHTLY_GITHUB_CUTOVER_SOURCE_SHA }}
-          NIGHTLY_VERSION: ${{ needs.identity.outputs.version }}
-          SOURCE_COMMIT: ${{ needs.identity.outputs.source_commit }}
-        run: |
-          node scripts/desktop-nightly.mjs resolve-cutover \
-            "$GITHUB_WORKSPACE/.nightly-current-feed" \
-            "$RUNNER_TEMP/desktop-nightly-releases.json" \
-            "$NIGHTLY_VERSION" \
-            "$SOURCE_COMMIT"
+            "$NIGHTLY_VERSION"
 
       - name: Attest every GitHub Nightly asset subject
         id: attest
@@ -332,7 +288,7 @@ jobs:
             "$NIGHTLY_VERSION" \
             "$ATTESTATION_BUNDLE"
 
-      - name: Ensure the exact immutable Nightly tag
+      - name: Ensure the exact versioned Nightly tag
         env:
           GH_TOKEN: ${{ github.token }}
           NIGHTLY_VERSION: ${{ needs.identity.outputs.version }}
@@ -353,44 +309,6 @@ jobs:
             "$SOURCE_COMMIT" \
             "$GITHUB_REPOSITORY"
 
-      - name: Prepare authenticated Nightlies SSH transport
-        if: steps.cutover.outputs.bridge == 'true'
-        env:
-          NIGHTLIES_RSYNC_HOST: ${{ secrets.NIGHTLIES_RSYNC_HOST }}
-          NIGHTLIES_RSYNC_KEY: ${{ secrets.NIGHTLIES_RSYNC_KEY }}
-          NIGHTLIES_RSYNC_PATH: ${{ secrets.NIGHTLIES_RSYNC_PATH }}
-          NIGHTLIES_RSYNC_PORT: ${{ secrets.NIGHTLIES_RSYNC_PORT }}
-          NIGHTLIES_RSYNC_USER: ${{ secrets.NIGHTLIES_RSYNC_USER }}
-        run: |
-          test -n "$NIGHTLIES_RSYNC_HOST"
-          test -n "$NIGHTLIES_RSYNC_KEY"
-          test -n "$NIGHTLIES_RSYNC_PATH"
-          test -n "$NIGHTLIES_RSYNC_USER"
-          [[ "$NIGHTLIES_RSYNC_PORT" =~ ^[0-9]{1,5}$ ]]
-          (( NIGHTLIES_RSYNC_PORT >= 1 && NIGHTLIES_RSYNC_PORT <= 65535 ))
-          ssh_directory="$RUNNER_TEMP/nightlies-ssh"
-          install -m 700 -d "$ssh_directory"
-          umask 077
-          printf '%s\n' "$NIGHTLIES_RSYNC_KEY" > "$ssh_directory/key"
-          {
-            echo "NIGHTLIES_RSYNC_BASE=$NIGHTLIES_RSYNC_USER@$NIGHTLIES_RSYNC_HOST:${NIGHTLIES_RSYNC_PATH%/}"
-            echo "NIGHTLIES_RSYNC_TARGET=$NIGHTLIES_RSYNC_USER@$NIGHTLIES_RSYNC_HOST:${NIGHTLIES_RSYNC_PATH%/}/maka/desktop"
-            echo "RSYNC_RSH=ssh -i $ssh_directory/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $NIGHTLIES_RSYNC_PORT"
-          } >> "$GITHUB_ENV"
-
-      - name: Ensure the Nightly destination exists
-        if: steps.cutover.outputs.bridge == 'true'
-        run: |
-          mkdir -p .nightly-empty/maka/desktop
-          rsync -rlptDz --protect-args .nightly-empty/maka/ "$NIGHTLIES_RSYNC_BASE/maka/"
-
-      - name: Stage the legacy cutover attestation
-        if: steps.cutover.outputs.bridge == 'true'
-        run: >-
-          rsync -rlptDvz --protect-args
-          .nightly-stage/bridge/versions/
-          "$NIGHTLIES_RSYNC_TARGET/versions/"
-
       - name: Publish the complete GitHub Prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -402,21 +320,3 @@ jobs:
             "$NIGHTLY_VERSION" \
             "$SOURCE_COMMIT" \
             "$GITHUB_REPOSITORY"
-
-      - name: Advance the legacy Nightlies feed to GitHub
-        if: steps.cutover.outputs.bridge == 'true'
-        run: >-
-          rsync -rlptDvz --protect-args
-          .nightly-stage/bridge/feed/
-          "$NIGHTLIES_RSYNC_TARGET/"
-
-      - name: Commit the completed legacy bridge
-        if: steps.cutover.outputs.bridge == 'true'
-        run: >-
-          rsync -rlptDvz --protect-args
-          .nightly-stage/bridge/completion/github-cutover.json
-          "$NIGHTLIES_RSYNC_TARGET/github-cutover.json"
-
-      - name: Remove the temporary Nightlies credentials
-        if: always() && steps.cutover.outputs.bridge == 'true'
-        run: rm -f "$RUNNER_TEMP/nightlies-ssh/key"

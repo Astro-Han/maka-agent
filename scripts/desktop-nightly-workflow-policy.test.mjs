@@ -124,11 +124,10 @@ test('the publisher verifies exact GitHub identity and assets before publishing 
   const workflow = await readWorkflow('desktop-nightly.yml');
   const steps = workflow.jobs.publish.steps;
   const positions = [
-    'Resolve the one-time Nightlies cutover',
     'Attest every GitHub Nightly asset subject',
     'Verify the issued Nightly provenance',
     'Add the one offline provenance bundle',
-    'Ensure the exact immutable Nightly tag',
+    'Ensure the exact versioned Nightly tag',
     'Prepare and verify the draft GitHub Prerelease',
     'Publish the complete GitHub Prerelease',
   ].map((name) => steps.findIndex((step) => step.name === name));
@@ -137,60 +136,21 @@ test('the publisher verifies exact GitHub identity and assets before publishing 
     positions,
     positions.toSorted((left, right) => left - right),
   );
-  const cutover = steps[positions[0]];
+  assert.match(steps[positions[0]].with['subject-path'], /\.nightly-stage\/release\/\*/u);
+  assert.match(steps[positions[3]].run, /product-release-tag\.mjs ensure/u);
+  assert.match(steps[positions[4]].run, /desktop-nightly-release\.mjs prepare/u);
+  assert.match(steps[positions[5]].run, /desktop-nightly-release\.mjs publish/u);
   assert.equal(
-    cutover.env.DESKTOP_NIGHTLY_GITHUB_CUTOVER_SOURCE_SHA,
-    '${{ vars.DESKTOP_NIGHTLY_GITHUB_CUTOVER_SOURCE_SHA }}',
-  );
-  assert.match(cutover.run, /desktop-nightly\.mjs resolve-cutover/u);
-  assert.match(steps[positions[1]].with['subject-path'], /\.nightly-stage\/release\/\*/u);
-  assert.match(steps[positions[4]].run, /product-release-tag\.mjs ensure/u);
-  assert.match(steps[positions[5]].run, /desktop-nightly-release\.mjs prepare/u);
-  assert.match(steps[positions[6]].run, /desktop-nightly-release\.mjs publish/u);
-  assert.equal(
-    steps[positions[2]].env.CERTIFICATE_IDENTITY,
+    steps[positions[1]].env.CERTIFICATE_IDENTITY,
     'https://github.com/${{ github.repository }}/.github/workflows/desktop-nightly.yml@refs/heads/main',
   );
 });
 
-test('only the explicit cutover writes the legacy bundle and feed, never large payloads', async () => {
+test('Desktop Nightly has no Apache Nightlies transport or compatibility state', async () => {
   const workflow = await readWorkflow('desktop-nightly.yml');
-  const publish = workflow.jobs.publish;
-  assert.equal(workflow.jobs.desktop.environment, 'nightly');
-  assert.equal(publish.environment, 'nightly');
-  assert.equal(
-    publish.steps.filter((step) => step.uses?.startsWith('burnett01/rsync-deployments@')).length,
-    0,
+  assert.equal(workflow.jobs.publish.environment, 'nightly');
+  assert.doesNotMatch(
+    JSON.stringify(workflow),
+    /nightlies\.apache\.org|NIGHTLIES_RSYNC|resolve-cutover|github-cutover|\brsync\b|\bssh\b/u,
   );
-  const steps = publish.steps;
-  const transport = publish.steps.find(
-    (step) => step.name === 'Prepare authenticated Nightlies SSH transport',
-  );
-  assert.equal(transport.if, "steps.cutover.outputs.bridge == 'true'");
-  assert.equal(transport.env.NIGHTLIES_RSYNC_KEY, '${{ secrets.NIGHTLIES_RSYNC_KEY }}');
-  assert.deepEqual(Object.keys(transport.env).toSorted(), [
-    'NIGHTLIES_RSYNC_HOST',
-    'NIGHTLIES_RSYNC_KEY',
-    'NIGHTLIES_RSYNC_PATH',
-    'NIGHTLIES_RSYNC_PORT',
-    'NIGHTLIES_RSYNC_USER',
-  ]);
-  assert.match(transport.run, /StrictHostKeyChecking=no/u);
-  assert.match(transport.run, /UserKnownHostsFile=\/dev\/null/u);
-  assert.doesNotMatch(transport.run, /ssh-keyscan|KNOWN_HOSTS/u);
-  const bundle = steps.find((step) => step.name === 'Stage the legacy cutover attestation');
-  const release = steps.find((step) => step.name === 'Publish the complete GitHub Prerelease');
-  const feed = steps.find((step) => step.name === 'Advance the legacy Nightlies feed to GitHub');
-  const completion = steps.find((step) => step.name === 'Commit the completed legacy bridge');
-  for (const step of [bundle, feed, completion]) {
-    assert.equal(step.if, "steps.cutover.outputs.bridge == 'true'");
-    assert.doesNotMatch(step.run, /--delete/u);
-    assert.doesNotMatch(step.run, /mac-arm64\.(?:dmg|zip)|win-x64\.(?:exe|zip)|blockmap/u);
-  }
-  assert.match(bundle.run, /\.nightly-stage\/bridge\/versions\//u);
-  assert.match(feed.run, /\.nightly-stage\/bridge\/feed\//u);
-  assert.match(completion.run, /bridge\/completion\/github-cutover\.json/u);
-  assert.ok(steps.indexOf(bundle) < steps.indexOf(release));
-  assert.ok(steps.indexOf(release) < steps.indexOf(feed));
-  assert.ok(steps.indexOf(feed) < steps.indexOf(completion));
 });

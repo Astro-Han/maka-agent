@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import test from 'node:test';
 import {
   prepareDesktopNightlyRelease,
@@ -50,7 +50,7 @@ async function writeUpdateSet(directory, version, platform) {
   ]);
 }
 
-async function stageRelease(root, version, sourceCommit) {
+async function stageRelease(root, version) {
   const input = join(root, 'input');
   const output = join(root, 'output');
   await mkdir(input);
@@ -64,7 +64,6 @@ async function stageRelease(root, version, sourceCommit) {
     inputDirectory: input,
     outputDirectory: output,
     version,
-    sourceCommit,
   });
   const bundle = join(root, 'bundle.json');
   await writeFile(bundle, 'sigstore bundle');
@@ -78,13 +77,13 @@ test('Nightly publication verifies the exact draft before one Prerelease/non-Lat
   const version = '0.2.0-dev.42.20260829';
   const tag = `v${version}`;
   const sourceCommit = 'a'.repeat(40);
-  const directory = await stageRelease(root, version, sourceCommit);
+  const directory = await stageRelease(root, version);
   const records = await productReleaseArtifactRecords(
     directory,
     desktopNightlyReleaseAssetNames(version),
   );
   const calls = [];
-  let uploaded = false;
+  let remoteAssets = records.slice(0, 1);
   let draft = true;
   let tampered = false;
   const release = () => ({
@@ -92,17 +91,15 @@ test('Nightly publication verifies the exact draft before one Prerelease/non-Lat
     tagName: tag,
     isDraft: draft,
     isPrerelease: true,
-    assets: uploaded
-      ? records.map((record, index) =>
-          tampered && index === 0 ? { ...record, digest: `sha256:${'0'.repeat(64)}` } : record,
-        )
-      : [],
+    assets: remoteAssets.map((record, index) =>
+      tampered && index === 0 ? { ...record, digest: `sha256:${'0'.repeat(64)}` } : record,
+    ),
   });
   const run = async (command, args) => {
     calls.push([command, args]);
     if (command === 'git') return { stdout: `${sourceCommit}\trefs/tags/${tag}\n` };
     if (command === 'gh' && args[0] === 'release' && args[1] === 'upload') {
-      uploaded = true;
+      remoteAssets = records;
       return { stdout: '' };
     }
     if (command === 'gh' && args[0] === 'release' && args[1] === 'edit') return { stdout: '' };
@@ -162,6 +159,10 @@ test('Nightly publication verifies the exact draft before one Prerelease/non-Lat
   const upload = calls.find(([, args]) => args[0] === 'release' && args[1] === 'upload');
   const patchCall = calls.find(([, args]) => args.includes('PATCH'));
   assert.ok(upload);
+  assert.deepEqual(
+    upload[1].slice(3, upload[1].indexOf('--repo')).map((path) => basename(path)),
+    records.slice(1).map(({ name }) => name),
+  );
   assert.ok(patchCall);
   assert.ok(calls.indexOf(upload) < calls.indexOf(patchCall));
   assert.ok(patchCall[1].includes('draft=false'));
@@ -180,7 +181,7 @@ test('a missing Nightly release is created only as a draft prerelease with Lates
   const version = '0.2.0-dev.42.20260829';
   const tag = `v${version}`;
   const sourceCommit = 'a'.repeat(40);
-  const directory = await stageRelease(root, version, sourceCommit);
+  const directory = await stageRelease(root, version);
   const records = await productReleaseArtifactRecords(
     directory,
     desktopNightlyReleaseAssetNames(version),
