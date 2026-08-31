@@ -5601,7 +5601,7 @@ describe('SessionManager permission mode updates', () => {
       availableToolNames: ['Read'],
     };
     const stalePlan = await manager.planSafeBoundaryContinuation(session.id, planInput);
-    expect(stalePlan.disposition).toBe('continue');
+    assert.strictEqual(stalePlan.disposition, 'continue');
     if (!stalePlan.continuation) throw new Error('expected stale continuation');
     const staleContinuation = stalePlan.continuation;
     await store.updateHeader(session.id, {
@@ -5613,13 +5613,13 @@ describe('SessionManager permission mode updates', () => {
       () => collectSessionEvents(manager.resumeSafeBoundaryContinuation(staleContinuation)),
       /replay changed after planning/,
     );
-    expect(providerRequest).toBe(undefined);
+    assert.strictEqual(providerRequest, undefined);
 
     const sameProjectionStalePlan = await manager.planSafeBoundaryContinuation(
       session.id,
       planInput,
     );
-    expect(sameProjectionStalePlan.disposition).toBe('continue');
+    assert.strictEqual(sameProjectionStalePlan.disposition, 'continue');
     if (!sameProjectionStalePlan.continuation) {
       throw new Error('expected same-projection stale continuation');
     }
@@ -5635,10 +5635,10 @@ describe('SessionManager permission mode updates', () => {
         ),
       /replay changed after planning/,
     );
-    expect(providerRequest).toBe(undefined);
+    assert.strictEqual(providerRequest, undefined);
 
     const plan = await manager.planSafeBoundaryContinuation(session.id, planInput);
-    expect(plan.disposition).toBe('continue');
+    assert.strictEqual(plan.disposition, 'continue');
     if (!plan.continuation) throw new Error('expected continuation');
 
     const sessionEvents = await collectSessionEvents(
@@ -5647,11 +5647,11 @@ describe('SessionManager permission mode updates', () => {
 
     assert.ok(providerRequest, JSON.stringify(sessionEvents));
     const promptJson = JSON.stringify(providerRequest);
-    expect(promptJson).not.toContain('source-only reasoning');
-    expect(promptJson).not.toContain('source-only-signature');
+    assert.doesNotMatch(promptJson, /source-only reasoning/);
+    assert.doesNotMatch(promptJson, /source-only-signature/);
     assert.match(promptJson, /continue across routes/, promptJson);
-    expect(promptJson).toContain('cross-route-read');
-    expect(promptJson).toContain('package contents');
+    assert.match(promptJson, /cross-route-read/);
+    assert.match(promptJson, /package contents/);
     assert.notEqual(
       plan.continuation.providerReplayDigest,
       sameProjectionStalePlan.continuation.providerReplayDigest,
@@ -5660,7 +5660,8 @@ describe('SessionManager permission mode updates', () => {
       session.id,
       plan.continuation.runId,
     );
-    expect(continuationEvents[0]?.actions?.continuationStart?.providerReplayDigest).toBe(
+    assert.strictEqual(
+      continuationEvents[0]?.actions?.continuationStart?.providerReplayDigest,
       plan.continuation.providerReplayDigest,
     );
   });
