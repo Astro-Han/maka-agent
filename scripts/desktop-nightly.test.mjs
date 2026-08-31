@@ -19,6 +19,7 @@
 
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -29,8 +30,10 @@ import { assertPackagedUpdateConfiguration } from './desktop-update-contract.mjs
 
 const run = promisify(execFile);
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const require = createRequire(import.meta.url);
+const { GitHubProvider } = require('electron-updater/out/providers/GitHubProvider.js');
 
-test('a nightly package embeds only the Apache Nightlies update authority', () => {
+test('a nightly package embeds only the Apache GitHub dev update authority', () => {
   const version = '0.2.0-dev.42.20260829';
   const config = resolveDesktopBuilderConfig({
     MAKA_DESKTOP_NIGHTLY_VERSION: version,
@@ -40,22 +43,27 @@ test('a nightly package embeds only the Apache Nightlies update authority', () =
   assert.equal(config.extraMetadata.runtimeHostSetupPackage, `maka-agent@${version}`);
   assert.equal(config.extraMetadata.makaUpdateChannel, 'nightly');
   assert.equal(config.publish.length, 1);
-  assert.equal(config.publish[0].provider, 'generic');
-  assert.equal(config.publish[0].url, 'https://nightlies.apache.org/maka/desktop/');
+  assert.deepEqual(config.publish[0], {
+    provider: 'github',
+    owner: 'apache',
+    repo: 'maka',
+    channel: 'dev',
+  });
 });
 
-test('a dev Nightly identity still advances the latest Desktop feed', () => {
+test('a dev Nightly identity writes the GitHub dev feed', () => {
   const config = resolveDesktopBuilderConfig({
     MAKA_DESKTOP_NIGHTLY_VERSION: '0.2.0-dev.42.20260829',
   });
 
-  assert.equal(config.publish[0].channel, 'latest');
+  assert.equal(config.publish[0].channel, 'dev');
 });
 
-test('a packaged Nightly accepts the pinned latest update channel', async () => {
-  const packagedConfiguration = `provider: generic
-url: https://nightlies.apache.org/maka/desktop/
-channel: latest
+test('a packaged Nightly accepts the pinned GitHub dev update channel', async () => {
+  const packagedConfiguration = `provider: github
+owner: apache
+repo: maka
+channel: dev
 updaterCacheDirName: '@makadesktop-updater'
 `;
 
@@ -63,6 +71,63 @@ updaterCacheDirName: '@makadesktop-updater'
     channel: 'nightly',
     read: async () => packagedConfiguration,
   });
+});
+
+test('the GitHub dev provider resolves each platform payload to its absolute Release asset URL', () => {
+  const version = '0.2.0-dev.42.20260829';
+  for (const { platform, channel, name } of [
+    {
+      platform: 'darwin',
+      channel: 'dev-mac',
+      name: `Maka-${version}-mac-arm64.zip`,
+    },
+    { platform: 'win32', channel: 'dev', name: `Maka-${version}-win-x64.exe` },
+  ]) {
+    const provider = new GitHubProvider(
+      { provider: 'github', owner: 'apache', repo: 'maka', channel: 'dev' },
+      {
+        allowPrerelease: true,
+        channel: undefined,
+        currentVersion: { raw: version },
+      },
+      { executor: {}, platform },
+    );
+    const [resolved] = provider.resolveFiles({
+      tag: `v${version}`,
+      files: [{ url: name, sha512: 'fixture' }],
+    });
+
+    assert.equal(provider.channel, channel);
+    assert.equal(
+      resolved.url.href,
+      `https://github.com/apache/maka/releases/download/v${version}/${name}`,
+    );
+  }
+});
+
+test('GitHub differential updates derive the previous blockmap from the previous immutable tag', () => {
+  const previous = '0.2.0-dev.41.20260828';
+  const current = '0.2.0-dev.42.20260829';
+  const provider = new GitHubProvider(
+    { provider: 'github', owner: 'apache', repo: 'maka', channel: 'dev' },
+    {
+      allowPrerelease: true,
+      channel: undefined,
+      currentVersion: { raw: previous },
+    },
+    { executor: {}, platform: 'win32' },
+  );
+  const currentAsset = new URL(
+    `https://github.com/apache/maka/releases/download/v${current}/Maka-${current}-win-x64.exe`,
+  );
+
+  const [oldBlockmap, newBlockmap] = provider.getBlockMapFiles(currentAsset, previous, current);
+
+  assert.equal(
+    oldBlockmap.href,
+    `https://github.com/apache/maka/releases/download/v${previous}/Maka-${previous}-win-x64.exe.blockmap`,
+  );
+  assert.equal(newBlockmap.href, `${currentAsset.href}.blockmap`);
 });
 
 test('formal release checks ignore the ambient Nightly packaging environment', async () => {
