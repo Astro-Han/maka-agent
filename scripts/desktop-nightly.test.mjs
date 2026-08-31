@@ -25,6 +25,8 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { resolveDesktopBuilderConfig } from '../apps/desktop/electron-builder.config.mjs';
+import { packageMacosArm64 } from './package-macos-arm64.mjs';
+import { packageWindowsX64 } from './package-windows-x64.mjs';
 import { resolveDesktopBuildVersion, resolveRuntimeHostSetupPackage } from './desktop-nightly.mjs';
 import { assertPackagedUpdateConfiguration } from './desktop-update-contract.mjs';
 
@@ -48,6 +50,43 @@ test('a nightly package embeds only the Apache GitHub dev update authority', () 
     owner: 'apache',
     repo: 'maka',
     channel: 'dev',
+  });
+});
+
+test('the macOS Nightly wrapper accepts dev update metadata', async () => {
+  const version = '0.2.0-dev.42.20260829';
+  await packageMacosArm64({
+    platform: 'darwin',
+    arch: 'arm64',
+    env: {
+      MAKA_DESKTOP_NIGHTLY_VERSION: version,
+      CSC_LINK: 'fixture',
+      CSC_KEY_PASSWORD: 'fixture',
+      APPLE_API_KEY: 'fixture',
+      APPLE_API_KEY_ID: 'fixture',
+      APPLE_API_ISSUER: 'fixture',
+    },
+    run: async () => {},
+    remove: async () => {},
+    assertFile: async (path) => {
+      if (path.endsWith('.yml')) assert.match(path, /\/dev-mac\.yml$/u);
+    },
+  });
+});
+
+test('the Windows Nightly wrapper accepts dev update metadata', async () => {
+  const version = '0.2.0-dev.42.20260829';
+  await packageWindowsX64({
+    platform: 'win32',
+    arch: 'x64',
+    env: { MAKA_DESKTOP_NIGHTLY_VERSION: version },
+    run: async () => {},
+    remove: async () => {},
+    makeDirectory: async () => {},
+    copy: async () => {},
+    assertFile: async (path) => {
+      if (path.endsWith('.yml')) assert.match(path, /\/dev\.yml$/u);
+    },
   });
 });
 
