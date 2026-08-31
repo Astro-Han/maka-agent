@@ -37,6 +37,7 @@ import type { ContinuationClaimStateV1 } from '@maka/core/runtime-event-store';
 import { isDeepStrictEqual } from 'node:util';
 import {
   buildContinuationReplayPlan,
+  type ContinuationReplayAdmissionRoute,
   type ContinuationReplayPlanV1,
 } from './continuation-replay.js';
 import {
@@ -358,6 +359,7 @@ export interface SafeBoundaryContinuationPlan {
 export interface RuntimeContinuationPlannerInput {
   sessionId: string;
   sourceRunId: string;
+  admissionRoute: ContinuationReplayAdmissionRoute;
   currentCwd: string;
   sourceWorkspaceIdentity: string;
   currentWorkspaceIdentity: string;
@@ -398,7 +400,12 @@ export class RuntimeContinuationPlanner {
 
     let prefixes: [ImmutableRuntimePrefixV1, ...ImmutableRuntimePrefixV1[]];
     try {
-      prefixes = await this.readLineagePrefixes(input.sessionId, input.sourceRunId, sourceRun);
+      prefixes = await this.readLineagePrefixes(
+        input.sessionId,
+        input.sourceRunId,
+        sourceRun,
+        input.admissionRoute.runHeaders,
+      );
     } catch (error) {
       if (error instanceof RuntimeLineageError) {
         return parkedPlan(error.code, error.message);
@@ -422,6 +429,7 @@ export class RuntimeContinuationPlanner {
     const replay = buildContinuationReplayPlan({
       prefixes,
       providerProjectionVersion: PROVIDER_REPLAY_PROJECTION_VERSION,
+      admissionRoute: input.admissionRoute,
     });
     if (replay.kind === 'blocked') {
       const reason =
@@ -614,6 +622,7 @@ export class RuntimeContinuationPlanner {
     sessionId: string,
     sourceRunId: string,
     sourceRun: Awaited<ReturnType<RuntimeContinuationPlannerDeps['readSourceRun']>>,
+    runHeaders: readonly AgentRunHeader[],
   ): Promise<[ImmutableRuntimePrefixV1, ...ImmutableRuntimePrefixV1[]]> {
     const immediate = await this.deps.readImmutableRuntimePrefix({
       sessionId,
@@ -744,23 +753,6 @@ export class RuntimeContinuationPlanner {
           `continuation lineage edge for ${edge.childRunId} is incomplete`,
         );
       }
-      const edgeReplay = buildContinuationReplayPlan({
-        prefixes: segments.slice(0, childIndex) as [
-          ImmutableRuntimePrefixV1,
-          ...ImmutableRuntimePrefixV1[],
-        ],
-        providerProjectionVersion: edge.providerProjectionVersion,
-      });
-      if (
-        edgeReplay.kind !== 'replayable' ||
-        edgeReplay.plan.boundary.manifestDigest !== edge.boundaryDigest ||
-        edgeReplay.plan.providerReplayDigest !== edge.providerReplayDigest
-      ) {
-        throw new RuntimeLineageError(
-          'runtime_lineage_replay_mismatch',
-          `continuation provider replay changed before ${edge.childRunId}`,
-        );
-      }
       if (!this.deps.readContinuationClaimStateByBoundary) {
         throw new RuntimeLineageError(
           'continuation_authority_unavailable',
@@ -788,6 +780,28 @@ export class RuntimeContinuationPlanner {
         throw new RuntimeLineageError(
           'runtime_lineage_claim_mismatch',
           `durable continuation claim does not authenticate ${edge.childRunId}`,
+        );
+      }
+      const edgeReplay = buildContinuationReplayPlan({
+        prefixes: segments.slice(0, childIndex) as [
+          ImmutableRuntimePrefixV1,
+          ...ImmutableRuntimePrefixV1[],
+        ],
+        providerProjectionVersion: edge.providerProjectionVersion,
+        admissionRoute: {
+          runHeaders,
+          targetConnectionId: state.claim.targetRunHeader.llmConnectionId,
+          targetModelId: state.claim.targetRunHeader.modelId,
+        },
+      });
+      if (
+        edgeReplay.kind !== 'replayable' ||
+        edgeReplay.plan.boundary.manifestDigest !== edge.boundaryDigest ||
+        edgeReplay.plan.providerReplayDigest !== edge.providerReplayDigest
+      ) {
+        throw new RuntimeLineageError(
+          'runtime_lineage_replay_mismatch',
+          `continuation provider replay changed before ${edge.childRunId}`,
         );
       }
     }

@@ -114,9 +114,15 @@ import {
   type RuntimeContinuation,
   type RuntimeContinuationSafetyObservation,
 } from './runtime-resume.js';
-import { buildContinuationReplayPlan, digestProviderReplay } from './continuation-replay.js';
 import {
+  buildContinuationReplayPlan,
+  digestProviderReplay,
+  type ContinuationReplayAdmissionRoute,
+} from './continuation-replay.js';
+import {
+  admitProviderReasoningReplayItems,
   buildRuntimeEventModelReplayPlan,
+  compatibleProviderReasoningReplayEventIds,
   PROVIDER_REPLAY_PROJECTION_VERSION,
 } from './model-history.js';
 import {
@@ -732,11 +738,20 @@ export class RuntimeKernel implements RuntimeKernelLike {
     }
 
     const header = await this.deps.store.readHeader(continuation.sessionId);
-    const sourceRun = await this.deps.runStore.readRun(
-      continuation.sessionId,
-      continuation.sourceRunId,
+    const [sourceRun, sessionRuns] = await Promise.all([
+      this.deps.runStore.readRun(continuation.sessionId, continuation.sourceRunId),
+      this.deps.runStore.listSessionRuns(continuation.sessionId),
+    ]);
+    const admissionRoute: ContinuationReplayAdmissionRoute = {
+      runHeaders: sessionRuns,
+      targetConnectionId: header.llmConnectionId,
+      targetModelId: header.model,
+    };
+    const sourceEvents = await revalidateContinuationBoundary(
+      continuationAuthority,
+      continuation,
+      admissionRoute,
     );
-    const sourceEvents = await revalidateContinuationBoundary(continuationAuthority, continuation);
     assertContinuationSourceUnchanged(continuation, sourceRun, sourceEvents);
     await this.revalidateContinuationSafety(continuation);
 
@@ -767,7 +782,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
     }
     await this.deps.continuationFailpoint?.('after_continuation_claim_committed');
 
-    const sessionRuns = await this.deps.runStore.listSessionRuns(continuation.sessionId);
     const existingClaim = sessionRuns.find(
       (runHeader) =>
         runHeader.continuationSource?.sourceRunId === continuation.sourceRunId &&
@@ -880,7 +894,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
     this.attachExecutionClaim(execution, run);
     yield* this.runAgentContinuation(
       continuation,
-      sessionRuns,
+      admissionRoute,
       run,
       execution,
       {
@@ -1249,7 +1263,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
 
   private async *runAgentContinuation(
     continuation: RuntimeContinuation,
-    runtimeContextRunHeaders: AgentRunHeader[],
+    admissionRoute: ContinuationReplayAdmissionRoute,
     run: AgentRun,
     execution: PendingExecutionClaim,
     messageOwner?: RuntimeMessageRunIdentity,
@@ -1294,6 +1308,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
     try {
       continuationMetadata = consumeAdmittedRuntimeContinuation({
         continuation,
+        admissionRoute,
         startAdmission:
           'continuationStartAdmission' in begin
             ? begin.continuationStartAdmission
@@ -1332,7 +1347,7 @@ export class RuntimeKernel implements RuntimeKernelLike {
         text: '',
         context: [],
         runtimeContext: continuation.runtimeContext,
-        runtimeContextRunHeaders,
+        runtimeContextRunHeaders: admissionRoute.runHeaders,
         continuation: continuationMetadata,
       },
       onSessionEvent: async (sessionEvent, runtimeEvent) => {
@@ -2684,6 +2699,7 @@ function requireRuntimeContinuationAuthority(
 async function revalidateContinuationBoundary(
   store: RuntimeContinuationAuthorityStore,
   continuation: RuntimeContinuation,
+  admissionRoute: ContinuationReplayAdmissionRoute,
 ): Promise<RuntimeEvent[]> {
   if (
     !continuation.boundary ||
@@ -2721,6 +2737,7 @@ async function revalidateContinuationBoundary(
   const replay = buildContinuationReplayPlan({
     prefixes: prefixes as [ImmutableRuntimePrefixV1, ...ImmutableRuntimePrefixV1[]],
     providerProjectionVersion: continuation.providerProjectionVersion,
+    admissionRoute,
   });
   if (
     replay.kind !== 'replayable' ||
@@ -2842,6 +2859,7 @@ function continuationTargetRunHeaderForExecution(input: {
 
 function consumeAdmittedRuntimeContinuation(input: {
   continuation: RuntimeContinuation;
+  admissionRoute: ContinuationReplayAdmissionRoute;
   startAdmission: RuntimeContinuationStartAdmissionProof;
   toolBoundaryProtocol?: ToolBoundaryProtocol;
 }): RuntimeContinuationMetadata {
@@ -2888,8 +2906,18 @@ function consumeAdmittedRuntimeContinuation(input: {
     throw new Error('Runtime continuation durable admission boundary is inconsistent');
   }
   const replay = buildRuntimeEventModelReplayPlan(continuation.runtimeContext);
+  const providerReasoningReplayEventIds = compatibleProviderReasoningReplayEventIds(
+    continuation.runtimeContext,
+    input.admissionRoute.runHeaders,
+    input.admissionRoute.targetConnectionId,
+    input.admissionRoute.targetModelId,
+  );
+  const admittedItems = admitProviderReasoningReplayItems(
+    replay.items,
+    providerReasoningReplayEventIds,
+  );
   if (
-    digestProviderReplay(continuation.providerProjectionVersion, replay.items) !==
+    digestProviderReplay(continuation.providerProjectionVersion, admittedItems) !==
     continuation.providerReplayDigest
   ) {
     throw new Error('Runtime continuation provider replay identity changed after admission');

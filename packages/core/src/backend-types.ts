@@ -94,7 +94,7 @@ export interface BackendSendInput {
    * provider-owned replay against the current model route. RuntimeEvents stay
    * the transcript authority; route provenance remains owned by AgentRun.
    */
-  runtimeContextRunHeaders?: AgentRunHeader[];
+  runtimeContextRunHeaders?: readonly AgentRunHeader[];
   /** Continue from an already committed RuntimeEvent boundary without adding another user turn. */
   continuation?: RuntimeContinuationMetadata;
   /**

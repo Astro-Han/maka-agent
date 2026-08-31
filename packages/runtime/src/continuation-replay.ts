@@ -18,6 +18,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { AgentRunHeader } from '@maka/core/agent-run';
 import type { RuntimeEvent } from '@maka/core/runtime-event';
 import { stableJsonStringify } from '@maka/core/tool-args-identity';
 import {
@@ -30,7 +31,9 @@ import {
 } from '@maka/core/runtime-boundary';
 import type { RuntimeEventModelReplayItem, RuntimeEventReplayDiagnostic } from './model-history.js';
 import {
+  admitProviderReasoningReplayItems,
   buildRuntimeEventModelReplayPlan,
+  compatibleProviderReasoningReplayEventIds,
   PROVIDER_REPLAY_PROJECTION_VERSION,
 } from './model-history.js';
 import { resolveRuntimeRecovery } from './recovery-resolver.js';
@@ -44,7 +47,6 @@ export interface ContinuationReplaySegmentV1 {
 export interface ContinuationReplaySegmentPlanV1 {
   protocol: 'continuation_replay_segment_plan_v1';
   providerProjectionVersion: typeof PROVIDER_REPLAY_PROJECTION_VERSION;
-  providerReplayDigest: RuntimeBoundaryDigest;
   segment: ContinuationReplaySegmentV1;
   providerItems: readonly RuntimeEventModelReplayItem[];
 }
@@ -82,9 +84,16 @@ export type ContinuationReplayPlanResult =
       diagnostics: readonly RuntimeEventReplayDiagnostic[];
     };
 
+export interface ContinuationReplayAdmissionRoute {
+  runHeaders: readonly AgentRunHeader[];
+  targetConnectionId: string | undefined;
+  targetModelId: string;
+}
+
 export function buildContinuationReplayPlan(input: {
   prefixes: readonly [ImmutableRuntimePrefixV1, ...ImmutableRuntimePrefixV1[]];
   providerProjectionVersion: typeof PROVIDER_REPLAY_PROJECTION_VERSION;
+  admissionRoute: ContinuationReplayAdmissionRoute;
 }): ContinuationReplayPlanResult {
   const segmentPlans: ContinuationReplaySegmentPlanV1[] = [];
   for (const [segmentIndex, prefix] of input.prefixes.entries()) {
@@ -102,7 +111,17 @@ export function buildContinuationReplayPlan(input: {
     ...RuntimePrefixSegmentV1[],
   ];
   const segments = segmentPlans.map((plan) => plan.segment);
-  const providerItems = segmentPlans.flatMap((plan) => plan.providerItems);
+  const runtimeContext = segments.flatMap((segment) => segment.replayRuntimeEvents);
+  const providerReasoningReplayEventIds = compatibleProviderReasoningReplayEventIds(
+    runtimeContext,
+    input.admissionRoute.runHeaders,
+    input.admissionRoute.targetConnectionId,
+    input.admissionRoute.targetModelId,
+  );
+  const providerItems = admitProviderReasoningReplayItems(
+    segmentPlans.flatMap((plan) => plan.providerItems),
+    providerReasoningReplayEventIds,
+  );
   return {
     kind: 'replayable',
     plan: {
@@ -111,7 +130,7 @@ export function buildContinuationReplayPlan(input: {
       boundary: createRuntimeBoundaryCursor(boundaries),
       providerReplayDigest: digestProviderReplay(input.providerProjectionVersion, providerItems),
       segments,
-      runtimeContext: segments.flatMap((segment) => segment.replayRuntimeEvents),
+      runtimeContext,
       providerItems,
     },
   };
@@ -219,7 +238,6 @@ export function buildContinuationReplaySegment(input: {
     plan: {
       protocol: 'continuation_replay_segment_plan_v1',
       providerProjectionVersion: input.providerProjectionVersion,
-      providerReplayDigest: digestProviderReplay(input.providerProjectionVersion, providerItems),
       segment: {
         boundary: runtimePrefixSegment(input.prefix),
         replayRuntimeEvents,

@@ -104,6 +104,20 @@ export function compatibleProviderReasoningReplayEventIds(
   );
 }
 
+/**
+ * Apply provider-reasoning admission without disturbing portable transcript
+ * or tool evidence. Durable replay identities and wire materializers share
+ * this item projection.
+ */
+export function admitProviderReasoningReplayItems(
+  items: readonly RuntimeEventModelReplayItem[],
+  providerReasoningReplayEventIds: ReadonlySet<string>,
+): RuntimeEventModelReplayItem[] {
+  return items.filter(
+    (item) => item.kind !== 'thinking' || providerReasoningReplayEventIds.has(item.eventId),
+  );
+}
+
 // ============================================================================
 // Effective model-history sizing
 // ============================================================================

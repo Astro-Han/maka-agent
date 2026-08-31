@@ -264,7 +264,10 @@ export type CompactSessionInput =
       };
     };
 
-export type PlanSafeBoundaryContinuationInput = Omit<RuntimeContinuationPlannerInput, 'sessionId'>;
+export type PlanSafeBoundaryContinuationInput = Omit<
+  RuntimeContinuationPlannerInput,
+  'sessionId' | 'admissionRoute'
+>;
 
 export interface PlanAuthoritativeSafeBoundaryContinuationInput {
   sourceRunId: string;
@@ -1977,6 +1980,32 @@ export class SessionManager {
     sessionId: string,
     input: PlanSafeBoundaryContinuationInput,
   ): Promise<SafeBoundaryContinuationPlan> {
+    let admissionRoute: RuntimeContinuationPlannerInput['admissionRoute'];
+    try {
+      if (!this.deps.runStore) throw new Error('AgentRunStore is not configured');
+      const [header, runHeaders] = await Promise.all([
+        this.deps.store.readHeader(sessionId),
+        this.deps.runStore.listSessionRuns(sessionId),
+      ]);
+      admissionRoute = {
+        runHeaders,
+        targetConnectionId: header.llmConnectionId,
+        targetModelId: header.model,
+      };
+    } catch {
+      const plan: SafeBoundaryContinuationPlan = {
+        disposition: 'park',
+        rejectionReasons: ['continuation_authority_unavailable'],
+        diagnostics: [
+          {
+            code: 'continuation_authority_unavailable',
+            message: 'provider replay admission authority is unavailable',
+          },
+        ],
+      };
+      this.recordContinuationPlan(sessionId, input.sourceRunId, plan);
+      return plan;
+    }
     const planner = new RuntimeContinuationPlanner({
       readSourceRun: async (targetSessionId, runId) => {
         if (!this.deps.runStore) throw new Error('AgentRunStore is not configured');
@@ -2008,7 +2037,7 @@ export class SessionManager {
       },
       newId: this.deps.newId,
     });
-    const plan = await planner.plan({ sessionId, ...input });
+    const plan = await planner.plan({ sessionId, admissionRoute, ...input });
     this.recordContinuationPlan(sessionId, input.sourceRunId, plan);
     return plan;
   }

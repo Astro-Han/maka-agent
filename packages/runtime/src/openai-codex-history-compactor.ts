@@ -32,6 +32,7 @@ import type { RuntimeEvent } from '@maka/core/runtime-event';
 import type { ModelMessage } from './model-protocol.js';
 import { fitHistoryCompactMessages } from './history-compact-input-fit.js';
 import {
+  admitProviderReasoningReplayItems,
   buildRuntimeEventModelReplayPlan,
   compatibleProviderReasoningReplayEventIds,
   type RuntimeEventModelReplayItem,
@@ -206,7 +207,10 @@ export function openAiCodexCompactionMessages(
     | { kind: 'text'; item: Text }
     | { kind: 'thinking'; item: Thinking };
 
-  const items = buildRuntimeEventModelReplayPlan(events).items;
+  const items = admitProviderReasoningReplayItems(
+    buildRuntimeEventModelReplayPlan(events).items,
+    providerReasoningReplayEventIds,
+  );
   const results = new Map<string, ToolResult>();
   for (const item of items) {
     if (item.kind === 'tool_result') results.set(item.toolCallId, item);
@@ -231,9 +235,6 @@ export function openAiCodexCompactionMessages(
       continue;
     }
     if (item.kind === 'thinking') {
-      if (!providerReasoningReplayEventIds.has(item.eventId)) {
-        continue;
-      }
       if (item.stepId) step(item.stepId).reasoning.push(item);
       else timeline.push({ kind: 'thinking', item });
       continue;

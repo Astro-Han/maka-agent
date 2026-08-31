@@ -326,6 +326,11 @@ describe('continuation replay segment', () => {
     const result = buildContinuationReplayPlan({
       prefixes: [ancestor, source],
       providerProjectionVersion: PROVIDER_REPLAY_PROJECTION_VERSION,
+      admissionRoute: {
+        runHeaders: [],
+        targetConnectionId: undefined,
+        targetModelId: 'test-model',
+      },
     });
 
     assert.equal(result.kind, 'replayable');

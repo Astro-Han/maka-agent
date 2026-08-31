@@ -137,6 +137,8 @@ import {
   claimAgentGraphRunnableIntent,
   fingerprintAgentGraphRunnableIntent,
 } from '../stream-graph-admission.js';
+import { digestProviderReplay } from '../continuation-replay.js';
+import { buildRuntimeEventModelReplayPlan } from '../model-history.js';
 import type { AgentGraphRunnableIntent } from '../stream-graph-readiness.js';
 
 test('sendMessage rejects removed Automation as a live trigger', async () => {
@@ -5385,6 +5387,246 @@ describe('SessionManager permission mode updates', () => {
     assert.strictEqual(
       followUpContext.some((event) => event.runId === plan.continuation?.runId),
       true,
+    );
+  });
+
+  test('authenticates the same cross-route continuation projection that reaches the provider', async () => {
+    const store = new MemorySessionStore();
+    const runStore = new MemoryAgentRunStore();
+    const backends = new BackendRegistry();
+    let providerRequest: unknown;
+    const model = new MockLanguageModelV4({
+      doStream: async (request) => {
+        providerRequest = request;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'stream-start', warnings: [] },
+              { type: 'text-start', id: 'text-1' },
+              { type: 'text-delta', id: 'text-1', delta: 'continued' },
+              { type: 'text-end', id: 'text-1' },
+              {
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: 'stop' },
+                usage: {
+                  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+                  outputTokens: { total: 1, text: 1, reasoning: 0 },
+                },
+              },
+            ] as LanguageModelV4StreamPart[],
+            initialDelayInMs: null,
+            chunkDelayInMs: null,
+          }),
+        };
+      },
+    });
+    backends.register('ai-sdk', (ctx) =>
+      createTestAiSdkBackend({
+        sessionId: ctx.sessionId,
+        header: ctx.header,
+        appendMessage: ctx.appendMessage ?? (async () => {}),
+        connection: {
+          slug: ctx.header.llmConnectionSlug,
+          providerType: 'anthropic',
+          defaultModel: ctx.header.model,
+        },
+        apiKey: 'sk-test',
+        modelId: ctx.header.model,
+        modelFactory: () => model,
+        tools: [
+          {
+            name: 'Read',
+            description: 'Read a file',
+            parameters: z.object({ path: z.string() }),
+            impl: async () => ({ ok: true }),
+          },
+        ],
+        ...(ctx.loadTurnRuntimeEvents ? { loadTurnRuntimeEvents: ctx.loadTurnRuntimeEvents } : {}),
+        newId: (() => {
+          let id = 0;
+          return () => `cross-route-backend-${++id}`;
+        })(),
+        now: nextNow(1),
+      }),
+    );
+    const manager = new SessionManager({
+      store,
+      runStore,
+      runtimeEventStore: runStore,
+      toolBoundaryProtocol: 't1_after_preflight_v1',
+      backends,
+      childTools: [testTool('Read')],
+      inspectContinuationSafety: async () => ({
+        workspaceIdentity: 'workspace-1',
+        backgroundOperationsSettled: true,
+        availableToolNames: ['Read'],
+      }),
+      newId: nextId(),
+      now: nextNow(6_575),
+    });
+    const session = await manager.createSession(
+      makeInput({
+        llmConnectionId: 'connection-a',
+        llmConnectionSlug: 'anthropic-a',
+        model: 'claude-a',
+        permissionMode: 'bypass',
+      }),
+    );
+    const sourceRunId = 'source-run-cross-route';
+    const sourceInvocationId = 'source-invocation-cross-route';
+    const sourceTurnId = 'source-turn-cross-route';
+    await runStore.createRun({
+      runId: sourceRunId,
+      invocationId: sourceInvocationId,
+      sessionId: session.id,
+      turnId: sourceTurnId,
+      status: 'failed',
+      failureClass: 'runtime_interrupted',
+      backendKind: 'ai-sdk',
+      llmConnectionId: 'connection-a',
+      llmConnectionSlug: 'anthropic-a',
+      modelId: 'claude-a',
+      cwd: '/tmp/cwd',
+      workspaceIdentity: 'workspace-1',
+      permissionMode: 'bypass',
+      orchestrationMode: 'default',
+      orchestrationSource: 'session',
+      toolMode: 'code_mode',
+      createdAt: 1,
+      updatedAt: 5,
+      completedAt: 5,
+    });
+    const sourceEvents: RuntimeEvent[] = [
+      {
+        id: 'cross-route-user',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 1,
+        partial: false,
+        author: 'user',
+        role: 'user',
+        content: { kind: 'text', text: 'continue across routes' },
+      },
+      {
+        id: 'cross-route-thinking',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 2,
+        partial: false,
+        author: 'agent',
+        role: 'model',
+        content: {
+          kind: 'thinking',
+          text: 'source-only reasoning',
+          signature: 'source-only-signature',
+        },
+        refs: { stepId: 'cross-route-step' },
+      },
+      {
+        id: 'cross-route-tool-call',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 3,
+        partial: false,
+        author: 'agent',
+        role: 'model',
+        content: {
+          kind: 'function_call',
+          id: 'cross-route-read',
+          name: 'Read',
+          args: { path: 'package.json' },
+        },
+        refs: { stepId: 'cross-route-step' },
+      },
+      {
+        id: 'cross-route-tool-result',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 4,
+        partial: false,
+        author: 'tool',
+        role: 'tool',
+        content: {
+          kind: 'function_response',
+          id: 'cross-route-read',
+          name: 'Read',
+          result: 'package contents',
+        },
+      },
+      {
+        id: 'cross-route-terminal',
+        sessionId: session.id,
+        invocationId: sourceInvocationId,
+        runId: sourceRunId,
+        turnId: sourceTurnId,
+        ts: 5,
+        partial: false,
+        author: 'system',
+        role: 'system',
+        status: 'failed',
+        actions: { endInvocation: true, stateDelta: { failureClass: 'runtime_interrupted' } },
+      },
+    ];
+    for (const event of sourceEvents) {
+      await runStore.appendRuntimeEvent(session.id, sourceRunId, event);
+    }
+    const planInput = {
+      sourceRunId,
+      currentCwd: '/tmp/cwd',
+      sourceWorkspaceIdentity: 'workspace-1',
+      currentWorkspaceIdentity: 'workspace-1',
+      backgroundOperationsSettled: true as const,
+      availableToolNames: ['Read'],
+    };
+    const stalePlan = await manager.planSafeBoundaryContinuation(session.id, planInput);
+    expect(stalePlan.disposition).toBe('continue');
+    if (!stalePlan.continuation) throw new Error('expected stale continuation');
+    const staleContinuation = stalePlan.continuation;
+    await store.updateHeader(session.id, {
+      llmConnectionId: 'connection-b',
+      llmConnectionSlug: 'anthropic-b',
+      model: 'claude-b',
+    });
+    await assert.rejects(
+      () => collectSessionEvents(manager.resumeSafeBoundaryContinuation(staleContinuation)),
+      /replay changed after planning/,
+    );
+    expect(providerRequest).toBe(undefined);
+
+    const plan = await manager.planSafeBoundaryContinuation(session.id, planInput);
+    expect(plan.disposition).toBe('continue');
+    if (!plan.continuation) throw new Error('expected continuation');
+
+    const sessionEvents = await collectSessionEvents(
+      manager.resumeSafeBoundaryContinuation(plan.continuation),
+    );
+
+    assert.ok(providerRequest, JSON.stringify(sessionEvents));
+    const promptJson = JSON.stringify(providerRequest);
+    expect(promptJson).not.toContain('source-only reasoning');
+    expect(promptJson).not.toContain('source-only-signature');
+    assert.match(promptJson, /continue across routes/, promptJson);
+    expect(promptJson).toContain('cross-route-read');
+    expect(promptJson).toContain('package contents');
+    const rawReplay = buildRuntimeEventModelReplayPlan(plan.continuation.runtimeContext);
+    const admittedReplayItems = rawReplay.items.filter((item) => item.kind !== 'thinking');
+    expect(plan.continuation.providerReplayDigest).toBe(
+      digestProviderReplay(1, admittedReplayItems),
+    );
+    const continuationEvents = await runStore.readRuntimeEvents(
+      session.id,
+      plan.continuation.runId,
+    );
+    expect(continuationEvents[0]?.actions?.continuationStart?.providerReplayDigest).toBe(
+      plan.continuation.providerReplayDigest,
     );
   });
 

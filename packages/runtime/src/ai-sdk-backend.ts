@@ -207,6 +207,7 @@ import {
 import { computeCost } from './telemetry/cost.js';
 import { getBuiltinPricing } from './telemetry/builtin-pricing.js';
 import {
+  admitProviderReasoningReplayItems,
   buildRuntimeEventModelReplayPlan,
   buildSteeringEnvelope,
   collectToolActivityTurnIds,
@@ -3697,9 +3698,6 @@ export class AiSdkBackend implements AgentBackend {
 
     const replaySupport = this.modelAdapter.runtimeEventReplaySupport();
     const reasoningReplay = (item: ThinkingItem): ReplayReasoning | undefined => {
-      if (!providerReasoningReplayEventIds.has(item.eventId)) {
-        return undefined;
-      }
       if (item.signature) {
         return replaySupport.signedThinking
           ? {
@@ -3985,7 +3983,10 @@ export class AiSdkBackend implements AgentBackend {
       }
     };
 
-    for (const item of plan.items) {
+    for (const item of admitProviderReasoningReplayItems(
+      plan.items,
+      providerReasoningReplayEventIds,
+    )) {
       switch (item.kind) {
         case 'tool_call':
           if (item.toolName !== 'apply_patch') {
