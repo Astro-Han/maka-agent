@@ -137,8 +137,6 @@ import {
   claimAgentGraphRunnableIntent,
   fingerprintAgentGraphRunnableIntent,
 } from '../stream-graph-admission.js';
-import { digestProviderReplay } from '../continuation-replay.js';
-import { buildRuntimeEventModelReplayPlan } from '../model-history.js';
 import type { AgentGraphRunnableIntent } from '../stream-graph-readiness.js';
 
 test('sendMessage rejects removed Automation as a live trigger', async () => {
@@ -5390,7 +5388,7 @@ describe('SessionManager permission mode updates', () => {
     );
   });
 
-  test('authenticates the same cross-route continuation projection that reaches the provider', async () => {
+  test('authenticates the exact target-aware continuation projection that reaches the provider', async () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
@@ -5601,6 +5599,28 @@ describe('SessionManager permission mode updates', () => {
     );
     expect(providerRequest).toBe(undefined);
 
+    const sameProjectionStalePlan = await manager.planSafeBoundaryContinuation(
+      session.id,
+      planInput,
+    );
+    expect(sameProjectionStalePlan.disposition).toBe('continue');
+    if (!sameProjectionStalePlan.continuation) {
+      throw new Error('expected same-projection stale continuation');
+    }
+    await store.updateHeader(session.id, {
+      llmConnectionId: 'connection-c',
+      llmConnectionSlug: 'anthropic-c',
+      model: 'claude-c',
+    });
+    await assert.rejects(
+      () =>
+        collectSessionEvents(
+          manager.resumeSafeBoundaryContinuation(sameProjectionStalePlan.continuation!),
+        ),
+      /replay changed after planning/,
+    );
+    expect(providerRequest).toBe(undefined);
+
     const plan = await manager.planSafeBoundaryContinuation(session.id, planInput);
     expect(plan.disposition).toBe('continue');
     if (!plan.continuation) throw new Error('expected continuation');
@@ -5616,10 +5636,9 @@ describe('SessionManager permission mode updates', () => {
     assert.match(promptJson, /continue across routes/, promptJson);
     expect(promptJson).toContain('cross-route-read');
     expect(promptJson).toContain('package contents');
-    const rawReplay = buildRuntimeEventModelReplayPlan(plan.continuation.runtimeContext);
-    const admittedReplayItems = rawReplay.items.filter((item) => item.kind !== 'thinking');
-    expect(plan.continuation.providerReplayDigest).toBe(
-      digestProviderReplay(1, admittedReplayItems),
+    assert.notEqual(
+      plan.continuation.providerReplayDigest,
+      sameProjectionStalePlan.continuation.providerReplayDigest,
     );
     const continuationEvents = await runStore.readRuntimeEvents(
       session.id,

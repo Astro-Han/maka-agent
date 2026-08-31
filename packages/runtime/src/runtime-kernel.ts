@@ -116,7 +116,7 @@ import {
 } from './runtime-resume.js';
 import {
   buildContinuationReplayPlan,
-  digestProviderReplay,
+  digestProviderReplayAdmission,
   type ContinuationReplayAdmissionRoute,
 } from './continuation-replay.js';
 import {
@@ -2917,8 +2917,12 @@ function consumeAdmittedRuntimeContinuation(input: {
     providerReasoningReplayEventIds,
   );
   if (
-    digestProviderReplay(continuation.providerProjectionVersion, admittedItems) !==
-    continuation.providerReplayDigest
+    digestProviderReplayAdmission({
+      providerProjectionVersion: continuation.providerProjectionVersion,
+      targetConnectionId: input.admissionRoute.targetConnectionId,
+      targetModelId: input.admissionRoute.targetModelId,
+      items: admittedItems,
+    }) !== continuation.providerReplayDigest
   ) {
     throw new Error('Runtime continuation provider replay identity changed after admission');
   }

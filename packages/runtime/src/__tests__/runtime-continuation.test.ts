@@ -30,7 +30,7 @@ import type { RuntimeEvent } from '@maka/core/runtime-event';
 import type { AgentRunHeader } from '@maka/core/agent-run';
 
 import { createLocalContinuationSafetyInspector } from '../continuation-safety.js';
-import { buildContinuationReplayPlan, digestProviderReplay } from '../continuation-replay.js';
+import { buildContinuationReplayPlan } from '../continuation-replay.js';
 import {
   buildRuntimeEventModelReplayPlan,
   PROVIDER_REPLAY_PROJECTION_VERSION,

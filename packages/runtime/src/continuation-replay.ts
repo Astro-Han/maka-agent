@@ -128,7 +128,12 @@ export function buildContinuationReplayPlan(input: {
       protocol: 'continuation_replay_plan_v1',
       providerProjectionVersion: input.providerProjectionVersion,
       boundary: createRuntimeBoundaryCursor(boundaries),
-      providerReplayDigest: digestProviderReplay(input.providerProjectionVersion, providerItems),
+      providerReplayDigest: digestProviderReplayAdmission({
+        providerProjectionVersion: input.providerProjectionVersion,
+        targetConnectionId: input.admissionRoute.targetConnectionId,
+        targetModelId: input.admissionRoute.targetModelId,
+        items: providerItems,
+      }),
       segments,
       runtimeContext,
       providerItems,
@@ -268,14 +273,20 @@ function isBlockingProjectionDiagnostic(diagnostic: RuntimeEventReplayDiagnostic
   );
 }
 
-export function digestProviderReplay(
-  providerProjectionVersion: number,
-  items: readonly RuntimeEventModelReplayItem[],
-): RuntimeBoundaryDigest {
+export function digestProviderReplayAdmission(input: {
+  providerProjectionVersion: number;
+  targetConnectionId: string | undefined;
+  targetModelId: string;
+  items: readonly RuntimeEventModelReplayItem[];
+}): RuntimeBoundaryDigest {
   const json = stableJsonStringify({
-    protocol: 'provider_replay_plan_v1',
-    providerProjectionVersion,
-    items,
+    protocol: 'provider_replay_admission_v1',
+    providerProjectionVersion: input.providerProjectionVersion,
+    target: {
+      connectionId: input.targetConnectionId ?? null,
+      modelId: input.targetModelId,
+    },
+    items: input.items,
   });
   return `sha256:${createHash('sha256').update(json, 'utf8').digest('hex')}`;
 }
