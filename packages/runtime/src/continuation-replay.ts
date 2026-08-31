@@ -45,8 +45,6 @@ export interface ContinuationReplaySegmentV1 {
 }
 
 export interface ContinuationReplaySegmentPlanV1 {
-  protocol: 'continuation_replay_segment_plan_v1';
-  providerProjectionVersion: typeof PROVIDER_REPLAY_PROJECTION_VERSION;
   segment: ContinuationReplaySegmentV1;
   providerItems: readonly RuntimeEventModelReplayItem[];
 }
@@ -241,8 +239,6 @@ export function buildContinuationReplaySegment(input: {
   return {
     kind: 'replayable',
     plan: {
-      protocol: 'continuation_replay_segment_plan_v1',
-      providerProjectionVersion: input.providerProjectionVersion,
       segment: {
         boundary: runtimePrefixSegment(input.prefix),
         replayRuntimeEvents,
