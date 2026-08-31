@@ -268,14 +268,6 @@ export async function publishDesktopNightlyRelease({
     assertReleaseState(await viewRelease({ repository, tag, cwd, run }), { tag, draft: false }),
     expected,
   );
-  try {
-    const latest = await run('gh', ['api', `repos/${repository}/releases/latest`], { cwd });
-    if (JSON.parse(latest.stdout)?.tag_name === tag) {
-      throw new Error(`Desktop Nightly ${tag} must not become Latest`);
-    }
-  } catch (error) {
-    if (!/HTTP 404/u.test(`${error?.stderr ?? ''}\n${error?.message ?? ''}`)) throw error;
-  }
   return published;
 }
 

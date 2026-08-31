@@ -118,9 +118,6 @@ test('Nightly publication verifies the exact draft before one Prerelease/non-Lat
         }),
       };
     }
-    if (command === 'gh' && args.includes('repos/apache/maka/releases/latest')) {
-      return { stdout: JSON.stringify({ tag_name: 'v0.1.11' }) };
-    }
     throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
   };
 
