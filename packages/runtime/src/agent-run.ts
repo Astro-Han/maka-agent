@@ -150,7 +150,6 @@ export interface AgentRunInput {
   newId: () => string;
   now: () => number;
   workspaceIdentity?: string;
-  resolveProviderStateIdentity?: (header: SessionHeader) => Promise<`sha256:${string}` | undefined>;
   continuationFailpoint?: (point: RuntimeContinuationFailpoint) => Promise<void>;
   /** Exact target header already committed inside the durable continuation claim. */
   claimedRunHeader?: AgentRunHeader;
@@ -326,8 +325,17 @@ export class AgentRun {
     return this.stopped;
   }
 
-  resolvedProviderStateIdentity(): `sha256:${string}` | undefined {
-    return this.providerStateIdentity;
+  headerSnapshot(): SessionHeader {
+    return this.header;
+  }
+
+  bindProviderStateIdentity(identity: `sha256:${string}` | undefined): void {
+    const claimed = this.input.claimedRunHeader?.providerStateIdentity;
+    const expected = claimed ?? this.providerStateIdentity;
+    if (expected !== undefined && expected !== identity) {
+      throw new Error('Prepared backend provider state does not match the AgentRun admission');
+    }
+    this.providerStateIdentity = identity;
   }
 
   isSessionInline(): boolean {
@@ -1059,8 +1067,7 @@ export class AgentRun {
         ? this.input.claimedRunHeader.createdAt
         : this.input.now();
     const providerStateIdentity =
-      this.input.claimedRunHeader?.providerStateIdentity ??
-      (await this.input.resolveProviderStateIdentity?.(this.header));
+      this.input.claimedRunHeader?.providerStateIdentity ?? this.providerStateIdentity;
     this.providerStateIdentity = providerStateIdentity;
     const computedHeader: AgentRunHeader = {
       runId: this.runId,

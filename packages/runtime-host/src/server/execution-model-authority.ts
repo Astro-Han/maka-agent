@@ -731,7 +731,7 @@ class AuxiliaryModelCallConfigurationError extends Error {
   }
 }
 
-interface ResolvedExecutionTarget {
+export interface ResolvedExecutionTarget {
   readonly connection: RuntimeExecutionConnection;
   readonly model: string;
   readonly apiKey: string;
@@ -773,26 +773,6 @@ function providerStateIdentityForResolvedExecution(
     credential: credentialBasis(resolved.secretMaterial.connection),
     requestHeaders: credentialBasis(resolved.secretMaterial.requestHeaders),
   });
-}
-
-export async function resolveExecutionProviderStateIdentity(
-  header: ExecutionRouteHeader,
-  runtimePolicy: {
-    readonly operations: Pick<
-      RuntimePolicyStoresWriter['operations'],
-      'resolveExecutionConnection'
-    >;
-  },
-): Promise<`sha256:${string}`> {
-  const resolved = await runtimePolicy.operations.resolveExecutionConnection(
-    executionConnectionRef(header),
-  );
-  if (resolved.kind !== 'ready') {
-    throw new AuxiliaryModelCallConfigurationError(
-      `Runtime Host model connection is not ready: ${resolved.kind}`,
-    );
-  }
-  return providerStateIdentityForResolvedExecution(resolved);
 }
 
 async function resolveDailyReviewHeader(

@@ -85,6 +85,7 @@ import type {
   BackendFactoryContext,
   BackendRegistry,
   CompactSessionInput,
+  PreparedBackendActivation,
   ResolvedChildToolActivation,
   SessionStore,
   StopSessionInput,
@@ -269,7 +270,6 @@ export interface RuntimeKernelDeps {
   safeBoundaryResumeEnabled?: boolean;
   continuationFailpoint?: (point: RuntimeContinuationFailpoint) => Promise<void>;
   runBackendActivation?: BackendActivationBoundary;
-  resolveProviderStateIdentity?: (header: SessionHeader) => Promise<`sha256:${string}` | undefined>;
   /** Hosted composition capability. When present, the Host owns all message queues. */
   messageAuthority?: RuntimeMessageAuthority;
   /** Hosted composition capability. Omit for embedded interaction ownership. */
@@ -283,6 +283,7 @@ interface BackendGeneration extends AgentRunActiveSession {
   generation: number;
   phase: 'active' | 'stopping' | 'disposing' | 'failed' | 'terminated';
   backend: AgentBackend;
+  providerStateIdentity?: `sha256:${string}`;
   stopBackend: AgentBackend['stop'];
   stopState:
     | { kind: 'idle' }
@@ -349,6 +350,7 @@ interface PendingExecutionClaim {
   rejectSettled(error: unknown): void;
   phase: 'pending' | 'attached' | 'reserved' | 'released' | 'failed';
   run?: AgentRun;
+  backendPreparation?: PreparedBackendActivation;
   stopIntent?: SessionStopIntent;
   finalization?: ExecutionClaimOutcome;
 }
@@ -659,7 +661,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
         repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
         newId: this.deps.newId,
         now: this.deps.now,
-        resolveProviderStateIdentity: this.deps.resolveProviderStateIdentity,
         ...(workspaceIdentity ? { workspaceIdentity } : {}),
         hooks: {
           reserveRun: async (targetSessionId, nextHeader, activeRun) => {
@@ -744,7 +745,14 @@ export class RuntimeKernel implements RuntimeKernelLike {
       this.deps.runStore.readRun(continuation.sessionId, continuation.sourceRunId),
       this.deps.runStore.listSessionRuns(continuation.sessionId),
     ]);
-    const targetProviderStateIdentity = await this.deps.resolveProviderStateIdentity?.(header);
+    const targetProviderStateIdentity = (
+      await this.deps.backends.prepare(header.backend, {
+        sessionId: continuation.sessionId,
+        workspaceRoot: header.workspaceRoot,
+        header,
+        abortSignal: execution.abortController.signal,
+      })
+    ).providerStateIdentity;
     const admissionRoute: ContinuationReplayAdmissionRoute = {
       runHeaders: sessionRuns,
       targetProviderStateIdentity,
@@ -823,7 +831,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
       repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
       newId: this.deps.newId,
       now: this.deps.now,
-      resolveProviderStateIdentity: this.deps.resolveProviderStateIdentity,
       workspaceIdentity: continuation.safetySnapshot.workspaceIdentity,
       effectiveOrchestration,
       claimedRunHeader: claim.targetRunHeader,
@@ -977,7 +984,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
       repairRunRuntimeLedger: this.deps.repairRunRuntimeLedger,
       newId: this.deps.newId,
       now: this.deps.now,
-      resolveProviderStateIdentity: this.deps.resolveProviderStateIdentity,
       effectiveOrchestration: resolveEffectiveOrchestration('default', undefined),
       hooks: {
         reserveRun: async (targetSessionId, nextHeader, activeRun) => {
@@ -1010,7 +1016,12 @@ export class RuntimeKernel implements RuntimeKernelLike {
           runId: run.runId,
         });
       }
-      begin = await this.runBackendActivation(() => run.beginOperation());
+      begin = await this.runBackendActivation(async () => {
+        run.bindProviderStateIdentity(
+          await this.prepareBackendForExecution(sessionId, header, execution),
+        );
+        return await run.beginOperation();
+      });
       await input.hostedRoot?.onRunStarted?.();
       this.settleReservedExecutionClaim(execution, run, { ok: true });
     } catch (error) {
@@ -1137,6 +1148,9 @@ export class RuntimeKernel implements RuntimeKernelLike {
       }
       begin = await this.runBackendActivation(async () => {
         await prepareBackendActivation?.();
+        run.bindProviderStateIdentity(
+          await this.prepareBackendForExecution(sessionId, run.headerSnapshot(), execution),
+        );
         const started = await run.begin();
         await owners.bindInteraction(this.deps.interactionAuthority, {
           sessionId,
@@ -1289,6 +1303,13 @@ export class RuntimeKernel implements RuntimeKernelLike {
           throw new Error('Durable continuation omitted final safety revalidation');
         }
         await revalidateSafety();
+        run.bindProviderStateIdentity(
+          await this.prepareBackendForExecution(
+            continuation.sessionId,
+            run.headerSnapshot(),
+            execution,
+          ),
+        );
         const started = await run.beginContinuation(continuation);
         await owners.bindInteraction(this.deps.interactionAuthority, {
           sessionId: continuation.sessionId,
@@ -2299,12 +2320,28 @@ export class RuntimeKernel implements RuntimeKernelLike {
     };
   }
 
+  private async prepareBackendForExecution(
+    sessionId: string,
+    header: SessionHeader,
+    execution: PendingExecutionClaim,
+  ): Promise<`sha256:${string}` | undefined> {
+    const existing = this.active.get(sessionId);
+    if (existing) return existing.providerStateIdentity;
+    const prepared = await this.deps.backends.prepare(header.backend, {
+      sessionId,
+      workspaceRoot: header.workspaceRoot,
+      header,
+      abortSignal: execution.abortController.signal,
+    });
+    execution.backendPreparation = prepared;
+    return prepared.providerStateIdentity;
+  }
+
   private async ensureActive(
     sessionId: string,
     header: SessionHeader,
     execution: PendingExecutionClaim,
   ): Promise<BackendGeneration> {
-    const providerStateIdentity = execution.run?.resolvedProviderStateIdentity();
     await this.clearBackendQuarantineForActivation(sessionId, execution);
     let existing = this.active.get(sessionId);
     if (existing) {
@@ -2320,12 +2357,20 @@ export class RuntimeKernel implements RuntimeKernelLike {
     const entry = await this.shareBackendActivation(`parent:${sessionId}`, async () => {
       const current = this.active.get(sessionId);
       if (current) return current;
+      const prepared =
+        execution.backendPreparation ??
+        (await this.deps.backends.prepare(header.backend, {
+          sessionId,
+          workspaceRoot: header.workspaceRoot,
+          header,
+          abortSignal: execution.abortController.signal,
+        }));
+      execution.run?.bindProviderStateIdentity(prepared.providerStateIdentity);
       const subagent = await this.resolveSubagentActivation(header);
-      const backend = await this.deps.backends.build(header.backend, {
+      const backend = await prepared.build({
         sessionId,
         workspaceRoot: header.workspaceRoot,
         header,
-        ...(providerStateIdentity ? { providerStateIdentity } : {}),
         store: this.deps.store,
         abortSignal: execution.abortController.signal,
         ...(subagent
@@ -2341,7 +2386,12 @@ export class RuntimeKernel implements RuntimeKernelLike {
         allowMidTurnHistoryCompaction: Boolean(this.deps.runtimeEventStore),
       });
       await this.rejectCancelledBackendActivation(backend, header, execution);
-      const generation = this.createBackendGeneration(sessionId, backend, header);
+      const generation = this.createBackendGeneration(
+        sessionId,
+        backend,
+        header,
+        prepared.providerStateIdentity,
+      );
       this.active.set(sessionId, generation);
       return generation;
     });
@@ -2417,12 +2467,14 @@ export class RuntimeKernel implements RuntimeKernelLike {
     sessionId: string,
     backend: AgentBackend,
     header: SessionHeader,
+    providerStateIdentity?: `sha256:${string}`,
   ): BackendGeneration {
     const active: BackendGeneration = {
       sessionId,
       generation: ++this.nextBackendGeneration,
       phase: 'active',
       backend,
+      ...(providerStateIdentity ? { providerStateIdentity } : {}),
       stopBackend: undefined as never,
       stopState: { kind: 'idle' },
       cachedHeader: header,

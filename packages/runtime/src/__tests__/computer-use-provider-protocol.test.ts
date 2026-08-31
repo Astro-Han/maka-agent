@@ -44,6 +44,7 @@ import { createTestAiSdkBackend } from './execution-boundary-test-helpers.js';
 import { latestObservationIn } from './observation-text-reader.js';
 
 const servers: Array<{ close(): Promise<void> }> = [];
+const PROVIDER_STATE_IDENTITY = `sha256:${'1'.repeat(64)}` as const;
 
 after(async () => {
   await Promise.all(servers.map((server) => server.close()));
@@ -94,6 +95,7 @@ describe('Anthropic-compatible Computer Use product loops', () => {
         appendMessage: async () => {},
         connection: providerConnection,
         apiKey: 'test-key',
+        providerStateIdentity: PROVIDER_STATE_IDENTITY,
         modelId: 'claude-sonnet-4-5-20250929',
         modelFactory: (input) => getAIModel(input),
         tools: [],
@@ -112,6 +114,7 @@ describe('Anthropic-compatible Computer Use product loops', () => {
       llmConnectionId: 'connection-anthropic',
       llmConnectionSlug: 'anthropic',
       modelId: 'claude-sonnet-4-5-20250929',
+      providerStateIdentity: PROVIDER_STATE_IDENTITY,
       cwd: '/tmp/maka',
       permissionMode: 'bypass',
       createdAt: 1,
@@ -475,6 +478,7 @@ describe('OpenAI-compatible product loops', () => {
       appendMessage: async () => {},
       connection: providerConnection,
       apiKey: 'test-key',
+      providerStateIdentity: PROVIDER_STATE_IDENTITY,
       modelId: 'gpt-5.4',
       modelFactory: (input) => getAIModel(input),
       tools: [],
@@ -492,6 +496,7 @@ describe('OpenAI-compatible product loops', () => {
       llmConnectionId: 'connection-copilot',
       llmConnectionSlug: 'github-copilot',
       modelId: 'gpt-5.4',
+      providerStateIdentity: PROVIDER_STATE_IDENTITY,
       cwd: '/tmp/maka',
       permissionMode: 'bypass',
       createdAt: 1,
@@ -684,6 +689,7 @@ describe('OpenAI-compatible product loops', () => {
       llmConnectionId: 'test-connection-id',
       llmConnectionSlug: providerConnection.slug,
       modelId: 'k3',
+      providerStateIdentity: PROVIDER_STATE_IDENTITY,
       cwd: '/tmp/maka',
       permissionMode: 'ask',
       createdAt: 1,
@@ -741,6 +747,7 @@ describe('OpenAI-compatible product loops', () => {
       appendMessage: async () => {},
       connection: providerConnection,
       apiKey: 'test-key',
+      providerStateIdentity: PROVIDER_STATE_IDENTITY,
       modelId: 'k3',
       modelFactory: (input) => getAIModel(input),
       providerOptions: buildProviderOptions(providerConnection, 'k3'),
@@ -829,6 +836,7 @@ describe('OpenAI-compatible product loops', () => {
       llmConnectionId: 'test-connection-id',
       llmConnectionSlug: providerConnection.slug,
       modelId: 'k3',
+      providerStateIdentity: PROVIDER_STATE_IDENTITY,
       cwd: '/tmp/maka',
       permissionMode: 'ask',
       createdAt: firstTurn.anchor.ts,
@@ -845,6 +853,7 @@ describe('OpenAI-compatible product loops', () => {
         },
         connection: providerConnection,
         apiKey: 'test-key',
+        providerStateIdentity: PROVIDER_STATE_IDENTITY,
         modelId: 'k3',
         modelFactory: (input) => getAIModel(input),
         providerOptions: buildProviderOptions(providerConnection, 'k3'),

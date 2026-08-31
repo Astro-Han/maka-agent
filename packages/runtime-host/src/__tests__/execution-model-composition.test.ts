@@ -92,6 +92,7 @@ import {
 } from '../server/execution-model-authority.js';
 import {
   createHostAiSdkBackend,
+  prepareHostAiSdkBackend,
   resolveCollaborationPermissionMode,
   type HostAiSdkBackendInput,
 } from '../server/execution-model-composition.js';
@@ -162,18 +163,22 @@ test('backend creation resolves a bound Session by immutable Connection identity
   });
 });
 
-test('backend creation rejects provider state drift after Run admission', async () => {
-  await assert.rejects(
-    createHostAiSdkBackend(
-      backendCreationFixture({
-        abortSignal: new AbortController().signal,
-        providerStateIdentity: `sha256:${'f'.repeat(64)}`,
-        resolveExecutionConnection: async () => readyExecutionConnection(),
-        readPricing: async () => ({ revision: 0, overrides: [] }),
-      }),
-    ),
-    /Provider state changed after AgentRun admission/,
-  );
+test('prepared backend activation builds from its admitted provider snapshot', async () => {
+  let providerReadAvailable = true;
+  const input = backendCreationFixture({
+    abortSignal: new AbortController().signal,
+    resolveExecutionConnection: async () => {
+      if (!providerReadAvailable) throw new Error('provider state was read after admission');
+      return readyExecutionConnection();
+    },
+    readPricing: async () => ({ revision: 0, overrides: [] }),
+  });
+  const { context, ...dependencies } = input;
+  const prepared = await prepareHostAiSdkBackend({ context, ...dependencies });
+  providerReadAvailable = false;
+
+  const backend = await prepared.build(context);
+  await backend.dispose();
 });
 
 test('backend creation aborts a stalled canonical connection read', async () => {
@@ -830,95 +835,99 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
       resolve: async () => oauthTokens,
     }),
   } as unknown as HostOAuthExecutionAuthority;
-  const backend = await createHostAiSdkBackend(
-    backendCreationFixture({
-      abortSignal: new AbortController().signal,
-      modelId,
-      oauthCredentials,
-      resolveExecutionConnection: async () => ({
-        kind: 'ready',
-        connection: {
-          slug: 'backend-creation-connection',
-          providerType: 'openai-codex',
-          enabledModelIds: [modelId],
-          models: [
-            {
-              id: modelId,
-              capabilities: { chat: true, functionCalling: true },
-              contextWindow: 32_768,
-              maxOutputTokens: 1_024,
-            },
-          ],
-        },
-        networkProxy: { enabled: false },
-        secretMaterial: { connection: { secret: 'oauth-material' } },
-      }),
-      readPricing: async () => ({ revision: 0, overrides: [] }),
-      recordHistoryCompactCheckpoint: async (checkpoint) => {
-        recordedTextCheckpoint = 'summary' in checkpoint;
+  const fixture = backendCreationFixture({
+    abortSignal: new AbortController().signal,
+    modelId,
+    oauthCredentials,
+    resolveExecutionConnection: async () => ({
+      kind: 'ready',
+      connection: {
+        slug: 'backend-creation-connection',
+        providerType: 'openai-codex',
+        enabledModelIds: [modelId],
+        models: [
+          {
+            id: modelId,
+            capabilities: { chat: true, functionCalling: true },
+            contextWindow: 32_768,
+            maxOutputTokens: 1_024,
+          },
+        ],
       },
-      recordModelCallAttempt: async ({ attempt }) => {
-        attempts.push(attempt);
-      },
-      createFetchTransport: () => ({
-        fetch: async (url, init) => {
-          const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-          requests.push({
-            url: String(url),
-            body,
-          });
-          const providerInput = Array.isArray(body.input) ? body.input : [];
-          if (
-            !providerInput.some(
-              (item) =>
-                typeof item === 'object' &&
-                item !== null &&
-                'type' in item &&
-                item.type === 'compaction_trigger',
-            )
-          ) {
-            return Response.json({
-              id: 'resp-text-fallback',
-              object: 'response',
-              created_at: 1,
-              status: 'completed',
-              model: modelId,
-              output: [
-                {
-                  type: 'message',
-                  id: 'msg-text-fallback',
-                  status: 'completed',
-                  role: 'assistant',
-                  content: [
-                    {
-                      type: 'output_text',
-                      text: fallbackSummary,
-                      annotations: [],
-                      logprobs: [],
-                    },
-                  ],
-                },
-              ],
-              usage: { input_tokens: 4_000, output_tokens: 60, total_tokens: 4_060 },
-            });
-          }
-          return Response.json(
-            {
-              error: {
-                message: 'request rejected without echoing this body',
-                code: 'missing_required_parameter',
-              },
-            },
-            {
-              status: 400,
-              headers: { 'x-request-id': 'req-codex-compact' },
-            },
-          );
-        },
-        close: async () => undefined,
-      }),
+      networkProxy: { enabled: false },
+      secretMaterial: { connection: { secret: 'oauth-material' } },
     }),
-  );
+    readPricing: async () => ({ revision: 0, overrides: [] }),
+    recordHistoryCompactCheckpoint: async (checkpoint) => {
+      recordedTextCheckpoint = 'summary' in checkpoint;
+    },
+    recordModelCallAttempt: async ({ attempt }) => {
+      attempts.push(attempt);
+    },
+    createFetchTransport: () => ({
+      fetch: async (url, init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        requests.push({
+          url: String(url),
+          body,
+        });
+        const providerInput = Array.isArray(body.input) ? body.input : [];
+        if (
+          !providerInput.some(
+            (item) =>
+              typeof item === 'object' &&
+              item !== null &&
+              'type' in item &&
+              item.type === 'compaction_trigger',
+          )
+        ) {
+          return Response.json({
+            id: 'resp-text-fallback',
+            object: 'response',
+            created_at: 1,
+            status: 'completed',
+            model: modelId,
+            output: [
+              {
+                type: 'message',
+                id: 'msg-text-fallback',
+                status: 'completed',
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'output_text',
+                    text: fallbackSummary,
+                    annotations: [],
+                    logprobs: [],
+                  },
+                ],
+              },
+            ],
+            usage: { input_tokens: 4_000, output_tokens: 60, total_tokens: 4_060 },
+          });
+        }
+        return Response.json(
+          {
+            error: {
+              message: 'request rejected without echoing this body',
+              code: 'missing_required_parameter',
+            },
+          },
+          {
+            status: 400,
+            headers: { 'x-request-id': 'req-codex-compact' },
+          },
+        );
+      },
+      close: async () => undefined,
+    }),
+  });
+  const { context, ...dependencies } = fixture;
+  const prepared = await prepareHostAiSdkBackend({ context, ...dependencies });
+  const providerStateIdentity = prepared.providerStateIdentity;
+  assert.ok(providerStateIdentity);
+  const backend = await prepared.build(context);
+  assert.ok(backend.compactHistory);
 
   try {
     const runtimeContext: RuntimeEvent[] = [
@@ -1054,6 +1063,7 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
           llmConnectionId: '11111111-1111-4111-8111-111111111111',
           llmConnectionSlug: 'backend-creation-connection',
           modelId,
+          providerStateIdentity,
           cwd: '/workspace',
           permissionMode: 'bypass',
           createdAt: 2,
@@ -3901,7 +3911,6 @@ async function publishConnectionModel(
 function backendCreationFixture(input: {
   abortSignal: AbortSignal;
   connectionId?: string;
-  providerStateIdentity?: `sha256:${string}`;
   resolveExecutionConnection: (ref?: unknown) => Promise<unknown>;
   readPricing: () => Promise<unknown>;
   runtimePolicy?: RuntimePolicyStoresWriter;
@@ -3971,9 +3980,6 @@ function backendCreationFixture(input: {
         permissionMode: 'bypass',
       },
       abortSignal: input.abortSignal,
-      ...(input.providerStateIdentity
-        ? { providerStateIdentity: input.providerStateIdentity }
-        : {}),
       ...(input.tools ? { tools: input.tools } : {}),
       ...(input.loadTurnRuntimeEvents
         ? { loadTurnRuntimeEvents: input.loadTurnRuntimeEvents }

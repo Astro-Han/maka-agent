@@ -4645,6 +4645,9 @@ describe('SessionManager permission mode updates', () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
+    backends.register('ai-sdk', () => {
+      throw new Error('continuation planning must not build a backend');
+    });
     const manager = new SessionManager({
       store,
       runStore,
@@ -4787,6 +4790,9 @@ describe('SessionManager permission mode updates', () => {
     const store = new MemorySessionStore();
     const runStore = new MemoryAgentRunStore();
     const backends = new BackendRegistry();
+    backends.register('ai-sdk', () => {
+      throw new Error('continuation planning must not build a backend');
+    });
     const manager = new SessionManager({
       store,
       runStore,
@@ -5152,9 +5158,14 @@ describe('SessionManager permission mode updates', () => {
     const lifecycleEvents: Array<{ type: string }> = [];
     let backend: FinalTextTestBackend | undefined;
     const providerStateIdentity = `sha256:${'c'.repeat(64)}` as const;
-    backends.register('ai-sdk', (ctx) => {
-      backend = new FinalTextTestBackend(ctx);
-      return backend;
+    backends.register('ai-sdk', {
+      prepare: async () => ({
+        providerStateIdentity,
+        build: (ctx) => {
+          backend = new FinalTextTestBackend(ctx);
+          return backend;
+        },
+      }),
     });
     const manager = new SessionManager({
       store,
@@ -5168,7 +5179,6 @@ describe('SessionManager permission mode updates', () => {
         backgroundOperationsSettled: true,
         availableToolNames: ['Read'],
       }),
-      resolveProviderStateIdentity: async () => providerStateIdentity,
       onContinuationLifecycleEvent: (event) => {
         lifecycleEvents.push(event);
       },

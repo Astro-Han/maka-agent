@@ -43,7 +43,11 @@ import {
 } from '@maka/runtime/network/scoped-fetch-transport';
 import { stableHash, toolCatalogHash } from '@maka/runtime/request-shape';
 import { toolAvailabilityHash } from '@maka/runtime/tool-availability';
-import { type BackendFactoryContext } from '@maka/runtime/session-manager';
+import {
+  type BackendFactoryContext,
+  type BackendPreparationContext,
+  type PreparedBackendActivation,
+} from '@maka/runtime/session-manager';
 import { type RuntimeCommitSink } from '@maka/runtime/runtime-commit-sink';
 import {
   createAttachmentByteReader,
@@ -62,7 +66,11 @@ import {
 import type { HostChildAgentBackendCapabilities } from './child-agent-composition.js';
 import type { HostExecutionArtifactServices } from './execution-artifacts.js';
 import type { HostMemoryExtractionCoordinator } from './memory-extraction-coordinator.js';
-import { readDuringBackendCreation, resolveExecutionTarget } from './execution-model-authority.js';
+import {
+  readDuringBackendCreation,
+  resolveExecutionTarget,
+  type ResolvedExecutionTarget,
+} from './execution-model-authority.js';
 import { toRuntimePolicyProxy } from './runtime-policy-proxy.js';
 import type { HostRunComposer, HostRunComposerFactory } from './host-run-composer.js';
 
@@ -82,6 +90,10 @@ export interface HostAiSdkBackendInput {
   readonly childAgents?: HostChildAgentBackendCapabilities;
   readonly createFetchTransport?: (proxy: ProxiedFetchProxy | null) => ProxiedFetchTransport;
 }
+
+export type HostAiSdkBackendPreparationInput = Omit<HostAiSdkBackendInput, 'context'> & {
+  readonly context: BackendPreparationContext;
+};
 
 type HostExecutionRuntimePolicyAuthority = {
   readonly operations: Pick<RuntimePolicyStoresWriter['operations'], 'resolveExecutionConnection'>;
@@ -115,12 +127,14 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
       ),
     input.context.abortSignal,
   );
-  if (
-    input.context.providerStateIdentity !== undefined &&
-    input.context.providerStateIdentity !== target.providerStateIdentity
-  ) {
-    throw new Error('Provider state changed after AgentRun admission');
-  }
+  return await buildHostAiSdkBackend(input, target);
+}
+
+async function buildHostAiSdkBackend(
+  input: HostAiSdkBackendInput,
+  target: ResolvedExecutionTarget,
+): Promise<AiSdkBackend> {
+  const createFetchTransport = input.createFetchTransport ?? createProxiedFetchTransport;
   const pricingSnapshot = await readDuringBackendCreation(
     () => input.usage.pricing.snapshot(),
     input.context.abortSignal,
@@ -464,6 +478,33 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
     }
     throw error;
   }
+}
+
+export async function prepareHostAiSdkBackend(
+  input: HostAiSdkBackendPreparationInput,
+): Promise<PreparedBackendActivation> {
+  const createFetchTransport = input.createFetchTransport ?? createProxiedFetchTransport;
+  const preparedTarget = await readDuringBackendCreation(
+    () =>
+      resolveExecutionTarget(
+        input.context.header,
+        input.runtimePolicy,
+        input.oauthCredentials,
+        createFetchTransport,
+      ),
+    input.context.abortSignal,
+  );
+  return {
+    providerStateIdentity: preparedTarget.providerStateIdentity,
+    build: (context) =>
+      buildHostAiSdkBackend(
+        {
+          ...input,
+          context,
+        },
+        preparedTarget,
+      ),
+  };
 }
 
 class HostAiSdkBackend extends AiSdkBackend {

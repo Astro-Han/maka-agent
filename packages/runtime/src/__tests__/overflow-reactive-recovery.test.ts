@@ -62,6 +62,7 @@ function reactiveStructuredSummary(foldedRuntimeEvents: RuntimeEvent[]): string 
 const RAW_SPAN_ONE = 'RAW_SPAN_ONE_'.repeat(24);
 const ANCHOR_TEXT = 'reactive overflow recovery keep my exact words';
 const OVERFLOW_MESSAGE = 'prompt is too long: 213462 tokens > 200000 maximum';
+const PROVIDER_STATE_IDENTITY = `sha256:${'1'.repeat(64)}` as const;
 
 /**
  * Per-provider-request script. Each entry drives one `doStream` invocation:
@@ -584,6 +585,7 @@ function buildReactiveFixture(options: ReactiveFixtureOptions): ReactiveFixture 
       models: [{ id: 'mock-model-id', contextWindow }],
     },
     apiKey: 'sk-test',
+    ...(options.reasoningReplayTail ? { providerStateIdentity: PROVIDER_STATE_IDENTITY } : {}),
     modelId: 'mock-model-id',
     modelFactory: () => model,
     ...(options.imagePrior || options.currentImage || options.liveImageResult
@@ -1912,6 +1914,8 @@ function priorRunHeader(runId: string, llmConnectionId: string, modelId: string)
     llmConnectionId,
     llmConnectionSlug: 'anthropic-source',
     modelId,
+    providerStateIdentity:
+      runId === 'same-route-prior-run' ? PROVIDER_STATE_IDENTITY : `sha256:${'2'.repeat(64)}`,
     cwd: '/tmp/maka',
     permissionMode: 'ask',
     createdAt: 1,

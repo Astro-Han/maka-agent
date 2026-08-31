@@ -637,8 +637,6 @@ export interface BackendFactoryContext {
   sessionId: string;
   workspaceRoot: string;
   header: SessionHeader;
-  /** Provider state identity already frozen into the activating AgentRun. */
-  providerStateIdentity?: `sha256:${string}`;
   store: SessionStore;
   /** Process-local cancellation for the execution that owns this activation. */
   abortSignal?: AbortSignal;
@@ -695,21 +693,43 @@ export interface BackendFactoryContext {
 
 export type BackendFactory = (ctx: BackendFactoryContext) => AgentBackend | Promise<AgentBackend>;
 
-export class BackendRegistry {
-  private readonly factories = new Map<PersistedBackendKind, BackendFactory>();
+export type BackendPreparationContext = Pick<
+  BackendFactoryContext,
+  'sessionId' | 'workspaceRoot' | 'header' | 'abortSignal'
+>;
 
-  register(kind: PersistedBackendKind, factory: BackendFactory): void {
-    this.factories.set(kind, factory);
+export interface PreparedBackendActivation {
+  readonly providerStateIdentity?: `sha256:${string}`;
+  build(ctx: BackendFactoryContext): AgentBackend | Promise<AgentBackend>;
+}
+
+export interface PreparedBackendFactory {
+  prepare(ctx: BackendPreparationContext): Promise<PreparedBackendActivation>;
+}
+
+type BackendRegistration = BackendFactory | PreparedBackendFactory;
+
+export class BackendRegistry {
+  private readonly registrations = new Map<PersistedBackendKind, BackendRegistration>();
+
+  register(kind: PersistedBackendKind, registration: BackendRegistration): void {
+    this.registrations.set(kind, registration);
   }
 
-  async build(kind: PersistedBackendKind, ctx: BackendFactoryContext): Promise<AgentBackend> {
-    const f = this.factories.get(kind);
-    if (!f) throw new Error(`No backend factory registered for kind="${kind}"`);
-    return await f(ctx);
+  async prepare(
+    kind: PersistedBackendKind,
+    ctx: BackendPreparationContext,
+  ): Promise<PreparedBackendActivation> {
+    const registration = this.registrations.get(kind);
+    if (!registration) throw new Error(`No backend factory registered for kind="${kind}"`);
+    if (typeof registration === 'function') {
+      return { build: registration };
+    }
+    return await registration.prepare(ctx);
   }
 
   has(kind: PersistedBackendKind): boolean {
-    return this.factories.has(kind);
+    return this.registrations.has(kind);
   }
 }
 
@@ -766,7 +786,6 @@ interface SessionManagerBaseDeps {
   inspectContinuationSafety?: (sessionId: string) => Promise<RuntimeContinuationSafetyObservation>;
   continuationFailpoint?: (point: RuntimeContinuationFailpoint) => Promise<void>;
   runBackendActivation?: BackendActivationBoundary;
-  resolveProviderStateIdentity?: (header: SessionHeader) => Promise<`sha256:${string}` | undefined>;
   safeBoundaryResumeEnabled?: boolean;
   /** Hosted composition capability. Omit for the production embedded queue. */
   messageAuthority?: RuntimeMessageAuthority;
@@ -1990,7 +2009,13 @@ export class SessionManager {
         this.deps.store.readHeader(sessionId),
         this.deps.runStore.listSessionRuns(sessionId),
       ]);
-      const targetProviderStateIdentity = await this.deps.resolveProviderStateIdentity?.(header);
+      const targetProviderStateIdentity = (
+        await this.deps.backends.prepare(header.backend, {
+          sessionId,
+          workspaceRoot: header.workspaceRoot,
+          header,
+        })
+      ).providerStateIdentity;
       admissionRoute = {
         runHeaders,
         targetProviderStateIdentity,

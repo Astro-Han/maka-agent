@@ -41,7 +41,7 @@ import { HostConnectionEffectCoordinator } from '../server/connection-effect-coo
 import { HostOAuthExecutionAuthority } from '../server/oauth-execution-authority.js';
 import type { ConnectionContext } from '../server/operation-dispatcher.js';
 import { RuntimePolicyActivationGate } from '../server/runtime-policy-activation-gate.js';
-import { resolveExecutionProviderStateIdentity } from '../server/execution-model-authority.js';
+import { resolveExecutionTarget } from '../server/execution-model-authority.js';
 import type { ConnectionOnboardingSaveResult, OperationOutcome } from '../protocol/index.js';
 
 const context: ConnectionContext = {
@@ -503,7 +503,18 @@ test('provider state identity follows endpoint, credential, and request-header o
       llmConnectionSlug: connection.slug,
       model: 'gpt-5',
     };
-    const initial = await resolveExecutionProviderStateIdentity(header, stores);
+    const resolveIdentity = async () =>
+      (
+        await resolveExecutionTarget(
+          header,
+          stores,
+          new HostOAuthExecutionAuthority(stores),
+          () => {
+            throw new Error('API-key provider must not create an OAuth refresh transport');
+          },
+        )
+      ).providerStateIdentity;
+    const initial = await resolveIdentity();
 
     const moved = await stores.connectionCatalog.update({
       expected: { connectionId: connection.connectionId, revision: connection.revision },
@@ -515,7 +526,7 @@ test('provider state identity follows endpoint, credential, and request-header o
       },
     });
     assert.equal(moved.kind, 'committed');
-    const afterEndpoint = await resolveExecutionProviderStateIdentity(header, stores);
+    const afterEndpoint = await resolveIdentity();
     assert.notEqual(afterEndpoint, initial);
 
     const status = await connectionCredentialStatus(stores, connection);
@@ -527,7 +538,7 @@ test('provider state identity follows endpoint, credential, and request-header o
       secret: 'key-b',
     });
     assert.equal(rotated.kind, 'committed');
-    const afterCredential = await resolveExecutionProviderStateIdentity(header, stores);
+    const afterCredential = await resolveIdentity();
     assert.notEqual(afterCredential, afterEndpoint);
 
     const headers = await stores.credentialVault.set({
@@ -540,7 +551,7 @@ test('provider state identity follows endpoint, credential, and request-header o
       secret: JSON.stringify({ 'X-Relay-Account': 'account-b' }),
     });
     assert.equal(headers.kind, 'committed');
-    const afterHeaders = await resolveExecutionProviderStateIdentity(header, stores);
+    const afterHeaders = await resolveIdentity();
     assert.notEqual(afterHeaders, afterCredential);
   });
 });
