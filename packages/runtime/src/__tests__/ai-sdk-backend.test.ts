@@ -6130,7 +6130,7 @@ describe('AiSdkBackend model history', () => {
       coveredRuntimeEvents: covered,
       providerState: {
         kind: 'openai_codex_remote_v2',
-        connectionSlug: codexConnection.slug,
+        connectionId: 'test-connection-id',
         modelId: 'mock-model-id',
         itemId: 'cmp_replay',
         encryptedContent: 'CODEX_ENCRYPTED_REPLAY_STATE',
@@ -6199,7 +6199,7 @@ describe('AiSdkBackend model history', () => {
       coveredRuntimeEvents: covered,
       providerState: {
         kind: 'openai_codex_remote_v2',
-        connectionSlug: codexConnection.slug,
+        connectionId: 'test-connection-id',
         modelId: 'mock-model-id',
         itemId: 'cmp_full_replay',
         encryptedContent: 'CODEX_FULL_ENCRYPTED_STATE',
@@ -6292,7 +6292,7 @@ describe('AiSdkBackend model history', () => {
       coveredRuntimeEvents: covered,
       providerState: {
         kind: 'openai_codex_remote_v2',
-        connectionSlug: codexConnection.slug,
+        connectionId: 'test-connection-id',
         modelId: 'mock-model-id',
         itemId: 'cmp_model_switch',
         encryptedContent: 'CODEX_MODEL_SWITCH_ENCRYPTED_STATE',
@@ -6386,7 +6386,7 @@ describe('AiSdkBackend model history', () => {
       coveredRuntimeEvents: covered,
       providerState: {
         kind: 'openai_codex_remote_v2',
-        connectionSlug: codexConnection.slug,
+        connectionId: 'test-connection-id',
         modelId: 'different-model',
         itemId: 'cmp_wrong_model',
         encryptedContent: 'CODEX_WRONG_MODEL_STATE',

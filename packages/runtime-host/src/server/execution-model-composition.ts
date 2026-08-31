@@ -194,12 +194,11 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
     providerOptions,
   });
   const summarizeHistoryCompact =
-    target.connection.providerType === 'openai-codex'
+    target.connection.providerType === 'openai-codex' && input.context.header.llmConnectionId
       ? withOpenAiCodexHistoryCompactionFallback(
           buildOpenAiCodexHistoryCompactor({
             resolveModel: resolveHistoryCompactModel,
             connectionId: input.context.header.llmConnectionId,
-            connectionSlug: target.connection.slug,
             modelId: target.model,
             providerOptions,
           }),
@@ -207,7 +206,9 @@ export async function createHostAiSdkBackend(input: HostAiSdkBackendInput): Prom
         )
       : textHistorySummarizer;
   const historyCompactRoute =
-    target.connection.providerType === 'openai-codex' ? 'provider_native' : 'text_summary';
+    target.connection.providerType === 'openai-codex' && input.context.header.llmConnectionId
+      ? 'provider_native'
+      : 'text_summary';
   let telemetryDrainRequested = false;
   const persistTelemetry = async (operation: () => Promise<void>): Promise<void> => {
     try {

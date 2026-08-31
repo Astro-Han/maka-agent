@@ -153,6 +153,7 @@ export interface AutomaticMemoryCompactionDecision {
 export interface AiSdkCompactionDeps {
   input: AiSdkCompactionCapabilities;
   sessionId: string;
+  targetConnectionId: string | undefined;
   now: () => number;
   modelAdapter: ModelAdapter;
   /**
@@ -183,6 +184,7 @@ export interface AiSdkCompactionDeps {
 export class AiSdkCompaction {
   private readonly input: AiSdkCompactionCapabilities;
   private readonly sessionId: string;
+  private readonly targetConnectionId: string | undefined;
   private readonly now: () => number;
   private readonly modelAdapter: ModelAdapter;
   private readonly createProviderRequestTracker: (input: {
@@ -212,6 +214,7 @@ export class AiSdkCompaction {
   constructor(deps: AiSdkCompactionDeps) {
     this.input = deps.input;
     this.sessionId = deps.sessionId;
+    this.targetConnectionId = deps.targetConnectionId;
     this.now = deps.now;
     this.modelAdapter = deps.modelAdapter;
     this.createProviderRequestTracker = deps.createProviderRequestTracker;
@@ -257,6 +260,7 @@ export class AiSdkCompaction {
           canContinueHistoryCompactCheckpointForModel(
             loaded,
             this.input.connection,
+            this.targetConnectionId,
             this.input.modelId,
           )
         ) {
@@ -565,6 +569,7 @@ export class AiSdkCompaction {
       canReplayHistoryCompactCheckpointForModel(
         loadedCheckpoint,
         this.input.connection,
+        this.targetConnectionId,
         this.input.modelId,
       )
     ) {

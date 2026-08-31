@@ -1112,6 +1112,7 @@ export class AiSdkBackend implements AgentBackend {
     this.compaction = new AiSdkCompaction({
       input,
       sessionId: this.sessionId,
+      targetConnectionId: input.header.llmConnectionId,
       now: this.now,
       modelAdapter: this.modelAdapter,
       createProviderRequestTracker: (trackerInput) =>
@@ -1778,6 +1779,7 @@ export class AiSdkBackend implements AgentBackend {
         canContinueHistoryCompactCheckpointForModel(
           checkpoint,
           this.input.connection,
+          this.input.header.llmConnectionId,
           this.input.modelId,
         )
           ? checkpoint

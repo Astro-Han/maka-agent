@@ -1924,7 +1924,7 @@ test('conversation copy clones one terminal Runtime ledger with new owned identi
       coveredRuntimeEvents: sourceEvents.filter(isHistoryCompactContentEvent),
       providerState: {
         kind: 'openai_codex_remote_v2',
-        connectionSlug: 'codex-source',
+        connectionId: 'connection-codex-source',
         modelId: 'gpt-5-codex',
         itemId: 'cmp-source',
         encryptedContent: 'OPAQUE_SOURCE_COMPACTION_STATE',

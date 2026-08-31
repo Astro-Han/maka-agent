@@ -58,7 +58,7 @@ test('checkpoint replay uses the canonical ledger before stale tool results are 
     charsPerToken: 1,
     providerState: {
       kind: 'openai_codex_remote_v2',
-      connectionSlug: 'codex',
+      connectionId: 'connection-codex',
       modelId: 'gpt-test',
       itemId: 'compact-item',
       encryptedContent: 'encrypted',

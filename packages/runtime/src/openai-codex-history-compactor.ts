@@ -23,6 +23,7 @@ import type {
 } from './ai-sdk-compaction-contract.js';
 import { HistoryCompactSummarizerError } from './history-compact-error.js';
 import {
+  canContinueHistoryCompactCheckpointForModel,
   historyCompactCheckpointToModelMessage,
   isProviderHistoryCompactCheckpoint,
   type HistoryCompactProviderState,
@@ -41,8 +42,7 @@ import { providerFailureDiagnostic } from './provider-error-classification.js';
 
 export interface BuildOpenAiCodexHistoryCompactorOptions {
   resolveModel: () => unknown;
-  connectionId?: string;
-  connectionSlug: string;
+  connectionId: string;
   modelId: string;
   providerOptions?: Record<string, unknown>;
 }
@@ -66,9 +66,12 @@ export function buildOpenAiCodexHistoryCompactor(options: BuildOpenAiCodexHistor
       const canContinuePrevious =
         previous &&
         isProviderHistoryCompactCheckpoint(previous) &&
-        previous.providerState.kind === 'openai_codex_remote_v2' &&
-        previous.providerState.connectionSlug === options.connectionSlug &&
-        previous.providerState.modelId === options.modelId;
+        canContinueHistoryCompactCheckpointForModel(
+          previous,
+          { providerType: 'openai-codex' },
+          options.connectionId,
+          options.modelId,
+        );
       const events = canContinuePrevious
         ? (input.newlyFoldedRuntimeEvents ?? [])
         : input.source.foldedRuntimeEvents;
@@ -121,7 +124,7 @@ export function buildOpenAiCodexHistoryCompactor(options: BuildOpenAiCodexHistor
       if (streamError) throw streamError;
       const state = extractOpenAiCodexCompactionState(
         content,
-        options.connectionSlug,
+        options.connectionId,
         options.modelId,
       );
       if (!state) throw new HistoryCompactSummarizerError('invalid_provider_state');
@@ -347,7 +350,7 @@ export function openAiCodexCompactionMessages(
 
 export function extractOpenAiCodexCompactionState(
   content: readonly unknown[] | undefined,
-  connectionSlug: string,
+  connectionId: string,
   modelId: string,
 ): HistoryCompactProviderState | undefined {
   const parts = (content ?? []).filter(isOpenAiCompactionPart);
@@ -356,7 +359,7 @@ export function extractOpenAiCodexCompactionState(
   if (!nonEmpty(metadata.itemId) || !nonEmpty(metadata.encryptedContent)) return undefined;
   return {
     kind: 'openai_codex_remote_v2',
-    connectionSlug,
+    connectionId,
     modelId,
     itemId: metadata.itemId,
     encryptedContent: metadata.encryptedContent,

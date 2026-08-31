@@ -105,7 +105,7 @@ describe('OpenAI Codex compaction output', () => {
       ),
       {
         kind: 'openai_codex_remote_v2',
-        connectionSlug: 'codex-subscription',
+        connectionId: 'codex-subscription',
         modelId: 'gpt-5.3-codex',
         itemId: 'item-1',
         encryptedContent: 'encrypted-1',
