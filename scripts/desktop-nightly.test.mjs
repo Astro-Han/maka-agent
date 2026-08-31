@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { resolveDesktopBuilderConfig } from '../apps/desktop/electron-builder.config.mjs';
@@ -69,7 +69,7 @@ test('the macOS Nightly wrapper accepts dev update metadata', async () => {
     run: async () => {},
     remove: async () => {},
     assertFile: async (path) => {
-      if (path.endsWith('.yml')) assert.match(path, /\/dev-mac\.yml$/u);
+      if (path.endsWith('.yml')) assert.equal(basename(path), 'dev-mac.yml');
     },
   });
 });
@@ -85,7 +85,7 @@ test('the Windows Nightly wrapper accepts dev update metadata', async () => {
     makeDirectory: async () => {},
     copy: async () => {},
     assertFile: async (path) => {
-      if (path.endsWith('.yml')) assert.match(path, /\/dev\.yml$/u);
+      if (path.endsWith('.yml')) assert.equal(basename(path), 'dev.yml');
     },
   });
 });
