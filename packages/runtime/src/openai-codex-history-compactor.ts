@@ -189,7 +189,7 @@ function hasAbortCause(error: unknown): boolean {
  */
 export function openAiCodexCompactionMessages(
   events: readonly RuntimeEvent[],
-  providerReasoningReplayEventIds?: ReadonlySet<string>,
+  providerReasoningReplayEventIds: ReadonlySet<string>,
 ): ModelMessage[] {
   type ToolCall = Extract<RuntimeEventModelReplayItem, { kind: 'tool_call' }>;
   type ToolResult = Extract<RuntimeEventModelReplayItem, { kind: 'tool_result' }>;
@@ -231,10 +231,7 @@ export function openAiCodexCompactionMessages(
       continue;
     }
     if (item.kind === 'thinking') {
-      if (
-        providerReasoningReplayEventIds !== undefined &&
-        !providerReasoningReplayEventIds.has(item.eventId)
-      ) {
+      if (!providerReasoningReplayEventIds.has(item.eventId)) {
         continue;
       }
       if (item.stepId) step(item.stepId).reasoning.push(item);

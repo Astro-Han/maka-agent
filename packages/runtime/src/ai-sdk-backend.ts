@@ -1117,8 +1117,18 @@ export class AiSdkBackend implements AgentBackend {
       modelAdapter: this.modelAdapter,
       createProviderRequestTracker: (trackerInput) =>
         this.createProviderRequestTracker(trackerInput),
-      materializeRuntimeReplayPlan: (plan, imageBudget, checkpoint) =>
-        this.materializeRuntimeReplayPlan(plan, imageBudget, checkpoint),
+      materializeRuntimeReplayPlan: (
+        plan,
+        imageBudget,
+        checkpoint,
+        providerReasoningReplayEventIds,
+      ) =>
+        this.materializeRuntimeReplayPlan(
+          plan,
+          imageBudget,
+          checkpoint,
+          providerReasoningReplayEventIds,
+        ),
       canReplayProviderNative: (plan) => this.canReplayProviderNative(plan),
     });
     if (
@@ -1917,6 +1927,13 @@ export class AiSdkBackend implements AgentBackend {
             replayPlan,
             scope.imageBudget,
             projectionCheckpoint,
+            compatibleProviderReasoningReplayEventIds(
+              replayEvents,
+              input.runtimeContextRunHeaders,
+              this.input.header.llmConnectionId,
+              this.input.modelId,
+              scope.runId,
+            ),
           );
           return projectionCheckpoint
             ? currentTurnMessages
@@ -3652,8 +3669,8 @@ export class AiSdkBackend implements AgentBackend {
   private async materializeRuntimeReplayPlan(
     plan: RuntimeEventModelReplayPlan,
     budget: ProviderImageBudget,
-    historyCompactCheckpoint?: HistoryCompactCheckpoint,
-    providerReasoningReplayEventIds?: ReadonlySet<string>,
+    historyCompactCheckpoint: HistoryCompactCheckpoint | undefined,
+    providerReasoningReplayEventIds: ReadonlySet<string>,
   ): Promise<ModelMessage[]> {
     type ToolCallItem = Extract<RuntimeEventModelReplayItem, { kind: 'tool_call' }>;
     type ToolResultItem = Extract<RuntimeEventModelReplayItem, { kind: 'tool_result' }>;
@@ -3680,10 +3697,7 @@ export class AiSdkBackend implements AgentBackend {
 
     const replaySupport = this.modelAdapter.runtimeEventReplaySupport();
     const reasoningReplay = (item: ThinkingItem): ReplayReasoning | undefined => {
-      if (
-        providerReasoningReplayEventIds !== undefined &&
-        !providerReasoningReplayEventIds.has(item.eventId)
-      ) {
+      if (!providerReasoningReplayEventIds.has(item.eventId)) {
         return undefined;
       }
       if (item.signature) {

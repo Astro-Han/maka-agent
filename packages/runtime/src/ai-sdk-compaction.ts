@@ -91,6 +91,7 @@ import type { MakaTool } from './tool-runtime.js';
 import {
   buildRuntimeEventModelReplayPlan,
   collectToolActivityTurnIds,
+  compatibleProviderReasoningReplayEventIds,
   type RuntimeEventModelReplayPlan,
 } from './model-history.js';
 import { toolSchemaCharsForDiagnostics } from './request-shape.js';
@@ -176,7 +177,8 @@ export interface AiSdkCompactionDeps {
   materializeRuntimeReplayPlan: (
     plan: RuntimeEventModelReplayPlan,
     imageBudget: ProviderImageBudget,
-    checkpoint?: HistoryCompactCheckpoint,
+    checkpoint: HistoryCompactCheckpoint | undefined,
+    providerReasoningReplayEventIds: ReadonlySet<string>,
   ) => Promise<ModelMessage[]>;
   canReplayProviderNative: (plan: RuntimeEventModelReplayPlan) => boolean;
 }
@@ -197,7 +199,8 @@ export class AiSdkCompaction {
   private readonly materializeRuntimeReplayPlan: (
     plan: RuntimeEventModelReplayPlan,
     imageBudget: ProviderImageBudget,
-    checkpoint?: HistoryCompactCheckpoint,
+    checkpoint: HistoryCompactCheckpoint | undefined,
+    providerReasoningReplayEventIds: ReadonlySet<string>,
   ) => Promise<ModelMessage[]>;
   private readonly canReplayProviderNative: (plan: RuntimeEventModelReplayPlan) => boolean;
   private historyCompactAbortController: AbortController | null = null;
@@ -1074,6 +1077,13 @@ export class AiSdkCompaction {
       replayPlan,
       input.origin.imageBudget,
       plan.checkpoint,
+      compatibleProviderReasoningReplayEventIds(
+        plan.replacementEvents,
+        state.priorRunHeaders,
+        this.targetConnectionId,
+        this.input.modelId,
+        input.origin.runId,
+      ),
     );
     // Apply the shape only when it actually shrinks the request versus the
     // reference payload (the incoming request for the proactive hook, the

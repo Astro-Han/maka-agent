@@ -621,38 +621,41 @@ describe('responses wire request body', () => {
       content,
       ...(refs ? { refs } : {}),
     });
-    const messages = openAiCodexCompactionMessages([
-      event('user', 'user', 'user', { kind: 'text', text: 'search' }),
-      event(
-        'call',
-        'model',
-        'agent',
-        {
-          kind: 'function_call',
+    const messages = openAiCodexCompactionMessages(
+      [
+        event('user', 'user', 'user', { kind: 'text', text: 'search' }),
+        event(
+          'call',
+          'model',
+          'agent',
+          {
+            kind: 'function_call',
+            id: 'search-1',
+            name: 'WebSearch',
+            args: { query: 'latest Maka' },
+            providerExecuted: true,
+          },
+          { stepId: 'provider-step' },
+        ),
+        event('result', 'tool', 'tool', {
+          kind: 'function_response',
           id: 'search-1',
           name: 'WebSearch',
-          args: { query: 'latest Maka' },
+          result: { type: 'web_search_result', query: 'latest Maka' },
+          providerOutput: { type: 'web_search_result', id: 'ws_123' },
           providerExecuted: true,
-        },
-        { stepId: 'provider-step' },
-      ),
-      event('result', 'tool', 'tool', {
-        kind: 'function_response',
-        id: 'search-1',
-        name: 'WebSearch',
-        result: { type: 'web_search_result', query: 'latest Maka' },
-        providerOutput: { type: 'web_search_result', id: 'ws_123' },
-        providerExecuted: true,
-        isError: false,
-      }),
-      event(
-        'text',
-        'model',
-        'agent',
-        { kind: 'text', text: 'Maka shipped.' },
-        { providerEventId: 'provider-step' },
-      ),
-    ]);
+          isError: false,
+        }),
+        event(
+          'text',
+          'model',
+          'agent',
+          { kind: 'text', text: 'Maka shipped.' },
+          { providerEventId: 'provider-step' },
+        ),
+      ],
+      new Set(),
+    );
     assert.deepEqual(
       messages.map((message) => ({
         role: message.role,

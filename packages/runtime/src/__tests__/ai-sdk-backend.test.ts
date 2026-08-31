@@ -3996,6 +3996,7 @@ describe('AiSdkBackend model history', () => {
 
     const emitted: SessionEvent[] = [];
     for await (const event of backend.send({
+      runId: 'run-1',
       turnId: 'turn-1',
       text: 'run both tools',
       context: [],
