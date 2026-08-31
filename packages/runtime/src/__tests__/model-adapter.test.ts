@@ -87,8 +87,7 @@ describe('ModelAdapter stream and error normalization', () => {
       }),
       [
         {
-          kind: 'thinking',
-          text: '',
+          kind: 'thinking-start',
           providerOptions: { anthropic: { redactedData: 'opaque-redacted-thinking' } },
         },
       ],
@@ -248,7 +247,7 @@ describe('ModelAdapter stream and error normalization', () => {
     };
     assert.deepEqual(
       adapter.translateChunk({ type: 'reasoning-start', id: 'alibaba-reasoning-item' } as Chunk),
-      [{ kind: 'thinking', text: '', reasoningItemId: 'alibaba-reasoning-item' }],
+      [{ kind: 'thinking-start', reasoningPartId: 'alibaba-reasoning-item' }],
     );
     assert.deepEqual(
       adapter.translateChunk({
@@ -256,7 +255,7 @@ describe('ModelAdapter stream and error normalization', () => {
         id: 'alibaba-reasoning-item',
         delta: 'summary',
       } as Chunk),
-      [{ kind: 'thinking', text: 'summary', reasoningItemId: 'alibaba-reasoning-item' }],
+      [{ kind: 'thinking', text: 'summary', reasoningPartId: 'alibaba-reasoning-item' }],
     );
     assert.deepEqual(
       adapter.translateChunk({
@@ -274,7 +273,7 @@ describe('ModelAdapter stream and error normalization', () => {
           kind: 'thinking',
           text: '',
           providerOptions,
-          reasoningItemId: 'alibaba-reasoning-item',
+          reasoningPartId: 'alibaba-reasoning-item',
           reasoningSummaryText: 'summary',
         },
       ],
@@ -317,7 +316,13 @@ describe('ModelAdapter stream and error normalization', () => {
         id: 'deepseek-reasoning-item',
         delta: 'plaintext reasoning',
       } as Chunk),
-      [{ kind: 'thinking', text: 'plaintext reasoning' }],
+      [
+        {
+          kind: 'thinking',
+          text: 'plaintext reasoning',
+          reasoningPartId: 'deepseek-reasoning-item',
+        },
+      ],
     );
     assert.deepEqual(
       adapter.translateChunk({
@@ -685,7 +690,7 @@ describe('ModelAdapter stream and error normalization', () => {
 
     assert.deepEqual(
       events.map((event) => event.kind),
-      ['thinking', 'thinking', 'thinking-signature'],
+      ['thinking-start', 'thinking', 'thinking', 'thinking-signature'],
     );
     assert.deepEqual(
       events

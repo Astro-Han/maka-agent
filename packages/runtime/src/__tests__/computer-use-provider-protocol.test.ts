@@ -50,7 +50,7 @@ after(async () => {
 });
 
 describe('Anthropic-compatible Computer Use product loops', () => {
-  test('replays same-route redacted thinking through the Anthropic SDK converter', async () => {
+  test('replays every same-route Anthropic reasoning block in provider order', async () => {
     const sessionId = 'session-anthropic-redacted-replay';
     const firstTurn = createDurableTurnHarness({
       sessionId,
@@ -70,11 +70,15 @@ describe('Anthropic-compatible Computer Use product loops', () => {
       assert.equal(request.url, '/v1/messages');
       requestBodies.push(JSON.parse(await readBody(request)) as Record<string, unknown>);
       if (requestBodies.length === 1) {
-        respondAnthropicRedactedStream(
-          response,
-          'claude-sonnet-4-5-20250929',
-          'opaque-redacted-thinking',
-        );
+        respondAnthropicReasoningBlocksStream(response, 'claude-sonnet-4-5-20250929', [
+          {
+            kind: 'signed',
+            text: 'inspect safely',
+            signature: 'signed-thinking-1',
+          },
+          { kind: 'redacted', data: 'opaque-redacted-thinking-1' },
+          { kind: 'redacted', data: 'opaque-redacted-thinking-2' },
+        ]);
       } else {
         respondAnthropicStream(response, 'claude-sonnet-4-5-20250929', 2, undefined);
       }
@@ -115,14 +119,28 @@ describe('Anthropic-compatible Computer Use product loops', () => {
       completedAt: 2,
     } satisfies AgentRunHeader;
     for await (const event of createRuntime().send(firstTurn.sendInput())) firstTurn.record(event);
-    assert.ok(
-      firstTurn.ledger.some(
-        (event) =>
-          event.content?.kind === 'thinking' &&
-          isRecord(event.content.providerOptions?.anthropic) &&
-          event.content.providerOptions.anthropic.redactedData === 'opaque-redacted-thinking',
-      ),
-      'ModelAdapter metadata must survive the RuntimeEvent durability boundary',
+    assert.deepEqual(
+      firstTurn.ledger
+        .filter(
+          (
+            event,
+          ): event is RuntimeEvent & {
+            content: Extract<NonNullable<RuntimeEvent['content']>, { kind: 'thinking' }>;
+          } => event.partial === false && event.content?.kind === 'thinking',
+        )
+        .map((event) => [
+          event.content.text,
+          event.content.signature,
+          isRecord(event.content.providerOptions?.anthropic)
+            ? event.content.providerOptions.anthropic.redactedData
+            : undefined,
+        ]),
+      [
+        ['inspect safely', 'signed-thinking-1', undefined],
+        ['', undefined, 'opaque-redacted-thinking-1'],
+        ['', undefined, 'opaque-redacted-thinking-2'],
+      ],
+      'ModelAdapter must preserve every ordered reasoning block at the RuntimeEvent boundary',
     );
 
     for await (const event of createRuntime().send(
@@ -135,10 +153,15 @@ describe('Anthropic-compatible Computer Use product loops', () => {
     }
 
     assert.equal(requestBodies.length, 2);
-    assert.ok(
-      collectRecords(requestBodies[1]!.messages).some(
-        (block) => block.type === 'redacted_thinking' && block.data === 'opaque-redacted-thinking',
-      ),
+    assert.deepEqual(
+      collectRecords(requestBodies[1]!.messages)
+        .filter((block) => block.type === 'thinking' || block.type === 'redacted_thinking')
+        .map((block) => [block.type, block.thinking, block.signature, block.data]),
+      [
+        ['thinking', 'inspect safely', 'signed-thinking-1', undefined],
+        ['redacted_thinking', undefined, undefined, 'opaque-redacted-thinking-1'],
+        ['redacted_thinking', undefined, undefined, 'opaque-redacted-thinking-2'],
+      ],
     );
   });
 
@@ -1409,10 +1432,13 @@ function respondOpenAiTextStream(
   response.end();
 }
 
-function respondAnthropicRedactedStream(
+function respondAnthropicReasoningBlocksStream(
   response: ServerResponse,
   model: string,
-  redactedData: string,
+  blocks: readonly (
+    | { kind: 'signed'; text: string; signature: string }
+    | { kind: 'redacted'; data: string }
+  )[],
 ) {
   response.writeHead(200, {
     'content-type': 'text/event-stream',
@@ -1434,18 +1460,35 @@ function respondAnthropicRedactedStream(
       usage: { input_tokens: 10, output_tokens: 0 },
     },
   });
+  for (const [index, block] of blocks.entries()) {
+    send('content_block_start', {
+      type: 'content_block_start',
+      index,
+      content_block:
+        block.kind === 'signed'
+          ? { type: 'thinking', thinking: '' }
+          : { type: 'redacted_thinking', data: block.data },
+    });
+    if (block.kind === 'signed') {
+      send('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'thinking_delta', thinking: block.text },
+      });
+      send('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'signature_delta', signature: block.signature },
+      });
+    }
+    send('content_block_stop', { type: 'content_block_stop', index });
+  }
   send('content_block_start', {
     type: 'content_block_start',
-    index: 0,
-    content_block: { type: 'redacted_thinking', data: redactedData },
-  });
-  send('content_block_stop', { type: 'content_block_stop', index: 0 });
-  send('content_block_start', {
-    type: 'content_block_start',
-    index: 1,
+    index: blocks.length,
     content_block: { type: 'text', text: 'Inspection complete.' },
   });
-  send('content_block_stop', { type: 'content_block_stop', index: 1 });
+  send('content_block_stop', { type: 'content_block_stop', index: blocks.length });
   send('message_delta', {
     type: 'message_delta',
     delta: { stop_reason: 'end_turn', stop_sequence: null },

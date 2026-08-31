@@ -1455,12 +1455,8 @@ export class AiSdkBackend implements AgentBackend {
     let stepText = '';
     let stepTextProviderOptions: NonNullable<ModelMessage['providerOptions']> | undefined;
     let stepTextPartStartOffset = 0;
-    let stepThinking = '';
-    let sawStepThinking = false;
-    let stepThinkingProviderOptions: NonNullable<ModelMessage['providerOptions']> | undefined;
-    let stepResponsesThinkingParts: AssistantThinkingPart[] = [];
-    let stepResponsesThinkingPartsByItemId = new Map<string, AssistantThinkingPart>();
-    let stepSignature: string | undefined;
+    let stepThinkingParts: AssistantThinkingPart[] = [];
+    let stepThinkingPartsById = new Map<string, AssistantThinkingPart>();
     const startedAt = this.now();
 
     // Flush the current step's AssistantMessage (text + thinking) and the paired
@@ -1473,21 +1469,10 @@ export class AiSdkBackend implements AgentBackend {
     // this step's assistant row. Hoisted to send() scope so both the streaming
     // path and the abort/error handler can flush a partial step.
     const flushStep = async (): Promise<void> => {
-      const hasThinking = sawStepThinking || stepSignature !== undefined;
+      const hasThinking = stepThinkingParts.length > 0;
       if (stepText.length === 0 && !hasThinking) return;
       const stepId = currentStepMessageId;
-      const thinkingParts: AssistantThinkingPart[] =
-        stepResponsesThinkingParts.length > 0
-          ? stepResponsesThinkingParts
-          : [
-              {
-                text: stepThinking,
-                ...(stepSignature !== undefined ? { signature: stepSignature } : {}),
-                ...(stepThinkingProviderOptions !== undefined
-                  ? { providerOptions: stepThinkingProviderOptions }
-                  : {}),
-              },
-            ];
+      const thinkingText = stepThinkingParts.map((part) => part.text).join('');
       const msg: AssistantMessage = {
         type: 'assistant',
         id: stepId,
@@ -1501,21 +1486,22 @@ export class AiSdkBackend implements AgentBackend {
         ...(hasThinking
           ? {
               thinking: {
-                text: stepThinking,
-                ...(thinkingParts.length === 1 && thinkingParts[0]!.signature !== undefined
-                  ? { signature: thinkingParts[0]!.signature }
+                text: thinkingText,
+                ...(stepThinkingParts.length === 1 && stepThinkingParts[0]!.signature !== undefined
+                  ? { signature: stepThinkingParts[0]!.signature }
                   : {}),
-                ...(thinkingParts.length === 1 && thinkingParts[0]!.providerOptions !== undefined
-                  ? { providerOptions: thinkingParts[0]!.providerOptions }
+                ...(stepThinkingParts.length === 1 &&
+                stepThinkingParts[0]!.providerOptions !== undefined
+                  ? { providerOptions: stepThinkingParts[0]!.providerOptions }
                   : {}),
-                ...(thinkingParts.length > 1 ? { parts: thinkingParts } : {}),
+                ...(stepThinkingParts.length > 1 ? { parts: stepThinkingParts } : {}),
               },
             }
           : {}),
       };
       await this.input.appendMessage(msg);
       if (hasThinking) {
-        for (const part of thinkingParts) {
+        for (const part of stepThinkingParts) {
           queue.push({
             type: 'thinking_complete',
             id: this.newId(),
@@ -1551,12 +1537,8 @@ export class AiSdkBackend implements AgentBackend {
       stepText = '';
       stepTextProviderOptions = undefined;
       stepTextPartStartOffset = 0;
-      stepThinking = '';
-      sawStepThinking = false;
-      stepThinkingProviderOptions = undefined;
-      stepResponsesThinkingParts = [];
-      stepResponsesThinkingPartsByItemId = new Map();
-      stepSignature = undefined;
+      stepThinkingParts = [];
+      stepThinkingPartsById = new Map();
     };
     let tokenUsage: NormalizedAiSdkUsage | undefined;
     let tokenUsageCostUsd: number | undefined;
@@ -2231,20 +2213,32 @@ export class AiSdkBackend implements AgentBackend {
                   >,
                   stepTextPartStartOffset,
                 );
+              } else if (event.kind === 'thinking-start') {
+                if (event.providerOptions !== undefined) {
+                  attemptSawContinuationMetadata = true;
+                }
+                const part: AssistantThinkingPart = {
+                  text: '',
+                  ...(event.providerOptions !== undefined
+                    ? { providerOptions: event.providerOptions }
+                    : {}),
+                };
+                stepThinkingParts.push(part);
+                if (event.reasoningPartId) {
+                  stepThinkingPartsById.set(event.reasoningPartId, part);
+                }
               } else if (event.kind === 'thinking') {
-                sawStepThinking = true;
-                stepThinking += event.text;
                 if (event.text.length > 0) attemptSawThinking = true;
                 if (event.providerOptions !== undefined) {
                   if (event.providerOptionsOrigin !== 'maka_transport') {
                     attemptSawContinuationMetadata = true;
                   }
-                  stepThinkingProviderOptions = event.providerOptions;
                 }
-                const itemId =
-                  event.reasoningItemId ?? responsesReasoningItemId(event.providerOptions);
-                if (typeof itemId === 'string' && itemId.length > 0) {
-                  let part = stepResponsesThinkingPartsByItemId.get(itemId);
+                const partId =
+                  event.reasoningPartId ?? responsesReasoningItemId(event.providerOptions);
+                let part: AssistantThinkingPart | undefined;
+                if (typeof partId === 'string' && partId.length > 0) {
+                  part = stepThinkingPartsById.get(partId);
                   if (
                     part &&
                     event.providerOptions === undefined &&
@@ -2254,45 +2248,42 @@ export class AiSdkBackend implements AgentBackend {
                     // output_item.done. Keep it out of the finalized item or
                     // its durable summary boundaries will no longer match.
                     part = { text: '' };
-                    stepResponsesThinkingParts.push(part);
-                    stepResponsesThinkingPartsByItemId.set(itemId, part);
+                    stepThinkingParts.push(part);
+                    stepThinkingPartsById.set(partId, part);
                   }
                   if (!part) {
-                    part = {
-                      text:
-                        stepResponsesThinkingParts.length === 0 && event.text.length === 0
-                          ? stepThinking
-                          : '',
-                    };
-                    stepResponsesThinkingParts.push(part);
-                    stepResponsesThinkingPartsByItemId.set(itemId, part);
+                    part = { text: '' };
+                    stepThinkingParts.push(part);
+                    stepThinkingPartsById.set(partId, part);
                   }
-                  const nextPartText = part.text + event.text;
+                } else {
+                  part = stepThinkingParts.at(-1);
                   if (
-                    event.reasoningSummaryText !== undefined &&
-                    event.reasoningSummaryText !== nextPartText
+                    part &&
+                    decodePlaintextResponsesReasoningState(part.providerOptions).kind === 'valid'
                   ) {
-                    throw new Error(
-                      'Streamed plaintext Responses reasoning does not match final provider summary',
-                    );
-                  }
-                  part.text = nextPartText;
-                  if (event.providerOptions !== undefined) {
-                    part.providerOptions = event.providerOptions;
-                  }
-                } else if (stepResponsesThinkingParts.length > 0) {
-                  const lastPart = stepResponsesThinkingParts.at(-1)!;
-                  const lastState = decodePlaintextResponsesReasoningState(
-                    lastPart.providerOptions,
-                  );
-                  if (lastState.kind === 'valid') {
                     // An invalid next item has no usable stream id. Do not
                     // append its deltas to the finalized item: partial-error
                     // flush must keep that item's durable boundaries valid.
-                    stepResponsesThinkingParts.push({ text: event.text });
-                  } else {
-                    lastPart.text += event.text;
+                    part = undefined;
                   }
+                }
+                if (!part) {
+                  part = { text: '' };
+                  stepThinkingParts.push(part);
+                }
+                const nextPartText = part.text + event.text;
+                if (
+                  event.reasoningSummaryText !== undefined &&
+                  event.reasoningSummaryText !== nextPartText
+                ) {
+                  throw new Error(
+                    'Streamed plaintext Responses reasoning does not match final provider summary',
+                  );
+                }
+                part.text = nextPartText;
+                if (event.providerOptions !== undefined) {
+                  part.providerOptions = event.providerOptions;
                 }
                 queue.push({
                   type: 'thinking_delta',
@@ -2304,7 +2295,17 @@ export class AiSdkBackend implements AgentBackend {
                 } satisfies ThinkingDeltaEvent);
               } else if (event.kind === 'thinking-signature') {
                 attemptSawContinuationMetadata = true;
-                stepSignature = event.signature;
+                let part = event.reasoningPartId
+                  ? stepThinkingPartsById.get(event.reasoningPartId)
+                  : stepThinkingParts.at(-1);
+                if (!part) {
+                  part = { text: '' };
+                  stepThinkingParts.push(part);
+                  if (event.reasoningPartId) {
+                    stepThinkingPartsById.set(event.reasoningPartId, part);
+                  }
+                }
+                part.signature = event.signature;
               } else if (event.kind === 'provider-tool-input') {
                 // The provider has started its own tool. Even without a
                 // final tool-call/result event, retrying can repeat external
@@ -2469,7 +2470,7 @@ export class AiSdkBackend implements AgentBackend {
               ) {
                 if (idleWatchdogRecovery) {
                   idleWatchdogRetryCount += 1;
-                  if (stepThinking.length > 0) {
+                  if (stepThinkingParts.length > 0) {
                     await flushStep();
                     currentStepMessageId = this.newId();
                   }
