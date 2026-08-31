@@ -188,7 +188,7 @@ function hasAbortCause(error: unknown): boolean {
  * Runtime persists tool calls/results before a step's reasoning/text closer;
  * grouping lets the compactor keep settled tool evidence before grounded text.
  */
-export function openAiCodexCompactionMessages(
+function openAiCodexCompactionMessages(
   events: readonly RuntimeEvent[],
   providerReasoningReplayEventIds: ReadonlySet<string>,
 ): ModelMessage[] {

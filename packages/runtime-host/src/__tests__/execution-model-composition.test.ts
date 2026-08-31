@@ -964,6 +964,45 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
           },
         },
       },
+      {
+        id: 'compact-provider-tool-call',
+        invocationId: 'compact-invocation',
+        runId: 'compact-same-route-run',
+        sessionId: 'backend-creation-session',
+        turnId: 'turn-current-route-model',
+        ts: 4,
+        partial: false,
+        role: 'model',
+        author: 'agent',
+        content: {
+          kind: 'function_call',
+          id: 'compact-web-search',
+          name: 'WebSearch',
+          args: { query: 'latest Maka' },
+          providerExecuted: true,
+        },
+        refs: { stepId: 'compact-provider-step' },
+      },
+      {
+        id: 'compact-provider-tool-result',
+        invocationId: 'compact-invocation',
+        runId: 'compact-same-route-run',
+        sessionId: 'backend-creation-session',
+        turnId: 'turn-current-route-model',
+        ts: 5,
+        partial: false,
+        role: 'tool',
+        author: 'tool',
+        content: {
+          kind: 'function_response',
+          id: 'compact-web-search',
+          name: 'WebSearch',
+          result: { type: 'web_search_result', query: 'latest Maka' },
+          providerOutput: { type: 'web_search_result', id: 'ws_compact' },
+          providerExecuted: true,
+          isError: false,
+        },
+      },
       compactRuntimeTextEvent(
         'compact-recent-user',
         'turn-recent-user',
@@ -1023,6 +1062,28 @@ test('Codex OAuth history compaction falls back to a text checkpoint after nativ
     assert.match(nativeRequestText, /SAME_ROUTE_ENCRYPTED_REASONING/);
     assert.match(nativeRequestText, /recent context/);
     assert.doesNotMatch(nativeRequestText, /context summarization assistant/i);
+    const nativeInput = requests[0]!.body.input;
+    assert.ok(Array.isArray(nativeInput));
+    const functionCallIds = new Set(
+      nativeInput
+        .filter(
+          (item): item is Record<string, unknown> =>
+            typeof item === 'object' && item !== null && item.type === 'function_call',
+        )
+        .map((item) => String(item.call_id)),
+    );
+    const functionOutputIds = nativeInput
+      .filter(
+        (item): item is Record<string, unknown> =>
+          typeof item === 'object' && item !== null && item.type === 'function_call_output',
+      )
+      .map((item) => String(item.call_id));
+    assert.deepEqual([...functionCallIds], ['compact-web-search']);
+    assert.deepEqual(functionOutputIds, ['compact-web-search']);
+    assert.deepEqual(
+      functionOutputIds.filter((callId) => !functionCallIds.has(callId)),
+      [],
+    );
     assert.doesNotMatch(fallbackRequestText, /"type":"compaction_trigger"/);
     assert.match(fallbackRequestText, /context summarization assistant/i);
     assert.equal(result.outcome.kind, 'compacted');
