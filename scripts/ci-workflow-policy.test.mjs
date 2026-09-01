@@ -768,28 +768,46 @@ test('core CI runs the live Eval proxy lifecycle when Eval is selected', () => {
   assert.doesNotMatch(evalPackage.scripts['test:dist'], /test_egress_filter_live\.py/u);
 });
 
-test('every suite that runs before dependency setup imports only node builtins', () => {
-  // The steps above `setup-node` run against a bare checkout, so a suite there
-  // that imports a devDependency throws `ERR_MODULE_NOT_FOUND` and turns the
-  // one required context red on every pull request — no merge, anywhere, until
-  // someone notices. Nothing about the file says so, which is how a closure
-  // assertion needing esbuild was very nearly added to one of them.
+test('everything that runs before dependency setup imports only node builtins', () => {
+  // The steps above `setup-node` run against a bare checkout, so a script there
+  // that imports a devDependency throws `ERR_MODULE_NOT_FOUND`. Whether that
+  // turns the one required context red on every pull request or only on the
+  // introducing one depends on how the step is gated, and neither is a state
+  // anyone should reach by accident — a closure assertion needing esbuild was
+  // very nearly added to one of them.
   //
-  // Derived from the workflow: whichever suites those steps name are the ones
-  // that carry the constraint, so moving a step below the install lifts it and
-  // adding a step above imposes it, without anyone editing this test.
+  // Derived from the workflow: whichever entry points those steps name are the
+  // ones that carry the constraint, so moving a step below the install lifts it
+  // and adding a step above imposes it, without anyone editing this test.
   const workflow = readWorkflow('ci.yml');
   const [installFree] = workflow.split(/\n\s+- uses: actions\/setup-node[^\n]*\n/u);
-  const suites = [
-    ...new Set(
-      [...installFree.matchAll(/(scripts\/[\w.-]+\.test\.mjs)/gu)].map(([, path]) => path),
-    ),
+
+  // `npm run` names a script, not a file, so expand one hop through the
+  // manifest. Four install-free entry points are reached only that way —
+  // `check:asf-headers` runs `scripts/asf-license-headers.mjs`, which carries
+  // the constraint and was outside the set that asserts it.
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const commands = [
+    installFree,
+    ...[...installFree.matchAll(/npm run ([\w:-]+)/gu)].map(([, name]) => {
+      const command = manifest.scripts?.[name];
+      assert.ok(command, `ci.yml runs npm run ${name}, which package.json does not define`);
+      return command;
+    }),
+  ].join('\n');
+
+  // `[\w./-]`, not `[\w.-]`: a class without `/` cannot match a path with a
+  // directory in it, which is how `scripts/computer-use/lab-root.test.mjs` —
+  // named by a step above the install — was dropped from this derivation while
+  // the count still looked right.
+  const entryPoints = [
+    ...new Set([...commands.matchAll(/(scripts\/[\w./-]+\.mjs)/gu)].map(([, path]) => path)),
   ].sort();
-  assert.ok(suites.length > 0, 'no suite runs before dependency setup');
+  assert.ok(entryPoints.length > 0, 'nothing runs before dependency setup');
 
   // The constraint is transitive: a local module may be imported only if it too
   // stays inside `node:`.
-  const pending = [...suites];
+  const pending = [...entryPoints];
   const seen = new Set(pending);
   while (pending.length > 0) {
     const path = pending.shift();
