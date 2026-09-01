@@ -33,18 +33,18 @@ import { readPullRequestPathFilter } from './workflow-pull-request-paths.mjs';
  * it has to earn that here rather than sit indistinguishable among the twenty
  * derived entries — which is the only way a rotted one is ever noticed.
  */
-const UNDERIVED_PACKAGE_PATTERNS = new Map([
+const UNDERIVED_PACKAGE_PATTERNS = new Set([
   // Regenerated and diffed by `check:release`, and consumed by the packaging
   // step rather than imported by the worker.
-  ['packages/cli/RUNTIME_HOST_PEER_DEPENDENCIES.rust.tsv', 'peer dependency manifest'],
-  ['packages/cli/RUNTIME_HOST_PEER_THIRD_PARTY_NOTICES.txt', 'peer dependency manifest'],
+  'packages/cli/RUNTIME_HOST_PEER_DEPENDENCIES.rust.tsv',
+  'packages/cli/RUNTIME_HOST_PEER_THIRD_PARTY_NOTICES.txt',
   // Candidate election runs in the packaged app, not in the worker closure, and
   // has broken this path before.
-  ['packages/runtime-host/src/client/connect-or-spawn.ts', 'Runtime Host candidate election'],
-  ['packages/runtime-host/src/client/launcher.ts', 'Runtime Host candidate election'],
+  'packages/runtime-host/src/client/connect-or-spawn.ts',
+  'packages/runtime-host/src/client/launcher.ts',
   // Builds the worker the closure starts from, so it precedes rather than joins
   // it.
-  ['packages/runtime/scripts/build-filesystem-worker.mjs', 'builds the worker itself'],
+  'packages/runtime/scripts/build-filesystem-worker.mjs',
 ]);
 
 test('the Windows package trigger is exactly its closure plus declared exceptions', async () => {
@@ -78,7 +78,7 @@ test('the Windows package trigger is exactly its closure plus declared exception
     .filter((pattern) => pattern.startsWith('packages/'))
     .filter((pattern) => !closure.some((path) => windowsReleasePatternCoversSource(path, pattern)))
     .sort();
-  assert.deepEqual(underived, [...UNDERIVED_PACKAGE_PATTERNS.keys()].sort());
+  assert.deepEqual(underived, [...UNDERIVED_PACKAGE_PATTERNS].sort());
 });
 
 test('the Windows package workflow path list has no duplicate entries', () => {
