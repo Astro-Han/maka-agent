@@ -125,6 +125,48 @@ test('contract checks run before dependency setup and can fail the job', () => {
   }
 });
 
+test('every selection that gates a step needing dependencies selects the install', () => {
+  const workflow = readWorkflow('ci.yml');
+
+  // `npm ci` is the only thing that decides whether a later step has anything
+  // to run against, so a step below it gated on a selection that cannot reach
+  // the install would run on a bare checkout — or, if its `run:` tolerates
+  // that, report green having done nothing. Both sides are read out of the
+  // workflow, so a step or a term added to either is covered by the edit that
+  // adds it.
+  const install = workflow.indexOf('run: npm ci');
+  assert.ok(install >= 0, 'ci.yml no longer installs dependencies');
+  const installStep = workflow.slice(
+    workflow.lastIndexOf('\n      - name:', install) + 1,
+    workflow.indexOf('\n      - ', install),
+  );
+  const installed = workflow.slice(workflow.indexOf('\n      - ', install));
+
+  // Any selection named inside an `if:` gates that step, whichever way the
+  // condition spells it — `== 'true'`, `!= ''` and `contains(...)` are all
+  // already in this file, and recognising one form drops the rest silently.
+  assert.doesNotMatch(installed, /\n\s+if: [>|]/u, 'a block-scalar `if:` hides its own gates');
+  const gating = conditionSelections(installed);
+  assert.ok(gating.length > 0, 'no step below the install is gated on a selection');
+  const installGate = conditionSelections(installStep);
+  assert.ok(installGate.length > 0, 'the install step is unconditional');
+
+  // The implication, not the text: `state_root_compat` is not in the install
+  // condition and never needed to be, because every path that selects it also
+  // selects `code`. That is what has to hold, and it is unwritten — moving one
+  // of those paths under `.github/`, which the planner's `code` loop skips,
+  // breaks it while every assertion phrased over the two lists stays green.
+  for (const path of plannerPathCorpus()) {
+    const plan = planTests([path]);
+    const gated = gating.filter((output) => selects(plan, output));
+    if (gated.length === 0) continue;
+    assert.ok(
+      installGate.some((output) => selects(plan, output)),
+      `${path} selects ${gated.join(', ')}, which gates a step run against no node_modules`,
+    );
+  }
+});
+
 test('the app icon gate selects every file its own tests open', () => {
   // Derived from the step, not from a memory of it: whatever `App icon artwork
   // drift` runs is the authority on what has to select it. The list this
@@ -808,6 +850,42 @@ function pathFilter(name, trigger) {
     if (entry) paths.push(entry[1]);
   }
   return paths;
+}
+
+/** Plan selections named by any `if:` in `section`, whatever the condition spells. */
+function conditionSelections(section) {
+  return [
+    ...new Set(
+      [...section.matchAll(/^\s+if: ([^\n]*)$/gmu)].flatMap(([, condition]) =>
+        [...condition.matchAll(/steps\.plan\.outputs\.(\w+)/gu)].map(([, name]) => name),
+      ),
+    ),
+  ].sort();
+}
+
+/** The planner names selections in camelCase and publishes them in snake_case. */
+function selects(plan, output) {
+  const key = output.replace(/_(\w)/gu, (_, letter) => letter.toUpperCase());
+  assert.ok(key in plan, `CI gates on ${output}, which the planner does not select`);
+  const value = plan[key];
+  return Array.isArray(value) ? value.length > 0 : Boolean(value);
+}
+
+/**
+ * Changed-file inputs to test an implication between selections with: every
+ * repository path the planner's own source names, plus a probe under each,
+ * because several selections are decided by `startsWith`. Derived from the
+ * planner, so a path added to one of its sets is exercised by the edit that
+ * adds it rather than by whoever remembers this list exists.
+ */
+function plannerPathCorpus() {
+  const source = readFileSync(new URL('./ci-test-plan.mjs', import.meta.url), 'utf8');
+  const literals = [...source.matchAll(/'([\w.@][\w./@-]*)'/gu)]
+    .map(([, value]) => value)
+    .filter((value) => value.includes('/') || value.includes('.'));
+  assert.ok(literals.length > 0, 'the planner names no repository path');
+
+  return [...new Set(literals.flatMap((value) => [value, `${value}probe.ts`, `${value}/probe.ts`]))];
 }
 
 /**
