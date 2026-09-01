@@ -32,6 +32,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { formatGitHubOutputs, loadWorkspaceGraph, planTests } from './ci-test-plan.mjs';
+import {
+  readPullRequestPathFilter,
+  readTriggerPathFilter,
+  workflowTriggerBlock,
+} from './workflow-pull-request-paths.mjs';
 
 test('GitHub output matches the selections consumed by CI', () => {
   const output = formatGitHubOutputs(planTests([], { forceFull: true }));
@@ -373,9 +378,7 @@ test('the recovery lane pairs its path filter with a nightly run and a main push
   // Windows recovery run back on every pull request. The main push carries no
   // filter because `strict: false` lets a stale-base pull request go green,
   // and because a paths filter only sees the first 300 files of a diff.
-  // Stripped comment lines survive as blank ones, so the gap between the
-  // trigger and its list is any mix of blank and four-space lines.
-  assert.match(triggers, /\n {2}pull_request:\n(?:(?: {4}[^\n]*)?\n)* {4}paths:/u);
+  assert.ok(readPullRequestPathFilter('windows-recovery.yml').length > 0, 'no paths filter');
   assert.match(triggers, /\n {2}push:\n {4}branches: \[main\]\n/u);
   assert.doesNotMatch(
     triggers.match(/\n {2}push:\n(?:(?: {4}[^\n]*)?\n)*/u)?.[0] ?? '',
@@ -433,8 +436,8 @@ test('a lane that filters both triggers filters them on the same paths', () => {
   let checked = 0;
 
   for (const name of readdirSync(WORKFLOW_DIR).filter((file) => file.endsWith('.yml'))) {
-    const pullRequest = pathFilter(name, 'pull_request');
-    const push = pathFilter(name, 'push');
+    const pullRequest = readTriggerPathFilter(name, 'pull_request');
+    const push = readTriggerPathFilter(name, 'push');
     if (!pullRequest?.length || !push?.length) continue;
 
     assert.deepEqual(push, pullRequest, `${name}: pull_request and push filter different paths`);
@@ -480,7 +483,7 @@ test('the recovery lane keeps every run kind out of one shared concurrency group
 
 test('the recovery lane leaves the suites it executes to the required test lane', () => {
   const workflow = readWorkflow('windows-recovery.yml');
-  const filtered = new Set(pullRequestPathFilter('windows-recovery.yml'));
+  const filtered = new Set(readPullRequestPathFilter('windows-recovery.yml'));
 
   // Derived from the dist paths the steps run, then widened along the workspace
   // dependency graph the planner selects with. The separator class matches the
@@ -513,7 +516,7 @@ test('the recovery lane leaves the suites it executes to the required test lane'
 });
 
 test('the recovery lane filter follows the postinstall launcher chain', () => {
-  const filtered = new Set(pullRequestPathFilter('windows-recovery.yml'));
+  const filtered = new Set(readPullRequestPathFilter('windows-recovery.yml'));
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   // Derived from postinstall itself, then one hop into whatever those entry
   // points launch, because a launcher the filter cannot see still decides what
@@ -533,7 +536,7 @@ test('the recovery lane filter follows the postinstall launcher chain', () => {
 });
 
 test('the recovery lane filters pull requests by what only Windows can prove', () => {
-  const filtered = new Set(pullRequestPathFilter('windows-recovery.yml'));
+  const filtered = new Set(readPullRequestPathFilter('windows-recovery.yml'));
 
   // What is left after the workspace sources came out: how `npm.cmd ci` resolves
   // and what it produces on Windows, what `npm.cmd run build:test` cleans up
@@ -580,8 +583,8 @@ test('a filtered pull-request lane can still run when its filter misses', () => 
   // `release-windows-check.yml`, whose filter was narrowed in this branch.
   const uncovered = [];
   for (const name of readdirSync(WORKFLOW_DIR).filter((file) => file.endsWith('.yml'))) {
+    if (readPullRequestPathFilter(name).length === 0) continue;
     const triggers = triggerBlock(name);
-    if (!/\n {2}pull_request:\n(?:(?: {4}[^\n]*)?\n)* {4}paths:/u.test(triggers)) continue;
 
     const push = triggers.match(/\n {2}push:\n(?:(?: {4,}[^\n]*)?\n)*/u)?.[0] ?? '';
     const escapes =
@@ -830,46 +833,6 @@ test('everything that runs before dependency setup imports only node builtins', 
 
 const WORKFLOW_DIR = new URL('../.github/workflows/', import.meta.url);
 
-/**
- * Reads the `paths` list belonging to a workflow's `pull_request` trigger.
- * Anchoring to the trigger, instead of matching entry text anywhere in the
- * file, is what makes the filter assertions fail when entries move under
- * `paths-ignore`, under another trigger, or out of `on:` altogether.
- */
-function pullRequestPathFilter(name) {
-  const paths = pathFilter(name, 'pull_request');
-  assert.ok(paths !== null, `${name}: no pull_request trigger`);
-
-  return paths;
-}
-// Returns the trigger's `paths:` entries in order, or null when the workflow
-// does not carry that trigger at all — which is what lets a caller tell "no
-// such trigger" apart from "this trigger runs on everything".
-//
-// Reads the `on:` block with comments already stripped, so a comment between
-// the trigger and its list cannot end the scan, and accepts the quoting and
-// spacing YAML allows, so a legal rewrite reports the entries it really has
-// instead of an empty list that reads as a missing filter.
-function pathFilter(name, trigger) {
-  const lines = triggerBlock(name).split('\n');
-  const start = lines.findIndex((line) => new RegExp(`^ {2}${trigger}:\\s*$`, 'u').test(line));
-  if (start < 0) return null;
-
-  const paths = [];
-  let inPaths = false;
-  for (const line of lines.slice(start + 1)) {
-    if (line.trim() === '') continue;
-    if (/^ {0,2}\S/u.test(line)) break;
-    if (/^ {4}\S/u.test(line)) {
-      inPaths = /^ {4}paths:\s*$/u.test(line);
-      continue;
-    }
-    const entry = inPaths ? /^\s+-\s+['"]?(.+?)['"]?\s*$/u.exec(line) : null;
-    if (entry) paths.push(entry[1]);
-  }
-  return paths;
-}
-
 /** Plan selections named by any `if:` in `section`, whatever the condition spells. */
 function conditionSelections(section) {
   return [
@@ -903,7 +866,9 @@ function plannerPathCorpus() {
     .filter((value) => value.includes('/') || value.includes('.'));
   assert.ok(literals.length > 0, 'the planner names no repository path');
 
-  return [...new Set(literals.flatMap((value) => [value, `${value}probe.ts`, `${value}/probe.ts`]))];
+  return [
+    ...new Set(literals.flatMap((value) => [value, `${value}probe.ts`, `${value}/probe.ts`])),
+  ];
 }
 
 /**
@@ -930,14 +895,8 @@ function readWorkflow(name) {
   return readFileSync(new URL(name, WORKFLOW_DIR), 'utf8');
 }
 
-/**
- * Reads the `on:` block only, so a workflow cannot escape a trigger contract by
- * writing `on: [pull_request]`, and prose elsewhere in the file cannot fake one.
- */
 function triggerBlock(name) {
-  const withoutComments = readWorkflow(name).replaceAll(/^[ \t]*#.*$/gmu, '');
-
-  return withoutComments.match(/^on:(.*(?:\n(?![^\s#]).*)*)/mu)?.[1] ?? '';
+  return workflowTriggerBlock(readWorkflow(name));
 }
 
 function hasPullRequestTrigger(name) {

@@ -20,7 +20,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { build } from 'esbuild';
-import { parse as parseYaml } from 'yaml';
 
 const defaultRepoRoot = resolve(import.meta.dirname, '..');
 const sourceExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.json'];
@@ -30,10 +29,6 @@ export const windowsPackageSourceEntrypoints = [
   'packages/runtime/src/filesystem-worker/worker-entry.ts',
   'packages/runtime/src/sandbox/index.ts',
 ];
-
-export async function collectWindowsPackageSourceClosure(repoRoot = defaultRepoRoot) {
-  return collectWorkspaceSourceClosure(windowsPackageSourceEntrypoints, repoRoot);
-}
 
 /**
  * Workspace sources `entryPoints` reach, transitively, resolved through the
@@ -62,20 +57,6 @@ export async function collectWorkspaceSourceClosure(entryPoints, repoRoot = defa
     .map(normalize)
     .filter((path) => path.startsWith('packages/'))
     .sort();
-}
-
-export function readWindowsReleasePathPatterns(repoRoot = defaultRepoRoot) {
-  return readPullRequestPathPatterns('release-windows-check.yml', repoRoot);
-}
-
-export function readPullRequestPathPatterns(workflowName, repoRoot = defaultRepoRoot) {
-  const workflowPath = join(repoRoot, '.github', 'workflows', workflowName);
-  const workflow = parseYaml(readFileSync(workflowPath, 'utf8'));
-  const paths = workflow?.on?.pull_request?.paths;
-  if (!Array.isArray(paths) || !paths.every((path) => typeof path === 'string')) {
-    throw new Error(`${workflowName} must declare pull_request.paths as strings.`);
-  }
-  return paths;
 }
 
 export function windowsReleasePatternCoversSource(path, pattern) {

@@ -21,12 +21,11 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  collectWindowsPackageSourceClosure,
   collectWorkspaceSourceClosure,
-  readPullRequestPathPatterns,
-  readWindowsReleasePathPatterns,
+  windowsPackageSourceEntrypoints,
   windowsReleasePatternCoversSource,
 } from './windows-package-source-closure.mjs';
+import { readPullRequestPathFilter } from './workflow-pull-request-paths.mjs';
 
 /**
  * The `packages/` half of this lane's filter that the import closure does not
@@ -49,8 +48,9 @@ const UNDERIVED_PACKAGE_PATTERNS = new Map([
 ]);
 
 test('the Windows package trigger is exactly its closure plus declared exceptions', async () => {
-  const closure = await collectWindowsPackageSourceClosure();
-  const patterns = readWindowsReleasePathPatterns();
+  const closure = await collectWorkspaceSourceClosure(windowsPackageSourceEntrypoints);
+  const patterns = readPullRequestPathFilter('release-windows-check.yml');
+  assert.ok(patterns.length > 0, 'release-windows-check.yml declares no pull_request.paths');
   const missing = closure.filter(
     (sourcePath) =>
       !patterns.some((pattern) => windowsReleasePatternCoversSource(sourcePath, pattern)),
@@ -82,7 +82,7 @@ test('the Windows package trigger is exactly its closure plus declared exception
 });
 
 test('the Windows package workflow path list has no duplicate entries', () => {
-  const patterns = readWindowsReleasePathPatterns();
+  const patterns = readPullRequestPathFilter('release-windows-check.yml');
   assert.equal(new Set(patterns).size, patterns.length);
 });
 
@@ -98,7 +98,7 @@ test('the recovery filter is exactly the Windows-branching closure of its tests'
     new URL('../.github/workflows/windows-recovery.yml', import.meta.url),
     'utf8',
   );
-  const filtered = readPullRequestPathPatterns('windows-recovery.yml')
+  const filtered = readPullRequestPathFilter('windows-recovery.yml')
     .filter((path) => path.startsWith('packages/'))
     .sort();
 
