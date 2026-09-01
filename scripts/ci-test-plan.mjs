@@ -88,6 +88,9 @@ const RELEASE_CONTRACT_FILES = new Set([
   'scripts/windows-upgrade-baseline.json',
   'scripts/windows-package-source-closure.mjs',
   'scripts/windows-package-source-closure.test.mjs',
+  // Reads the filter that closure test compares against, and `check:release`
+  // is the only gate that runs it against `release-windows-check.yml`.
+  'scripts/workflow-pull-request-paths.mjs',
 ]);
 
 // What decides whether a build can read durable state an earlier release wrote.
