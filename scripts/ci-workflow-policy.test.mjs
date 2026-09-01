@@ -125,39 +125,6 @@ test('contract checks run before dependency setup and can fail the job', () => {
   }
 });
 
-test('every selection that gates an installed step is one heavy validation covers', () => {
-  const workflow = readWorkflow('ci.yml');
-
-  // `heavy` decides whether the toolchain is installed at all, so any later
-  // step gated on a selection outside that disjunction would run against a
-  // runner with no dependencies — or, if the step is a `run:` that tolerates
-  // it, report green having done nothing. Derived from the workflow rather
-  // than restated, so a new plan output cannot gate a step without joining
-  // the disjunction first.
-  const [, installed] = workflow.split(/\n\s+- uses: actions\/setup-node[^\n]*\n/u);
-  assert.ok(installed, 'ci.yml no longer installs a toolchain');
-
-  const gating = [
-    ...new Set([...installed.matchAll(/steps\.plan\.outputs\.(\w+) ==/gu)].map(([, name]) => name)),
-  ].sort();
-  assert.ok(gating.length > 0, 'no installed step is gated on a selection');
-
-  // The planner names selections in camelCase and publishes them in snake_case.
-  const source = readFileSync(new URL('./ci-test-plan.mjs', import.meta.url), 'utf8');
-  const disjunction = source.match(/export function requiresHeavyValidation[\s\S]*?\n\}/u)?.[0];
-  assert.ok(disjunction, 'requiresHeavyValidation is no longer a single expression');
-
-  for (const output of gating) {
-    if (output === 'heavy') continue;
-    const camel = output.replace(/_(\w)/gu, (_, letter) => letter.toUpperCase());
-    assert.match(
-      disjunction,
-      new RegExp(`plan\\.${camel}\\b`, 'u'),
-      `${output} gates an installed step but does not select the install`,
-    );
-  }
-});
-
 test('the app icon gate selects every file its own tests open', () => {
   // Derived from the step, not from a memory of it: whatever `App icon artwork
   // drift` runs is the authority on what has to select it. The list this

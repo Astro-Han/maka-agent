@@ -531,23 +531,6 @@ export function planTests(changedFiles, options = {}) {
   };
 }
 
-export function requiresHeavyValidation(plan) {
-  return Boolean(
-    plan.appIcons ||
-      plan.asfSource ||
-      plan.astryxSurface ||
-      plan.cliPackage ||
-      plan.code ||
-      plan.e2e ||
-      plan.releaseContract ||
-      plan.runtimeHost ||
-      plan.runtimeSandbox ||
-      plan.stateRootCompat ||
-      plan.storybook ||
-      plan.standardWorkspaces.length > 0,
-  );
-}
-
 export function formatGitHubOutputs(plan) {
   return [
     `app_icons=${plan.appIcons}`,
@@ -556,7 +539,6 @@ export function formatGitHubOutputs(plan) {
     `cli_package=${plan.cliPackage}`,
     `code=${plan.code}`,
     `e2e=${plan.e2e}`,
-    `heavy=${requiresHeavyValidation(plan)}`,
     `runtime_host=${plan.runtimeHost}`,
     `runtime_sandbox=${plan.runtimeSandbox}`,
     `release_contract=${plan.releaseContract}`,
