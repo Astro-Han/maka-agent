@@ -118,6 +118,7 @@ import {
   type ReconnectableReadIpcMain,
 } from "./ipc-reconnect-policy.js";
 import { createMainWindowController } from "./main-window.js";
+import { resolveWindowRevealMode } from "./window-reveal.js";
 import type { DesktopRuntimeHostIdentity } from "../preload/bridge-contract.js";
 import {
   captureDesktopDiagnosticEnvironment,
@@ -472,15 +473,16 @@ function ensureMcpReady(): Promise<void> {
   return mcpStartup;
 }
 const keepSystemAwake = createKeepSystemAwakeController(powerSaveBlocker);
-const startHidden =
-  (Boolean(e2eFixture) || isIsolatedE2e) &&
-  process.env.MAKA_E2E_SHOW_WINDOW !== "1";
+const revealMode = resolveWindowRevealMode(
+  Boolean(e2eFixture) || isIsolatedE2e,
+  process.env.MAKA_E2E_SHOW_WINDOW === "1",
+);
 let onMainWindowClose = (): void => {};
 const mainWindowController = createMainWindowController({
   workspaceRoot,
   e2eFixture,
   settingsStore,
-  startHidden,
+  revealMode,
   onClose: () => onMainWindowClose(),
   onRendererProcessGone: async (details) => {
     const diagnosticInput = createDesktopMainRendererDiagnosticInput({
@@ -1896,7 +1898,7 @@ function wireLifecycle(): void {
     resumeQuit: () => app.quit(),
   });
   installDesktopShellPresentation({
-    startHidden,
+    revealMode,
     mainWindowController,
     focusOrCreateWindow: quitCoordinator.focusOrCreateWindow,
     onIconError: (error) =>

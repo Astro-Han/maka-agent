@@ -303,9 +303,11 @@ async function launchElectron(args, diagnostics) {
   // a developer with `npm run dev` open smoked the dev server instead of the
   // build this script just made (VITE_DEV_SERVER_URL), and the run touched
   // the real $HOME. A fixture window also starts hidden for its whole
-  // lifecycle (`startHidden` in `main.ts`), which leaves this gate with
-  // nothing to look at — showWindow opts this run back into a visible window,
-  // and the dock rule follows it.
+  // lifecycle (the `hidden` reveal mode — see `window-reveal.ts`), which
+  // leaves this gate with nothing to look at. showWindow opts this run into a
+  // visible window; it stays an accessory app that never takes the foreground,
+  // so the window appears without interrupting whoever launched it. Clicking
+  // it still brings it forward when someone wants to drive it by hand.
   const env = buildFixtureEnv(userDataDir, homeDir, {
     scenario: args.startupOnly ? undefined : args.scenario,
     showWindow: true,

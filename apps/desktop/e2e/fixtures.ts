@@ -525,7 +525,11 @@ async function setPromptRailWindowVisible(
   await worker.app.evaluate(({ BrowserWindow }, shouldShow) => {
     const window = BrowserWindow.getAllWindows()[0];
     if (!window) throw new Error('the prompt-rail BrowserWindow is missing');
-    if (shouldShow) window.show();
+    // showInactive, not show: this worker window is re-revealed between every
+    // test in the file, and show() activates the app each time — a suite run
+    // would yank the developer's foreground away a dozen times over. The
+    // window still needs to be on screen for the compositor.
+    if (shouldShow) window.showInactive();
     else window.hide();
   }, visible);
 }

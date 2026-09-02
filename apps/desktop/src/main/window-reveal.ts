@@ -29,27 +29,58 @@
  * can't be imported under plain `node --test` because it pulls in `electron`).
  */
 
+/**
+ * How far this run is allowed to go when it reveals the main window.
+ *
+ *  - `hidden`: never reveal. E2E-fixture captures paint the hidden window via
+ *    `paintWhenInitiallyHidden`, so pixels arrive without a window on screen.
+ *  - `inactive`: reveal, never raise. An E2E run that asked for a visible
+ *    window (`MAKA_E2E_SHOW_WINDOW`) needs the compositor and a real layout —
+ *    a hidden window is throttled to ~1fps under xvfb and geometry assertions
+ *    need one — but taking the foreground from the developer running the suite
+ *    is never part of that.
+ *  - `active`: the product. Reveal and honor foreground intent.
+ */
+export type WindowRevealMode = 'hidden' | 'inactive' | 'active';
+
+/**
+ * The run's reveal mode. `showWindowRequested` (MAKA_E2E_SHOW_WINDOW) asks for
+ * a visible window; it does not ask for focus, so it can only lift `hidden` to
+ * `inactive`. Only a run that is not an E2E run at all is `active`.
+ */
+export function resolveWindowRevealMode(
+  isE2eRun: boolean,
+  showWindowRequested: boolean,
+): WindowRevealMode {
+  if (!isE2eRun) return 'active';
+  return showWindowRequested ? 'inactive' : 'hidden';
+}
+
 /** Minimal structural view of the BrowserWindow surface the gate touches. */
 export interface RevealableWindow {
   isDestroyed(): boolean;
   isVisible(): boolean;
   show(): void;
+  /** Reveals without activating the app — the `inactive` mode's only reveal. */
+  showInactive(): void;
 }
 
 /**
  * Reveal `win` unless it must stay hidden. Idempotent and focus-safe:
- * - `keepHidden` true (e2e-fixture capture): never reveal — capture runs on
- *   the hidden window via `paintWhenInitiallyHidden`.
+ * - `hidden` mode: never reveal.
+ * - `inactive` mode: reveal with showInactive(), so the window appears where
+ *   it belongs without pulling the app to the front.
  * - null / destroyed window: no-op (teardown raced the timer or the IPC).
  * - already visible: no-op, so a second signal (HMR reload re-fires
  *   notifyRendererReady, or the timer races the signal) never re-shows and
  *   never steals foreground focus.
  */
-export function showWindowOnceReady(win: RevealableWindow | null, keepHidden: boolean): void {
-  if (keepHidden) return;
+export function showWindowOnceReady(win: RevealableWindow | null, mode: WindowRevealMode): void {
+  if (mode === 'hidden') return;
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) return;
-  win.show();
+  if (mode === 'inactive') win.showInactive();
+  else win.show();
 }
 
 /** Focus surface for deferred focus requests (see createWindowRevealGate). */
@@ -86,25 +117,35 @@ export interface WindowRevealGate {
  * intent and markReady applies it right before the reveal, so the window's
  * first on-screen frame is already maximized.
  *
- * `keepHidden` windows (e2e-fixture capture / E2E) never show, maximize, or
- * take focus from any path — captures run while the developer works elsewhere.
+ * `hidden` windows (e2e-fixture capture / E2E) never show, maximize, or take
+ * focus from any path — captures run while the developer works elsewhere.
+ * `inactive` windows appear but stay behind: a focus request reveals them and
+ * stops there, so an E2E run's own activate / second-instance traffic cannot
+ * pull the app in front of whatever the developer is doing.
  */
-export function createWindowRevealGate(keepHidden: boolean): WindowRevealGate {
+export function createWindowRevealGate(mode: WindowRevealMode): WindowRevealGate {
   let ready = false;
   let pendingFocus = false;
   let pendingMaximize = false;
 
   const focusNow = (win: FocusableRevealableWindow | null): void => {
-    if (keepHidden) return;
+    if (mode === 'hidden') return;
     if (!win || win.isDestroyed()) return;
+    if (mode === 'inactive') {
+      showWindowOnceReady(win, mode);
+      return;
+    }
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
   };
 
   const maximizeNow = (win: FocusableRevealableWindow | null): void => {
-    if (keepHidden) return;
+    if (mode === 'hidden') return;
     if (!win || win.isDestroyed()) return;
+    // maximize() reveals a still-hidden window, and that reveal activates the
+    // app. Reveal it inactively first so the maximize has nothing left to show.
+    if (mode === 'inactive') showWindowOnceReady(win, mode);
     win.maximize();
   };
 
@@ -122,7 +163,7 @@ export function createWindowRevealGate(keepHidden: boolean): WindowRevealGate {
         pendingMaximize = false;
         maximizeNow(win);
       }
-      showWindowOnceReady(win, keepHidden);
+      showWindowOnceReady(win, mode);
       if (pendingFocus) {
         pendingFocus = false;
         focusNow(win);
