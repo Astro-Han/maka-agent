@@ -72,6 +72,27 @@ export async function ensureSidebarExpanded(page: Page): Promise<void> {
 }
 
 /**
+ * Wait until the composer is in a state where Enter is a real submission: the
+ * connections projection has produced at least one connection, the draft is
+ * non-empty, no known blocker is showing and no earlier send is still in
+ * flight. 发送 is disabled for all of that, so it is the one signal covering
+ * it; intermediate signals (a cleared draft, an updated model label) resolve
+ * earlier and mean nothing here.
+ *
+ * It does NOT cover the submission-readiness probe: an unresolved snapshot is
+ * not a hard block, so the button is enabled while the probe is in flight, and
+ * `send()` awaits the probe again on its own. A slow probe is absorbed by the
+ * assertions' 20s; a probe that comes back blocked still drops the send with
+ * no feedback, which is a product gap, not something a test-side fence can
+ * close.
+ */
+export async function awaitSendReady(page: Page): Promise<void> {
+  await expect(page.getByRole('button', { name: '发送' })).toBeEnabled({
+    timeout: 20_000,
+  });
+}
+
+/**
  * Wait for the default Host's Coordination Session and the WorkHub projection
  * to agree that the surface is ready. A mounted WorkHub main is not sufficient:
  * it is also rendered while the Host reconnects and the projection reloads.
@@ -670,9 +691,9 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
       use,
     );
   },
-  // This scenario is read-only at the Host boundary. Keep its real Electron +
-  // Host composition warm for the worker, while the test-scoped wrapper below
-  // restores Host and renderer state between tests.
+  // Keep this scenario's real Electron + Host composition warm for the worker,
+  // while the test-scoped wrapper below restores Host and renderer state
+  // between tests. Tests on it may run a Turn, so the reset is not read-only.
   promptRailWorker: [async ({}, use) => {
     await withE2eWindow({
       seed: false,
@@ -717,7 +738,15 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
   promptRailMotionWindow: async ({}, use) => {
     await withE2eWindow({
       seed: false,
-      readinessSelector: '[data-turn-id]',
+      // The transcript and the fixture attributes arrive on two unordered
+      // async paths: `runDeferredStartupRefreshes` fires `refreshSessions()`
+      // and `applyE2eFixture()` side by side, and only the second one — after
+      // its `e2eFixture.getState()` IPC resolves — writes
+      // `data-maka-scroll-motion`. A turn can therefore paint while the
+      // document still says nothing about scroll motion. Requiring both in one
+      // selector is what makes "this window scrolls smoothly" true by the time
+      // a test body reads it.
+      readinessSelector: 'html[data-maka-scroll-motion="smooth"] [data-turn-id]',
       e2eFixtureScenario: 'chat-prompt-rail',
       showWindow: true,
       scrollMotion: 'smooth',
