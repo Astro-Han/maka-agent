@@ -52,13 +52,27 @@ async function tabTo(page: Page, target: Locator, label: string, limit = 30): Pr
   ).toBe(true);
 }
 
+/**
+ * Walk to the skip link from the document start, taking the start back if a
+ * cold start moves it.
+ *
+ * Parking focus on `body` is not a one-shot the renderer respects: the composer
+ * restores its draft caret with `getSelection().addRange(...)`, and a range set
+ * inside a `contenteditable` focuses it — so once per cold start, tens of
+ * milliseconds after the park and with no `focus()` call to fence on, focus
+ * lands in the composer. A walk that starts there has to run out the tab ring
+ * and wrap around, which is over budget. The restore fires once, so re-park and
+ * walk again rather than widening the budget — the budget is the assertion.
+ */
 async function enterMainFromSkipLink(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    document.body.tabIndex = -1;
-    document.body.focus();
-  });
   const skipLink = page.getByRole('link', { name: '跳到主要内容' });
-  await tabTo(page, skipLink, 'skip link', 10);
+  await expect(async () => {
+    await page.evaluate(() => {
+      document.body.tabIndex = -1;
+      document.body.focus();
+    });
+    await tabTo(page, skipLink, 'skip link', 10);
+  }).toPass({ timeout: 30_000 });
   await page.keyboard.press('Enter');
   await expect(page.getByRole('main')).toBeFocused();
   await page.evaluate(() => document.body.removeAttribute('tabindex'));
