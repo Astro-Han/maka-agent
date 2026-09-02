@@ -703,6 +703,10 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
       // assertion that names it.
       readinessSelector: '[data-turn-id]',
       e2eFixtureScenario: 'chat-prompt-rail',
+      // Every other fixture window names its locale; without one the renderer
+      // takes the host's, so any test that reaches a control by its label
+      // passes on a Chinese desktop and cannot find it on an English CI runner.
+      locale: 'zh',
       showWindow: true,
     }, async (page, { app }) => {
       const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
