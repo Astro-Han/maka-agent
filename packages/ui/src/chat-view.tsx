@@ -510,11 +510,35 @@ export function ChatView(props: {
   }
   const scrollRef = chatLayout.scrollContainerRef;
   const scrollAuthority = useTranscriptScrollAuthority();
+  // A rail click aims itself: it puts the prompt at the top of the scrollport
+  // and holds it there while the loaded range settles. Asking the shell to load
+  // an unloaded prompt also publishes a scroll target, and that reveal centres
+  // the turn with the app's scroll motion — a second answer to "where should
+  // this turn sit", and an animated one, which walks the prompt back off the
+  // top for a second after the rail has landed it. The reveal keeps its other
+  // job of recording the reading position; it just has to agree with the rail
+  // about the edge.
+  const railAimedTurnIdRef = useRef<string | undefined>(undefined);
   const navigatePromptRailFallback = useCallback((turn: PromptAnchorRailTurn) => {
     if (!turnIdsRef.current.has(turn.turnId) && turn.sequence !== undefined) {
+      railAimedTurnIdRef.current = turn.turnId;
       loadTranscriptTurnRef.current?.({ turnId: turn.turnId, sequence: turn.sequence });
     }
   }, []);
+  // Navigating anywhere else resolves the claim, so a click the shell ignored
+  // cannot re-aim a later search.
+  if (props.scrollTargetTurn && props.scrollTargetTurn.turnId !== railAimedTurnIdRef.current) {
+    railAimedTurnIdRef.current = undefined;
+  }
+  const scrollTargetTurn = props.scrollTargetTurn
+    ? {
+        ...props.scrollTargetTurn,
+        align:
+          props.scrollTargetTurn.turnId === railAimedTurnIdRef.current
+            ? ('start' as const)
+            : ('center' as const),
+      }
+    : undefined;
   const inlineTransientMessages = tailTurnId
     ? transientMessages.filter((message) => {
         const turn = turns.find((candidate) => candidate.turnId === tailTurnId);
@@ -540,7 +564,7 @@ export function ChatView(props: {
     scrollRef,
     sessionId: props.activeSession?.id,
     messages: props.messages,
-    target: props.scrollTargetTurn,
+    target: scrollTargetTurn,
     restoreTarget: props.restoreTargetTurn,
     onReadingAnchorChange: props.onReadingAnchorChange,
     behavior: props.scrollBehavior,
