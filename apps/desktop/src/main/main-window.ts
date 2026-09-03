@@ -172,11 +172,9 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
   // e2e-fixture capture and E2E — see main.ts) must never be revealed;
   // e2e-fixture captures run on the hidden window and E2E drives it headless.
   // A run that asked for a visible window is `inactive`: it reveals, but never
-  // activates the app. `!app.isPackaged` mirrors the original creation-time
-  // gate so a packaged build ignores a stray E2E flag. The fallback timer, the
-  // renderer-ready IPC, and focus() all route their show() through this mode
-  // via the reveal gate below.
-  const revealMode: WindowRevealMode = app.isPackaged ? 'active' : deps.revealMode;
+  // activates the app. The fallback timer, the renderer-ready IPC, and focus()
+  // all route their show() through this mode via the reveal gate below.
+  const revealMode: WindowRevealMode = deps.revealMode;
   // ChatGPT Pro review P2: focus() (second-instance / activate) used to call
   // mainWindow.show() directly, bypassing the reveal gate — re-launching or
   // clicking the dock icon during the pre-commit window would flash the

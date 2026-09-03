@@ -31,7 +31,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { terminateChildProcessTree } from '@maka/runtime/process-tree-terminator';
 import { closeElectronApplication } from './electron-lifecycle.mjs';
-import { buildFixtureEnv } from './fixture-env.mjs';
+import { buildFixtureEnv, inactiveWindowPlatformArgs } from './fixture-env.mjs';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
@@ -315,7 +315,9 @@ async function launchElectron(args, diagnostics) {
   env.MAKA_E2E_FIXTURE_WIDTH = String(args.width);
   env.MAKA_E2E_FIXTURE_HEIGHT = String(args.height);
   env.MAKA_REAL_WINDOW_SMOKE = '1';
-  const launchArgs = ['.', `--user-data-dir=${userDataDir}`];
+  // This run always reveals its window inactively, which needs XWayland on a
+  // native Wayland session.
+  const launchArgs = ['.', ...inactiveWindowPlatformArgs(), `--user-data-dir=${userDataDir}`];
   const child = spawn(electronBin, launchArgs, {
     cwd: DESKTOP_DIR,
     env,

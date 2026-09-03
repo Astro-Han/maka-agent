@@ -47,12 +47,18 @@ export type WindowRevealMode = 'hidden' | 'inactive' | 'active';
  * The run's reveal mode. `showWindowRequested` (MAKA_E2E_SHOW_WINDOW) asks for
  * a visible window; it does not ask for focus, so it can only lift `hidden` to
  * `inactive`. Only a run that is not an E2E run at all is `active`.
+ *
+ * A packaged build ignores a stray E2E flag entirely. That rule lives here
+ * rather than in one consumer, because both of them — the reveal gate and the
+ * dock rule — have to read the same answer; a build whose window may take
+ * focus while the dock treats it as an accessory app is neither mode.
  */
 export function resolveWindowRevealMode(
   isE2eRun: boolean,
   showWindowRequested: boolean,
+  isPackaged: boolean,
 ): WindowRevealMode {
-  if (!isE2eRun) return 'active';
+  if (isPackaged || !isE2eRun) return 'active';
   return showWindowRequested ? 'inactive' : 'hidden';
 }
 
@@ -114,8 +120,12 @@ export interface WindowRevealGate {
  * The same deferral applies to restoring a saved maximized state: Electron's
  * BrowserWindow.maximize() reveals a still-hidden window (verified on macOS),
  * so createWindow must not call it directly — requestMaximize holds the
- * intent and markReady applies it right before the reveal, so the window's
- * first on-screen frame is already maximized.
+ * intent and markReady applies it right before the reveal. In `active` mode
+ * that means the window's first on-screen frame is already maximized. An
+ * `inactive` window cannot have both: the reveal that maximize() performs is
+ * an activating one, so it is revealed inactively first and then maximized,
+ * and the zoom is visible. Not taking the foreground is worth more than the
+ * single frame, and an E2E run has no saved maximized bounds to restore.
  *
  * `hidden` windows (e2e-fixture capture / E2E) never show, maximize, or take
  * focus from any path — captures run while the developer works elsewhere.
@@ -157,8 +167,9 @@ export function createWindowRevealGate(mode: WindowRevealMode): WindowRevealGate
     },
     markReady(win) {
       ready = true;
-      // Maximize first: it implicitly shows the window, so the reveal below
-      // becomes a no-op and the first visible frame is already maximized.
+      // Maximize first: in `active` mode it implicitly shows the window, so
+      // the reveal below becomes a no-op and the first visible frame is
+      // already maximized.
       if (pendingMaximize) {
         pendingMaximize = false;
         maximizeNow(win);

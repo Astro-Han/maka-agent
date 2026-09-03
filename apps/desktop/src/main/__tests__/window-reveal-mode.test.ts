@@ -70,17 +70,28 @@ function fakeWindow(): FocusableRevealableWindow & {
 
 describe('resolveWindowRevealMode', () => {
   it('leaves a product run active', () => {
-    assert.equal(resolveWindowRevealMode(false, false), 'active');
+    assert.equal(resolveWindowRevealMode(false, false, false), 'active');
     // A stray MAKA_E2E_SHOW_WINDOW outside an E2E run changes nothing.
-    assert.equal(resolveWindowRevealMode(false, true), 'active');
+    assert.equal(resolveWindowRevealMode(false, true, false), 'active');
   });
 
   it('hides an E2E run that did not ask for a window', () => {
-    assert.equal(resolveWindowRevealMode(true, false), 'hidden');
+    assert.equal(resolveWindowRevealMode(true, false, false), 'hidden');
   });
 
   it('gives an E2E run that asked for a window pixels, not focus', () => {
-    assert.equal(resolveWindowRevealMode(true, true), 'inactive');
+    assert.equal(resolveWindowRevealMode(true, true, false), 'inactive');
+  });
+
+  it('ignores a stray E2E flag in a packaged build', () => {
+    // Both consumers read this one answer, so a packaged build cannot end up
+    // with a window that takes focus and a dock that hides its tile.
+    assert.equal(resolveWindowRevealMode(true, false, true), 'active');
+    assert.equal(resolveWindowRevealMode(true, true, true), 'active');
+    assert.equal(
+      resolveDockPresentation('darwin', resolveWindowRevealMode(true, true, true)),
+      'icon',
+    );
   });
 });
 

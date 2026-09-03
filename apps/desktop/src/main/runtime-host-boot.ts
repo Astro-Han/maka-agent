@@ -476,6 +476,7 @@ const keepSystemAwake = createKeepSystemAwakeController(powerSaveBlocker);
 const revealMode = resolveWindowRevealMode(
   Boolean(e2eFixture) || isIsolatedE2e,
   process.env.MAKA_E2E_SHOW_WINDOW === "1",
+  app.isPackaged,
 );
 let onMainWindowClose = (): void => {};
 const mainWindowController = createMainWindowController({
