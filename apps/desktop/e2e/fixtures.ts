@@ -81,10 +81,14 @@ export async function ensureSidebarExpanded(page: Page): Promise<void> {
  *
  * It does NOT cover the submission-readiness probe: an unresolved snapshot is
  * not a hard block, so the button is enabled while the probe is in flight, and
- * `send()` awaits the probe again on its own. A slow probe is absorbed by the
- * assertions' 20s; a probe that comes back blocked still drops the send with
- * no feedback, which is a product gap, not something a test-side fence can
- * close.
+ * `send()` awaits the probe again on its own — a first send inside a barrier
+ * that gives up at 30s. The post-send assertions wait 20s, which covers every
+ * admission measured here but not that whole barrier. Widening them past it
+ * buys nothing: the 60s test budget is the real cap, a send admitted at 25s
+ * leaves the multi-send specs unable to finish anyway, and the only change
+ * would be trading a named assertion failure for a bare test timeout. A probe
+ * that comes back blocked still drops the send with no feedback, which is a
+ * product gap, not something a test-side fence can close.
  */
 export async function awaitSendReady(page: Page): Promise<void> {
   await expect(page.getByRole('button', { name: '发送' })).toBeEnabled({
@@ -752,6 +756,7 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
       // a test body reads it.
       readinessSelector: 'html[data-maka-scroll-motion="smooth"] [data-turn-id]',
       e2eFixtureScenario: 'chat-prompt-rail',
+      locale: 'zh',
       showWindow: true,
       scrollMotion: 'smooth',
     }, use);

@@ -91,6 +91,35 @@ export interface ChatViewGoalIndicatorProps {
   goalIndicator?: SessionContextGoal;
 }
 
+/** A rail click's outstanding request that the reveal for its Turn agree with it. */
+export type RailAlignmentClaim = { turnId: string; nonce?: number };
+
+/**
+ * Which edge the transcript's reveal should use for the target the shell is
+ * publishing, and what is left of the rail's claim afterwards.
+ *
+ * A claim belongs to the one navigation its click asked for, not to the Turn:
+ * it binds to the first target that arrives for that Turn and is spent on
+ * anything else. A later search for the same Turn is a different command with
+ * its own nonce, and gets the search contract back.
+ */
+export function resolveRailAlignedTarget<T extends { turnId: string; nonce: number }>(
+  claim: RailAlignmentClaim | undefined,
+  target: T | undefined,
+): {
+  claim: RailAlignmentClaim | undefined;
+  target: (T & { align: 'start' | 'center' }) | undefined;
+} {
+  if (!target) return { claim, target: undefined };
+  const aimedByRail = claim !== undefined
+    && claim.turnId === target.turnId
+    && (claim.nonce === undefined || claim.nonce === target.nonce);
+  return {
+    claim: aimedByRail ? { turnId: target.turnId, nonce: target.nonce } : undefined,
+    target: { ...target, align: aimedByRail ? 'start' : 'center' },
+  };
+}
+
 /** Persistent navigation position with a direct path back to the transcript tail. */
 export function TranscriptHistoryNotice({
   title,
@@ -518,27 +547,16 @@ export function ChatView(props: {
   // top for a second after the rail has landed it. The reveal keeps its other
   // job of recording the reading position; it just has to agree with the rail
   // about the edge.
-  const railAimedTurnIdRef = useRef<string | undefined>(undefined);
+  const railClaimRef = useRef<RailAlignmentClaim | undefined>(undefined);
   const navigatePromptRailFallback = useCallback((turn: PromptAnchorRailTurn) => {
     if (!turnIdsRef.current.has(turn.turnId) && turn.sequence !== undefined) {
-      railAimedTurnIdRef.current = turn.turnId;
+      railClaimRef.current = { turnId: turn.turnId };
       loadTranscriptTurnRef.current?.({ turnId: turn.turnId, sequence: turn.sequence });
     }
   }, []);
-  // Navigating anywhere else resolves the claim, so a click the shell ignored
-  // cannot re-aim a later search.
-  if (props.scrollTargetTurn && props.scrollTargetTurn.turnId !== railAimedTurnIdRef.current) {
-    railAimedTurnIdRef.current = undefined;
-  }
-  const scrollTargetTurn = props.scrollTargetTurn
-    ? {
-        ...props.scrollTargetTurn,
-        align:
-          props.scrollTargetTurn.turnId === railAimedTurnIdRef.current
-            ? ('start' as const)
-            : ('center' as const),
-      }
-    : undefined;
+  const railAlignment = resolveRailAlignedTarget(railClaimRef.current, props.scrollTargetTurn);
+  railClaimRef.current = railAlignment.claim;
+  const scrollTargetTurn = railAlignment.target;
   const inlineTransientMessages = tailTurnId
     ? transientMessages.filter((message) => {
         const turn = turns.find((candidate) => candidate.turnId === tailTurnId);
