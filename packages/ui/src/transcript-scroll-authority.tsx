@@ -54,13 +54,23 @@ import { ChatLayoutScrollButton } from '@astryxdesign/core/Chat';
 const PIN_THRESHOLD_PX = 10;
 const BUTTON_THRESHOLD_PX = 100;
 /**
- * How far the offset may miss what the content accounts for and still be the
- * content. `scrollHeight` and `clientHeight` are integers while `scrollTop` is
- * not, so the arithmetic below is exact to under a pixel — this is that
- * rounding, not a gesture the reader might have made. The pin threshold is a
- * distance from the tail and says nothing about it.
+ * How far one event's offset may miss what the content accounts for and still
+ * be the content.
+ *
+ * Native anchoring moves the offset by what it inserted, but it rounds the
+ * anchor's old and new positions separately, while the range it is measured
+ * against is `scrollHeight - clientHeight` — two more integers, each rounded on
+ * its own. Growth above the reader is measured landing a whole pixel outside
+ * the band on about a quarter of its frames, which is what this absorbs; a
+ * story in `packages/ui/stories` holds that measurement, so this is a number
+ * from a browser rather than a guess, and it goes red if the browser stops
+ * agreeing.
+ *
+ * It is spent per event and never carried. The error is bounded per event but
+ * one-directional across a stream, so keeping a running total would turn a
+ * pixel of arithmetic into a drift that eventually crosses any threshold.
  */
-const GEOMETRY_ROUNDING_PX = 2;
+const GEOMETRY_ROUNDING_PX = 1;
 
 export interface TranscriptScrollSnapshot {
   /** Following the tail: growth writes `scrollTop`. */
@@ -120,8 +130,6 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
   let lastClientHeight = 0;
   /** The offset the last event saw, to measure the next one's move against. */
   let lastScrollTop = 0;
-  /** Offset movement no content change accounts for, since the last reading. */
-  let unexplained = 0;
   let snapshot: TranscriptScrollSnapshot = { pinned, awayFromTail };
   const listeners = new Set<() => void>();
   const readerListeners = new Set<() => void>();
@@ -144,7 +152,6 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
     lastScrollHeight = root.scrollHeight;
     lastClientHeight = root.clientHeight;
     lastScrollTop = root.scrollTop;
-    unexplained = 0;
     awayFromTail = false;
     publish();
   };
@@ -165,7 +172,6 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
           lastScrollHeight = target.scrollHeight;
           lastClientHeight = target.clientHeight;
           lastScrollTop = target.scrollTop;
-          unexplained = 0;
           return;
         }
         // Content moves the offset too, and only ever by how much the end of
@@ -192,13 +198,7 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
         const explainedLow = Math.min(0, contentDelta);
         const explainedHigh = Math.max(0, contentDelta);
         const topDelta = target.scrollTop - lastScrollTop;
-        // What the content could not account for, kept across events rather
-        // than judged one at a time. A reader crossing the transcript slowly
-        // produces a run of moves each smaller than the rounding this has to
-        // tolerate, and re-baselining on every event would spend every one of
-        // them: they would never add up to a reader, and the answer would go
-        // on writing the view out from under a reader who was plainly moving.
-        unexplained += topDelta - Math.min(explainedHigh, Math.max(explainedLow, topDelta));
+        const unexplained = topDelta - Math.min(explainedHigh, Math.max(explainedLow, topDelta));
         const readerMoved = Math.abs(unexplained) > GEOMETRY_ROUNDING_PX;
         lastScrollHeight = target.scrollHeight;
         lastClientHeight = target.clientHeight;
@@ -209,7 +209,6 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
           publish();
           return;
         }
-        unexplained = 0;
         pinned = distance <= PIN_THRESHOLD_PX;
         publish();
         for (const listener of [...readerListeners]) listener();
@@ -217,7 +216,6 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
       lastScrollHeight = target.scrollHeight;
       lastClientHeight = target.clientHeight;
       lastScrollTop = target.scrollTop;
-      unexplained = 0;
       target.addEventListener('scroll', onScroll, { passive: true });
       // Everything that moves the tail without the reader asking, watched in
       // one place: the scroller's own box, because the tail also moves when the
