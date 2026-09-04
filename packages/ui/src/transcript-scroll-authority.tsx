@@ -168,16 +168,17 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
           unexplained = 0;
           return;
         }
-        // Content moves the offset too, and only within a band it can account
-        // for. Native anchoring answers content landing above the reader by
-        // pushing the offset down by exactly what was inserted, and content
-        // leaving from above by pulling it up by exactly what went; a
-        // transcript shorter than the offset clamps it to the new end. Inside
-        // that band their offset changed and their intent did not, so the pin
-        // must not be re-derived from where they now are, and nobody may be
-        // told the reader asked for anything. The affordance still follows the
-        // new distance, because that is a fact about the viewport rather than
-        // about them.
+        // Content moves the offset too, and only ever by how much the end of
+        // the transcript moved. Native anchoring answers content landing above
+        // the reader by pushing the offset down by exactly what was inserted,
+        // content leaving from above by pulling it up by exactly what went,
+        // and a transcript that ends before the offset by clamping it to the
+        // new end — every one of them somewhere between nothing and that whole
+        // amount. Inside that band their offset changed and their intent did
+        // not, so the pin must not be re-derived from where they now are, and
+        // nobody may be told the reader asked for anything. The affordance
+        // still follows the new distance, because that is a fact about the
+        // viewport rather than about them.
         //
         // Outside it, the move is the reader's, and this may not be decided
         // from the geometry merely having changed. During growth it always
@@ -188,7 +189,7 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
         // most needs to be believed.
         const maxScroll = target.scrollHeight - target.clientHeight;
         const contentDelta = maxScroll - (lastScrollHeight - lastClientHeight);
-        const explainedLow = Math.min(0, contentDelta, maxScroll - lastScrollTop);
+        const explainedLow = Math.min(0, contentDelta);
         const explainedHigh = Math.max(0, contentDelta);
         const topDelta = target.scrollTop - lastScrollTop;
         // What the content could not account for, kept across events rather
