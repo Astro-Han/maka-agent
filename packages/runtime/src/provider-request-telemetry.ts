@@ -325,7 +325,7 @@ export class ProviderRequestTracker {
     throwIfAbortedBeforeDispatch(input.abortSignal);
     this.input.accounting?.assertReady?.();
     const step = this.step;
-    const composition = this.observe(input);
+    const composition = preparedPromptComposition(secretFreeParams(input.params));
     throwIfAbortedBeforeDispatch(input.abortSignal);
     let sawOutput = false;
     const attempt = this.beginAttempt(step, composition, input);
@@ -394,7 +394,7 @@ export class ProviderRequestTracker {
     throwIfAbortedBeforeDispatch(input.abortSignal);
     this.input.accounting?.assertReady?.();
     const step = this.step;
-    const composition = this.observe(input);
+    const composition = preparedPromptComposition(secretFreeParams(input.params));
     throwIfAbortedBeforeDispatch(input.abortSignal);
     const attempt = this.beginAttempt(step, composition, input);
     try {
@@ -607,12 +607,6 @@ export class ProviderRequestTracker {
       // Reported through the run's accounting-incomplete signal by the sink
       // itself. Settlement must not fail the turn the call already completed.
     }
-  }
-
-  private observe(
-    input: TrackProviderStreamInput | TrackProviderGenerateInput,
-  ): PromptComposition | undefined {
-    return preparedPromptComposition(secretFreeParams(input.params));
   }
 }
 
