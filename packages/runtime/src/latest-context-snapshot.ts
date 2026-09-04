@@ -25,10 +25,7 @@ import {
 
 export { LATEST_CONTEXT_PROJECTION_TYPE };
 import type { PromptComposition } from '@maka/core/model-call-attempt';
-import type {
-  ContextDiagnosticsCompaction,
-  ContextDiagnosticsComposition,
-} from './context-diagnostics.js';
+import type { ContextDiagnosticsCompaction } from './context-diagnostics.js';
 
 /**
  * One request's context, frozen by the transaction that committed it (#2323).
@@ -64,7 +61,7 @@ export interface LatestContextSnapshot {
    * prepared-request observation — a request explains itself or says nothing,
    * never borrows another request's breakdown.
    */
-  composition?: ContextDiagnosticsComposition;
+  composition?: PromptComposition;
   /** The boundary that applied when this request was built, if any. */
   compaction?: ContextDiagnosticsCompaction;
 }
@@ -141,7 +138,7 @@ export function readLatestContextSnapshot(
     !isOptionalCount(record.cacheReadInputTokens) ||
     (record.contextWindow !== undefined &&
       (!isCount(record.contextWindow) || record.contextWindow === 0)) ||
-    (record.composition !== undefined && !isContextDiagnosticsComposition(record.composition)) ||
+    (record.composition !== undefined && !isPromptComposition(record.composition)) ||
     (record.compaction !== undefined && !isContextDiagnosticsCompaction(record.compaction))
   ) {
     return undefined;
@@ -149,7 +146,7 @@ export function readLatestContextSnapshot(
   return record as unknown as LatestContextSnapshot;
 }
 
-function isContextDiagnosticsComposition(value: unknown): value is ContextDiagnosticsComposition {
+function isPromptComposition(value: unknown): value is PromptComposition {
   const composition = shapedRecord(
     value,
     ['segments'],
@@ -160,20 +157,20 @@ function isContextDiagnosticsComposition(value: unknown): value is ContextDiagno
     !Array.isArray(composition.segments) ||
     composition.segments.length === 0 ||
     composition.segments.length > 4 ||
-    !composition.segments.every(isContextDiagnosticsSegment) ||
+    !composition.segments.every(isPromptCompositionSegment) ||
     (composition.tools !== undefined &&
       (!Array.isArray(composition.tools) ||
         composition.tools.length === 0 ||
         composition.tools.length > 64 ||
-        !composition.tools.every(isContextDiagnosticsTool))) ||
+        !composition.tools.every(isPromptCompositionTool))) ||
     (composition.remainingTools !== undefined &&
-      !isContextDiagnosticsRemainder(composition.remainingTools)) ||
+      !isPromptCompositionRemainder(composition.remainingTools)) ||
     !isOptionalCount(composition.unlabelledToolBytes) ||
     (composition.unlabelledToolBytes !== undefined && composition.unlabelledToolBytes === 0)
   ) {
     return false;
   }
-  const valid = composition as unknown as ContextDiagnosticsComposition;
+  const valid = composition as unknown as PromptComposition;
   const segmentOrder = ['system_instructions', 'tool_definitions', 'messages', 'other'];
   const order = valid.segments.map((segment) => segmentOrder.indexOf(segment.kind));
   if (order.some((value, index) => index > 0 && value <= order[index - 1]!)) return false;
@@ -201,7 +198,7 @@ function isContextDiagnosticsComposition(value: unknown): value is ContextDiagno
     : describedToolBytes === 0 && valid.remainingTools === undefined;
 }
 
-function isContextDiagnosticsSegment(value: unknown): boolean {
+function isPromptCompositionSegment(value: unknown): boolean {
   const segment = shapedRecord(value, ['kind', 'bytes'], []);
   return Boolean(
     segment &&
@@ -214,12 +211,12 @@ function isContextDiagnosticsSegment(value: unknown): boolean {
   );
 }
 
-function isContextDiagnosticsTool(value: unknown): boolean {
+function isPromptCompositionTool(value: unknown): boolean {
   const tool = shapedRecord(value, ['name', 'bytes'], []);
   return Boolean(tool && isBoundedString(tool.name, 512) && isCount(tool.bytes) && tool.bytes > 0);
 }
 
-function isContextDiagnosticsRemainder(value: unknown): boolean {
+function isPromptCompositionRemainder(value: unknown): boolean {
   const remainder = shapedRecord(value, ['count', 'bytes'], []);
   return Boolean(
     remainder &&

@@ -111,7 +111,7 @@ function sizedSegment(
   value: unknown,
   label?: string,
 ): SizedRequestSegment {
-  const serialized = JSON.stringify(normalizePreparedValue(value).value);
+  const serialized = JSON.stringify(normalizePreparedValue(value));
   return {
     kind,
     bytes: Buffer.byteLength(serialized, 'utf8'),
@@ -195,29 +195,22 @@ export function stableStringify(value: unknown): string {
   return JSON.stringify(canonicalize(value));
 }
 
-interface NormalizedPreparedValue {
-  value: unknown;
-  opaque: boolean;
-}
-
 /**
  * Lossless JSON representation for the semantic values accepted by the model
  * seam. Every value is tagged, so a bigint cannot collide with a user string
- * and an undefined property cannot disappear. Values that cannot be described
- * exactly are retained as explicit opaque markers instead of pretending they
- * were equal to another request.
+ * and an undefined property cannot disappear, and values that cannot be
+ * described exactly are kept as explicit markers rather than dropped — a size
+ * taken from this covers the whole payload.
  */
-function normalizePreparedValue(value: unknown): NormalizedPreparedValue {
+function normalizePreparedValue(value: unknown): unknown {
   const tag = '__makaPreparedValue';
   const ancestors = new Set<object>();
-  const visit = (current: unknown, depth: number): NormalizedPreparedValue => {
+  const visit = (current: unknown, depth: number): unknown => {
     if (current === null || typeof current === 'string' || typeof current === 'boolean') {
-      return { value: current, opaque: false };
+      return current;
     }
     if (typeof current === 'number') {
-      if (Number.isFinite(current) && !Object.is(current, -0)) {
-        return { value: current, opaque: false };
-      }
+      if (Number.isFinite(current) && !Object.is(current, -0)) return current;
       const encoded = Number.isNaN(current)
         ? 'NaN'
         : current === Infinity
@@ -225,126 +218,75 @@ function normalizePreparedValue(value: unknown): NormalizedPreparedValue {
           : current === -Infinity
             ? '-Infinity'
             : '-0';
-      return { value: { [tag]: 'number', value: encoded }, opaque: false };
+      return { [tag]: 'number', value: encoded };
     }
-    if (typeof current === 'bigint') {
-      return { value: { [tag]: 'bigint', value: current.toString() }, opaque: false };
-    }
-    if (typeof current === 'undefined') {
-      return { value: { [tag]: 'undefined' }, opaque: false };
-    }
-    if (typeof current === 'function' || typeof current === 'symbol') {
-      return { value: { [tag]: 'opaque', kind: typeof current }, opaque: true };
-    }
-    if (typeof current !== 'object') {
-      return { value: { [tag]: 'opaque', kind: typeof current }, opaque: true };
-    }
-    if (depth >= 64) {
-      return { value: { [tag]: 'opaque', kind: 'max-depth' }, opaque: true };
-    }
-    if (ancestors.has(current)) {
-      return { value: { [tag]: 'opaque', kind: 'cycle' }, opaque: true };
-    }
+    if (typeof current === 'bigint') return { [tag]: 'bigint', value: current.toString() };
+    if (typeof current === 'undefined') return { [tag]: 'undefined' };
+    if (typeof current !== 'object') return { [tag]: 'opaque', kind: typeof current };
+    if (depth >= 64) return { [tag]: 'opaque', kind: 'max-depth' };
+    if (ancestors.has(current)) return { [tag]: 'opaque', kind: 'cycle' };
     ancestors.add(current);
     try {
       if (current instanceof ArrayBuffer) {
         return {
-          value: {
-            [tag]: 'binary',
-            kind: 'ArrayBuffer',
-            encoding: 'base64',
-            value: Buffer.from(current).toString('base64'),
-          },
-          opaque: false,
+          [tag]: 'binary',
+          kind: 'ArrayBuffer',
+          encoding: 'base64',
+          value: Buffer.from(current).toString('base64'),
         };
       }
       if (ArrayBuffer.isView(current)) {
         return {
-          value: {
-            [tag]: 'binary',
-            kind: current.constructor?.name ?? 'ArrayBufferView',
-            encoding: 'base64',
-            value: Buffer.from(current.buffer, current.byteOffset, current.byteLength).toString(
-              'base64',
-            ),
-          },
-          opaque: false,
+          [tag]: 'binary',
+          kind: current.constructor?.name ?? 'ArrayBufferView',
+          encoding: 'base64',
+          value: Buffer.from(current.buffer, current.byteOffset, current.byteLength).toString(
+            'base64',
+          ),
         };
       }
       if (current instanceof Date) {
         const timestamp = current.getTime();
         return {
-          value: {
-            [tag]: 'date',
-            value: Number.isNaN(timestamp) ? 'invalid' : current.toISOString(),
-          },
-          opaque: false,
+          [tag]: 'date',
+          value: Number.isNaN(timestamp) ? 'invalid' : current.toISOString(),
         };
       }
       if (current instanceof Map) {
-        let opaque = false;
-        const entries = [...current.entries()].map(([key, entry]) => {
-          const normalizedKey = visit(key, depth + 1);
-          const normalizedEntry = visit(entry, depth + 1);
-          opaque ||= normalizedKey.opaque || normalizedEntry.opaque;
-          return [normalizedKey.value, normalizedEntry.value];
-        });
-        return { value: { [tag]: 'map', entries }, opaque };
+        const entries = [...current.entries()].map(([key, entry]) => [
+          visit(key, depth + 1),
+          visit(entry, depth + 1),
+        ]);
+        return { [tag]: 'map', entries };
       }
       if (current instanceof Set) {
-        let opaque = false;
-        const entries = [...current].map((entry) => {
-          const normalized = visit(entry, depth + 1);
-          opaque ||= normalized.opaque;
-          return normalized.value;
-        });
-        return { value: { [tag]: 'set', entries }, opaque };
+        return { [tag]: 'set', entries: [...current].map((entry) => visit(entry, depth + 1)) };
       }
       if (Array.isArray(current)) {
-        let opaque = false;
-        const entries = Array.from({ length: current.length }, (_, index) => {
-          if (!(index in current)) return { [tag]: 'array-hole' };
-          const normalized = visit(current[index], depth + 1);
-          opaque ||= normalized.opaque;
-          return normalized.value;
-        });
-        return { value: entries, opaque };
+        return Array.from({ length: current.length }, (_, index) =>
+          index in current ? visit(current[index], depth + 1) : { [tag]: 'array-hole' },
+        );
       }
       if (isPlainObject(current)) {
-        let opaque = false;
         const entries = Object.keys(current).map((key) => {
-          let normalized: NormalizedPreparedValue;
           try {
-            normalized = visit(current[key], depth + 1);
+            return [key, visit(current[key], depth + 1)];
           } catch {
-            normalized = {
-              value: { [tag]: 'opaque', kind: 'unreadable-property' },
-              opaque: true,
-            };
+            return [key, { [tag]: 'opaque', kind: 'unreadable-property' }];
           }
-          opaque ||= normalized.opaque;
-          return [key, normalized.value];
         });
-        if (Object.hasOwn(current, tag)) {
-          return { value: { [tag]: 'object', entries }, opaque };
-        }
-        return { value: Object.fromEntries(entries), opaque };
+        if (Object.hasOwn(current, tag)) return { [tag]: 'object', entries };
+        return Object.fromEntries(entries);
       }
       const toJSON = (current as { toJSON?: unknown }).toJSON;
       if (typeof toJSON === 'function') {
         try {
           return visit(toJSON.call(current), depth + 1);
         } catch {
-          return { value: { [tag]: 'opaque', kind: 'toJSON-failed' }, opaque: true };
+          return { [tag]: 'opaque', kind: 'toJSON-failed' };
         }
       }
-      return {
-        value: {
-          [tag]: 'opaque',
-          kind: current.constructor?.name ?? 'non-plain-object',
-        },
-        opaque: true,
-      };
+      return { [tag]: 'opaque', kind: current.constructor?.name ?? 'non-plain-object' };
     } finally {
       ancestors.delete(current);
     }

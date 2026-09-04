@@ -48,18 +48,6 @@ import {
 
 export type ContextDiagnosticsUnavailableReason = 'no_completed_request' | 'trace_unavailable';
 
-/**
- * The composition vocabulary is the stored one.
- *
- * These names are what a `ModelCallAttempt` durably carries, so serving them
- * under a second set of diagnostic-only types would be two spellings of one
- * fact, kept in step by hand.
- */
-export type ContextDiagnosticsSegmentKind = PromptCompositionSegmentKind;
-export type ContextDiagnosticsSegment = PromptCompositionSegment;
-export type ContextDiagnosticsTool = PromptCompositionTool;
-export type ContextDiagnosticsComposition = PromptComposition;
-
 export interface ContextDiagnosticsCompaction {
   kind: 'history';
   phase: 'pre_turn' | 'mid_turn';
@@ -89,7 +77,7 @@ export type ContextDiagnostics =
        * quiet lie this separation exists to prevent, so readers never join an
        * independent capture stream (#2323).
        */
-      composition?: ContextDiagnosticsComposition;
+      composition?: PromptComposition;
       compaction?: ContextDiagnosticsCompaction;
     };
 
@@ -359,7 +347,7 @@ interface MeteringAnchor {
   inputTokens?: number;
   cacheReadInputTokens?: number;
   contextWindow?: number;
-  composition?: ContextDiagnosticsComposition;
+  composition?: PromptComposition;
 }
 
 interface CheckpointCandidate {
@@ -404,7 +392,7 @@ function meteringAnchor(event: AgentRunEvent): MeteringAnchor | undefined {
 function exactHistoricalComposition(
   anchor: MeteringAnchor,
   candidates: readonly LegacyProviderAnchor[],
-): ContextDiagnosticsComposition | undefined {
+): PromptComposition | undefined {
   const matches = candidates.filter(
     (candidate) =>
       candidate.composition !== undefined &&

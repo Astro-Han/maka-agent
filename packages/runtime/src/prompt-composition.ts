@@ -17,13 +17,11 @@
  * under the License.
  */
 
-import type {
-  ContextDiagnosticsComposition,
-  ContextDiagnosticsSegment,
-} from './context-diagnostics.js';
 import {
   PROMPT_COMPOSITION_MAX_TOOLS,
   type PreparedRequestObservationSegmentKind,
+  type PromptComposition,
+  type PromptCompositionSegment,
 } from '@maka/core/model-call-attempt';
 
 /**
@@ -59,7 +57,7 @@ export interface SizedRequestSegment {
  */
 export function foldPromptComposition(
   segments: readonly SizedRequestSegment[],
-): ContextDiagnosticsComposition | undefined {
+): PromptComposition | undefined {
   if (segments.length === 0) return undefined;
 
   const byKind = new Map<PreparedRequestObservationSegmentKind, number>();
@@ -83,7 +81,7 @@ export function foldPromptComposition(
 
   // A zero-byte kind is dropped rather than shown as `≈0`, the same way
   // `/context` folds it — a part nothing contributed to is not a part.
-  const folded: ContextDiagnosticsSegment[] = KIND_ORDER.flatMap((kind) => {
+  const folded: PromptCompositionSegment[] = KIND_ORDER.flatMap((kind) => {
     const bytes = byKind.get(kind) ?? 0;
     return bytes > 0 ? [{ kind: PART_KINDS[kind], bytes }] : [];
   });
@@ -130,7 +128,7 @@ export const PROVIDER_REQUEST_ATTEMPT_EVENT_TYPE = 'provider_request_attempt_rec
 export function readPromptCompositionEvent(event: {
   readonly type: string;
   readonly data?: unknown;
-}): { attemptId: string; composition: ContextDiagnosticsComposition } | undefined {
+}): { attemptId: string; composition: PromptComposition } | undefined {
   if (event.type !== PROVIDER_REQUEST_ATTEMPT_EVENT_TYPE) return undefined;
   const data = event.data;
   if (!isRecord(data)) return undefined;
@@ -193,7 +191,7 @@ const KIND_ORDER: readonly PreparedRequestObservationSegmentKind[] = [
  * four buckets already fold the same segments for `readLatestContextDiagnostics`
  * (#1580), and two names for one fact is how two surfaces start disagreeing.
  */
-const PART_KINDS: Record<PreparedRequestObservationSegmentKind, ContextDiagnosticsSegment['kind']> =
+const PART_KINDS: Record<PreparedRequestObservationSegmentKind, PromptCompositionSegment['kind']> =
   {
     system_prompt: 'system_instructions',
     tool_schema: 'tool_definitions',
