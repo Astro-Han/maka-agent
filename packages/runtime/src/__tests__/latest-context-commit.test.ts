@@ -186,7 +186,7 @@ test('a real send seals its observation into SQLite and reconstructs it after re
   }
 });
 
-test('an artifact captured before abort does not create a canonical sent attempt', async () => {
+test('a turn aborted before dispatch does not create a canonical sent attempt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'maka-aborted-request-chain-'));
   try {
     const sessionStore = createSessionStore(root);
@@ -196,7 +196,6 @@ test('an artifact captured before abort does not create a canonical sent attempt
     let ids = 0;
     const newId = () => `abort-chain-${++ids}`;
     let providerCalls = 0;
-    let artifactWrites = 0;
 
     backends.register('ai-sdk', (ctx) => {
       let backend!: ReturnType<typeof createTestAiSdkBackend>;
@@ -220,10 +219,8 @@ test('an artifact captured before abort does not create a canonical sent attempt
             },
           }),
         tools: [],
-        persistPreparedRequestArtifact: async () => {
-          artifactWrites += 1;
+        beforeRunProviderDispatch: () => {
           void backend.stop('user_stop');
-          return { artifactId: 'abandoned-artifact' };
         },
         ...(ctx.recordModelCallAttempt
           ? { recordModelCallAttempt: ctx.recordModelCallAttempt }
@@ -260,7 +257,6 @@ test('an artifact captured before abort does not create a canonical sent attempt
     const events = (
       await Promise.all(runIds.map((runId) => runStore.readEvents(session.id, runId)))
     ).flat();
-    assert.equal(artifactWrites, 1);
     assert.equal(providerCalls, 0);
     assert.equal(events.filter((event) => event.type === 'model_call_attempt_recorded').length, 0);
     assert.deepEqual(await readLatestContextDiagnostics(runStore, session.id, runIds), {

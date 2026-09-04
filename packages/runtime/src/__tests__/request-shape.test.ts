@@ -17,8 +17,6 @@
  * under the License.
  */
 
-import { Buffer } from 'node:buffer';
-import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
@@ -64,17 +62,18 @@ describe('canonicalizeToolSet active allow-list', () => {
 });
 
 describe('prepared request observation', () => {
-  test('derives the request digest and bytes from the private serialization', () => {
+  test('sizes and identifies the whole request, not just its named segments', () => {
     const material = prepareRequestObservation({
       prompt: [{ role: 'user', content: 'hello' }],
       maxOutputTokens: 1_024,
     });
 
-    assert.equal(
-      material.observation.digest,
-      `sha256:${createHash('sha256').update(material.serializedRequest).digest('hex')}`,
+    assert.match(material.digest, /^sha256:[a-f0-9]{64}$/);
+    // `maxOutputTokens` is part of the request but is not a segment, so the
+    // total has to exceed what the segments account for.
+    assert.ok(
+      material.bytes > material.segments.reduce((total, segment) => total + segment.bytes, 0),
     );
-    assert.equal(material.observation.bytes, Buffer.byteLength(material.serializedRequest, 'utf8'));
   });
 
   test('serializes non-JSON values without collapsing their semantic identity', () => {
@@ -91,8 +90,7 @@ describe('prepared request observation', () => {
       headers: { 'x-observation': 'present' },
     });
 
-    assert.doesNotThrow(() => JSON.parse(observed.serializedRequest));
-    assert.notEqual(observed.observation.digest, plain.observation.digest);
+    assert.notEqual(observed.digest, plain.digest);
   });
 
   test('preserves the semantic identity of binary request content', () => {
@@ -114,10 +112,9 @@ describe('prepared request observation', () => {
 
     const first = observe(1);
     const second = observe(2);
-    assert.notEqual(first.serializedRequest, second.serializedRequest);
-    assert.notEqual(first.observation.digest, second.observation.digest);
-    assert.notEqual(first.observation.segments[0]?.digest, second.observation.segments[0]?.digest);
-    assert.equal(first.observation.segments[0]?.comparison, 'exact');
+    assert.notEqual(first.digest, second.digest);
+    assert.notEqual(first.segments[0]?.digest, second.segments[0]?.digest);
+    assert.equal(first.segments[0]?.comparison, 'exact');
   });
 
   test('marks redacted compaction content comparison-opaque', () => {
@@ -136,8 +133,8 @@ describe('prepared request observation', () => {
       ],
     });
 
-    assert.equal(material.observation.segments[0]?.kind, 'message');
-    assert.equal(material.observation.segments[0]?.comparison, 'opaque');
+    assert.equal(material.segments[0]?.kind, 'message');
+    assert.equal(material.segments[0]?.comparison, 'opaque');
   });
 
   test('bounds ordered segments without dropping their count or bytes', () => {
@@ -148,23 +145,20 @@ describe('prepared request observation', () => {
     const material = prepareRequestObservation({ prompt });
     const expectedBytes = prompt.reduce(
       (total, message) =>
-        total + prepareRequestObservation({ prompt: [message] }).observation.segments[0]!.bytes,
+        total + prepareRequestObservation({ prompt: [message] }).segments[0]!.bytes,
       0,
     );
 
-    assert.ok(material.observation.segments.length <= 256);
+    assert.ok(material.segments.length <= 256);
     assert.equal(
-      material.observation.segments.reduce((total, segment) => total + segment.bytes, 0),
+      material.segments.reduce((total, segment) => total + segment.bytes, 0),
       expectedBytes,
     );
     assert.equal(
-      material.observation.segments.reduce(
-        (total, segment) => total + (segment.representedSegments ?? 1),
-        0,
-      ),
+      material.segments.reduce((total, segment) => total + (segment.representedSegments ?? 1), 0),
       prompt.length,
     );
-    assert.equal(material.observation.segments.at(-1)?.comparison, 'opaque');
+    assert.equal(material.segments.at(-1)?.comparison, 'opaque');
   });
 
   test('records semantic segments in provider-prefix order and labels only tools', () => {
@@ -178,7 +172,7 @@ describe('prepared request observation', () => {
     });
 
     assert.deepEqual(
-      material.observation.segments.map(({ kind, index, cacheable, role, label }) => ({
+      material.segments.map(({ kind, index, cacheable, role, label }) => ({
         kind,
         index,
         cacheable,

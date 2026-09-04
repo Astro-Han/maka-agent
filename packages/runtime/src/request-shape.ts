@@ -36,13 +36,6 @@ export interface CanonicalToolSet {
   activeTools: string[];
 }
 
-export interface PreparedRequestMaterial {
-  /** Full secret-free representation for the private request artifact. */
-  serializedRequest: string;
-  /** Bounded public observation derived from that same representation. */
-  observation: PreparedRequestObservation;
-}
-
 /**
  * Split the registry into the full dispatch set (`providerTools`) and the
  * model-visible subset (`activeTools`).
@@ -93,8 +86,11 @@ export function toolSchemaCharsForDiagnostics(
  * exact request evidence, but are not claimed to be a provider-cacheable prefix
  * segment. None of this is presented as the provider's final wire body.
  */
-export function prepareRequestObservation(payload: unknown): PreparedRequestMaterial {
+export function prepareRequestObservation(payload: unknown): PreparedRequestObservation {
   const normalizedPayload = normalizePreparedValue(payload);
+  // Serialized to size and identify the request, then dropped. Keeping the
+  // whole body was what filled the artifact store with re-serialized copies of
+  // the same conversation, one per step.
   const serializedRequest = JSON.stringify(normalizedPayload.value);
   const segments: PreparedRequestObservationSegment[] = [];
   const parts = semanticRequestParts(payload);
@@ -120,13 +116,10 @@ export function prepareRequestObservation(payload: unknown): PreparedRequestMate
   }
 
   return {
-    serializedRequest,
-    observation: {
-      schemaVersion: PREPARED_REQUEST_OBSERVATION_SCHEMA_VERSION,
-      digest: hashSerialized(serializedRequest),
-      bytes: Buffer.byteLength(serializedRequest, 'utf8'),
-      segments: boundPreparedRequestSegments(segments),
-    },
+    schemaVersion: PREPARED_REQUEST_OBSERVATION_SCHEMA_VERSION,
+    digest: hashSerialized(serializedRequest),
+    bytes: Buffer.byteLength(serializedRequest, 'utf8'),
+    segments: boundPreparedRequestSegments(segments),
   };
 }
 

@@ -112,9 +112,8 @@ export interface PreparedRequestObservationSegment {
 /**
  * Bounded, secret-free observation of one prepared semantic model request.
  *
- * This is not the provider wire body. The full secret-free serialization stays
- * in the private request artifact referenced by `captureArtifactId` when that
- * sink is available.
+ * This is not the provider wire body, and no copy of that body is kept: the
+ * request is built from the conversation the run already stores.
  */
 export interface PreparedRequestObservation {
   schemaVersion: typeof PREPARED_REQUEST_OBSERVATION_SCHEMA_VERSION;
@@ -165,7 +164,14 @@ export interface ModelCallAttempt {
   providerId: string;
   modelId: string;
   contextWindow?: number;
-  /** Join key for the private prepared-request artifact, when best-effort persistence won the race. */
+  /**
+   * Join key for the private prepared-request artifact.
+   *
+   * Historical only: nothing writes it any more. Every capture was a copy of
+   * the conversation the run already stores, and the copies grew with the
+   * conversation. Attempts recorded before that sink was removed still carry
+   * the key, so it stays decodable.
+   */
   captureArtifactId?: string;
   /** Semantic request actually prepared for this dispatched physical attempt. */
   requestObservation?: PreparedRequestObservation;

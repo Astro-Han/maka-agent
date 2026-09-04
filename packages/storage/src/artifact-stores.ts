@@ -46,7 +46,6 @@ export {
   type ArtifactAttachmentResourceReader,
   type ReadImageSnapshotPlan,
 } from './artifact-attachments.js';
-export { persistProviderRequestCaptureArtifact } from './provider-request-capture-artifact.js';
 
 const writerBrand: unique symbol = Symbol('InteractiveArtifactStoreWriter');
 const writers = new WeakSet<object>();

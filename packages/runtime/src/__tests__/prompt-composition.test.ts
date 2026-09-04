@@ -132,7 +132,7 @@ describe('a real observation survives the whole chain into one fold', () => {
       providerOptions: { anthropic: { thinking: { type: 'enabled' } } },
     });
 
-    const composition = foldPromptComposition(material.observation.segments);
+    const composition = foldPromptComposition(material.segments);
 
     assert.deepEqual(
       composition?.tools?.map((tool) => tool.name),
@@ -165,8 +165,8 @@ describe('a real observation survives the whole chain into one fold', () => {
       providerOptions: { anthropic: { thinking: { type: 'enabled' } } },
     });
 
-    assert.equal(material.observation.segments.length, 256);
-    const composition = foldPromptComposition(material.observation.segments);
+    assert.equal(material.segments.length, 256);
+    const composition = foldPromptComposition(material.segments);
     assert.equal(composition?.tools?.length, 64);
     assert.equal(composition?.remainingTools?.count, 189);
     assert.equal(composition?.unlabelledToolBytes, undefined);
