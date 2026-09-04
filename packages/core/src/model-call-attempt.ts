@@ -346,7 +346,14 @@ const PROMPT_COMPOSITION_REMAINING_TOOLS_SHAPE = defineObjectShape<{
   bytes: number;
 }>()(['count', 'bytes'], []);
 
-const PROMPT_COMPOSITION_SEGMENT_KINDS: readonly PromptCompositionSegmentKind[] = [
+/**
+ * The fold's buckets, in the order a composition lists them.
+ *
+ * The order is part of the contract, not presentation: a reader comparing two
+ * compositions compares them position by position, and the projection
+ * validator rejects a record whose segments arrive out of this order.
+ */
+export const PROMPT_COMPOSITION_SEGMENT_KINDS: readonly PromptCompositionSegmentKind[] = [
   'system_instructions',
   'tool_definitions',
   'messages',

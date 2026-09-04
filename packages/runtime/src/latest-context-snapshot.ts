@@ -26,8 +26,9 @@ import {
 export { LATEST_CONTEXT_PROJECTION_TYPE };
 import {
   PROMPT_COMPOSITION_MAX_TOOLS,
+  PROMPT_COMPOSITION_SEGMENT_KINDS,
   type PromptComposition,
-  type PromptCompositionSegment,
+  type PromptCompositionSegmentKind,
 } from '@maka/core/model-call-attempt';
 import type { ContextDiagnosticsCompaction } from './context-diagnostics.js';
 
@@ -150,14 +151,6 @@ export function readLatestContextSnapshot(
   return record as unknown as LatestContextSnapshot;
 }
 
-/** The fold's buckets, in the order a composition must list them. */
-const COMPOSITION_SEGMENT_ORDER: readonly PromptCompositionSegment['kind'][] = [
-  'system_instructions',
-  'tool_definitions',
-  'messages',
-  'other',
-];
-
 function isPromptComposition(value: unknown): value is PromptComposition {
   const composition = shapedRecord(
     value,
@@ -168,7 +161,7 @@ function isPromptComposition(value: unknown): value is PromptComposition {
     !composition ||
     !Array.isArray(composition.segments) ||
     composition.segments.length === 0 ||
-    composition.segments.length > COMPOSITION_SEGMENT_ORDER.length ||
+    composition.segments.length > PROMPT_COMPOSITION_SEGMENT_KINDS.length ||
     !composition.segments.every(isPromptCompositionSegment) ||
     (composition.tools !== undefined &&
       (!Array.isArray(composition.tools) ||
@@ -183,7 +176,9 @@ function isPromptComposition(value: unknown): value is PromptComposition {
     return false;
   }
   const valid = composition as unknown as PromptComposition;
-  const order = valid.segments.map((segment) => COMPOSITION_SEGMENT_ORDER.indexOf(segment.kind));
+  const order = valid.segments.map((segment) =>
+    PROMPT_COMPOSITION_SEGMENT_KINDS.indexOf(segment.kind),
+  );
   if (order.some((value, index) => index > 0 && value <= order[index - 1]!)) return false;
 
   const toolDefinitions = valid.segments.find((segment) => segment.kind === 'tool_definitions');
@@ -213,7 +208,7 @@ function isPromptCompositionSegment(value: unknown): boolean {
   const segment = shapedRecord(value, ['kind', 'bytes'], []);
   return Boolean(
     segment &&
-      COMPOSITION_SEGMENT_ORDER.includes(segment.kind as PromptCompositionSegment['kind']) &&
+      PROMPT_COMPOSITION_SEGMENT_KINDS.includes(segment.kind as PromptCompositionSegmentKind) &&
       isCount(segment.bytes) &&
       segment.bytes > 0,
   );
