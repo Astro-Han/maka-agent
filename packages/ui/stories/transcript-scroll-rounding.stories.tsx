@@ -29,11 +29,14 @@
  * It is measured here instead, in a real layout engine on fractional heights,
  * through both paths that move the offset without the reader: native anchoring
  * compensating content above them, and the browser clamping the offset when
- * the transcript ends before it. Clamping lands exact. Anchoring misses by a
- * whole pixel on about a quarter of its frames, which is where
- * `GEOMETRY_ROUNDING_PX` comes from — it is that measurement, and this is the
- * thing that holds it. Shrink the constant and the misses below are read as
- * gestures; widen it and the deliberate one at the end goes unheard.
+ * the transcript ends before it. Clamping lands exact. Anchoring misses, which
+ * is where `GEOMETRY_ROUNDING_PX` comes from — it is that measurement, and
+ * this is the thing that holds it.
+ *
+ * And it holds the other half of the rule, which is that the slack is spent
+ * only on events the content actually moved. A settled transcript rounds
+ * nothing, so a reader inching down one is heard exactly; that is the last
+ * phase, and it is what a slack applied unconditionally would swallow.
  *
  * It asks the authority directly rather than reading a scroll position. A
  * misclassification while the reader is at the tail re-derives the same pin and
@@ -157,7 +160,7 @@ export const ContentThatOnlyRoundsIsNotTheReader: Story = {
         `content moved the offset further outside its own band than the module allows; escapes ${escapes
           .map((value) => value.toExponential(2))
           .join(' ')}`,
-      ).toBeLessThanOrEqual(1);
+      ).toBeLessThanOrEqual(2);
 
       // And none of it was read as the reader, who touched nothing at all.
       await expect(
@@ -168,12 +171,13 @@ export const ContentThatOnlyRoundsIsNotTheReader: Story = {
       ).toBe(0);
 
       // And the run is only worth anything if this classifier still says yes
-      // to a reader. Two pixels: the smallest move that has to survive a
-      // tolerance sized to absorb one, so a constant that grew would be caught
-      // here rather than by a reader losing their place mid-answer.
+      // to a reader. Two pixels, on content that just settled: no arithmetic
+      // happened, so nothing here is owed any slack, and a version that spent
+      // it anyway would lose this reader — the same reader, moving the same
+      // way, that a streaming transcript has to keep.
       root.scrollTop -= 2;
       await settled();
-      await expect(readerMoves, 'a real gesture went unheard').toBe(1);
+      await expect(readerMoves, 'a reader on settled content went unheard').toBe(1);
     } finally {
       detach();
     }

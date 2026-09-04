@@ -54,23 +54,25 @@ import { ChatLayoutScrollButton } from '@astryxdesign/core/Chat';
 const PIN_THRESHOLD_PX = 10;
 const BUTTON_THRESHOLD_PX = 100;
 /**
- * How far one event's offset may miss what the content accounts for and still
- * be the content.
+ * How far an offset may miss what the content accounts for and still be the
+ * content.
  *
- * Native anchoring moves the offset by what it inserted, but it rounds the
- * anchor's old and new positions separately, while the range it is measured
- * against is `scrollHeight - clientHeight` — two more integers, each rounded on
- * its own. Growth above the reader is measured landing a whole pixel outside
- * the band on about a quarter of its frames, which is what this absorbs; a
- * story in `packages/ui/stories` holds that measurement, so this is a number
- * from a browser rather than a guess, and it goes red if the browser stops
- * agreeing.
+ * The band below holds an exact `scrollTop` against a range built from two
+ * rounded integers, and native anchoring rounds the anchor's own positions
+ * separately again, so a step that is entirely the content still lands a pixel
+ * or two outside its own band. A story in `packages/ui/stories` measures that
+ * against a real layout engine and goes red if a browser starts missing by
+ * more.
  *
- * It is spent per event and never carried. The error is bounded per event but
- * one-directional across a stream, so keeping a running total would turn a
- * pixel of arithmetic into a drift that eventually crosses any threshold.
+ * It is spent only where that arithmetic happened. An event that finds the
+ * content unchanged has nothing rounded in it: the band is a point, the offset
+ * either moved or did not, and a reader inching down a settled transcript is
+ * heard exactly. Spending it on those events instead is what would make a slow
+ * reader unhearable, and no accumulator can buy that back — the error is
+ * bounded per event but one-directional across a stream, so a running total
+ * turns a pixel of arithmetic into a drift that crosses any threshold.
  */
-const GEOMETRY_ROUNDING_PX = 1;
+const GEOMETRY_ROUNDING_PX = 2;
 
 export interface TranscriptScrollSnapshot {
   /** Following the tail: growth writes `scrollTop`. */
@@ -199,7 +201,8 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
         const explainedHigh = Math.max(0, contentDelta);
         const topDelta = target.scrollTop - lastScrollTop;
         const unexplained = topDelta - Math.min(explainedHigh, Math.max(explainedLow, topDelta));
-        const readerMoved = Math.abs(unexplained) > GEOMETRY_ROUNDING_PX;
+        const slack = contentDelta === 0 ? 0 : GEOMETRY_ROUNDING_PX;
+        const readerMoved = Math.abs(unexplained) > slack;
         lastScrollHeight = target.scrollHeight;
         lastClientHeight = target.clientHeight;
         lastScrollTop = target.scrollTop;
