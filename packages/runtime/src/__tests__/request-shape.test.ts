@@ -20,9 +20,10 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import { PROMPT_COMPOSITION_MAX_TOOLS } from '@maka/core/model-call-attempt';
 import {
   canonicalizeToolSet,
-  prepareRequestObservation,
+  preparedPromptComposition,
   toolSchemaCharsForDiagnostics,
 } from '../request-shape.js';
 import type { MakaTool } from '../tool-runtime.js';
@@ -61,108 +62,9 @@ describe('canonicalizeToolSet active allow-list', () => {
   });
 });
 
-describe('prepared request observation', () => {
-  test('sizes and identifies the whole request, not just its named segments', () => {
-    const material = prepareRequestObservation({
-      prompt: [{ role: 'user', content: 'hello' }],
-      maxOutputTokens: 1_024,
-    });
-
-    assert.match(material.digest, /^sha256:[a-f0-9]{64}$/);
-    // `maxOutputTokens` is part of the request but is not a segment, so the
-    // total has to exceed what the segments account for.
-    assert.ok(
-      material.bytes > material.segments.reduce((total, segment) => total + segment.bytes, 0),
-    );
-  });
-
-  test('serializes non-JSON values without collapsing their semantic identity', () => {
-    const observed = prepareRequestObservation({
-      bigint: 42n,
-      missing: undefined,
-      createdAt: new Date('2026-08-31T00:00:00.000Z'),
-      headers: new Map([['x-observation', 'present']]),
-    });
-    const plain = prepareRequestObservation({
-      bigint: '42',
-      missing: '[undefined]',
-      createdAt: '2026-08-31T00:00:00.000Z',
-      headers: { 'x-observation': 'present' },
-    });
-
-    assert.notEqual(observed.digest, plain.digest);
-  });
-
-  test('preserves the semantic identity of binary request content', () => {
-    const observe = (byte: number) =>
-      prepareRequestObservation({
-        prompt: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'file',
-                data: { type: 'data', data: new Uint8Array([byte]) },
-                mediaType: 'application/octet-stream',
-              },
-            ],
-          },
-        ],
-      });
-
-    const first = observe(1);
-    const second = observe(2);
-    assert.notEqual(first.digest, second.digest);
-    assert.notEqual(first.segments[0]?.digest, second.segments[0]?.digest);
-    assert.equal(first.segments[0]?.comparison, 'exact');
-  });
-
-  test('marks redacted compaction content comparison-opaque', () => {
-    const material = prepareRequestObservation({
-      prompt: [
-        {
-          role: 'assistant',
-          content: [
-            {
-              type: 'custom',
-              kind: 'openai.compaction',
-              providerOptions: { openai: { redacted: true } },
-            },
-          ],
-        },
-      ],
-    });
-
-    assert.equal(material.segments[0]?.kind, 'message');
-    assert.equal(material.segments[0]?.comparison, 'opaque');
-  });
-
-  test('bounds ordered segments without dropping their count or bytes', () => {
-    const prompt = Array.from({ length: 1_000 }, (_, index) => ({
-      role: 'user',
-      content: `message-${index}`,
-    }));
-    const material = prepareRequestObservation({ prompt });
-    const expectedBytes = prompt.reduce(
-      (total, message) =>
-        total + prepareRequestObservation({ prompt: [message] }).segments[0]!.bytes,
-      0,
-    );
-
-    assert.ok(material.segments.length <= 256);
-    assert.equal(
-      material.segments.reduce((total, segment) => total + segment.bytes, 0),
-      expectedBytes,
-    );
-    assert.equal(
-      material.segments.reduce((total, segment) => total + (segment.representedSegments ?? 1), 0),
-      prompt.length,
-    );
-    assert.equal(material.segments.at(-1)?.comparison, 'opaque');
-  });
-
-  test('records semantic segments in provider-prefix order and labels only tools', () => {
-    const material = prepareRequestObservation({
+describe('prepared prompt composition', () => {
+  test('folds every semantic part into its bucket and names the tools', () => {
+    const composition = preparedPromptComposition({
       prompt: [
         { role: 'system', content: 'system' },
         { role: 'user', content: 'hello' },
@@ -172,20 +74,80 @@ describe('prepared request observation', () => {
     });
 
     assert.deepEqual(
-      material.segments.map(({ kind, index, cacheable, role, label }) => ({
-        kind,
-        index,
-        cacheable,
-        ...(role ? { role } : {}),
-        ...(label ? { label } : {}),
-      })),
-      [
-        { kind: 'tool_schema', index: 0, cacheable: true, label: 'Bash' },
-        { kind: 'tool_schema', index: 1, cacheable: true },
-        { kind: 'system_prompt', index: 0, cacheable: true },
-        { kind: 'message', index: 0, cacheable: true, role: 'user' },
-        { kind: 'provider_options', index: 0, cacheable: false },
-      ],
+      composition?.segments.map((segment) => segment.kind),
+      ['system_instructions', 'tool_definitions', 'messages', 'other'],
     );
+    assert.deepEqual(
+      composition?.tools?.map((tool) => tool.name),
+      ['Bash'],
+    );
+    // The unnamed tool's schema is still counted; it just cannot be listed.
+    assert.ok((composition?.unlabelledToolBytes ?? 0) > 0);
+  });
+
+  test('sizes non-JSON values rather than dropping them', () => {
+    const composition = preparedPromptComposition({
+      prompt: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'file',
+              data: { type: 'data', data: new Uint8Array([1, 2, 3]) },
+              mediaType: 'application/octet-stream',
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.ok((composition?.segments[0]?.bytes ?? 0) > 0);
+  });
+
+  test('folds a long conversation into one row without losing its bytes', () => {
+    const prompt = Array.from({ length: 1_000 }, (_, index) => ({
+      role: 'user',
+      content: `message-${index}`,
+    }));
+    const expectedBytes = prompt.reduce(
+      (total, message) =>
+        total + (preparedPromptComposition({ prompt: [message] })?.segments[0]?.bytes ?? 0),
+      0,
+    );
+
+    const composition = preparedPromptComposition({ prompt });
+    assert.deepEqual(
+      composition?.segments.map((segment) => segment.kind),
+      ['messages'],
+    );
+    assert.equal(composition?.segments[0]?.bytes, expectedBytes);
+  });
+
+  test('names the largest tools and carries the rest as a counted remainder', () => {
+    const composition = preparedPromptComposition({
+      tools: Array.from({ length: PROMPT_COMPOSITION_MAX_TOOLS + 5 }, (_, index) => ({
+        name: `tool-${String(index).padStart(3, '0')}`,
+        inputSchema: { type: 'object', padding: 'x'.repeat(index) },
+      })),
+    });
+
+    assert.equal(composition?.tools?.length, PROMPT_COMPOSITION_MAX_TOOLS);
+    assert.equal(composition?.remainingTools?.count, 5);
+    assert.ok((composition?.remainingTools?.bytes ?? 0) > 0);
+    // Largest first, so what a reader could remove is at the top.
+    const bytes = composition?.tools?.map((tool) => tool.bytes) ?? [];
+    assert.deepEqual(
+      bytes,
+      [...bytes].sort((left, right) => right - left),
+    );
+    // Every tool byte is still accounted for, named or not.
+    assert.equal(
+      bytes.reduce((total, size) => total + size, 0) + (composition?.remainingTools?.bytes ?? 0),
+      composition?.segments.find((segment) => segment.kind === 'tool_definitions')?.bytes,
+    );
+  });
+
+  test('has nothing to say about an empty request', () => {
+    assert.equal(preparedPromptComposition({}), undefined);
   });
 });

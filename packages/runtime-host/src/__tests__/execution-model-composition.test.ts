@@ -2029,7 +2029,7 @@ test('production Host executes a canonical ai-sdk Session against a real provide
     const capturedRequestCount = mainRequests.length + compactRequests.length;
     const attempts = await waitForCanonicalAttempts(usageStores, session.id, capturedRequestCount);
     assert.equal(attempts.length, capturedRequestCount);
-    assert.ok(attempts.every((attempt) => attempt.requestObservation));
+    assert.ok(attempts.every((attempt) => attempt.promptComposition));
     const contextDiagnostics = await composition.handlers['context.diagnostics.query'](
       { sessionId: session.id },
       connectionContext,

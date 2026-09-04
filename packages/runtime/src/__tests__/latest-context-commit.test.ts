@@ -38,7 +38,7 @@ import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import type { LanguageModelV4StreamPart } from '@ai-sdk/provider';
 import {
   decodeModelCallAttempt,
-  PREPARED_REQUEST_OBSERVATION_MAX_SEGMENTS,
+  PROMPT_COMPOSITION_MAX_TOOLS,
   type ModelCallAttempt,
 } from '@maka/core/model-call-attempt';
 import { createSqliteAgentRunStore } from '@maka/storage/agent-run-store';
@@ -154,11 +154,10 @@ test('a real send seals its observation into SQLite and reconstructs it after re
         )
       ).flat();
       assert.equal(canonicalAttempts.length, 1);
-      const observation = canonicalAttempts[0]?.requestObservation;
-      assert.ok(observation);
-      assert.ok(observation.segments.length <= PREPARED_REQUEST_OBSERVATION_MAX_SEGMENTS);
-      assert.ok(observation.segments.length > 0);
-      assert.ok(observation.segments.every((segment) => segment.comparison === 'exact'));
+      const composition = canonicalAttempts[0]?.promptComposition;
+      assert.ok(composition);
+      assert.ok(composition.segments.length > 0);
+      assert.ok((composition.tools?.length ?? 0) <= PROMPT_COMPOSITION_MAX_TOOLS);
 
       let coldScans = 0;
       const cold = await readLatestContextDiagnostics(

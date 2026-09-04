@@ -352,8 +352,8 @@ describe('provider request tracker', () => {
         { step: 2, attempt: 1, status: 'completed' },
       ],
     );
-    // Both attempts observed the same request, so they share its identity.
-    assert.equal(attempts[0]?.requestObservation?.digest, attempts[1]?.requestObservation?.digest);
+    // Both attempts measured the same request, so they describe it the same way.
+    assert.deepEqual(attempts[0]?.promptComposition, attempts[1]?.promptComposition);
     assert.equal(attempts[1]?.cacheReadInputTokens, 4);
     assert.equal(attempts[1]?.cacheMissInputTokens, 6);
   });
@@ -400,10 +400,10 @@ describe('provider request tracker', () => {
       })),
       [{ status: 'completed', finishReason: 'stop', inputTokens: 7, outputTokens: 3 }],
     );
-    assert.ok(attempts[0]?.requestObservation);
+    assert.ok(attempts[0]?.promptComposition);
   });
 
-  test('derives a canonical opaque observation from a redacted request', async () => {
+  test('keeps a redacted request out of the canonical attempt', async () => {
     const attempts: ModelCallAttempt[] = [];
     const tracker = new telemetry.ProviderRequestTracker({
       traceId: 'compaction-trace',
@@ -458,7 +458,7 @@ describe('provider request tracker', () => {
     });
 
     assert.equal(attempts.length, 1);
-    assert.equal(attempts[0]?.requestObservation?.segments[0]?.comparison, 'opaque');
+    assert.ok(attempts[0]?.promptComposition);
     assert.doesNotMatch(JSON.stringify(attempts[0]), /cmp_secret|OPAQUE_ENCRYPTED_STATE/);
   });
 
@@ -903,9 +903,9 @@ describe('canonical model-call accounting', () => {
     assert.equal(attempt.costUsd, undefined);
   });
 
-  test('carries the bounded request observation on the canonical attempt', async () => {
-    // The observation is the whole record of what was sent: nothing stores a
-    // copy of the request body for it to be joined against.
+  test('carries the folded prompt composition on the canonical attempt', async () => {
+    // The composition is the whole record of what the prompt was made of:
+    // nothing stores the parts it folds, or a copy of the request body.
     const recorded: ModelCallAttempt[] = [];
     const tracker = accountingTracker({
       record: ({ attempt }) => {
@@ -924,8 +924,7 @@ describe('canonical model-call accounting', () => {
     const attempt = decodeModelCallAttempt(recorded[0]);
     assert.equal(attempt.usageBasis, 'reported');
     assert.equal(attempt.captureArtifactId, undefined, 'nothing writes a capture join any more');
-    assert.match(attempt.requestObservation?.digest ?? '', /^sha256:[a-f0-9]{64}$/);
-    assert.ok((attempt.requestObservation?.segments.length ?? 0) > 0);
+    assert.ok((attempt.promptComposition?.segments.length ?? 0) > 0);
   });
 
   test('an unresolvable price records unpriced rather than zero', async () => {

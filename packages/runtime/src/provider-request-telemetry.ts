@@ -23,10 +23,10 @@ import {
   type ModelCallAttempt,
   type ModelCallKind,
   type ModelCallUsageBasis,
-  type PreparedRequestObservation,
+  type PromptComposition,
 } from '@maka/core/model-call-attempt';
 import type { PricingConfig } from '@maka/core/usage-stats/types';
-import { prepareRequestObservation } from './request-shape.js';
+import { preparedPromptComposition } from './request-shape.js';
 import { rawFinishReasonString } from './model-protocol.js';
 import {
   providerFailureDiagnostic,
@@ -325,10 +325,10 @@ export class ProviderRequestTracker {
     throwIfAbortedBeforeDispatch(input.abortSignal);
     this.input.accounting?.assertReady?.();
     const step = this.step;
-    const observation = this.observe(input);
+    const composition = this.observe(input);
     throwIfAbortedBeforeDispatch(input.abortSignal);
     let sawOutput = false;
-    const attempt = this.beginAttempt(step, observation, input);
+    const attempt = this.beginAttempt(step, composition, input);
 
     let result: ProviderStreamResult;
     try {
@@ -394,9 +394,9 @@ export class ProviderRequestTracker {
     throwIfAbortedBeforeDispatch(input.abortSignal);
     this.input.accounting?.assertReady?.();
     const step = this.step;
-    const observation = this.observe(input);
+    const composition = this.observe(input);
     throwIfAbortedBeforeDispatch(input.abortSignal);
-    const attempt = this.beginAttempt(step, observation, input);
+    const attempt = this.beginAttempt(step, composition, input);
     try {
       const result = await input.doGenerate();
       await attempt.finalize(input.abortSignal?.aborted ? 'aborted' : 'completed', {
@@ -412,7 +412,7 @@ export class ProviderRequestTracker {
 
   private beginAttempt(
     step: number,
-    observation: PreparedRequestObservation,
+    composition: PromptComposition | undefined,
     input: Pick<
       TrackProviderStreamInput | TrackProviderGenerateInput,
       'providerId' | 'modelId' | 'abortSignal' | 'historyCompactBoundary' | 'historyCompactRoute'
@@ -484,7 +484,7 @@ export class ProviderRequestTracker {
           logicalCallId,
           usage,
           contextWindow,
-          requestObservation: observation,
+          promptComposition: composition,
           // Frozen when THIS request was prepared, so a checkpoint published
           // mid-flight by another turn cannot be sealed into a prompt built
           // before it existed.
@@ -528,7 +528,7 @@ export class ProviderRequestTracker {
       logicalCallId: string;
       usage: ProviderRequestUsage | undefined;
       contextWindow: number | undefined;
-      requestObservation: PreparedRequestObservation;
+      promptComposition: PromptComposition | undefined;
       historyCompactBoundary: ContextDiagnosticsCompaction | undefined;
       historyCompactRoute: HistoryCompactRoute | undefined;
     },
@@ -565,7 +565,7 @@ export class ProviderRequestTracker {
       providerId: accounting.providerId ?? record.providerId,
       modelId: record.modelId,
       ...(context.contextWindow !== undefined ? { contextWindow: context.contextWindow } : {}),
-      requestObservation: context.requestObservation,
+      ...(context.promptComposition ? { promptComposition: context.promptComposition } : {}),
       startedAt: record.startedAt,
       completedAt: record.completedAt,
       latencyMs: record.latencyMs,
@@ -596,7 +596,7 @@ export class ProviderRequestTracker {
       attempt.callKind === 'main' && attempt.status === 'completed'
         ? latestContextProjectionInput(
             attempt,
-            attempt.requestObservation?.segments,
+            attempt.promptComposition,
             context.historyCompactBoundary,
           )
         : undefined;
@@ -611,8 +611,8 @@ export class ProviderRequestTracker {
 
   private observe(
     input: TrackProviderStreamInput | TrackProviderGenerateInput,
-  ): PreparedRequestObservation {
-    return prepareRequestObservation(secretFreeParams(input.params));
+  ): PromptComposition | undefined {
+    return preparedPromptComposition(secretFreeParams(input.params));
   }
 }
 

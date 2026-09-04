@@ -20,13 +20,10 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import {
-  PREPARED_REQUEST_OBSERVATION_MAX_SEGMENTS,
-  PREPARED_REQUEST_OBSERVATION_SCHEMA_VERSION,
   PREPARED_REQUEST_OBSERVATION_TEXT_MAX_LENGTH,
-  type PreparedRequestObservation,
-  type PreparedRequestObservationSegment,
-  type PreparedRequestObservationSegmentKind,
+  type PromptComposition,
 } from '@maka/core/model-call-attempt';
+import { foldPromptComposition, type SizedRequestSegment } from './prompt-composition.js';
 import { toJSONSchema } from 'zod';
 
 import type { MakaTool } from './tool-runtime.js';
@@ -86,75 +83,42 @@ export function toolSchemaCharsForDiagnostics(
  * exact request evidence, but are not claimed to be a provider-cacheable prefix
  * segment. None of this is presented as the provider's final wire body.
  */
-export function prepareRequestObservation(payload: unknown): PreparedRequestObservation {
-  const normalizedPayload = normalizePreparedValue(payload);
-  // Serialized to size and identify the request, then dropped. Keeping the
-  // whole body was what filled the artifact store with re-serialized copies of
-  // the same conversation, one per step.
-  const serializedRequest = JSON.stringify(normalizedPayload.value);
-  const segments: PreparedRequestObservationSegment[] = [];
+export function preparedPromptComposition(payload: unknown): PromptComposition | undefined {
+  const segments: SizedRequestSegment[] = [];
   const parts = semanticRequestParts(payload);
 
-  for (const [index, tool] of parts.tools.entries()) {
-    segments.push(preparedSegment('tool_schema', index, tool, true, undefined, toolLabel(tool)));
-  }
+  for (const tool of parts.tools) segments.push(sizedSegment('tool_schema', tool, toolLabel(tool)));
   if (parts.instructions !== undefined) {
     const instructions = Array.isArray(parts.instructions)
       ? parts.instructions
       : [parts.instructions];
-    for (const [index, instruction] of instructions.entries()) {
-      segments.push(preparedSegment('system_prompt', index, instruction, true));
-    }
+    for (const instruction of instructions)
+      segments.push(sizedSegment('system_prompt', instruction));
   }
-  for (const [index, message] of parts.messages.entries()) {
-    const role =
-      isObjectLike(message) && typeof message.role === 'string' ? message.role : undefined;
-    segments.push(preparedSegment('message', index, message, true, role));
-  }
+  for (const message of parts.messages) segments.push(sizedSegment('message', message));
   if (parts.providerOptions !== undefined) {
-    segments.push(preparedSegment('provider_options', 0, parts.providerOptions, false));
+    segments.push(sizedSegment('provider_options', parts.providerOptions));
   }
 
-  return {
-    schemaVersion: PREPARED_REQUEST_OBSERVATION_SCHEMA_VERSION,
-    digest: hashSerialized(serializedRequest),
-    bytes: Buffer.byteLength(serializedRequest, 'utf8'),
-    segments: boundPreparedRequestSegments(segments),
-  };
+  // Folded here rather than stored part by part. The fold is bounded by its own
+  // output — four kinds and a capped tool list — so the unbounded segment list
+  // never leaves this function and needs no cap of its own.
+  return foldPromptComposition(segments);
 }
 
-const MAX_PREPARED_REQUEST_REMAINDERS = 4;
-
-function boundPreparedRequestSegments(
-  segments: readonly PreparedRequestObservationSegment[],
-): PreparedRequestObservationSegment[] {
-  if (segments.length <= PREPARED_REQUEST_OBSERVATION_MAX_SEGMENTS) return [...segments];
-  const kept = segments.slice(
-    0,
-    PREPARED_REQUEST_OBSERVATION_MAX_SEGMENTS - MAX_PREPARED_REQUEST_REMAINDERS,
-  );
-  const remainders: PreparedRequestObservationSegment[] = [];
-  for (const segment of segments.slice(kept.length)) {
-    const previous = remainders.at(-1);
-    if (previous?.kind === segment.kind) {
-      previous.bytes += segment.bytes;
-      previous.representedSegments = (previous.representedSegments ?? 1) + 1;
-      previous.digest = hashSerialized(
-        JSON.stringify(['prepared-segment-remainder', previous.digest, segment.digest]),
-      );
-      continue;
-    }
-    remainders.push({
-      kind: segment.kind,
-      index: segment.index,
-      cacheable: segment.cacheable,
-      comparison: 'opaque',
-      digest: hashSerialized(JSON.stringify(['prepared-segment-remainder', segment.digest])),
-      bytes: segment.bytes,
-      representedSegments: 1,
-    });
-  }
-  return [...kept, ...remainders];
+function sizedSegment(
+  kind: SizedRequestSegment['kind'],
+  value: unknown,
+  label?: string,
+): SizedRequestSegment {
+  const serialized = JSON.stringify(normalizePreparedValue(value).value);
+  return {
+    kind,
+    bytes: Buffer.byteLength(serialized, 'utf8'),
+    ...(label !== undefined
+      ? { label: label.slice(0, PREPARED_REQUEST_OBSERVATION_TEXT_MAX_LENGTH) }
+      : {}),
+  };
 }
 
 function semanticRequestParts(payload: unknown): {
@@ -203,32 +167,6 @@ function providerVisibleTools(
   return providerTools.filter((tool) => active.has(tool.name));
 }
 
-function preparedSegment(
-  kind: PreparedRequestObservationSegmentKind,
-  index: number,
-  value: unknown,
-  cacheable: boolean,
-  role?: string,
-  label?: string,
-): PreparedRequestObservationSegment {
-  const normalized = normalizePreparedValue(value);
-  const serialized = JSON.stringify(normalized.value);
-  return {
-    kind,
-    index,
-    cacheable,
-    comparison: normalized.opaque || containsComparisonOpaqueRedaction(value) ? 'opaque' : 'exact',
-    digest: hashSerialized(serialized),
-    bytes: Buffer.byteLength(serialized, 'utf8'),
-    ...(role !== undefined
-      ? { role: role.slice(0, PREPARED_REQUEST_OBSERVATION_TEXT_MAX_LENGTH) }
-      : {}),
-    ...(label !== undefined
-      ? { label: label.slice(0, PREPARED_REQUEST_OBSERVATION_TEXT_MAX_LENGTH) }
-      : {}),
-  };
-}
-
 /**
  * The tool's own name as the payload carries it.
  *
@@ -243,10 +181,6 @@ function toolLabel(tool: unknown): string | undefined {
 
 export function stableHash(value: unknown): `sha256:${string}` {
   return `sha256:${createHash('sha256').update(stableStringify(value)).digest('hex')}`;
-}
-
-function hashSerialized(serialized: string): `sha256:${string}` {
-  return `sha256:${createHash('sha256').update(serialized).digest('hex')}`;
 }
 
 export function toolCatalogHash(tools: readonly MakaTool[]): `sha256:${string}` {
@@ -416,25 +350,6 @@ function normalizePreparedValue(value: unknown): NormalizedPreparedValue {
     }
   };
   return visit(value, 0);
-}
-
-function containsComparisonOpaqueRedaction(value: unknown, seen = new Set<object>()): boolean {
-  if (!isObjectLike(value)) return false;
-  if (seen.has(value)) return false;
-  seen.add(value);
-  if (Array.isArray(value)) {
-    return value.some((entry) => containsComparisonOpaqueRedaction(entry, seen));
-  }
-  if (
-    value.type === 'custom' &&
-    value.kind === 'openai.compaction' &&
-    isPlainObject(value.providerOptions) &&
-    isPlainObject(value.providerOptions.openai) &&
-    value.providerOptions.openai.redacted === true
-  ) {
-    return true;
-  }
-  return Object.values(value).some((entry) => containsComparisonOpaqueRedaction(entry, seen));
 }
 
 function toolShapeForDiagnostics(tool: MakaTool): unknown {

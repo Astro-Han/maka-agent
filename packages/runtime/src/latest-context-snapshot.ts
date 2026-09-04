@@ -24,11 +24,11 @@ import {
 } from '@maka/core/agent-run';
 
 export { LATEST_CONTEXT_PROJECTION_TYPE };
+import type { PromptComposition } from '@maka/core/model-call-attempt';
 import type {
   ContextDiagnosticsCompaction,
   ContextDiagnosticsComposition,
 } from './context-diagnostics.js';
-import { foldPromptComposition, type SizedRequestSegment } from './prompt-composition.js';
 
 /**
  * One request's context, frozen by the transaction that committed it (#2323).
@@ -78,10 +78,9 @@ export interface LatestContextSnapshot {
  */
 export function latestContextProjectionInput(
   attempt: LatestContextFacts,
-  segments: readonly SizedRequestSegment[] | undefined,
+  composition: PromptComposition | undefined,
   compaction: ContextDiagnosticsCompaction | undefined,
 ): LatestContextProjectionInput {
-  const composition = segments ? foldPromptComposition(segments) : undefined;
   const snapshot: LatestContextSnapshot = {
     schemaVersion: LATEST_CONTEXT_SNAPSHOT_SCHEMA_VERSION,
     attemptId: attempt.attemptId,

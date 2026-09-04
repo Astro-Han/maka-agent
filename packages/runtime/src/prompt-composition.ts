@@ -21,7 +21,10 @@ import type {
   ContextDiagnosticsComposition,
   ContextDiagnosticsSegment,
 } from './context-diagnostics.js';
-import type { PreparedRequestObservationSegmentKind } from '@maka/core/model-call-attempt';
+import {
+  PROMPT_COMPOSITION_MAX_TOOLS,
+  type PreparedRequestObservationSegmentKind,
+} from '@maka/core/model-call-attempt';
 
 /**
  * The three fields a fold needs, and no more.
@@ -97,8 +100,8 @@ export function foldPromptComposition(
   // downstream only moves the cliff: the 257th tool would fail the whole query
   // instead of being summarised. What falls below the cut is carried as a
   // remainder, so the rows still account for every tool byte.
-  const tools = ranked.slice(0, MAX_TOOL_ROWS);
-  const remainder = ranked.slice(MAX_TOOL_ROWS);
+  const tools = ranked.slice(0, PROMPT_COMPOSITION_MAX_TOOLS);
+  const remainder = ranked.slice(PROMPT_COMPOSITION_MAX_TOOLS);
   const remainingToolCount = remainder.length + boundedToolCount;
   const remainingToolBytes =
     remainder.reduce((carry, tool) => carry + tool.bytes, 0) + boundedToolBytes;
@@ -177,15 +180,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isNonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
-
-/**
- * How many tools the fold names individually.
- *
- * Generous enough that a normal registry is listed whole, small enough that a
- * pathological one cannot make this record unbounded. The panel shows fewer
- * still; this is the bound on what crosses a wire and sits in a projection.
- */
-const MAX_TOOL_ROWS = 64;
 
 const KIND_ORDER: readonly PreparedRequestObservationSegmentKind[] = [
   'system_prompt',
