@@ -110,6 +110,8 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
    */
   let lastScrollHeight = 0;
   let lastClientHeight = 0;
+  /** The offset the last event saw, to measure the next one's move against. */
+  let lastScrollTop = 0;
   let snapshot: TranscriptScrollSnapshot = { pinned, awayFromTail };
   const listeners = new Set<() => void>();
   const readerListeners = new Set<() => void>();
@@ -131,6 +133,7 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
     lastWrittenTop = root.scrollTop;
     lastScrollHeight = root.scrollHeight;
     lastClientHeight = root.clientHeight;
+    lastScrollTop = root.scrollTop;
     awayFromTail = false;
     publish();
   };
@@ -150,24 +153,37 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
         if (lastWrittenTop !== undefined && Math.abs(target.scrollTop - lastWrittenTop) < 1) {
           lastScrollHeight = target.scrollHeight;
           lastClientHeight = target.clientHeight;
+          lastScrollTop = target.scrollTop;
           return;
         }
-        // An event that arrives with the scroll geometry changed is the content
-        // or the viewport moving under the reader, not the reader moving:
-        // anchoring holding them still as turns land above, growth that outran
-        // this authority's own write, or a resize the browser answered by
-        // clamping the offset. Their offset changed and their intent did not,
-        // so the pin — which is that intent — must not be re-derived from where
-        // they now are, and nobody may be told the reader asked for anything.
-        // The affordance still follows the new distance, because that is a fact
-        // about the viewport rather than about them.
-        const moved =
-          target.scrollHeight !== lastScrollHeight || target.clientHeight !== lastClientHeight;
+        // Content moves the offset too, and only within a band it can account
+        // for: anchoring pushes the offset down by at most what was inserted
+        // above the reader, and a transcript that shrank clamps it up to the
+        // new end. Inside that band their offset changed and their intent did
+        // not, so the pin must not be re-derived from where they now are, and
+        // nobody may be told the reader asked for anything. The affordance
+        // still follows the new distance, because that is a fact about the
+        // viewport rather than about them.
+        //
+        // Outside it, the move is the reader's, and this may not be decided
+        // from the geometry merely having changed. During growth it always
+        // has, so a reader who scrolled while an answer streamed arrived
+        // carrying a changed `scrollHeight` and was discarded along with it —
+        // the pin stayed, and the next growth wrote the view back to the tail.
+        // Scrolling away from a streaming answer is the one moment a reader
+        // most needs to be believed.
+        const maxScroll = target.scrollHeight - target.clientHeight;
+        const explainedLow = Math.min(0, maxScroll - lastScrollTop);
+        const explainedHigh = Math.max(0, maxScroll - (lastScrollHeight - lastClientHeight));
+        const topDelta = target.scrollTop - lastScrollTop;
+        const readerMoved =
+          topDelta < explainedLow - PIN_THRESHOLD_PX || topDelta > explainedHigh + PIN_THRESHOLD_PX;
         lastScrollHeight = target.scrollHeight;
         lastClientHeight = target.clientHeight;
+        lastScrollTop = target.scrollTop;
         const distance = distanceToTail();
         awayFromTail = distance > BUTTON_THRESHOLD_PX;
-        if (moved) {
+        if (!readerMoved) {
           publish();
           return;
         }
@@ -177,6 +193,7 @@ export function createTranscriptScrollAuthority(): TranscriptScrollAuthority {
       };
       lastScrollHeight = target.scrollHeight;
       lastClientHeight = target.clientHeight;
+      lastScrollTop = target.scrollTop;
       target.addEventListener('scroll', onScroll, { passive: true });
       // Everything that moves the tail without the reader asking, watched in
       // one place: the scroller's own box, because the tail also moves when the

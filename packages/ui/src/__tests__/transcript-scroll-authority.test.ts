@@ -254,6 +254,31 @@ test('growth that outruns the write does not read as the reader scrolling up', (
   });
 });
 
+test('a reader who scrolls up while the answer grows is still the reader', () => {
+  withObservers((resize) => {
+    const root = fakeRoot();
+    const authority = createTranscriptScrollAuthority();
+    authority.attach(root as unknown as HTMLElement);
+    assert.equal(root.scrollTop, 2_400);
+
+    // The same shape as the case above — a scroll event carrying a grown
+    // `scrollHeight` — and the opposite intent. Growth cannot move the offset
+    // backwards, so an offset that went up the transcript is the reader's, and
+    // during a streaming answer this is the only kind of event they produce.
+    root.grow(37);
+    root.scrollTop = 1_900;
+    root.emitScroll();
+    assert.equal(authority.getSnapshot().pinned, false);
+    assert.equal(authority.getSnapshot().awayFromTail, true);
+
+    // And the pin stays off: what arrives next is more of the same answer, and
+    // following it would take the transcript away from where they went.
+    root.grow(300);
+    resize();
+    assert.equal(root.scrollTop, 1_900);
+  });
+});
+
 test('content landing above a released reader does not re-pin them', () => {
   withObservers((resize) => {
     const root = fakeRoot();
