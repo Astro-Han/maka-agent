@@ -24,7 +24,11 @@ import {
 } from '@maka/core/agent-run';
 
 export { LATEST_CONTEXT_PROJECTION_TYPE };
-import type { PromptComposition } from '@maka/core/model-call-attempt';
+import {
+  PROMPT_COMPOSITION_MAX_TOOLS,
+  type PromptComposition,
+  type PromptCompositionSegment,
+} from '@maka/core/model-call-attempt';
 import type { ContextDiagnosticsCompaction } from './context-diagnostics.js';
 
 /**
@@ -146,6 +150,14 @@ export function readLatestContextSnapshot(
   return record as unknown as LatestContextSnapshot;
 }
 
+/** The fold's buckets, in the order a composition must list them. */
+const COMPOSITION_SEGMENT_ORDER: readonly PromptCompositionSegment['kind'][] = [
+  'system_instructions',
+  'tool_definitions',
+  'messages',
+  'other',
+];
+
 function isPromptComposition(value: unknown): value is PromptComposition {
   const composition = shapedRecord(
     value,
@@ -156,12 +168,12 @@ function isPromptComposition(value: unknown): value is PromptComposition {
     !composition ||
     !Array.isArray(composition.segments) ||
     composition.segments.length === 0 ||
-    composition.segments.length > 4 ||
+    composition.segments.length > COMPOSITION_SEGMENT_ORDER.length ||
     !composition.segments.every(isPromptCompositionSegment) ||
     (composition.tools !== undefined &&
       (!Array.isArray(composition.tools) ||
         composition.tools.length === 0 ||
-        composition.tools.length > 64 ||
+        composition.tools.length > PROMPT_COMPOSITION_MAX_TOOLS ||
         !composition.tools.every(isPromptCompositionTool))) ||
     (composition.remainingTools !== undefined &&
       !isPromptCompositionRemainder(composition.remainingTools)) ||
@@ -171,8 +183,7 @@ function isPromptComposition(value: unknown): value is PromptComposition {
     return false;
   }
   const valid = composition as unknown as PromptComposition;
-  const segmentOrder = ['system_instructions', 'tool_definitions', 'messages', 'other'];
-  const order = valid.segments.map((segment) => segmentOrder.indexOf(segment.kind));
+  const order = valid.segments.map((segment) => COMPOSITION_SEGMENT_ORDER.indexOf(segment.kind));
   if (order.some((value, index) => index > 0 && value <= order[index - 1]!)) return false;
 
   const toolDefinitions = valid.segments.find((segment) => segment.kind === 'tool_definitions');
@@ -202,10 +213,7 @@ function isPromptCompositionSegment(value: unknown): boolean {
   const segment = shapedRecord(value, ['kind', 'bytes'], []);
   return Boolean(
     segment &&
-      (segment.kind === 'system_instructions' ||
-        segment.kind === 'tool_definitions' ||
-        segment.kind === 'messages' ||
-        segment.kind === 'other') &&
+      COMPOSITION_SEGMENT_ORDER.includes(segment.kind as PromptCompositionSegment['kind']) &&
       isCount(segment.bytes) &&
       segment.bytes > 0,
   );
