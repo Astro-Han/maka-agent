@@ -279,6 +279,82 @@ test('a reader who scrolls up while the answer grows is still the reader', () =>
   });
 });
 
+test('a slow reader is a reader, however small each step is', () => {
+  withObservers((resize) => {
+    const root = fakeRoot();
+    const authority = createTranscriptScrollAuthority();
+    authority.attach(root as unknown as HTMLElement);
+    let readerMoves = 0;
+    authority.subscribeToReaderScroll(() => {
+      readerMoves += 1;
+    });
+
+    // A trackpad crossing the transcript unhurriedly. Judged one event at a
+    // time against the rounding this has to tolerate, every one of these is
+    // noise and the reader never moves at all; they only mean anything added
+    // up. Nothing grows here, so there is nothing else they could be.
+    for (let step = 0; step < 90; step += 1) {
+      root.scrollTop -= 2;
+      root.emitScroll();
+    }
+    assert.equal(authority.getSnapshot().pinned, false);
+    assert.ok(readerMoves > 0, 'the reader moved 180px and was never heard');
+
+    root.grow(500);
+    resize();
+    assert.equal(root.scrollTop, 2_220);
+  });
+});
+
+test('content leaving from above the reader is not the reader either', () => {
+  withObservers(() => {
+    const root = fakeRoot();
+    const authority = createTranscriptScrollAuthority();
+    authority.attach(root as unknown as HTMLElement);
+    authority.releasePin();
+    root.scrollTop = 1_500;
+    root.emitScroll();
+    assert.equal(authority.getSnapshot().pinned, false);
+    let readerMoves = 0;
+    authority.subscribeToReaderScroll(() => {
+      readerMoves += 1;
+    });
+
+    // A tool block above them folds away. Anchoring answers a removal the same
+    // way it answers an arrival — by moving the offset exactly as far — so the
+    // reader is still looking at the same content and has asked for nothing.
+    root.grow(-60);
+    root.scrollTop = 1_440;
+    root.emitScroll();
+    assert.equal(readerMoves, 0);
+    assert.equal(authority.getSnapshot().pinned, false);
+  });
+});
+
+test('a viewport that grew does not move the reader, it only clamps them', () => {
+  withObservers(() => {
+    const root = fakeRoot();
+    const authority = createTranscriptScrollAuthority();
+    authority.attach(root as unknown as HTMLElement);
+    authority.releasePin();
+    root.scrollTop = 2_350;
+    root.emitScroll();
+    let readerMoves = 0;
+    authority.subscribeToReaderScroll(() => {
+      readerMoves += 1;
+    });
+
+    // The composer loses a line, so the scrollport gets taller and the end of
+    // the transcript moves up past where the reader was sitting. The browser
+    // clamps them to it; they did not ask to go.
+    root.shrinkViewport(-200);
+    root.scrollTop = 2_200;
+    root.emitScroll();
+    assert.equal(readerMoves, 0);
+    assert.equal(authority.getSnapshot().pinned, false);
+  });
+});
+
 test('content landing above a released reader does not re-pin them', () => {
   withObservers((resize) => {
     const root = fakeRoot();
