@@ -2861,7 +2861,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
       ts?: number;
       errorClass?: string;
       abortSource?: string;
-      failureMessage?: string;
       retry?: TurnRecord['retry'];
     } = {},
   ): Promise<void> {
@@ -2876,7 +2875,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
         lineage,
         ...(options.abortSource ? { abortSource: options.abortSource } : {}),
         ...(options.errorClass !== undefined ? { errorClass: options.errorClass } : {}),
-        ...(options.failureMessage ? { failureMessage: options.failureMessage } : {}),
         ...(options.retry ? { retry: options.retry } : {}),
         partialOutputRetained: await this.turnHasRetainedOutput(sessionId, turnId),
       }),

@@ -60,7 +60,10 @@ import {
   safePlaintextResponsesReasoningItemId,
 } from './responses-reasoning-state.js';
 import { classifyError, providerModelFailure } from './provider-error-classification.js';
-import type { ProviderRequestTracker } from './provider-request-telemetry.js';
+import {
+  withProviderStreamTracking,
+  type ProviderRequestTracker,
+} from './provider-request-telemetry.js';
 import type { ContextDiagnosticsCompaction } from './context-diagnostics.js';
 import {
   createOpenAiChatReasoningTransportState,
@@ -138,16 +141,6 @@ export interface ModelAdapterStreamInput {
   historyCompactBoundary?: ContextDiagnosticsCompaction;
   /** Turn-scoped continuation lane. Omitted callers keep the full-request path. */
   continuationKey?: string;
-}
-
-interface ProviderMiddlewareStreamInput {
-  doStream: () => PromiseLike<{
-    stream: ReadableStream<unknown>;
-    request?: unknown;
-    response?: unknown;
-  }>;
-  params: Record<string, unknown> & { abortSignal?: AbortSignal };
-  model: { provider: string; modelId: string };
 }
 
 export class ModelAdapter {
@@ -245,21 +238,14 @@ export class ModelAdapter {
       this.runtime,
     );
     const trackedModel = input.providerRequestTracker
-      ? wrapLanguageModel({
+      ? withProviderStreamTracking({
           model: input.model,
-          middleware: {
-            wrapStream: async ({ doStream, params, model }: ProviderMiddlewareStreamInput) =>
-              await input.providerRequestTracker!.trackStream({
-                providerId: model.provider,
-                modelId: model.modelId,
-                params,
-                abortSignal: input.abortSignal,
-                doStream,
-                ...(input.historyCompactBoundary
-                  ? { historyCompactBoundary: input.historyCompactBoundary }
-                  : {}),
-              }),
-          },
+          wrapLanguageModel,
+          tracker: input.providerRequestTracker,
+          abortSignal: input.abortSignal,
+          ...(input.historyCompactBoundary
+            ? { historyCompactBoundary: input.historyCompactBoundary }
+            : {}),
         })
       : input.model;
     const usesOpenAiResponsesAdapter = hasOpenAiResponsesAdapter(this.runtime);
@@ -544,7 +530,7 @@ export class ModelAdapter {
       ...(failure.code !== undefined ? { code: failure.code } : {}),
       ...(reasonOverride !== undefined
         ? { reason: reasonOverride }
-        : failure.kind !== 'abort' && failure.kind !== 'unknown'
+        : failure.kind !== 'abort'
           ? { reason: failure.kind }
           : {}),
       message: failure.message,
@@ -597,12 +583,7 @@ export function settleModelStepOutcome(evidence: ModelStepSettlementEvidence): M
     );
   }
   if (failure) {
-    return failedStepOutcome(
-      failure.retryable ? 'retryable-failure' : 'terminal-failure',
-      failure,
-      request,
-      usage,
-    );
+    return failedStepOutcome('failed', failure, request, usage);
   }
   if (!sawFinish || finishReason === 'other' || finishReason === 'unknown') {
     return failedStepOutcome(
@@ -620,12 +601,7 @@ export function settleModelStepOutcome(evidence: ModelStepSettlementEvidence): M
       finishReason === 'error'
         ? providerFinishFailure(rawFinishReason)
         : modelStepFailure('unknown', 'Provider stopped the stream on a content filter');
-    return failedStepOutcome(
-      terminalFailure.retryable ? 'retryable-failure' : 'terminal-failure',
-      terminalFailure,
-      request,
-      usage,
-    );
+    return failedStepOutcome('failed', terminalFailure, request, usage);
   }
   return {
     kind: 'completed',

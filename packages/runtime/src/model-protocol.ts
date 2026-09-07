@@ -429,7 +429,7 @@ export type ModelStepOutcome =
       continuation: 'none' | 'pending';
     }
   | {
-      kind: 'truncated' | 'retryable-failure' | 'terminal-failure' | 'aborted';
+      kind: 'truncated' | 'failed' | 'aborted';
       failure: ModelFailure;
       usage?: NormalizedUsage;
       request: ModelRequestMetadata;

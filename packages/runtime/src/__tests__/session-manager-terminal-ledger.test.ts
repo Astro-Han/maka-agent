@@ -263,19 +263,21 @@ describe('SessionManager terminal ledger invariants', () => {
     if (turnState?.type !== 'turn_state') throw new Error('failed turn_state was not projected');
     assert.strictEqual(turnState.status, 'failed');
     assert.strictEqual(turnState.errorClass, 'stream_truncated');
-    assert.equal(turnState.failureMessage, 'Response stream ended without a finish reason.');
     assert.deepEqual(turnState.retry, { decision: 'declined', because: 'side_effects' });
     const restored = runtimeEvents.map((event) =>
       decodeRuntimeEvent(JSON.parse(JSON.stringify(event))),
     );
     const terminal = restored.find(isTerminalRuntimeEvent)!;
+    assert.equal(
+      terminal.content?.kind === 'error' ? terminal.content.message : undefined,
+      'Response stream ended without a finish reason.',
+    );
     assert.equal(runtimeEventHasModelVisibleContent(terminal), false);
     assert.ok(Buffer.byteLength(JSON.stringify(terminal)) < 4096);
     const cold = projectRuntimeEventsToStoredMessages(restored, { invocations: [run] });
     assert.deepEqual(cold.diagnostics, []);
     const coldTurn = deriveTurnRecords(cold.messages).find((turn) => turn.turnId === 'turn-1')!;
     assert.equal(coldTurn.errorClass, turnState.errorClass);
-    assert.equal(coldTurn.failureMessage, turnState.failureMessage);
     assert.deepEqual(coldTurn.retry, turnState.retry);
   });
 

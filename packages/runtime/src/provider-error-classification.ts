@@ -123,11 +123,6 @@ interface ProviderErrorFacts {
   responseHeaders?: Record<string, string>;
 }
 
-export interface ProviderRetryMetadata {
-  retryable: boolean;
-  retryAfterMs?: number;
-}
-
 /** Bounded, allowlisted provider failure facts safe for durable telemetry. */
 export interface ProviderFailureDiagnostic {
   errorClass: ModelFailureKind;
@@ -217,20 +212,10 @@ function parseRetryAfterMs(headers: Record<string, string>): number | null | und
   return Math.ceil(delayMs);
 }
 
-/**
- * Normalizes provider retry facts without leaking SDK error objects or raw
- * response headers across the ModelAdapter boundary.
- */
-export function providerRetryMetadata(error: unknown): ProviderRetryMetadata {
-  const facts = extractProviderErrorFacts(error);
-  if (!facts) return { retryable: false };
-  return retryMetadataFromFacts(facts);
-}
-
 function retryMetadataFromFacts(
   facts: ProviderErrorFacts,
   errorClass = classifyProviderFacts(facts),
-): ProviderRetryMetadata {
+): Pick<ModelFailure, 'retryable' | 'retryAfterMs'> {
   if (facts.aborted) return { retryable: false };
   const { evidence } = facts;
 
@@ -376,16 +361,6 @@ function normalizeProviderError(error: unknown): ProviderErrorFacts | undefined 
     };
   }
   return undefined;
-}
-
-/**
- * Retains only allowlisted provider failure fields. The provider value may also
- * contain request bodies, headers, or credentials, so it must never be copied
- * or serialized as diagnostic output wholesale.
- */
-export function providerFailureSummary(error: unknown): ProviderFailureSummary | undefined {
-  const facts = extractProviderErrorFacts(error);
-  return facts ? failureSummaryFromFacts(facts) : undefined;
 }
 
 function failureSummaryFromFacts(facts: ProviderErrorFacts): ProviderFailureSummary | undefined {

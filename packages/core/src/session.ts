@@ -937,7 +937,6 @@ export interface TurnStateMessage {
   /** Diagnostic source for user/renderer-triggered aborts, e.g. renderer.stop_button. */
   abortSource?: string;
   errorClass?: string;
-  failureMessage?: string;
   retry?: ModelRetryDecision;
   partialOutputRetained: boolean;
 }
@@ -1148,7 +1147,6 @@ export interface TurnRecord {
   abortedAt?: number;
   abortSource?: string;
   errorClass?: string;
-  failureMessage?: string;
   retry?: ModelRetryDecision;
   partialOutputRetained: boolean;
 }
@@ -1268,7 +1266,6 @@ const TURN_STATE_MESSAGE_SHAPE = defineObjectShape<TurnStateMessage>()(
     'abortedAt',
     'abortSource',
     'errorClass',
-    'failureMessage',
     'retry',
   ],
 );
@@ -1562,7 +1559,6 @@ function decodeMessage(
         (message.abortedAt === undefined || isFiniteNumber(message.abortedAt)) &&
         isOptionalString(message.abortSource) &&
         isOptionalString(message.errorClass) &&
-        isOptionalString(message.failureMessage) &&
         (message.retry === undefined || isModelRetryDecision(message.retry))
       )
         return message as unknown as TurnStateMessage;
@@ -1857,7 +1853,6 @@ export function deriveTurnRecords(messages: readonly StoredMessage[]): TurnRecor
         ...(latestState.abortedAt !== undefined ? { abortedAt: latestState.abortedAt } : {}),
         ...(latestState.abortSource ? { abortSource: latestState.abortSource } : {}),
         ...(latestState.errorClass ? { errorClass: latestState.errorClass } : {}),
-        ...(latestState.failureMessage ? { failureMessage: latestState.failureMessage } : {}),
         ...(latestState.retry ? { retry: latestState.retry } : {}),
         partialOutputRetained: latestState.partialOutputRetained || partialOutputRetained,
       };

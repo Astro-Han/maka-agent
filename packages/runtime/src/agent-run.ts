@@ -129,7 +129,6 @@ export interface AgentRunHooks {
       ts?: number;
       errorClass?: string;
       abortSource?: string;
-      failureMessage?: string;
       retry?: TurnRecord['retry'];
     },
   ): Promise<void>;
@@ -802,7 +801,6 @@ export class AgentRun {
           .appendTurnState(this.sessionId, this.turnId, 'failed', this.lineage, {
             ts: runtimeEvent.ts,
             errorClass: failure.reason ?? failure.code ?? 'unknown',
-            failureMessage: failure.message,
             ...(failure.retry ? { retry: failure.retry } : {}),
           })
           .catch((error) => this.enqueueTraceWriteFailure(error, 'terminal session projection'));

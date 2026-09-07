@@ -26,8 +26,7 @@ import { z } from 'zod/v4';
 import {
   classifyError,
   providerFailureDiagnostic,
-  providerFailureSummary,
-  providerRetryMetadata,
+  providerModelFailure,
 } from '../provider-error-classification.js';
 
 describe('Provider error classification', () => {
@@ -85,7 +84,7 @@ describe('Provider error classification', () => {
       data: { error: { code: 'insufficient_quota' } },
     });
     assert.equal(classifyError(quotaOn429), 'provider_billing');
-    assert.equal(providerRetryMetadata(quotaOn429).retryable, false);
+    assert.equal(providerModelFailure(quotaOn429).retryable, false);
   });
 
   test('plan-window wording on a credential-shaped status projects to billing', () => {
@@ -99,7 +98,7 @@ describe('Provider error classification', () => {
       data: { error: { type: 'authentication_error' } },
     });
     assert.equal(classifyError(planWindow), 'provider_billing');
-    assert.equal(providerRetryMetadata(planWindow).retryable, false);
+    assert.equal(providerModelFailure(planWindow).retryable, false);
 
     const exhaustedCredits = Object.assign(new Error('Request failed with status code 403'), {
       name: 'AI_APICallError',
@@ -144,7 +143,9 @@ describe('Provider error classification', () => {
     );
 
     assert.equal(classifyError(exhaustedEdgeRejection), 'provider_unavailable');
-    assert.deepEqual(providerRetryMetadata(exhaustedEdgeRejection), { retryable: false });
+    assert.partialDeepStrictEqual(providerModelFailure(exhaustedEdgeRejection), {
+      retryable: false,
+    });
     assert.deepEqual(providerFailureDiagnostic(exhaustedEdgeRejection), {
       errorClass: 'provider_unavailable',
       httpStatus: 403,
@@ -207,7 +208,7 @@ describe('Provider error classification', () => {
   });
 
   test('extracts allowlisted fields from JSON string failures without copying the payload', () => {
-    const summary = providerFailureSummary(
+    const summary = providerModelFailure(
       JSON.stringify({
         error: { message: 'provider rejected request', code: 'bad_request' },
         request_id: 'req-123',
@@ -216,14 +217,14 @@ describe('Provider error classification', () => {
       }),
     );
 
-    assert.deepEqual(summary, {
+    assert.partialDeepStrictEqual(summary, {
       message: 'provider rejected request (code=bad_request, requestId=req-123)',
       code: 'bad_request',
     });
     assert.equal(JSON.stringify(summary).includes('private customer text'), false);
     assert.equal(JSON.stringify(summary).includes('x-debug'), false);
-    assert.deepEqual(
-      providerFailureSummary({
+    assert.partialDeepStrictEqual(
+      providerModelFailure({
         error: JSON.stringify({
           message: 'nested provider rejection',
           code: 'nested_error',
@@ -236,8 +237,8 @@ describe('Provider error classification', () => {
       },
     );
     assert.equal(
-      providerFailureSummary(JSON.stringify([{ prompt: 'private list payload' }])),
-      undefined,
+      providerModelFailure(JSON.stringify([{ prompt: 'private list payload' }])).message,
+      'Model request failed',
     );
   });
 
@@ -252,8 +253,8 @@ describe('Provider error classification', () => {
     });
 
     assert.equal(classifyError(websocketFailure), 'network');
-    assert.deepEqual(providerRetryMetadata(websocketFailure), { retryable: true });
-    assert.deepEqual(providerRetryMetadata(missingContinuation), { retryable: true });
+    assert.partialDeepStrictEqual(providerModelFailure(websocketFailure), { retryable: true });
+    assert.partialDeepStrictEqual(providerModelFailure(missingContinuation), { retryable: true });
   });
 
   test('treats a status-less provider server_error as temporarily unavailable', () => {
@@ -267,7 +268,7 @@ describe('Provider error classification', () => {
     };
 
     assert.equal(classifyError(failure), 'provider_unavailable');
-    assert.deepEqual(providerRetryMetadata(failure), { retryable: true });
+    assert.partialDeepStrictEqual(providerModelFailure(failure), { retryable: true });
     assert.deepEqual(providerFailureDiagnostic(failure), {
       errorClass: 'provider_unavailable',
       providerCode: 'server_error',
@@ -292,7 +293,7 @@ describe('Provider error classification', () => {
     );
 
     assert.equal(classifyError(failure), 'network');
-    assert.deepEqual(providerRetryMetadata(failure), { retryable: true });
+    assert.partialDeepStrictEqual(providerModelFailure(failure), { retryable: true });
     assert.equal(providerFailureDiagnostic(failure).retryable, true);
   });
 
@@ -302,7 +303,7 @@ describe('Provider error classification', () => {
     });
 
     assert.equal(classifyError(failure), 'network');
-    assert.deepEqual(providerRetryMetadata(failure), { retryable: true });
+    assert.partialDeepStrictEqual(providerModelFailure(failure), { retryable: true });
   });
 
   test('does not retry a bare rate limit marked retryable by the AI SDK', () => {
@@ -312,7 +313,7 @@ describe('Provider error classification', () => {
       statusCode: 429,
     });
 
-    assert.deepEqual(providerRetryMetadata(rateLimit), { retryable: false });
+    assert.partialDeepStrictEqual(providerModelFailure(rateLimit), { retryable: false });
   });
 
   test('retries a rate limit only when the provider names a retry delay', () => {
@@ -327,8 +328,8 @@ describe('Provider error classification', () => {
       responseHeaders: { 'retry-after': '40' },
     });
 
-    assert.deepEqual(providerRetryMetadata(bareRateLimit), { retryable: false });
-    assert.deepEqual(providerRetryMetadata(delayedRateLimit), {
+    assert.partialDeepStrictEqual(providerModelFailure(bareRateLimit), { retryable: false });
+    assert.partialDeepStrictEqual(providerModelFailure(delayedRateLimit), {
       retryable: true,
       retryAfterMs: 40_000,
     });
@@ -344,17 +345,17 @@ describe('Provider error classification', () => {
       });
 
     assert.equal(classifyError(capacity()), 'provider_capacity');
-    assert.deepEqual(providerRetryMetadata(capacity()), { retryable: true });
-    assert.deepEqual(
-      providerRetryMetadata(
+    assert.partialDeepStrictEqual(providerModelFailure(capacity()), { retryable: true });
+    assert.partialDeepStrictEqual(
+      providerModelFailure(
         Object.assign(capacity(), {
           responseHeaders: { 'retry-after': '12' },
         }),
       ),
       { retryable: true, retryAfterMs: 12_000 },
     );
-    assert.deepEqual(
-      providerRetryMetadata(
+    assert.partialDeepStrictEqual(
+      providerModelFailure(
         Object.assign(capacity(), {
           responseHeaders: { 'retry-after': 'not-a-delay' },
         }),
@@ -379,7 +380,9 @@ describe('Provider error classification', () => {
       data: { error: { code: 'resource-exhausted' } },
     });
     assert.equal(classifyError(capacityWithRateLimitStatus), 'provider_capacity');
-    assert.deepEqual(providerRetryMetadata(capacityWithRateLimitStatus), { retryable: true });
+    assert.partialDeepStrictEqual(providerModelFailure(capacityWithRateLimitStatus), {
+      retryable: true,
+    });
     assert.deepEqual(providerFailureDiagnostic(capacityWithRateLimitStatus), {
       errorClass: 'provider_capacity',
       httpStatus: 429,

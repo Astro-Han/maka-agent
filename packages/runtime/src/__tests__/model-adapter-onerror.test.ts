@@ -76,8 +76,7 @@ describe('settleModelStepOutcome', () => {
       request: {},
     });
 
-    assert.equal(outcome.kind, 'retryable-failure');
-    if (outcome.kind !== 'retryable-failure') return;
+    assert.ok(outcome.kind === 'failed');
     assert.equal(outcome.failure, failure);
   });
 
@@ -90,8 +89,7 @@ describe('settleModelStepOutcome', () => {
       request: {},
     });
 
-    assert.equal(outcome.kind, 'terminal-failure');
-    if (outcome.kind !== 'terminal-failure') return;
+    assert.ok(outcome.kind === 'failed');
     assert.equal(outcome.failure.kind, 'provider_unavailable');
     assert.equal(outcome.failure.code, '503');
     assert.equal(outcome.failure.retryable, false);
@@ -157,8 +155,7 @@ describe('ModelAdapter.startStream onError', () => {
       },
     ]);
     const outcome = await requireAlreadySettled(result.outcome);
-    assert.equal(outcome.kind, 'retryable-failure');
-    if (outcome.kind !== 'retryable-failure') return;
+    assert.ok(outcome.kind === 'failed');
     assert.deepEqual(outcome.failure, failures[0]);
   });
 
@@ -207,8 +204,7 @@ describe('ModelAdapter.startStream onError', () => {
       },
     ]);
     const outcome = await requireAlreadySettled(result.outcome);
-    assert.equal(outcome.kind, 'terminal-failure');
-    if (outcome.kind !== 'terminal-failure') return;
+    assert.ok(outcome.kind === 'failed');
     assert.deepEqual(outcome.failure, failures[0]);
   });
 
@@ -241,8 +237,7 @@ describe('ModelAdapter.startStream onError', () => {
     for await (const _event of result.events) void _event;
     const outcome = await result.outcome;
 
-    assert.equal(outcome.kind, 'terminal-failure');
-    if (outcome.kind !== 'terminal-failure') return;
+    assert.ok(outcome.kind === 'failed');
     assert.deepEqual(outcome.failure, {
       type: 'model_failure',
       kind: 'rate_limit',
@@ -291,7 +286,7 @@ describe('ModelAdapter.startStream onError', () => {
       },
     ]);
     assert.deepEqual(await result.outcome, {
-      kind: 'retryable-failure',
+      kind: 'failed',
       failure: failures[0],
       request: { messages: [{ role: 'user', content: 'hi' }] },
       continuation: 'none',
@@ -419,8 +414,7 @@ describe('ModelAdapter.startStream onError', () => {
       },
     ]);
 
-    assert.equal(outcome.kind, 'terminal-failure');
-    if (outcome.kind !== 'terminal-failure') return;
+    assert.ok(outcome.kind === 'failed');
     assert.equal(outcome.failure.kind, 'unknown');
     assert.equal(outcome.failure.message, 'Provider stopped the stream on a content filter');
   });

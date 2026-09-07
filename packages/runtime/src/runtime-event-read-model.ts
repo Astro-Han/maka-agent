@@ -1199,11 +1199,8 @@ function projectTerminalTurnState(
     ...(status === 'aborted' ? { abortedAt: event.ts } : {}),
     ...(abortSource ? { abortSource } : {}),
     ...(status === 'failed' ? { errorClass: failureClass ?? 'unknown' } : {}),
-    ...(status === 'failed' && event.content?.kind === 'error'
-      ? {
-          failureMessage: event.content.message,
-          ...(event.content.retry ? { retry: event.content.retry } : {}),
-        }
+    ...(status === 'failed' && event.content?.kind === 'error' && event.content.retry
+      ? { retry: event.content.retry }
       : {}),
     partialOutputRetained,
   });

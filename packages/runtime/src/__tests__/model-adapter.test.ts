@@ -907,7 +907,7 @@ describe('ModelAdapter stream and error normalization', () => {
     const event = adapter.makeErrorEvent('turn-1', error);
 
     assert.equal(adapter.classifyError(error), 'unknown');
-    assert.equal(event.reason, undefined);
+    assert.equal(event.reason, 'unknown');
     assert.equal(event.message, 'connect ECONNREFUSED 127.0.0.1:443');
   });
 
@@ -930,7 +930,7 @@ describe('ModelAdapter stream and error normalization', () => {
     });
     const event = adapter.makeErrorEvent('turn-1', failure);
 
-    assert.equal(event.reason, undefined);
+    assert.equal(event.reason, 'unknown');
     assert.equal(event.code, 'provider_error');
     assert.match(event.message, /^provider exploded api_key=\[redacted\]/);
     assert.match(event.message, /… \(code=provider_error, requestId=req-123\)$/);

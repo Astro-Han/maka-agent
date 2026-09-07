@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import { MODEL_FAILURE_MESSAGE_MAX_BYTES } from '@maka/core/model-failure';
 import { decodeCanonicalMessage, type TurnRecord, type TurnStateMessage } from '@maka/core/session';
 import { truncateUtf8 } from '@maka/core/diagnostic-log';
 import {
@@ -180,9 +179,6 @@ function projectTurnStateMessageForWire(message: TurnStateMessage): TurnStateMes
     ...(message.errorClass
       ? { errorClass: truncateUtf8(message.errorClass, SESSION_TURN_DIAGNOSTIC_MAX_BYTES) }
       : {}),
-    ...(message.failureMessage
-      ? { failureMessage: truncateUtf8(message.failureMessage, MODEL_FAILURE_MESSAGE_MAX_BYTES) }
-      : {}),
     ...(message.retry ? { retry: message.retry } : {}),
     partialOutputRetained: message.partialOutputRetained,
   };
@@ -210,7 +206,6 @@ export function projectSessionTurnContribution(contribution: SessionTurnContribu
       ...(state.abortedAt !== undefined ? { abortedAt: state.abortedAt } : {}),
       ...(state.abortSource ? { abortSource: state.abortSource } : {}),
       ...(state.errorClass ? { errorClass: state.errorClass } : {}),
-      ...(state.failureMessage ? { failureMessage: state.failureMessage } : {}),
       ...(state.retry ? { retry: state.retry } : {}),
       partialOutputRetained: state.partialOutputRetained || partialOutputRetained,
     };
@@ -429,13 +424,6 @@ function decodeSessionTurnContribution(value: unknown): SessionTurnContribution 
         message.errorClass,
         'Session turn error class',
         SESSION_TURN_DIAGNOSTIC_MAX_BYTES,
-      );
-    }
-    if (message.failureMessage !== undefined) {
-      requireUtf8String(
-        message.failureMessage,
-        'Session turn failure message',
-        MODEL_FAILURE_MESSAGE_MAX_BYTES,
       );
     }
     latestState = {

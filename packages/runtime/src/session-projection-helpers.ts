@@ -47,7 +47,6 @@ export interface BuildTurnStateMessageInput {
   status: TurnRecord['status'];
   lineage?: TurnStateLineage;
   errorClass?: string;
-  failureMessage?: string;
   retry?: TurnRecord['retry'];
   abortSource?: string;
   partialOutputRetained: boolean;
@@ -85,7 +84,6 @@ export function buildTurnStateMessage(input: BuildTurnStateMessageInput): TurnSt
     ...(input.status === 'failed'
       ? {
           errorClass: input.errorClass ?? 'unknown',
-          ...(input.failureMessage ? { failureMessage: input.failureMessage } : {}),
           ...(input.retry ? { retry: input.retry } : {}),
         }
       : {}),

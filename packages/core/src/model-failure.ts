@@ -19,27 +19,20 @@
 
 import { defineObjectShape, hasExactShape, isRecord } from './record-schema.js';
 
-export const MODEL_FAILURE_KINDS = [
-  'abort',
-  'auth',
-  'context_overflow',
-  'network',
-  'provider_capacity',
-  'provider_billing',
-  'provider_unavailable',
-  'rate_limit',
-  'request_rejected',
-  'stream_truncated',
-  'timeout',
-  'unknown',
-] as const;
-
-export type ModelFailureKind = (typeof MODEL_FAILURE_KINDS)[number];
+export type ModelFailureKind =
+  | 'abort'
+  | 'auth'
+  | 'context_overflow'
+  | 'network'
+  | 'provider_capacity'
+  | 'provider_billing'
+  | 'provider_unavailable'
+  | 'rate_limit'
+  | 'request_rejected'
+  | 'stream_truncated'
+  | 'timeout'
+  | 'unknown';
 export const MODEL_FAILURE_MESSAGE_MAX_BYTES = 2 * 1024;
-
-export function isModelFailureKind(value: unknown): value is ModelFailureKind {
-  return typeof value === 'string' && MODEL_FAILURE_KINDS.some((kind) => kind === value);
-}
 
 export type ModelRetryDecision =
   | { decision: 'exhausted'; attempts: number }
