@@ -89,6 +89,8 @@ export function describeTurnErrorClass(errorClass: string | undefined, locale: U
   const reasonDescription = describeSessionErrorReason(errorClass, locale);
   if (reasonDescription) return reasonDescription;
   switch (errorClass.toLowerCase()) {
+    // Before #3758, transport failures could persist their raw code as the class.
+    case 'econnreset': case 'econnrefused': case 'econnaborted': return copy.network;
     case SANDBOX_BOUNDARY_RESTART_CLOSURE_CLASS: return copy.sandboxBoundaryClosed;
     case 'server_error': case 'providerunavailable': return copy.provider;
     case 'contextlength': return copy.contextOverflow;

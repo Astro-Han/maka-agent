@@ -36,6 +36,8 @@ describe('failed turn presentation', () => {
     assert.match(describeTurnErrorClass('server_error', 'zh-CN'), /模型服务返回错误/);
     assert.match(describeTurnErrorClass('server_error', 'zh-TW'), /模型服務回傳錯誤/);
     assert.match(describeTurnErrorClass('server_error', 'en'), /model service returned an error/i);
+    // Before #3758 the adapter persisted these codes with an unknown kind.
+    assert.equal(describeTurnErrorClass('ECONNRESET', 'en'), describeTurnErrorClass('network', 'en'));
   });
 
   it('states what to do without promising a resume the UI cannot offer', () => {
