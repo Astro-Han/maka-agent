@@ -667,7 +667,7 @@ export function providerModelFailure(error: unknown): ModelFailure {
     kind,
     ...retry,
     ...(summary?.code !== undefined ? { code: summary.code } : {}),
-    message: summary?.message ?? failureFallbackMessage(kind),
+    message: summary?.message ?? 'Model request failed',
   };
 }
 
@@ -777,33 +777,4 @@ function isTrustedCodexEdgeRejection(facts: ProviderErrorFacts): boolean {
         : undefined;
   }
   return false;
-}
-
-function failureFallbackMessage(errorClass: ModelFailureKind): string {
-  switch (errorClass) {
-    case 'context_overflow':
-      return 'Context window exceeded';
-    case 'timeout':
-      return 'Request timed out';
-    case 'auth':
-      return 'Authentication failed';
-    case 'provider_billing':
-      return 'Provider billing required';
-    case 'provider_capacity':
-      return 'Model service is temporarily at capacity';
-    case 'provider_unavailable':
-      return 'Provider returned an error';
-    case 'rate_limit':
-      return 'Rate limit exceeded';
-    case 'network':
-      return 'Network error';
-    case 'request_rejected':
-      return 'Provider rejected the request';
-    case 'stream_truncated':
-      return 'Provider response stream ended before completion';
-    case 'abort':
-      return 'Request aborted';
-    case 'unknown':
-      return 'Model request failed';
-  }
 }
