@@ -224,7 +224,6 @@ function deriveTurnPresentationEntry(input: {
     entry.failedSeverity = deriveFailedTurnSeverity(turn.errorClass);
     entry.failedExecutionStateLabel = describeFailedTurnExecutionState({
       retry: turn.retry,
-      partialOutputRetained: turn.partialOutputRetained,
       toolActivityCount: turn.tools.length,
       erroredToolCount: turn.tools.filter((tool) => tool.status === 'errored').length,
     }, uiLocale);

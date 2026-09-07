@@ -26,7 +26,6 @@ import {
 } from '../../renderer/session-status-presentation.js';
 
 const NOTHING_RAN = {
-  partialOutputRetained: false,
   toolActivityCount: 0,
   erroredToolCount: 0,
 };
@@ -80,23 +79,18 @@ describe('failed turn execution state', () => {
     assert.match(describeFailedTurnExecutionState(state, 'zh-TW') ?? '', /工具執行出錯/);
   });
 
-  it('reports nothing when the turn left nothing to re-read', () => {
+  it('does not infer execution guidance from a legacy output hint', () => {
     assert.equal(describeFailedTurnExecutionState(NOTHING_RAN, 'zh-CN'), undefined);
+    const legacyState = { ...NOTHING_RAN, partialOutputRetained: true };
+    assert.equal(describeFailedTurnExecutionState(legacyState, 'zh-CN'), undefined);
   });
 
   it('prefers the most specific state the turn reached', () => {
-    const all = { partialOutputRetained: true, toolActivityCount: 2, erroredToolCount: 1 };
+    const all = { toolActivityCount: 2, erroredToolCount: 1 };
     assert.match(describeFailedTurnExecutionState(all, 'zh-CN') ?? '', /工具执行出错/);
     assert.match(
       describeFailedTurnExecutionState({ ...all, erroredToolCount: 0 }, 'zh-CN') ?? '',
       /执行过工具/,
-    );
-    assert.match(
-      describeFailedTurnExecutionState(
-        { ...NOTHING_RAN, partialOutputRetained: true },
-        'zh-CN',
-      ) ?? '',
-      /部分回答/,
     );
   });
 

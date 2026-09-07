@@ -416,7 +416,6 @@ export interface TurnViewModel {
   abortSource?: string;
   errorClass?: string;
   retry?: import('@maka/core/model-failure').ModelRetryDecision;
-  partialOutputRetained: boolean;
   user?: ChatItem;
   tools: ToolActivityItem[];
   assistant?: ChatItem;
@@ -485,7 +484,6 @@ export function overlayLiveTurn(
       : ({
           turnId: liveTurn.turnId,
           status: "completed" as const,
-          partialOutputRetained: false,
           tools: [],
           notes: [],
           timeline: [],
@@ -744,7 +742,6 @@ export function materializeTurns(
         ...(record?.abortSource ? { abortSource: record.abortSource } : {}),
         ...(record?.errorClass ? { errorClass: record.errorClass } : {}),
         ...(record?.retry ? { retry: record.retry } : {}),
-        partialOutputRetained: record?.partialOutputRetained ?? false,
         tools: [],
         notes: [],
         timeline: [],

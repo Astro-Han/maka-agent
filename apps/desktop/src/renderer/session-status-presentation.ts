@@ -130,7 +130,6 @@ export function deriveFailedTurnSeverity(errorClass: string | undefined): Failed
 
 export interface FailedTurnExecutionState {
   retry?: ModelRetryDecision;
-  partialOutputRetained: boolean;
   toolActivityCount: number;
   erroredToolCount: number;
 }
@@ -146,7 +145,8 @@ export interface FailedTurnExecutionState {
  * "inspect the tool result" and dropped "sign in again" — the only step that
  * could actually change the outcome. Both facts are true at once and the
  * banner has a slot for each (`title` / `description`), so neither has to
- * lose. Returns undefined when the turn produced nothing worth re-reading.
+ * lose. Without a recorded retry decision or tool activity, there is no
+ * supplementary guidance; loading older answer text must not change it.
  */
 export function describeFailedTurnExecutionState(
   state: FailedTurnExecutionState,
@@ -158,6 +158,5 @@ export function describeFailedTurnExecutionState(
   const copy = turnCopy.executionState;
   if (state.erroredToolCount > 0) return copy.erroredTool;
   if (state.toolActivityCount > 0) return copy.toolRan;
-  if (state.partialOutputRetained) return copy.partialOutput;
   return undefined;
 }
