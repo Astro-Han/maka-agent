@@ -238,7 +238,20 @@ describe('SessionManager terminal ledger invariants', () => {
       { store },
     );
 
+    const readMessages = store.readMessages.bind(store);
+    let acceptedUserMessage = false;
+    let wholeSessionReads = 0;
+    const appendMessage = store.appendMessage.bind(store);
+    store.appendMessage = async (sessionId, message) => {
+      await appendMessage(sessionId, message);
+      if (message.type === 'user') acceptedUserMessage = true;
+    };
+    store.readMessages = async (sessionId) => {
+      if (acceptedUserMessage) wholeSessionReads += 1;
+      return readMessages(sessionId);
+    };
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
+    assert.equal(wholeSessionReads, 0, 'terminal state writes must not scan session history');
 
     const [run] = await runStore.listSessionInvocations(session.id);
     if (!run) throw new Error('run was not recorded');
@@ -261,6 +274,7 @@ describe('SessionManager terminal ledger invariants', () => {
       .reverse()
       .find((message) => message.type === 'turn_state' && message.turnId === 'turn-1');
     if (turnState?.type !== 'turn_state') throw new Error('failed turn_state was not projected');
+    assert.equal(turnState.partialOutputRetained, undefined);
     assert.strictEqual(turnState.status, 'failed');
     assert.strictEqual(turnState.errorClass, 'stream_truncated');
     assert.deepEqual(turnState.retry, { decision: 'declined', because: 'side_effects' });

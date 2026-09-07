@@ -211,7 +211,6 @@ import { projectAgentGraphRecords } from './stream-graph-projection.js';
 import {
   buildStatusPatch,
   buildTurnStateMessage,
-  turnHasRetainedOutput as messagesHaveRetainedOutput,
   type RunLifecycleStatus,
 } from './session-projection-helpers.js';
 import {
@@ -4390,14 +4389,8 @@ export class SessionManager {
         lineage,
         ...(options.abortSource ? { abortSource: options.abortSource } : {}),
         ...(options.errorClass !== undefined ? { errorClass: options.errorClass } : {}),
-        partialOutputRetained: await this.turnHasRetainedOutput(sessionId, turnId),
       }),
     );
-  }
-
-  private async turnHasRetainedOutput(sessionId: string, turnId: string): Promise<boolean> {
-    const messages = await this.deps.store.readMessages(sessionId).catch(() => []);
-    return messagesHaveRetainedOutput(messages, turnId);
   }
 
   private async requireTurnForAction(

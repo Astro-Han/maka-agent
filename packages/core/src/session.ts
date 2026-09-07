@@ -938,7 +938,8 @@ export interface TurnStateMessage {
   abortSource?: string;
   errorClass?: string;
   retry?: ModelRetryDecision;
-  partialOutputRetained: boolean;
+  /** Legacy retained-output hint; current projections derive this from output contributions. */
+  partialOutputRetained?: boolean;
 }
 
 export const WORKHUB_COORDINATION_RECORD_SCHEMA_VERSION = 1 as const;
@@ -1256,8 +1257,9 @@ const TOKEN_USAGE_MESSAGE_SHAPE = defineObjectShape<TokenUsageMessage>()(
   ],
 );
 const TURN_STATE_MESSAGE_SHAPE = defineObjectShape<TurnStateMessage>()(
-  ['type', 'id', 'turnId', 'ts', 'status', 'partialOutputRetained'],
+  ['type', 'id', 'turnId', 'ts', 'status'],
   [
+    'partialOutputRetained',
     'parentTurnId',
     'retriedFromTurnId',
     'regeneratedFromTurnId',
@@ -1550,7 +1552,8 @@ function decodeMessage(
         hasExactShape(message, TURN_STATE_MESSAGE_SHAPE) &&
         hasMessageEnvelope(message, true) &&
         isTurnStatus(message.status) &&
-        typeof message.partialOutputRetained === 'boolean' &&
+        (message.partialOutputRetained === undefined ||
+          typeof message.partialOutputRetained === 'boolean') &&
         isOptionalString(message.parentTurnId) &&
         isOptionalString(message.retriedFromTurnId) &&
         isOptionalString(message.regeneratedFromTurnId) &&

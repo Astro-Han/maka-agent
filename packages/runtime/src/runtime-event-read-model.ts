@@ -1177,12 +1177,7 @@ function projectTerminalTurnState(
   }
   const abortSource = status === 'aborted' ? abortSourceFromRuntime(event) : undefined;
   const failureClass = status === 'failed' ? failureClassFromRuntimeEvent(event) : undefined;
-  const partialOutputRetained = messages.some(
-    (message) =>
-      message.turnId === event.turnId &&
-      ((message.type === 'assistant' && message.text.trim().length > 0) ||
-        message.type === 'tool_result'),
-  );
+
   messages.push({
     type: 'turn_state',
     id: stableMessageId(event, state, 'turn_state'),
@@ -1202,7 +1197,6 @@ function projectTerminalTurnState(
     ...(status === 'failed' && event.content?.kind === 'error' && event.content.retry
       ? { retry: event.content.retry }
       : {}),
-    partialOutputRetained,
   });
   if (failureClass === 'tool_step_cap_reached') {
     messages.push({
@@ -1614,7 +1608,6 @@ function semanticMessage(message: StoredMessage): unknown {
         abortedAt: message.abortedAt,
         abortSource: message.abortSource,
         errorClass: message.errorClass,
-        partialOutputRetained: message.partialOutputRetained,
       };
     case 'system_note':
       return {

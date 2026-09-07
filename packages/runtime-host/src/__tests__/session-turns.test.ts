@@ -139,3 +139,39 @@ test('rejects invalid turn-state references before publishing a contribution', (
     }),
   );
 });
+
+for (const output of ['none', 'assistant', 'tool', 'legacy'] as const) {
+  test(`derives retained output from bounded contributions: ${output}`, () => {
+    const contribution = projectSessionTurnContributionForWire({
+      turnId: 'turn-1',
+      firstSequence: 0,
+      latestState: {
+        sequence: 100,
+        message: {
+          type: 'turn_state',
+          id: 'state',
+          turnId: 'turn-1',
+          ts: 100,
+          status: 'failed',
+          ...(output === 'legacy' ? { partialOutputRetained: true } : {}),
+        },
+      },
+      userPromptPreview: null,
+      hasAssistantMessage: true,
+      hasAssistantOutput: output === 'assistant',
+      hasToolResult: output === 'tool',
+      hasFailedToolResult: false,
+      hasAbortNote: false,
+    });
+    const decoded = decodeSessionTurnsQueryResult({
+      sessionId: 'session-1',
+      throughSequence: 100,
+      contributions: [contribution],
+      nextPosition: null,
+    });
+    assert.equal(
+      projectSessionTurnContribution(decoded.contributions[0]!).partialOutputRetained,
+      output !== 'none',
+    );
+  });
+}

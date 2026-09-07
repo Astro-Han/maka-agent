@@ -180,7 +180,9 @@ function projectTurnStateMessageForWire(message: TurnStateMessage): TurnStateMes
       ? { errorClass: truncateUtf8(message.errorClass, SESSION_TURN_DIAGNOSTIC_MAX_BYTES) }
       : {}),
     ...(message.retry ? { retry: message.retry } : {}),
-    partialOutputRetained: message.partialOutputRetained,
+    ...(message.partialOutputRetained !== undefined
+      ? { partialOutputRetained: message.partialOutputRetained }
+      : {}),
   };
 }
 

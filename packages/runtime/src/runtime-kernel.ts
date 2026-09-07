@@ -98,7 +98,6 @@ import {
   buildStatusPatch,
   buildTurnStateMessage,
   normalizeStopSessionSource,
-  turnHasRetainedOutput as messagesHaveRetainedOutput,
 } from './session-projection-helpers.js';
 import { buildToolsForAgentDefinition } from './agent-catalog.js';
 import { loadLatestHistoryCompactCheckpointFromRunLedger } from './history-compact-ledger.js';
@@ -2023,7 +2022,6 @@ export class RuntimeKernel implements RuntimeKernelLike {
         status: 'aborted',
         lineage: projection.lineage,
         ...(operation.abortSource ? { abortSource: operation.abortSource } : {}),
-        partialOutputRetained: await this.turnHasRetainedOutput(sessionId, projection.turnId),
       });
       await this.appendStopProjection(sessionId, projection.message);
       projection.projected = true;
@@ -2876,14 +2874,8 @@ export class RuntimeKernel implements RuntimeKernelLike {
         ...(options.abortSource ? { abortSource: options.abortSource } : {}),
         ...(options.errorClass !== undefined ? { errorClass: options.errorClass } : {}),
         ...(options.retry ? { retry: options.retry } : {}),
-        partialOutputRetained: await this.turnHasRetainedOutput(sessionId, turnId),
       }),
     );
-  }
-
-  private async turnHasRetainedOutput(sessionId: string, turnId: string): Promise<boolean> {
-    const messages = await this.deps.store.readMessages(sessionId).catch(() => []);
-    return messagesHaveRetainedOutput(messages, turnId);
   }
 }
 

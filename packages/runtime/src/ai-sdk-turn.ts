@@ -2213,16 +2213,35 @@ export class AiSdkTurn {
                 sealedThinkingRetryCount < MAX_SEALED_THINKING_RETRIES_PER_STEP &&
                 attemptCanRecoverWithSealedThinking() &&
                 !attemptHasNoObservableOutput();
+              // The stopping gate also supplies the durable reason. An absent
+              // decision means this attempt is allowed to retry.
+              let retry: import('@maka/core/model-failure').ModelRetryDecision | undefined;
               if (
-                (failure.retryable || idleWatchdogRecovery || incompleteStreamRecovery) &&
-                failure.kind !== 'context_overflow' &&
-                providerAttempt < MAX_PROVIDER_ATTEMPTS_PER_STEP &&
-                stepBudgetRemains &&
-                (attemptHasNoObservableOutput() ||
+                !(
+                  attemptHasNoObservableOutput() ||
                   idleWatchdogRecovery ||
                   incompleteStreamRecovery ||
-                  sealedThinkingRecovery)
+                  sealedThinkingRecovery
+                )
               ) {
+                retry = {
+                  decision: 'declined',
+                  because: attemptSawToolActivity ? 'side_effects' : 'observable_output',
+                };
+              } else if (!stepBudgetRemains) {
+                retry = { decision: 'declined', because: 'budget' };
+              } else if (providerAttempt >= MAX_PROVIDER_ATTEMPTS_PER_STEP) {
+                retry = { decision: 'exhausted', attempts: providerAttempt };
+              } else if (failure.kind === 'context_overflow') {
+                retry = { decision: 'declined', because: 'policy' };
+              } else if (!(failure.retryable || idleWatchdogRecovery || incompleteStreamRecovery)) {
+                retry =
+                  incompleteStreamTerminal &&
+                  incompleteStreamRetryCount >= MAX_INCOMPLETE_STREAM_RETRIES_PER_STEP
+                    ? { decision: 'exhausted', attempts: providerAttempt }
+                    : { decision: 'declined', because: 'policy' };
+              }
+              if (!retry) {
                 if (idleWatchdogRecovery) idleWatchdogRetryCount += 1;
                 if (sealedThinkingRecovery) sealedThinkingRetryCount += 1;
                 if (incompleteStreamRecovery) incompleteStreamRetryCount += 1;
@@ -2273,20 +2292,6 @@ export class AiSdkTurn {
               // safe fold): surface the real provider error via the terminal
               // handler after settling any authoritative usage — never a
               // fabricated success.
-              const retry: import('@maka/core/model-failure').ModelRetryDecision =
-                attemptSawToolActivity
-                  ? { decision: 'declined', because: 'side_effects' }
-                  : !attemptHasNoObservableOutput() &&
-                      !idleWatchdogRecovery &&
-                      !sealedThinkingRecovery
-                    ? { decision: 'declined', because: 'observable_output' }
-                    : !stepBudgetRemains
-                      ? { decision: 'declined', because: 'budget' }
-                      : providerAttempt >= MAX_PROVIDER_ATTEMPTS_PER_STEP ||
-                          (incompleteStreamTerminal &&
-                            incompleteStreamRetryCount >= MAX_INCOMPLETE_STREAM_RETRIES_PER_STEP)
-                        ? { decision: 'exhausted', attempts: providerAttempt }
-                        : { decision: 'declined', because: 'policy' };
               terminalProviderError = settledWatchdogTimeout?.error ?? failure;
               terminalRetry = { error: terminalProviderError, retry };
               terminalProviderErrorReason =
