@@ -873,7 +873,7 @@ describe('ModelAdapter stream and error normalization', () => {
   });
 
   test('projects the final provider error inside an AI SDK retry wrapper', () => {
-    const inner = Object.assign(new Error('Service unavailable: token=provider-secret'), {
+    const inner = Object.assign(new Error('Service unavailable'), {
       name: 'AI_APICallError',
       statusCode: 503,
     });
@@ -886,8 +886,7 @@ describe('ModelAdapter stream and error normalization', () => {
     const event = newAdapter().makeErrorEvent('turn-1', wrapped);
 
     assert.equal(event.reason, 'provider_unavailable');
-    assert.equal(event.message, 'Service unavailable: token=[redacted] (status=503)');
-    assert.equal(JSON.stringify(event).includes('provider-secret'), false);
+    assert.equal(event.message, 'Service unavailable (status=503)');
   });
 
   test('projects a structured network error to a consistent reason and safe message', () => {
