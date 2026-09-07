@@ -167,6 +167,10 @@ describe('redactSecrets', () => {
   });
 
   test('masks compound credential assignments without changing authorization schemes', () => {
+    assert.equal(
+      redactSecrets('Service unavailable: token=provider-secret'),
+      'Service unavailable: token=[redacted]',
+    );
     const text = redactSecrets(
       'ssh_private_key=ssh-value sessionToken=session-value service-account-key=service-value Authorization: Basic basic-value Proxy-Authorization: Bearer proxy-value issue_key=ISSUE-1359 objectKey=target',
     );

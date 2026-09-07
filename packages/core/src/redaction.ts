@@ -87,9 +87,25 @@ function redactTextSecrets(value: string): string {
     AWS_SECRET_ASSIGNMENT_PATTERN,
     (_match, prefix: string) => `${prefix}[redacted]`,
   );
-  next = next.replace(ASSIGNED_SECRET_KEY_VALUE_PATTERN, (match, prefix: string, key: string) =>
-    isAssignmentSensitiveKey(key) ? `${prefix}[redacted]` : match,
-  );
+  const parts: string[] = [];
+  let retainedThrough = 0;
+  ASSIGNED_SECRET_KEY_VALUE_PATTERN.lastIndex = 0;
+  for (
+    let match = ASSIGNED_SECRET_KEY_VALUE_PATTERN.exec(next);
+    match;
+    match = ASSIGNED_SECRET_KEY_VALUE_PATTERN.exec(next)
+  ) {
+    const prefix = match[1]!;
+    if (isAssignmentSensitiveKey(match[2]!)) {
+      parts.push(next.slice(retainedThrough, match.index), prefix, '[redacted]');
+      retainedThrough = ASSIGNED_SECRET_KEY_VALUE_PATTERN.lastIndex;
+    } else {
+      // A prose label such as "Error: token=..." must not consume the credential.
+      ASSIGNED_SECRET_KEY_VALUE_PATTERN.lastIndex = match.index + prefix.length;
+    }
+  }
+  parts.push(next.slice(retainedThrough));
+  next = parts.join('');
   for (const pattern of SECRET_PATTERNS) {
     // Each pattern's single capture group matches only the secret token, so the
     // replacement is always the full redaction marker. Never echo any part of

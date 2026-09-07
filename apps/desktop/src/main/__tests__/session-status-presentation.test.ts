@@ -39,11 +39,12 @@ describe('failed turn presentation', () => {
   });
 
   it('states what to do without promising a resume the UI cannot offer', () => {
-    // The banner offers a button only for `app_restarted`; every other class
-    // has to point at the one action that always exists — send a message.
-    for (const errorClass of ['rate_limit', 'network', 'timeout', 'unknown_failure']) {
+    for (const errorClass of ['rate_limit', 'network', 'timeout']) {
       assert.match(describeTurnErrorClass(errorClass, 'zh-CN'), /重新发消息|再发消息|发消息/);
     }
+    assert.doesNotMatch(describeTurnErrorClass('unknown_failure', 'zh-CN'), /重试|重发/);
+    assert.match(describeTurnErrorClass('stream_truncated', 'zh-CN'), /中途断开/);
+    assert.match(describeFailedTurnExecutionState({ ...NOTHING_RAN, retry: { decision: 'declined', because: 'side_effects' } }, 'zh-CN')!, /未自动重试/);
   });
 
   it('grades continuable outcomes below outcomes the user must act on', () => {

@@ -2856,7 +2856,14 @@ export class RuntimeKernel implements RuntimeKernelLike {
     turnId: string,
     status: TurnRecord['status'],
     lineage: AgentRunLineage = {},
-    options: { id?: string; ts?: number; errorClass?: string; abortSource?: string } = {},
+    options: {
+      id?: string;
+      ts?: number;
+      errorClass?: string;
+      abortSource?: string;
+      failureMessage?: string;
+      retry?: TurnRecord['retry'];
+    } = {},
   ): Promise<void> {
     const ts = options.ts ?? this.deps.now();
     await this.deps.store.appendMessage(
@@ -2869,6 +2876,8 @@ export class RuntimeKernel implements RuntimeKernelLike {
         lineage,
         ...(options.abortSource ? { abortSource: options.abortSource } : {}),
         ...(options.errorClass !== undefined ? { errorClass: options.errorClass } : {}),
+        ...(options.failureMessage ? { failureMessage: options.failureMessage } : {}),
+        ...(options.retry ? { retry: options.retry } : {}),
         partialOutputRetained: await this.turnHasRetainedOutput(sessionId, turnId),
       }),
     );

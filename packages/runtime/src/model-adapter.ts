@@ -25,7 +25,6 @@ import {
   type RuntimeExecutionConnection,
 } from '@maka/core/llm-connections';
 import { lookupModelMetadata } from '@maka/core/model-metadata';
-import { generalizedErrorMessage } from '@maka/core/redaction';
 import type { CacheMissInputSource } from '@maka/core/usage-stats/types';
 import { rawFinishReasonString } from './model-protocol.js';
 import type {
@@ -60,12 +59,7 @@ import {
   plaintextResponsesReasoningProviderOptions,
   safePlaintextResponsesReasoningItemId,
 } from './responses-reasoning-state.js';
-import {
-  classifyError,
-  errorPresentationFromClass,
-  providerFailureSummary,
-  providerRetryMetadata,
-} from './provider-error-classification.js';
+import { classifyError, providerModelFailure } from './provider-error-classification.js';
 import type { ProviderRequestTracker } from './provider-request-telemetry.js';
 import type { ContextDiagnosticsCompaction } from './context-diagnostics.js';
 import {
@@ -540,7 +534,7 @@ export class ModelAdapter {
   }
 
   makeErrorEvent(turnId: string, err: unknown, reasonOverride?: string): ErrorEvent {
-    const failure = normalizeModelFailure(err);
+    const failure = normalizeProviderFailure(err);
     return {
       type: 'error',
       id: this.input.newId(),
@@ -561,8 +555,8 @@ export class ModelAdapter {
     return normalizeProviderFailure(error);
   }
 
-  classifyError(error: unknown): string {
-    if (isModelFailure(error)) return errorClassFromFailureKind(error.kind);
+  classifyError(error: unknown): ModelFailureKind {
+    if (isModelFailure(error)) return error.kind;
     return classifyError(error);
   }
 
@@ -596,7 +590,8 @@ export function settleModelStepOutcome(evidence: ModelStepSettlementEvidence): M
   if (aborted || failure?.kind === 'abort') {
     return failedStepOutcome(
       'aborted',
-      failure ?? normalizeModelFailure(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+      failure ??
+        normalizeProviderFailure(Object.assign(new Error('aborted'), { name: 'AbortError' })),
       request,
       usage,
     );
@@ -613,7 +608,7 @@ export function settleModelStepOutcome(evidence: ModelStepSettlementEvidence): M
     return failedStepOutcome(
       'truncated',
       modelStepFailure(
-        'provider_unavailable',
+        'stream_truncated',
         `Provider stream ended without finishing (${finishReason})`,
       ),
       request,
@@ -1266,34 +1261,8 @@ function compileProviderTool(
   }
 }
 
-function normalizeModelFailure(error: unknown): ModelFailure {
-  if (isModelFailure(error)) return error;
-  const errorClass = classifyError(error);
-  const presentation = errorPresentationFromClass(errorClass);
-  const retry = providerRetryMetadata(error);
-  const code =
-    error instanceof Error && 'code' in error
-      ? String((error as { code?: unknown }).code)
-      : undefined;
-  return {
-    type: 'model_failure',
-    kind: modelFailureKind(errorClass),
-    retryable: retry.retryable,
-    ...(retry.retryAfterMs !== undefined ? { retryAfterMs: retry.retryAfterMs } : {}),
-    ...(code !== undefined ? { code } : {}),
-    message: presentation.message ?? generalizedErrorMessage(error),
-  };
-}
-
 function normalizeProviderFailure(error: unknown): ModelFailure {
-  if (isModelFailure(error)) return error;
-  const summary = providerFailureSummary(error);
-  const failure = normalizeModelFailure(error);
-  return {
-    ...failure,
-    ...(summary?.code !== undefined ? { code: summary.code } : {}),
-    ...(failure.kind === 'unknown' && summary !== undefined ? { message: summary.message } : {}),
-  };
+  return isModelFailure(error) ? error : providerModelFailure(error);
 }
 
 function isModelFailure(value: unknown): value is ModelFailure {
@@ -1304,56 +1273,6 @@ function isModelFailure(value: unknown): value is ModelFailure {
     typeof (value as { kind?: unknown }).kind === 'string' &&
     typeof (value as { message?: unknown }).message === 'string'
   );
-}
-
-function modelFailureKind(errorClass: string): ModelFailureKind {
-  switch (errorClass) {
-    case 'Abort':
-      return 'abort';
-    case 'Auth':
-      return 'auth';
-    case 'ContextLength':
-      return 'context_overflow';
-    case 'Network':
-      return 'network';
-    case 'ProviderBilling':
-      return 'provider_billing';
-    case 'ProviderCapacity':
-      return 'provider_capacity';
-    case 'ProviderUnavailable':
-      return 'provider_unavailable';
-    case 'RateLimit':
-      return 'rate_limit';
-    case 'Timeout':
-      return 'timeout';
-    default:
-      return 'unknown';
-  }
-}
-
-function errorClassFromFailureKind(kind: ModelFailureKind): string {
-  switch (kind) {
-    case 'abort':
-      return 'Abort';
-    case 'auth':
-      return 'Auth';
-    case 'context_overflow':
-      return 'ContextLength';
-    case 'network':
-      return 'Network';
-    case 'provider_billing':
-      return 'ProviderBilling';
-    case 'provider_capacity':
-      return 'ProviderCapacity';
-    case 'provider_unavailable':
-      return 'ProviderUnavailable';
-    case 'rate_limit':
-      return 'RateLimit';
-    case 'timeout':
-      return 'Timeout';
-    case 'unknown':
-      return 'Other';
-  }
 }
 
 type TokenCountBreakdown = {

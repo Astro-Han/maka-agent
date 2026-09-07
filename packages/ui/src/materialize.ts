@@ -415,6 +415,8 @@ export interface TurnViewModel {
   abortedAt?: number;
   abortSource?: string;
   errorClass?: string;
+  failureMessage?: string;
+  retry?: import('@maka/core/model-failure').ModelRetryDecision;
   partialOutputRetained: boolean;
   user?: ChatItem;
   tools: ToolActivityItem[];
@@ -742,6 +744,8 @@ export function materializeTurns(
           : {}),
         ...(record?.abortSource ? { abortSource: record.abortSource } : {}),
         ...(record?.errorClass ? { errorClass: record.errorClass } : {}),
+        ...(record?.failureMessage ? { failureMessage: record.failureMessage } : {}),
+        ...(record?.retry ? { retry: record.retry } : {}),
         partialOutputRetained: record?.partialOutputRetained ?? false,
         tools: [],
         notes: [],

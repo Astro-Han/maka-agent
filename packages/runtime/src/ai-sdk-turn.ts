@@ -605,6 +605,7 @@ function providerRetryDelayMs(failedAttempt: number, retryAfterMs?: number): num
 
 function providerRetryReason(kind: ModelFailureKind): ProviderRetryReason {
   switch (kind) {
+    case 'stream_truncated':
     case 'network':
     case 'provider_unavailable':
     case 'rate_limit':
@@ -1302,6 +1303,9 @@ export class AiSdkTurn {
       };
       let lastCompletedStepHadToolResult = false;
       let terminalProviderErrorReason: string | undefined;
+      let terminalRetry:
+        | { error: unknown; retry: import('@maka/core/model-failure').ModelRetryDecision }
+        | undefined;
       try {
         const startWatchdog = (): void => {
           watchdogState.current?.stop();
@@ -2269,7 +2273,22 @@ export class AiSdkTurn {
               // safe fold): surface the real provider error via the terminal
               // handler after settling any authoritative usage — never a
               // fabricated success.
+              const retry: import('@maka/core/model-failure').ModelRetryDecision =
+                attemptSawToolActivity
+                  ? { decision: 'declined', because: 'side_effects' }
+                  : !attemptHasNoObservableOutput() &&
+                      !idleWatchdogRecovery &&
+                      !sealedThinkingRecovery
+                    ? { decision: 'declined', because: 'observable_output' }
+                    : !stepBudgetRemains
+                      ? { decision: 'declined', because: 'budget' }
+                      : providerAttempt >= MAX_PROVIDER_ATTEMPTS_PER_STEP ||
+                          (incompleteStreamTerminal &&
+                            incompleteStreamRetryCount >= MAX_INCOMPLETE_STREAM_RETRIES_PER_STEP)
+                        ? { decision: 'exhausted', attempts: providerAttempt }
+                        : { decision: 'declined', because: 'policy' };
               terminalProviderError = settledWatchdogTimeout?.error ?? failure;
+              terminalRetry = { error: terminalProviderError, retry };
               terminalProviderErrorReason =
                 lastCompletedStepHadToolResult && failure.kind === 'timeout'
                   ? 'model_after_tool_timeout'
@@ -2660,7 +2679,12 @@ export class AiSdkTurn {
           } satisfies CompleteEvent);
         } else {
           const terminalError = currentWatchdogTimeout()?.error ?? err;
-          queue.push(this.makeErrorEvent(turnId, terminalError, terminalProviderErrorReason));
+          queue.push({
+            ...this.makeErrorEvent(turnId, terminalError, terminalProviderErrorReason),
+            ...(terminalRetry && terminalRetry.error === terminalError
+              ? { retry: terminalRetry.retry }
+              : {}),
+          });
           trace.modelStreamFailed(
             streamErrorClass,
             terminalError,

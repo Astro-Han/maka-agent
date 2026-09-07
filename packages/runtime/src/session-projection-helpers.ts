@@ -47,6 +47,8 @@ export interface BuildTurnStateMessageInput {
   status: TurnRecord['status'];
   lineage?: TurnStateLineage;
   errorClass?: string;
+  failureMessage?: string;
+  retry?: TurnRecord['retry'];
   abortSource?: string;
   partialOutputRetained: boolean;
 }
@@ -80,7 +82,13 @@ export function buildTurnStateMessage(input: BuildTurnStateMessageInput): TurnSt
     ...(lineage.parentSessionId ? { parentSessionId: lineage.parentSessionId } : {}),
     ...(input.status === 'aborted' ? { abortedAt: input.ts } : {}),
     ...(input.status === 'aborted' && input.abortSource ? { abortSource: input.abortSource } : {}),
-    ...(input.status === 'failed' ? { errorClass: input.errorClass ?? 'unknown' } : {}),
+    ...(input.status === 'failed'
+      ? {
+          errorClass: input.errorClass ?? 'unknown',
+          ...(input.failureMessage ? { failureMessage: input.failureMessage } : {}),
+          ...(input.retry ? { retry: input.retry } : {}),
+        }
+      : {}),
     partialOutputRetained: input.partialOutputRetained,
   };
 }

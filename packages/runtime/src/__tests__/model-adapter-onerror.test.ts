@@ -64,7 +64,7 @@ describe('settleModelStepOutcome', () => {
     const failure = {
       type: 'model_failure' as const,
       kind: 'rate_limit' as const,
-      message: 'Rate limit exceeded',
+      message: 'rate limited (status=429)',
       retryable: true,
     };
 
@@ -151,7 +151,7 @@ describe('ModelAdapter.startStream onError', () => {
         type: 'model_failure',
         kind: 'rate_limit',
         code: '429',
-        message: 'Rate limit exceeded',
+        message: 'rate limited (status=429)',
         retryable: true,
         retryAfterMs: 2500,
       },
@@ -247,7 +247,7 @@ describe('ModelAdapter.startStream onError', () => {
       type: 'model_failure',
       kind: 'rate_limit',
       retryable: false,
-      message: 'Rate limit exceeded',
+      message: 'Provider stopped the stream with an error (code=rate_limit_exceeded)',
       code: 'rate_limit_exceeded',
     });
     assert.equal(outcome.usage?.rawFinishReason, 'rate_limit_exceeded');
@@ -285,7 +285,7 @@ describe('ModelAdapter.startStream onError', () => {
         type: 'model_failure',
         kind: 'rate_limit',
         code: '429',
-        message: 'Rate limit exceeded',
+        message: 'rate limited (status=429)',
         retryable: true,
         retryAfterMs: 2500,
       },
@@ -483,7 +483,8 @@ describe('ModelAdapter.startStream onError', () => {
         {
           type: 'model_failure',
           kind: 'network',
-          message: 'Network error',
+          message:
+            'Client network socket disconnected before secure TLS connection was established',
           retryable: true,
         },
       ]);

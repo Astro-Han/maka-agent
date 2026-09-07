@@ -125,7 +125,13 @@ export interface AgentRunHooks {
     turnId: string,
     status: TurnRecord['status'],
     lineage?: AgentRunLineage,
-    options?: { ts?: number; errorClass?: string; abortSource?: string },
+    options?: {
+      ts?: number;
+      errorClass?: string;
+      abortSource?: string;
+      failureMessage?: string;
+      retry?: TurnRecord['retry'];
+    },
   ): Promise<void>;
 }
 
@@ -785,6 +791,32 @@ export class AgentRun {
         requireTerminalWrite: options.requireTerminalWrite ?? Boolean(this.input.runtimeEventStore),
       });
       await this.recordSessionEvent(sessionEvent, options);
+      if (
+        this.turnFailed &&
+        !this.stopped &&
+        runtimeEvent.status === 'failed' &&
+        runtimeEvent.content?.kind === 'error'
+      ) {
+        const failure = runtimeEvent.content;
+        await this.input.hooks
+          .appendTurnState(this.sessionId, this.turnId, 'failed', this.lineage, {
+            ts: runtimeEvent.ts,
+            errorClass: failure.reason ?? failure.code ?? 'unknown',
+            failureMessage: failure.message,
+            ...(failure.retry ? { retry: failure.retry } : {}),
+          })
+          .catch((error) => this.enqueueTraceWriteFailure(error, 'terminal session projection'));
+        if (this.finalStatus) {
+          await this.input.hooks
+            .updateStatus(
+              this.sessionId,
+              this.finalStatus.status,
+              this.finalStatus.blockedReason,
+              runtimeEvent.ts,
+            )
+            .catch((error) => this.enqueueTraceWriteFailure(error, 'terminal session projection'));
+        }
+      }
       return;
     }
     if (this.requiresDurablePersistence() && isInteractionResumeAck(sessionEvent)) {
@@ -1048,9 +1080,9 @@ export class AgentRun {
         );
       }
     }
-    if (transition && !this.stopped) {
+    if (transition && !this.stopped && ev.type !== 'error') {
       const updateSessionStatus = async (): Promise<void> => {
-        if (terminalSessionEvent || ev.type === 'error') {
+        if (terminalSessionEvent) {
           await this.input.hooks
             .updateStatus(this.sessionId, transition.status, transition.blockedReason, ev.ts)
             .catch((error) => this.enqueueTraceWriteFailure(error, 'terminal session projection'));
@@ -1093,13 +1125,6 @@ export class AgentRun {
       } else {
         this.turnFailed = true;
         this.finalStatus = transition ?? { status: 'blocked', blockedReason: 'unknown' };
-
-        await this.input.hooks
-          .appendTurnState(this.sessionId, this.turnId, 'failed', this.lineage, {
-            ts: ev.ts,
-            errorClass: ev.reason ?? ev.code ?? 'unknown',
-          })
-          .catch((error) => this.enqueueTraceWriteFailure(error, 'terminal session projection'));
 
         this.markRunFailed(ev.reason ?? ev.code ?? 'unknown', ev.message);
       }

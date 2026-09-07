@@ -23,14 +23,21 @@ import assert from 'node:assert/strict';
 import { setTimeout as timerDelay } from 'node:timers/promises';
 import { deriveTurnRecords } from '@maka/core/session';
 import { DurableStoreWriteError, RunSealedError } from '@maka/core/runtime-event-store';
-import { isTerminalRuntimeEvent } from '@maka/core/runtime-event';
+import {
+  decodeRuntimeEvent,
+  isTerminalRuntimeEvent,
+  runtimeEventHasModelVisibleContent,
+} from '@maka/core/runtime-event';
 import {
   ToolLedgerCorruptionError,
   ToolLedgerRejectionError,
 } from '@maka/core/tool-ledger-scanner';
 import type { SandboxBoundaryResponse } from '@maka/core/sandbox-boundary';
 import type { AgentRunEvent, AgentRunStore } from '@maka/core/agent-run';
-import { runtimeInvocationFailureClass } from '../runtime-event-read-model.js';
+import {
+  runtimeInvocationFailureClass,
+  projectRuntimeEventsToStoredMessages,
+} from '../runtime-event-read-model.js';
 import {
   buildInvocationOpenedEvent,
   buildSyntheticTerminalRuntimeEvent,
@@ -216,17 +223,27 @@ describe('SessionManager terminal ledger invariants', () => {
   });
 
   test('error streams persist a failed terminal fact without non-terminal error ledger rows', async () => {
-    const { manager, runStore, session } = await makeHarness([
-      { type: 'error', recoverable: false, reason: 'tool_failed', message: 'Tool failed' },
-      { type: 'complete', stopReason: 'end_turn' },
-    ]);
+    const store = new TinySessionStore();
+    const { manager, runStore, session } = await makeHarness(
+      [
+        {
+          type: 'error',
+          recoverable: false,
+          reason: 'stream_truncated',
+          message: 'Response stream ended without a finish reason.',
+          retry: { decision: 'declined', because: 'side_effects' },
+        },
+        { type: 'complete', stopReason: 'end_turn' },
+      ],
+      { store },
+    );
 
     await drain(manager.sendMessage(session.id, { turnId: 'turn-1', text: 'hello' }));
 
     const [run] = await runStore.listSessionInvocations(session.id);
     if (!run) throw new Error('run was not recorded');
     assert.strictEqual(runtimeInvocationOutcome(run), 'failed');
-    assert.strictEqual(runtimeInvocationFailureClass(run), 'tool_failed');
+    assert.strictEqual(runtimeInvocationFailureClass(run), 'stream_truncated');
     const runtimeEvents = await runStore.readRuntimeEvents(session.id, run.runId);
     assert.strictEqual(
       runtimeEvents.some(
@@ -237,15 +254,29 @@ describe('SessionManager terminal ledger invariants', () => {
     const terminalEvents = runtimeEvents.filter(isTerminalRuntimeEvent);
     assert.strictEqual(terminalEvents.length, 1);
     assert.strictEqual(terminalEvents[0]?.status, 'failed');
-    assert.strictEqual(terminalEvents[0]?.actions?.stateDelta?.failureClass, 'tool_failed');
+    assert.strictEqual(terminalEvents[0]?.actions?.stateDelta?.failureClass, 'stream_truncated');
 
-    const messages = await manager.getMessages(session.id);
-    const turnState = messages.find(
-      (message) => message.type === 'turn_state' && message.turnId === 'turn-1',
-    );
+    const messages = await store.readMessages(session.id);
+    const turnState = messages
+      .reverse()
+      .find((message) => message.type === 'turn_state' && message.turnId === 'turn-1');
     if (turnState?.type !== 'turn_state') throw new Error('failed turn_state was not projected');
     assert.strictEqual(turnState.status, 'failed');
-    assert.strictEqual(turnState.errorClass, 'tool_failed');
+    assert.strictEqual(turnState.errorClass, 'stream_truncated');
+    assert.equal(turnState.failureMessage, 'Response stream ended without a finish reason.');
+    assert.deepEqual(turnState.retry, { decision: 'declined', because: 'side_effects' });
+    const restored = runtimeEvents.map((event) =>
+      decodeRuntimeEvent(JSON.parse(JSON.stringify(event))),
+    );
+    const terminal = restored.find(isTerminalRuntimeEvent)!;
+    assert.equal(runtimeEventHasModelVisibleContent(terminal), false);
+    assert.ok(Buffer.byteLength(JSON.stringify(terminal)) < 4096);
+    const cold = projectRuntimeEventsToStoredMessages(restored, { invocations: [run] });
+    assert.deepEqual(cold.diagnostics, []);
+    const coldTurn = deriveTurnRecords(cold.messages).find((turn) => turn.turnId === 'turn-1')!;
+    assert.equal(coldTurn.errorClass, turnState.errorClass);
+    assert.equal(coldTurn.failureMessage, turnState.failureMessage);
+    assert.deepEqual(coldTurn.retry, turnState.retry);
   });
 
   test('stopSession keeps renderer abortSource on terminal facts and run headers', async () => {

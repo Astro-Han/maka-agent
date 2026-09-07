@@ -309,7 +309,7 @@ describe('OpenAI Responses WebSocket transport', () => {
           (error as Error & { code?: string }).code,
           'OPENAI_RESPONSES_WEBSOCKET_TRANSPORT_ERROR',
         );
-        assert.equal(classifyError(error), 'Network');
+        assert.equal(classifyError(error), 'network');
         assert.deepEqual(providerRetryMetadata(error), { retryable: true });
         return true;
       },

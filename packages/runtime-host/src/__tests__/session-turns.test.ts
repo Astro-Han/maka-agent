@@ -86,6 +86,8 @@ test('bounds turn diagnostics before publishing a contribution', () => {
         status: 'failed',
         partialOutputRetained: false,
         errorClass: '失败'.repeat(100_000),
+        failureMessage: '错误详情'.repeat(100_000),
+        retry: { decision: 'declined', because: 'side_effects' },
       },
     },
     userPromptPreview: 'hello',
@@ -108,6 +110,9 @@ test('bounds turn diagnostics before publishing a contribution', () => {
       nextPosition: null,
     }),
   );
+  const turn = projectSessionTurnContribution(contribution);
+  assert.ok(Buffer.byteLength(turn.failureMessage!, 'utf8') <= 2048);
+  assert.deepEqual(turn.retry, { decision: 'declined', because: 'side_effects' });
 });
 
 test('rejects invalid turn-state references before publishing a contribution', () => {

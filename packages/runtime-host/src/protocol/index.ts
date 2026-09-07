@@ -101,7 +101,8 @@ export const RUNTIME_HOST_REGISTRATION_SCHEMA_VERSION = 1 as const;
 export const RUNTIME_HOST_PROTOCOL_VERSION = 0 as const;
 // Increment when the same protocol version no longer guarantees safe Client-Host
 // interoperability. Mismatches are rejected before domain commands are admitted.
-export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 122 as const;
+export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 123 as const;
+// 123: Failed turns carry canonical retry decisions through bounded projections.
 // 122: Authenticated physical handoff continuations retain logical Turn identity.
 // Older peers cannot decode the handoff source and sealed invocation facts.
 // 121: Host diagnostics report `upgradeBlockingActivity`, the Host's

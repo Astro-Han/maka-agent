@@ -37,6 +37,7 @@
  */
 
 import type { CacheMissInputSource } from '@maka/core/usage-stats/types';
+import type { ModelFailureKind } from '@maka/core/model-failure';
 
 // ---------------------------------------------------------------------------
 // JSON value contract
@@ -328,17 +329,7 @@ export type ModelFinishReason = string;
  * error objects and AI SDK wrappers are classified inside `ModelAdapter` and
  * never cross the boundary.
  */
-export type ModelFailureKind =
-  | 'abort'
-  | 'auth'
-  | 'context_overflow'
-  | 'network'
-  | 'provider_capacity'
-  | 'provider_billing'
-  | 'provider_unavailable'
-  | 'rate_limit'
-  | 'timeout'
-  | 'unknown';
+export type { ModelFailureKind } from '@maka/core/model-failure';
 
 export interface ModelFailure {
   type: 'model_failure';

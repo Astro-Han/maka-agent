@@ -8093,6 +8093,7 @@ describe('SessionManager permission mode updates', () => {
       ts: 103,
       status: 'failed',
       errorClass: 'tool_failed',
+      failureMessage: 'tool failed',
       partialOutputRetained: true,
     });
     assert.strictEqual(runtimeEvents.filter((event) => event.status === 'failed').length, 1);
