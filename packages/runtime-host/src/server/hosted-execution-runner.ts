@@ -83,28 +83,27 @@ export class HostHostedExecutionRunner {
         ? this.input.waitForAllResidencies()
         : this.input.waitForExecutionResidencies());
       const usage = await this.#readUsage(startedAt, (this.input.now ?? Date.now)());
-      const incompleteUsage = incompleteUsageReason(usage);
-      if (incompleteUsage) {
-        return indeterminate(
-          input.executionId,
-          `Runtime Host usage did not settle: ${incompleteUsage}`,
-        );
-      }
+      const incompleteUsage = hasIncompleteUsage(usage);
       return {
         executionId: input.executionId,
         kind: 'settled',
         status: terminalStatus(terminal),
         ...(terminal.status === 'failed' ? { failureReason: terminal.failureClass } : {}),
-        usage: {
-          inputTokens: usage.summary.totalTokens.input,
-          outputTokens: usage.summary.totalTokens.output,
-          cacheReadTokens: usage.summary.totalTokens.cacheRead,
-          cacheWriteTokens: usage.summary.totalTokens.cacheWrite,
-          reasoningTokens: usage.summary.totalTokens.reasoning,
-          totalTokens: usage.summary.totalTokens.total,
-        },
+        // Missing accounting does not undo a terminal Turn or its drained tools.
+        usage: incompleteUsage
+          ? null
+          : {
+              inputTokens: usage.summary.totalTokens.input,
+              outputTokens: usage.summary.totalTokens.output,
+              cacheReadTokens: usage.summary.totalTokens.cacheRead,
+              cacheWriteTokens: usage.summary.totalTokens.cacheWrite,
+              reasoningTokens: usage.summary.totalTokens.reasoning,
+              totalTokens: usage.summary.totalTokens.total,
+            },
         costUsd:
-          usage.provenance.coverage.unpricedAttempts === 0 && usage.provenance.legacyRecords === 0
+          !incompleteUsage &&
+          usage.provenance.coverage.unpricedAttempts === 0 &&
+          usage.provenance.legacyRecords === 0
             ? usage.summary.totalCostUsd
             : null,
       };
@@ -158,15 +157,14 @@ export class HostHostedExecutionRunner {
   }
 }
 
-function incompleteUsageReason(
-  result: Extract<UsageQueryResult, { kind: 'summary' }>,
-): string | undefined {
+function hasIncompleteUsage(result: Extract<UsageQueryResult, { kind: 'summary' }>): boolean {
   const { coverage, unreadableRecords, pendingRepairs } = result.provenance;
-  if (unreadableRecords > 0) return 'unreadable_usage_record';
-  if (pendingRepairs > 0) return 'pending_usage_repair';
-  if (coverage.usagePartialAttempts > 0) return 'partial_attempt_usage';
-  if (coverage.usageMissingAttempts > 0) return 'missing_attempt_usage';
-  return undefined;
+  return (
+    unreadableRecords > 0 ||
+    pendingRepairs > 0 ||
+    coverage.usagePartialAttempts > 0 ||
+    coverage.usageMissingAttempts > 0
+  );
 }
 
 function isTerminal(

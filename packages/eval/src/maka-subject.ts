@@ -331,7 +331,8 @@ function positive(value: unknown, where: string): number {
   return value as number;
 }
 
-function estimateDeepSeekCost(usage: NormalizedUsage, model: string): number | null {
+function estimateDeepSeekCost(usage: NormalizedUsage | null, model: string): number | null {
+  if (usage === null) return null;
   if (model !== 'deepseek-v4-flash') return null;
   return deepSeekCostUsd(usage);
 }

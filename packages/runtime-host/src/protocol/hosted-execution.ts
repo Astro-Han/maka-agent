@@ -65,7 +65,7 @@ export type HostedExecutionProjection =
       readonly kind: 'settled';
       readonly status: 'completed' | 'failed' | 'cancelled';
       readonly failureReason?: string;
-      readonly usage: HostedExecutionUsage;
+      readonly usage: HostedExecutionUsage | null;
       readonly costUsd: number | null;
     }
   | {
@@ -172,7 +172,7 @@ export function decodeHostedExecutionProjection(value: unknown): HostedExecution
     ...(exact.failureReason === undefined
       ? {}
       : { failureReason: failureReason(exact.failureReason) }),
-    usage: decodeUsage(exact.usage),
+    usage: exact.usage === null ? null : decodeUsage(exact.usage),
     costUsd: decodeCost(exact.costUsd),
   };
 }

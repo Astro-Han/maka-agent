@@ -62,7 +62,7 @@ test('hosted execution reads usage only after execution residencies settle', asy
   assert.equal(usageRead, true);
 });
 
-test('incomplete usage preserves its fixed safe cause', async () => {
+test('incomplete usage preserves terminal execution without inventing token counts or cost', async () => {
   const usage = usageSummary();
   usage.provenance.coverage.usageMissingAttempts = 1;
   const runner = new HostHostedExecutionRunner({
@@ -75,7 +75,13 @@ test('incomplete usage preserves its fixed safe cause', async () => {
 
   const result = await runner.run(input(), new AbortController().signal);
 
-  assert.equal(result.failureReason, 'Runtime Host usage did not settle: missing_attempt_usage');
+  assert.deepEqual(result, {
+    executionId: ID,
+    kind: 'settled',
+    status: 'completed',
+    usage: null,
+    costUsd: null,
+  });
 });
 
 test('abort after terminal completion preserves the completed result', async () => {

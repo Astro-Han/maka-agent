@@ -584,6 +584,7 @@ test('the Maka shim projects only a completed subject as a zero exit', async () 
   const shim = new URL('../harbor-maka-subject.js', import.meta.url);
   for (const [projection, expectedExit, expectedStatus] of [
     [{ kind: 'settled', status: 'completed' }, 0, 'completed'],
+    [{ kind: 'settled', status: 'completed', usage: null }, 0, 'completed'],
     [{ kind: 'settled', status: 'failed' }, 1, 'failed'],
     [{ kind: 'settled', status: 'cancelled' }, 1, 'indeterminate'],
     [{ kind: 'indeterminate' }, 1, 'indeterminate'],
@@ -660,6 +661,10 @@ test('the Maka shim projects only a completed subject as a zero exit', async () 
         },
       });
       assert.equal(result.status, expectedStatus);
+      if ('usage' in projection && projection.usage === null) {
+        assert.equal(result.usage, null);
+        assert.equal(result.costUsd, null);
+      }
       assert.ok(stdout.includes('MAKA-EVAL-RESULT-V1'));
     } finally {
       await rm(root, { recursive: true, force: true });
