@@ -45,11 +45,11 @@ const DEFAULT_DEPENDENCIES: DesktopWorkbarServiceDependencies = {
   readSettledMessages: readSettledMessagesFrom,
 };
 
-function isLiveDesktopTerminal(update: ShellRunUpdate): boolean {
+function isDesktopTerminal(update: ShellRunUpdate): boolean {
   return update.ownership.kind === 'local' &&
     update.sourceTurnId.startsWith(DESKTOP_TERMINAL_LAUNCH_PREFIX) &&
     update.sourceTurnId === update.sourceToolCallId &&
-    update.result.mode === 'pty' && !isTerminalShellRunStatus(update.result.status);
+    update.result.mode === 'pty';
 }
 
 /** The only Desktop-to-Workbar adapter. It narrows the preload bridge by tool. */
@@ -71,9 +71,15 @@ export function createDesktopWorkbarServices(
       write: (input) => bridge.shellRuns.write(input),
       subscribePtyData: (handler) => bridge.shellRuns.subscribePtyData(handler),
       subscribeResync: (handler) => bridge.shellRuns.subscribeResync(handler),
-      listLive: async (sessionId) => (await bridge.shellRuns.list(sessionId)).filter(isLiveDesktopTerminal),
+      recover: async (sessionId) => {
+        const recovery = await bridge.shellRuns.recover(sessionId);
+        return { ...recovery, resources: recovery.resources.filter((update) =>
+          isDesktopTerminal(update) && !isTerminalShellRunStatus(update.result.status)),
+        };
+      },
+      subscribeCloseChanges: (handler) => bridge.shellRuns.subscribeCloseChanges(handler),
       subscribeUpdates: (handler) => bridge.shellRuns.subscribeUpdates((update) => {
-        if (isLiveDesktopTerminal(update)) handler(update);
+        if (isDesktopTerminal(update)) handler(update);
       }),
     },
     browser: {
@@ -87,7 +93,6 @@ export function createDesktopWorkbarServices(
       close: (sessionId) => bridge.browser.close(sessionId),
       getState: (sessionId) => bridge.browser.getState(sessionId),
       subscribeState: (handler) => bridge.browser.onState(handler),
-      subscribeLive: (handler) => bridge.browser.onLive(handler),
     },
     artifacts: {
       list: (sessionId) => bridge.artifacts.list(sessionId),

@@ -61,6 +61,7 @@ export interface WorkbarLayoutState {
 export type WorkbarLayoutAction =
   | WorkbarPanelsAction
   | { type: 'restore-terminals'; tabs: readonly SessionWorkbarTab[] }
+  | { type: 'close-terminal'; sessionId: string; ref: string }
   | {
       type: 'remove-stale';
       placement: SessionWorkbarPlacement;
@@ -205,6 +206,17 @@ export function reduceWorkbarLayout(
   state: WorkbarLayoutState,
   action: WorkbarLayoutAction,
 ): WorkbarLayoutState {
+  if (action.type === 'close-terminal') {
+    for (const placement of ['right', 'bottom'] as const) {
+      const tabIds = state.panels[placement].tabs.filter((tab) =>
+        tab.kind === 'terminal' && tab.ownerSessionId === action.sessionId && tab.resourceRef === action.ref,
+      ).map((tab) => tab.id);
+      if (tabIds.length) state = reduceWorkbarLayout(state, {
+        type: state.activeSessionId === action.sessionId ? 'close' : 'remove-stale', placement, tabIds,
+      });
+    }
+    return state;
+  }
   if (action.type === 'restore-terminals') {
     const existing = new Set([...state.panels.right.tabs, ...state.panels.bottom.tabs].map((tab) => tab.id));
     const missing = action.tabs.filter((tab) => !existing.has(tab.id));

@@ -25,6 +25,8 @@ import type { ShellRunUpdate } from '@maka/core/events';
 import type { SessionSummary } from '@maka/core/session';
 import { LocaleProvider } from '@maka/ui';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
+import { TerminalCloseIntents } from '../terminal-close-intents.js';
+import type { TerminalCloseChange } from '../../shared/runtime-host-identity.js';
 import {
   createFakeWorkbarServices,
   projectWorkbarPanelsForSession,
@@ -91,12 +93,26 @@ function ControllerProbe(props: ControllerProbeInput) {
   return null;
 }
 
+const connectedServices = new WeakSet<WorkbarServices>();
+
 function renderController(
   root: ReturnType<typeof installReactRenderer>['root'],
   services: WorkbarServices,
   input: ControllerProbeInput,
   strictMode = false,
 ) {
+  if (!connectedServices.has(services)) {
+    connectedServices.add(services);
+    const listeners = new Set<(change: TerminalCloseChange) => void>();
+    const closes = new TerminalCloseIntents((change) => listeners.forEach((listener) => listener(change)));
+    const { stop, recover } = services.terminal;
+    services.terminal.stop = (identity) => closes.stop(identity, () => stop(identity));
+    services.terminal.recover = (id) => closes.recover(id, async () => (await recover(id)).resources);
+    services.terminal.subscribeCloseChanges = (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    };
+  }
   const probe = createElement(
     LocaleProvider,
     {
@@ -272,16 +288,8 @@ describe('useWorkbarController', () => {
   it('keeps the initial Session active after StrictMode replays mount effects', async () => {
     const { root } = installReactRenderer();
     const starts: string[] = [];
-    let browserSubscriptions = 0;
     const defaults = createFakeWorkbarServices();
     const services = createFakeWorkbarServices({
-      browser: {
-        ...defaults.browser,
-        subscribeLive: () => {
-          browserSubscriptions += 1;
-          return () => undefined;
-        },
-      },
       terminal: {
         ...defaults.terminal,
         start: async (sessionId) => {
@@ -296,7 +304,6 @@ describe('useWorkbarController', () => {
     );
     await act(async () => controller().commands.openTool('terminal'));
 
-    assert.equal(browserSubscriptions, 2);
     assert.deepEqual(starts, ['a']);
     assert.equal(
       controller().host.panelsState.right.tabs.some(
@@ -363,7 +370,7 @@ describe('useWorkbarController', () => {
         },
         stop: async (request) => {
           stops.push(request);
-          return null;
+          return;
         },
       },
     });
@@ -401,7 +408,7 @@ describe('useWorkbarController', () => {
           shellUpdate(sessionId, `terminal-${++ordinal}`),
         stop: async (request) => {
           stops.push(request);
-          return null;
+          return;
         },
       },
     });
@@ -439,8 +446,8 @@ describe('useWorkbarController', () => {
 
   it('retains a failed Terminal close for visible retry and removes it only after Stop succeeds', async () => {
     const { root } = installReactRenderer();
-    const firstStop = deferred<ShellRunUpdate | null>();
-    const retryStop = deferred<ShellRunUpdate | null>();
+    const firstStop = deferred<void>();
+    const retryStop = deferred<void>();
     const stops: Array<{ sessionId: string; ref: string }> = [];
     const defaults = createFakeWorkbarServices();
     const services = createFakeWorkbarServices({
@@ -477,7 +484,7 @@ describe('useWorkbarController', () => {
     await act(async () => renderController(root, services, input(session('b'))));
     await act(async () => controller().commands.toggleRight());
     assert.equal(controller().host.rightCollapsed, false);
-    await act(async () => retryStop.resolve(null));
+    await act(async () => retryStop.resolve());
     assert.equal(controller().host.panelsState.right.tabs.includes(tab), false);
     assert.equal(controller().host.rightCollapsed, false);
     assert.deepEqual(stops, [
@@ -497,7 +504,7 @@ describe('useWorkbarController', () => {
     const services = createFakeWorkbarServices({ terminal: {
       ...defaults.terminal,
       start: async (id) => id === 'c' ? lateStart.promise : shellUpdate(id, `terminal-${id}`),
-      stop: async ({ ref }) => { stops.push(ref); return null; },
+      stop: async ({ ref }) => { stops.push(ref); return; },
     } });
     await act(async () => renderController(root, services, input(session('a'))));
     await act(async () => controller().commands.openTool('terminal'));
@@ -533,7 +540,7 @@ describe('useWorkbarController', () => {
         start: () => start.promise,
         stop: async (request) => {
           stops.push(request);
-          return null;
+          return;
         },
       },
     });
@@ -553,18 +560,18 @@ describe('useWorkbarController', () => {
     const { root } = installReactRenderer();
     const stops: Array<{ sessionId: string; ref: string }> = [];
     const defaults = createFakeWorkbarServices();
-    const pendingStop = deferred<ShellRunUpdate | null>();
+    const pendingStop = deferred<void>();
     let live = true;
     const services = createFakeWorkbarServices({
       terminal: {
         ...defaults.terminal,
-        listLive: async (sessionId) => live ? [shellUpdate(sessionId, 'terminal-unmount')] : [],
+        recover: async (sessionId) => ({ resources: live ? [shellUpdate(sessionId, 'terminal-unmount')] : [], closes: [] }),
         start: async (sessionId) => shellUpdate(sessionId, 'terminal-unmount'),
         stop: (request) => {
           stops.push(request);
           if (stops.length === 1) return pendingStop.promise;
           live = false;
-          return Promise.resolve(null);
+          return Promise.resolve();
         },
       },
     });
@@ -589,6 +596,48 @@ describe('useWorkbarController', () => {
     assert.equal(stops.length, 2);
   });
 
+  it('delivers an old pending Close to the rebuilt view', async () => {
+    const { root } = installReactRenderer();
+    const stop = deferred<void>();
+    let live = true;
+    const defaults = createFakeWorkbarServices();
+    const services = createFakeWorkbarServices({ terminal: {
+      ...defaults.terminal,
+      recover: async (id) => ({ resources: live ? [shellUpdate(id, 'pending-close')] : [], closes: [] }),
+      stop: async () => { await stop.promise; live = false; },
+    } });
+    await act(async () => renderController(root, services, input(session('a'))));
+    const tab = controller().host.panelsState.right.tabs[0]!;
+    await act(async () => controller().host.onCloseTab('right', tab));
+    await act(async () => root.unmount());
+    const reopened = installReactRenderer();
+    await act(async () => renderController(reopened.root, services, input(session('a'))));
+    assert.equal(controller().host.panelsState.right.tabs[0]?.resourceRef, 'pending-close');
+    await act(async () => stop.resolve());
+    assert.equal(controller().host.panelsState.right.tabs.length, 0);
+  });
+
+  it('retries a failed inventory without needing output, navigation or reconnect', async (context) => {
+    context.mock.timers.enable({ apis: ['setTimeout'] });
+    const { root } = installReactRenderer();
+    let reads = 0;
+    const defaults = createFakeWorkbarServices();
+    const services = createFakeWorkbarServices({ terminal: {
+      ...defaults.terminal,
+      recover: async (id) => {
+        if (++reads === 1) throw new Error('catalog changed during pagination');
+        return { resources: [shellUpdate(id, 'quiet-terminal')], closes: [] };
+      },
+    } });
+    await act(async () => renderController(root, services, input(session('a'))));
+    assert.equal(controller().host.panelsState.right.tabs.length, 0);
+    await act(async () => context.mock.timers.tick(100));
+    assert.equal(controller().host.panelsState.right.tabs[0]?.resourceRef, 'quiet-terminal');
+    await act(async () => root.unmount());
+    context.mock.timers.tick(10_000);
+    assert.equal(reads, 2);
+  });
+
   it('restores on reconnect without stealing selection or resurrecting a closed tab from an older read', async () => {
     const { root } = installReactRenderer();
     const defaults = createFakeWorkbarServices();
@@ -597,8 +646,8 @@ describe('useWorkbarController', () => {
     let reads = 0;
     const services = createFakeWorkbarServices({ terminal: {
       ...defaults.terminal,
-      listLive: async (id) => ++reads === 1 ? [] : reads === 2
-        ? [shellUpdate(id, 'recovered')] : reads === 3 ? staleRead.promise : [],
+      recover: async (id) => ({ resources: ++reads === 1 ? [] : reads === 2
+        ? [shellUpdate(id, 'recovered')] : reads === 3 ? await staleRead.promise : [], closes: [] }),
       subscribeResync: (handler) => { resync = handler; return () => { resync = undefined; }; },
     } });
     await act(async () => renderController(root, services, input(session('a'))));
@@ -625,7 +674,7 @@ describe('useWorkbarController', () => {
     it(`completes ${recoverySessionId === 'a' ? 'same' : 'another'} Session recovery when Stop is the only invalidator`, async () => {
       const { root } = installReactRenderer();
       const defaults = createFakeWorkbarServices();
-      const stop = deferred<ShellRunUpdate | null>();
+      const stop = deferred<void>();
       const inventory = deferred<ShellRunUpdate[]>();
       let recovering = false;
       let reads = 0;
@@ -635,7 +684,7 @@ describe('useWorkbarController', () => {
         ...defaults.terminal,
         start: async () => shellUpdate('a', 'closing-terminal'),
         stop: () => stop.promise,
-        listLive: async () => !recovering ? [] : ++reads === 1 ? inventory.promise : [other],
+        recover: async () => ({ resources: !recovering ? [] : ++reads === 1 ? await inventory.promise : [other], closes: [] }),
         subscribeResync: (handler) => { resync = handler; return () => { resync = undefined; }; },
       } });
       await act(async () => renderController(root, services, input(session('a'))));
@@ -647,7 +696,7 @@ describe('useWorkbarController', () => {
         if (recoverySessionId === 'a') resync?.({ sessionId: 'a' });
         else renderController(root, services, input(session('b')));
       });
-      await act(async () => stop.resolve(null));
+      await act(async () => stop.resolve());
       await act(async () => inventory.resolve([other]));
       assert.deepEqual(controller().host.panelsState.right.tabs.map((tab) => tab.resourceRef), ['other-live-terminal']);
       assert.equal(reads, recoverySessionId === 'a' ? 2 : 1);
@@ -757,22 +806,14 @@ describe('useWorkbarController', () => {
     assert.equal(controller().selectors.hiddenSessionIds.has('fork'), false);
   });
 
-  it('binds Browser ownership and disposes its live subscription once', async () => {
+  it('binds Browser ownership to the selected Session', async () => {
     const { root } = installReactRenderer();
     const activeSessions: Array<string | null> = [];
-    let subscriptions = 0;
-    let disposals = 0;
     const defaults = createFakeWorkbarServices();
     const services = createFakeWorkbarServices({
       browser: {
         ...defaults.browser,
         setActiveSession: (sessionId) => activeSessions.push(sessionId),
-        subscribeLive: () => {
-          subscriptions += 1;
-          return () => {
-            disposals += 1;
-          };
-        },
       },
     });
 
@@ -780,8 +821,6 @@ describe('useWorkbarController', () => {
     await act(async () => renderController(root, services, input(session('b'))));
     await act(async () => root.unmount());
 
-    assert.equal(subscriptions, 1);
-    assert.equal(disposals, 1);
     assert.deepEqual(activeSessions, ['a', 'b']);
   });
 });

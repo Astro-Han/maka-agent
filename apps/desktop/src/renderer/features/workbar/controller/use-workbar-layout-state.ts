@@ -145,6 +145,10 @@ export function useWorkbarLayoutState(
     (tabs: readonly SessionWorkbarTab[]) => dispatch({ type: 'restore-terminals', tabs }),
     [],
   );
+  const closeTerminal = useCallback(
+    (sessionId: string, ref: string) => dispatch({ type: 'close-terminal', sessionId, ref }),
+    [],
+  );
   const activateWorkbarTab = useCallback(
     (placement: SessionWorkbarPlacement, tabId: string) =>
       dispatch({ type: 'activate', placement, tabId }),
@@ -243,6 +247,7 @@ export function useWorkbarLayoutState(
     activateWorkbarTab,
     closeWorkbarTab,
     closeWorkbarTabs,
+    closeTerminal,
     moveWorkbarTabToPanel,
     titleWorkbarTab,
     openWorkbarLauncher,

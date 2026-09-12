@@ -37,7 +37,6 @@ function createBridgeRecorder(): {
     'browser.setActiveSession',
     'browser.setViewport',
     'browser.onState',
-    'browser.onLive',
     'inspector.subscribeUsageChanges',
   ]);
   // Adapters that reshape a bridge answer need one to reshape.
@@ -97,15 +96,15 @@ describe('createDesktopWorkbarServices', () => {
     let listener: ((update: ShellRunUpdate) => void) | undefined;
     bridge.shellRuns = {
       ...bridge.shellRuns,
-      list: async () => updates,
+      recover: async () => ({ resources: updates, closes: [] }),
       subscribeUpdates: (handler) => { listener = handler; return () => { listener = undefined; }; },
     };
     const services = createDesktopWorkbarServices(bridge);
-    assert.deepEqual(await services.terminal.listLive('s'), [manual]);
+    assert.deepEqual(await services.terminal.recover('s'), { resources: [manual], closes: [] });
     const received: ShellRunUpdate[] = [];
     const dispose = services.terminal.subscribeUpdates((update) => received.push(update));
     for (const update of updates) listener?.(update);
-    assert.deepEqual(received, [manual]);
+    assert.deepEqual(received, [manual, updates[3]]);
     dispose();
     assert.equal(listener, undefined);
   });
@@ -159,7 +158,6 @@ describe('createDesktopWorkbarServices', () => {
     await services.browser.close('s');
     await services.browser.getState('s');
     services.browser.subscribeState(eventHandler)();
-    services.browser.subscribeLive(eventHandler)();
 
     await services.artifacts.list('s');
     await services.artifacts.readText('s', 'a');
@@ -230,7 +228,6 @@ describe('createDesktopWorkbarServices', () => {
         'browser.close',
         'browser.getState',
         'browser.onState',
-        'browser.onLive',
         'artifacts.list',
         'artifacts.readText',
         'artifacts.readBinary',

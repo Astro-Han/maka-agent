@@ -74,15 +74,16 @@ export function createFakeWorkbarServices(
       subscribeSessionEvents: noopSubscription,
     },
     terminal: {
-      listLive: async () => [],
+      recover: async () => ({ resources: [], closes: [] }),
+      subscribeCloseChanges: noopSubscription,
       subscribeUpdates: noopSubscription,
       start: async () => {
         throw new Error('Fake terminal.start is not configured');
       },
-      stop: async () => null,
+      stop: async () => undefined,
       attach: async () => null,
       detach: async () => undefined,
-      write: async () => null,
+      write: async () => undefined,
       subscribePtyData: noopSubscription,
       subscribeResync: noopSubscription,
     },
@@ -97,7 +98,6 @@ export function createFakeWorkbarServices(
       close: async () => undefined,
       getState: async () => null,
       subscribeState: noopSubscription,
-      subscribeLive: noopSubscription,
     },
     artifacts: {
       list: async () => [],

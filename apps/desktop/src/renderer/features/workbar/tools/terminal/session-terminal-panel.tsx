@@ -21,6 +21,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Banner } from '@astryxdesign/core/Banner';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { generalizedErrorMessageForLocale } from '@maka/core/redaction';
+import { isTerminalShellRunStatus } from '@maka/core/shell-run';
 import { useUiLocale } from '@maka/ui';
 import { ICON_SIZE, Terminal as TerminalIcon } from '@maka/ui/icons';
 import { FitAddon } from '@xterm/addon-fit';
@@ -89,6 +90,7 @@ export function SessionTerminalPanel(props: {
 
     lastSizeRef.current = '';
     let disposed = false;
+    let ended = false;
     let hydrationPending = false;
     let resyncRequested = false;
     let cancelHydrationFrame: (() => void) | null = null;
@@ -141,11 +143,12 @@ export function SessionTerminalPanel(props: {
       writeEvent(event);
     });
     const hydrate = (epoch: number) => {
+      if (ended || disposed) return;
       hydrationPending = true;
       void terminalService
         .attach({ sessionId: props.sessionId, ref: props.terminalRef! })
         .then((snapshot) => {
-          if (disposed || !hydration.isCurrent(epoch)) return;
+          if (disposed || ended || !hydration.isCurrent(epoch)) return;
           if (!snapshot) {
             loadFailed();
             return;
@@ -166,8 +169,17 @@ export function SessionTerminalPanel(props: {
             if (activeRef.current) terminal.focus();
           });
         })
-        .catch((nextError) => {
-          if (disposed || !hydration.isCurrent(epoch)) return;
+        .catch(async (nextError) => {
+          if (disposed || ended || !hydration.isCurrent(epoch)) return;
+          // Exit can precede mounting this view, so no terminal update need
+          // arrive after subscription. A failed attach is not itself proof of
+          // exit; use the existing authoritative inventory to distinguish it.
+          const recovery = await terminalService.recover(props.sessionId).catch(() => undefined);
+          if (disposed || ended || !hydration.isCurrent(epoch)) return;
+          if (recovery && !recovery.resources.some((update) => update.result.ref === props.terminalRef)) {
+            finish();
+            return;
+          }
           loadFailed(nextError);
         })
         .finally(() => {
@@ -186,7 +198,7 @@ export function SessionTerminalPanel(props: {
       hydrate(hydration.begin());
     });
     const inputSubscription = terminal.onData((input) => {
-      if (!input || disposed) return;
+      if (!input || disposed || ended) return;
       void terminalService
         .write({
           sessionId: props.sessionId,
@@ -203,6 +215,7 @@ export function SessionTerminalPanel(props: {
         return;
       }
       fit.fit();
+      if (ended) return;
       const key = `${terminal.cols}:${terminal.rows}`;
       if (lastSizeRef.current === key) return;
       lastSizeRef.current = key;
@@ -226,6 +239,25 @@ export function SessionTerminalPanel(props: {
       resize();
     });
 
+    const finish = () => {
+      if (disposed || ended) return;
+      ended = true;
+      setError(null);
+      terminal.options.disableStdin = true;
+      cancelHydrationFrame?.();
+      unsubscribe();
+      unsubscribeResync();
+      unsubscribeUpdates();
+      inputSubscription.dispose();
+      // Keep the existing buffer and let already queued writes finish. Output
+      // arriving after resource retirement has no recovery guarantee.
+      void terminalService.detach({ sessionId: props.sessionId, ref: props.terminalRef! }).catch(() => {});
+    };
+    const unsubscribeUpdates = terminalService.subscribeUpdates((update) => {
+      if (update.sessionId === props.sessionId && update.result.ref === props.terminalRef &&
+          isTerminalShellRunStatus(update.result.status)) finish();
+    });
+
     setError(null);
     hydrate(hydration.begin());
 
@@ -238,6 +270,7 @@ export function SessionTerminalPanel(props: {
       unsubscribeFontSize();
       unsubscribe();
       unsubscribeResync();
+      unsubscribeUpdates();
       inputSubscription.dispose();
       terminalQueryReplies.dispose();
       void terminalService

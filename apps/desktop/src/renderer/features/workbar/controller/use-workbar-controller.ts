@@ -131,10 +131,6 @@ function nextOrdinal(
   );
 }
 
-function terminalResourceKey(sessionId: string, ref: string): string {
-  return `${sessionId}\u0000${ref}`;
-}
-
 export function useWorkbarController(
   input: UseWorkbarControllerInput,
 ): WorkbarController {
@@ -155,7 +151,6 @@ export function useWorkbarController(
   const [hiddenCompanionForkIds, setHiddenCompanionForkIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
-  const [, setLiveBrowserSessionIds] = useState<readonly string[]>([]);
 
   const activeSessionIdRef = useRef<string | undefined>(undefined);
   const resourceGenerationRef = useRef(0);
@@ -201,28 +196,12 @@ export function useWorkbarController(
     reservedOrdinalsRef.current['side-chat'].clear();
     reservedOrdinalsRef.current.terminal.clear();
   }, [layout.workbarPanelsState]);
-  const stoppingTerminalsRef = useRef(new Map<string, Promise<void>>());
   const terminalReadGenerationRef = useRef(0);
-
-  const stopTerminal = useCallback(
-    (sessionId: string, ref: string) => {
-      const key = terminalResourceKey(sessionId, ref);
-      const pending = stoppingTerminalsRef.current.get(key);
-      if (pending) return pending;
-      if (activeSessionIdRef.current === sessionId) terminalReadGenerationRef.current += 1;
-      const stopping = terminal
-        .stop({ sessionId, ref })
-        .then(() => {
-          if (activeSessionIdRef.current === sessionId) terminalReadGenerationRef.current += 1;
-        })
-        .finally(() => {
-          stoppingTerminalsRef.current.delete(key);
-        });
-      stoppingTerminalsRef.current.set(key, stopping);
-      return stopping;
-    },
-    [terminal],
-  );
+  useEffect(() => terminal.subscribeCloseChanges((change) => {
+    if (change.sessionId === activeSessionIdRef.current) terminalReadGenerationRef.current += 1;
+    if (change.status !== 'closed') return;
+    layout.closeTerminal(change.sessionId, change.ref);
+  }), [terminal, layout.closeTerminal]);
 
   const reserveOrdinal = useCallback(
     (kind: 'side-chat' | 'terminal'): number => {
@@ -247,32 +226,37 @@ export function useWorkbarController(
     let disposed = false;
     let reading = false;
     let refreshAgain = false;
+    let failures = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => {
       if (disposed) return;
       if (reading) { refreshAgain = true; return; }
+      clearTimeout(retry);
       reading = true;
       const generation = ++terminalReadGenerationRef.current;
-      void terminal.listLive(activeSessionId).then((updates) => {
+      void terminal.recover(activeSessionId).then(({ resources, closes }) => {
         if (disposed) return;
         if (generation !== terminalReadGenerationRef.current) {
           refreshAgain = true;
           return;
         }
-        layout.restoreTerminals(updates.filter((update) =>
-          !stoppingTerminalsRef.current.has(terminalResourceKey(activeSessionId, update.result.ref)),
-        ).map((update) => ({
-          id: terminalSessionWorkbarTabId(update.result.ref),
+        failures = 0;
+        const refs = new Set([...resources.map((update) => update.result.ref), ...closes.map((close) => close.ref)]);
+        layout.restoreTerminals([...refs].map((ref) => ({
+          id: terminalSessionWorkbarTabId(ref),
           kind: 'terminal',
-          resourceRef: update.result.ref,
+          resourceRef: ref,
           ownerSessionId: activeSessionId,
         })));
-      }).catch(() => undefined).finally(() => {
+      }).catch(() => {
+        if (!disposed) retry = setTimeout(refresh, Math.min(100 * 2 ** Math.min(failures++, 5), 2_000));
+      }).finally(() => {
         reading = false;
         if (refreshAgain) { refreshAgain = false; refresh(); }
-      }); // Reconnect or reactivation repeats a failed authoritative read.
+      });
     };
     const unsubscribeResync = terminal.subscribeResync((event) => {
-      if (event.sessionId === activeSessionId) refresh();
+      if (event.sessionId === activeSessionId) { terminalReadGenerationRef.current += 1; refresh(); }
     });
     const unsubscribeUpdates = terminal.subscribeUpdates((update) => {
       if (update.sessionId !== activeSessionId) return;
@@ -280,7 +264,7 @@ export function useWorkbarController(
       if (![...panels.right.tabs, ...panels.bottom.tabs].some((tab) => tab.resourceRef === update.result.ref)) refresh();
     });
     refresh();
-    return () => { disposed = true; unsubscribeResync(); unsubscribeUpdates(); };
+    return () => { disposed = true; clearTimeout(retry); unsubscribeResync(); unsubscribeUpdates(); };
   }, [activeSessionId, terminal, layout.restoreTerminals]);
 
   const revealPlacement = useCallback(
@@ -450,15 +434,7 @@ export function useWorkbarController(
         }
         const ownerSessionId = tab.ownerSessionId;
         const generation = resourceGenerationRef.current;
-        void stopTerminal(ownerSessionId, ref).then(() => {
-          if (generation !== resourceGenerationRef.current) return;
-          // Placement and navigation may change while Host is stopping the PTY.
-          for (const currentPlacement of ['right', 'bottom'] as const) {
-            layout.closeWorkbarTabs(currentPlacement, [tab.id], {
-              preserveVisibility: options?.preserveVisibility || activeSessionIdRef.current !== ownerSessionId,
-            });
-          }
-        }).catch((error) => {
+        void terminal.stop({ sessionId: ownerSessionId, ref }).catch((error) => {
           if (generation !== resourceGenerationRef.current) return;
           input.reportError(
             terminalCopy.stopFailed,
@@ -479,7 +455,7 @@ export function useWorkbarController(
       );
       if (panelIds.size > 0) sideConversations.removePanels(panelIds);
     },
-    [layout.closeWorkbarTabs, sideConversations, stopTerminal, input.reportError, terminalCopy.stopFailed, locale],
+    [layout.closeWorkbarTabs, sideConversations, terminal, input.reportError, terminalCopy.stopFailed, locale],
   );
 
   const closeTabs = useCallback(
@@ -577,10 +553,6 @@ export function useWorkbarController(
     [],
   );
 
-  useEffect(
-    () => browser.subscribeLive((payload) => setLiveBrowserSessionIds(payload.sessionIds)),
-    [browser],
-  );
   useEffect(() => {
     browser.setActiveSession(activeSessionId ?? null);
   }, [activeSessionId, browser]);

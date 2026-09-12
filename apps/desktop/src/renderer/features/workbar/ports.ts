@@ -74,10 +74,11 @@ export interface WorkbarReviewService {
 
 export interface WorkbarTerminalService {
   /** Live, locally owned manual terminals; excludes model tools and inherited resources. */
-  listLive(sessionId: string): Promise<ShellRunUpdate[]>;
+  recover(sessionId: string): Promise<import('../../../shared/runtime-host-identity.js').TerminalRecovery>;
+  subscribeCloseChanges(handler: (change: import('../../../shared/runtime-host-identity.js').TerminalCloseChange) => void): WorkbarUnsubscribe;
   subscribeUpdates(handler: (update: ShellRunUpdate) => void): WorkbarUnsubscribe;
   start(sessionId: string): Promise<ShellRunUpdate>;
-  stop(input: { sessionId: string; ref: string }): Promise<ShellRunUpdate | null>;
+  stop(input: { sessionId: string; ref: string }): Promise<void>;
   attach(input: {
     sessionId: string;
     ref: string;
@@ -88,7 +89,7 @@ export interface WorkbarTerminalService {
     ref: string;
     input?: string;
     size?: { cols: number; rows: number };
-  }): Promise<ShellRunUpdate | null>;
+  }): Promise<void>;
   subscribePtyData(
     handler: (event: ShellRunPtyDataEvent) => void,
   ): WorkbarUnsubscribe;
@@ -109,9 +110,6 @@ export interface WorkbarBrowserService {
   getState(sessionId: string): Promise<BrowserState | null>;
   subscribeState(
     handler: (payload: { sessionId: string; state: BrowserState }) => void,
-  ): WorkbarUnsubscribe;
-  subscribeLive(
-    handler: (payload: { sessionIds: string[] }) => void,
   ): WorkbarUnsubscribe;
 }
 

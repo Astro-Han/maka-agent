@@ -240,6 +240,25 @@ test('Terminal survives navigation and reload, then stops on explicit close', as
     (await page.evaluate((id) => window.maka.shellRuns.list(id), sessionId))
       .find((update) => update.result.ref === terminalRef)?.result.status,
   ).not.toBe('running');
+
+  // Natural exit ends live controls while the local picture remains. Reload
+  // does not promise to recover a completed terminal's contents or its tab.
+  await page.getByRole('button', { name: '展开任务工作栏' }).click();
+  await page.getByRole('button', { name: /终端.*查看当前任务的终端运行和实时输出/ }).click();
+  await expect(terminal).toBeVisible();
+  const completedRef = await terminal.getAttribute('data-terminal-ref');
+  await page.evaluate(async ({ sessionId, ref }) => {
+    await window.maka.shellRuns.write({ sessionId, ref: ref!, input: 'exit 0\r' });
+  }, { sessionId, ref: completedRef });
+  await expect.poll(async () => page.evaluate(async ({ sessionId, ref }) =>
+    (await window.maka.shellRuns.list(sessionId)).find((update) => update.result.ref === ref)?.result,
+  { sessionId, ref: completedRef })).toMatchObject({ status: 'completed', exitCode: 0 });
+  await expect(terminal).toBeVisible();
+  await page.setViewportSize({ width: 1150, height: 800 });
+  await expect(terminal.getByText(/无法|失败/)).toHaveCount(0);
+  await page.reload();
+  await sidebar.locator(`[data-session-id=${JSON.stringify(sessionId)}]`).click();
+  await expect(terminal).toHaveCount(0);
 });
 
 test('Side Chat survives collapse, confirms close, and cleans up on source switch', async ({
