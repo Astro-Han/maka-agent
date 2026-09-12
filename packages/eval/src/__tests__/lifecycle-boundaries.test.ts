@@ -35,6 +35,14 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import {
+  connectOrSpawnRuntimeHost,
+  prepareConnectedRuntimeHostRetirement,
+} from '@maka/runtime-host/client';
+import {
+  INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID,
+  RUNTIME_HOST_PROTOCOL_VERSION,
+} from '@maka/runtime-host/protocol';
 import { FileAttemptStore } from '../attempt-store.js';
 import type { ExperimentCell, ExperimentSpec, JsonObject } from '../experiment.js';
 import { createExternalSubjectAdapter } from '../external-subject.js';
@@ -1165,9 +1173,34 @@ test('the DeepSeek Harness arm pins its own minimal composition', async () => {
   assert.deepEqual(profile.dsh.profile.bundles, []);
 });
 
-test('Maka Eval policy enables privacy independently of the tool profile', () => {
-  const document = makaEvalRuntimePolicyDocument();
-  assert.equal(document.policy.privacy.incognitoActive, true);
+test('Maka Eval policy loads through Runtime Host with privacy and proxy settings', async () => {
+  const rootPath = await mkdtemp(join(tmpdir(), 'maka-eval-policy-'));
+  const document = makaEvalRuntimePolicyDocument('http://127.0.0.1:8080');
+  await writeFile(join(rootPath, 'runtime-policy.json'), JSON.stringify(document));
+  try {
+    const host = await connectOrSpawnRuntimeHost({
+      rootPath,
+      protocol: { min: RUNTIME_HOST_PROTOCOL_VERSION, max: RUNTIME_HOST_PROTOCOL_VERSION },
+      compositionId: INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID,
+      candidateEntrypoint: new URL(
+        import.meta.resolve('@maka/runtime-host/execution-candidate-main'),
+      ),
+      electionDeadlineMs: 5000,
+    });
+    assert.equal(host.kind, 'connected', JSON.stringify(host));
+    if (host.kind !== 'connected') return;
+    try {
+      const snapshot = await host.connection.request('runtime.policy.query', {});
+      assert.equal(snapshot.policy.privacy.incognitoActive, true);
+      assert.deepEqual(snapshot.policy.networkProxy, document.policy.networkProxy);
+    } finally {
+      await prepareConnectedRuntimeHostRetirement(host.connection, 'refuse_active_work');
+      await host.connection.close();
+      await host.spawnedProcess?.exited;
+    }
+  } finally {
+    await rm(rootPath, { recursive: true, force: true });
+  }
 });
 
 test('experiment specs do not declare an executor working-directory authority', async () => {
