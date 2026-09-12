@@ -3499,7 +3499,6 @@
         "actionFactories": [],
         "dependencyPaths": {
           "../locales/settings-shared-copy": 1,
-          "./settings-nav": 1,
           "./settings-surface": 1,
           "@maka/ui": 1,
           "react": 1
