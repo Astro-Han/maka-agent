@@ -40,6 +40,7 @@ import type {
   ModelRequestMetadata,
   ModelToolSet,
   ToolCallPart,
+  UserContent,
 } from './model-protocol.js';
 export type {
   NormalizedUsage,
@@ -268,7 +269,11 @@ export class ModelAdapter {
           this.openAiResponsesTransportState.semanticBaseline(responsesLane),
         )
       : { messages: fullMessages };
-    const providerMessages = remapModelMessageToolNames(continuation.messages, providerToolName);
+    const namedMessages = remapModelMessageToolNames(continuation.messages, providerToolName);
+    const providerMessages =
+      this.runtime.wire === 'openai-chat'
+        ? chatToolImagesToUserMessages(namedMessages)
+        : namedMessages;
     const providerSystem = input.system
       ? remapProviderToolNamesInText(input.system, providerToolName)
       : undefined;
@@ -1140,6 +1145,40 @@ function translateChunk(
     default:
       return [];
   }
+}
+
+function chatToolImagesToUserMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+  const result: ModelMessage[] = [];
+  let images: Exclude<UserContent, string> = [];
+  const flushImages = () => {
+    if (images.length === 0) return;
+    result.push({ role: 'user', content: images });
+    images = [];
+  };
+  for (const message of messages) {
+    if (message.role !== 'tool') {
+      flushImages();
+      result.push(message);
+      continue;
+    }
+    const content = message.content.map((part) => {
+      if (part.type !== 'tool-result' || part.output.type !== 'content') return part;
+      const value = part.output.value.map((item) => {
+        if (item.type !== 'file' || !item.mediaType.startsWith('image/')) return item;
+        images.push(
+          { type: 'text', text: `Image returned by ${part.toolName} (${part.toolCallId}):` },
+          item,
+        );
+        return { type: 'text' as const, text: 'Image attached after the tool results.' };
+      });
+      return { ...part, output: { ...part.output, value } };
+    });
+    result.push({ ...message, content });
+  }
+  // Chat Completions accepts images in user messages, not tool messages.
+  // Wait for all adjacent results so parallel calls keep their complete replies.
+  flushImages();
+  return result;
 }
 
 /**
