@@ -306,6 +306,7 @@ export function GeneralSettingsPage(props: {
           onRefresh={props.onRefreshConnections}
           permissionMode={props.settings.chatDefaults.permissionMode}
           thinkingLevel={props.settings.chatDefaults.thinkingLevel}
+          codeModeEnabled={props.settings.chatDefaults.codeModeEnabled === true}
           onUpdate={props.onUpdate}
         />
       ) : null}
@@ -502,6 +503,7 @@ function GeneralDefaultsCard(props: {
   onRefresh(): Promise<void>;
   permissionMode: ChatDefaultPermissionMode;
   thinkingLevel?: ThinkingLevel;
+  codeModeEnabled: boolean;
   onUpdate(
     patch: Parameters<typeof window.maka.settings.update>[0],
   ): Promise<UpdateAppSettingsResult>;
@@ -517,11 +519,12 @@ function GeneralDefaultsCard(props: {
   const toast = useToast();
   const mountedRef = useMountedRef();
   const persistGuard = useKeyedActionGuard<
-    "default-model" | "permission-mode" | "thinking-level"
+    "default-model" | "permission-mode" | "thinking-level" | "code-mode"
   >();
   const [saving, setSaving] = useState(false);
   const [savingPermissionMode, setSavingPermissionMode] = useState(false);
   const [savingThinkingLevel, setSavingThinkingLevel] = useState(false);
+  const [savingCodeMode, setSavingCodeMode] = useState(false);
 
   const modelChoices = useMemo(
     () => buildChatModelChoices(props.connections),
@@ -650,11 +653,46 @@ function GeneralDefaultsCard(props: {
     }
   }
 
+  async function persistCodeMode(codeModeEnabled: boolean) {
+    if (!props.settingsInteractive) return;
+    const releaseSave = persistGuard.begin('code-mode');
+    if (!releaseSave) return;
+    setSavingCodeMode(true);
+    try {
+      await props.onUpdate({ chatDefaults: { codeModeEnabled } });
+    } catch (error) {
+      if (mountedRef.current) {
+        toast.error(copy.updateFailed, settingsActionErrorMessage(error, locale), undefined,
+          host ? { profileId: host.profileId } : undefined);
+      }
+    } finally {
+      releaseSave();
+      if (mountedRef.current) setSavingCodeMode(false);
+    }
+  }
+
   return (
     <SettingsSection
       title={sections.chatDefaults}
       description={sections.chatDefaultsHelp}
     >
+      {props.settingsAvailable ? (
+        <SettingsRow
+          label="Code Mode"
+          description={copy.codeModeHelp}
+          end={
+            <Switch
+              label="Code Mode"
+              isLabelHidden
+              value={props.codeModeEnabled}
+              isDisabled={savingCodeMode || !props.settingsInteractive}
+              onChange={(enabled) => void persistCodeMode(enabled)}
+            />
+          }
+        />
+      ) : props.showSettingsPlaceholder ? (
+        <SettingsRowSkeleton label="Code Mode" description={copy.codeModeHelp} width="3rem" />
+      ) : null}
       {props.connectionsAvailable ? (
         <SettingsRow
           label={copy.defaultModel}

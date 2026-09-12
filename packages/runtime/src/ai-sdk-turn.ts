@@ -424,44 +424,31 @@ function projectToolModePlan(
   plan: ToolAvailabilityPlan,
   toolMode: ToolMode,
   execTool: MakaTool,
+  nested: ReadonlyMap<string, MakaTool>,
 ): ToolAvailabilityPlan {
   if (toolMode === 'direct') return plan;
-  const withExec = (names: readonly string[]): string[] =>
-    [...new Set([...names, execTool.name])].sort((a, b) => a.localeCompare(b));
-  const invalid = plan.providerTools.filter((tool) => tool.name === INVALID_TOOL_NAME);
-  const visible = [
-    ...plan.providerTools.filter((tool) => tool.name !== INVALID_TOOL_NAME),
-    execTool,
-  ].sort((a, b) => a.name.localeCompare(b.name));
+  const catalog = requestCompositionToolSchemas([...nested.values()], [...nested.keys()]);
+  const projectedExec = {
+    ...execTool,
+    description: [
+      execTool.description,
+      'This is the only callable tool. Call the following tools from inside exec.',
+      'After tool_search, return its result and use the refreshed catalog in the next exec call.',
+      JSON.stringify(catalog),
+    ].join('\n'),
+  };
   return {
     ...plan,
-    providerTools: [...visible, ...invalid],
-    activeTools: withExec(plan.activeTools),
+    providerTools: [
+      projectedExec,
+      ...plan.providerTools.filter((tool) => tool.name === INVALID_TOOL_NAME),
+    ],
+    activeTools: [execTool.name],
     ...(plan.projectActiveTools
-      ? {
-          projectActiveTools: (options) => ({
-            activeTools: withExec(plan.projectActiveTools?.(options).activeTools ?? []),
-          }),
-        }
+      ? { projectActiveTools: () => ({ activeTools: [execTool.name] }) }
       : {}),
-    currentRepairToolNames: () => withExec(plan.currentRepairToolNames()),
-    diagnostics: (activeTools, visibleToolSchemaChars) => {
-      const baseActive = activeTools.filter((name) => name !== execTool.name);
-      const baseChars = toolSchemaCharsForDiagnostics(plan.providerTools, baseActive);
-      const diagnostic = plan.diagnostics(baseActive, baseChars);
-      if (!diagnostic) return undefined;
-      const execSchemaChars = Math.max(0, visibleToolSchemaChars - baseChars);
-      return {
-        ...diagnostic,
-        visibleToolCount: (diagnostic.visibleToolCount ?? baseActive.length) + 1,
-        fullToolCount:
-          (diagnostic.fullToolCount ?? baseActive.length + (diagnostic.hiddenToolCount ?? 0)) + 1,
-        visibleToolSchemaChars,
-        fullToolSchemaChars:
-          (diagnostic.fullToolSchemaChars ??
-            baseChars + (diagnostic.toolSchemaCharReduction ?? 0)) + execSchemaChars,
-      };
-    },
+    currentRepairToolNames: () => [execTool.name],
+    diagnostics: (_active, chars) => plan.diagnostics([...nested.keys()], chars),
   };
 }
 
@@ -846,7 +833,9 @@ export class AiSdkTurn {
       : { disposition: 'policy_denied', dispatch: false };
   }
 
-  private createCodeModeExecTool(eventSink: DurableSessionEventSink): MakaTool<{ code: string }> {
+  private createCodeModeExecTool(
+    eventSink: AsyncEventQueue<SessionEvent>,
+  ): MakaTool<{ code: string }> {
     return {
       name: 'exec',
       description: [
@@ -1117,7 +1106,7 @@ export class AiSdkTurn {
             ])
           : new Set<string>();
     const requestedToolMode: unknown =
-      input.toolMode === undefined ? DEFAULT_TOOL_MODE : input.toolMode;
+      input.toolMode ?? this.deps.backend.header.toolMode ?? DEFAULT_TOOL_MODE;
     if (!isToolMode(requestedToolMode)) {
       throw new Error(`Invalid tool mode: ${String(requestedToolMode)}`);
     }
@@ -1127,11 +1116,9 @@ export class AiSdkTurn {
       if (toolMode === 'code_mode' && snapshot.hostTools.some((tool) => tool.name === 'exec')) {
         throw new Error('Tool name "exec" is reserved for Code Mode.');
       }
-      const plan = projectToolModePlan(
-        snapshot.runtime.prepare(this.activeTools, requiredOrchestrationTools),
-        toolMode,
-        codeModeExecTool,
-      );
+      const basePlan = snapshot.runtime.prepare(this.activeTools, requiredOrchestrationTools);
+      const nestedTools = nestableToolSnapshot(basePlan.providerTools, basePlan.activeTools);
+      const plan = projectToolModePlan(basePlan, toolMode, codeModeExecTool, nestedTools);
       const modelTools: ModelToolSet = {};
       for (const tool of plan.providerTools) {
         modelTools[tool.name] = tool.providerTool
@@ -1139,9 +1126,9 @@ export class AiSdkTurn {
           : { kind: 'function', description: tool.description, inputSchema: tool.parameters };
       }
       toolRuntime.setGating(plan.gating);
-      return { plan, providerTools: plan.providerTools, modelTools };
+      return { plan, providerTools: plan.providerTools, modelTools, nestedTools };
     };
-    let { plan, providerTools, modelTools } = snapshotStepTools();
+    let { plan, providerTools, modelTools, nestedTools } = snapshotStepTools();
     let activeToolResultPruneDiagnosticPatch: ActiveToolResultPruneDiagnosticPatch = {};
     let midTurnCompactDiagnosticPatch: Partial<ContextBudgetDiagnostic> | undefined;
     // Tool names the repair path matches a mis-cased call against — follows the
@@ -1462,7 +1449,7 @@ export class AiSdkTurn {
         let finishReason: ModelFinishReason = 'stop';
         let terminalProviderError: unknown;
         agentLoop: for (;;) {
-          ({ plan, providerTools, modelTools } = snapshotStepTools());
+          ({ plan, providerTools, modelTools, nestedTools } = snapshotStepTools());
           resolvedSystemPrompt = await this.resolveSystemPrompt();
           systemPrompt = joinPromptFragments([
             resolvedSystemPrompt.text,
@@ -1596,13 +1583,9 @@ export class AiSdkTurn {
             // no longer sees it as a direct tool, but a nested retry must still
             // reach ToolRuntime's denial latch instead of becoming an endlessly
             // variable unknown-tool error inside `exec`.
-            const codeModeActiveTools =
-              toolRuntime.hasSandboxBoundaryDenial() && activeToolsForRequest.includes('exec')
-                ? [...activeToolsForRequest, REQUEST_SANDBOX_BOUNDARY_TOOL_NAME]
-                : activeToolsForRequest;
             this.codeModeTools =
-              toolMode === 'code_mode'
-                ? nestableToolSnapshot(providerTools, codeModeActiveTools)
+              toolMode === 'code_mode' && activeToolsForRequest.includes('exec')
+                ? nestedTools
                 : undefined;
             const requestWatchdog = watchdogState.current;
             // Read here, beside the messages it describes: `attemptMessages` is
@@ -2710,7 +2693,7 @@ export class AiSdkTurn {
   }
 
   private async executeCodeModeCell(
-    eventSink: DurableSessionEventSink,
+    eventSink: AsyncEventQueue<SessionEvent>,
     code: string,
     context: MakaToolContext,
   ): Promise<unknown> {
@@ -2765,6 +2748,8 @@ export class AiSdkTurn {
         })),
         isFatalToolError: isRuntimeCommitBoundaryError,
         callTool: async (name, input, signal) => {
+          if (this.loopStopRequested)
+            throw new Error('The turn has yielded; no further tools may run.');
           const tool = snapshot.get(name);
           if (!tool) throw new Error(`Tool "${name}" is not active or nestable in this cell`);
           const parsedInput = await validateCodeModeToolInput(tool, input);
@@ -2772,6 +2757,7 @@ export class AiSdkTurn {
             tool,
             turnId: context.turnId,
             toolCallId: `${context.toolCallId}:nested:${this.deps.newId()}`,
+            stepId: `${context.toolCallId}:nested`,
             input: parsedInput,
             abortSignal: signal,
             eventSink: nestedEventSink,
@@ -2785,6 +2771,14 @@ export class AiSdkTurn {
           }
           if (nestedOutputLimitExceeded) {
             throw new Error('Code Mode nested output byte limit exceeded');
+          }
+          if (isPlanToolResult(settlement.result))
+            this.handlePlanToolResult(settlement.result, eventSink);
+          if (
+            name === YIELD_AGENT_GRAPH_TOOL_NAME &&
+            isAgentGraphYieldToolResult(settlement.result)
+          ) {
+            this.handleAgentGraphYieldToolResult(settlement.result);
           }
           return settlement.result;
         },

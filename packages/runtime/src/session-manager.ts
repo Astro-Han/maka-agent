@@ -2561,6 +2561,7 @@ export class SessionManager {
         permissionMode: childPermissionMode,
         collaborationMode: 'agent',
         orchestrationMode: 'default',
+        toolMode: parentHeader.toolMode ?? DEFAULT_TOOL_MODE,
         subagentParent: {
           kind: 'subagent',
           parentSessionId: input.source.sessionId,
@@ -3103,6 +3104,7 @@ export class SessionManager {
         permissionMode: definition.permissionMode,
         collaborationMode: 'agent',
         orchestrationMode: 'default',
+        toolMode: parentHeader.toolMode ?? DEFAULT_TOOL_MODE,
         subagentParent: {
           kind: 'subagent',
           parentSessionId,
@@ -3834,7 +3836,7 @@ export class SessionManager {
         cwd: session.cwd,
         permissionMode: session.permissionMode,
         collaborationMode: session.collaborationMode ?? 'agent',
-        toolMode: DEFAULT_TOOL_MODE,
+        toolMode: session.toolMode ?? DEFAULT_TOOL_MODE,
         ...orchestration,
         ...(workspaceIdentity !== undefined ? { workspaceIdentity } : {}),
       },

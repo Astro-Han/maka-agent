@@ -381,6 +381,7 @@ export class HostSessionCatalogCoordinator {
           ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
           ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
           permissionMode: prepared.permissionMode ?? policy.policy.chatDefaults.permissionMode,
+          toolMode: policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct',
           collaborationMode: input.collaborationMode ?? 'agent',
           orchestrationMode: input.orchestrationMode ?? 'default',
         },
@@ -613,6 +614,7 @@ export class HostSessionCatalogCoordinator {
               ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
               ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
               permissionMode: prepared.permissionMode ?? policy.policy.chatDefaults.permissionMode,
+              toolMode: policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct',
               collaborationMode: input.collaborationMode ?? 'agent',
               orchestrationMode: input.orchestrationMode ?? 'default',
             };
