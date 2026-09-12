@@ -2726,8 +2726,8 @@ export class AiSdkTurn {
       },
       pushAndWaitUntilConsumed: (event) => eventSink.pushAndWaitUntilConsumed(event),
     };
-    // Admission covers the whole cell, including host batches while the SDK
-    // releases its Worker. executeCodeCell waits for every started host call
+    // Admission covers the whole cell, including host waits. executeCodeCell
+    // waits for every started host call
     // on both success and cancellation, so settlement is the release boundary.
     //
     // One cell may wait; the next is turned away rather than queued, which is

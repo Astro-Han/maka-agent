@@ -203,6 +203,23 @@
 
 THIRD-PARTY COMPONENTS
 
+Vercel Code Mode and run execution-budget patches
+
+Source: https://www.npmjs.com/package/@ai-sdk/code-mode/v/1.0.56
+        https://www.npmjs.com/package/run/v/2.1.4
+Repository: https://github.com/vercel/ai/tree/main/packages/code-mode
+            https://github.com/vercel-labs/run/tree/run%402.1.4/packages/run
+Dependency patches: patches/@maka+runtime++@ai-sdk+code-mode+1.0.56.patch
+                    patches/run+2.1.4.patch
+Readable source changes: patches/run-2.1.4-source.diff
+Copyright 2023 Vercel, Inc.
+License: Apache-2.0
+
+These patches modify the execution time policy and its SDK forwarding. The
+Apache License, Version 2.0 above applies. The generated run Worker includes
+embedded third-party code; its upstream notices and license texts are retained
+in patches/run-2.1.4-notices.md.
+
 Vercel AI SDK
 
 Source: https://www.npmjs.com/package/@ai-sdk/provider-utils/v/5.0.11
