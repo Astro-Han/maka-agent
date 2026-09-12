@@ -209,12 +209,19 @@ export function reduceWorkbarLayout(
       : { ...state, activeSessionId: action.sessionId };
   }
   if (action.type === 'retain-sessions') {
+    let panels = state.panels;
+    for (const placement of ['right', 'bottom'] as const) {
+      const tabIds = panels[placement].tabs.filter((tab) =>
+        tab.kind === 'terminal' && tab.ownerSessionId && !action.sessionIds.has(tab.ownerSessionId),
+      ).map((tab) => tab.id);
+      if (tabIds.length) panels = reduceWorkbarPanels(panels, { type: 'close', placement, tabIds });
+    }
     const entries = Object.entries(state.collapsedBySession).filter(
       ([id]) => id === state.activeSessionId || action.sessionIds.has(id),
     );
-    return entries.length === Object.keys(state.collapsedBySession).length
+    return panels === state.panels && entries.length === Object.keys(state.collapsedBySession).length
       ? state
-      : { ...state, collapsedBySession: Object.fromEntries(entries) };
+      : { ...state, panels, collapsedBySession: Object.fromEntries(entries) };
   }
   if (action.type === 'collapse') {
     if (action.placement === 'right') {

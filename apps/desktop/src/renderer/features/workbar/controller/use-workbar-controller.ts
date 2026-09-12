@@ -202,8 +202,7 @@ export function useWorkbarController(
     reservedOrdinalsRef.current['side-chat'].clear();
     reservedOrdinalsRef.current.terminal.clear();
   }, [layout.workbarPanelsState]);
-  const stoppingTerminalKeysRef = useRef(new Set<string>());
-  const stoppedTerminalKeysRef = useRef(new Set<string>());
+  const stoppingTerminalsRef = useRef(new Map<string, Promise<void>>());
   const ownedTerminalResourcesRef = useRef(
     new Map<string, { sessionId: string; ref: string }>(),
   );
@@ -211,30 +210,24 @@ export function useWorkbarController(
   const stopTerminal = useCallback(
     (sessionId: string, ref: string) => {
       const key = terminalResourceKey(sessionId, ref);
-      if (
-        stoppingTerminalKeysRef.current.has(key) ||
-        stoppedTerminalKeysRef.current.has(key)
-      ) {
-        return;
-      }
-      stoppingTerminalKeysRef.current.add(key);
-      void terminal
+      const pending = stoppingTerminalsRef.current.get(key);
+      if (pending) return pending;
+      const stopping = terminal
         .stop({ sessionId, ref })
         .then(() => {
-          stoppedTerminalKeysRef.current.add(key);
           ownedTerminalResourcesRef.current.delete(key);
         })
-        .catch(() => undefined)
         .finally(() => {
-          stoppingTerminalKeysRef.current.delete(key);
+          stoppingTerminalsRef.current.delete(key);
         });
+      stoppingTerminalsRef.current.set(key, stopping);
+      return stopping;
     },
     [terminal],
   );
 
   const registerTerminal = useCallback((sessionId: string, ref: string) => {
     const key = terminalResourceKey(sessionId, ref);
-    stoppedTerminalKeysRef.current.delete(key);
     ownedTerminalResourcesRef.current.set(key, { sessionId, ref });
   }, []);
 
@@ -259,7 +252,7 @@ export function useWorkbarController(
   useEffect(
     () => () => {
       for (const resource of ownedTerminalResourcesRef.current.values()) {
-        stopTerminal(resource.sessionId, resource.ref);
+        void stopTerminal(resource.sessionId, resource.ref).catch(() => undefined);
       }
     },
     [stopTerminal],
@@ -327,7 +320,7 @@ export function useWorkbarController(
               if (
                 generation !== resourceGenerationRef.current
               ) {
-                stopTerminal(ownerSessionId, ref);
+                void stopTerminal(ownerSessionId, ref).catch(() => undefined);
                 return;
               }
               layout.openDynamicWorkbarTab(
@@ -420,20 +413,39 @@ export function useWorkbarController(
     ],
   );
 
-  const closeTabsImmediately = useCallback(
+  const closeTabsWithoutConfirmation = useCallback(
     (
       placement: SessionWorkbarPlacement,
       tabs: readonly SessionWorkbarTab[],
       options?: { preserveVisibility?: boolean },
     ) => {
       if (tabs.length === 0) return;
+      const immediateTabs: SessionWorkbarTab[] = [];
       for (const tab of tabs) {
         const ref = terminalRefFromWorkbarTab(tab);
-        if (ref && tab.ownerSessionId) stopTerminal(tab.ownerSessionId, ref);
+        if (!ref || !tab.ownerSessionId) {
+          immediateTabs.push(tab);
+          continue;
+        }
+        const ownerSessionId = tab.ownerSessionId;
+        void stopTerminal(ownerSessionId, ref).then(() => {
+          // Placement and navigation may change while Host is stopping the PTY.
+          for (const currentPlacement of ['right', 'bottom'] as const) {
+            layout.closeWorkbarTabs(currentPlacement, [tab.id], {
+              preserveVisibility: options?.preserveVisibility || activeSessionIdRef.current !== ownerSessionId,
+            });
+          }
+        }).catch((error) => {
+          input.reportError(
+            terminalCopy.stopFailed,
+            localizedShellErrorMessage(error, terminalCopy.stopFailed, locale),
+            ownerSessionId,
+          );
+        });
       }
       layout.closeWorkbarTabs(
         placement,
-        tabs.map((tab) => tab.id),
+        immediateTabs.map((tab) => tab.id),
         options,
       );
       const panelIds = new Set(
@@ -443,7 +455,7 @@ export function useWorkbarController(
       );
       if (panelIds.size > 0) sideConversations.removePanels(panelIds);
     },
-    [layout.closeWorkbarTabs, sideConversations, stopTerminal],
+    [layout.closeWorkbarTabs, sideConversations, stopTerminal, input.reportError, terminalCopy.stopFailed, locale],
   );
 
   const closeTabs = useCallback(
@@ -467,10 +479,10 @@ export function useWorkbarController(
         );
         return;
       }
-      closeTabsImmediately(placement, tabs);
+      closeTabsWithoutConfirmation(placement, tabs);
     },
     [
-      closeTabsImmediately,
+      closeTabsWithoutConfirmation,
       sideConversations.contentPanelIds,
       skipSideChatCloseConfirmation,
     ],
@@ -544,13 +556,18 @@ export function useWorkbarController(
   useEffect(() => {
     const authoritativeSessionIds = input.authoritativeSessionIds;
     if (!authoritativeSessionIds) return;
+    for (const [key, resource] of ownedTerminalResourcesRef.current) {
+      if (!authoritativeSessionIds.has(resource.sessionId)) {
+        ownedTerminalResourcesRef.current.delete(key);
+      }
+    }
     setHiddenCompanionForkIds((current) =>
       reconcileCompanionForkVisibility(
         current,
         authoritativeSessionIds,
       ),
     );
-  }, [input.authoritativeSessionIds]);
+  }, [input.authoritativeSessionIds, layout.workbarPanelsState]);
 
   useEffect(
     () => browser.subscribeLive((payload) => setLiveBrowserSessionIds(payload.sessionIds)),
@@ -603,7 +620,7 @@ export function useWorkbarController(
       const pending = pendingSideChatClose;
       setPendingSideChatClose([]);
       for (const placement of ['right', 'bottom'] as const) {
-        closeTabsImmediately(
+        closeTabsWithoutConfirmation(
           placement,
           pending
             .filter((candidate) => candidate.placement === placement)
@@ -611,7 +628,7 @@ export function useWorkbarController(
         );
       }
     },
-    [closeTabsImmediately, pendingSideChatClose],
+    [closeTabsWithoutConfirmation, pendingSideChatClose],
   );
 
   const commands = useMemo<WorkbarControllerCommands>(

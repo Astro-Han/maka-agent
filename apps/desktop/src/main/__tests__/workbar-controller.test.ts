@@ -130,7 +130,7 @@ function input(
     activeSession,
     projectId: activeSession?.projectId,
     projectAliases: [],
-    authoritativeSessionIds: new Set(activeSession ? [activeSession.id] : []),
+    authoritativeSessionIds: new Set(['a', 'b', ...(activeSession ? [activeSession.id] : [])]),
     shellObscured: false,
     modelChoices: [],
     reportError: (title, description) => errors.push(`${title}: ${description}`),
@@ -437,9 +437,10 @@ describe('useWorkbarController', () => {
     assert.deepEqual(stops, [{ sessionId: 'a', ref: 'terminal-1' }]);
   });
 
-  it('retries a failed explicit Terminal stop at workspace teardown, not navigation', async () => {
+  it('retains a failed Terminal close for visible retry and removes it only after Stop succeeds', async () => {
     const { root } = installReactRenderer();
     const firstStop = deferred<ShellRunUpdate | null>();
+    const retryStop = deferred<ShellRunUpdate | null>();
     const stops: Array<{ sessionId: string; ref: string }> = [];
     const defaults = createFakeWorkbarServices();
     const services = createFakeWorkbarServices({
@@ -448,7 +449,7 @@ describe('useWorkbarController', () => {
         start: async (sessionId) => shellUpdate(sessionId, 'terminal-retry'),
         stop: (request) => {
           stops.push(request);
-          return stops.length === 1 ? firstStop.promise : Promise.resolve(null);
+          return stops.length === 1 ? firstStop.promise : retryStop.promise;
         },
       },
     });
@@ -460,7 +461,9 @@ describe('useWorkbarController', () => {
     );
     assert.ok(tab);
     await act(async () => controller().host.onCloseTab('right', tab));
+    await act(async () => controller().host.onCloseTab('right', tab));
     assert.deepEqual(stops, [{ sessionId: 'a', ref: 'terminal-retry' }]);
+    assert.ok(controller().host.panelsState.right.tabs.includes(tab));
 
     await act(async () => {
       firstStop.reject(new Error('Host disconnected'));
@@ -468,13 +471,55 @@ describe('useWorkbarController', () => {
     });
     await act(async () => renderController(root, services, input(session('b'))));
     assert.equal(stops.length, 1);
-    await act(async () => root.unmount());
+    await act(async () => renderController(root, services, input(session('a'))));
+    assert.ok(controller().host.panelsState.right.tabs.includes(tab));
+    await act(async () => controller().host.onCloseTab('right', tab));
+    await act(async () => renderController(root, services, input(session('b'))));
+    await act(async () => controller().commands.toggleRight());
+    assert.equal(controller().host.rightCollapsed, false);
+    await act(async () => retryStop.resolve(null));
+    assert.equal(controller().host.panelsState.right.tabs.includes(tab), false);
+    assert.equal(controller().host.rightCollapsed, false);
     assert.deepEqual(stops, [
       { sessionId: 'a', ref: 'terminal-retry' },
       { sessionId: 'a', ref: 'terminal-retry' },
     ]);
 
+    await act(async () => root.unmount());
     assert.equal(stops.length, 2);
+  });
+
+  it('releases a retired owner’s terminal topology and teardown obligation', async () => {
+    const { root } = installReactRenderer();
+    const lateStart = deferred<ShellRunUpdate>();
+    const stops: string[] = [];
+    const defaults = createFakeWorkbarServices();
+    const services = createFakeWorkbarServices({ terminal: {
+      ...defaults.terminal,
+      start: async (id) => id === 'c' ? lateStart.promise : shellUpdate(id, `terminal-${id}`),
+      stop: async ({ ref }) => { stops.push(ref); return null; },
+    } });
+    await act(async () => renderController(root, services, input(session('a'))));
+    await act(async () => controller().commands.openTool('terminal'));
+    await act(async () => renderController(root, services, input(session('b'))));
+    await act(async () => controller().commands.openTool('terminal'));
+    // Host admits retirement only after A's resource is terminal. Its catalog
+    // removal is authoritative; the renderer does not issue another Stop.
+    await act(async () => renderController(root, services, {
+      ...input(session('b')), authoritativeSessionIds: new Set(['b']),
+    }));
+    assert.deepEqual(controller().host.panelsState.right.tabs.map((tab) => tab.ownerSessionId), ['b']);
+    await act(async () => renderController(root, services, input(session('c'))));
+    await act(async () => controller().commands.openTool('terminal'));
+    await act(async () => renderController(root, services, {
+      ...input(session('b')), authoritativeSessionIds: new Set(['b']),
+    }));
+    // A delayed response cannot resurrect a terminal whose owner has retired.
+    await act(async () => lateStart.resolve(shellUpdate('c', 'terminal-c')));
+    assert.deepEqual(controller().host.panelsState.right.tabs.map((tab) => tab.ownerSessionId), ['b']);
+    assert.deepEqual(stops, []);
+    await act(async () => root.unmount());
+    assert.deepEqual(stops, ['terminal-b']);
   });
 
   it('owns a resolved Terminal before its tab state commits', async () => {

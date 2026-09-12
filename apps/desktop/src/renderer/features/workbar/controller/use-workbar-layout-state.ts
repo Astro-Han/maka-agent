@@ -67,7 +67,7 @@ export function useWorkbarLayoutState(
     if (authoritativeSessionIds) {
       dispatch({ type: 'retain-sessions', sessionIds: authoritativeSessionIds });
     }
-  }, [authoritativeSessionIds, activeSessionId]);
+  }, [authoritativeSessionIds, activeSessionId, state.panels]);
   const stateRef = useRef(state);
   stateRef.current = state;
   const rightDragStartRef = useRef(state.rightWidth);
