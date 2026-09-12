@@ -66,6 +66,7 @@ import type { RuntimeHostResidency } from './host-kernel.js';
 import type { HostResidencyKind } from './host-residency-registry.js';
 import type { HostedExecutionAuthority } from './hosted-execution-authority.js';
 import type { SessionCreateInput } from '../protocol/session-catalog.js';
+import { DEFAULT_TOOL_MODE, type ToolMode } from '@maka/core/tool-mode';
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const NATIVE_PROVIDER_RETRY_MS = 5_000;
@@ -94,7 +95,7 @@ export interface HostScheduledTaskCoordinatorInput {
   readonly root: ScheduledTaskRoot;
   readonly runtimePolicy: RuntimePolicyStoresWriter;
   readonly nativeEffects: ScheduledTaskNativeEffects;
-  readonly createSession: (input: SessionCreateInput) => Promise<void>;
+  readonly createSession: (input: SessionCreateInput, toolMode: ToolMode) => Promise<void>;
   readonly changes: {
     publish(revision: number, reason: ScheduledTaskChangedReason, taskId: string): void;
   };
@@ -740,7 +741,7 @@ export class HostScheduledTaskCoordinator implements ScheduledTaskToolAuthority 
       permissionMode: execution.permissionMode,
       collaborationMode: execution.collaborationMode,
       orchestrationMode: execution.orchestrationMode,
-    });
+    }, execution.toolMode ?? DEFAULT_TOOL_MODE);
   }
 
   async #resolveAgentRunConnection(
@@ -949,6 +950,7 @@ function executionTemplateFromHeader(header: SessionHeader): ScheduledTaskExecut
     permissionMode: header.permissionMode,
     collaborationMode: header.collaborationMode ?? 'agent',
     orchestrationMode: header.orchestrationMode ?? 'default',
+    toolMode: header.toolMode ?? DEFAULT_TOOL_MODE,
   };
 }
 

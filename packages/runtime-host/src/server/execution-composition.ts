@@ -2250,7 +2250,7 @@ export async function createExecutionRuntimeHostComposition(
       root: coordinator,
       runtimePolicy: runtimePolicyStores,
       nativeEffects: clientCapabilities,
-      createSession: (input) => sessionCatalog.createForHost(input),
+      createSession: (input, toolMode) => sessionCatalog.createForHost(input, toolMode),
       changes: {
         publish: (
           revision: number,
