@@ -834,7 +834,9 @@ async function fetchFireworksModels(
       {
         id: model.name,
         ...(model.displayName ? { displayName: model.displayName } : {}),
-        ...(typeof model.contextLength === 'number' ? { contextWindow: model.contextLength } : {}),
+        ...(typeof model.contextLength === 'number' && model.contextLength !== 0
+          ? { contextWindow: model.contextLength }
+          : {}),
         ...(Object.keys(capabilities).length ? { capabilities } : {}),
       },
     ];

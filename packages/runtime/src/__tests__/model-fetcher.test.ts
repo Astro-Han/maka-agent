@@ -139,6 +139,37 @@ describe('fetchProviderModels', () => {
     );
   });
 
+  test('Fireworks discovery preserves models whose context length is unspecified', async () => {
+    const server = await startJsonServer((request, response) => {
+      respondJson(
+        response,
+        200,
+        request.url?.startsWith('/v1/accounts?')
+          ? { accounts: [] }
+          : {
+              models: [
+                { name: 'accounts/fireworks/models/unknown', contextLength: 0 },
+                { name: 'accounts/fireworks/models/known', contextLength: 32768 },
+              ],
+            },
+      );
+    });
+    const result = await runConnectionModelDiscoveryEffect(
+      fireworksConnection(server.url),
+      'fireworks-key',
+      { fetch: globalThis.fetch },
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      result.models.map(({ id, contextWindow }) => ({ id, contextWindow })),
+      [
+        { id: 'accounts/fireworks/models/unknown', contextWindow: undefined },
+        { id: 'accounts/fireworks/models/known', contextWindow: 32768 },
+      ],
+    );
+  });
+
   test('Fireworks bounds account concurrency while preserving normal pagination', async () => {
     let activeModelRequests = 0;
     let maxActiveModelRequests = 0;
