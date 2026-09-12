@@ -448,7 +448,7 @@ function projectToolModePlan(
       ? { projectActiveTools: () => ({ activeTools: [execTool.name] }) }
       : {}),
     currentRepairToolNames: () => [execTool.name],
-    diagnostics: (_active, chars) => plan.diagnostics([...nested.keys()], chars),
+    diagnostics: () => undefined,
   };
 }
 
@@ -1118,7 +1118,16 @@ export class AiSdkTurn {
       }
       const basePlan = snapshot.runtime.prepare(this.activeTools, requiredOrchestrationTools);
       const nestedTools = nestableToolSnapshot(basePlan.providerTools, basePlan.activeTools);
-      const plan = projectToolModePlan(basePlan, toolMode, codeModeExecTool, nestedTools);
+      const plan = projectToolModePlan(
+        basePlan,
+        toolMode,
+        codeModeExecTool,
+        toolRuntime.hasSandboxBoundaryDenial()
+          ? new Map(
+              [...nestedTools].filter(([name]) => name !== REQUEST_SANDBOX_BOUNDARY_TOOL_NAME),
+            )
+          : nestedTools,
+      );
       const modelTools: ModelToolSet = {};
       for (const tool of plan.providerTools) {
         modelTools[tool.name] = tool.providerTool
@@ -2717,15 +2726,9 @@ export class AiSdkTurn {
       },
       pushAndWaitUntilConsumed: (event) => eventSink.pushAndWaitUntilConsumed(event),
     };
-    // A permit is held across the cell's complete lifecycle, not just its
-    // sandbox run: `executeCodeCell` settles only once the cell's host
-    // operations have drained, so releasing on settlement covers the drain.
-    // The sandbox worker cap cannot serve this purpose — on cancellation
-    // `runCodeMode` releases its worker and rejects at once, by design, while
-    // host operations started by the cell may still be running with durable
-    // side effects. Only the Runtime waits for those, so only the Runtime can
-    // bound them; releasing when the worker is released would let repeated
-    // cancellation accumulate host work without bound.
+    // Admission covers the whole cell, including host batches while the SDK
+    // releases its Worker. executeCodeCell waits for every started host call
+    // on both success and cancellation, so settlement is the release boundary.
     //
     // One cell may wait; the next is turned away rather than queued, which is
     // what the Code Mode adapter did before this moved to the side that owns
