@@ -84,17 +84,21 @@ describe('session workspace action identity', () => {
     const readerC = reader(sessionC);
     act(() => { workspace.setActiveId(sessionA); workspace.commitTranscript(sessionA, a, readerA); });
     assert.equal(workspace.transcriptRangeRef.current, readerA);
+    assert.equal(workspace.isSessionSelected(sessionA), true);
     displays.length = 0;
     act(() => workspace.setActiveId(sessionB));
     assert.equal(workspace.requestedSessionId, sessionB);
     assert.equal(workspace.activeId, sessionA);
     assert.equal(workspace.messages, a);
+    assert.equal(workspace.isSessionSelected(sessionA), false);
+    assert.equal(workspace.isSessionSelected(sessionB), false);
     assert.equal(workspace.transcriptRangeRef.current, undefined, 'the old picture has no reader during handoff');
     act(() => workspace.setActiveId(sessionC));
     act(() => workspace.commitTranscript(sessionB, [row('b-message')]));
     assert.equal(workspace.activeId, sessionA);
     act(() => workspace.commitTranscript(sessionC, c, readerC));
     assert.equal(workspace.transcriptRangeRef.current, readerC);
+    assert.equal(workspace.isSessionSelected(sessionC), true);
     assert.equal(workspace.activeId, sessionC);
     assert.equal(workspace.messageLoadPending, false);
     assert.ok(displays.every((display) =>

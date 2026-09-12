@@ -155,7 +155,7 @@ export function createAppShellChatActions(deps: {
   messageRetryPending: SessionPendingClaim;
   refreshSessions: () => Promise<DesktopSessionSummary[]>;
   activateSessionForFirstSend: (sessionId: string) => Promise<void>;
-  setActiveId: (sessionId: string | undefined) => void;
+  retireSession: (sessionId: string) => void;
   setMessageLoadErrorBySession: MessageLoadErrorUpdater;
   setMessages: MessageListUpdater;
   addTransientMessage: (
@@ -210,7 +210,7 @@ export function createAppShellChatActions(deps: {
     messageRetryPending,
     refreshSessions,
     activateSessionForFirstSend,
-    setActiveId,
+    retireSession,
     setMessageLoadErrorBySession,
     setMessages,
     removeTransientMessage,
@@ -353,7 +353,7 @@ export function createAppShellChatActions(deps: {
       unsentSessionId = undefined;
       try {
         await window.maka.sessions.remove(sessionId);
-        if (activeIdRef.current === sessionId) setActiveId(undefined);
+        retireSession(sessionId);
         await refreshSessions();
       } catch {
         // Best-effort: a failed cleanup must not replace the real error.

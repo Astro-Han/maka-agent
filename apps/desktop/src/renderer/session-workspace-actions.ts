@@ -53,6 +53,7 @@ export type MessageListUpdater = (
 
 export interface SessionWorkspaceActions {
   captureSelection(): () => boolean;
+  isSessionSelected(sessionId: string | undefined): boolean;
   retiredSessionIds(sessions: readonly { id: string }[]): string[];
   setActiveId(next: string | undefined): void;
   startNewSession(): void;
@@ -231,6 +232,7 @@ export function createSessionWorkspaceActions(deps: {
   }
 
   return {
+    isSessionSelected: (sessionId) => readRequestedSessionId() === sessionId && activeIdRef.current === sessionId,
     captureSelection() {
       const revision = selectionRevisionRef.current;
       return () => selectionRevisionRef.current === revision;

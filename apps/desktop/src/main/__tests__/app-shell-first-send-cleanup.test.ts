@@ -373,8 +373,8 @@ describe('composer first-send cleanup', () => {
           activeIdRef.current = sessionId;
           throw new Error('Timed out while preparing the new Session event stream');
         },
-        setActiveId: (sessionId) => {
-          activeIdRef.current = sessionId;
+        retireSession: (sessionId) => {
+          if (activeIdRef.current === sessionId) activeIdRef.current = undefined;
         },
         isNewChatSendSurfaceActive: () => activeIdRef.current === undefined,
         isShellSurfaceOwnerActive: (owner) =>

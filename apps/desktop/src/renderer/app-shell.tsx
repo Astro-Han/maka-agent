@@ -319,6 +319,7 @@ function AppShellContent({
     startNewSession,
     clearOwnedSessionState,
     captureSelection,
+    isSessionSelected,
     retiredSessionIds,
     messages,
     transientMessages,
@@ -1489,7 +1490,7 @@ function AppShellContent({
     messageRetryPending: sessionUiController.messageRetryPending,
     refreshSessions,
     activateSessionForFirstSend,
-    setActiveId,
+    retireSession: clearSessionRendererState,
     setMessageLoadErrorBySession: sessionUiController.setMessageLoadErrorBySession,
     setMessages,
     addTransientMessage,
@@ -1523,13 +1524,12 @@ function AppShellContent({
   });
   const handleSwitchToBypassAndRetry = useCallback(
     async (turnId: string) => {
-      const sessionId = activeIdRef.current;
-      if (!sessionId) return;
+      const selectionIsCurrent = captureSelection();
       const switched = await setPermissionMode('bypass');
-      if (!switched || activeIdRef.current !== sessionId) return;
+      if (!switched || !selectionIsCurrent()) return;
       await handleTurnFooterAction(turnId, 'regenerate');
     },
-    [handleTurnFooterAction, setPermissionMode],
+    [captureSelection, handleTurnFooterAction, setPermissionMode],
   );
 
   const {
@@ -2063,7 +2063,7 @@ function AppShellContent({
    */
   function isShellSurfaceOwnerActive(owner: ComposerImportOwner): boolean {
     return navSelectionRef.current.section === owner.navSection &&
-      activeIdRef.current === owner.sessionId &&
+      isSessionSelected(owner.sessionId) &&
       (owner.sessionId !== undefined || owner.newTaskDraftKey === currentNewTaskDraftKey);
   }
 
