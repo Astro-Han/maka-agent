@@ -529,7 +529,7 @@ test('Maka framework termination is authoritative before stdout decoding', async
   assert.equal(external.status, 'failed');
 });
 
-test('Maka forwards the configured Runtime Host settlement budget', async () => {
+test('Maka pre-names the evaluation session and forwards the Host settlement budget', async () => {
   const makaCell = cell('maka', { ...makaConfig(), hostSettlementTimeoutMs: 120_000 });
   let settlementBudget: unknown;
   const result = await createMakaSubjectAdapter().execute({
@@ -541,8 +541,9 @@ test('Maka forwards the configured Runtime Host settlement budget', async () => 
       execute: async (input) => {
         const payload = JSON.parse(Buffer.from(input.args[1] ?? '', 'base64url').toString()) as {
           hostSettlementTimeoutMs?: unknown;
-          execution: { executionId: string };
+          execution: { executionId: string; session: { name?: string } };
         };
+        assert.equal(payload.execution.session.name, `Eval ${payload.execution.executionId}`);
         settlementBudget = payload.hostSettlementTimeoutMs;
         return {
           termination: 'exited',

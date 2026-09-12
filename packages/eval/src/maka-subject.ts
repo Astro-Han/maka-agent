@@ -41,6 +41,7 @@ export function createMakaSubjectAdapter(): SubjectAdapter {
       const input: RunHostedExecutionInput['execution'] = {
         executionId,
         session: {
+          name: `Eval ${executionId}`,
           workspace: { kind: 'host_path', path: context.cwd },
           modelTarget: {
             kind: 'explicit',
