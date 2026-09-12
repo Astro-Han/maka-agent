@@ -1,0 +1,10 @@
+name: CI validation probe
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo 'real fixture validation'

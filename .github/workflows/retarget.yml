@@ -1,10 +1,11 @@
-name: CI suite probe
+name: CI retarget probe
 on:
   pull_request:
     branches: [test/ci-gate-base]
-    types: [opened, synchronize, reopened]
+    types: [edited]
 permissions:
   contents: read
 jobs:
   test:
+    if: github.event.changes.base.ref.from != ''
     uses: ./.github/workflows/validation.yml
