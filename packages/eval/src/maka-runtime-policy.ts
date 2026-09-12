@@ -35,6 +35,8 @@ export function makaEvalRuntimePolicyDocument(proxyUrl?: string) {
               protocol: 'http' as const,
               host: proxy.hostname,
               port: Number(proxy.port || 80),
+              authEnabled: proxy.username !== '' || proxy.password !== '',
+              username: decodeURIComponent(proxy.username),
             },
           }
         : {}),

@@ -1180,7 +1180,10 @@ test('the DeepSeek Harness arm pins its own minimal composition', async () => {
 
 test('Maka Eval policy loads through Runtime Host with privacy and proxy settings', async () => {
   const rootPath = await mkdtemp(join(tmpdir(), 'maka-eval-policy-'));
-  const document = makaEvalRuntimePolicyDocument('http://127.0.0.1:8080');
+  const document = makaEvalRuntimePolicyDocument('http://agent%2Btest:proxy-secret@127.0.0.1:8080');
+  assert.equal(document.policy.networkProxy.authEnabled, true);
+  assert.equal(document.policy.networkProxy.username, 'agent+test');
+  assert.equal(JSON.stringify(document).includes('proxy-secret'), false);
   await writeFile(join(rootPath, 'runtime-policy.json'), JSON.stringify(document));
   try {
     const host = await connectOrSpawnRuntimeHost({
