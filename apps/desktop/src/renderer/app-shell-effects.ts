@@ -313,13 +313,14 @@ export function useActiveSessionEvents(options: {
   activeId: string | undefined;
   observationAuthorityRevision: number;
   activeIdRef: RefBox<string | undefined>;
+  isRequestedSession(sessionId: string): boolean;
   handleEvent: (sessionId: string, event: SessionEvent) => void;
   setExecution: import('./features/conversation/index.js').AppShellSessionUiStateController['setExecution'];
   beginObservationSeed: (sessionId: string) => void;
   completeObservationSeed: (sessionId: string) => void;
   setMessageLoadErrorBySession: (updater: (current: Record<string, string>) => Record<string, string>) => void;
   setMessageLoadPending: (pending: boolean) => void;
-  setMessages: (messages: StoredMessage[]) => void;
+  commitTranscript: (sessionId: string, messages: StoredMessage[]) => void;
   transcriptRangeRef: RefBox<desktopTranscript.DesktopTranscriptRangeController | undefined>;
   setSessionEventHealthBySession: SessionEventHealthUpdater;
   toastApi: Pick<ToastApi, 'error'>;
@@ -339,17 +340,17 @@ export function useActiveSessionEvents(options: {
     sessionId: string,
     store: desktopTranscript.DesktopTranscriptRangeStore,
   ) => {
-    if (options.activeIdRef.current === sessionId) {
+    if (options.isRequestedSession(sessionId)) {
       const snapshot = store.snapshot();
-      options.setMessages([...snapshot.messages]);
       if (snapshot.ready) {
+        options.commitTranscript(sessionId, [...snapshot.messages]);
         clearMessageLoadError(sessionId);
-        options.setMessageLoadPending(false);
       }
     }
   });
   const applyReadError = useEffectEvent((sessionId: string, error: unknown) => {
-    if (options.activeIdRef.current === sessionId) {
+    if (options.isRequestedSession(sessionId)) {
+      if (options.activeIdRef.current !== sessionId) options.commitTranscript(sessionId, []);
       const message = messageReadErrorMessage(error, options.uiLocale);
       options.setMessageLoadErrorBySession((current) => ({
         ...current,

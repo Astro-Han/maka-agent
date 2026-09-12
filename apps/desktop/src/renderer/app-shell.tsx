@@ -313,6 +313,7 @@ function AppShellContent({
     seedSessions,
     activeId,
     activeIdRef,
+    requestedSessionId,
     bootstrapSelectionLease,
     setActiveId,
     startNewSession,
@@ -320,6 +321,7 @@ function AppShellContent({
     messages,
     transientMessages,
     setMessages,
+    commitTranscript,
     addTransientMessage,
     updateTransientMessage,
     retireCancelledTransientMessages,
@@ -328,11 +330,15 @@ function AppShellContent({
     messageLoadPending,
     setMessageLoadPending,
     sessionUiController,
+    sessionCatalogController,
   } = useAppShellSessionWorkspace(toastApi);
   // A locally created task can become active before its catalog row arrives,
   // and remains pending until Host creation finishes. Neither state admits
   // Host reads; cached rows already have a Host identity and may reconnect.
   const activeCatalogSession = sessions.find((session) => session.id === activeId);
+  const requestedCatalogSession = sessions.find((session) => session.id === requestedSessionId);
+  const requestedHostSession = requestedCatalogSession?.localState !== 'pending'
+    ? requestedCatalogSession : undefined;
   const activeHostSession = activeCatalogSession?.localState !== 'pending' ? activeCatalogSession : undefined;
   const sharedSessionActive = activeCatalogSession?.shared === true;
   const ownerActiveId = sharedSessionActive ? undefined : activeHostSession?.id;
@@ -2006,21 +2012,22 @@ function AppShellContent({
   const observationAuthorityRef = useRef(liveContent.EMPTY_SESSION_OBSERVATION_AUTHORITY);
   observationAuthorityRef.current = liveContent.advanceSessionObservationAuthority(
     observationAuthorityRef.current,
-    activeId,
-    activeSession?.profileId,
+    requestedSessionId,
+    requestedCatalogSession?.profileId,
   );
   useActiveSessionEvents({
     uiLocale,
-    activeId: activeHostSession?.id,
+    activeId: requestedHostSession?.id,
     observationAuthorityRevision: observationAuthorityRef.current.revision,
     activeIdRef,
+    isRequestedSession: (id) => sessionCatalogController.getState().activeSessionId === id,
     handleEvent,
     beginObservationSeed,
     setExecution: sessionUiController.setExecution,
     completeObservationSeed,
     setMessageLoadErrorBySession: sessionUiController.setMessageLoadErrorBySession,
     setMessageLoadPending,
-    setMessages,
+    commitTranscript,
     transcriptRangeRef,
     setSessionEventHealthBySession: sessionUiController.setSessionEventHealthBySession,
     toastApi,
@@ -2454,7 +2461,9 @@ function AppShellContent({
               navigation entry point. */}
           <MakaUriContext.Provider value={dispatchMakaUri}>
           <div className="maka-detail-with-artifacts">
-            <div className="mainColumn" data-home-surface={homeSurfaceActive ? 'true' : undefined}>
+            <div className="mainColumn" data-home-surface={homeSurfaceActive ? 'true' : undefined}
+              inert={activeId !== requestedSessionId || undefined}
+              aria-busy={activeId !== requestedSessionId || undefined}>
               <ModuleHub.ModuleHubHost />
               <WorkHubMainNavigation onOpenWorkHub={openWorkHub} onOpenSession={(sessionId) => { closeSettings(); openSession(sessionId); }} />
               <WorkHubDock enabled={workHubEnabled} visible={workHubActive && sessionsSelected && !shellObscured} />

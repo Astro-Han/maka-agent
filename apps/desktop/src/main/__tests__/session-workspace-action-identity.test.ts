@@ -21,6 +21,7 @@ import { strict as assert } from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
 import { act, createElement } from 'react';
 import { LocaleProvider } from '@maka/ui';
+import type { StoredMessage } from '@maka/core/session';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 import { useAppShellSessionWorkspace } from '../../renderer/use-app-shell-session-workspace.js';
 
@@ -49,6 +50,55 @@ function actionKeys(workspace: Workspace): string[] {
 
 describe('session workspace action identity', () => {
   afterEach(cleanupFakeDom);
+
+  it('hands over identity and rows together and rejects superseded reads', () => {
+    const { root } = installReactRenderer();
+    let workspace!: Workspace;
+    const displays: Array<{ id: string | undefined; messages: StoredMessage[] }> = [];
+    function Probe(): null {
+      workspace = useAppShellSessionWorkspace({ error: () => {} });
+      displays.push({ id: workspace.activeId, messages: workspace.messages });
+      return null;
+    }
+    act(() => root.render(createElement(LocaleProvider, {
+      locale: 'en', children: createElement(Probe),
+    })));
+    act(() => workspace.seedSessions(['a', 'b', 'c'].map((id) => ({
+      id, name: id, isFlagged: false, isArchived: false, labels: [],
+      hasUnread: false, status: 'active' as const, backend: 'ai-sdk' as const,
+      revision: 1, runtimeHostId: 'local', profileId: 'local', profileName: 'Local',
+      llmConnectionSlug: 'test', connectionLocked: false, model: 'test',
+      permissionMode: 'ask' as const, profileKind: 'local' as const,
+    }))));
+    const row = (id: string): StoredMessage => ({ id, type: 'user', text: id, turnId: id, ts: 1 });
+    const a = [row('a-message')];
+    const c = [row('c-message')];
+    act(() => { workspace.setActiveId('a'); workspace.commitTranscript('a', a); });
+    displays.length = 0;
+    act(() => workspace.setActiveId('b'));
+    assert.equal(workspace.requestedSessionId, 'b');
+    assert.equal(workspace.activeId, 'a');
+    assert.equal(workspace.messages, a);
+    act(() => workspace.setActiveId('c'));
+    act(() => workspace.commitTranscript('b', [row('b-message')]));
+    assert.equal(workspace.activeId, 'a');
+    act(() => workspace.commitTranscript('c', c));
+    assert.equal(workspace.activeId, 'c');
+    assert.equal(workspace.messageLoadPending, false);
+    assert.ok(displays.every((display) =>
+      (display.id === 'a' && display.messages === a) ||
+      (display.id === 'c' && display.messages === c)));
+
+    act(() => workspace.setActiveId('b'));
+    act(() => workspace.startNewSession());
+    act(() => workspace.commitTranscript('b', [row('b-message')]));
+    assert.equal(workspace.activeId, undefined);
+    assert.deepEqual(workspace.messages, []);
+    // A first-send task has no readable Host history yet; it must activate
+    // immediately rather than waiting for its own first message to be sent.
+    act(() => workspace.setActiveId('new-local-task'));
+    assert.equal(workspace.activeId, 'new-local-task');
+  });
 
   it('keeps every action identity fixed across re-renders', () => {
     const { root } = installReactRenderer();

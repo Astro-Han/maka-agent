@@ -56,6 +56,7 @@ export interface SessionWorkspaceActions {
   startNewSession(): void;
   clearOwnedSessionState(sessionId: string): void;
   setMessages: MessageListUpdater;
+  commitTranscript(sessionId: string, messages: StoredMessage[]): void;
   addTransientMessage(sessionId: string, message: TransientUserMessage): void;
   updateTransientMessage(sessionId: string, message: TransientUserMessage): void;
   retireCancelledTransientMessages(sessionId: string): Promise<void>;
@@ -64,6 +65,8 @@ export interface SessionWorkspaceActions {
 
 export function createSessionWorkspaceActions(deps: {
   activeIdRef: RefBox<string | undefined>;
+  readRequestedSessionId(): string | undefined;
+  isReadableSession(sessionId: string): boolean;
   messagesRef: RefBox<StoredMessage[]>;
   transientMessagesBySessionRef: RefBox<Map<string, Map<string, TransientUserMessage>>>;
   transcriptRangeRef: RefBox<DesktopTranscriptRangeController | undefined>;
@@ -76,6 +79,8 @@ export function createSessionWorkspaceActions(deps: {
 }): SessionWorkspaceActions {
   const {
     activeIdRef,
+    readRequestedSessionId,
+    isReadableSession,
     messagesRef,
     transientMessagesBySessionRef,
     transcriptRangeRef,
@@ -177,19 +182,24 @@ export function createSessionWorkspaceActions(deps: {
 
   function setActiveId(next: string | undefined): void {
     selectionRevisionRef.current += 1;
-    // Clear here, not in the read effect: a layout-effect clear would wipe an
-    // optimistic first message before the first paint.
-    if (!next) {
-      setMessageLoadPending(false);
-    } else if (next !== activeIdRef.current) {
-      messagesRef.current = [];
-      setMessagesState([]);
-      setTransientMessagesState(projectTransientMessages(next, []));
-      setMessageLoadPending(true);
+    const changed = next !== activeIdRef.current;
+    // An existing conversation is handed over by commitTranscript. New/local
+    // tasks have no readable history yet and must show their staged first row
+    // immediately so creating a task never waits for sending that same row.
+    if (changed && (!next || !activeIdRef.current || !isReadableSession(next))) {
+      activeIdRef.current = next;
+      setMessages([]);
     }
-    activeIdRef.current = next;
+    setMessageLoadPending(Boolean(next && changed));
     if (next) clearNewTaskReloadIntent();
     setActiveIdState(next);
+  }
+
+  function commitTranscript(sessionId: string, messages: StoredMessage[]): void {
+    if (readRequestedSessionId() !== sessionId) return;
+    activeIdRef.current = sessionId;
+    setMessages(messages);
+    setMessageLoadPending(false);
   }
 
   function startNewSession(): void {
@@ -211,6 +221,7 @@ export function createSessionWorkspaceActions(deps: {
     startNewSession,
     clearOwnedSessionState,
     setMessages,
+    commitTranscript,
     addTransientMessage,
     updateTransientMessage,
     retireCancelledTransientMessages,

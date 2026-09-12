@@ -46,7 +46,7 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
   // Session rail subscribes to it directly instead of receiving it from the
   // shell's render (#4109).
   const catalog = useSessionCatalogController();
-  const activeId = useExternalStoreSelector(catalog, selectActiveSessionId);
+  const requestedSessionId = useExternalStoreSelector(catalog, selectActiveSessionId);
   const activeIdRef = useRef<string | undefined>(undefined);
   const sessionUiController = useAppShellSessionUiState();
   const sessionList = useAppShellSessionList(toastApi, {
@@ -54,7 +54,12 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
   });
   const selectionRevisionRef = useRef(0);
   const bootstrapSelectionLeaseRef = useRef<ReturnType<typeof createBootstrapSelectionLease> | null>(null);
-  const [messages, setMessages] = useState<StoredMessage[]>([]);
+  // The displayed identity and its rows are one value. The catalog selection
+  // is navigation intent; a pending read must not tear down the current view.
+  const [transcript, setTranscript] = useState<{
+    sessionId: string | undefined;
+    messages: StoredMessage[];
+  }>({ sessionId: undefined, messages: [] });
   const messagesRef = useRef<StoredMessage[]>([]);
   const [transientMessages, setTransientMessages] = useState<TransientUserMessage[]>([]);
   const transientMessagesBySessionRef = useRef(
@@ -70,6 +75,10 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
   // per-render identity there is what defeated the Session rail's memo.
   actionsRef.current ??= createSessionWorkspaceActions({
     activeIdRef,
+    readRequestedSessionId: () => catalog.getState().activeSessionId,
+    isReadableSession: (id) => catalog.getState().sessions.some(
+      (session) => session.id === id && session.localState !== 'pending',
+    ),
     messagesRef,
     transientMessagesBySessionRef,
     transcriptRangeRef,
@@ -79,7 +88,7 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
     // controller is created once per renderer, so this identity is fixed and
     // the once-created factory may capture it.
     setActiveIdState: catalog.setActiveSessionId,
-    setMessagesState: setMessages,
+    setMessagesState: (messages) => setTranscript({ sessionId: activeIdRef.current, messages }),
     setTransientMessagesState: setTransientMessages,
     setMessageLoadPending,
     clearSessionUiState: sessionUiController.clearSessionUiState,
@@ -98,11 +107,12 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
   return {
     ...sessionList,
     sessionCatalogController: catalog,
-    activeId,
+    activeId: transcript.sessionId,
+    requestedSessionId,
     activeIdRef,
     bootstrapSelectionLease: bootstrapSelectionLeaseRef.current,
     ...actions,
-    messages,
+    messages: transcript.messages,
     transientMessages,
     transcriptRangeRef,
     messageLoadPending,
