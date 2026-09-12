@@ -621,6 +621,39 @@ describe('useWorkbarController', () => {
     assert.equal(resync, undefined);
   });
 
+  for (const recoverySessionId of ['a', 'b']) {
+    it(`completes ${recoverySessionId === 'a' ? 'same' : 'another'} Session recovery when Stop is the only invalidator`, async () => {
+      const { root } = installReactRenderer();
+      const defaults = createFakeWorkbarServices();
+      const stop = deferred<ShellRunUpdate | null>();
+      const inventory = deferred<ShellRunUpdate[]>();
+      let recovering = false;
+      let reads = 0;
+      let resync: ((event: { sessionId: string }) => void) | undefined;
+      const other = shellUpdate(recoverySessionId, 'other-live-terminal');
+      const services = createFakeWorkbarServices({ terminal: {
+        ...defaults.terminal,
+        start: async () => shellUpdate('a', 'closing-terminal'),
+        stop: () => stop.promise,
+        listLive: async () => !recovering ? [] : ++reads === 1 ? inventory.promise : [other],
+        subscribeResync: (handler) => { resync = handler; return () => { resync = undefined; }; },
+      } });
+      await act(async () => renderController(root, services, input(session('a'))));
+      await act(async () => controller().commands.openTool('terminal'));
+      const closing = controller().host.panelsState.right.tabs[0]!;
+      await act(async () => controller().host.onCloseTab('right', closing));
+      recovering = true;
+      await act(async () => {
+        if (recoverySessionId === 'a') resync?.({ sessionId: 'a' });
+        else renderController(root, services, input(session('b')));
+      });
+      await act(async () => stop.resolve(null));
+      await act(async () => inventory.resolve([other]));
+      assert.deepEqual(controller().host.panelsState.right.tabs.map((tab) => tab.resourceRef), ['other-live-terminal']);
+      assert.equal(reads, recoverySessionId === 'a' ? 2 : 1);
+    });
+  }
+
   it('reports only a Terminal start failure that still belongs to the active Session', async () => {
     const { root } = installReactRenderer();
     const currentErrors: string[] = [];

@@ -209,11 +209,11 @@ export function useWorkbarController(
       const key = terminalResourceKey(sessionId, ref);
       const pending = stoppingTerminalsRef.current.get(key);
       if (pending) return pending;
-      terminalReadGenerationRef.current += 1;
+      if (activeSessionIdRef.current === sessionId) terminalReadGenerationRef.current += 1;
       const stopping = terminal
         .stop({ sessionId, ref })
         .then(() => {
-          terminalReadGenerationRef.current += 1;
+          if (activeSessionIdRef.current === sessionId) terminalReadGenerationRef.current += 1;
         })
         .finally(() => {
           stoppingTerminalsRef.current.delete(key);
@@ -253,7 +253,11 @@ export function useWorkbarController(
       reading = true;
       const generation = ++terminalReadGenerationRef.current;
       void terminal.listLive(activeSessionId).then((updates) => {
-        if (disposed || generation !== terminalReadGenerationRef.current) return;
+        if (disposed) return;
+        if (generation !== terminalReadGenerationRef.current) {
+          refreshAgain = true;
+          return;
+        }
         layout.restoreTerminals(updates.filter((update) =>
           !stoppingTerminalsRef.current.has(terminalResourceKey(activeSessionId, update.result.ref)),
         ).map((update) => ({
