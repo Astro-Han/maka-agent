@@ -28,6 +28,7 @@ import type { UiLocale } from '@maka/core/ui-locale';
 import { sessionExpectsEventStream } from '@maka/core/session-event-health';
 import { type ShellRunUpdate } from '@maka/core/events';
 import type { LiveTurnProjection, NavSelection } from '@maka/ui';
+import type { TranscriptPublisher } from './features/conversation/index.js';
 import { messageReadErrorMessage } from './app-shell-copy';
 import { getDesktopConversationCopy } from './locales/conversation-copy.js';
 import { applyTheme, applyThemePalette } from './theme';
@@ -318,7 +319,7 @@ export function useActiveSessionEvents(options: {
   clearMessageLoadError(sessionId: string): void;
   setMessageLoadPending: (pending: boolean) => void;
   commitTranscript: import('./session-workspace-actions.js').SessionWorkspaceActions['commitTranscript'];
-  publishTranscript: import('./features/conversation/index.js').TranscriptPublisher<
+  publishTranscript: TranscriptPublisher<
     desktopTranscript.DesktopTranscriptRangeController
   >;
   transcriptRangeRef: RefBox<desktopTranscript.DesktopTranscriptRangeController | undefined>;
