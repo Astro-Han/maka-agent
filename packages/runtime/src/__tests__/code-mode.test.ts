@@ -485,21 +485,23 @@ test('still preempts compute while a host tool is pending', async () => {
 });
 
 test('accumulates compute across awaits instead of resetting the budget', async () => {
+  // Keep the single slice well below the budget on a loaded runner, with
+  // enough repeated slices to exercise cumulative accounting on faster hosts.
   const work = 'let total = 0; for (let i = 0; i < 10_000; i++) total += Math.sqrt(i);';
   const executionPolicy = {
     ...DEFAULT_CODE_MODE_EXECUTION_POLICY,
-    timeoutMs: 100,
-    maxBridgeRequests: 512,
+    timeoutMs: 1_000,
+    maxBridgeRequests: 8_192,
   };
   const single = await execute(`${work} return total;`, { executionPolicy });
-  assert.equal(single.ok, true);
+  assert.equal(single.ok, true, JSON.stringify(single));
   let calls = 0;
   const result = await execute(
-    `for (let step = 0; step < 500; step++) { ${work} await tools.tick({}); }`,
+    `for (let step = 0; step < 5_000; step++) { ${work} await tools.tick({}); }`,
     {
       executionPolicy,
       tools: [{ name: 'tick' }],
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(15_000),
       callTool: async () => {
         calls++;
         return null;
@@ -507,8 +509,8 @@ test('accumulates compute across awaits instead of resetting the budget', async 
     },
   );
   assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.error.message, /timed out after 100ms/);
-  assert.ok(calls > 1 && calls < 500);
+  if (!result.ok) assert.match(result.error.message, /timed out after 1000ms/);
+  assert.ok(calls > 1 && calls < 5_000, `completed ${calls} slices`);
 });
 
 test('waits for an aborted host operation to settle before rejecting', async () => {
