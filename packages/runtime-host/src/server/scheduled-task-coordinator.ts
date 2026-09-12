@@ -723,25 +723,30 @@ export class HostScheduledTaskCoordinator implements ScheduledTaskToolAuthority 
     } catch (error) {
       if (!isSessionNotFoundError(error) && !isMissingRecord(error)) throw error;
     }
-    await this.#createSession({
-      sessionId: identity.sessionId,
-      workspace:
-        execution.projectId != null && execution.projectId !== ''
-          ? { kind: 'project', projectId: execution.projectId }
-          : { kind: 'host_path', path: execution.cwd },
-      name: task.title,
-      labels: ['scheduled-task'],
-      modelTarget: {
-        kind: 'explicit',
-        connectionId: connection.connectionId,
-        connectionSlug: execution.llmConnectionSlug,
-        model: execution.model,
+    await this.#createSession(
+      {
+        sessionId: identity.sessionId,
+        workspace:
+          execution.projectId != null && execution.projectId !== ''
+            ? { kind: 'project', projectId: execution.projectId }
+            : { kind: 'host_path', path: execution.cwd },
+        name: task.title,
+        labels: ['scheduled-task'],
+        modelTarget: {
+          kind: 'explicit',
+          connectionId: connection.connectionId,
+          connectionSlug: execution.llmConnectionSlug,
+          model: execution.model,
+        },
+        ...(execution.thinkingLevel === undefined
+          ? {}
+          : { thinkingLevel: execution.thinkingLevel }),
+        permissionMode: execution.permissionMode,
+        collaborationMode: execution.collaborationMode,
+        orchestrationMode: execution.orchestrationMode,
       },
-      ...(execution.thinkingLevel === undefined ? {} : { thinkingLevel: execution.thinkingLevel }),
-      permissionMode: execution.permissionMode,
-      collaborationMode: execution.collaborationMode,
-      orchestrationMode: execution.orchestrationMode,
-    }, execution.toolMode ?? DEFAULT_TOOL_MODE);
+      execution.toolMode ?? DEFAULT_TOOL_MODE,
+    );
   }
 
   async #resolveAgentRunConnection(

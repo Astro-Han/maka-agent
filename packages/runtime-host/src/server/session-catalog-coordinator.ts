@@ -565,7 +565,10 @@ export class HostSessionCatalogCoordinator {
     }
   }
 
-  async #create(input: SessionCreateInput, toolMode?: ToolMode): Promise<OperationOutcome<'session.create'>> {
+  async #create(
+    input: SessionCreateInput,
+    toolMode?: ToolMode,
+  ): Promise<OperationOutcome<'session.create'>> {
     if (isWorkHubCoordinationSessionId(input.sessionId)) {
       return createFailure(
         'operation_conflict',
@@ -616,7 +619,8 @@ export class HostSessionCatalogCoordinator {
               ...(input.thinkingLevel === undefined ? {} : { thinkingLevel: input.thinkingLevel }),
               ...(input.toolProfile === undefined ? {} : { toolProfile: input.toolProfile }),
               permissionMode: prepared.permissionMode ?? policy.policy.chatDefaults.permissionMode,
-              toolMode: toolMode ?? (policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct'),
+              toolMode:
+                toolMode ?? (policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct'),
               collaborationMode: input.collaborationMode ?? 'agent',
               orchestrationMode: input.orchestrationMode ?? 'default',
             };

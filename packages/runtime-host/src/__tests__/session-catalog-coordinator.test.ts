@@ -1072,17 +1072,23 @@ test('new tasks snapshot the current global Code Mode setting', async () => {
   assert.deepEqual(modes, ['code_mode', 'direct']);
   // A scheduled task carries its frozen mode through the internal creation
   // path even when the user's global default has since changed.
-  await fixture.coordinator.createForHost({
-    sessionId: fixture.sessionId,
-    workspace: { kind: 'host_path', path: process.cwd() },
-    modelTarget: { kind: 'default' },
-  }, 'code_mode');
+  await fixture.coordinator.createForHost(
+    {
+      sessionId: fixture.sessionId,
+      workspace: { kind: 'host_path', path: process.cwd() },
+      modelTarget: { kind: 'default' },
+    },
+    'code_mode',
+  );
   enabled = true;
-  await fixture.coordinator.createForHost({
-    sessionId: fixture.sessionId,
-    workspace: { kind: 'host_path', path: process.cwd() },
-    modelTarget: { kind: 'default' },
-  }, 'direct');
+  await fixture.coordinator.createForHost(
+    {
+      sessionId: fixture.sessionId,
+      workspace: { kind: 'host_path', path: process.cwd() },
+      modelTarget: { kind: 'default' },
+    },
+    'direct',
+  );
   assert.deepEqual(modes.slice(2), ['code_mode', 'direct']);
 });
 
