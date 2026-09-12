@@ -318,6 +318,8 @@ function AppShellContent({
     setActiveId,
     startNewSession,
     clearOwnedSessionState,
+    captureSelection,
+    retiredSessionIds,
     messages,
     transientMessages,
     setMessages,
@@ -1379,7 +1381,6 @@ function AppShellContent({
     () => setNavSelection({ section: 'sessions' }),
     [setNavSelection],
   );
-  const clearActiveMessages = useCallback(() => setMessages([]), [setMessages]);
   const openSession = useMemo(
     () =>
       createSessionOpenCommand({
@@ -1399,11 +1400,9 @@ function AppShellContent({
   // their identity carries no information and this object never has to be
   // held still by hand (#4109).
   const sessionNavigationPorts: SessionNavigationPorts = {
-    activeIdRef,
     sessionsRef,
     pendingSessionRowActionsRef,
     activateSession: setActiveId,
-    clearActiveMessages,
     clearSessionRendererState,
     refreshSessions,
     toastApi,
@@ -1516,11 +1515,10 @@ function AppShellContent({
   const { handleTurnFooterAction } = useStableActions(createAppShellTurnActions, {
     uiLocale,
     activeIdRef,
+    captureSelection,
     turnActionRegistry,
     openSessionInChat,
-    refreshMessages,
     refreshSessions,
-    setMessages,
     toastApi,
   });
   const handleSwitchToBypassAndRetry = useCallback(
@@ -1541,11 +1539,11 @@ function AppShellContent({
   } = useStableActions(createAppShellRevisionActions, {
     uiLocale,
     activeIdRef,
+    captureSelection,
     composerRef,
     messages,
     hasPendingAttachments: () => hasPendingContext,
     openSessionInChat,
-    refreshMessages,
     refreshSessions,
     setMessages,
     commitRevisionDraft,
@@ -1971,11 +1969,8 @@ function AppShellContent({
     refreshShellSettings,
     refreshSessions,
     rendererMountedRef,
-    retireSession: (sessionId) => {
-      setActiveId(undefined);
-      setMessages([]);
-      clearSessionRendererState(sessionId);
-    },
+    retireSession: clearSessionRendererState,
+    retiredSessionIds,
     setSessionEventHealthBySession: sessionUiController.setSessionEventHealthBySession,
     toastApi,
   });

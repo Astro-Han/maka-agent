@@ -52,11 +52,13 @@ export type MessageListUpdater = (
 ) => void;
 
 export interface SessionWorkspaceActions {
+  captureSelection(): () => boolean;
+  retiredSessionIds(sessions: readonly { id: string }[]): string[];
   setActiveId(next: string | undefined): void;
   startNewSession(): void;
   clearOwnedSessionState(sessionId: string): void;
   setMessages: MessageListUpdater;
-  commitTranscript(sessionId: string, messages: StoredMessage[]): void;
+  commitTranscript(sessionId: string, messages: StoredMessage[], controller?: DesktopTranscriptRangeController): void;
   addTransientMessage(sessionId: string, message: TransientUserMessage): void;
   updateTransientMessage(sessionId: string, message: TransientUserMessage): void;
   retireCancelledTransientMessages(sessionId: string): Promise<void>;
@@ -182,6 +184,7 @@ export function createSessionWorkspaceActions(deps: {
 
   function setActiveId(next: string | undefined): void {
     selectionRevisionRef.current += 1;
+    if (next !== readRequestedSessionId()) transcriptRangeRef.current = undefined;
     const changed = next !== activeIdRef.current;
     // An existing conversation is handed over by commitTranscript. New/local
     // tasks have no readable history yet and must show their staged first row
@@ -195,8 +198,9 @@ export function createSessionWorkspaceActions(deps: {
     setActiveIdState(next);
   }
 
-  function commitTranscript(sessionId: string, messages: StoredMessage[]): void {
+  function commitTranscript(sessionId: string, messages: StoredMessage[], controller?: DesktopTranscriptRangeController): void {
     if (readRequestedSessionId() !== sessionId) return;
+    transcriptRangeRef.current = controller;
     activeIdRef.current = sessionId;
     setMessages(messages);
     setMessageLoadPending(false);
@@ -211,12 +215,31 @@ export function createSessionWorkspaceActions(deps: {
   }
 
   function clearOwnedSessionState(sessionId: string): void {
+    const requested = readRequestedSessionId();
+    if (activeIdRef.current === sessionId) {
+      activeIdRef.current = undefined;
+      transcriptRangeRef.current = undefined;
+      setMessages([]);
+    }
+    if (requested === sessionId) {
+      const displayed = activeIdRef.current;
+      setActiveId(displayed && isReadableSession(displayed) ? displayed : undefined);
+    }
     transientMessagesBySessionRef.current.delete(sessionId);
     if (activeIdRef.current === sessionId) setTransientMessagesState([]);
     clearSessionUiState(sessionId);
   }
 
   return {
+    captureSelection() {
+      const revision = selectionRevisionRef.current;
+      return () => selectionRevisionRef.current === revision;
+    },
+    retiredSessionIds(sessions) {
+      return [...new Set([activeIdRef.current, readRequestedSessionId()])].filter(
+        (id): id is string => id !== undefined && !sessions.some((session) => session.id === id),
+      );
+    },
     setActiveId,
     startNewSession,
     clearOwnedSessionState,

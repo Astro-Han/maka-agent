@@ -24,6 +24,7 @@ import { LocaleProvider } from '@maka/ui';
 import type { StoredMessage } from '@maka/core/session';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 import { useAppShellSessionWorkspace } from '../../renderer/use-app-shell-session-workspace.js';
+import { createRecoveringDesktopTranscriptRangeController, DesktopTranscriptRangeStore } from '../../renderer/platform/desktop/desktop-transcript-range-store.js';
 
 /**
  * The session workspace hands its actions to consumers that put them in
@@ -52,6 +53,9 @@ describe('session workspace action identity', () => {
   afterEach(cleanupFakeDom);
 
   it('hands over identity and rows together and rejects superseded reads', () => {
+    const sessionA = JSON.stringify(['local', 'a']);
+    const sessionB = JSON.stringify(['local', 'b']);
+    const sessionC = JSON.stringify(['local', 'c']);
     const { root } = installReactRenderer();
     let workspace!: Workspace;
     const displays: Array<{ id: string | undefined; messages: StoredMessage[] }> = [];
@@ -63,7 +67,7 @@ describe('session workspace action identity', () => {
     act(() => root.render(createElement(LocaleProvider, {
       locale: 'en', children: createElement(Probe),
     })));
-    act(() => workspace.seedSessions(['a', 'b', 'c'].map((id) => ({
+    act(() => workspace.seedSessions([sessionA, sessionB, sessionC].map((id) => ({
       id, name: id, isFlagged: false, isArchived: false, labels: [],
       hasUnread: false, status: 'active' as const, backend: 'ai-sdk' as const,
       revision: 1, runtimeHostId: 'local', profileId: 'local', profileName: 'Local',
@@ -73,31 +77,60 @@ describe('session workspace action identity', () => {
     const row = (id: string): StoredMessage => ({ id, type: 'user', text: id, turnId: id, ts: 1 });
     const a = [row('a-message')];
     const c = [row('c-message')];
-    act(() => { workspace.setActiveId('a'); workspace.commitTranscript('a', a); });
+    const reader = (id: string) => createRecoveringDesktopTranscriptRangeController(
+      new DesktopTranscriptRangeStore(id), async () => { throw new Error('unexpected read'); }, { onError() {} },
+    );
+    const readerA = reader(sessionA);
+    const readerC = reader(sessionC);
+    act(() => { workspace.setActiveId(sessionA); workspace.commitTranscript(sessionA, a, readerA); });
+    assert.equal(workspace.transcriptRangeRef.current, readerA);
     displays.length = 0;
-    act(() => workspace.setActiveId('b'));
-    assert.equal(workspace.requestedSessionId, 'b');
-    assert.equal(workspace.activeId, 'a');
+    act(() => workspace.setActiveId(sessionB));
+    assert.equal(workspace.requestedSessionId, sessionB);
+    assert.equal(workspace.activeId, sessionA);
     assert.equal(workspace.messages, a);
-    act(() => workspace.setActiveId('c'));
-    act(() => workspace.commitTranscript('b', [row('b-message')]));
-    assert.equal(workspace.activeId, 'a');
-    act(() => workspace.commitTranscript('c', c));
-    assert.equal(workspace.activeId, 'c');
+    assert.equal(workspace.transcriptRangeRef.current, undefined, 'the old picture has no reader during handoff');
+    act(() => workspace.setActiveId(sessionC));
+    act(() => workspace.commitTranscript(sessionB, [row('b-message')]));
+    assert.equal(workspace.activeId, sessionA);
+    act(() => workspace.commitTranscript(sessionC, c, readerC));
+    assert.equal(workspace.transcriptRangeRef.current, readerC);
+    assert.equal(workspace.activeId, sessionC);
     assert.equal(workspace.messageLoadPending, false);
     assert.ok(displays.every((display) =>
-      (display.id === 'a' && display.messages === a) ||
-      (display.id === 'c' && display.messages === c)));
+      (display.id === sessionA && display.messages === a) ||
+      (display.id === sessionC && display.messages === c)));
 
-    act(() => workspace.setActiveId('b'));
+    act(() => workspace.setActiveId(sessionB));
     act(() => workspace.startNewSession());
-    act(() => workspace.commitTranscript('b', [row('b-message')]));
+    act(() => workspace.commitTranscript(sessionB, [row('b-message')]));
     assert.equal(workspace.activeId, undefined);
     assert.deepEqual(workspace.messages, []);
     // A first-send task has no readable Host history yet; it must activate
     // immediately rather than waiting for its own first message to be sent.
     act(() => workspace.setActiveId('new-local-task'));
     assert.equal(workspace.activeId, 'new-local-task');
+
+    // Retiring the old display must not cancel a newer navigation intent.
+    act(() => { workspace.setActiveId(sessionA); workspace.commitTranscript(sessionA, a); });
+    const selectionIsCurrent = workspace.captureSelection();
+    act(() => workspace.setActiveId(sessionB));
+    assert.equal(selectionIsCurrent(), false);
+    act(() => workspace.clearOwnedSessionState(sessionA));
+    assert.equal(workspace.requestedSessionId, sessionB);
+    assert.equal(workspace.activeId, undefined);
+    act(() => workspace.commitTranscript(sessionB, [row('b-message')]));
+    assert.equal(workspace.activeId, sessionB);
+
+    // Retiring the destination revokes its read and falls back to the display.
+    act(() => workspace.setActiveId(sessionC));
+    act(() => workspace.clearOwnedSessionState(sessionC));
+    act(() => workspace.commitTranscript(sessionC, c));
+    assert.equal(workspace.requestedSessionId, sessionB);
+    assert.equal(workspace.activeId, sessionB);
+    assert.equal(workspace.switchingSession, false);
+    act(() => workspace.setActiveId(sessionA));
+    assert.deepEqual(workspace.retiredSessionIds([{ id: sessionB }]), [sessionA]);
   });
 
   it('keeps every action identity fixed across re-renders', () => {

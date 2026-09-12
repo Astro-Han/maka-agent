@@ -50,7 +50,6 @@ import {
   ShellRunHydration,
   type ShellRunUpdatesBySession,
 } from './shell-run-update-state.js';
-import { sessionCatalogRetiresSession } from '../shared/runtime-host-identity.js';
 import * as desktopTranscript from './platform/desktop/desktop-transcript-range-store.js';
 
 type RefBox<T> = { current: T };
@@ -163,6 +162,7 @@ export function useAppShellBootstrapSubscriptions(options: {
   refreshSessions: () => Promise<SessionSummary[]>;
   rendererMountedRef: RefBox<boolean>;
   retireSession: (sessionId: string) => void;
+  retiredSessionIds(sessions: readonly { id: string }[]): string[];
   setSessionEventHealthBySession: SessionEventHealthUpdater;
   toastApi: ToastApi;
 }) {
@@ -175,9 +175,7 @@ export function useAppShellBootstrapSubscriptions(options: {
   });
   const handleRuntimeHostChange = useEffectEvent((event: DesktopRuntimeHostProfileChangedEvent) => {
     void options.refreshSessions().then((sessions) => {
-      const activeSessionId = options.activeIdRef.current;
-      if (!sessionCatalogRetiresSession(activeSessionId, sessions)) return;
-      options.retireSession(activeSessionId);
+      options.retiredSessionIds(sessions).forEach(options.retireSession);
     });
     if (event.readiness !== 'ready') return;
     if (!event.isDefault) return;
@@ -200,6 +198,7 @@ export function useAppShellBootstrapSubscriptions(options: {
   const handleSessionChange = useEffectEvent(
     (event: SessionChangedEvent) => {
       const refreshedSessions = options.refreshSessions();
+      if (event.reason === 'archived' && event.sessionId) options.retireSession(event.sessionId);
       if (event.reason === 'created' || event.reason === 'migrated') {
         void options.refreshProjects();
       }
@@ -228,9 +227,7 @@ export function useAppShellBootstrapSubscriptions(options: {
       options.toastApi.info(copy.modelReboundTitle, copy.modelReboundDescription(event.modelId));
     }
     void refreshedSessions.then((sessions) => {
-      const activeSessionId = options.activeIdRef.current;
-      if (!sessionCatalogRetiresSession(activeSessionId, sessions)) return;
-      options.retireSession(activeSessionId);
+      options.retiredSessionIds(sessions).forEach(options.retireSession);
     });
     },
   );
@@ -320,7 +317,7 @@ export function useActiveSessionEvents(options: {
   setMessageLoadErrorBySession: (updater: (current: Record<string, string>) => Record<string, string>) => void;
   clearMessageLoadError(sessionId: string): void;
   setMessageLoadPending: (pending: boolean) => void;
-  commitTranscript: (sessionId: string, messages: StoredMessage[]) => void;
+  commitTranscript: import('./session-workspace-actions.js').SessionWorkspaceActions['commitTranscript'];
   transcriptRangeRef: RefBox<desktopTranscript.DesktopTranscriptRangeController | undefined>;
   setSessionEventHealthBySession: SessionEventHealthUpdater;
   toastApi: Pick<ToastApi, 'error'>;
@@ -331,12 +328,12 @@ export function useActiveSessionEvents(options: {
   // teardown, so the window it publishes is always a live one.
   const applyTranscript = useEffectEvent((
     sessionId: string,
-    store: desktopTranscript.DesktopTranscriptRangeStore,
+    controller: desktopTranscript.DesktopTranscriptRangeController,
   ) => {
     if (options.activeId === sessionId) {
-      const snapshot = store.snapshot();
+      const snapshot = controller.store.snapshot();
       if (snapshot.ready) {
-        options.commitTranscript(sessionId, [...snapshot.messages]);
+        options.commitTranscript(sessionId, [...snapshot.messages], controller);
         clearMessageLoadError(sessionId);
       }
     }
@@ -403,7 +400,6 @@ export function useActiveSessionEvents(options: {
         now: Date.now(),
       }),
     }));
-    const unsubscribeTranscript = transcript.subscribe(() => applyTranscript(activeId, transcript));
     const openTranscript = (signal: AbortSignal) =>
       window.maka.transcripts.open(
         activeId,
@@ -427,7 +423,7 @@ export function useActiveSessionEvents(options: {
         onError: (error) => { if (!disposed) applyReadError(activeId, error); },
       },
     );
-    options.transcriptRangeRef.current = controller;
+    const unsubscribeTranscript = transcript.subscribe(() => applyTranscript(activeId, controller));
     const subscribeSessionEvents = () => {
       const attempt = ++observationAttempt;
       beginObservationSeed(activeId);

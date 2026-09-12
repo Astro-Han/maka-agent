@@ -446,7 +446,7 @@
         "nonTriviaTokens": 642
       },
       "src/renderer/app-shell-effects.ts": {
-        "importDeclarations": 11,
+        "importDeclarations": 10,
         "bridgePaths": {
           "window.maka.app.info": 1,
           "window.maka.appWindow.subscribeCommand": 1,
@@ -482,7 +482,6 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
-          "../shared/runtime-host-identity.js": 1,
           "./app-shell-copy": 1,
           "./browser-storage": 1,
           "./locales/conversation-copy.js": 1,
@@ -495,8 +494,8 @@
           "@maka/core/session-event-health": 1,
           "react": 1
         },
-        "importSpecifiers": 19,
-        "nonTriviaTokens": 3715
+        "importSpecifiers": 18,
+        "nonTriviaTokens": 3711
       },
       "src/renderer/app-shell-overlays.tsx": {
         "importDeclarations": 7,
@@ -582,7 +581,7 @@
           "@maka/core/session": 1
         },
         "importSpecifiers": 8,
-        "nonTriviaTokens": 2316
+        "nonTriviaTokens": 2315
       },
       "src/renderer/app-shell-session-events.ts": {
         "importDeclarations": 2,
@@ -680,7 +679,7 @@
           "./session-workspace-errors.js": 1
         },
         "importSpecifiers": 3,
-        "nonTriviaTokens": 650
+        "nonTriviaTokens": 620
       },
       "src/renderer/app-shell-turn-view-model.ts": {
         "importDeclarations": 6,
@@ -866,7 +865,7 @@
           "react": 1
         },
         "importSpecifiers": 104,
-        "nonTriviaTokens": 13515
+        "nonTriviaTokens": 13475
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 2,
