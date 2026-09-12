@@ -825,6 +825,8 @@ function bridge(options: {
       subscribeSessionEvents: unsubscribe,
     },
     terminal: {
+      listLive: async () => [],
+      subscribeUpdates: () => () => undefined,
       start: async () => {
         throw new Error('Terminal stories mount an existing resource');
       },

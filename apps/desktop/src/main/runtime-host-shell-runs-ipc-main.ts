@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { DESKTOP_TERMINAL_LAUNCH_PREFIX } from '../shared/runtime-host-identity.js';
 import type { ShellRunUpdate } from '@maka/core/events';
 import type { ShellRunPtySnapshot } from '@maka/runtime/shell-run-contract';
 import type { SessionDomainChange } from '@maka/runtime-host/protocol';
@@ -99,7 +100,7 @@ export function registerRuntimeHostShellRunsIpc(
     const normalizedSessionId = requiredId(sessionId, 'Session');
     const started = await deps.client.startRuntimeResource({
       sessionId: normalizedSessionId,
-      launchId: `desktop-terminal-${newId()}`,
+      launchId: `${DESKTOP_TERMINAL_LAUNCH_PREFIX}${newId()}`,
     });
     return requiredRuntimeResource(
       await deps.client.getRuntimeResource(normalizedSessionId, started.resource.ref),

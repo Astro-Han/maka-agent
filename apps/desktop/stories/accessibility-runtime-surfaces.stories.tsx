@@ -108,6 +108,8 @@ export const ActiveTerminal: Story = {
   decorators: [
     withWorkbarServices({
       terminal: {
+        listLive: async () => [],
+        subscribeUpdates: () => () => undefined,
         start: async () => {
           throw new Error('not used by this story');
         },

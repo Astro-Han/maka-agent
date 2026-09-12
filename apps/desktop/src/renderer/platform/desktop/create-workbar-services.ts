@@ -18,6 +18,9 @@
  */
 
 import type { MakaBridge } from '../../../preload/bridge-contract.js';
+import type { ShellRunUpdate } from '@maka/core/events';
+import { isTerminalShellRunStatus } from '@maka/core/shell-run';
+import { DESKTOP_TERMINAL_LAUNCH_PREFIX } from '../../../shared/runtime-host-identity.js';
 import type { WorkbarServices } from '../../features/workbar';
 import { readSettledMessagesFrom } from '../../session-message-settlement.js';
 
@@ -42,6 +45,13 @@ const DEFAULT_DEPENDENCIES: DesktopWorkbarServiceDependencies = {
   readSettledMessages: readSettledMessagesFrom,
 };
 
+function isLiveDesktopTerminal(update: ShellRunUpdate): boolean {
+  return update.ownership.kind === 'local' &&
+    update.sourceTurnId.startsWith(DESKTOP_TERMINAL_LAUNCH_PREFIX) &&
+    update.sourceTurnId === update.sourceToolCallId &&
+    update.result.mode === 'pty' && !isTerminalShellRunStatus(update.result.status);
+}
+
 /** The only Desktop-to-Workbar adapter. It narrows the preload bridge by tool. */
 export function createDesktopWorkbarServices(
   bridge: DesktopWorkbarBridge = window.maka,
@@ -53,7 +63,19 @@ export function createDesktopWorkbarServices(
       subscribeSessionEvents: (sessionId, handler) =>
         bridge.sessions.subscribeEvents(sessionId, handler),
     },
-    terminal: bridge.shellRuns,
+    terminal: {
+      start: (sessionId) => bridge.shellRuns.start(sessionId),
+      stop: (input) => bridge.shellRuns.stop(input),
+      attach: (input) => bridge.shellRuns.attach(input),
+      detach: (input) => bridge.shellRuns.detach(input),
+      write: (input) => bridge.shellRuns.write(input),
+      subscribePtyData: (handler) => bridge.shellRuns.subscribePtyData(handler),
+      subscribeResync: (handler) => bridge.shellRuns.subscribeResync(handler),
+      listLive: async (sessionId) => (await bridge.shellRuns.list(sessionId)).filter(isLiveDesktopTerminal),
+      subscribeUpdates: (handler) => bridge.shellRuns.subscribeUpdates((update) => {
+        if (isLiveDesktopTerminal(update)) handler(update);
+      }),
+    },
     browser: {
       setActiveSession: (sessionId) => bridge.browser.setActiveSession(sessionId),
       setViewport: (input) => bridge.browser.setViewport(input),

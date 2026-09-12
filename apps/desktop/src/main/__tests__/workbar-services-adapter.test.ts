@@ -19,6 +19,7 @@
 
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
+import type { ShellRunUpdate } from '@maka/core/events';
 import type { MakaBridge } from '../../preload/bridge-contract.js';
 import { createDesktopWorkbarServices } from '../../renderer/platform/desktop/create-workbar-services.js';
 
@@ -79,6 +80,35 @@ function createBridgeRecorder(): {
 }
 
 describe('createDesktopWorkbarServices', () => {
+  it('recovers only live local desktop PTYs from the Host inventory and updates', async () => {
+    const { bridge } = createBridgeRecorder();
+    const manual = {
+      sessionId: 's', ownership: { kind: 'local' },
+      sourceTurnId: 'desktop-terminal-one', sourceToolCallId: 'desktop-terminal-one',
+      result: { ref: 'manual', mode: 'pty', status: 'running' },
+    } as ShellRunUpdate;
+    const updates = [
+      manual,
+      { ...manual, sourceTurnId: 'agent-turn' },
+      { ...manual, result: { ...manual.result, mode: 'pipes' } },
+      { ...manual, result: { ...manual.result, status: 'completed' } },
+      { ...manual, ownership: { kind: 'source_unavailable', sourceSessionId: 'source' } },
+    ] as ShellRunUpdate[];
+    let listener: ((update: ShellRunUpdate) => void) | undefined;
+    bridge.shellRuns = {
+      ...bridge.shellRuns,
+      list: async () => updates,
+      subscribeUpdates: (handler) => { listener = handler; return () => { listener = undefined; }; },
+    };
+    const services = createDesktopWorkbarServices(bridge);
+    assert.deepEqual(await services.terminal.listLive('s'), [manual]);
+    const received: ShellRunUpdate[] = [];
+    const dispose = services.terminal.subscribeUpdates((update) => received.push(update));
+    for (const update of updates) listener?.(update);
+    assert.deepEqual(received, [manual]);
+    dispose();
+    assert.equal(listener, undefined);
+  });
   it('preserves the Side Conversation Stop identity kind', async () => {
     const { bridge, calls } = createBridgeRecorder();
     const services = createDesktopWorkbarServices(bridge, {

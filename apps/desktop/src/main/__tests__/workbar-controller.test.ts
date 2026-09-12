@@ -489,7 +489,7 @@ describe('useWorkbarController', () => {
     assert.equal(stops.length, 2);
   });
 
-  it('releases a retired owner’s terminal topology and teardown obligation', async () => {
+  it('releases a retired owner’s terminal topology without stopping Host resources', async () => {
     const { root } = installReactRenderer();
     const lateStart = deferred<ShellRunUpdate>();
     const stops: string[] = [];
@@ -519,10 +519,10 @@ describe('useWorkbarController', () => {
     assert.deepEqual(controller().host.panelsState.right.tabs.map((tab) => tab.ownerSessionId), ['b']);
     assert.deepEqual(stops, []);
     await act(async () => root.unmount());
-    assert.deepEqual(stops, ['terminal-b']);
+    assert.deepEqual(stops, []);
   });
 
-  it('owns a resolved Terminal before its tab state commits', async () => {
+  it('leaves a late Terminal start with its Host Session after view disposal', async () => {
     const { root } = installReactRenderer();
     const start = deferred<ShellRunUpdate>();
     const stops: Array<{ sessionId: string; ref: string }> = [];
@@ -546,33 +546,79 @@ describe('useWorkbarController', () => {
       root.unmount();
     });
 
-    assert.deepEqual(stops, [
-      { sessionId: 'a', ref: 'terminal-before-commit' },
-    ]);
+    assert.deepEqual(stops, []);
   });
 
-  it('stops an opened Terminal exactly once when the controller unmounts', async () => {
+  it('recovers a live Terminal after Stop rejects following controller unmount', async () => {
     const { root } = installReactRenderer();
     const stops: Array<{ sessionId: string; ref: string }> = [];
     const defaults = createFakeWorkbarServices();
+    const pendingStop = deferred<ShellRunUpdate | null>();
+    let live = true;
     const services = createFakeWorkbarServices({
       terminal: {
         ...defaults.terminal,
+        listLive: async (sessionId) => live ? [shellUpdate(sessionId, 'terminal-unmount')] : [],
         start: async (sessionId) => shellUpdate(sessionId, 'terminal-unmount'),
-        stop: async (request) => {
+        stop: (request) => {
           stops.push(request);
-          return null;
+          if (stops.length === 1) return pendingStop.promise;
+          live = false;
+          return Promise.resolve(null);
         },
       },
     });
 
     await act(async () => renderController(root, services, input(session('a'))));
-    await act(async () => controller().commands.openTool('terminal'));
+    const tab = controller().host.panelsState.right.tabs[0]!;
+    assert.equal(tab.resourceRef, 'terminal-unmount');
+    await act(async () => controller().host.onCloseTab('right', tab));
     await act(async () => root.unmount());
+    await act(async () => pendingStop.reject(new Error('disconnected after unmount')));
 
     assert.deepEqual(stops, [
       { sessionId: 'a', ref: 'terminal-unmount' },
     ]);
+    const reopened = installReactRenderer();
+    await act(async () => renderController(reopened.root, services, input(session('a'))));
+    const restored = controller().host.panelsState.right.tabs[0]!;
+    assert.equal(restored.resourceRef, tab.resourceRef);
+    assert.equal(controller().host.panelsState.right.launcherOpen, false);
+    await act(async () => controller().host.onCloseTab('right', restored));
+    assert.equal(controller().host.panelsState.right.tabs.length, 0);
+    assert.equal(stops.length, 2);
+  });
+
+  it('restores on reconnect without stealing selection or resurrecting a closed tab from an older read', async () => {
+    const { root } = installReactRenderer();
+    const defaults = createFakeWorkbarServices();
+    const staleRead = deferred<ShellRunUpdate[]>();
+    let resync: ((event: { sessionId: string }) => void) | undefined;
+    let reads = 0;
+    const services = createFakeWorkbarServices({ terminal: {
+      ...defaults.terminal,
+      listLive: async (id) => ++reads === 1 ? [] : reads === 2
+        ? [shellUpdate(id, 'recovered')] : reads === 3 ? staleRead.promise : [],
+      subscribeResync: (handler) => { resync = handler; return () => { resync = undefined; }; },
+    } });
+    await act(async () => renderController(root, services, input(session('a'))));
+    await act(async () => controller().commands.openTool('files'));
+    const selected = controller().host.panelsState.right.activeTabId;
+    await act(async () => controller().commands.toggleRight());
+    await act(async () => resync?.({ sessionId: 'a' }));
+    assert.equal(controller().host.panelsState.right.activeTabId, selected);
+    assert.equal(controller().host.rightCollapsed, true);
+    const tab = controller().host.panelsState.right.tabs.find((tab) => tab.resourceRef === 'recovered');
+    assert.ok(tab);
+    await act(async () => resync?.({ sessionId: 'a' }));
+    await act(async () => { for (let i = 0; i < 100; i++) resync?.({ sessionId: 'a' }); });
+    assert.equal(reads, 3);
+    await act(async () => controller().host.onCloseTab('right', tab));
+    await act(async () => staleRead.resolve([shellUpdate('a', 'recovered')]));
+    assert.equal(controller().host.panelsState.right.tabs.includes(tab), false);
+    assert.equal(reads, 4);
+    await act(async () => root.unmount());
+    assert.equal(resync, undefined);
   });
 
   it('reports only a Terminal start failure that still belongs to the active Session', async () => {
@@ -653,11 +699,11 @@ describe('useWorkbarController', () => {
     );
   });
 
-  it('hides created companion Sessions until cleanup or reconciliation', async () => {
+  it('keeps a newly created companion hidden through panel changes and stale catalogs until cleanup', async () => {
     const { root } = installReactRenderer();
     const services = createFakeWorkbarServices();
     const firstInput = input(session('a'));
-    firstInput.authoritativeSessionIds = new Set(['a', 'fork']);
+    firstInput.authoritativeSessionIds = new Set(['a']);
     await act(async () => renderController(root, services, firstInput));
 
     await act(async () =>
@@ -667,10 +713,14 @@ describe('useWorkbarController', () => {
       }),
     );
     assert.equal(controller().selectors.hiddenSessionIds.has('fork'), true);
+    await act(async () => controller().commands.openTool('files'));
+    assert.equal(controller().selectors.hiddenSessionIds.has('fork'), true);
 
     const reconciled = input(session('a'));
-    reconciled.authoritativeSessionIds = new Set(['a']);
+    reconciled.authoritativeSessionIds = new Set(['a', 'fork']);
     await act(async () => renderController(root, services, reconciled));
+    assert.equal(controller().selectors.hiddenSessionIds.has('fork'), true);
+    await act(async () => controller().host.onForkVisibilityChange?.({ type: 'cleanup-succeeded', sessionId: 'fork' }));
     assert.equal(controller().selectors.hiddenSessionIds.has('fork'), false);
   });
 

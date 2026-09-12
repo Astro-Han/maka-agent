@@ -73,6 +73,9 @@ export interface WorkbarReviewService {
 }
 
 export interface WorkbarTerminalService {
+  /** Live, locally owned manual terminals; excludes model tools and inherited resources. */
+  listLive(sessionId: string): Promise<ShellRunUpdate[]>;
+  subscribeUpdates(handler: (update: ShellRunUpdate) => void): WorkbarUnsubscribe;
   start(sessionId: string): Promise<ShellRunUpdate>;
   stop(input: { sessionId: string; ref: string }): Promise<ShellRunUpdate | null>;
   attach(input: {

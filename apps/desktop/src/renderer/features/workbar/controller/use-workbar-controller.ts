@@ -57,7 +57,6 @@ import {
 } from '../tools/side-chat/quote-companion-panel-state.js';
 import {
   applyCompanionForkVisibilityEvent,
-  reconcileCompanionForkVisibility,
 } from '../tools/side-chat/quote-companion-visibility.js';
 import { recoverOrphanedCompanionCopies } from '../tools/side-chat/quote-companion-core.js';
 import { useSideConversationWorkspace } from '../tools/side-chat/use-side-conversation-workspace.js';
@@ -203,19 +202,18 @@ export function useWorkbarController(
     reservedOrdinalsRef.current.terminal.clear();
   }, [layout.workbarPanelsState]);
   const stoppingTerminalsRef = useRef(new Map<string, Promise<void>>());
-  const ownedTerminalResourcesRef = useRef(
-    new Map<string, { sessionId: string; ref: string }>(),
-  );
+  const terminalReadGenerationRef = useRef(0);
 
   const stopTerminal = useCallback(
     (sessionId: string, ref: string) => {
       const key = terminalResourceKey(sessionId, ref);
       const pending = stoppingTerminalsRef.current.get(key);
       if (pending) return pending;
+      terminalReadGenerationRef.current += 1;
       const stopping = terminal
         .stop({ sessionId, ref })
         .then(() => {
-          ownedTerminalResourcesRef.current.delete(key);
+          terminalReadGenerationRef.current += 1;
         })
         .finally(() => {
           stoppingTerminalsRef.current.delete(key);
@@ -225,11 +223,6 @@ export function useWorkbarController(
     },
     [terminal],
   );
-
-  const registerTerminal = useCallback((sessionId: string, ref: string) => {
-    const key = terminalResourceKey(sessionId, ref);
-    ownedTerminalResourcesRef.current.set(key, { sessionId, ref });
-  }, []);
 
   const reserveOrdinal = useCallback(
     (kind: 'side-chat' | 'terminal'): number => {
@@ -249,14 +242,42 @@ export function useWorkbarController(
     [],
   );
 
-  useEffect(
-    () => () => {
-      for (const resource of ownedTerminalResourcesRef.current.values()) {
-        void stopTerminal(resource.sessionId, resource.ref).catch(() => undefined);
-      }
-    },
-    [stopTerminal],
-  );
+  useEffect(() => {
+    if (!activeSessionId) return;
+    let disposed = false;
+    let reading = false;
+    let refreshAgain = false;
+    const refresh = () => {
+      if (disposed) return;
+      if (reading) { refreshAgain = true; return; }
+      reading = true;
+      const generation = ++terminalReadGenerationRef.current;
+      void terminal.listLive(activeSessionId).then((updates) => {
+        if (disposed || generation !== terminalReadGenerationRef.current) return;
+        layout.restoreTerminals(updates.filter((update) =>
+          !stoppingTerminalsRef.current.has(terminalResourceKey(activeSessionId, update.result.ref)),
+        ).map((update) => ({
+          id: terminalSessionWorkbarTabId(update.result.ref),
+          kind: 'terminal',
+          resourceRef: update.result.ref,
+          ownerSessionId: activeSessionId,
+        })));
+      }).catch(() => undefined).finally(() => {
+        reading = false;
+        if (refreshAgain) { refreshAgain = false; refresh(); }
+      }); // Reconnect or reactivation repeats a failed authoritative read.
+    };
+    const unsubscribeResync = terminal.subscribeResync((event) => {
+      if (event.sessionId === activeSessionId) refresh();
+    });
+    const unsubscribeUpdates = terminal.subscribeUpdates((update) => {
+      if (update.sessionId !== activeSessionId) return;
+      const panels = panelsStateRef.current;
+      if (![...panels.right.tabs, ...panels.bottom.tabs].some((tab) => tab.resourceRef === update.result.ref)) refresh();
+    });
+    refresh();
+    return () => { disposed = true; unsubscribeResync(); unsubscribeUpdates(); };
+  }, [activeSessionId, terminal, layout.restoreTerminals]);
 
   const revealPlacement = useCallback(
     (placement: SessionWorkbarPlacement) => {
@@ -316,11 +337,9 @@ export function useWorkbarController(
             .start(ownerSessionId)
             .then((update) => {
               const ref = update.result.ref;
-              registerTerminal(ownerSessionId, ref);
               if (
                 generation !== resourceGenerationRef.current
               ) {
-                void stopTerminal(ownerSessionId, ref).catch(() => undefined);
                 return;
               }
               layout.openDynamicWorkbarTab(
@@ -364,10 +383,8 @@ export function useWorkbarController(
       layout.openWorkbarTab,
       locale,
       openNewSideConversation,
-      registerTerminal,
       reserveOrdinal,
       revealPlacement,
-      stopTerminal,
       terminal,
       terminalCopy.startFailed,
     ],
@@ -428,7 +445,9 @@ export function useWorkbarController(
           continue;
         }
         const ownerSessionId = tab.ownerSessionId;
+        const generation = resourceGenerationRef.current;
         void stopTerminal(ownerSessionId, ref).then(() => {
+          if (generation !== resourceGenerationRef.current) return;
           // Placement and navigation may change while Host is stopping the PTY.
           for (const currentPlacement of ['right', 'bottom'] as const) {
             layout.closeWorkbarTabs(currentPlacement, [tab.id], {
@@ -436,6 +455,7 @@ export function useWorkbarController(
             });
           }
         }).catch((error) => {
+          if (generation !== resourceGenerationRef.current) return;
           input.reportError(
             terminalCopy.stopFailed,
             localizedShellErrorMessage(error, terminalCopy.stopFailed, locale),
@@ -552,22 +572,6 @@ export function useWorkbarController(
       ),
     [],
   );
-
-  useEffect(() => {
-    const authoritativeSessionIds = input.authoritativeSessionIds;
-    if (!authoritativeSessionIds) return;
-    for (const [key, resource] of ownedTerminalResourcesRef.current) {
-      if (!authoritativeSessionIds.has(resource.sessionId)) {
-        ownedTerminalResourcesRef.current.delete(key);
-      }
-    }
-    setHiddenCompanionForkIds((current) =>
-      reconcileCompanionForkVisibility(
-        current,
-        authoritativeSessionIds,
-      ),
-    );
-  }, [input.authoritativeSessionIds, layout.workbarPanelsState]);
 
   useEffect(
     () => browser.subscribeLive((payload) => setLiveBrowserSessionIds(payload.sessionIds)),

@@ -62,17 +62,20 @@ remounted when the active session changes.
   `Tab` renders `endContent` inside its own `<button>`, so a per-tab close
   would nest a button in a button. Tabs are never reordered, so the strip's
   order is the order the faces were opened in.
-- How many Terminals or Side Chats exist is each face's own business; only a
-  deliberate open adds a tab.
-- Closing or leaving the owner session stops Terminal resources.
-- A Terminal start is tagged with its source generation. If it resolves after
-  a Session switch or controller disposal, the returned resource is stopped
-  immediately and never enters the tab topology.
-- Terminal ownership is registered as soon as `start` returns, before the tab
-  state commits. Host projection excludes resources owned by another Session,
-  so a Session switch cannot briefly reattach an old Terminal.
+- Host Sessions own Terminal processes. Switching Sessions, collapsing a panel,
+  or disposing a window never stops them; disposal releases xterm and its control
+  connection. Explicit close removes a tab only after Host confirms Stop.
+- Activation and reconnect restore live desktop Terminal entries from Host.
+  Presentation is transient and reconstructible, never the resource inventory.
+  Recovery preserves panel visibility and selection, and excludes inherited,
+  completed, and model-created resources. Late start results stay with Host if
+  their requesting view has disappeared.
+- Removing a Session from the authoritative catalog retires its Terminal views.
+  Host owns admission of Session retirement while processes are live.
 - Side Chat survives panel collapse and is cleaned only when its tab closes or
   when navigation leaves its source session.
+- Fork creation hides the internal Session until cleanup succeeds. Catalog
+  absence does not confirm cleanup because a snapshot may predate creation.
 - Disposed Side Chat operations are fenced at every fork/send boundary; a late
   fork is cleaned and a late send cannot write back into an abandoned panel.
 - Inactive tabs stay mounted; their hooks receive the existing active/hidden

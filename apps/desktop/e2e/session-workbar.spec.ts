@@ -186,7 +186,7 @@ test('Git changes re-read the workspace after the app regains focus', async ({
   await expect(panel.getByText('新增 5 行')).toBeVisible();
 });
 
-test('Terminal ownership follows the active Session and stops the old resource', async ({
+test('Terminal survives navigation and reload, then stops on explicit close', async ({
   window: page,
 }) => {
   const { composer, sessionId, sidebar } = await createSession(
@@ -218,7 +218,7 @@ test('Terminal ownership follows the active Session and stops the old resource',
         .find((update) => update.result.ref === terminalRef)
         ?.result.status,
     )
-    .not.toBe('running');
+    .toBe('running');
 
   await composer.fill('create replacement session');
   await awaitSendReady(page);
@@ -226,6 +226,20 @@ test('Terminal ownership follows the active Session and stops the old resource',
   await expect(page.getByText('Fake backend received: create replacement session')).toBeVisible();
   await page.getByRole('button', { name: '展开任务工作栏' }).click();
   await expect(page.getByRole('list', { name: '打开工具' })).toBeVisible();
+  await sidebar.locator(`[data-session-id=${JSON.stringify(sessionId)}]`).click();
+  await expect(terminal).toBeVisible();
+  await expect(terminal).toHaveAttribute('data-terminal-ref', terminalRef!);
+  await page.reload();
+  await sidebar.locator(`[data-session-id=${JSON.stringify(sessionId)}]`).click();
+  await expect(terminal).toBeVisible();
+  await expect(terminal).toHaveAttribute('data-terminal-ref', terminalRef!);
+  await page.getByRole('button', { name: '打开或关闭工作栏的面' }).click();
+  await page.getByRole('menu').getByRole('menuitem', { name: /终端/ }).click();
+  await expect(terminal).toHaveCount(0);
+  await expect.poll(async () =>
+    (await page.evaluate((id) => window.maka.shellRuns.list(id), sessionId))
+      .find((update) => update.result.ref === terminalRef)?.result.status,
+  ).not.toBe('running');
 });
 
 test('Side Chat survives collapse, confirms close, and cleans up on source switch', async ({

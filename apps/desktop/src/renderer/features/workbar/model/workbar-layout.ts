@@ -28,6 +28,7 @@ import {
   type SessionWorkbarPanelsState,
   type SessionWorkbarPlacement,
   type WorkbarPanelsAction,
+  type SessionWorkbarTab,
 } from './workbar-tabs.js';
 
 /**
@@ -59,6 +60,7 @@ export interface WorkbarLayoutState {
 
 export type WorkbarLayoutAction =
   | WorkbarPanelsAction
+  | { type: 'restore-terminals'; tabs: readonly SessionWorkbarTab[] }
   | {
       type: 'remove-stale';
       placement: SessionWorkbarPlacement;
@@ -203,6 +205,18 @@ export function reduceWorkbarLayout(
   state: WorkbarLayoutState,
   action: WorkbarLayoutAction,
 ): WorkbarLayoutState {
+  if (action.type === 'restore-terminals') {
+    const existing = new Set([...state.panels.right.tabs, ...state.panels.bottom.tabs].map((tab) => tab.id));
+    const missing = action.tabs.filter((tab) => !existing.has(tab.id));
+    if (!missing.length) return state;
+    const right = state.panels.right;
+    return { ...state, panels: { ...state.panels, right: {
+      ...right,
+      tabs: [...right.tabs, ...missing],
+      activeTabId: right.activeTabId ?? missing[0]!.id,
+      launcherOpen: right.tabs.length === 0 ? false : right.launcherOpen,
+    } } };
+  }
   if (action.type === 'activate-session') {
     return state.activeSessionId === action.sessionId
       ? state

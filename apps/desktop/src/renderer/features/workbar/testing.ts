@@ -74,6 +74,8 @@ export function createFakeWorkbarServices(
       subscribeSessionEvents: noopSubscription,
     },
     terminal: {
+      listLive: async () => [],
+      subscribeUpdates: noopSubscription,
       start: async () => {
         throw new Error('Fake terminal.start is not configured');
       },
