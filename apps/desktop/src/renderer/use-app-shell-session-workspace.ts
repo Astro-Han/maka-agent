@@ -18,7 +18,7 @@
  */
 
 import { useRef } from 'react';
-import { useAppShellSessionUiState } from './app-shell-session-ui-state.js';
+import * as Conversation from './features/conversation/index.js';
 import {
   selectActiveSessionId,
   useSessionCatalogController,
@@ -43,21 +43,32 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
   // shell's render (#4109).
   const catalog = useSessionCatalogController();
   const requestedSessionId = useExternalStoreSelector(catalog, selectActiveSessionId);
-  const sessionList = useAppShellSessionList(toastApi, {
-    catalog,
-  });
-  const { sessionUiController, display } = useAppShellSessionUiState(sessionList.sessions, requestedSessionId);
-  const { activeIdRef, messagesRef, transientMessagesBySessionRef, setMessageLoadPending } = display;
+  const activeIdRef = useRef<string | undefined>(undefined);
+  const actionsRef = useRef<SessionWorkspaceActions | null>(null);
+  const sessionList = useAppShellSessionList(toastApi, { catalog });
+  const { controller: sessionUiController, publication, display } = Conversation.useAppShellSessionUiState(
+    sessionList.sessions,
+    requestedSessionId,
+    activeIdRef,
+    (sessionId, messages, controller: DesktopTranscriptRangeController) =>
+      actionsRef.current!.commitTranscript(sessionId, messages, controller),
+  );
   const selectionRevisionRef = useRef(0);
   const bootstrapSelectionLeaseRef = useRef<ReturnType<typeof createBootstrapSelectionLease> | null>(null);
-  const transcriptRangeRef = useRef<DesktopTranscriptRangeController | undefined>(undefined);
+  const {
+    messagesRef, transcriptRangeRef, setMessagesState,
+    messages, publishedTranscriptRange, publishTranscript, isMessagePublished,
+  } = publication;
+  const {
+    transientMessagesBySessionRef,
+    setTransientMessagesState, setMessageLoadPending,
+  } = display;
 
-  const actionsRef = useRef<SessionWorkspaceActions | null>(null);
-  // Every dep below is a ref box, a state setter, or a method of the
-  // once-created session-UI controller, so one instance serves the renderer's
-  // lifetime. Consumers list these in dep arrays and pass them as props; a
-  // per-render identity there is what defeated the Session rail's memo.
-  actionsRef.current ??= createSessionWorkspaceActions({
+  // The captured publication setter only reads stable refs and writes React
+  // state. Along with the controller methods and other refs, it lets one
+  // actions instance serve the renderer's lifetime without defeating the
+  // Session rail's memo with new action identities on every render.
+  const actions = actionsRef.current ??= createSessionWorkspaceActions({
     activeIdRef,
     readRequestedSessionId: () => catalog.getState().activeSessionId,
     isReadableSession: (id) => catalog.getState().sessions.some(
@@ -72,13 +83,11 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
     // controller is created once per renderer, so this identity is fixed and
     // the once-created factory may capture it.
     setActiveIdState: catalog.setActiveSessionId,
-    setMessagesState: display.setMessagesState,
-    setTransientMessagesState: display.setTransientMessagesState,
+    setMessagesState,
+    setTransientMessagesState,
     setMessageLoadPending,
     clearSessionUiState: sessionUiController.clearSessionUiState,
   });
-  const actions = actionsRef.current;
-
   if (!bootstrapSelectionLeaseRef.current) {
     bootstrapSelectionLeaseRef.current = createBootstrapSelectionLease({
       readActiveId: () => activeIdRef.current,
@@ -90,12 +99,17 @@ export function useAppShellSessionWorkspace(toastApi: ToastApi) {
 
   return {
     ...sessionList,
-    ...display,
     sessionCatalogController: catalog,
     requestedSessionId,
+    activeIdRef,
     bootstrapSelectionLease: bootstrapSelectionLeaseRef.current,
     ...actions,
+    messages,
+    publishedTranscriptRange,
+    publishTranscript,
+    isMessagePublished,
     transcriptRangeRef,
+    ...display,
     // The store's own surface, not a copy of it. Consumers reach setters and
     // claims through the controller.
     sessionUiController,

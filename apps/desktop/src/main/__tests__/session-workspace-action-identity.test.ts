@@ -25,6 +25,7 @@ import type { StoredMessage } from '@maka/core/session';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 import { useAppShellSessionWorkspace } from '../../renderer/use-app-shell-session-workspace.js';
 import { createRecoveringDesktopTranscriptRangeController, DesktopTranscriptRangeStore } from '../../renderer/platform/desktop/desktop-transcript-range-store.js';
+import { encodeDesktopTranscriptSnapshot } from '../desktop-transcript-ipc.js';
 
 /**
  * The session workspace hands its actions to consumers that put them in
@@ -52,7 +53,7 @@ function actionKeys(workspace: Workspace): string[] {
 describe('session workspace action identity', () => {
   afterEach(cleanupFakeDom);
 
-  it('hands over identity and rows together and rejects superseded reads', () => {
+  it('hands over identity and rows together and rejects superseded reads', async () => {
     const sessionA = JSON.stringify(['local', 'a']);
     const sessionB = JSON.stringify(['local', 'b']);
     const sessionC = JSON.stringify(['local', 'c']);
@@ -135,6 +136,41 @@ describe('session workspace action identity', () => {
     assert.equal(workspace.switchingSession, false);
     act(() => workspace.setActiveId(sessionA));
     assert.deepEqual(workspace.retiredSessionIds([{ id: sessionB }]), [sessionA]);
+
+    // The real publication scheduler may hold a ready source while the reader
+    // is interacting. A retired queued source may not replace the displayed
+    // Session or publish its reader.
+    act(() => workspace.setActiveId(sessionC));
+    for (const batch of encodeDesktopTranscriptSnapshot({
+      sessionId: 'c', generation: 'publication', hostEpoch: 'host',
+      durableThrough: null, durable: [], overlay: c, hasOlder: false, hasNewer: false,
+    })) readerC.store.accept(batch);
+    let blocked = true;
+    let idle!: () => void;
+    const detach = workspace.sessionUiController.transcriptViewportNavigation.attachCommitScheduler(sessionC, {
+      commitIfIdle: (commit) => { if (blocked) return false; commit(); return true; },
+      subscribeToIdle: (listener) => { idle = listener; return () => {}; },
+    });
+    let publications = 0;
+    await act(async () => workspace.publishTranscript(
+      sessionC, readerC, workspace.captureSelection(), () => { publications += 1; },
+    ));
+    assert.equal(workspace.activeId, sessionB);
+    act(() => workspace.clearOwnedSessionState(sessionC));
+    await act(async () => { blocked = false; idle(); });
+    assert.equal(publications, 0, 'retirement revokes queued publication');
+    assert.equal(workspace.activeId, sessionB);
+    assert.equal(workspace.transcriptRangeRef.current, undefined);
+    await act(async () => {
+      workspace.setActiveId(sessionC);
+      workspace.publishTranscript(sessionC, readerC, workspace.captureSelection(), () => { publications += 1; });
+    });
+    assert.equal(publications, 1);
+    assert.equal(workspace.activeId, sessionC);
+    assert.equal((workspace.messages as StoredMessage[])[0]?.id, 'c-message');
+    assert.equal(workspace.publishedTranscriptRange?.sessionId, sessionC);
+    assert.equal(workspace.transcriptRangeRef.current, readerC);
+    await act(async () => detach());
   });
 
   it('keeps every action identity fixed across re-renders', () => {

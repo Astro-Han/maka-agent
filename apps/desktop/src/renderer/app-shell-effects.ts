@@ -20,7 +20,7 @@
 import { useEffect, useEffectEvent, useLayoutEffect } from 'react';
 import { useHotkeys } from '@astryxdesign/core/hooks';
 import type { ConnectionEvent } from '@maka/core/connections';
-import type { SessionChangedEvent, SessionSummary, StoredMessage } from '@maka/core/session';
+import type { SessionChangedEvent, SessionSummary } from '@maka/core/session';
 import type { SessionEvent } from '@maka/core/events';
 import type { SessionEventStreamSnapshot } from '@maka/core/session-event-health';
 import type { ThemePalette, ThemePreference } from '@maka/core/settings';
@@ -318,25 +318,26 @@ export function useActiveSessionEvents(options: {
   clearMessageLoadError(sessionId: string): void;
   setMessageLoadPending: (pending: boolean) => void;
   commitTranscript: import('./session-workspace-actions.js').SessionWorkspaceActions['commitTranscript'];
+  publishTranscript: import('./features/conversation/index.js').TranscriptPublisher<
+    desktopTranscript.DesktopTranscriptRangeController
+  >;
   transcriptRangeRef: RefBox<desktopTranscript.DesktopTranscriptRangeController | undefined>;
   setSessionEventHealthBySession: SessionEventHealthUpdater;
   toastApi: Pick<ToastApi, 'error'>;
 }) {
   const activeId = options.activeId;
   const clearMessageLoadError = useEffectEvent(options.clearMessageLoadError);
-  // Reached only from the store subscription, which the effect unsubscribes on
-  // teardown, so the window it publishes is always a live one.
+  // Publication rechecks both the requested Session and the effect instance
+  // after any reader input wait before handing over the displayed transcript.
   const applyTranscript = useEffectEvent((
     sessionId: string,
     controller: desktopTranscript.DesktopTranscriptRangeController,
+    effectIsCurrent: () => boolean,
   ) => {
-    if (options.activeId === sessionId) {
-      const snapshot = controller.store.snapshot();
-      if (snapshot.ready) {
-        options.commitTranscript(sessionId, [...snapshot.messages], controller);
-        clearMessageLoadError(sessionId);
-      }
-    }
+    options.publishTranscript(sessionId, controller, effectIsCurrent, () => {
+      clearMessageLoadError(sessionId);
+      options.setMessageLoadPending(false);
+    });
   });
   const applyReadError = useEffectEvent((sessionId: string, error: unknown) => {
     if (options.activeId === sessionId) {
@@ -423,7 +424,8 @@ export function useActiveSessionEvents(options: {
         onError: (error) => { if (!disposed) applyReadError(activeId, error); },
       },
     );
-    const unsubscribeTranscript = transcript.subscribe(() => applyTranscript(activeId, controller));
+    const unsubscribeTranscript = transcript.subscribe(() =>
+      applyTranscript(activeId, controller, () => !disposed));
     const subscribeSessionEvents = () => {
       const attempt = ++observationAttempt;
       beginObservationSeed(activeId);

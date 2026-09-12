@@ -261,6 +261,8 @@ function makeUsageLog(input: {
   };
 }
 
+const USAGE_PAGINATION_SENTINEL = 'Usage pagination page two sentinel';
+
 const usageLogs: UsageStats['logs'] = [
   makeUsageLog({
     id: '1',
@@ -287,6 +289,23 @@ const usageLogs: UsageStats['logs'] = [
     turnId: undefined,
     costUsd: undefined,
   },
+  ...Array.from({ length: 47 }, (_, index) => {
+    const id = String(index + 6);
+    return makeUsageLog({
+      id,
+      kind: 'model',
+      model: 'gpt-5',
+      sessionName: `Usage pagination fixture ${id}`,
+      minutesAgo: index + 40,
+    });
+  }),
+  makeUsageLog({
+    id: '53',
+    kind: 'model',
+    model: 'gpt-5',
+    sessionName: USAGE_PAGINATION_SENTINEL,
+    minutesAgo: 90,
+  }),
 ];
 
 // Priced provenance so the fixtures' costs read as authoritative
@@ -1655,7 +1674,7 @@ function withUsageStoryBridge(
       ): Promise<UpdateAppSettingsResult> => ({
         settings: mergeSettings(settings, patch),
       }),
-      usageStats: async (): Promise<UsageStats> => stats,
+      usageStats: async (): Promise<UsageStats> => ({ ...stats, logs: [...stats.logs] }),
     },
   } satisfies Record<string, unknown>);
 }
@@ -1848,6 +1867,7 @@ function renderedLinkColors(renderedLink: HTMLElement) {
 }
 
 type SettingsStoryProps = {
+  reopenable?: boolean;
   section: SettingsSection;
   connections?: LlmConnection[];
   defaultSlug?: string | null;
@@ -1895,6 +1915,7 @@ function SettingsStory(props: SettingsStoryProps) {
 }
 
 function SettingsStoryFrame(props: SettingsStoryProps) {
+  const [open, setOpen] = useState(true);
   const archivedTasks = useArchivedTasksStoryBridge(props.archivedTaskSessions ?? []);
   const initialFocusRef = useRef<HTMLButtonElement>(null);
   const [uiLocaleUpdateGate] = useState(createUiLocaleUpdateGate);
@@ -1918,6 +1939,7 @@ function SettingsStoryFrame(props: SettingsStoryProps) {
 
   return (
     <>
+      {props.reopenable && <button onClick={() => setOpen(!open)}>{open ? 'Close settings' : 'Reopen settings'}</button>}
       {/* `100dvh`, not `100%`: `SettingsSurface` is a `Layout height="fill"`,
           which needs a bounded ancestor to hand its content pane a scroll
           box. Under Storybook's fullscreen body a percentage height resolves
@@ -1936,7 +1958,7 @@ function SettingsStoryFrame(props: SettingsStoryProps) {
         <ConnectionSettingsServicesProvider services={connectionSettingsServices}>
           <RuntimeHostManagementServicesProvider services={runtimeHostManagementServices}>
             <SessionBundleServicesProvider services={sessionBundleServices}>
-            <SettingsSurface
+            {open && <SettingsSurface
               onClose={noop}
               themePref={themePref}
               onThemeChange={setThemePref}
@@ -1957,7 +1979,7 @@ function SettingsStoryFrame(props: SettingsStoryProps) {
               onRemoteHostAdded={noop}
               onSelectedRuntimeHostProfileIdChange={noop}
               snapshotCache={snapshotCache}
-            />
+            />}
             </SessionBundleServicesProvider>
           </RuntimeHostManagementServicesProvider>
         </ConnectionSettingsServicesProvider>
@@ -2210,6 +2232,50 @@ export const GeneralCachedRevalidation: Story = {
     await expect(mixedBoundary).not.toHaveAttribute('inert');
     await canvas.findByText('正在加载设置');
     await expect(canvas.queryByRole('alert')).not.toBeInTheDocument();
+  },
+};
+
+// Real path: unmount and reopen Settings with its renderer-owned snapshot cache.
+// Observe every DOM commit, not just the final ready screen after refresh.
+export const GeneralReopenKeepsReadyControls: Story = {
+  decorators: [withGeneralHostGenerationRevalidationBridge],
+  render: () => {
+    resetGenerationStoryBridge();
+    return <SettingsStory section="general" reopenable />;
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => {
+      expect(canvas.getByRole('textbox', { name: '助手语气偏好' })).toBeEnabled();
+      expect(canvas.getByRole('button', { name: '默认模型' })).toBeEnabled();
+    });
+    await userEvent.click(canvas.getByRole('button', { name: 'Close settings' }));
+    expect(canvas.queryByRole('textbox', { name: '助手语气偏好' })).not.toBeInTheDocument();
+    let missingControls = false;
+    let loadingAlert = false;
+    const inspect = () => {
+      const surface = canvasElement.querySelector('.settingsSurface');
+      const main = surface?.querySelector('main, [role="main"]');
+      if (!surface || !main) return;
+      missingControls ||= main.querySelector('textarea') === null ||
+        within(main as HTMLElement).queryByRole('button', { name: '默认模型' }) === null;
+      loadingAlert ||= [...surface.querySelectorAll('[role="alert"]')]
+        .some((alert) => alert.textContent?.includes('正在加载设置'));
+    };
+    const observer = new MutationObserver(inspect);
+    observer.observe(canvasElement, { childList: true, subtree: true, characterData: true });
+    try {
+      await userEvent.click(canvas.getByRole('button', { name: 'Reopen settings' }));
+      await waitFor(() => {
+        expect(canvas.getByRole('textbox', { name: '助手语气偏好' })).toBeEnabled();
+        expect(canvas.getByRole('button', { name: '默认模型' })).toBeEnabled();
+      });
+      inspect();
+      expect(missingControls).toBe(false);
+      expect(loadingAlert).toBe(false);
+    } finally {
+      observer.disconnect();
+    }
   },
 };
 // A Runtime Host can be replaced without changing its renderer-facing
@@ -2539,6 +2605,8 @@ export const UsageLongTail: Story = {
     if (showDetails) await userEvent.click(showDetails);
 
     const table = await canvas.findByRole('table', { name: usageCopy.tables.requestsAria });
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(50);
+    expect(within(table).queryByText(USAGE_PAGINATION_SENTINEL)).not.toBeInTheDocument();
     const timeCell = table.querySelector<HTMLTableCellElement>('tbody tr td:first-child');
     expect(timeCell).not.toBeNull();
     const timeText = timeCell?.firstElementChild;
@@ -2563,6 +2631,66 @@ export const UsageLongTail: Story = {
       expect(tooltip).toHaveTextContent(longTarget);
     });
     await userEvent.unhover(targetCellText);
+
+    async function goToPageTwo() {
+      const pageTwo = canvas
+        .getAllByRole('button')
+        .find((button) => button.textContent?.trim() === '2');
+      expect(pageTwo).toBeDefined();
+      await userEvent.click(pageTwo!);
+      await waitFor(() => {
+        const secondPageTable = canvas.getByRole('table', {
+          name: usageCopy.tables.requestsAria,
+        });
+        expect(secondPageTable.querySelectorAll('tbody tr')).toHaveLength(3);
+        expect(secondPageTable).toHaveAttribute('aria-rowcount', String(usageLogs.length));
+        expect(secondPageTable.querySelector('tbody tr')).toHaveAttribute('aria-rowindex', '51');
+        expect(within(secondPageTable).getByText(USAGE_PAGINATION_SENTINEL)).toBeInTheDocument();
+      });
+    }
+
+    async function expectFirstPage(reason: string) {
+      await waitFor(() => {
+        const firstPageTable = canvas.getByRole('table', {
+          name: usageCopy.tables.requestsAria,
+        });
+        expect(firstPageTable.querySelectorAll('tbody tr'), reason).toHaveLength(50);
+        expect(within(firstPageTable).getByText(longTarget)).toBeInTheDocument();
+        expect(within(firstPageTable).queryByText(USAGE_PAGINATION_SENTINEL)).not.toBeInTheDocument();
+      });
+    }
+
+    await goToPageTwo();
+    const modelFilter = canvas.getByRole('textbox', { name: usageCopy.filterAria });
+    await userEvent.type(modelFilter, 'zai');
+    await expectFirstPage('model filter should reset pagination');
+
+    await goToPageTwo();
+    const statusFilter = canvas.getByRole('combobox', { name: usageCopy.statusAria });
+    await userEvent.click(canvas.getByRole('button', { name: usageCopy.clearFilters }));
+    await expectFirstPage('clearing filters should reset pagination');
+    expect(modelFilter).toHaveValue('');
+    expect(statusFilter).toHaveTextContent(usageCopy.statuses[0]);
+
+    await goToPageTwo();
+    await userEvent.click(statusFilter);
+    await userEvent.click(
+      await within(document.body).findByRole('option', { name: usageCopy.statuses[1] }),
+    );
+    await expectFirstPage('status filter should reset pagination');
+
+    await userEvent.click(await canvas.findByRole('button', { name: usageCopy.clearFilters }));
+    await goToPageTwo();
+    const nextRange = canvas
+      .getAllByRole('radio')
+      .find((radio) => radio.getAttribute('aria-checked') === 'false');
+    expect(nextRange).toBeDefined();
+    await userEvent.click(nextRange!);
+    await expectFirstPage('changing range should reset pagination');
+
+    await goToPageTwo();
+    await userEvent.click(canvas.getByRole('button', { name: usageCopy.refreshAria }));
+    await expectFirstPage('refreshing should reset pagination');
   },
 };
 // Real path: the same long-content Usage page at the minimum supported window width.

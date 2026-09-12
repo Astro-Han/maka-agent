@@ -118,7 +118,6 @@
     "src/renderer/session-error-presentation.ts",
     "src/renderer/session-event-health.ts",
     "src/renderer/session-health-notice.ts",
-    "src/renderer/session-message-settlement.ts",
     "src/renderer/session-read-state.ts",
     "src/renderer/session-status-presentation.ts",
     "src/renderer/session-workspace-actions.ts",
@@ -213,7 +212,6 @@
     "src/renderer/theme.ts",
     "src/renderer/titlebar-dim-color.ts",
     "src/renderer/titlebar-modal-sync.ts",
-    "src/renderer/transient-message-projection.ts",
     "src/renderer/turn-footer-actions.ts",
     "src/renderer/use-active-execution-boundary.ts",
     "src/renderer/use-app-shell-composer-quotes.ts",
@@ -273,9 +271,7 @@
     "src/renderer/features/workbar/tools/terminal/session-terminal-panel.tsx -> src/renderer/theme",
     "src/renderer/features/workbar/ui/workbar-surface.tsx -> src/renderer/work-board-panel"
   ],
-  "legacyPlatformImports": [
-    "src/renderer/platform/desktop/create-workbar-services.ts -> src/renderer/session-message-settlement"
-  ],
+  "legacyPlatformImports": [],
   "controllerOwners": [
     {
       "implementation": "src/renderer/features/app-update/controller/use-app-update-controller.ts",
@@ -329,7 +325,7 @@
           "@maka/ui": 1
         },
         "importSpecifiers": 10,
-        "nonTriviaTokens": 3638
+        "nonTriviaTokens": 3636
       },
       "src/renderer/app-shell-chrome-actions.tsx": {
         "importDeclarations": 4,
@@ -495,13 +491,12 @@
           "react": 1
         },
         "importSpecifiers": 18,
-        "nonTriviaTokens": 3711
+        "nonTriviaTokens": 3715
       },
       "src/renderer/app-shell-overlays.tsx": {
         "importDeclarations": 7,
         "bridgePaths": {},
         "environmentCapabilities": {
-          "window": 2,
           "window.addEventListener": 1,
           "window.removeEventListener": 1
         },
@@ -527,7 +522,7 @@
           "react": 1
         },
         "importSpecifiers": 11,
-        "nonTriviaTokens": 977
+        "nonTriviaTokens": 962
       },
       "src/renderer/app-shell-project-actions.ts": {
         "importDeclarations": 4,
@@ -575,13 +570,13 @@
         "dependencyPaths": {
           "./locales/conversation-copy.js": 1,
           "./locales/shell-copy.js": 1,
+          "./platform/desktop/session-message-settlement.js": 1,
           "./session-copy-attempt.js": 1,
-          "./session-message-settlement.js": 1,
           "./session-workspace-errors.js": 1,
           "@maka/core/session": 1
         },
         "importSpecifiers": 8,
-        "nonTriviaTokens": 2315
+        "nonTriviaTokens": 2155
       },
       "src/renderer/app-shell-session-events.ts": {
         "importDeclarations": 2,
@@ -597,13 +592,14 @@
           "createAppShellSessionEventHandlers"
         ],
         "dependencyPaths": {
+          "./application/contracts/message-queue-projection.js": 1,
           "./features/conversation/index.js": 1,
           "./locales/conversation-copy.js": 1,
           "./model-connection-errors.js": 1,
           "@maka/ui": 1
         },
         "importSpecifiers": 7,
-        "nonTriviaTokens": 2752
+        "nonTriviaTokens": 2725
       },
       "src/renderer/app-shell-session-start-actions.ts": {
         "importDeclarations": 2,
@@ -729,8 +725,6 @@
           "window.maka.settings.subscribeClientChanged": 1
         },
         "environmentCapabilities": {
-          "document.querySelector": 1,
-          "requestAnimationFrame": 1,
           "window.clearTimeout": 1,
           "window.requestAnimationFrame": 4,
           "window.setTimeout": 1
@@ -865,7 +859,7 @@
           "react": 1
         },
         "importSpecifiers": 104,
-        "nonTriviaTokens": 13472
+        "nonTriviaTokens": 13402
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 2,
@@ -930,7 +924,7 @@
         "nonTriviaTokens": 135
       },
       "src/renderer/use-app-shell-session-workspace.ts": {
-        "importDeclarations": 8,
+        "importDeclarations": 7,
         "bridgePaths": {},
         "environmentCapabilities": {},
         "hookCalls": {
@@ -944,8 +938,8 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
-          "./app-shell-session-ui-state.js": 1,
           "./bootstrap-selection-lease.js": 1,
+          "./features/conversation/index.js": 1,
           "./new-task-reload-intent.js": 1,
           "./session-catalog-state.js": 1,
           "./session-workspace-actions.js": 1,
@@ -953,8 +947,8 @@
           "./use-external-store-selector.js": 1,
           "react": 1
         },
-        "importSpecifiers": 9,
-        "nonTriviaTokens": 412
+        "importSpecifiers": 8,
+        "nonTriviaTokens": 461
       }
     },
     "closure": {
@@ -2172,22 +2166,6 @@
           "./locales/conversation-copy.js": 1
         }
       },
-      "src/renderer/session-message-settlement.ts": {
-        "bridgePaths": {
-          "window.maka.transcripts": 1
-        },
-        "environmentCapabilities": {
-          "window.clearTimeout": 2,
-          "window.setTimeout": 2
-        },
-        "hookCalls": {},
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {
-          "./platform/desktop/desktop-transcript-range-store.js": 1
-        }
-      },
       "src/renderer/session-read-state.ts": {
         "bridgePaths": {},
         "environmentCapabilities": {},
@@ -2220,9 +2198,8 @@
         "unresolvedDependencies": 0,
         "actionFactories": [],
         "dependencyPaths": {
-          "./new-task-reload-intent.js": 1,
-          "./transient-message-projection.js": 1,
-          "@maka/runtime-host/protocol": 1
+          "./application/contracts/transient-message-projection.js": 1,
+          "./new-task-reload-intent.js": 1
         }
       },
       "src/renderer/session-workspace-errors.ts": {
@@ -3455,7 +3432,6 @@
         "actionFactories": [],
         "dependencyPaths": {
           "../locales/settings-shared-copy": 1,
-          "./settings-nav": 1,
           "./settings-surface": 1,
           "@maka/ui": 1,
           "react": 1
@@ -4048,15 +4024,6 @@
         "dependencyPaths": {
           "./theme": 1
         }
-      },
-      "src/renderer/transient-message-projection.ts": {
-        "bridgePaths": {},
-        "environmentCapabilities": {},
-        "hookCalls": {},
-        "lifecycleMethods": {},
-        "unresolvedDependencies": 0,
-        "actionFactories": [],
-        "dependencyPaths": {}
       },
       "src/renderer/turn-footer-actions.ts": {
         "bridgePaths": {},

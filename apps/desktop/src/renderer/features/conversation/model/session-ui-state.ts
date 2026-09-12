@@ -17,9 +17,6 @@
  * under the License.
  */
 
-import { useCallback, useRef, useState } from 'react';
-import type { SessionSummary, StoredMessage } from '@maka/core/session';
-import type { TransientUserMessageProjection } from '@maka/ui';
 import type { MessageQueueEntryProjection, ShellRunUpdate } from '@maka/core/events';
 import type { SessionEventStreamSnapshot } from '@maka/core/session-event-health';
 import { createTranscriptViewportNavigation, type InteractionQueues, type LiveTurnBuffer } from '@maka/ui';
@@ -228,57 +225,6 @@ export function createAppShellSessionUiStateController(
 }
 
 export type AppShellSessionUiStateController = ReturnType<typeof createAppShellSessionUiStateController>;
-
-/**
- * Owns the displayed conversation and its per-session UI controller. Navigation
- * intent can advance while the previous readable transcript stays visible.
- * The controller retains its identity; its subscribers select individual maps
- * instead of causing this view to render for every background Session update.
- */
-export function useAppShellSessionUiState<Session extends SessionSummary & { localState?: string; shared?: boolean }>(
-  sessions: readonly Session[], requestedSessionId: string | undefined,
-) {
-  const controllerRef = useRef<AppShellSessionUiStateController | null>(null);
-  controllerRef.current ??= createAppShellSessionUiStateController();
-  const activeIdRef = useRef<string | undefined>(undefined);
-  const messagesRef = useRef<StoredMessage[]>([]);
-  const [transcript, setTranscript] = useState<{
-    sessionId: string | undefined;
-    messages: StoredMessage[];
-  }>({ sessionId: undefined, messages: [] });
-  const [transientMessages, setTransientMessagesState] = useState<TransientUserMessageProjection[]>([]);
-  const transientMessagesBySessionRef = useRef(new Map<string, Map<string, TransientUserMessageProjection>>());
-  const [messageLoadPending, setMessageLoadPending] = useState(false);
-  const setMessagesState = useCallback((messages: StoredMessage[]) => {
-    setTranscript({ sessionId: activeIdRef.current, messages });
-  }, []);
-  const activeCatalogSession = sessions.find((session) => session.id === transcript.sessionId);
-  const requestedCatalogSession = sessions.find((session) => session.id === requestedSessionId);
-  // Locally staged tasks cannot admit Host reads until creation completes.
-  const activeHostSession = activeCatalogSession?.localState !== 'pending' ? activeCatalogSession : undefined;
-  const requestedHostSession = requestedCatalogSession?.localState !== 'pending' ? requestedCatalogSession : undefined;
-  const sharedSessionActive = activeCatalogSession?.shared === true;
-  const display = {
-    activeId: transcript.sessionId,
-    messages: transcript.messages,
-    activeIdRef,
-    messagesRef,
-    setMessagesState,
-    transientMessages,
-    transientMessagesBySessionRef,
-    setTransientMessagesState,
-    messageLoadPending,
-    setMessageLoadPending,
-    activeCatalogSession,
-    activeHostSession,
-    requestedCatalogSession,
-    requestedHostSession,
-    sharedSessionActive,
-    ownerActiveId: sharedSessionActive ? undefined : activeHostSession?.id,
-    switchingSession: transcript.sessionId !== requestedSessionId,
-  };
-  return { sessionUiController: controllerRef.current, display };
-}
 
 function createRuntimeSessionRegistry<T>() {
   const ref: { current: Record<string, T> } = { current: {} };

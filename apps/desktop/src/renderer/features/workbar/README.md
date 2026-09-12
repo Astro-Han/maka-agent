@@ -65,11 +65,18 @@ remounted when the active session changes.
 - Host Sessions own Terminal processes. Switching Sessions, collapsing a panel,
   or disposing a window never stops them; disposal releases xterm and its control
   connection. Explicit close removes a tab only after Host confirms Stop.
+- Main's Host target owns pending and uncertain Close intents across renderer
+  and connection replacement. A successful Stop closes the exact owner/ref in
+  the current topology; a failed attempt remains available for explicit retry.
+  No Close history or terminal contents are persisted for recovery.
 - Activation and reconnect restore live desktop Terminal entries from Host.
   Presentation is transient and reconstructible, never the resource inventory.
   Recovery preserves panel visibility and selection, and excludes inherited,
   completed, and model-created resources. Late start results stay with Host if
   their requesting view has disappeared.
+- Natural completion detaches live controls and subscriptions but may retain
+  the current local xterm picture until its view closes. Late output can be
+  lost; completion does not promise a final output snapshot or replay.
 - Removing a Session from the authoritative catalog retires its Terminal views.
   Host owns admission of Session retirement while processes are live.
 - Side Chat survives panel collapse and is cleaned only when its tab closes or

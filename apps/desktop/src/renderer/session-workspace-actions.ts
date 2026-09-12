@@ -35,13 +35,12 @@
 
 import type { StoredMessage } from '@maka/core/session';
 import type { TransientUserMessageProjection } from '@maka/ui';
-import { MESSAGE_QUEUE_MAX_ENTRIES } from '@maka/runtime-host/protocol';
 import { clearNewTaskReloadIntent, markNewTaskReloadIntent } from './new-task-reload-intent.js';
 import type { DesktopTranscriptRangeController } from './platform/desktop/desktop-transcript-range-store.js';
 import {
   mergeTransientMessageProjection,
   reconcileTransientMessages,
-} from './transient-message-projection.js';
+} from './application/contracts/transient-message-projection.js';
 
 type RefBox<T> = { current: T };
 
@@ -59,7 +58,7 @@ export interface SessionWorkspaceActions {
   startNewSession(): void;
   clearOwnedSessionState(sessionId: string): void;
   setMessages: MessageListUpdater;
-  commitTranscript(sessionId: string, messages: StoredMessage[], controller?: DesktopTranscriptRangeController): void;
+  commitTranscript(sessionId: string, messages: StoredMessage[], controller?: DesktopTranscriptRangeController): boolean;
   addTransientMessage(sessionId: string, message: TransientUserMessage): void;
   updateTransientMessage(sessionId: string, message: TransientUserMessage): void;
   retireCancelledTransientMessages(sessionId: string): Promise<void>;
@@ -154,21 +153,14 @@ export function createSessionWorkspaceActions(deps: {
     const pending = transientMessagesBySessionRef.current.get(sessionId);
     if (!pending || pending.size === 0) return;
     try {
-      // A legal Host queue already fills the protocol's per-query cap, and an
-      // unreconciled root Message sits beside it, so asking about every row at
-      // once fails the whole proof and retires nothing.
       const messageIds = [...pending.keys()];
-      const cancelled: string[] = [];
-      for (let from = 0; from < messageIds.length; from += MESSAGE_QUEUE_MAX_ENTRIES) {
-        const result = await window.maka.sessions.queryCancelledMessages(
-          sessionId,
-          messageIds.slice(from, from + MESSAGE_QUEUE_MAX_ENTRIES),
-        );
-        cancelled.push(...result.cancelledMessageIds);
-      }
+      const { cancelledMessageIds } = await window.maka.sessions.queryCancelledMessages(
+        sessionId,
+        messageIds,
+      );
       const current = transientMessagesBySessionRef.current.get(sessionId);
       if (!current) return;
-      for (const messageId of cancelled) current.delete(messageId);
+      for (const messageId of cancelledMessageIds) current.delete(messageId);
       if (current.size === 0) transientMessagesBySessionRef.current.delete(sessionId);
       reprojectActiveTransients(sessionId);
     } catch {
@@ -199,12 +191,13 @@ export function createSessionWorkspaceActions(deps: {
     setActiveIdState(next);
   }
 
-  function commitTranscript(sessionId: string, messages: StoredMessage[], controller?: DesktopTranscriptRangeController): void {
-    if (readRequestedSessionId() !== sessionId) return;
+  function commitTranscript(sessionId: string, messages: StoredMessage[], controller?: DesktopTranscriptRangeController): boolean {
+    if (readRequestedSessionId() !== sessionId) return false;
     transcriptRangeRef.current = controller;
     activeIdRef.current = sessionId;
     setMessages(messages);
     setMessageLoadPending(false);
+    return true;
   }
 
   function startNewSession(): void {
