@@ -253,6 +253,16 @@ export function reduceWorkbarLayout(
       : action,
   );
   if (panels === state.panels) return state;
+  // A resource may finish opening after navigation. It belongs to the request's
+  // Session and must not reveal a panel in whichever Session is now selected.
+  if (action.type === 'open' && action.tab.ownerSessionId &&
+    action.tab.ownerSessionId !== state.activeSessionId) {
+    return { ...state, panels,
+      ...(action.placement === 'right' ? {
+        collapsedBySession: { ...state.collapsedBySession, [action.tab.ownerSessionId]: false },
+      } : {}),
+    };
+  }
   let rightCollapsed = isSessionWorkbarCollapsed(state);
   let bottomOpen = state.bottomOpen;
   if (action.type === 'open' || action.type === 'open-launcher') {

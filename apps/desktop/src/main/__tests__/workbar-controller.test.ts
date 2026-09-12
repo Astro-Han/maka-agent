@@ -27,6 +27,7 @@ import { LocaleProvider } from '@maka/ui';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 import {
   createFakeWorkbarServices,
+  projectWorkbarPanelsForSession,
   useWorkbarController,
   WorkbarServicesProvider,
   type UseWorkbarControllerInput,
@@ -71,14 +72,18 @@ type ControllerProbeInput = UseWorkbarControllerInput & { openOnActivation?: boo
 function ControllerProbe(props: ControllerProbeInput) {
   const workbar = useWorkbarController(props);
   latestController = workbar;
+  const visiblePanels = projectWorkbarPanelsForSession(
+    workbar.host.panelsState, workbar.host.activeId,
+    new Set(workbar.host.quotes?.map((quote) => `side-chat:${quote.id}`)),
+  );
   useLayoutEffect(() => {
     if (props.openOnActivation) workbar.host.onOpenLauncher('right');
   }, [props.activeSession?.id, props.openOnActivation]);
   controllerRenderSnapshots.push({
     activeId: latestController.host.activeId,
     terminalOwnerIds: [
-      ...latestController.host.panelsState.right.tabs,
-      ...latestController.host.panelsState.bottom.tabs,
+      ...visiblePanels.right.tabs,
+      ...visiblePanels.bottom.tabs,
     ]
       .filter((tab) => tab.kind === 'terminal')
       .map((tab) => tab.ownerSessionId),
@@ -194,7 +199,7 @@ describe('useWorkbarController', () => {
     assert.equal(controller().host.rightCollapsed, false);
   });
 
-  it("preserves the active Session's visibility while removing the previous Session's Terminal", async () => {
+  it("preserves visibility while hiding, rather than removing, another Session's Terminal", async () => {
     const { root } = installReactRenderer();
     const defaults = createFakeWorkbarServices();
     const services = createFakeWorkbarServices({
@@ -217,7 +222,10 @@ describe('useWorkbarController', () => {
     assert.equal(controller().host.panelsState.right.tabs.length, 1);
     await act(async () => show('b'));
 
-    assert.equal(controller().host.panelsState.right.tabs.length, 0);
+    assert.equal(controller().host.panelsState.right.tabs.length, 1);
+    assert.equal(projectWorkbarPanelsForSession(
+      controller().host.panelsState, 'b', new Set(),
+    ).right.tabs.length, 0);
     assert.equal(controller().host.rightCollapsed, false);
   });
 
@@ -340,7 +348,7 @@ describe('useWorkbarController', () => {
     );
   });
 
-  it('stops a Terminal whose start resolves after the owner Session changes', async () => {
+  it('retains a Terminal whose start resolves after navigation without revealing it in the new Session', async () => {
     const { root } = installReactRenderer();
     const start = deferred<ShellRunUpdate>();
     const starts: string[] = [];
@@ -367,16 +375,21 @@ describe('useWorkbarController', () => {
     await act(async () => renderController(root, services, input(session('b'))));
     await act(async () => start.resolve(shellUpdate('a', 'terminal-a')));
 
-    assert.deepEqual(stops, [{ sessionId: 'a', ref: 'terminal-a' }]);
+    assert.deepEqual(stops, []);
     assert.equal(
       controller().host.panelsState.right.tabs.some(
         (tab) => tab.kind === 'terminal',
       ),
-      false,
+      true,
     );
+    assert.equal(controller().host.rightCollapsed, true);
+    await act(async () => renderController(root, services, input(session('a'))));
+    const owned = controller().host.panelsState.right.tabs.find((tab) => tab.kind === 'terminal');
+    assert.equal(owned?.ownerSessionId, 'a');
+    assert.equal(owned?.resourceRef, 'terminal-a');
   });
 
-  it('stops an opened Terminal exactly once on close and on Session switch', async () => {
+  it('stops only explicitly closed Terminals and retains the same resource across navigation', async () => {
     const { root } = installReactRenderer();
     const stops: Array<{ sessionId: string; ref: string }> = [];
     const defaults = createFakeWorkbarServices();
@@ -407,7 +420,6 @@ describe('useWorkbarController', () => {
     await act(async () => renderController(root, services, input(session('b'))));
     assert.deepEqual(stops, [
       { sessionId: 'a', ref: 'terminal-1' },
-      { sessionId: 'a', ref: 'terminal-2' },
     ]);
     assert.equal(
       controllerRenderSnapshots
@@ -419,9 +431,13 @@ describe('useWorkbarController', () => {
         ),
       false,
     );
+    await act(async () => renderController(root, services, input(session('a'))));
+    const retained = controller().host.panelsState.right.tabs.find((tab) => tab.kind === 'terminal');
+    assert.equal(retained?.resourceRef, 'terminal-2');
+    assert.deepEqual(stops, [{ sessionId: 'a', ref: 'terminal-1' }]);
   });
 
-  it('retries a failed Terminal stop during later Session cleanup', async () => {
+  it('retries a failed explicit Terminal stop at workspace teardown, not navigation', async () => {
     const { root } = installReactRenderer();
     const firstStop = deferred<ShellRunUpdate | null>();
     const stops: Array<{ sessionId: string; ref: string }> = [];
@@ -451,12 +467,13 @@ describe('useWorkbarController', () => {
       await Promise.resolve();
     });
     await act(async () => renderController(root, services, input(session('b'))));
+    assert.equal(stops.length, 1);
+    await act(async () => root.unmount());
     assert.deepEqual(stops, [
       { sessionId: 'a', ref: 'terminal-retry' },
       { sessionId: 'a', ref: 'terminal-retry' },
     ]);
 
-    await act(async () => renderController(root, services, input(session('c'))));
     assert.equal(stops.length, 2);
   });
 

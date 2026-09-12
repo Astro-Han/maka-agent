@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Banner } from '@astryxdesign/core/Banner';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { generalizedErrorMessageForLocale } from '@maka/core/redaction';
@@ -59,6 +59,13 @@ export function SessionTerminalPanel(props: {
   const activeRef = useRef(props.active);
   const lastSizeRef = useRef('');
   const [error, setError] = useState<string | null>(null);
+  const loadFailed = useEffectEvent((cause?: unknown) => {
+    setError(cause === undefined ? copy.loadFailed :
+      generalizedErrorMessageForLocale(cause, copy.loadFailed, locale));
+  });
+  const writeFailed = useEffectEvent((cause: unknown) => {
+    setError(generalizedErrorMessageForLocale(cause, copy.writeFailed, locale));
+  });
 
   useEffect(() => {
     activeRef.current = props.active;
@@ -75,7 +82,7 @@ export function SessionTerminalPanel(props: {
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || !props.terminalRef || !props.active) return;
+    if (!host || !props.terminalRef) return;
 
     lastSizeRef.current = '';
     let disposed = false;
@@ -137,7 +144,7 @@ export function SessionTerminalPanel(props: {
         .then((snapshot) => {
           if (disposed || !hydration.isCurrent(epoch)) return;
           if (!snapshot) {
-            setError(copy.loadFailed);
+            loadFailed();
             return;
           }
           const committed = hydration.commit(epoch, snapshot);
@@ -158,9 +165,7 @@ export function SessionTerminalPanel(props: {
         })
         .catch((nextError) => {
           if (disposed || !hydration.isCurrent(epoch)) return;
-          setError(
-            generalizedErrorMessageForLocale(nextError, copy.loadFailed, locale),
-          );
+          loadFailed(nextError);
         })
         .finally(() => {
           hydrationPending = false;
@@ -187,9 +192,7 @@ export function SessionTerminalPanel(props: {
         })
         .catch((nextError) => {
           if (disposed) return;
-          setError(
-            generalizedErrorMessageForLocale(nextError, copy.writeFailed, locale),
-          );
+          writeFailed(nextError);
         });
     });
     const resize = () => {
@@ -242,12 +245,8 @@ export function SessionTerminalPanel(props: {
       terminal.dispose();
     };
   }, [
-    copy.loadFailed,
-    copy.writeFailed,
-    locale,
     props.sessionId,
     props.terminalRef,
-    props.active,
     terminalService,
   ]);
 
