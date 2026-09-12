@@ -69,8 +69,11 @@ export function SessionTerminalPanel(props: {
 
   useEffect(() => {
     activeRef.current = props.active;
-    if (!props.active) return;
     const terminal = terminalRef.current;
+    // Hidden terminals retain their parser and buffer, but have no accessible
+    // viewport to announce or measure. xterm recreates that view on activation.
+    if (terminal) terminal.options.screenReaderMode = props.active;
+    if (!props.active) return;
     const fit = fitRef.current;
     if (!terminal || !fit) return;
     return scheduleTerminalFrame(() => {
@@ -98,7 +101,7 @@ export function SessionTerminalPanel(props: {
       fontSize: getTerminalFontSize(),
       letterSpacing: 0,
       lineHeight: 1.2,
-      screenReaderMode: true,
+      screenReaderMode: activeRef.current,
       scrollback: 5_000,
       theme: terminalTheme(host),
     });
