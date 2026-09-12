@@ -530,7 +530,10 @@ test('Maka framework termination is authoritative before stdout decoding', async
 });
 
 test('Maka pre-names the evaluation session and forwards the Host settlement budget', async () => {
-  const makaCell = cell('maka', { ...makaConfig(), hostSettlementTimeoutMs: 120_000 });
+  const config = { ...makaConfig(), hostSettlementTimeoutMs: 120_000 };
+  Reflect.deleteProperty(config, 'thinkingLevel');
+  const makaCell = cell('maka', config);
+  createMakaSubjectAdapter().validate?.(makaCell);
   let settlementBudget: unknown;
   const result = await createMakaSubjectAdapter().execute({
     cell: makaCell,
@@ -544,6 +547,7 @@ test('Maka pre-names the evaluation session and forwards the Host settlement bud
           execution: { executionId: string; session: { name?: string } };
         };
         assert.equal(payload.execution.session.name, `Eval ${payload.execution.executionId}`);
+        assert.equal(Object.hasOwn(payload.execution.session, 'thinkingLevel'), false);
         settlementBudget = payload.hostSettlementTimeoutMs;
         return {
           termination: 'exited',

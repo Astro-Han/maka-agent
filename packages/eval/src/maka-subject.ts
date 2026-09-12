@@ -48,7 +48,7 @@ export function createMakaSubjectAdapter(): SubjectAdapter {
             connectionSlug: config.connectionSlug,
             model: config.model,
           },
-          thinkingLevel: config.thinkingLevel,
+          ...(config.thinkingLevel === undefined ? {} : { thinkingLevel: config.thinkingLevel }),
           permissionMode: config.permissionMode,
           collaborationMode: config.collaborationMode,
           orchestrationMode: config.orchestrationMode,
@@ -306,12 +306,13 @@ function exact(value: unknown, fields: readonly string[]): Record<string, unknow
     throw new Error('Maka config must be an object');
   const record = value as Record<string, unknown>;
   if (
-    Object.keys(record).length !== fields.length ||
-    fields.some((field) => !Object.hasOwn(record, field))
+    Object.keys(record).some((field) => !fields.includes(field)) ||
+    fields.some((field) => field !== 'thinkingLevel' && !Object.hasOwn(record, field))
   )
     throw new Error('Maka config fields are invalid');
   for (const field of fields) {
     if (field === 'hostSettlementTimeoutMs') continue;
+    if (field === 'thinkingLevel' && !Object.hasOwn(record, field)) continue;
     if (typeof record[field] !== 'string' || record[field] === '')
       throw new Error(`Maka config.${field} is invalid`);
   }
