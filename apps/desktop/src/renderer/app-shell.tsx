@@ -330,18 +330,14 @@ function AppShellContent({
     messageLoadPending,
     setMessageLoadPending,
     sessionUiController,
-    sessionCatalogController,
+    activeCatalogSession,
+    activeHostSession,
+    requestedCatalogSession,
+    requestedHostSession,
+    sharedSessionActive,
+    ownerActiveId,
+    switchingSession,
   } = useAppShellSessionWorkspace(toastApi);
-  // A locally created task can become active before its catalog row arrives,
-  // and remains pending until Host creation finishes. Neither state admits
-  // Host reads; cached rows already have a Host identity and may reconnect.
-  const activeCatalogSession = sessions.find((session) => session.id === activeId);
-  const requestedCatalogSession = sessions.find((session) => session.id === requestedSessionId);
-  const requestedHostSession = requestedCatalogSession?.localState !== 'pending'
-    ? requestedCatalogSession : undefined;
-  const activeHostSession = activeCatalogSession?.localState !== 'pending' ? activeCatalogSession : undefined;
-  const sharedSessionActive = activeCatalogSession?.shared === true;
-  const ownerActiveId = sharedSessionActive ? undefined : activeHostSession?.id;
   // Only the outstanding read needs a fence; past Sessions leave no hydration metadata.
   const interactionHydrationRef = useRef<{ sessionId: string } | null>(null);
   const markInteractionChanged = useCallback((sessionId: string) => {
@@ -2020,12 +2016,12 @@ function AppShellContent({
     activeId: requestedHostSession?.id,
     observationAuthorityRevision: observationAuthorityRef.current.revision,
     activeIdRef,
-    isRequestedSession: (id) => sessionCatalogController.getState().activeSessionId === id,
     handleEvent,
     beginObservationSeed,
     setExecution: sessionUiController.setExecution,
     completeObservationSeed,
     setMessageLoadErrorBySession: sessionUiController.setMessageLoadErrorBySession,
+    clearMessageLoadError: sessionUiController.clearMessageLoadError,
     setMessageLoadPending,
     commitTranscript,
     transcriptRangeRef,
@@ -2462,8 +2458,8 @@ function AppShellContent({
           <MakaUriContext.Provider value={dispatchMakaUri}>
           <div className="maka-detail-with-artifacts">
             <div className="mainColumn" data-home-surface={homeSurfaceActive ? 'true' : undefined}
-              inert={activeId !== requestedSessionId || undefined}
-              aria-busy={activeId !== requestedSessionId || undefined}>
+              inert={switchingSession || undefined}
+              aria-busy={switchingSession || undefined}>
               <ModuleHub.ModuleHubHost />
               <WorkHubMainNavigation onOpenWorkHub={openWorkHub} onOpenSession={(sessionId) => { closeSettings(); openSession(sessionId); }} />
               <WorkHubDock enabled={workHubEnabled} visible={workHubActive && sessionsSelected && !shellObscured} />

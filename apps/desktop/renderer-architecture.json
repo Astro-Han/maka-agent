@@ -496,7 +496,7 @@
           "react": 1
         },
         "importSpecifiers": 19,
-        "nonTriviaTokens": 3762
+        "nonTriviaTokens": 3715
       },
       "src/renderer/app-shell-overlays.tsx": {
         "importDeclarations": 7,
@@ -866,7 +866,7 @@
           "react": 1
         },
         "importSpecifiers": 104,
-        "nonTriviaTokens": 13602
+        "nonTriviaTokens": 13515
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 2,
@@ -938,9 +938,8 @@
           "useAppShellSessionList": 1,
           "useAppShellSessionUiState": 1,
           "useExternalStoreSelector": 1,
-          "useRef": 7,
-          "useSessionCatalogController": 1,
-          "useState": 3
+          "useRef": 4,
+          "useSessionCatalogController": 1
         },
         "lifecycleMethods": {},
         "unresolvedDependencies": 0,
@@ -955,8 +954,8 @@
           "./use-external-store-selector.js": 1,
           "react": 1
         },
-        "importSpecifiers": 10,
-        "nonTriviaTokens": 559
+        "importSpecifiers": 9,
+        "nonTriviaTokens": 412
       }
     },
     "closure": {

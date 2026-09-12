@@ -313,12 +313,12 @@ export function useActiveSessionEvents(options: {
   activeId: string | undefined;
   observationAuthorityRevision: number;
   activeIdRef: RefBox<string | undefined>;
-  isRequestedSession(sessionId: string): boolean;
   handleEvent: (sessionId: string, event: SessionEvent) => void;
   setExecution: import('./features/conversation/index.js').AppShellSessionUiStateController['setExecution'];
   beginObservationSeed: (sessionId: string) => void;
   completeObservationSeed: (sessionId: string) => void;
   setMessageLoadErrorBySession: (updater: (current: Record<string, string>) => Record<string, string>) => void;
+  clearMessageLoadError(sessionId: string): void;
   setMessageLoadPending: (pending: boolean) => void;
   commitTranscript: (sessionId: string, messages: StoredMessage[]) => void;
   transcriptRangeRef: RefBox<desktopTranscript.DesktopTranscriptRangeController | undefined>;
@@ -326,21 +326,14 @@ export function useActiveSessionEvents(options: {
   toastApi: Pick<ToastApi, 'error'>;
 }) {
   const activeId = options.activeId;
-  const clearMessageLoadError = useEffectEvent((sessionId: string) => {
-    options.setMessageLoadErrorBySession((current) => {
-      if (!current[sessionId]) return current;
-      const next = { ...current };
-      delete next[sessionId];
-      return next;
-    });
-  });
+  const clearMessageLoadError = useEffectEvent(options.clearMessageLoadError);
   // Reached only from the store subscription, which the effect unsubscribes on
   // teardown, so the window it publishes is always a live one.
   const applyTranscript = useEffectEvent((
     sessionId: string,
     store: desktopTranscript.DesktopTranscriptRangeStore,
   ) => {
-    if (options.isRequestedSession(sessionId)) {
+    if (options.activeId === sessionId) {
       const snapshot = store.snapshot();
       if (snapshot.ready) {
         options.commitTranscript(sessionId, [...snapshot.messages]);
@@ -349,7 +342,7 @@ export function useActiveSessionEvents(options: {
     }
   });
   const applyReadError = useEffectEvent((sessionId: string, error: unknown) => {
-    if (options.isRequestedSession(sessionId)) {
+    if (options.activeId === sessionId) {
       if (options.activeIdRef.current !== sessionId) options.commitTranscript(sessionId, []);
       const message = messageReadErrorMessage(error, options.uiLocale);
       options.setMessageLoadErrorBySession((current) => ({
