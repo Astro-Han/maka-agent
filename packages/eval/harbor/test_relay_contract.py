@@ -222,8 +222,12 @@ class RelayContractTest(unittest.TestCase):
         self.assertEqual(diagnostic["category"], "execution-scope-unavailable")
 
     def test_stages_environment_and_discards_unstructured_stdout(self):
-        relay = load_relay()
+        relay = load_relay("pier")
         environment = Environment()
+        environment.agent_process_env = lambda env: {
+            "HTTPS_PROXY": "http://agent:proxy-secret@pier-egress-proxy:8080",
+            **env,
+        }
         command = asyncio.run(
             relay._prepare_command(
                 environment,
@@ -243,6 +247,8 @@ class RelayContractTest(unittest.TestCase):
         self.assertIn(b"export MODE=offline", environment.uploaded)
         self.assertIn(b"export API_KEY=canary-secret", environment.uploaded)
         self.assertNotIn("canary-secret", command)
+        self.assertIn(b"HTTPS_PROXY=http://agent:proxy-secret@pier-egress-proxy:8080", environment.uploaded)
+        self.assertNotIn("proxy-secret", command)
         self.assertIn(">/dev/null", command)
 
     def test_leaves_no_credential_file_when_command_preparation_fails(self):

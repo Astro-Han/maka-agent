@@ -281,6 +281,8 @@ async def _prepare_command(
 ) -> str:
     credentials = request.get("credentials")
     public_environment = request.get("environment", {})
+    if framework == "pier":
+        public_environment = environment.agent_process_env(public_environment) or {}
     if not isinstance(credentials, dict) or not all(
         isinstance(key, str) and isinstance(value, str) for key, value in credentials.items()
     ):
