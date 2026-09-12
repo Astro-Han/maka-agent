@@ -1053,6 +1053,12 @@ test('new tasks snapshot the current global Code Mode setting', async () => {
   });
   for (const value of [true, false]) {
     enabled = value;
+    const expectedMode = value ? 'code_mode' : 'direct';
+    assert.equal(
+      (await fixture.coordinator.resolveExternalSessionImportTarget()).toolMode,
+      expectedMode,
+    );
+    assert.equal((await fixture.coordinator.resolveDefaultCreateTarget()).toolMode, expectedMode);
     const outcome = await fixture.coordinator.handlers['session.create'](
       {
         sessionId: fixture.sessionId,

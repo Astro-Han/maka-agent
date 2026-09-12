@@ -344,6 +344,7 @@ export class HostSessionCatalogCoordinator {
       llmConnectionSlug: model.connectionSlug,
       model: model.model,
       permissionMode: policy.policy.chatDefaults.permissionMode,
+      toolMode: policy.policy.chatDefaults.codeModeEnabled ? 'code_mode' : 'direct',
       collaborationMode: 'agent',
       orchestrationMode: 'default',
     };
