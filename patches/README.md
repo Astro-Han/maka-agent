@@ -91,7 +91,7 @@ the queue at the native exit fence. See #2978.
 
 Delete when node-pty ships an equivalent Unix write-lifecycle fix.
 
-## `@ai-sdk/provider-utils@5.0.34`
+## `@ai-sdk/provider-utils@5.0.40`
 
 Streaming tool-call association for gateways that reuse or omit `index` / `id`
 (Ollama-style, Anthropic→OpenAI translators). See #1967 / #1976 and
