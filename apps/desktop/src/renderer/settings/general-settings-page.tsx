@@ -518,7 +518,7 @@ function GeneralDefaultsCard(props: {
   const boundaryCopy = getShellCopy(locale).sessionSettingsActions;
   const toast = useToast();
   const mountedRef = useMountedRef();
-  type SaveKey = "default-model" | "permission-mode" | "thinking-level" | "code-mode";
+  type SaveKey = "default-model" | "permission-mode" | "thinking-level";
   const persistGuard = useKeyedActionGuard<SaveKey>();
   const [savingRows, setSavingRows] = useState<Partial<Record<SaveKey, boolean>>>({});
   function setRowSaving(key: SaveKey, saving: boolean) {
@@ -654,9 +654,6 @@ function GeneralDefaultsCard(props: {
 
   async function persistCodeMode(codeModeEnabled: boolean) {
     if (!props.settingsInteractive) return;
-    const releaseSave = persistGuard.begin('code-mode');
-    if (!releaseSave) return;
-    setRowSaving("code-mode", true);
     try {
       await props.onUpdate({ chatDefaults: { codeModeEnabled } });
     } catch (error) {
@@ -664,9 +661,6 @@ function GeneralDefaultsCard(props: {
         toast.error(copy.updateFailed, settingsActionErrorMessage(error, locale), undefined,
           host ? { profileId: host.profileId } : undefined);
       }
-    } finally {
-      releaseSave();
-      if (mountedRef.current) setRowSaving("code-mode", false);
     }
   }
 
@@ -684,8 +678,8 @@ function GeneralDefaultsCard(props: {
               label="Code Mode"
               isLabelHidden
               value={props.codeModeEnabled}
-              isDisabled={savingRows["code-mode"] || !props.settingsInteractive}
-              onChange={(enabled) => void persistCodeMode(enabled)}
+              isDisabled={!props.settingsInteractive}
+              changeAction={persistCodeMode}
             />
           }
         />
