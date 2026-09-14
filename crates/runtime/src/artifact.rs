@@ -1,0 +1,176 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    File,
+    Diff,
+    Html,
+    Image,
+    Pdf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactSource {
+    ToolResult,
+    ToolResultProjection,
+    ToolResultArchive,
+    SubagentWriteback,
+    DeepResearch,
+    UserUpload,
+    SessionEffect,
+}
+
+impl ArtifactSource {
+    pub fn user_deletable(self) -> bool {
+        matches!(self, Self::ToolResult | Self::UserUpload)
+    }
+}
+
+/// Canonical descriptor. The payload is owned by storage, never a renderer path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Artifact {
+    pub id: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub created_at: u64,
+    pub name: String,
+    pub kind: ArtifactKind,
+    pub size_bytes: u64,
+    #[serde(
+        default,
+        deserialize_with = "optional_text",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mime_type: Option<String>,
+    pub source: ArtifactSource,
+    #[serde(
+        default,
+        deserialize_with = "optional_text",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub summary: Option<String>,
+}
+
+impl Artifact {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        crate::interaction::entity_id(&self.id)?;
+        crate::interaction::entity_id(&self.session_id)?;
+        if self.turn_id.is_empty()
+            || self.turn_id.encode_utf16().count() > 512
+            || self.turn_id.bytes().any(|b| b < 32 || b == 127)
+            || self.created_at > 9_007_199_254_740_991
+            || self.size_bytes > 9_007_199_254_740_991
+            || self.name.is_empty()
+            || self.mime_type.as_ref().is_some_and(String::is_empty)
+            || self.summary.as_ref().is_some_and(String::is_empty)
+        {
+            return Err("Invalid artifact descriptor");
+        }
+        Ok(())
+    }
+}
+
+fn optional_text<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+
+/// Stable logical identity makes an acknowledged or ambiguous upload retryable
+/// without assigning it a different destination or overwriting another artifact.
+pub fn upload_artifact_id(session_id: &str, upload_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(session_id);
+    digest.update([0]);
+    digest.update(upload_id);
+    format!("attachment-{}", &format!("{:x}", digest.finalize())[..32])
+}
+
+pub fn content_digest(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+pub fn normalize_name(name: &str) -> String {
+    let mut cleaned = String::new();
+    let mut whitespace = false;
+    for character in name.trim_matches(js_whitespace).chars() {
+        if js_whitespace(character) {
+            if !whitespace {
+                cleaned.push(' ');
+            }
+            whitespace = true;
+        } else {
+            cleaned.push(if "\\/:*?\"<>|\0".contains(character) {
+                '-'
+            } else {
+                character
+            });
+            whitespace = false;
+        }
+    }
+    let cleaned = cleaned.trim_matches([' ', '.', '-']);
+    let mut units = 0;
+    let end = cleaned
+        .char_indices()
+        .find_map(|(index, character)| {
+            units += character.len_utf16();
+            (units > 120).then_some(index)
+        })
+        .unwrap_or(cleaned.len());
+    let result = cleaned[..end].trim_end_matches([' ', '.', '-']);
+    if result.is_empty() {
+        "artifact".into()
+    } else {
+        result.into()
+    }
+}
+
+fn js_whitespace(character: char) -> bool {
+    matches!(character, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' |
+        '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' |
+        '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_are_idempotent_with_javascript_whitespace_and_utf16_truncation() {
+        for (input, expected) in [
+            (" ../unsafe:name?.txt ".into(), "unsafe-name-.txt".into()),
+            ("-.gitignore".into(), "gitignore".into()),
+            ("\u{feff}  . a\u{feff}".into(), "a".into()),
+            ("\u{0085}a\u{0085}".into(), "\u{0085}a\u{0085}".into()),
+            (format!("{}😀", "a".repeat(119)), "a".repeat(119)),
+            (". -- ".into(), "artifact".into()),
+        ] {
+            assert_eq!(normalize_name(&input), expected);
+            assert_eq!(normalize_name(&expected), expected);
+            assert!(expected.encode_utf16().count() <= 120);
+        }
+    }
+}

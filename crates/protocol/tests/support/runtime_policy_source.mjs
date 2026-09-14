@@ -1,0 +1,50 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import assert from 'node:assert/strict';
+import { withSourceModule } from '../../../../tests/support/source.mjs';
+
+await withSourceModule('packages/runtime-host/src/protocol/runtime-policy.ts', async (source) => {
+  let input = '';
+  for await (const chunk of process.stdin) input += chunk;
+  const { cases, errors, defaults } = JSON.parse(input);
+  const proxy = await withSourceModule(
+    'packages/runtime-host/src/protocol/network-proxy.ts',
+    async (source) => source.NETWORK_PROXY_OPERATION_SPECS,
+  );
+  const specs = { ...source.RUNTIME_POLICY_OPERATION_SPECS, ...proxy };
+  await withSourceModule('packages/core/src/runtime-policy.ts', async (core) => {
+    assert.deepEqual(defaults, core.createDefaultRuntimePolicy());
+  });
+  for (const [operation, expected] of Object.entries(errors)) {
+    assert.deepEqual(specs[operation].errors, expected);
+  }
+  for (const [index, test] of cases.entries()) {
+    const spec = specs[test.operation];
+    let actual;
+    try {
+      const value =
+        test.direction === 'input' ? spec.decodeInput(test.value) : spec.decodeOutput(test.value);
+      actual = { ok: true, value };
+    } catch {
+      actual = { ok: false };
+    }
+    assert.deepEqual(actual, test.expected, `case ${index}: ${JSON.stringify(test.value)}`);
+  }
+});

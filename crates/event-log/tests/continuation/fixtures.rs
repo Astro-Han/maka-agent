@@ -1,0 +1,110 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::*;
+
+pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEvent {
+    RuntimeEvent::new(
+        Invocation {
+            session_id: "session".into(),
+            turn_id: id.into(),
+            run_id: id.into(),
+            invocation_id: id.into(),
+        },
+        Fact::InvocationOpened {
+            configuration: Some(InvocationConfiguration {
+                system_prompt: None,
+                cwd: ".".into(),
+                workspace_identity: Some(
+                    WorkspaceIdentity::from_marker_id("ef751105-55b5-4d65-a364-646281586a17")
+                        .unwrap(),
+                ),
+                permission_mode: PermissionMode::Explore,
+                collaboration_mode: CollaborationMode::Agent,
+                orchestration_mode: OrchestrationMode::Default,
+                tool_mode: ToolMode::Direct,
+                model: None,
+                thinking_level: None,
+            }),
+            input: match claim {
+                Some(claim) => InvocationInput::Continuation {
+                    claim: Box::new(claim),
+                    request_fingerprint: digest('f'),
+                },
+                None => InvocationInput::Message {
+                    content: id.into(),
+                    skill_invocation: Default::default(),
+                    source_messages: Vec::new(),
+                    request_fingerprint: None,
+                },
+            },
+        },
+    )
+}
+
+pub(super) fn digest(c: char) -> String {
+    format!("sha256:{}", c.to_string().repeat(64))
+}
+
+pub(super) async fn append(log: &EventLog, event: &RuntimeEvent) -> u64 {
+    log.append(&EventWrite::plain(event.clone()).unwrap())
+        .await
+        .unwrap()
+}
+
+pub(super) async fn close(log: &EventLog, opening: &RuntimeEvent) {
+    append(
+        log,
+        &RuntimeEvent::new(
+            opening.invocation.clone(),
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::Completed,
+            },
+        ),
+    )
+    .await;
+}
+
+pub(super) async fn claim(
+    log: &EventLog,
+    id: &str,
+    source: &RuntimeEvent,
+    base: SessionBase,
+) -> ContinuationClaim {
+    let prefix = log
+        .run_prefix("session", &source.invocation.run_id, None, 100, 65536)
+        .await
+        .unwrap()
+        .unwrap();
+    ContinuationClaim {
+        id: id.into(),
+        source: RunBoundary {
+            invocation: prefix.invocation,
+            high_water: prefix.high_water,
+            digest: prefix.digest,
+        },
+        base,
+        // Fixture of engine-owned projection evidence; the store authenticates raw ancestry.
+        replay: ReplayEvidence {
+            version: REPLAY_VERSION,
+            digest: digest('a'),
+            route_identity: digest('b'),
+        },
+    }
+}

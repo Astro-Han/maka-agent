@@ -474,7 +474,8 @@ export class ClientSessionSubscription
   }
 
   #assertTranscriptReadable(): void {
-    if (this.#closing || this.#done || this.#terminalError) {
+    if (this.#terminalError) throw this.#terminalError;
+    if (this.#closing || this.#done) {
       throw new RuntimeHostSubscriptionError(
         'connection_closed',
         'Session subscription closed during transcript loading',

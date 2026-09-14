@@ -773,3 +773,18 @@ copyright notices, and license texts are in:
 Additional verbatim license texts referenced by that inventory are in:
 
   apps/desktop/resources/licenses/renderer/
+
+OpenAI Codex apply-patch (adapted source)
+
+Source: https://github.com/openai/codex
+Copyright 2025 OpenAI
+License: Apache License 2.0 (the text at the beginning of this file).
+
+The pure patch parser, contextual matching and line-ending reconstruction in
+crates/apply-patch/src/{lib,parser,seek_sequence,text_file,update}.rs
+contain adapted portions of codex-rs/apply-patch. The parser is based on revision
+d45513ce5ad99d37638f355601f075d55860001e; matching and line-ending handling are
+based on revision 624ccf794703e2d84e748fc3ef547d6191a8c0a4. Maka removes filesystem,
+shell, streaming and execution-service dependencies, adds bounded pure APIs,
+and excludes unsupported patch operations. Detailed provenance and modifications
+are recorded in crates/apply-patch/SOURCE.md.

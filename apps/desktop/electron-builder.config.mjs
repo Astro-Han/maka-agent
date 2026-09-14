@@ -17,9 +17,12 @@
  * under the License.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Arch } from 'electron-builder';
+import { buildCli, rustTarget } from '../../scripts/rust/build-cli.mjs';
 import {
   resolveDesktopBuildVersion,
   resolveRuntimeHostSetupPackage,
@@ -45,7 +48,17 @@ function resolvePackageFile(packageName, relativePath) {
   return join(dirname(require.resolve(`${packageName}/package.json`)), relativePath);
 }
 
-async function stageReleaseManifests({ packager }) {
+async function stageReleaseManifests({ packager, arch }) {
+  const target = rustTarget(packager.platform.nodeName, Arch[arch]);
+  const binary = await buildCli({
+    release: true,
+    ...(target === rustTarget() ? {} : { target }),
+  });
+  const nativeStage = fileURLToPath(new URL(
+    `../../target/desktop/${packager.platform.buildConfigurationKey}-${Arch[arch]}/`, import.meta.url,
+  ));
+  mkdirSync(nativeStage, { recursive: true });
+  copyFileSync(binary, join(nativeStage, basename(binary)));
   const stage = await packager.info.tempDirManager.createTempDir({
     prefix: 'maka-release-manifests',
   });
@@ -110,6 +123,10 @@ const baseDesktopBuilderConfig = {
     'dist/renderer/computer-use-overlay/**',
   ],
   extraResources: [
+    {
+      from: '../../target/desktop/${os}-${arch}',
+      to: 'runtime-host',
+    },
     {
       from: 'bundled-tools.json',
       to: 'bundled-tools.json',

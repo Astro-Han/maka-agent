@@ -1,0 +1,215 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::{read, shell};
+use crate::session::SessionConfiguration;
+use maka_event_log::EventLog;
+use maka_fs_tools::{
+    EDIT_DESCRIPTION, EDIT_NAME, GLOB_DESCRIPTION, GLOB_NAME, GREP_DESCRIPTION, GREP_NAME,
+    MutationExecutor, PATCH_DESCRIPTION, PATCH_NAME, READ_NAME, ReadExecutor, ReadLimits,
+    ReadScope, WRITE_DESCRIPTION, WRITE_NAME, WriteCoordinator, WriteScope, edit_schema,
+    glob_schema, grep_schema, patch_schema, write_schema,
+};
+use maka_process::{SHELL_NAME, ShellExecutor};
+use maka_protocol::session::PermissionMode;
+use maka_protocol::{OperationError, OperationErrorCode};
+use maka_tools::{
+    ToolCatalog, ToolDefinition, ToolHandler, ToolNesting, ToolRegistration, ToolSemantics,
+};
+use std::{path::PathBuf, sync::Arc};
+
+mod live;
+pub(super) use live::NativeTools;
+
+/// Definitions and capability identities remain Run-owned. Native calls capture
+/// the current durable permission boundary during preparation, before T1.
+pub(super) fn catalog(
+    native: NativeTools,
+    mode: PermissionMode,
+    additional_tools: Vec<ToolRegistration>,
+    mut skills: super::skills::FrozenSkills,
+) -> Result<(ToolCatalog, Arc<super::skills::FrozenSkills>), OperationError> {
+    let mut registrations = native.registrations(mode)?;
+    let live = Arc::new(live::LiveTools::new(native, &registrations, mode));
+    for registration in &mut registrations {
+        registration.handler = ToolHandler::Prepared(live.clone());
+    }
+    registrations.extend(additional_tools);
+    skills.host.tools.extend(
+        registrations
+            .iter()
+            .map(|tool| tool.definition.name.clone()),
+    );
+    skills
+        .host
+        .tools
+        .extend(["Skill".into(), "SkillSearch".into()]);
+    let skills = Arc::new(skills);
+    // An empty frozen inventory cannot service either tool during this Run.
+    if skills.catalog().available().next().is_some() {
+        registrations.extend(skills.registrations());
+    }
+    ToolCatalog::new(registrations)
+        .map(ToolCatalog::with_discovery)
+        .map(|catalog| (catalog, skills))
+        .map_err(unavailable)
+}
+
+fn registrations(
+    native: &NativeTools,
+    mode: PermissionMode,
+) -> Result<Vec<ToolRegistration>, OperationError> {
+    if native.profile.is_some() {
+        return Err(unavailable(
+            "Named Session tool profiles are not implemented",
+        ));
+    }
+    let cwd = PathBuf::from(&native.cwd);
+    let (read_scope, write_scope) = match mode {
+        PermissionMode::Explore => (
+            ReadScope::Restricted {
+                roots: vec![cwd.clone()],
+            },
+            None,
+        ),
+        PermissionMode::Ask => {
+            let roots = vec![cwd.clone(), std::env::temp_dir()];
+            #[cfg(unix)]
+            let roots = {
+                let mut roots = roots;
+                roots.push(PathBuf::from("/tmp"));
+                roots
+            };
+            (
+                ReadScope::Restricted {
+                    roots: roots.clone(),
+                },
+                Some(WriteScope::Restricted { roots }),
+            )
+        }
+        PermissionMode::Bypass => (ReadScope::Unrestricted, Some(WriteScope::Unrestricted)),
+    };
+    let executor =
+        ReadExecutor::new(&cwd, read_scope, ReadLimits::default()).map_err(unavailable)?;
+    let mut registrations = vec![ToolRegistration {
+        definition: ToolDefinition {
+            name: READ_NAME.into(),
+            description: read::DESCRIPTION.into(),
+            input_schema: read::schema(),
+        },
+        nesting: ToolNesting::Nestable,
+        semantics: ToolSemantics::Parallel,
+        handler: ToolHandler::Prepared(Arc::new(read::SessionRead::new(
+            executor.clone(),
+            native.log.clone(),
+        ))),
+    }];
+    let search = Arc::new(executor);
+    for (name, description, input_schema) in [
+        (GLOB_NAME, GLOB_DESCRIPTION, glob_schema()),
+        (GREP_NAME, GREP_DESCRIPTION, grep_schema()),
+    ] {
+        registrations.push(ToolRegistration {
+            definition: ToolDefinition {
+                name: name.into(),
+                description: description.into(),
+                input_schema,
+            },
+            nesting: ToolNesting::Nestable,
+            semantics: ToolSemantics::Parallel,
+            handler: ToolHandler::Immediate(search.clone()),
+        });
+    }
+    if let Some(scope) = write_scope {
+        let executor = Arc::new(
+            MutationExecutor::new(&cwd, scope, native.writes.clone()).map_err(unavailable)?,
+        );
+        for (name, description, input_schema) in [
+            (WRITE_NAME, WRITE_DESCRIPTION, write_schema()),
+            (EDIT_NAME, EDIT_DESCRIPTION, edit_schema()),
+            (PATCH_NAME, PATCH_DESCRIPTION, patch_schema()),
+        ] {
+            registrations.push(ToolRegistration {
+                definition: ToolDefinition {
+                    name: name.into(),
+                    description: description.into(),
+                    input_schema,
+                },
+                nesting: ToolNesting::Nestable,
+                semantics: ToolSemantics::Parallel,
+                handler: ToolHandler::Immediate(executor.clone()),
+            });
+        }
+    }
+    // No OS sandbox is implemented. A working directory does not constrain a
+    // shell, so only an explicit unrestricted Session may receive this tool.
+    if mode == PermissionMode::Bypass {
+        let executor = ShellExecutor::trusted_unrestricted(&cwd).map_err(unavailable)?;
+        let description = format!(
+            "{} Set run_in_background=true for a persistent background task; use Read with its returned ref as path to observe output. Set pty=true for terminal-dependent programs (requires background mode). Background tasks have no default timeout; foreground defaults to 120 seconds and allows at most 600 seconds.",
+            executor.description()
+        );
+        let handler = Arc::new(shell::SessionShell::new(
+            executor,
+            native.shells.clone(),
+            native.log.clone(),
+            native.controllers.clone(),
+        ));
+        registrations.push(ToolRegistration {
+            definition: ToolDefinition {
+                name: SHELL_NAME.into(),
+                description,
+                input_schema: shell::schema(),
+            },
+            nesting: ToolNesting::Nestable,
+            semantics: ToolSemantics::Parallel,
+            handler: ToolHandler::Prepared(handler.clone()),
+        });
+        registrations.push(ToolRegistration {
+            definition: ToolDefinition {
+                name: shell::STOP_NAME.into(),
+                description:
+                    "Stop a background shell task by its runtime ref and wait for native cleanup."
+                        .into(),
+                input_schema: shell::stop_schema(),
+            },
+            nesting: ToolNesting::Nestable,
+            semantics: ToolSemantics::Parallel,
+            handler: ToolHandler::Prepared(handler.clone()),
+        });
+        registrations.push(ToolRegistration {
+            definition: ToolDefinition {
+                name: shell::WRITE_STDIN_NAME.into(),
+                description: "Send raw input or ordered terminal actions to a background PTY, optionally with resize. Actions: {type:'text',text}, {type:'key',key,modifiers?}, {type:'mouse',event,x,y,button?,direction?,modifiers?}. Text has no terminal controls; use key enter, named navigation keys, or ctrl/alt chords. Mouse requires application-enabled SGR tracking. Returns the committed terminal cut, not output attributed to this input; use Read for later output. A connected Client controller takes precedence.".into(),
+                input_schema: shell::write_stdin_schema(),
+            },
+            nesting: ToolNesting::Nestable,
+            semantics: ToolSemantics::Parallel,
+            handler: ToolHandler::Prepared(handler),
+        });
+    }
+    Ok(registrations)
+}
+
+fn unavailable(message: impl std::fmt::Display) -> OperationError {
+    OperationError {
+        code: OperationErrorCode::OperationUnavailable,
+        message: message.to_string(),
+    }
+}

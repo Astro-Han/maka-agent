@@ -345,20 +345,26 @@ test('rejects epoch and Session correlation changes per subscription', async () 
   }
 });
 
-test('evicts a locally slow iterator and keeps the connection usable', async () => {
+test('preserves slow-consumer failure across an in-flight transcript read without closing the connection', async () => {
   const closeObserved = deferred<void>();
   await withProtocolPeer(
     async (transport, hostEpoch, rootId) => {
       const request = await acceptConnectionAndReadOpen(transport, hostEpoch, rootId);
-      const opened = openResult(hostEpoch, 'subscription-slow');
-      const frames = [
-        encodeLocalIpcTestFrame({
-          requestId: request.requestId,
-          operation: 'subscription.open',
-          ok: true,
-          result: opened,
-        }),
-      ];
+      const opened = openResult(
+        hostEpoch,
+        'subscription-slow',
+        transcriptBootstrap(Buffer.from('{}')),
+      );
+      await writeProtocolFrame(transport, {
+        requestId: request.requestId,
+        operation: 'subscription.open',
+        ok: true,
+        result: opened,
+      });
+      const read = decodeClientFrame(await transport.read(1_000));
+      assert.ok(!('kind' in read));
+      assert.equal(read.operation, 'session.transcript.page');
+      const frames = [];
       for (let sequence = 1; sequence <= 33; sequence += 1) {
         frames.push(
           encodeLocalIpcTestFrame(deltaFrame(hostEpoch, opened.subscriptionId, sequence)),
@@ -366,18 +372,36 @@ test('evicts a locally slow iterator and keeps the connection usable', async () 
       }
       await writeRawLocalIpc(transport, Buffer.concat(frames));
       await answerClose(transport, opened.subscriptionId, closeObserved.resolve);
+      await writeProtocolFrame(transport, {
+        requestId: read.requestId,
+        operation: 'session.transcript.page',
+        ok: true,
+        result: transcriptPage(),
+      });
       await answerStatus(transport, hostEpoch);
     },
     async (connection) => {
       const subscription = await connection.openSessionSubscription({
         sessionId: 'session-1',
-        transcript: { kind: 'none' },
+        transcript: { kind: 'tail', maxBytes: 16 * 1024 },
       });
+      const reading = assert.rejects(
+        subscription.loadTranscriptPage({
+          source: 'durable',
+          direction: 'older',
+          throughSequence: 0,
+          cursor: null,
+          anchorSequence: null,
+          maxBytes: 16 * 1024,
+        }),
+        hasSubscriptionReason('slow_consumer'),
+      );
       await closeObserved.promise;
       await assert.rejects(
         () => subscription[Symbol.asyncIterator]().next(),
         hasSubscriptionReason('slow_consumer'),
       );
+      await reading;
       assert.equal((await connection.status()).hostEpoch, connection.hostEpoch);
     },
   );

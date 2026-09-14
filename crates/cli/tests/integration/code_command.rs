@@ -1,0 +1,122 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+use maka_event_log::{EventLog, StoreError};
+use maka_runtime::event::{Fact, TerminalStatus};
+use maka_runtime::execution::{PermissionMode, ToolMode};
+use serde_json::json;
+
+#[tokio::test]
+async fn binary_runs_journaled_file_tools_and_reconstructs_the_invocation_after_exit() {
+    let directory = tempfile::tempdir().unwrap();
+    let log_path = directory.path().join("events.sqlite");
+    let file_path = directory.path().join("output.txt");
+    let source = format!(
+        "await tools.write_file({}); return await tools.read_file({});",
+        json!({"path":file_path, "content":"hello from Rust"}),
+        json!({"path":file_path})
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_maka"))
+        .current_dir(directory.path())
+        .args(["code", "--log"])
+        .arg(&log_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(source.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["output"]["ok"], true);
+    assert_eq!(response["output"]["value"]["text"], "hello from Rust");
+    assert_eq!(
+        std::fs::read_to_string(file_path).unwrap(),
+        "hello from Rust"
+    );
+    let log = EventLog::open(&log_path).await.unwrap();
+    let prefix = log.prefix(10, 16_384).await.unwrap();
+    assert_eq!(
+        prefix
+            .events
+            .iter()
+            .map(|entry| entry.event.fact.kind())
+            .collect::<Vec<_>>(),
+        [
+            "invocation_opened",
+            "tool_dispatched",
+            "tool_settled",
+            "tool_dispatched",
+            "tool_settled",
+            "invocation_ended"
+        ]
+    );
+    let id = response["invocation"]["invocation_id"].as_str().unwrap();
+    let view = prefix.project_invocation(id);
+    assert_eq!(view.terminal, Some(TerminalStatus::Completed));
+    assert!(view.uncertain_operations.is_empty());
+    let Fact::InvocationOpened {
+        input: maka_runtime::input::InvocationInput::Code { source: recorded },
+        configuration: Some(configuration),
+    } = &prefix.events[0].event.fact
+    else {
+        panic!("code opening must retain source and configuration");
+    };
+    assert_eq!(recorded, &source);
+    let cwd = std::path::Path::new(&configuration.cwd);
+    assert!(cwd.is_absolute());
+    // Windows canonicalize adds a verbatim prefix; current_dir need not do so.
+    assert_eq!(
+        cwd.canonicalize().unwrap(),
+        directory.path().canonicalize().unwrap()
+    );
+    assert_eq!(configuration.permission_mode, PermissionMode::Bypass);
+    assert_eq!(configuration.tool_mode, ToolMode::CodeMode);
+    assert!(configuration.model.is_none());
+    log.close().await.unwrap();
+    let inspect = Command::new(env!("CARGO_BIN_EXE_maka"))
+        .args(["inspect", "--log"])
+        .arg(&log_path)
+        .output()
+        .unwrap();
+    assert!(inspect.status.success());
+    let reopened: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
+    assert_eq!(reopened["digest"], prefix.digest);
+
+    let foreign = directory.path().join("foreign.sqlite");
+    std::fs::write(&foreign, b"not a Maka database").unwrap();
+    assert!(matches!(
+        EventLog::open(&foreign).await,
+        Err(StoreError::Sqlx(_))
+    ));
+    assert_eq!(std::fs::read(foreign).unwrap(), b"not a Maka database");
+}

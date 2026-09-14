@@ -26,7 +26,8 @@ docs/assets/
 apps/desktop/tests/real-window-smoke/
 deepseek.key
 
-# Built only by the dedicated Gitoxide helper lane; normal workspace tests do not use Cargo.
+# Cargo workspace and independent native helper build artifacts.
+/target/
 /native/gitoxide-helper/target/
 /native/runtime-host-peer/target/
 /native/runtime-host-windows-task-launcher/target/

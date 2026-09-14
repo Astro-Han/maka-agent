@@ -215,6 +215,8 @@ export interface DesktopRuntimeHostCandidateStartInput
   extends Omit<DesktopRuntimeHostCandidateDeps, "ipcMain"> {
   readonly ipcMain: CandidateIpcMain;
   readonly rootPath: string;
+  /** Native roots are validated by Maka, never opened as a TypeScript operational database. */
+  readonly nativeHost?: boolean;
   readonly clientInstanceId?: string;
   readonly electionDeadlineMs?: number;
   readonly connectTimeoutMs?: number;
@@ -385,7 +387,9 @@ export async function startDesktopRuntimeHostCandidate(
     // A resident managed Host can speak this protocol while still using an
     // older storage schema. Validate the shared local database before exposing
     // any candidate services, so startup recovery can update its owning Host.
-    acquireOperationalStateDatabase(input.rootPath, { schemaMigration: 'require_current' }).close();
+    if (!input.nativeHost) {
+      acquireOperationalStateDatabase(input.rootPath, { schemaMigration: 'require_current' }).close();
+    }
     return {
       kind: "ready",
       candidate: await createDesktopRuntimeHostCandidate(

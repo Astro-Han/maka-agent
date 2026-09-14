@@ -1,0 +1,271 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+//! Session metadata policy. Execution content remains in the runtime log.
+mod metadata;
+mod name;
+
+pub use metadata::apply_metadata_patch;
+
+use maka_event_log::sessions::SessionRecord;
+use maka_protocol::session::*;
+use maka_protocol::{ProtocolError, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sha2::{Digest, Sha256};
+
+pub use maka_runtime::execution::ModelBinding as SessionModel;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SessionConfiguration {
+    pub workspace: WorkspaceProjection,
+    pub name: String,
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub is_flagged: bool,
+    #[serde(default)]
+    pub title_is_manual: bool,
+    pub model: SessionModel,
+    #[serde(default)]
+    pub connection_locked: bool,
+    pub thinking_level: Option<ThinkingLevel>,
+    pub tool_profile: Option<SessionToolProfile>,
+    /// Frozen at creation. Missing on older Rust Sessions means direct tools.
+    #[serde(default)]
+    pub tool_mode: maka_runtime::execution::ToolMode,
+    pub permission_mode: PermissionMode,
+    /// Revision of the enforced policy, independent of unrelated catalog changes.
+    #[serde(default)]
+    pub boundary_revision: u64,
+    pub collaboration_mode: CollaborationMode,
+    pub orchestration_mode: OrchestrationMode,
+}
+
+impl SessionConfiguration {
+    pub async fn invocation_configuration(
+        &self,
+    ) -> std::io::Result<maka_runtime::execution::InvocationConfiguration> {
+        let workspace_identity = maka_fs_tools::workspace::ensure_identity(std::path::Path::new(
+            &self.workspace.host_cwd,
+        ))
+        .await?;
+        Ok(maka_runtime::execution::InvocationConfiguration {
+            system_prompt: None,
+            cwd: self.workspace.host_cwd.clone(),
+            workspace_identity: Some(workspace_identity),
+            permission_mode: self.permission_mode,
+            collaboration_mode: self.collaboration_mode,
+            orchestration_mode: self.orchestration_mode,
+            tool_mode: self.tool_mode,
+            model: Some(self.model.clone()),
+            thinking_level: self.thinking_level,
+        })
+    }
+}
+
+/// Preparing the stable request identity precedes model/workspace resolution.
+/// An exact replay can therefore succeed even if its old connection was removed.
+pub struct PreparedSession {
+    input: SessionCreateInput,
+    name: String,
+    labels: Vec<String>,
+    permission_mode: Option<PermissionMode>,
+}
+
+impl PreparedSession {
+    pub fn new(input: SessionCreateInput) -> Result<Self> {
+        if input.labels.as_ref().is_some_and(|labels| {
+            labels
+                .iter()
+                .any(|label| matches!(label.as_str(), "mode:bot" | "mode:deep_research"))
+        }) {
+            return Err(ProtocolError::invalid(
+                "Session creation cannot set reserved execution labels",
+            ));
+        }
+        if input.mode.is_none() && input.permission_mode == Some(PermissionMode::Explore) {
+            return Err(ProtocolError::invalid(
+                "Explore permission requires a declared Session mode",
+            ));
+        }
+        let requested_name = match input.mode {
+            Some(SessionStartMode::DeepResearch) => "Deep Research",
+            _ => input.name.as_deref().unwrap_or("New Chat"),
+        };
+        let name = name::normalize(requested_name)?;
+        let mut labels = input.labels.clone().unwrap_or_default();
+        match input.mode {
+            Some(SessionStartMode::DeepResearch) => labels.push("mode:deep_research".into()),
+            Some(SessionStartMode::Bot) => labels.push("mode:bot".into()),
+            None => {}
+        }
+        let permission_mode = if input.mode.is_some() {
+            Some(PermissionMode::Explore)
+        } else {
+            input.permission_mode
+        };
+        Ok(Self {
+            input,
+            name,
+            labels,
+            permission_mode,
+        })
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.input.session_id
+    }
+    pub fn workspace(&self) -> &WorkspaceTarget {
+        &self.input.workspace
+    }
+    pub fn model_target(&self) -> &SessionModelTarget {
+        &self.input.model_target
+    }
+
+    pub fn fingerprint(&self) -> String {
+        let workspace = match &self.input.workspace {
+            WorkspaceTarget::HostPath { path } => json!(["host_path", path]),
+            WorkspaceTarget::Project { project_id } => json!(["project", project_id]),
+        };
+        let model = match &self.input.model_target {
+            SessionModelTarget::Default => json!(["default"]),
+            SessionModelTarget::Explicit {
+                connection_id,
+                connection_slug,
+                model,
+            } => json!([connection_id, connection_slug, model]),
+        };
+        let permission = self
+            .permission_mode
+            .map(|mode| json!(mode))
+            .unwrap_or_else(|| json!(["runtime_default"]));
+        let identity = json!([
+            "session.create.v4",
+            self.input.session_id,
+            workspace,
+            self.name,
+            self.labels,
+            model,
+            self.input.thinking_level,
+            self.input.tool_profile,
+            permission,
+            self.input
+                .collaboration_mode
+                .unwrap_or(CollaborationMode::Agent),
+            self.input
+                .orchestration_mode
+                .unwrap_or(OrchestrationMode::Default),
+        ]);
+        format!(
+            "sha256:{:x}",
+            Sha256::digest(identity.to_string().as_bytes())
+        )
+    }
+
+    pub fn bind(
+        self,
+        workspace: WorkspaceProjection,
+        model: SessionModel,
+        default_permission: PermissionMode,
+        tool_mode: maka_runtime::execution::ToolMode,
+    ) -> SessionConfiguration {
+        SessionConfiguration {
+            workspace,
+            name: self.name,
+            labels: self.labels,
+            is_flagged: false,
+            title_is_manual: false,
+            model,
+            connection_locked: false,
+            thinking_level: self.input.thinking_level,
+            tool_profile: self.input.tool_profile,
+            tool_mode,
+            permission_mode: self.permission_mode.unwrap_or(default_permission),
+            boundary_revision: 0,
+            collaboration_mode: self
+                .input
+                .collaboration_mode
+                .unwrap_or(CollaborationMode::Agent),
+            orchestration_mode: self
+                .input
+                .orchestration_mode
+                .unwrap_or(OrchestrationMode::Default),
+        }
+    }
+}
+
+/// Durable control metadata baseline. The host overlays execution status from
+/// canonical runtime facts before presenting a live catalog entry.
+pub fn metadata_projection(
+    record: SessionRecord<SessionConfiguration>,
+) -> SessionCatalogProjection {
+    let config = record.configuration;
+    let mut labels = Vec::new();
+    let mut labels_truncated = false;
+    for label in config.labels {
+        if labels.len() >= 32
+            || label.is_empty()
+            || label.len() > 128
+            || label.trim() != label
+            || label.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}')
+            || labels.contains(&label)
+        {
+            labels_truncated = true;
+        } else {
+            labels.push(label);
+        }
+    }
+    SessionCatalogProjection {
+        id: record.id,
+        revision: record.revision,
+        workspace: config.workspace,
+        created_at: record.created_at,
+        activity_at: record.updated_at,
+        name: config.name,
+        is_flagged: config.is_flagged,
+        is_archived: record.archived,
+        labels,
+        labels_truncated,
+        has_unread: record.read_state.has_unread,
+        status: SessionStatus::Active,
+        backend: Backend::AiSdk,
+        llm_connection_id: Some(config.model.connection_id),
+        llm_connection_slug: config.model.connection_slug,
+        connection_locked: config.connection_locked,
+        model: config.model.model,
+        permission_mode: config.permission_mode,
+        collaboration_mode: config.collaboration_mode,
+        orchestration_mode: config.orchestration_mode,
+        thinking_level: config.thinking_level,
+        last_message_at: None,
+        last_message_preview: None,
+        blocked_reason: None,
+        status_updated_at: None,
+        parent_session_id: None,
+        branch_of_turn_id: None,
+        subagent: None,
+        revision_root_session_id: None,
+        revision_parent_session_id: None,
+        revision_of_turn_id: None,
+        revision_index: None,
+        revision_state: None,
+        last_read_message_id: record.read_state.last_read_message_id,
+        live_run_state: None,
+    }
+}

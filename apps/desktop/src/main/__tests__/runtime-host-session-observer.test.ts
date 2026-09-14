@@ -2554,6 +2554,7 @@ test("keeps a joining observer pending across repeated catch-up eviction", async
   const replacementEvents = new AsyncFrameQueue();
   const finalEvents = new AsyncFrameQueue();
   const replacementTranscript = deferred<StoredMessage[]>();
+  const replacementClose = deferred<void>();
   const finalTranscript = deferred<StoredMessage[]>();
   let openCount = 0;
   const observer = new RuntimeHostSessionObserver({
@@ -2576,8 +2577,22 @@ test("keeps a joining observer pending across repeated catch-up eviction", async
             snapshot: continuitySnapshot(),
             activeAssistantStreams: [],
             transcript: replacementTranscript.promise,
-            events: replacementEvents,
+            events: {
+              [Symbol.asyncIterator]() {
+                return {
+                  ...replacementEvents[Symbol.asyncIterator](),
+                  async return() {
+                    replacementTranscript.reject(new RuntimeHostSubscriptionError(
+                      'connection_closed', 'Subscription closed during transcript loading',
+                    ));
+                    await replacementClose.promise;
+                    return { done: true as const, value: undefined };
+                  },
+                };
+              },
+            },
             async close() {
+              replacementClose.resolve();
               replacementEvents.end();
             },
           });
@@ -2629,8 +2644,8 @@ test("keeps a joining observer pending across repeated catch-up eviction", async
     sequence: 1,
     reason: "slow_consumer",
   });
-  replacementTranscript.resolve([]);
   await waitFor(() => openCount === 3);
+  replacementTranscript.resolve([]);
   await Promise.resolve();
   assert.equal(joiningSettled, false);
   finalTranscript.resolve([

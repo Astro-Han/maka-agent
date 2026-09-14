@@ -155,6 +155,7 @@ export {
 } from './catalog-reader.js';
 export {
   connectOrSpawnRuntimeHost,
+  connectOrSpawnRuntimeHostWithDependencies,
   type CandidateExitDetails,
   type ConnectOrSpawnRuntimeHostInput,
   type ConnectOrSpawnRuntimeHostResult,
@@ -164,6 +165,8 @@ export {
 export { abortable, waitForRuntimeHostReady } from './wait-for-ready.js';
 export {
   createRuntimeHostCandidateLaunchBarrier,
+  createRuntimeHostCandidateLaunchBarrierWithDependencies,
+  type RuntimeHostCandidateLaunchBarrierDependencies,
   type RuntimeHostCandidateLaunchBarrier,
 } from './candidate-launch-barrier.js';
 export { runHostedExecution, type RunHostedExecutionInput } from './hosted-execution.js';

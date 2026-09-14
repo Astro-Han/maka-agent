@@ -1,0 +1,245 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use maka_event_log::EventLog;
+use maka_presentation::{Content, InvocationView, TurnState};
+use maka_runtime::{
+    continuation::{ContinuationClaim, REPLAY_VERSION, ReplayEvidence, RunBoundary, SessionBase},
+    event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent, StoredEvent},
+    execution::{
+        CollaborationMode, InvocationConfiguration, OrchestrationMode, PermissionMode, ToolMode,
+        WorkspaceIdentity,
+    },
+    input::InvocationInput,
+};
+
+#[path = "continuation/fixtures.rs"]
+mod fixtures;
+use fixtures::*;
+
+#[tokio::test]
+async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_after_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("continuation.sqlite");
+    let log = EventLog::open(&path).await.unwrap();
+    let prior = opening("prior", None);
+    append(&log, &prior).await;
+    close(&log, &prior).await;
+    let source = opening("source", None);
+    append(&log, &source).await;
+    close(&log, &source).await;
+    let context = log
+        .context_before_run(&source.invocation, 100, 65536)
+        .await
+        .unwrap();
+    let base = SessionBase {
+        high_water: context.source_evidence.high_water,
+        digest: context.source_evidence.digest,
+    };
+    assert_eq!(base.high_water, 2);
+    let original = claim(&log, "claim-first", &source, base.clone()).await;
+    let before = log.prefix(100, 65536).await.unwrap();
+    assert!(
+        log.continuation_for_source(&original.source)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Invalid raw evidence and workspace observations must not acquire the boundary.
+    for mutation in 0..5 {
+        let mut changed = original.clone();
+        match mutation {
+            0 => changed.source.digest = digest('c'),
+            1 => changed.base.digest = digest('c'),
+            2 => changed.source.invocation.turn_id = "wrong-source-turn".into(),
+            _ => {}
+        }
+        let mut target = opening("first", Some(changed));
+        if let Fact::InvocationOpened {
+            configuration: Some(configuration),
+            ..
+        } = &mut target.fact
+        {
+            match mutation {
+                3 => configuration.workspace_identity = None,
+                4 => {
+                    configuration.workspace_identity = Some(
+                        WorkspaceIdentity::from_marker_id("bedbc850-d324-435a-9374-a02ae5037244")
+                            .unwrap(),
+                    )
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            log.append(&EventWrite::plain(target).unwrap())
+                .await
+                .is_err()
+        );
+    }
+    for mutation in 0..3 {
+        let mut target = opening("first", Some(original.clone()));
+        match mutation {
+            0 => target.invocation.turn_id = source.invocation.turn_id.clone(),
+            1 => target.invocation.session_id = "other-session".into(),
+            _ => {
+                if let Fact::InvocationOpened {
+                    input: InvocationInput::Continuation { claim, .. },
+                    ..
+                } = &mut target.fact
+                {
+                    claim.replay.version += 1;
+                }
+            }
+        }
+        assert!(EventWrite::plain(target).is_err());
+    }
+
+    let first = opening("first", Some(original.clone()));
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER reject_continuation BEFORE INSERT ON runtime_events
+        WHEN json_extract(NEW.event_json,'$.fact.input.kind')='continuation'
+        BEGIN SELECT RAISE(ABORT,'injected opening failure'); END;",
+    )
+    .unwrap();
+    assert!(
+        log.append(&EventWrite::plain(first.clone()).unwrap())
+            .await
+            .is_err()
+    );
+    assert!(
+        log.continuation_for_source(&original.source)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        serde_json::to_value(log.prefix(100, 65536).await.unwrap()).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    db.execute_batch("DROP TRIGGER reject_continuation")
+        .unwrap();
+
+    let sequence = append(&log, &first).await;
+    let committed = log
+        .continuation_for_source(&original.source)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(committed.event, first);
+    assert_eq!(committed.sequence, sequence);
+    let mut view = InvocationView::new(65536).unwrap();
+    assert!(
+        view.push(&committed).unwrap().is_empty(),
+        "continuation must not fabricate a user message"
+    );
+    let terminal = RuntimeEvent::new(
+        first.invocation.clone(),
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::Completed,
+        },
+    );
+    let terminal_sequence = append(&log, &terminal).await;
+    let rows = view
+        .push(&StoredEvent {
+            sequence: terminal_sequence,
+            event: terminal,
+        })
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(
+        rows[0].message.content,
+        Content::TurnState {
+            state: TurnState::Completed
+        }
+    ));
+
+    let mut duplicate = original.clone();
+    duplicate.id = "different-claim".into();
+    assert!(
+        log.append(&EventWrite::plain(opening("duplicate", Some(duplicate))).unwrap())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        append(&log, &first).await,
+        sequence,
+        "exact retry remains legal after sealing"
+    );
+    let mut wrong_lookup = original.source.clone();
+    wrong_lookup.digest = digest('e');
+    assert!(log.continuation_for_source(&wrong_lookup).await.is_err());
+
+    let second_claim = claim(&log, "claim-second", &first, base.clone()).await;
+    let reused_turn = opening("prior", Some(second_claim.clone()));
+    assert!(
+        log.append(&EventWrite::plain(reused_turn).unwrap())
+            .await
+            .is_err()
+    );
+    let second = opening("second", Some(second_claim.clone()));
+    append(&log, &second).await;
+    close(&log, &second).await;
+    let third_claim = claim(&log, "claim-third", &second, base).await;
+    log.close().await.unwrap();
+
+    let log = EventLog::open(&path).await.unwrap();
+    assert_eq!(
+        log.continuation_for_source(&original.source)
+            .await
+            .unwrap()
+            .unwrap()
+            .event,
+        first
+    );
+    assert_eq!(
+        log.continuation_for_source(&second_claim.source)
+            .await
+            .unwrap()
+            .unwrap()
+            .event,
+        second
+    );
+    assert_eq!(append(&log, &first).await, sequence);
+    let committed_before_corruption = log.prefix(100, 65536).await.unwrap().high_water;
+    // Current parent still hashes identically, but an ancestor's raw bytes changed.
+    db.execute(
+        "UPDATE runtime_events SET event_json=event_json || ' ' WHERE event_id=?",
+        [&source.id],
+    )
+    .unwrap();
+    assert!(
+        log.append(&EventWrite::plain(opening("third", Some(third_claim.clone()))).unwrap())
+            .await
+            .is_err()
+    );
+    assert!(
+        log.continuation_for_source(&third_claim.source)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        log.prefix(100, 65536).await.unwrap().high_water,
+        committed_before_corruption
+    );
+    log.close().await.unwrap();
+}

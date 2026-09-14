@@ -123,6 +123,7 @@ const coveredExtensions = new Map([
   ['.py', 'hash'],
   ['.rs', 'block'],
   ['.sh', 'hash'],
+  ['.sql', 'block'],
   ['.swift', 'block'],
   ['.toml', 'hash'],
   ['.ts', 'block'],
@@ -174,6 +175,16 @@ const isUnder =
  */
 export const exclusionRules = [
   {
+    id: 'network-test-certificates',
+    justification:
+      'Generated PEM certificates and a public test-only key for loopback TLS acceptance. Their format is consumed directly by TLS parsers; provenance and regeneration guidance live in the adjacent README.md.',
+    matches: isOneOf(
+      'crates/network/tests/fixtures/ca.pem',
+      'crates/network/tests/fixtures/localhost.pem',
+      'crates/network/tests/fixtures/localhost.key',
+    ),
+  },
+  {
     id: 'asf-release-documents',
     justification:
       'These files are the license, notice, and incubation disclosure themselves. ASF policy fixes their contents, so a header inside them would be circular.',
@@ -209,6 +220,12 @@ export const exclusionRules = [
         // Adapted from opencode under MIT; attribution pinned by #3325.
         'packages/runtime/src/edit-replace.ts',
         'packages/runtime/src/tool-output.ts',
+        // Codex Apache-2.0 adaptations; exact origins and modifications in SOURCE.md / LICENSE.
+        'crates/apply-patch/src/lib.rs',
+        'crates/apply-patch/src/parser.rs',
+        'crates/apply-patch/src/seek_sequence.rs',
+        'crates/apply-patch/src/text_file.rs',
+        'crates/apply-patch/src/update.rs',
         // Adapted from Vercel AI SDK material; recorded by the #2907 origin audit.
         'packages/runtime/src/model-protocol.ts',
         'packages/eval/harbor/deepseek-harness-profile/cordis.patch.yml',
@@ -229,6 +246,7 @@ export const exclusionRules = [
       'docs/astryx-surface-file-inventory.paths',
       'docs/windows-test-inventory.md',
       'native/gitoxide-helper/Cargo.lock',
+      'Cargo.lock',
       'native/runtime-host-peer/Cargo.lock',
       'native/runtime-host-windows-task-launcher/Cargo.lock',
       'packages/runtime/src/bundled-skill-catalog.generated.ts',
@@ -314,6 +332,14 @@ const provenanceMarkers = [
  * they may carry the ASF header anyway.
  */
 const reviewedProvenance = new Map([
+  [
+    'crates/js-runtime/TERMINAL_SOURCE.md',
+    'Original Maka provenance documentation quoting MIT notices for the locked xterm bundle; the upstream code retains its MIT license.',
+  ],
+  [
+    'crates/apply-patch/SOURCE.md',
+    'Maka-authored adaptation record quoting upstream copyright; the five mixed-origin source files are separately excluded and attributed in LICENSE/NOTICE.',
+  ],
   [
     'website/src/copy/en.ts',
     'Website footer copy. The copyright line it carries is the ASF’s own, as the site footer must show it.',

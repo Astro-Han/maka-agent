@@ -362,7 +362,14 @@ export class RuntimeHostSessionSubscriptionOwner {
 
   async #pump(attempt: SubscriptionAttempt): Promise<void> {
     try {
-      for await (const frame of attempt.handle.events) {
+      // This owner closes attempts after publishing their failure. for-await
+      // would close the iterator first and let a concurrent transcript read
+      // replace the recovery cause with a spurious connection_closed error.
+      const iterator = attempt.handle.events[Symbol.asyncIterator]();
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) break;
+        const frame = next.value;
         if (this.#closed || (this.#attempt !== attempt && this.#candidate !== attempt)) return;
         if (frame.kind === "subscription.closed") {
           throw subscriptionClosedError(frame.reason);

@@ -1,0 +1,165 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use crate::{ConfigError, ConfigurationStore, Result, TransactionMode};
+use maka_runtime::configuration::{
+    policy::{
+        ChatDefaults, EnabledPolicy, MAX_POLICY_SNAPSHOT_BYTES, Personalization, RuntimePolicy,
+        RuntimePolicyMutationResult, RuntimePolicySnapshot, decode_canonical_document,
+    },
+    validation::{MAX_SAFE_INTEGER, revision},
+};
+use sqlx::SqliteConnection;
+
+// Matches migration 0006. Recovery has headroom for schema growth; ordinary
+// writes still require a policy that fits the unchanged 48 KiB wire budget.
+const MAX_POLICY_DOCUMENT_BYTES: usize = 64 * 1024;
+
+impl ConfigurationStore {
+    pub async fn set_network_proxy(
+        &self,
+        expected_revision: u64,
+        value: maka_runtime::configuration::policy::NetworkProxy,
+    ) -> Result<RuntimePolicyMutationResult> {
+        self.update_policy(expected_revision, move |policy| {
+            policy.network_proxy = value
+        })
+        .await
+    }
+    /// Reads the root policy without materializing defaults into persistence.
+    pub async fn runtime_policy(&self) -> Result<RuntimePolicySnapshot> {
+        self.transaction(TransactionMode::Deferred, |connection| {
+            Box::pin(read(connection))
+        })
+        .await
+    }
+
+    /// Replaces chat defaults in the same root-owned transaction as its CAS.
+    pub async fn set_chat_defaults(
+        &self,
+        expected_revision: u64,
+        value: ChatDefaults,
+    ) -> Result<RuntimePolicyMutationResult> {
+        self.update_policy(expected_revision, move |policy| {
+            policy.chat_defaults = value
+        })
+        .await
+    }
+
+    pub async fn set_personalization(
+        &self,
+        expected_revision: u64,
+        value: Personalization,
+    ) -> Result<RuntimePolicyMutationResult> {
+        self.update_policy(expected_revision, move |policy| {
+            policy.personalization = value
+        })
+        .await
+    }
+
+    pub async fn set_workspace_instructions(
+        &self,
+        expected_revision: u64,
+        value: EnabledPolicy,
+    ) -> Result<RuntimePolicyMutationResult> {
+        self.update_policy(expected_revision, move |policy| {
+            policy.workspace_instructions = value
+        })
+        .await
+    }
+
+    async fn update_policy(
+        &self,
+        expected_revision: u64,
+        update: impl FnOnce(&mut RuntimePolicy) + Send + 'static,
+    ) -> Result<RuntimePolicyMutationResult> {
+        revision(expected_revision, false).map_err(ConfigError::Invalid)?;
+        self.transaction(TransactionMode::Immediate, move |connection| {
+            Box::pin(async move {
+                let mut snapshot = read(connection).await?;
+                if snapshot.revision != expected_revision {
+                    return Ok(RuntimePolicyMutationResult::RevisionConflict {
+                        expected_revision,
+                        actual_revision: snapshot.revision,
+                    });
+                }
+                if snapshot.revision == MAX_SAFE_INTEGER {
+                    return Err(ConfigError::Invalid(
+                        "runtime policy revision exhausted".into(),
+                    ));
+                }
+                snapshot.revision += 1;
+                let previous_proxy = snapshot.policy.network_proxy.clone();
+                update(&mut snapshot.policy);
+                if !maka_runtime::configuration::policy::network_update::same_route(
+                    &previous_proxy,
+                    &snapshot.policy.network_proxy,
+                ) {
+                    crate::network::invalidate_tests(connection).await?;
+                }
+                write(connection, &snapshot).await?;
+                Ok(RuntimePolicyMutationResult::Committed {
+                    revision: snapshot.revision,
+                })
+            })
+        })
+        .await
+    }
+}
+
+pub(crate) async fn write(
+    connection: &mut SqliteConnection,
+    snapshot: &RuntimePolicySnapshot,
+) -> Result<()> {
+    snapshot.validate().map_err(ConfigError::Invalid)?;
+    let document = serde_json::to_string(snapshot)?;
+    if document.len() > MAX_POLICY_SNAPSHOT_BYTES {
+        return Err(ConfigError::Invalid(
+            "runtime policy snapshot exceeds byte limit".into(),
+        ));
+    }
+    sqlx::query("INSERT INTO runtime_policy(singleton, document) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET document = excluded.document")
+        .bind(document).execute(connection).await?;
+    Ok(())
+}
+
+pub(crate) async fn read(connection: &mut SqliteConnection) -> Result<RuntimePolicySnapshot> {
+    // Bound bytes before loading the document, including databases altered outside
+    // the checked writer. A corrupt row is persistence failure, never defaults.
+    let size: Option<i64> = sqlx::query_scalar(
+        "SELECT length(CAST(document AS BLOB)) FROM runtime_policy WHERE singleton = 1",
+    )
+    .fetch_optional(&mut *connection)
+    .await?;
+    let Some(size) = size else {
+        return Ok(RuntimePolicySnapshot {
+            revision: 0,
+            policy: RuntimePolicy::default(),
+        });
+    };
+    if size < 0 || size > MAX_POLICY_DOCUMENT_BYTES as i64 {
+        return Err(ConfigError::UnsupportedDatabase);
+    }
+    let document: String =
+        sqlx::query_scalar("SELECT document FROM runtime_policy WHERE singleton = 1")
+            .fetch_one(connection)
+            .await?;
+    let value = serde_json::from_str(&document)?;
+    decode_canonical_document(value).map_err(|_| ConfigError::UnsupportedDatabase)
+}

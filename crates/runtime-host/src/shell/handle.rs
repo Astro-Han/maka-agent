@@ -1,0 +1,236 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::control::{Control, ControlError, Input, WriteReceipt};
+use super::output::{Output, PtyReplay, PtyStream};
+use super::{ShellError, Update};
+use maka_runtime::{
+    shell_run::ShellRun,
+    terminal::{
+        TerminalSize,
+        input::{InputAction, encode_actions},
+    },
+};
+use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio_util::sync::CancellationToken;
+
+/// A settled native stop, including whether this caller owned its first signal.
+#[derive(Debug)]
+pub struct StopReceipt {
+    pub record: Arc<ShellRun>,
+    pub applied: bool,
+}
+
+pub(super) struct StopState {
+    claimed: bool,
+    // None is an unknown native signal outcome, never inferred from shell state.
+    pub signal_applied: Option<bool>,
+}
+
+impl Default for StopState {
+    fn default() -> Self {
+        Self {
+            claimed: false,
+            signal_applied: Some(false),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct PtyControl {
+    pub(super) commands: mpsc::Sender<Control>,
+    pub(super) output: Output,
+}
+
+#[derive(Clone)]
+pub struct ShellHandle {
+    // Shared across controller generations, including disconnect during input.
+    pub(crate) control_gate: Arc<tokio::sync::Mutex<()>>,
+    pub(super) snapshot: watch::Receiver<Update>,
+    pub(super) cancellation: CancellationToken,
+    pub(super) stop: Arc<Mutex<StopState>>,
+    pub(super) pty: Option<PtyControl>,
+}
+impl ShellHandle {
+    pub fn replay(&self) -> Option<PtyReplay> {
+        self.pty.as_ref().map(|pty| pty.output.replay())
+    }
+
+    pub fn attach(&self) -> Option<(PtyReplay, PtyStream)> {
+        self.pty.as_ref().map(|pty| pty.output.attach())
+    }
+
+    pub(crate) fn stream(&self) -> Option<PtyStream> {
+        self.pty.as_ref().map(|pty| pty.output.stream())
+    }
+
+    pub fn latest(&self) -> Update {
+        self.snapshot.borrow().clone()
+    }
+
+    pub async fn changed(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+        self.snapshot
+            .changed()
+            .await
+            .map_err(|_| Arc::new(ShellError::Rejected("shell worker closed")))?;
+        self.snapshot
+            .borrow_and_update()
+            .clone()
+            .expect("worker only publishes settled cuts")
+    }
+
+    pub async fn ready(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+        loop {
+            if let Some(result) = self.latest() {
+                return result;
+            }
+            self.changed().await?;
+        }
+    }
+
+    pub async fn finished(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+        loop {
+            if let Some(result) = self.latest() {
+                let record = result?;
+                if !record.state.active() {
+                    return Ok(record);
+                }
+            }
+            self.changed().await?;
+        }
+    }
+
+    /// The last sender belongs to the worker, after native resources and its
+    /// residency have been released. A terminal record alone is not this fence.
+    pub(crate) async fn drained(&mut self) -> Result<Arc<ShellRun>, Arc<ShellError>> {
+        while self.snapshot.changed().await.is_ok() {}
+        self.finished().await
+    }
+
+    /// Independent of queue/backpressure and of the lifetime of any RPC waiter.
+    pub fn stop(&self) {
+        self.claim_stop();
+    }
+
+    pub async fn stop_and_wait(&mut self) -> Result<StopReceipt, Arc<ShellError>> {
+        let owner = self.claim_stop();
+        let record = self.finished().await?;
+        let applied = if owner {
+            self.stop.lock().unwrap().signal_applied.ok_or_else(|| {
+                Arc::new(ShellError::Process(
+                    maka_runtime::tools::ToolError::OutcomeUnknown(
+                        "shell termination signal outcome unknown".into(),
+                    ),
+                ))
+            })?
+        } else {
+            false
+        };
+        Ok(StopReceipt { record, applied })
+    }
+
+    fn claim_stop(&self) -> bool {
+        let mut stop = self.stop.lock().unwrap();
+        if stop.claimed
+            || self.cancellation.is_cancelled()
+            || self
+                .latest()
+                .is_some_and(|result| !result.is_ok_and(|record| record.state.active()))
+        {
+            return false;
+        }
+        stop.claimed = true;
+        self.cancellation.cancel();
+        true
+    }
+
+    pub async fn input(&self, actions: Vec<InputAction>) -> Result<WriteReceipt, ControlError> {
+        self.input_and_resize(actions, None).await
+    }
+
+    pub async fn input_and_resize(
+        &self,
+        actions: Vec<InputAction>,
+        size: Option<TerminalSize>,
+    ) -> Result<WriteReceipt, ControlError> {
+        // Bound memory before waiting for queue capacity. Encode again on the
+        // worker using the current screen cut; this preflight grants no effect.
+        let record = self
+            .latest()
+            .ok_or_else(|| ControlError::new("PTY not ready", 0))?
+            .map_err(|e| ControlError::new(e, 0))?;
+        let maka_runtime::shell_run::ShellOutput::Pty { screen } = &record.output else {
+            return Err(ControlError::rejected("resource is not a PTY"));
+        };
+        encode_actions(&actions, screen.input, size.unwrap_or(screen.size))
+            .map_err(ControlError::rejected)?;
+        self.control(Input::Actions(actions), size, CancellationToken::new())
+            .await
+    }
+
+    pub async fn resize(&self, size: TerminalSize) -> Result<(), ControlError> {
+        self.write_raw(String::new(), Some(size)).await.map(|_| ())
+    }
+
+    /// Raw terminal input includes ESC/C0. The client boundary separately limits
+    /// it to 32 KiB; the model WriteStdin contract permits 64 KiB. Resize and input
+    /// are one serialized command, validated before either can perform an effect.
+    pub async fn write_raw(
+        &self,
+        input: String,
+        size: Option<TerminalSize>,
+    ) -> Result<WriteReceipt, ControlError> {
+        if input.len() > 64 * 1024 || (input.is_empty() && size.is_none()) {
+            return Err(ControlError::rejected(
+                "PTY input is empty or exceeds 64 KiB",
+            ));
+        }
+        self.control(Input::Raw(input), size, CancellationToken::new())
+            .await
+    }
+
+    pub(crate) async fn control(
+        &self,
+        input: Input,
+        size: Option<TerminalSize>,
+        cancellation: CancellationToken,
+    ) -> Result<WriteReceipt, ControlError> {
+        let (reply, response) = oneshot::channel();
+        let commands = &self
+            .pty
+            .as_ref()
+            .ok_or_else(|| ControlError::rejected("resource is not a PTY"))?
+            .commands;
+        let command = Control {
+            input,
+            size,
+            reply,
+            cancellation: cancellation.clone(),
+        };
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(ControlError::rejected("PTY control cancelled before admission")),
+            sent = commands.send(command) => sent.map_err(|_| ControlError::new("PTY closed", 0))?,
+        }
+        response
+            .await
+            .map_err(|_| ControlError::unknown("PTY control outcome unknown"))?
+    }
+}

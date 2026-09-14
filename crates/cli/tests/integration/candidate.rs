@@ -1,0 +1,220 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use maka_event_log::root::{RootNamespaces, RootOwner};
+use serde_json::Value;
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    time::{Duration, Instant},
+};
+
+#[test]
+fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle() {
+    let directory = tempfile::tempdir().unwrap();
+    let namespaces = RootNamespaces::for_current_account().unwrap();
+    let root = directory.path().join("root");
+    let owner = RootOwner::create(&root, &namespaces).unwrap();
+    let mut fixture = CandidateFixture {
+        child: None,
+        root,
+        root_id: owner.root_id().to_owned(),
+        registration: owner.control_directory().join("registration.json"),
+        lock: owner.lock_path().to_owned(),
+    };
+    drop(owner);
+
+    for release in [false, true] {
+        fixture.child = Some(
+            Command::new(env!("CARGO_BIN_EXE_maka"))
+                .args(["host", "candidate", "--root"])
+                .arg(&fixture.root)
+                .args([
+                    "--expected-root-id",
+                    &fixture.root_id,
+                    "--startup-attempt-id",
+                    &uuid::Uuid::new_v4().to_string(),
+                    "--generation",
+                    "native-cli-test",
+                    "--idle-grace-ms",
+                    "1000",
+                    "--owner-stdin",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap(),
+        );
+        let registration = fixture.wait_for_registration();
+        assert_eq!(registration["pid"], fixture.child.as_ref().unwrap().id());
+        assert_eq!(registration["rootId"], fixture.root_id);
+        assert_eq!(registration["generation"], "native-cli-test");
+        assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
+
+        // Initialization verifies identity without competing for an active writer lease.
+        let init = Command::new(env!("CARGO_BIN_EXE_maka"))
+            .args(["host", "init", "--root"])
+            .arg(&fixture.root)
+            .output()
+            .unwrap();
+        assert!(
+            init.status.success(),
+            "{}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&init.stdout).unwrap()["rootId"],
+            fixture.root_id
+        );
+
+        let mut stdin = fixture.child.as_mut().unwrap().stdin.take().unwrap();
+        if release {
+            stdin
+                .write_all(b"{\"kind\":\"runtime-host-launch-owner-release\"}\n")
+                .unwrap();
+            drop(stdin);
+        } else {
+            fixture.child.as_mut().unwrap().stdin = Some(stdin);
+        }
+
+        let probe = Command::new("node")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+            .args([
+                "--socket",
+                registration["endpoint"].as_str().unwrap(),
+                "--root-id",
+                &fixture.root_id,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            probe.status.success(),
+            "{}",
+            String::from_utf8_lossy(&probe.stderr)
+        );
+
+        if !release {
+            drop(fixture.child.as_mut().unwrap().stdin.take());
+        }
+        let status = fixture.wait_for_exit();
+        assert!(
+            status.success(),
+            "candidate did not drain successfully: {status}"
+        );
+        assert!(
+            !fixture.registration.exists(),
+            "candidate left a discoverable stale epoch"
+        );
+        #[cfg(unix)]
+        assert!(!Path::new(registration["endpoint"].as_str().unwrap()).exists());
+        let reopened = RootOwner::open(&fixture.root, &namespaces).unwrap();
+        assert_eq!(reopened.root_id(), fixture.root_id);
+        drop(reopened);
+    }
+    let discovery = Command::new("node")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+        .args(["--native-candidate", env!("CARGO_BIN_EXE_maka"), "--root"])
+        .arg(&fixture.root)
+        .output()
+        .unwrap();
+    assert!(
+        discovery.status.success(),
+        "{}",
+        String::from_utf8_lossy(&discovery.stderr)
+    );
+    assert!(!fixture.registration.exists());
+    drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
+}
+
+/// Reap the exact test child before removing its fresh root's account-level lease files.
+struct CandidateFixture {
+    child: Option<Child>,
+    root: PathBuf,
+    root_id: String,
+    registration: PathBuf,
+    lock: PathBuf,
+}
+
+impl CandidateFixture {
+    fn wait_for_registration(&mut self) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if let Ok(bytes) = fs::read(&self.registration) {
+                return serde_json::from_slice(&bytes).unwrap();
+            }
+            assert!(
+                self.child.as_mut().unwrap().try_wait().unwrap().is_none(),
+                "candidate exited before registration"
+            );
+            assert!(
+                Instant::now() < deadline,
+                "candidate registration timed out"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn wait_for_exit(&mut self) -> std::process::ExitStatus {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = self.child.as_mut().unwrap().try_wait().unwrap() {
+                self.child.take();
+                return status;
+            }
+            assert!(Instant::now() < deadline, "candidate drain timed out");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for CandidateFixture {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let control = self.registration.parent().unwrap();
+        let namespaces = RootNamespaces {
+            ownership: self.lock.parent().unwrap().to_owned(),
+            control: control.parent().unwrap().to_owned(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Ok(owner) = RootOwner::open(&self.root, &namespaces) {
+                drop(owner);
+                break;
+            }
+            if Instant::now() >= deadline {
+                eprintln!(
+                    "refusing to unlink a possibly active test lease: {}",
+                    self.lock.display()
+                );
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = fs::remove_file(&self.registration);
+        let _ = fs::remove_file(control.join("owner.lock"));
+        let _ = fs::remove_dir(control);
+        let _ = fs::remove_file(&self.lock);
+    }
+}

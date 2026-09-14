@@ -1,0 +1,194 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#![cfg(unix)]
+
+use maka_event_log::{
+    EventLog,
+    root::{RootNamespaces, RootOwner},
+};
+use maka_runtime::{event::Fact, execution::ThinkingLevel};
+use maka_runtime_host::{
+    server::{Host, local::LocalListener},
+    session::SessionConfiguration,
+};
+use sqlx::Connection;
+use std::{os::unix::fs::PermissionsExt, path::Path, process::Command, time::Duration};
+use tokio_util::sync::CancellationToken;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn original_client_native_openai_options_reach_both_wires_and_survive_reopen() {
+    let directory = tempfile::Builder::new()
+        .prefix("maka-options-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in("/tmp")
+        .unwrap();
+    let ns = RootNamespaces {
+        ownership: directory.path().join("owners"),
+        control: directory.path().join("control"),
+    };
+    let root = directory.path().join("root");
+    let workspace = directory.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let owner = RootOwner::create(&root, &ns).unwrap();
+    let root_id = owner.root_id().to_owned();
+    seed_catalog(owner, &root).await;
+    let mut original = None;
+    for reopened in [false, true] {
+        let host = Host::open(RootOwner::open(&root, &ns).unwrap())
+            .await
+            .unwrap();
+        let socket = directory.path().join("h.sock");
+        let listener = LocalListener::bind(&socket).unwrap();
+        let cancellation = CancellationToken::new();
+        let server = tokio::spawn(listener.serve(host, cancellation.clone()));
+        let probe = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs");
+        let client_workspace = workspace.clone();
+        let expected_id = root_id.clone();
+        let client = tokio::task::spawn_blocking(move || {
+            let mut command = Command::new("node");
+            command
+                .arg(probe)
+                .arg("--socket")
+                .arg(socket)
+                .args(["--root-id", &expected_id])
+                .arg("--openai-options-workspace")
+                .arg(client_workspace);
+            if reopened {
+                command.arg("--reopened");
+            }
+            command.output().unwrap()
+        });
+        let output = tokio::time::timeout(Duration::from_secs(30), client)
+            .await
+            .unwrap()
+            .unwrap();
+        cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(if reopened {
+                "original-client-openai-options-reopened"
+            } else {
+                "original-client-openai-options"
+            })
+        );
+        let log = EventLog::open(&root.join(maka_event_log::root::ROOT_DATABASE))
+            .await
+            .unwrap();
+        let prefix = log.prefix(1000, 1024 * 1024).await.unwrap();
+        for wire in ["openai-chat", "openai-responses"] {
+            let current = log
+                .get_session::<SessionConfiguration>(wire)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(current.configuration.thinking_level, None);
+            let levels: Vec<_> = prefix
+                .events
+                .iter()
+                .filter_map(|stored| {
+                    let Fact::InvocationOpened { configuration, .. } = &stored.event.fact else {
+                        return None;
+                    };
+                    if !stored.event.invocation.turn_id.starts_with(wire) {
+                        return None;
+                    }
+                    let configuration = configuration
+                        .as_ref()
+                        .expect("opening freezes configuration");
+                    assert_eq!(
+                        configuration.model.as_ref(),
+                        Some(&current.configuration.model)
+                    );
+                    Some(configuration.thinking_level)
+                })
+                .collect();
+            assert_eq!(
+                levels,
+                [
+                    None,
+                    Some(ThinkingLevel::High),
+                    Some(ThinkingLevel::Off),
+                    None
+                ],
+                "later updates must not rewrite earlier invocation contexts"
+            );
+        }
+        let bytes = serde_json::to_vec(&prefix).unwrap();
+        if let Some(original) = &original {
+            assert_eq!(
+                &bytes, original,
+                "reopen preserves canonical facts and raw-byte digest"
+            );
+        } else {
+            original = Some(bytes);
+        }
+        log.close().await.unwrap();
+    }
+}
+
+// The public connection draft has no discovered-model field. Seed that persisted
+// inventory offline; all credentials, Session changes, turns and queries use the
+// unchanged public client once the Host opens it.
+async fn seed_catalog(owner: RootOwner, root: &Path) {
+    let store = maka_config::ConfigurationStore::for_root(std::sync::Arc::new(owner))
+        .await
+        .unwrap();
+    store.close().await.unwrap();
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}/v1", reservation.local_addr().unwrap());
+    let mut db = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new().filename(root.join("configuration-rust.sqlite")),
+    )
+    .await
+    .unwrap();
+    for (index, wire) in ["openai-chat", "openai-responses"].iter().enumerate() {
+        let id = format!("00000000-0000-4000-8000-00000000000{index}");
+        let document = serde_json::json!({
+            "connectionId": id, "revision": 1, "slug": wire, "name": wire,
+            "providerType": "openai", "baseUrl": base_url, "enabled": true,
+            "enabledModelIds": ["gpt-5.2"], "modelSource": "fetched", "modelsFetchedAt": 1,
+            "models": [{"id": "gpt-5.2", "apiProtocol": wire, "capabilities": {"parallelToolCalls": false}}]
+        });
+        sqlx::query(
+            "INSERT INTO connections(connection_id, slug, revision, document) VALUES (?, ?, 1, ?)",
+        )
+        .bind(id)
+        .bind(wire)
+        .bind(document.to_string())
+        .execute(&mut db)
+        .await
+        .unwrap();
+    }
+    sqlx::query("UPDATE connection_catalog SET revision = 1")
+        .execute(&mut db)
+        .await
+        .unwrap();
+    db.close().await.unwrap();
+}

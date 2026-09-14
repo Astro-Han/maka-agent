@@ -161,6 +161,7 @@ Start with [ARCHITECTURE.md](./ARCHITECTURE.md). It provides the system map, cod
 
 ```text
 apps/desktop/          Electron main / preload / React renderer
+crates/                Rust runtime and Host (root Cargo workspace)
 
 packages/core/         Pure contracts for Sessions, Events, Permissions, and Connections
 packages/storage/      SQLite operational state, configuration, and payload stores
@@ -181,25 +182,27 @@ patches/               Patches applied to npm dependencies at install
 experiments/           Platform experiments, currently the Windows sandbox smoke scripts
 ```
 
+The Rust rewrite's crate map, supported behavior, and validation commands are in
+[Rust runtime host](./docs/rust-runtime.md).
+
 ## Local data and recovery
 
-Workspace data lives under Electron `userData` by default:
+Desktop defaults to the Rust host, with separate host and Desktop state:
 
 ```text
-<Electron userData>/workspaces/default/
-  runtime.sqlite
-  connection-catalog.json
-  credential-vault.json
-  settings.json
-  artifacts/
+<Electron userData>/
+  runtime-host-rust/
+    runtime-rust.sqlite
+    configuration-rust.sqlite
+  desktop-state/
 ```
 
-- API keys and similar secrets are a local plaintext file (`credential-vault.json`), readable only by your OS account. The renderer never sees them.
-- Tools that write files or run a shell must pass the sandbox boundary first.
-- `runtime.sqlite` is the live record. Older JSONL transcripts and Electron `safeStorage` credential files are not imported; an upgraded workspace can show empty threads, and those credentials must be entered again.
-- Resuming an interrupted turn is off by default. Set `MAKA_RUNTIME_SAFE_BOUNDARY_RESUME=1` only if you want Desktop **Safe resume**, CLI `/resume`, and startup auto-resume — those calls hit the model and use tokens.
+- `runtime-rust.sqlite` holds committed execution facts. Connections and unencrypted credentials live in `configuration-rust.sqlite`, protected by OS-account permissions.
+- **There is no OS sandbox.** File and shell tools run with your OS permissions.
+- Existing TypeScript State Roots are neither migrated nor adopted. Their `workspaces/default/runtime.sqlite` and `credential-vault.json` remain separate; configure the new host before use.
+- Safe resume is not implemented in Rust. `MAKA_RUNTIME_SAFE_BOUNDARY_RESUME` applies only to the TypeScript backend and does not enable Rust recovery.
 
-Details: [SECURITY.md](./SECURITY.md), [privacy](./docs/workspace-privacy-context.md), [resume](./docs/architecture/runtime-resume-architecture.md).
+Current behavior: [Rust runtime host](./docs/rust-runtime.md). The [privacy](./docs/workspace-privacy-context.md) and [resume](./docs/architecture/runtime-resume-architecture.md) contracts describe the TypeScript backend. See [SECURITY.md](./SECURITY.md) for reporting vulnerabilities.
 
 ## Development and verification
 

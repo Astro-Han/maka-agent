@@ -1,0 +1,192 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use crate::{DiscoveredSkill, DiscoverySnapshot, Issue, IssueCode, Severity, fields};
+use maka_runtime::skills::SkillFailureReason;
+pub use maka_runtime::skills::SkillPreference as Preference;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    path::PathBuf,
+};
+
+/// A failed preference read is not an empty/default preference map.
+#[derive(Debug)]
+pub enum Preferences {
+    Available(BTreeMap<String, Preference>),
+    Unavailable,
+}
+
+#[derive(Debug, Default)]
+pub struct HostCapabilities {
+    pub tools: HashSet<String>,
+    pub capabilities: HashSet<String>,
+}
+
+/// A read-only view combining one file snapshot and one authoritative preference read.
+pub struct Catalog<'a> {
+    pub discovery: &'a DiscoverySnapshot,
+    pub preferences: &'a Preferences,
+    pub host: &'a HostCapabilities,
+}
+
+#[derive(Debug)]
+pub struct LoadedInstructions<'a> {
+    pub skill: &'a DiscoveredSkill,
+    pub relative_path: PathBuf,
+    pub instructions: String,
+    pub truncated: bool,
+}
+
+impl Catalog<'_> {
+    pub fn available(&self) -> impl Iterator<Item = &DiscoveredSkill> {
+        self.discovery.inventory.iter().filter(|skill| {
+            skill.shadowed_by.is_none() && self.enabled(skill) && self.compatible(skill)
+        })
+    }
+
+    pub fn load(&self, request: &str) -> Result<LoadedInstructions<'_>, SkillFailureReason> {
+        let request = request.trim_matches(fields::whitespace);
+        if request.is_empty()
+            || request.encode_utf16().count() > 512
+            || request
+                .chars()
+                .any(|c| matches!(c, '\u{0000}'..='\u{001f}' | '\u{007f}'))
+        {
+            return Err(SkillFailureReason::InvalidName);
+        }
+        if matches!(self.preferences, Preferences::Unavailable) {
+            return Err(SkillFailureReason::ResolutionFailed);
+        }
+        let key = request.to_lowercase();
+        let visible = || {
+            self.discovery
+                .inventory
+                .iter()
+                .filter(|skill| skill.shadowed_by.is_none())
+        };
+        // Resolve identity before eligibility: an unavailable exact id cannot be
+        // replaced by another skill whose display name happens to match it.
+        let skill = self
+            .discovery
+            .inventory
+            .iter()
+            .find(|skill| skill.location.reference.to_lowercase() == key)
+            .or_else(|| visible().find(|skill| skill.location.id.to_lowercase() == key))
+            .or_else(|| visible().find(|skill| skill.document.manifest.name.to_lowercase() == key))
+            .ok_or(SkillFailureReason::NotFound)?;
+        if skill.shadowed_by.is_some() {
+            return Err(SkillFailureReason::NotFound);
+        }
+        if !self.enabled(skill) {
+            return Err(SkillFailureReason::Disabled);
+        }
+        if !self.compatible(skill) {
+            return Err(SkillFailureReason::HostIncompatible);
+        }
+        let mut instructions = fields::clean(&skill.document.body);
+        if instructions.is_empty() {
+            instructions.push_str("(empty)");
+        }
+        let maximum = crate::document::MAX_TOOL_BODY_CHARS;
+        let truncated = instructions.chars().count() > maximum;
+        if truncated {
+            instructions = instructions.chars().take(maximum - 25).collect();
+            instructions.push_str("\n[skill truncated]");
+        }
+        let relative_path = skill
+            .location
+            .path
+            .strip_prefix(&skill.location.discovery_root)
+            .map_err(|_| SkillFailureReason::ResolutionFailed)?
+            .join("SKILL.md");
+        Ok(LoadedInstructions {
+            skill,
+            relative_path,
+            instructions,
+            truncated,
+        })
+    }
+    fn enabled(&self, skill: &DiscoveredSkill) -> bool {
+        match self.preferences {
+            Preferences::Available(preferences) => {
+                preferences
+                    .get(&skill.location.reference)
+                    .copied()
+                    .unwrap_or_default()
+                    .enabled
+            }
+            Preferences::Unavailable => false,
+        }
+    }
+
+    fn compatible(&self, skill: &DiscoveredSkill) -> bool {
+        let attributes = &skill.document.manifest.attributes;
+        attributes
+            .required_tools
+            .iter()
+            .all(|tool| self.host.tools.contains(tool))
+            && attributes
+                .required_capabilities
+                .iter()
+                .all(|cap| self.host.capabilities.contains(cap))
+    }
+}
+
+impl DiscoverySnapshot {
+    pub(crate) fn resolve_precedence(&mut self) {
+        let mut ids = HashMap::<String, usize>::new();
+        let mut names = HashMap::<String, usize>::new();
+        for index in 0..self.inventory.len() {
+            let skill = &self.inventory[index];
+            let id = skill.location.id.to_lowercase();
+            if let Some(&higher) = ids.get(&id) {
+                let reference = self.inventory[higher].location.reference.clone();
+                let skill = &mut self.inventory[index];
+                skill.shadowed_by = Some(reference);
+                skill.document.issues.push(Issue::new(
+                    IssueCode::DuplicateId,
+                    Severity::Warning,
+                    "id",
+                    format!(
+                        "Skill id \"{}\" is shadowed by a higher-precedence discovered skill.",
+                        skill.location.id
+                    ),
+                ));
+                continue;
+            }
+            ids.insert(id, index);
+            let name = skill.document.manifest.name.to_lowercase();
+            if let Some(&other) = names.get(&name) {
+                let issue = Issue::new(
+                    IssueCode::DuplicateName,
+                    Severity::Warning,
+                    "name",
+                    format!(
+                        "Skill display name \"{}\" is also used by another discovered skill. Load by id to avoid ambiguity.",
+                        skill.document.manifest.name
+                    ),
+                );
+                self.inventory[other].document.issues.push(issue.clone());
+                self.inventory[index].document.issues.push(issue);
+            } else {
+                names.insert(name, index);
+            }
+        }
+    }
+}

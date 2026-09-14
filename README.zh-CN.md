@@ -180,25 +180,26 @@ patches/               安装时应用到 npm 依赖的补丁
 experiments/           平台实验，目前是 Windows 沙箱 smoke 脚本
 ```
 
+Rust 重写的运行方式、crate 边界与限制见 [Rust Runtime Host](./docs/rust-runtime.zh-CN.md)。
+
 ## 本地数据与恢复
 
-Workspace 数据默认放在 Electron `userData` 下：
+Desktop 默认使用 Rust Host，Host 与 Desktop 状态分别存储：
 
 ```text
-<Electron userData>/workspaces/default/
-  runtime.sqlite
-  connection-catalog.json
-  credential-vault.json
-  settings.json
-  artifacts/
+<Electron userData>/
+  runtime-host-rust/
+    runtime-rust.sqlite
+    configuration-rust.sqlite
+  desktop-state/
 ```
 
-- API key 一类的机密存在本地明文文件（`credential-vault.json`），只有你的系统账号能读。界面进程拿不到明文。
-- 写文件、跑 Shell 的工具必须先过沙箱边界。
-- `runtime.sqlite` 是当前生效的那份记录。更早的 JSONL transcript 和 Electron `safeStorage` 凭据不会导入；升级后会话可能是空的，那些凭据需要重新填写。
-- 中断回合的续跑默认关闭。只有设置 `MAKA_RUNTIME_SAFE_BOUNDARY_RESUME=1` 才会打开 Desktop **安全恢复**、CLI `/resume` 和启动时自动续跑——这些路径会真的请求模型、消耗 token。
+- `runtime-rust.sqlite` 保存已提交的执行事实；连接与未加密凭据存于 `configuration-rust.sqlite`，由系统账号权限保护。
+- **没有 OS 沙箱。** 文件和 Shell 工具使用你的系统权限执行。
+- 不迁移或接管现有 TypeScript State Root。旧 `workspaces/default/runtime.sqlite` 和 `credential-vault.json` 仍独立保留，使用新 Host 前需重新配置。
+- Rust 尚未实现安全续跑；`MAKA_RUNTIME_SAFE_BOUNDARY_RESUME` 仅适用于 TypeScript 后端，不能开启 Rust 恢复。
 
-细节见 [SECURITY.md](./SECURITY.md)、[隐私](./docs/workspace-privacy-context.md)、[续跑](./docs/architecture/runtime-resume-architecture.zh-CN.md)。
+当前行为见 [Rust Runtime Host](./docs/rust-runtime.zh-CN.md)。[隐私](./docs/workspace-privacy-context.md)与[续跑](./docs/architecture/runtime-resume-architecture.zh-CN.md)契约描述的是 TypeScript 后端；漏洞报告见 [SECURITY.md](./SECURITY.md)。
 
 ## 开发与验证
 

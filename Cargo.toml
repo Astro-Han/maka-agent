@@ -1,0 +1,71 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+[workspace]
+default-members = ["crates/cli"]
+exclude = ["native/gitoxide-helper", "native/runtime-host-peer", "native/runtime-host-windows-task-launcher", "experiments/windows-sandbox/launcher"]
+members = ["crates/skills", "crates/apply-patch", "crates/cli", "crates/runtime", "crates/event-log", "crates/js-runtime", "crates/runtime-host", "crates/protocol", "crates/model", "crates/transport", "crates/agent", "crates/config", "crates/presentation", "crates/tools", "crates/fs-tools", "crates/process", "crates/client-capability", "crates/network"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+maka-network = { path = "crates/network" }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "gzip", "brotli", "deflate", "socks"] }
+maka-runtime-host = { path = "crates/runtime-host" }
+clap = { version = "4.6.6", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
+maka-client-capability = { path = "crates/client-capability" }
+apply-patch = { path = "crates/apply-patch" }
+maka-process = { path = "crates/process" }
+jsonschema = { version = "0.56.0", default-features = false }
+maka-tools = { path = "crates/tools" }
+maka-fs-tools = { path = "crates/fs-tools" }
+cap-std = "4.0.3"
+gix = { version = "=0.87.1", default-features = false, features = ["sha1", "sha256"] }
+imagesize = { version = "=0.15.0", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+maka-runtime = { path = "crates/runtime" }
+maka-skills = { path = "crates/skills" }
+maka-presentation = { path = "crates/presentation" }
+maka-event-log = { path = "crates/event-log" }
+maka-js-runtime = { path = "crates/js-runtime" }
+maka-protocol = { path = "crates/protocol" }
+maka-model = { path = "crates/model" }
+maka-transport = { path = "crates/transport" }
+maka-agent = { path = "crates/agent" }
+maka-config = { path = "crates/config" }
+deno_core = "=0.411.0"
+deno_error = "0.7"
+rusqlite = { version = "0.38", features = ["bundled"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+libc = "0.2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "signal", "io-util"] }
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = "0.29"
+tokio-util = { version = "0.7", features = ["rt"] }
+uuid = { version = "1", features = ["v4"] }
+
+tempfile = "3"

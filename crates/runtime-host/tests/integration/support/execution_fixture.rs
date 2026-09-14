@@ -1,0 +1,132 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use maka_config::ConfigurationStore;
+use maka_event_log::{
+    EventLog,
+    root::{RootNamespaces, RootOwner},
+};
+use maka_protocol::session::PermissionMode;
+use maka_runtime::configuration::*;
+use maka_runtime_host::server::Host;
+use maka_runtime_host::session::{PreparedSession, SessionModel};
+use serde_json::json;
+use std::{os::unix::fs::PermissionsExt, path::PathBuf, sync::Arc};
+
+pub async fn fixture() -> (
+    tempfile::TempDir,
+    RootNamespaces,
+    PathBuf,
+    std::net::TcpListener,
+    Arc<Host>,
+) {
+    let directory = tempfile::Builder::new()
+        .prefix("maka-execution-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in("/tmp")
+        .unwrap();
+    let ns = RootNamespaces {
+        ownership: directory.path().join("owners"),
+        control: directory.path().join("control"),
+    };
+    let root = directory.path().join("root");
+    let provider = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    provider.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}/v1", provider.local_addr().unwrap());
+    let owner = Arc::new(RootOwner::create(&root, &ns).unwrap());
+    let configuration = ConfigurationStore::for_root(owner.clone()).await.unwrap();
+    let created = configuration
+        .create_connection(
+            serde_json::from_value(json!({
+                "expectedCatalogRevision":0,
+                "connection":{"slug":"fixture","name":"Fixture","providerType":"openai-compatible",
+                    "baseUrl":base_url,"enabled":true,"enabledModelIds":["fixture-model"]}
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let CatalogMutationResult::Committed {
+        connection: Some(connection),
+        ..
+    } = created
+    else {
+        panic!("connection must be committed");
+    };
+    assert!(matches!(
+        configuration
+            .set_credential(
+                SetCredentialInput {
+                    locator: CredentialLocator::Connection {
+                        connection_id: connection.connection_id.clone(),
+                        kind: ConnectionCredentialKind::ApiKey,
+                    },
+                    expected: None,
+                    expected_connection: Some(ConnectionCredentialTarget {
+                        connection_id: connection.connection_id.clone(),
+                        revision: 1,
+                        slug: "fixture".into(),
+                        provider_type: "openai-compatible".into(),
+                        effective_base_url: base_url,
+                    }),
+                    secret: "fixture-secret".into(),
+                },
+                1
+            )
+            .await
+            .unwrap(),
+        CredentialMutationResult::Committed { .. }
+    ));
+    let log = EventLog::for_root(owner.clone()).await.unwrap();
+    let prepared = PreparedSession::new(
+        serde_json::from_value(json!({
+            "sessionId":"session","workspace":{"kind":"host_path","path":"/tmp"},
+            "modelTarget":{"kind":"default"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let session = prepared.bind(
+        maka_protocol::session::WorkspaceProjection {
+            target: maka_protocol::session::WorkspaceTarget::HostPath {
+                path: "/tmp".into(),
+            },
+            host_cwd: "/tmp".into(),
+        },
+        SessionModel {
+            connection_id: connection.connection_id,
+            connection_slug: "fixture".into(),
+            model: "fixture-model".into(),
+        },
+        PermissionMode::Explore,
+        maka_runtime::execution::ToolMode::Direct,
+    );
+    log.create_session("session", "fingerprint", &session, 1)
+        .await
+        .unwrap();
+    log.shutdown().await.unwrap();
+    configuration.close().await.unwrap();
+    drop(log);
+    drop(owner);
+    let host = Host::open(RootOwner::open(&root, &ns).unwrap())
+        .await
+        .unwrap();
+
+    (directory, ns, root, provider, host)
+}

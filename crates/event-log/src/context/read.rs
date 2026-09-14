@@ -1,0 +1,208 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::selection::Selection;
+use super::{
+    ContextBaseline, ModelContextSource, boundary, evidence, invalid, latest_main, proof, safety,
+    validate,
+};
+use crate::{EventLog, StoreError};
+use maka_runtime::{
+    context::CheckpointMode,
+    event::{Fact, RuntimeEvent, StoredEvent},
+};
+use sqlx::{Connection, SqliteConnection};
+
+impl EventLog {
+    pub async fn read_model_context(
+        &self,
+        session: &str,
+        current: Option<&str>,
+        max_events: usize,
+        max_bytes: usize,
+    ) -> Result<ModelContextSource, StoreError> {
+        self.context_source(session, current, max_events, max_bytes, None)
+            .await
+    }
+
+    pub async fn prepare_context_compaction(
+        &self,
+        session: &str,
+        current: Option<&str>,
+        max_events: usize,
+        max_bytes: usize,
+        mode: &CheckpointMode,
+    ) -> Result<ModelContextSource, StoreError> {
+        self.context_source(session, current, max_events, max_bytes, Some(mode.clone()))
+            .await
+    }
+
+    async fn context_source(
+        &self,
+        session: &str,
+        current: Option<&str>,
+        max_events: usize,
+        max_bytes: usize,
+        mode: Option<CheckpointMode>,
+    ) -> Result<ModelContextSource, StoreError> {
+        self.validate_root()?;
+        crate::sessions::validate_id(session)?;
+        let (session, current) = (session.to_owned(), current.map(str::to_owned));
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    let opening =
+                        safety::current_opening(&mut tx, &session, current.as_deref()).await?;
+                    safety::require_safe(&mut tx, &session, current.as_deref()).await?;
+                    let selection = match &opening {
+                        Some((_, event)) => Selection::for_opening(&mut tx, event).await?,
+                        None => Selection::session(&session),
+                    };
+                    let high_water = if let Some(mode) = &mode {
+                        if let Some((_, event)) = &opening {
+                            safety::active_boundary(
+                                &mut tx,
+                                &event.invocation.invocation_id,
+                                i64::MAX as u64,
+                            )
+                            .await?;
+                        }
+                        boundary::source_fence(&mut tx, &selection, opening.as_ref(), mode).await?
+                    } else {
+                        selection.high_water(&mut tx, i64::MAX as u64).await?
+                    };
+                    let before = if mode.is_some() {
+                        sqlx::query_scalar::<_, Option<i64>>("SELECT MIN(sequence) FROM runtime_events WHERE invocation_id=? AND kind='model_requested' AND json_extract(event_json,'$.fact.purpose')='summary'")
+                            .bind(current.as_deref()).fetch_one(&mut *tx).await?.unwrap_or(i64::MAX) as u64
+                    } else { i64::MAX as u64 };
+                    let latest_main = latest_main::read_selected(&mut tx, &selection, high_water).await?;
+                    let source = materialize_selected(
+                        &mut tx, &selection, high_water, before, max_events, max_bytes, latest_main,
+                    ).await?;
+                    tx.commit().await?;
+                    Ok(source)
+                })
+            })
+            .await
+    }
+}
+
+pub(super) async fn materialize_selected(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    high_water: u64,
+    before: u64,
+    max_events: usize,
+    max_bytes: usize,
+    latest_main: super::LatestMainContext,
+) -> Result<ModelContextSource, StoreError> {
+    let baseline = latest_selected(connection, selection, high_water).await?;
+    let anchor = if let Some(ContextBaseline { checkpoint, .. }) = &baseline {
+        if let CheckpointMode::MidTurn { anchor_event_id } = &checkpoint.mode {
+            let (sequence, event) = proof::by_id(connection, anchor_event_id).await?;
+            Some(StoredEvent { sequence, event })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let anchor_bytes = anchor
+        .as_ref()
+        .map(|a| serde_json::to_vec(&a.event).map(|b| b.len()))
+        .transpose()?
+        .unwrap_or(0);
+    let remaining_bytes = max_bytes
+        .checked_sub(anchor_bytes)
+        .ok_or(StoreError::PrefixTooLarge)?;
+    let remaining_events = max_events
+        .checked_sub(usize::from(anchor.is_some()))
+        .ok_or(StoreError::PrefixTooLarge)?;
+    let after = baseline
+        .as_ref()
+        .map_or(0, |b| b.checkpoint.covered_through);
+    let tail = super::tail::read(
+        connection,
+        selection,
+        after,
+        high_water,
+        before,
+        remaining_events,
+        remaining_bytes,
+    )
+    .await?;
+    let source_evidence = evidence::selected(connection, selection, high_water).await?;
+    let effective_source_digest =
+        crate::archive::digest_selected(connection, selection, &source_evidence, before).await?;
+    Ok(ModelContextSource {
+        source_evidence,
+        effective_source_digest,
+        baseline,
+        anchor,
+        tail,
+        latest_main,
+    })
+}
+
+pub(crate) async fn latest_selected(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    through: u64,
+) -> Result<Option<ContextBaseline>, StoreError> {
+    let Some(StoredEvent { sequence, event }) =
+        latest_record(connection, selection, through).await?
+    else {
+        return Ok(None);
+    };
+    validate::chain(connection, &event, sequence, true).await?;
+    let Fact::ContextCheckpointRecorded { checkpoint } = event.fact else {
+        return Err(invalid("checkpoint kind mismatch"));
+    };
+    Ok(Some(ContextBaseline {
+        event_id: event.id,
+        checkpoint,
+    }))
+}
+
+/// Select without traversing predecessors, so chain validation stays iterative.
+pub(crate) async fn latest_record(
+    connection: &mut SqliteConnection,
+    selection: &Selection,
+    through: u64,
+) -> Result<Option<StoredEvent>, StoreError> {
+    let filter = Selection::predicate("c", "?3");
+    let row: Option<(i64, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT c.sequence,c.event_json FROM runtime_events c WHERE c.kind='context_checkpoint_recorded' AND c.sequence <= ?1
+         AND json_extract(c.event_json,'$.invocation.session_id')=?2 AND {filter}
+         AND NOT EXISTS(SELECT 1 FROM runtime_events r WHERE r.invocation_id=c.invocation_id
+           AND r.kind='model_requested' AND r.operation_id=json_extract(c.event_json,'$.fact.checkpoint.summary_step_id')
+           AND json_extract(r.event_json,'$.fact.source_scope.kind')='lineage'
+           AND (?3 IS NULL OR c.invocation_id NOT IN (SELECT value FROM json_each(?3,'$.runs'))))
+         ORDER BY c.sequence DESC LIMIT 1"
+    ))).bind(through as i64).bind(&selection.session).bind(&selection.lineage).fetch_optional(&mut *connection).await?;
+    let Some((sequence, json)) = row else {
+        return Ok(None);
+    };
+    let event: RuntimeEvent = serde_json::from_str(&json)?;
+    Ok(Some(StoredEvent {
+        sequence: crate::sequence_number(sequence)?,
+        event,
+    }))
+}

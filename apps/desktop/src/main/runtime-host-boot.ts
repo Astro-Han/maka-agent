@@ -34,8 +34,13 @@ import {
   type MessageBoxReturnValue,
 } from "electron";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  createNativeRuntimeHostCandidateLaunchBarrier,
+  initializeNativeRuntimeHost,
+} from "./native-runtime-host.js";
 import { type ConnectionEvent } from '@maka/core/connections';
 import { type SessionChangedEvent, type SessionChangedReason } from '@maka/core/session';
 import { isBotDeliveryProvider } from '@maka/core/bot-chat-settings';
@@ -333,7 +338,13 @@ const runtimeHostDirectPeerAvailable = runtimeHostPeerClient !== undefined;
 const runtimeHostClientInstanceId = await loadOrCreateRuntimeHostClientInstanceId(
   join(userDataDir, "runtime-host-client.json"),
 );
-const runtimeHostCandidateLaunchBarrier = createRuntimeHostCandidateLaunchBarrier();
+const nativeHostBinaryName = process.platform === "win32" ? "maka.exe" : "maka";
+const nativeHostExecutable = app.isPackaged
+  ? join(process.resourcesPath, "runtime-host", nativeHostBinaryName)
+  : fileURLToPath(new URL(`../../../../target/debug/${nativeHostBinaryName}`, import.meta.url));
+const runtimeHostCandidateLaunchBarrier = isE2e
+  ? createRuntimeHostCandidateLaunchBarrier()
+  : createNativeRuntimeHostCandidateLaunchBarrier(nativeHostExecutable);
 const runtimeHostCredentialStore = createClientRuntimeHostCredentialStore(userDataDir);
 const runtimeHostProfileCatalog = createClientRuntimeHostProfileCatalog(
   userDataDir,
@@ -358,6 +369,13 @@ const workspaceRoot = join(
   "workspaces",
   e2eFixture?.workspaceName ?? "default",
 );
+// Runtime authority and Desktop-owned control tables must not migrate the old TS Host database.
+const localHostRoot = isE2e ? workspaceRoot : join(userDataDir, "runtime-host-rust");
+const desktopControlRoot = isE2e ? workspaceRoot : join(userDataDir, "desktop-state");
+const desktopDatabaseOptions = {
+  schemaMigration: isE2e ? "require_current" as const : "migrate" as const,
+};
+mkdirSync(workspaceRoot, { recursive: true });
 const desktopDiagnostics: DesktopDiagnosticsDeps = {
   environment: () =>
     captureDesktopDiagnosticEnvironment({
@@ -420,7 +438,12 @@ if (e2eFixture) {
   );
   await seedE2eFixture({ workspaceRoot, fixture: e2eFixture });
 }
-const resolveLocalStorageRoot = () =>
+const resolveLocalStorageRoot = async () => {
+  if (!isE2e) {
+    await startupStep("native storage root", initializeNativeRuntimeHost(nativeHostExecutable, localHostRoot));
+    return resolveStorageRoot({ path: localHostRoot, kind: "interactive" });
+  }
+  return (
   e2eFixture
     ? resolveStorageRoot({ path: workspaceRoot, kind: "interactive" })
     : startupStep(
@@ -428,7 +451,9 @@ const resolveLocalStorageRoot = () =>
         resolveDesktopStorageRoot(workspaceRoot, {
           confirmRepair: () => confirmDesktopStorageRootRepair(workspaceRoot),
         }),
-      );
+      )
+  );
+};
 updateDesktopStartupProgress('storage');
 const startupLocalStorageRoot =
   await resolveLocalStorageRoot();
@@ -1117,7 +1142,8 @@ registerNotificationsIpc({
 const sessionCopyOwnerProcessId = randomUUID();
 const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
   {
-    rootPath: workspaceRoot,
+    rootPath: localHostRoot,
+    nativeHost: !isE2e,
     clientInstanceId: runtimeHostClientInstanceId,
     generation: runtimeHostGeneration,
     candidateLaunchBarrier: runtimeHostCandidateLaunchBarrier,
@@ -1125,13 +1151,9 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
     // The Desktop E2E composition lives behind its own entry module, which
     // release packaging drops: picking it here is what keeps FakeBackend and
     // the E2E bootstrap out of the shipped Runtime Host.
-    candidateEntrypoint: new URL(
-      import.meta.resolve(
-        isE2e
-          ? "@maka/runtime-host/test-only/execution-candidate-e2e-main"
-          : "@maka/runtime-host/execution-candidate-main",
-      ),
-    ),
+    candidateEntrypoint: isE2e
+      ? new URL(import.meta.resolve("@maka/runtime-host/test-only/execution-candidate-e2e-main"))
+      : "host",
     ipcMain,
     workspaceRoot,
     attachmentApprovals,
@@ -1254,11 +1276,11 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
     completeDesktopInteractionTurn,
     createSessionCopyCleanup: ({ removeSession, resumeSessionCopy }) =>
       createSessionCopyCleanupAuthority({
-        workspaceRoot,
+        workspaceRoot: desktopControlRoot,
         removeSession,
         resumeSessionCopy,
         processId: sessionCopyOwnerProcessId,
-        databaseOptions: { schemaMigration: 'require_current' },
+        databaseOptions: desktopDatabaseOptions,
       }),
     renderer: mainWindowController,
     onError: (error) =>
@@ -1428,14 +1450,13 @@ runtimeHostManager = await startLocalRuntimeHostManager().catch(async (error: un
   }
   throw error;
 });
-// Runtime Host is the only schema-migration authority for its State Root.
-// Work Board remains a Desktop-owned table, but it opens only after the Host is
-// ready and verifies the schema instead of changing it behind a resident Host.
+// Desktop owns these tables in its own directory. The TS E2E composition retains
+// its existing shared-database migration authority.
 workBoardIpc = registerWorkBoardIpc({
   ipcMain,
   workspaceRoot,
   mainWindowController,
-  store: createWorkBoardStore(workspaceRoot, { schemaMigration: 'require_current' }),
+  store: createWorkBoardStore(desktopControlRoot, desktopDatabaseOptions),
 });
 updateDesktopStartupProgress('renderer');
 wireLifecycle();
