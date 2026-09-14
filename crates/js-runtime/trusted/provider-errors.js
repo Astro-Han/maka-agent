@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { isTransportFailure } from './network-fetch.js';
+
 const codes = new Set([
   'context_length_exceeded',
   'model_context_window_exceeded',
@@ -170,15 +172,22 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
   }
 }
 
-// Only structured provider evidence authorizes a retry. In particular a local
+// Only native transport or structured provider evidence authorizes a retry. A local
 // response-size failure wrapped by the SDK must not reset its budget by retrying.
 function transientFailure(error) {
   if (!record(error)) return;
   let cause = error;
+  let transport = false;
   for (let depth = 0; record(cause) && depth < 8; depth++, cause = cause.cause) {
     if (cause.name === 'AbortError' || cause.name === 'ProviderResponseLimitError') return;
+    transport ||= isTransportFailure(cause);
   }
   const status = error.name === 'AI_APICallError' ? error.statusCode : undefined;
+  // Once error headers arrived, body loss cannot erase authentication or
+  // rate-limit evidence. Successful streaming responses may carry status 200.
+  if (transport && (status === undefined || (status >= 200 && status < 300))) {
+    return { reason: 'network', message: 'model HTTP transport interrupted' };
+  }
   const code = error.code ?? error.type ?? error.error?.code ?? error.error?.type;
   const reason =
     status === 429

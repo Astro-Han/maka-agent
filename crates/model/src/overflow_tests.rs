@@ -24,8 +24,19 @@ async fn provider_evidence_is_bounded_and_output_survives_normalization() {
     let mut runtime = JsRuntime::new(Default::default());
     runtime
         .execute_script(
+            "network-fetch",
+            include_str!("../../js-runtime/trusted/network-fetch.js").replace("export ", ""),
+        )
+        .unwrap();
+    runtime
+        .execute_script(
             "provider-errors",
-            include_str!("../../js-runtime/trusted/provider-errors.js").replace("export ", ""),
+            include_str!("../../js-runtime/trusted/provider-errors.js")
+                .replace(
+                    "import { isTransportFailure } from './network-fetch.js';",
+                    "",
+                )
+                .replace("export ", ""),
         )
         .unwrap();
     let promise = runtime.execute_script("overflow-contract", r#"

@@ -36,14 +36,14 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 use std::time::Duration;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum TrustedError {
     #[error("model request cancelled")]
     Cancelled,
-    #[error("model request deadline exceeded")]
+    #[error("model stream idle timeout exceeded")]
     TimedOut,
     #[error("trusted JavaScript runtime failed: {0}")]
     Failed(String),
@@ -89,6 +89,7 @@ pub(super) enum Command {
         id: u32,
         request: Value,
         sender: mpsc::Sender<Result<ProviderEvent>>,
+        activity: Arc<Notify>,
         cancellation: CancellationToken,
         lane: Option<ResponsesLane>,
         network: maka_network::Policy,
@@ -172,13 +173,13 @@ impl TrustedRuntime {
         request: Value,
         sender: mpsc::Sender<Result<ProviderEvent>>,
         cancellation: CancellationToken,
-        deadline: Duration,
+        idle_timeout: Duration,
     ) -> Result<()> {
         self.model_in_lane(
             request,
             sender,
             cancellation,
-            deadline,
+            idle_timeout,
             None,
             Default::default(),
         )
@@ -190,7 +191,7 @@ impl TrustedRuntime {
         request: Value,
         sender: mpsc::Sender<Result<ProviderEvent>>,
         cancellation: CancellationToken,
-        deadline: Duration,
+        idle_timeout: Duration,
         lane: Option<ResponsesLane>,
         network: maka_network::Policy,
     ) -> Result<()> {
@@ -210,12 +211,14 @@ impl TrustedRuntime {
         let service = self.service()?;
         let id = self.next_id()?;
         let (reply, mut done) = oneshot::channel();
+        let activity = Arc::new(Notify::new());
         service
             .commands
             .send(Command::Model {
                 id,
                 request,
                 sender,
+                activity: activity.clone(),
                 cancellation: cancellation.clone(),
                 lane,
                 network,
@@ -227,15 +230,18 @@ impl TrustedRuntime {
             .map_err(|_| service.health.error())?;
         let mut cancel_on_drop =
             ModelCancellation::new(id, service.commands.clone(), cancellation.clone());
-        let cause = tokio::select! {
-            biased;
-            result = &mut done => {
-                cancel_on_drop.disarm();
-                let result = result.map_err(|_| service.health.error())?.map(|_| ());
-                return if cancellation.is_cancelled() { Err(TrustedError::Cancelled) } else { result };
-            },
-            _ = cancellation.cancelled() => TrustedError::Cancelled,
-            _ = tokio::time::sleep(deadline) => TrustedError::TimedOut,
+        let cause = loop {
+            tokio::select! {
+                biased;
+                result = &mut done => {
+                    cancel_on_drop.disarm();
+                    let result = result.map_err(|_| service.health.error())?.map(|_| ());
+                    return if cancellation.is_cancelled() { Err(TrustedError::Cancelled) } else { result };
+                },
+                _ = cancellation.cancelled() => break TrustedError::Cancelled,
+                _ = activity.notified() => {},
+                _ = tokio::time::sleep(idle_timeout) => break TrustedError::TimedOut,
+            }
         };
         cancel_on_drop.cancel();
         // Abort is request-local. Only failure to settle cleanup escalates to a

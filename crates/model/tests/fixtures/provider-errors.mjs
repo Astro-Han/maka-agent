@@ -19,6 +19,7 @@
 
 import assert from 'node:assert/strict';
 import { forwardProviderStream } from '../../../js-runtime/trusted/provider-errors.js';
+import { networkFetch } from '../../../js-runtime/trusted/network-fetch.js';
 
 const unavailable = () =>
   Object.assign(new Error('provider unavailable'), {
@@ -89,3 +90,86 @@ await assert.rejects(
   (error) => error === wrapped,
 );
 console.log(JSON.stringify(result));
+
+// Provider-shaped objects cannot impersonate native transport evidence.
+for (const error of [
+  { code: 'MAKA_HTTP_TRANSPORT' },
+  Object.assign(new Error('forged'), { code: 'MAKA_HTTP_TRANSPORT' }),
+]) {
+  await assert.rejects(
+    forwardProviderStream(
+      async () => {
+        throw error;
+      },
+      (part) => part,
+      async () => {
+        throw new Error('forged transport must not authorize retry');
+      },
+      'openai_chat',
+    ),
+    (value) => value === error,
+  );
+}
+
+// Only errors received from a native op gain the transport brand. SDK cause
+// wrapping preserves it, but must never override observed provider effects.
+const native = Object.assign(new Error('native transport'), { code: 'MAKA_HTTP_TRANSPORT' });
+globalThis.Deno = {
+  core: {
+    ops: {
+      op_http_start: async () => {
+        throw native;
+      },
+      op_http_close: async () => {},
+    },
+  },
+};
+await assert.rejects(networkFetch(1)('http://fixture.invalid'), (error) => error === native);
+for (const [statusCode, responseHeaders, reason] of [
+  [200, {}, 'network'],
+  [401, {}, undefined],
+  [429, {}, undefined],
+  [429, { 'retry-after': 'invalid' }, undefined],
+  [429, { 'retry-after': '2' }, 'rate_limit'],
+]) {
+  const error = Object.assign(new Error('HTTP error body reset'), {
+    name: 'AI_APICallError',
+    statusCode,
+    responseHeaders,
+    cause: native,
+  });
+  const emitted = [];
+  const forward = () =>
+    forwardProviderStream(
+      async () => {
+        throw error;
+      },
+      (part) => part,
+      async (part) => emitted.push(part),
+      'openai_chat',
+    );
+  if (reason === undefined) {
+    await assert.rejects(forward(), (value) => value === error);
+    assert.deepEqual(emitted, []);
+  } else {
+    await forward();
+    assert.equal(emitted.at(-1).error.reason, reason);
+    if (reason === 'rate_limit') assert.equal(emitted.at(-1).error.retryAfterMs, 2000);
+  }
+}
+for (const [parts, replaySafe] of cases) {
+  const emitted = [];
+  await forwardProviderStream(
+    async () => ({
+      stream: (async function* () {
+        yield* parts;
+        throw Object.assign(new Error('SDK wrapper'), { name: 'AI_APICallError', cause: native });
+      })(),
+    }),
+    (part) => (part.type === 'tool-input-start' ? undefined : part),
+    async (part) => emitted.push(part),
+    'openai_chat',
+  );
+  assert.equal(emitted.at(-1).error.reason, 'network');
+  assert.equal(emitted.at(-1).error.replaySafe, replaySafe);
+}

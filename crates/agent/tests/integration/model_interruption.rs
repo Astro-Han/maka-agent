@@ -109,9 +109,11 @@ fn engine(log: Arc<EventLog>) -> Engine {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn safe_retry_preserves_failed_evidence_and_cancellation_stops_backoff() {
     tokio::time::timeout(Duration::from_secs(15), async {
-        for cancel in [false, true] {
+        for (cancel, reset) in [(false, false), (true, false), (false, true)] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let observed = Arc::new(Notify::new());
+            let reset_ready = observed.clone();
             let server = tokio::spawn(async move {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut requests = vec![read_request(&mut socket).await];
@@ -120,7 +122,11 @@ async fn safe_retry_preserves_failed_evidence_and_cancellation_stops_backoff() {
                     "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"unexecuted","type":"function",
                         "function":{"name":"Read","arguments":"{\"path\":\"never-read\"}"}}]},"finish_reason":null}]});
                 socket.write_all(format!("data: {intent}\n\n").as_bytes()).await.unwrap();
-                drop(socket); // Real SDK EOF, not a fabricated model error.
+                if reset {
+                    reset_ready.notified().await;
+                    socket.set_zero_linger().unwrap();
+                }
+                drop(socket); // Real EOF or RST, never a fabricated model error.
                 if !cancel {
                     let (mut socket, _) = listener.accept().await.unwrap();
                     requests.push(read_request(&mut socket).await);
@@ -134,6 +140,16 @@ async fn safe_retry_preserves_failed_evidence_and_cancellation_stops_backoff() {
             let cancellation = CancellationToken::new();
             let mut commits = log.subscribe_commits();
             let stop = async {
+                if reset {
+                    loop {
+                        let prefix = log.prefix(100, 128 * 1024).await.unwrap();
+                        if prefix.events.iter().any(|event| matches!(&event.event.fact,
+                            Fact::ModelObserved { event: ModelEvent::PartDelta { text, .. }, .. }
+                                if text == "unfinished-secret-fragment")) { break; }
+                        commits.changed().await.unwrap();
+                    }
+                    observed.notify_one();
+                }
                 if cancel {
                     loop {
                         let prefix = log.prefix(100, 128 * 1024).await.unwrap();

@@ -47,7 +47,7 @@ pub(super) async fn open(
         .entry("openai-beta")
         .or_insert(HeaderValue::from_static("responses_websockets=2026-02-06"));
     // One initial attempt, then five exponential retries. The caller's select
-    // owns cancellation and the model deadline, including these sleeps. No
+    // owns cancellation and the model idle budget, including these sleeps. No
     // response.create has been sent yet, so reconnecting cannot replay it.
     for attempt in 0..=5 {
         if attempt > 0 {

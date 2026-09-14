@@ -232,6 +232,99 @@ async fn malformed_provider_tool_identity_cannot_complete_a_model_step() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn active_stream_outlives_idle_budget_but_silence_closes_the_socket() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let executor = ModelExecutor::new(1, Duration::from_secs(3)).unwrap();
+        for silent in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let observed = Arc::new(Notify::new());
+            let ready = observed.clone();
+            let (first, last) = fixtures(ProviderKind::OpenaiChat, "progress");
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_request(&mut socket).await;
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").await.unwrap();
+                socket.write_all(first.as_bytes()).await.unwrap();
+                ready.notified().await;
+                if silent {
+                    let mut byte = [0];
+                    assert_eq!(socket.read(&mut byte).await.unwrap(), 0, "idle timeout must close the transport");
+                } else {
+                    // Continuous progress for longer than the whole idle budget.
+                    for _ in 0..4 {
+                        tokio::time::sleep(Duration::from_millis(900)).await;
+                        socket.write_all(first.as_bytes()).await.unwrap();
+                    }
+                    socket.write_all(last.as_bytes()).await.unwrap();
+                }
+            });
+            let mut stream = executor.stream(request(ProviderKind::OpenaiChat, base), CancellationToken::new()).await.unwrap();
+            let mut builder = StepBuilder::default();
+            let mut failure = None;
+            let mut deltas = 0;
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(event) => {
+                        if matches!(event, ModelEvent::PartDelta { .. }) {
+                            deltas += 1;
+                            observed.notify_one();
+                        }
+                        builder.push(event).unwrap();
+                    }
+                    Err(error) => { failure = Some(error); break; }
+                }
+            }
+            stream.cancel_and_wait().await;
+            if silent {
+                assert!(matches!(failure, Some(maka_model::ModelError::TimedOut)), "{failure:?}");
+            } else {
+                assert!(failure.is_none(), "{failure:?}");
+                assert_eq!(deltas, 5);
+                builder.finish().unwrap();
+            }
+            server.await.unwrap();
+        }
+    }).await.expect("stream activity and idle cleanup must settle");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_connect_failure_is_retryable_but_invalid_http_is_not() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let executor = ModelExecutor::new(1, Duration::from_secs(5)).unwrap();
+        for connect_failure in [true, false] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let server = if connect_failure {
+                drop(listener);
+                None
+            } else {
+                Some(tokio::spawn(async move {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    read_request(&mut socket).await;
+                    socket.write_all(b"not an HTTP response\r\n\r\n").await.unwrap();
+                }))
+            };
+            let mut stream = executor.stream(request(ProviderKind::OpenaiChat, base), CancellationToken::new()).await.unwrap();
+            let error = loop {
+                match stream.next().await.expect("failed transport must report its error") {
+                    Ok(_) => {},
+                    Err(error) => break error,
+                }
+            };
+            stream.cancel_and_wait().await;
+            if connect_failure {
+                assert!(matches!(error, maka_model::ModelError::Provider(ref failure)
+                    if failure.reason() == maka_model::ProviderFailureReason::Network && failure.replay_safe()), "{error:?}");
+            } else {
+                assert!(matches!(error, maka_model::ModelError::Adapter(_)), "{error:?}");
+            }
+            if let Some(server) = server { server.await.unwrap(); }
+        }
+    }).await.expect("transport classification must settle");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancellation_closes_pending_fetch_and_releases_model_capacity() {
     tokio::time::timeout(Duration::from_secs(15), async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

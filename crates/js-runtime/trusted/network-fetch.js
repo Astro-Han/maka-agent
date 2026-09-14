@@ -18,6 +18,13 @@
  */
 
 // No ambient proxy policy: Rust uses the same immutable routing for HTTP and WS.
+const transportFailures = new WeakSet();
+export const isTransportFailure = (error) => transportFailures.has(error);
+function nativeFailure(error) {
+  if (error instanceof Error && error.code === 'MAKA_HTTP_TRANSPORT') transportFailures.add(error);
+  throw error;
+}
+
 export function networkFetch(id) {
   const ops = Deno.core.ops;
   return async (input, init) => {
@@ -31,13 +38,9 @@ export function networkFetch(id) {
     try {
       const body = new Uint8Array(await request.arrayBuffer());
       request.signal.throwIfAborted();
-      const response = await ops.op_http_start(
-        id,
-        request.method,
-        request.url,
-        Object.fromEntries(request.headers),
-        body,
-      );
+      const response = await ops
+        .op_http_start(id, request.method, request.url, Object.fromEntries(request.headers), body)
+        .catch(nativeFailure);
       if (!response.hasBody) {
         cleanup();
         await ops.op_http_close(id);
@@ -48,7 +51,7 @@ export function networkFetch(id) {
           {
             async pull(controller) {
               try {
-                const chunk = await ops.op_http_chunk(id);
+                const chunk = await ops.op_http_chunk(id).catch(nativeFailure);
                 if (chunk === null) {
                   cleanup();
                   controller.close();

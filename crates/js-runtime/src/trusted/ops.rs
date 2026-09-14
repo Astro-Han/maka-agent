@@ -26,12 +26,13 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct Output {
     pub http: Rc<super::http::Exchange>,
     pub sender: mpsc::Sender<Result<ProviderEvent>>,
+    pub activity: Arc<Notify>,
     pub cancellation: CancellationToken,
     pub endpoint: String,
     pub responses: Option<Rc<super::responses::Exchange>>,
@@ -76,7 +77,7 @@ async fn op_model_emit(
     id: u32,
     #[serde] value: serde_json::Value,
 ) -> std::result::Result<(), JsErrorBox> {
-    let (sender, cancellation, budget) = {
+    let (sender, activity, cancellation, budget) = {
         let state = state.borrow();
         let models = state.borrow::<Models>();
         let output = models
@@ -85,6 +86,7 @@ async fn op_model_emit(
             .ok_or_else(|| JsErrorBox::generic("model request closed"))?;
         (
             output.sender.clone(),
+            output.activity.clone(),
             output.cancellation.clone(),
             models.budget.clone(),
         )
@@ -105,7 +107,11 @@ async fn op_model_emit(
         biased;
         _ = cancellation.cancelled() => Err(JsErrorBox::generic("model cancelled")),
         result = sender.send(Ok(event)) => result.map_err(|_| JsErrorBox::generic("model receiver closed")),
-    }
+    }?;
+    // Model progress, not request age, controls the idle timer. Notifications
+    // coalesce, so a fast stream cannot create an unbounded heartbeat queue.
+    activity.notify_one();
+    Ok(())
 }
 
 deno_core::extension!(

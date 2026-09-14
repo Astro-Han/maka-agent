@@ -103,7 +103,7 @@ fn serialize_tools<S: serde::Serializer>(
 pub enum ModelError {
     #[error("model request cancelled")]
     Cancelled,
-    #[error("model request deadline exceeded")]
+    #[error("model stream idle timeout exceeded")]
     TimedOut,
     #[error("model input exceeds provider capacity (observed output: {observed_output})")]
     ContextOverflow { observed_output: bool },
@@ -187,26 +187,26 @@ impl Drop for ModelStream {
 #[derive(Clone)]
 pub struct ModelExecutor {
     permits: Arc<Semaphore>,
-    deadline: Duration,
+    idle_timeout: Duration,
     runtime: TrustedRuntime,
 }
 
 impl ModelExecutor {
-    pub fn new(concurrency: usize, deadline: Duration) -> Result<Self, ModelError> {
-        Self::with_runtime(TrustedRuntime::default(), concurrency, deadline)
+    pub fn new(concurrency: usize, idle_timeout: Duration) -> Result<Self, ModelError> {
+        Self::with_runtime(TrustedRuntime::default(), concurrency, idle_timeout)
     }
 
     pub fn with_runtime(
         runtime: TrustedRuntime,
         concurrency: usize,
-        deadline: Duration,
+        idle_timeout: Duration,
     ) -> Result<Self, ModelError> {
-        if concurrency == 0 || deadline.is_zero() {
+        if concurrency == 0 || idle_timeout.is_zero() {
             return Err(ModelError::Adapter("invalid model execution limits".into()));
         }
         Ok(Self {
             permits: Arc::new(Semaphore::new(concurrency)),
-            deadline,
+            idle_timeout,
             runtime,
         })
     }
@@ -250,7 +250,7 @@ impl ModelExecutor {
         auth::prepare(&mut request)?;
         let (sender, receiver) = mpsc::channel(32);
         let worker_cancel = cancellation.clone();
-        let deadline = self.deadline;
+        let idle_timeout = self.idle_timeout;
         let runtime = self.runtime.clone();
         let network = request.provider.network.clone();
         if let Some(lane) = &lane {
@@ -263,7 +263,7 @@ impl ModelExecutor {
             let _permit = permit;
             let failure_sender = sender.clone();
             let result = runtime
-                .model_in_lane(request, sender, worker_cancel, deadline, lane, network)
+                .model_in_lane(request, sender, worker_cancel, idle_timeout, lane, network)
                 .await;
             if let Err(error) = result {
                 let _ = failure_sender.send(Err(error)).await;

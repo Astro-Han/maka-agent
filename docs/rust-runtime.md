@@ -110,9 +110,11 @@ Do not run untrusted code or point test instances at existing user data.
 - Request-scoped proxy policy applies to HTTP and Responses WebSocket transport.
   Failed WS handshakes retry five times with exponential backoff, then use HTTP
   through the same policy. Separately, main requests allow up to ten attempts for
-  identified transient provider failures, using frozen inputs and cancellable backoff.
+  identified transient provider or native network failures, using frozen inputs and cancellable backoff.
   Provider tool activity or replay metadata blocks retries. Unknown/local errors
-  and unclassified network failures or deadlines are not retried.
+  and unclassified network failures or idle timeouts are not retried.
+  Model activity refreshes the 120-second idle budget; active streams have no fixed
+  two-minute duration limit. User cancellation still closes and drains the request.
 
 ## Code layout
 

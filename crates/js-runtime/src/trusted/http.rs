@@ -100,7 +100,7 @@ impl Exchange {
         let response = tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err(failed("HTTP request cancelled")),
-            response = request.send() => response.map_err(|_| failed("HTTP request failed"))?,
+            response = request.send() => response.map_err(|error| transport_failure(&error, "HTTP request failed"))?,
         };
         let status = response.status().as_u16();
         let headers: Vec<_> = response
@@ -128,7 +128,7 @@ impl Exchange {
         let result = tokio::select! {
             biased;
             _ = cancellation.cancelled() => Err(failed("HTTP request cancelled")),
-            result = response.chunk() => result.map_err(|_| failed("HTTP response body failed")),
+            result = response.chunk() => result.map_err(|error| transport_failure(&error, "HTTP response body failed")),
         };
         match result {
             Ok(Some(bytes)) => {
@@ -165,6 +165,42 @@ fn exchange(state: &OpState, id: u32) -> Result<Rc<Exchange>, JsErrorBox> {
 }
 fn failed(message: &'static str) -> JsErrorBox {
     JsErrorBox::generic(message)
+}
+
+#[derive(Debug, thiserror::Error, deno_error::JsError)]
+#[class(generic)]
+#[property("code" = "MAKA_HTTP_TRANSPORT")]
+#[error("model HTTP transport interrupted")]
+struct TransportFailure;
+
+fn transport_failure(error: &reqwest::Error, message: &'static str) -> JsErrorBox {
+    use std::{error::Error, io::ErrorKind};
+    let mut transient = error.is_timeout() || error.is_dns();
+    let mut cause = error.source();
+    while let Some(error) = cause {
+        if let Some(error) = error.downcast_ref::<std::io::Error>() {
+            transient |= matches!(
+                error.kind(),
+                ErrorKind::ConnectionRefused
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::NotConnected
+                    | ErrorKind::BrokenPipe
+                    | ErrorKind::TimedOut
+                    | ErrorKind::HostUnreachable
+                    | ErrorKind::NetworkUnreachable
+                    | ErrorKind::NetworkDown
+            );
+        }
+        cause = error.source();
+    }
+    // Connector/body errors also include certificate and decoding failures.
+    // Only typed network evidence crosses this boundary; URLs/secrets never do.
+    if transient {
+        JsErrorBox::from_err(TransportFailure)
+    } else {
+        failed(message)
+    }
 }
 
 #[op2]
