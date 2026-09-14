@@ -670,18 +670,24 @@ test('automatically folds a running process on completion without remounting the
   assert.equal(container.querySelectorAll('.maka-chat-message-bubble-assistant')[1]?.isSameNode(answer!), true);
 });
 
-test('respects a manual expansion through appended events and completion', async () => {
+test('keeps running work expanded and allows manual disclosure after settlement', async () => {
   const { container, root } = domRoot();
   await renderTurn(root, turnWith([PROCESS_TEXT, COMPLETED_TOOL]));
   const process = container.querySelector('details.maka-processing-sequence');
   const summary = process?.querySelector('summary');
   assert.ok(process && summary);
   const click = () => act(() => { summary.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true })); });
-  await click(); // explicitly hide the running process
+  assert.equal(summary.getAttribute('aria-disabled'), 'true');
+  assert.equal(summary.getAttribute('tabindex'), '-1');
+  await click(); // pointer activation cannot hide live work
   await renderTurn(root, turnWith([PROCESS_TEXT, COMPLETED_TOOL, ANSWER]));
-  assert.equal(process.hasAttribute('open'), false);
-  await click(); // explicitly reopen it
+  assert.equal(process.hasAttribute('open'), true);
   await renderTurn(root, { ...turnWith([PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }]), status: 'completed' });
+  assert.equal(process.hasAttribute('open'), false);
+  assert.equal(summary.hasAttribute('aria-disabled'), false);
+  assert.equal(summary.getAttribute('tabindex'), '0');
+  await click();
+  await renderTurn(root, { ...turnWith([PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }]), status: 'completed', durationMs: 2000 });
   assert.equal(process.hasAttribute('open'), true);
 });
 
@@ -692,7 +698,7 @@ test('a newly failed tool reveals the process while turn recovery stays outside'
   const summary = process?.querySelector('summary');
   assert.ok(process && summary);
   await act(() => { summary.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true })); });
-  assert.equal(process.hasAttribute('open'), false);
+  assert.equal(process.hasAttribute('open'), true);
   await act(() => root.render(<LocaleProvider locale="en"><TurnView
     turn={{ ...turnWith([PROCESS_TEXT, { kind: 'tools', items: [{ toolUseId: 'tool-1', toolName: 'read', args: {}, status: 'errored' }] }]), status: 'failed' }}
     failedReasonLabel="Read failed"
@@ -701,6 +707,9 @@ test('a newly failed tool reveals the process while turn recovery stays outside'
   assert.equal(process.hasAttribute('open'), true);
   assert.match(summary.textContent ?? '', /Needs attention/);
   assert.doesNotMatch(process.textContent ?? '', /Continue this turn/);
+  assert.match(container.textContent ?? '', /Continue this turn/);
+  await act(() => { summary.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true })); });
+  assert.equal(process.hasAttribute('open'), false);
   assert.match(container.textContent ?? '', /Continue this turn/);
 });
 

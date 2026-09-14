@@ -640,13 +640,13 @@ export const RunningStatusDuringToolRun: Story = {
     await expect(activity).toHaveTextContent('正在琢磨…');
     await expect(canvasElement.querySelectorAll('.maka-turn-processing')).toHaveLength(1);
     await expect(canvasElement.querySelector('.maka-turn-footer .maka-turn-processing')).toBeNull();
-    // Closing the process hides the tool spinner. The summary takes it over
-    // so a reader still sees activity while the details are out of view.
+    // Live work is not a disclosure action. Even pointer activation cannot
+    // hide it; the tool keeps ownership of its visible spinner.
     const summary = process.querySelector('summary')!;
+    await expect(summary).toHaveAttribute('aria-disabled', 'true');
+    await expect(summary).toHaveAttribute('tabindex', '-1');
+    await expect(summary.querySelector(':scope > svg')).toBeNull();
     await expect(activity.querySelector('.astryx-spinner')).toBeNull();
-    await userEvent.click(summary);
-    await waitFor(() => expect(process.open).toBe(false));
-    await expect(activity.querySelector('.astryx-spinner')).not.toBeNull();
     await userEvent.click(summary);
     await waitFor(() => expect(process.open).toBe(true));
     await expect(activity.querySelector('.astryx-spinner')).toBeNull();
@@ -3749,7 +3749,7 @@ export const CompletedProcessCollapsed: Story = {
 // a selection in the final answer. Native summary keyboard activation remains
 // browser-owned; userEvent does not emulate its Enter or focus behavior.
 export const CompletedProcessExpanded: Story = {
-  render: CompletedProcessCollapsed.render,
+  render: () => <ComposedShell motionEnabled sidebarCollapsed chat={{ messages: processDisclosureMessages, scrollBehavior: 'auto' }} />,
   play: async ({ canvasElement }) => {
     const process = canvasElement.querySelector<HTMLDetailsElement>('.maka-processing-sequence')!;
     const summary = process.querySelector('summary')!;
@@ -3757,6 +3757,16 @@ export const CompletedProcessExpanded: Story = {
     summary.focus();
     summary.click();
     await waitFor(() => expect(process.open).toBe(true));
+    const content = process.querySelector<HTMLElement>('.maka-processing-content')!;
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const reveal = content.getAnimations().find((animation) =>
+        animation instanceof CSSAnimation && animation.animationName === 'maka-process-reveal');
+      await expect(reveal).toBeDefined();
+      // Animate paint opacity, never the height of the full process.
+      await expect((reveal!.effect as KeyframeEffect).getKeyframes().every((frame) =>
+        'opacity' in frame && !('height' in frame))).toBe(true);
+      await reveal!.finished;
+    }
     await expect(summary).toHaveFocus();
     await expect(await within(canvasElement).findByText('我先检查登录状态的存储和恢复逻辑。')).toBeVisible();
     const answer = await within(canvasElement).findByText('已修复登录状态恢复。');

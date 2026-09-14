@@ -1341,17 +1341,17 @@ function ProcessingBlock(props: {
 }) {
   const copy = getConversationCopy(useUiLocale()).messages;
   // null follows the lifecycle: open while running, collapsed on completion.
-  // Explicit reader choices survive appended events and the live→stored swap.
+  // Settled reader choices survive appended events. Live work stays expanded.
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const needsAttention = props.entries.some((entry) => entry.kind === 'tools'
     && entry.items.some((tool) => tool.status === 'errored' || tool.status === 'interrupted'));
-  // Reveal a new failure even if the reader collapsed the running process.
-  // They can close it again; its attention label remains visible. Permission
+  // Reveal a new failure even if a prior settled process was collapsed.
+  // They can close it again once settled; its attention label remains visible. Permission
   // requests and turn recovery banners are owned outside the timeline.
   useEffect(() => {
     if (needsAttention) setManualOpen(null);
   }, [needsAttention]);
-  const open = manualOpen ?? (props.running || needsAttention);
+  const open = props.running || (manualOpen ?? needsAttention);
   const seconds = props.durationMs !== undefined && Number.isFinite(props.durationMs)
     ? Math.floor(Math.max(0, props.durationMs) / 1000)
     : undefined;
@@ -1362,25 +1362,28 @@ function ProcessingBlock(props: {
     <details
       className="maka-processing-sequence"
       data-maka-transcript-boundary=""
+      data-running={props.running ? 'true' : 'false'}
       open={open}
     >
       <summary
         className="maka-processing-summary"
         aria-expanded={open}
+        aria-disabled={props.running || undefined}
+        tabIndex={props.running ? -1 : 0}
         onClick={(event) => {
           event.preventDefault();
-          setManualOpen(!open);
+          if (!props.running) setManualOpen(!open);
         }}
       >
         {props.activity && !needsAttention ? (
           <TurnRunningStatus
             startedAt={props.activity.startedAt}
             activityLabel={props.activity.label}
-            showSpinner={!open || !props.entries.some((entry) =>
+            showSpinner={!props.entries.some((entry) =>
               entry.kind === 'tools' && toolTrowHasVisibleSpinner(entry.items))}
           />
         ) : <span>{label}</span>}
-        <ChevronRight size={ICON_SIZE.meta} aria-hidden="true" />
+        {!props.running && <ChevronRight size={ICON_SIZE.meta} aria-hidden="true" />}
       </summary>
       <div className="maka-processing-content">
         {props.entries.map((entry, index) => (

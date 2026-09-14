@@ -274,10 +274,23 @@
 .maka-processing-summary::-webkit-details-marker { display: none; }
 .maka-processing-summary:hover { color: var(--foreground); }
 .maka-processing-summary:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-ring-width)); }
-.maka-processing-summary > svg { flex-shrink: 0; }
+.maka-processing-summary > svg { flex-shrink: 0; transition: transform 160ms ease-out; }
 .maka-processing-summary .maka-turn-processing { margin: 0; }
+.maka-processing-summary[aria-disabled='true'] { cursor: default; }
+.maka-processing-summary[aria-disabled='true']:hover { color: var(--muted-foreground); }
 .maka-processing-sequence[open] > .maka-processing-summary > svg { transform: rotate(90deg); }
 .maka-processing-content { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding-block: 12px 4px; }
+/* Settle geometry once. Animating a long process's height would relayout the
+   following answers and drive scroll compensation on every animation frame.
+   No persistent will-change or transform layer for the potentially long body. */
+@keyframes maka-process-reveal { from { opacity: 0.35; } to { opacity: 1; } }
+.maka-processing-sequence[data-running='false'][open] > .maka-processing-content {
+  animation: maka-process-reveal 160ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .maka-processing-summary > svg { transition: none; }
+  .maka-processing-sequence[data-running='false'][open] > .maka-processing-content { animation: none; }
+}
 .maka-deep-thinking { min-width: 0; }
 /* Reasoning uses the same safe Markdown pipeline as answers, then lowers its
    visual weight inside the disclosure. Body layout stays with the upstream
