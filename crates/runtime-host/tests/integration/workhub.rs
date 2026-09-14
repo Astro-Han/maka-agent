@@ -28,6 +28,7 @@ async fn original_client_workhub_routing_runs_once_and_replays_after_reopen() {
         "--workhub-creation-workspace",
         "--workhub-selection-workspace",
         "--workhub-stop-workspace",
+        "--workhub-steering-workspace",
     ] {
         let fixture = ClientFixture::new("maka-workhub-delegation-");
         fixture.run(flag, false, "workhub-delegation-passed").await;
@@ -58,6 +59,17 @@ async fn original_client_workhub_routing_runs_once_and_replays_after_reopen() {
                 _ => None,
             })
             .unwrap();
+        if flag == "--workhub-steering-workspace" {
+            assert!(matches!(
+                log.message_execution(
+                    &delegation.target.session_id,
+                    &delegation.target_message_id()
+                )
+                .await
+                .unwrap(),
+                maka_event_log::message_resolution::MessageExecution::Shared(_)
+            ));
+        }
         assert!(
             log.pending_messages(&delegation.target.session_id)
                 .await

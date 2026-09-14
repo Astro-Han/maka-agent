@@ -43,11 +43,14 @@ pub struct Delegation {
     pub action_id: String,
     #[serde(default, skip_serializing_if = "DelegationKind::is_existing")]
     pub kind: DelegationKind,
+    #[serde(default, skip_serializing_if = "DelegationDelivery::is_new_turn")]
+    pub delivery: DelegationDelivery,
     pub request_fingerprint: String,
     /// Canonical user input, never text supplied by a model strategy.
     pub source_message_event_id: String,
     pub target: Invocation,
-    /// Candidate metadata observed by admission, checked with the pending message commit.
+    /// Observed Session revision; new roots CAS it, steering CASes configuration
+    /// because the existing worker legitimately advances this revision.
     pub target_revision: u64,
     pub delegation_text: String,
 }
@@ -58,6 +61,25 @@ pub enum DelegationKind {
     #[default]
     Existing,
     Created,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DelegationDelivery {
+    #[default]
+    NewTurn,
+    Steering {
+        configuration_digest: String,
+    },
+}
+
+impl DelegationDelivery {
+    fn is_new_turn(&self) -> bool {
+        *self == Self::NewTurn
+    }
+    pub fn is_steering(&self) -> bool {
+        matches!(self, Self::Steering { .. })
+    }
 }
 
 impl DelegationKind {
@@ -86,7 +108,8 @@ impl Delegation {
         }
         if self.kind == DelegationKind::Created
             && (self.target.session_id != created_session_id(&self.action_id)
-                || self.target_revision != 1)
+                || self.target_revision != 1
+                || self.delivery != DelegationDelivery::NewTurn)
         {
             return Err("invalid WorkHub creation identity");
         }
@@ -106,6 +129,13 @@ impl Delegation {
             || self.delegation_text.len() > 48 * 1024
         {
             return Err("invalid WorkHub delegation content");
+        }
+        if let DelegationDelivery::Steering {
+            configuration_digest,
+        } = &self.delivery
+            && !crate::archive::valid_projection_digest(configuration_digest)
+        {
+            return Err("invalid WorkHub target configuration basis");
         }
         Ok(())
     }
@@ -148,8 +178,14 @@ impl Delegation {
                     .map_err(|_| "invalid delegated message")?,
                 content,
             },
-            submitted_placement: Placement::NextTurn,
-            disposition: MessageDisposition::TurnStarted,
+            submitted_placement: match &self.delivery {
+                DelegationDelivery::NewTurn => Placement::NextTurn,
+                DelegationDelivery::Steering { .. } => Placement::CurrentTurn,
+            },
+            disposition: match &self.delivery {
+                DelegationDelivery::NewTurn => MessageDisposition::TurnStarted,
+                DelegationDelivery::Steering { .. } => MessageDisposition::Steering,
+            },
             skill_invocation: Default::default(),
             submitted_intent: None,
         };

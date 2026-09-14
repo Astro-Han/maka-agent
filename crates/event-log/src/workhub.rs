@@ -21,6 +21,7 @@ use crate::{EventLog, StoreError, message_admissions::PendingMessageAdmission, s
 use maka_runtime::{
     event::{Fact, RuntimeEvent, StoredEvent},
     input::InvocationInput,
+    workhub::DelegationDelivery,
 };
 use sqlx::SqliteConnection;
 
@@ -130,11 +131,11 @@ pub(crate) async fn apply(
     .bind(&delegation.target.turn_id)
     .fetch_one(&mut *tx)
     .await?;
-    if occupied {
+    if occupied && delegation.delivery == DelegationDelivery::NewTurn {
         return Err(invalid("WorkHub target execution identity already exists"));
     }
-    let (revision, fingerprint): (i64, String) =
-        sqlx::query_as("SELECT revision, fingerprint FROM session_control WHERE id = ?")
+    let (revision, fingerprint, configuration): (i64, String, Option<String>) =
+        sqlx::query_as("SELECT revision, fingerprint, CASE WHEN length(CAST(configuration AS BLOB)) <= 65536 THEN configuration END FROM session_control WHERE id = ?")
             .bind(&delegation.target.session_id)
             .fetch_optional(&mut *tx)
             .await?
@@ -144,16 +145,27 @@ pub(crate) async fn apply(
     {
         return Err(invalid("WorkHub target was not created by this action"));
     }
-    if u64::try_from(revision).ok() != Some(delegation.target_revision) {
-        return Err(StoreError::RevisionConflict {
-            expected: delegation.target_revision.to_string(),
-            actual: revision.to_string(),
-        });
+    let (expected, actual) = match &delegation.delivery {
+        DelegationDelivery::NewTurn => {
+            (delegation.target_revision.to_string(), revision.to_string())
+        }
+        DelegationDelivery::Steering {
+            configuration_digest,
+        } => (
+            configuration_digest.clone(),
+            maka_runtime::artifact::content_digest(
+                configuration.ok_or(StoreError::PrefixTooLarge)?.as_bytes(),
+            ),
+        ),
+    };
+    if expected != actual {
+        return Err(StoreError::RevisionConflict { expected, actual });
     }
-    crate::context::safety::require_safe(tx, &delegation.target.session_id, None).await?;
-    if crate::shell_runs::unsettled(tx, &delegation.target.session_id).await? {
-        return Err(StoreError::SessionBusy);
-    }
+    let owner = delegation
+        .delivery
+        .is_steering()
+        .then_some(&delegation.target);
+    candidates::require_available(tx, &delegation.target.session_id, owner).await?;
     let admitted_at = event
         .recorded_at
         .duration_since(std::time::UNIX_EPOCH)
@@ -187,7 +199,12 @@ pub(crate) async fn apply(
     crate::message_admissions::insert::insert(
         tx,
         &admission,
-        crate::message_admissions::insert::Owner::Unsealed,
+        match &delegation.delivery {
+            DelegationDelivery::NewTurn => crate::message_admissions::insert::Owner::Unsealed,
+            DelegationDelivery::Steering { .. } => {
+                crate::message_admissions::insert::Owner::Current
+            }
+        },
     )
     .await?;
     Ok(())

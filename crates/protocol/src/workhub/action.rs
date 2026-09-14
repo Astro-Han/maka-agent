@@ -118,6 +118,8 @@ pub enum ActResult {
     DelegateExisting {
         target_session_id: String,
         target_turn_id: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        steered: bool,
     },
     StopWork {
         outcome: maka_runtime::workhub::StopOutcome,
@@ -137,6 +139,7 @@ impl ActResult {
             | Self::DelegateExisting {
                 target_session_id,
                 target_turn_id,
+                ..
             } => (target_session_id, Some(target_turn_id)),
             Self::StopWork {
                 target_session_id,

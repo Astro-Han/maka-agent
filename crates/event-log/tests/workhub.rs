@@ -49,6 +49,245 @@ fn message(text: &str) -> Fact {
 }
 
 #[tokio::test]
+async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_handoff() {
+    use maka_event_log::message_resolution::MessageExecution;
+    use maka_runtime::{
+        interaction::{
+            ClosureReason, InteractionOutcome, InteractionQuestion, InteractionRecord,
+            InteractionRequest,
+        },
+        shell_run::{ShellOutput, ShellRun, ShellState, ShellVisibility},
+        workhub::DelegationDelivery,
+    };
+    for scenario in ["live", "late", "unknown", "orphan", "changed"] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("events.sqlite");
+        let mut log = EventLog::open(&path).await.unwrap();
+        for session in [COORDINATION_SESSION_ID, "target"] {
+            log.create_session(session, "create", &json!({}), 1)
+                .await
+                .unwrap();
+        }
+        let coordinator = invocation(COORDINATION_SESSION_ID, "coord");
+        let opening = write(&coordinator, message("user authority"));
+        log.append(&opening).await.unwrap();
+        let target = invocation("target", "existing");
+        log.append(&write(&target, message("unrelated original task")))
+            .await
+            .unwrap();
+        let basis = log
+            .get_session::<serde_json::Value>("target")
+            .await
+            .unwrap()
+            .unwrap();
+        let delegation = Delegation {
+            kind: Default::default(),
+            delivery: DelegationDelivery::Steering {
+                configuration_digest: basis.configuration_digest.clone(),
+            },
+            action_id: "steer".into(),
+            request_fingerprint: content_digest(b"steer"),
+            source_message_event_id: opening.event().id.clone(),
+            target: target.clone(),
+            target_revision: basis.revision,
+            delegation_text: "additional task".into(),
+        };
+        let action = write(
+            &coordinator,
+            Fact::WorkhubDelegated {
+                delegation: Box::new(delegation.clone()),
+            },
+        );
+        let question = InteractionRecord {
+            session_id: target.session_id.clone(),
+            turn_id: target.turn_id.clone(),
+            run_id: target.run_id.clone(),
+            request_id: "question".into(),
+            created_at: 10,
+            outcome: None,
+            request: InteractionRequest::Question {
+                tool_use_id: "question-tool".into(),
+                questions: vec![InteractionQuestion {
+                    question: "Continue?".into(),
+                    options: ["Yes", "No"]
+                        .into_iter()
+                        .map(|label| maka_runtime::interaction::QuestionOption {
+                            label: label.into(),
+                            description: None,
+                        })
+                        .collect(),
+                }],
+            },
+        };
+        log.establish_interaction(&question).await.unwrap();
+        assert!(
+            log.append(&action).await.is_err(),
+            "waiting target cannot accept delegation"
+        );
+        assert!(
+            log.workhub_candidates(
+                |_: &maka_event_log::sessions::SessionRecord<serde_json::Value>| true
+            )
+            .await
+            .unwrap()
+            .iter()
+            .all(|record| record.id != "target")
+        );
+        assert!(log.pending_messages("target").await.unwrap().is_empty());
+        log.commit_interaction_outcome(
+            "question",
+            InteractionOutcome::Closure {
+                reason: ClosureReason::ProducerCancelled,
+                committed_at: 11,
+            },
+        )
+        .await
+        .unwrap();
+        let mut wrong_owner = delegation.clone();
+        wrong_owner.target.run_id = "different-run".into();
+        assert!(
+            log.append(&write(
+                &coordinator,
+                Fact::WorkhubDelegated {
+                    delegation: Box::new(wrong_owner)
+                }
+            ))
+            .await
+            .is_err()
+        );
+        if matches!(scenario, "live" | "orphan") {
+            log.create_shell_run(ShellRun {
+                id: "shell".into(),
+                session_id: "target".into(),
+                source_run_id: Some(target.run_id.clone()),
+                source_turn_id: target.turn_id.clone(),
+                source_tool_call_id: "shell-call".into(),
+                visibility: ShellVisibility::Model,
+                cwd: temp.path().to_string_lossy().into_owned(),
+                command: "background task".into(),
+                started_at: 10,
+                updated_at: 10,
+                timeout_ms: None,
+                revision: 1,
+                state: ShellState::Starting,
+                output: ShellOutput::Pipes {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    latest_stream: None,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                },
+            })
+            .await
+            .unwrap();
+        }
+        if scenario == "orphan" {
+            log.recover_shell_runs(20).await.unwrap();
+        }
+        if scenario == "changed" {
+            log.update_session_metadata(
+                "target",
+                basis.revision,
+                |config: &mut serde_json::Value| {
+                    config["name"] = json!("changed target");
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+        }
+        if scenario == "unknown" {
+            log.append(&write(
+                &target,
+                Fact::ToolDispatched {
+                    operation_id: "uncertain".into(),
+                    call: maka_runtime::tool_call::ToolCallIdentity::standalone("unknown".into()),
+                    name: "write".into(),
+                    input: json!({}),
+                },
+            ))
+            .await
+            .unwrap();
+        }
+        if matches!(scenario, "late" | "unknown") {
+            log.append(&write(
+                &target,
+                Fact::InvocationEnded {
+                    outcome: if scenario == "late" {
+                        InvocationOutcome::Completed
+                    } else {
+                        InvocationOutcome::Failed {
+                            class: "unknown".into(),
+                            message: None,
+                        }
+                    },
+                },
+            ))
+            .await
+            .unwrap();
+            assert!(
+                log.get_session::<serde_json::Value>("target")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .revision
+                    > basis.revision
+            );
+        }
+        if matches!(scenario, "unknown" | "orphan" | "changed") {
+            assert!(
+                log.append(&action).await.is_err(),
+                "sealed/orphaned effects cannot hide behind steering"
+            );
+            assert!(log.pending_messages("target").await.unwrap().is_empty());
+            log.close().await.unwrap();
+            continue;
+        }
+        let sequence = log.append(&action).await.unwrap();
+        let pending = log.pending_messages("target").await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].invocation, target);
+        if scenario == "live" {
+            assert_eq!(log.commit_pending_steering(&target).await.unwrap(), 1);
+            assert!(
+                matches!(log.message_execution("target", &delegation.target_message_id()).await.unwrap(), MessageExecution::Shared(owner) if owner.invocation == target)
+            );
+        } else {
+            // Process exits after admission to an already sealed owner; the normal
+            // successor consumes the original source after reopening.
+            log.close().await.unwrap();
+            log = EventLog::open(&path).await.unwrap();
+            assert_eq!(log.pending_messages("target").await.unwrap(), pending);
+            let successor = invocation("target", "successor");
+            log.append(&write(
+                &successor,
+                Fact::InvocationOpened {
+                    configuration: None,
+                    input: InvocationInput::Message {
+                        content: pending[0].source.message.content.clone(),
+                        source_messages: vec![pending[0].source.clone()],
+                        request_fingerprint: None,
+                        skill_invocation: None,
+                    },
+                },
+            ))
+            .await
+            .unwrap();
+            assert!(
+                matches!(log.message_execution("target", &delegation.target_message_id()).await.unwrap(), MessageExecution::Owned(owner) if owner.invocation == successor)
+            );
+        }
+        let before = log.prefix(64, 1024 * 1024).await.unwrap().digest;
+        log.close().await.unwrap();
+        let log = EventLog::open(&path).await.unwrap();
+        assert_eq!(log.append(&action).await.unwrap(), sequence);
+        assert!(log.pending_messages("target").await.unwrap().is_empty());
+        assert_eq!(log.prefix(64, 1024 * 1024).await.unwrap().digest, before);
+        log.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("events.sqlite");
@@ -64,6 +303,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     let target = invocation("target", "delegated");
     let delegation = Delegation {
         kind: Default::default(),
+        delivery: Default::default(),
         action_id: "action".into(),
         request_fingerprint: content_digest(b"bound proposal"),
         source_message_event_id: source.event().id.clone(),

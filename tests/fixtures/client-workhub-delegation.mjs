@@ -37,7 +37,11 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
   const createNew = mode === 'created';
   const selectTarget = mode === 'selected';
   const stopTarget = mode === 'stopped';
+  const steerTarget = mode === 'steered';
   const targetReady = Promise.withResolvers();
+  const initialTarget = Promise.withResolvers();
+  const delegated = Promise.withResolvers();
+  const finishTarget = Promise.withResolvers();
   const targetSessionId = createNew ? createdTarget('delegation-action') : 'target';
   const request = (operation, input) => connection.request(operation, input, 5000);
   const file = join(workspace, 'delegation.json');
@@ -87,7 +91,16 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
           typeof message.content === 'string' &&
           message.content.includes('Delegated task:\nImplement the requested task'),
       );
-      const finished = data.messages.some((message) => message.role === 'tool');
+      const bootstrap =
+        !target &&
+        data.messages.some((message) => message.content === 'Existing task is already running');
+      const finished = target
+        ? data.messages.some(
+            (message) =>
+              message.role === 'tool' &&
+              JSON.stringify(message.content).includes('TRANSFER_EVIDENCE'),
+          )
+        : data.messages.some((message) => message.role === 'tool');
       const path = target
         ? body.match(/maka:\/\/runtime\/attachments\/[A-Za-z0-9_-]+/u)?.[0]
         : undefined;
@@ -95,12 +108,17 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         assert(path);
         assert(!path.endsWith('/' + attachment.ref.relativePath));
         if (finished) assert(body.includes('TRANSFER_EVIDENCE'));
-        if (finished && stopTarget) {
+        if (finished && (stopTarget || steerTarget)) {
           response.writeHead(200, { 'Content-Type': 'text/event-stream' });
           response.flushHeaders();
           targetReady.resolve();
-          return;
+          if (stopTarget) return;
+          await finishTarget.promise;
         }
+      }
+      if (bootstrap) {
+        initialTarget.resolve();
+        await delegated.promise;
       }
       const delta = finished
         ? { content: target ? 'target completed' : 'delegation completed' }
@@ -111,8 +129,10 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                 id: 'delegate-call',
                 type: 'function',
                 function: {
-                  name: target ? 'Read' : 'mcp__desktop_workhub__tasks',
-                  arguments: JSON.stringify(target ? { path } : {}),
+                  name: target || bootstrap ? 'Read' : 'mcp__desktop_workhub__tasks',
+                  arguments: JSON.stringify(
+                    target ? { path } : bootstrap ? { path: join(workspace, 'seed.txt') } : {},
+                  ),
                 },
               },
             ],
@@ -134,7 +154,8 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         model: 'fixture-model',
         choices: [{ index: 0, delta, finish_reason }],
       });
-      response.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close' });
+      if (!response.headersSent)
+        response.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close' });
       response.end(
         [chunk(delta, null), chunk({}, finished ? 'stop' : 'tool_calls')]
           .map((event) => 'data: ' + JSON.stringify(event) + '\n\n')
@@ -198,6 +219,15 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       'evidence.txt',
       'text/plain',
     );
+    if (steerTarget) {
+      await writeFile(join(workspace, 'seed.txt'), 'BEFORE_STEERING');
+      await request('turn.start', {
+        sessionId: targetSessionId,
+        turnId: 'already-running',
+        content: { text: 'Existing task is already running' },
+      });
+      await initialTarget.promise;
+    }
     const initial = await request('workhub.coordination.candidates', {});
     assert.deepEqual(
       initial.candidates.map((candidate) => candidate.sessionId).sort(),
@@ -249,7 +279,12 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
               : await act(input);
             assert.equal(receipt.disposition, createNew ? 'create_new' : 'delegate_existing');
             assert.equal(receipt.targetSessionId, targetSessionId);
-            if (stopTarget) {
+            if (steerTarget) {
+              assert.equal(receipt.steered, true);
+              assert.equal(receipt.targetTurnId, 'already-running');
+              delegated.resolve();
+            }
+            if (stopTarget || steerTarget) {
               await targetReady.promise;
               stopInput = {
                 turnId,
@@ -262,7 +297,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
               stopReceipt = await act(stopInput);
               assert.deepEqual(stopReceipt, {
                 disposition: 'stop_work',
-                outcome: 'stop_delivered',
+                outcome: steerTarget ? 'not_owned' : 'stop_delivered',
                 targetSessionId,
                 targetTurnId: receipt.targetTurnId,
               });
@@ -274,6 +309,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                 }),
                 (error) => error.code === 'operation_conflict',
               );
+              if (steerTarget) finishTarget.resolve();
             }
             if (createNew) {
               const created = await querySession(request, targetSessionId);

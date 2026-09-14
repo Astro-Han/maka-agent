@@ -26,7 +26,7 @@ use maka_runtime::{
     artifact::content_digest,
     event::{CommitError, EventWrite, Fact, Invocation, RuntimeEvent},
     input::InvocationInput,
-    workhub::{COORDINATION_SESSION_ID, Delegation, DelegationKind},
+    workhub::{COORDINATION_SESSION_ID, Delegation, DelegationDelivery, DelegationKind},
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -128,17 +128,37 @@ async fn admit(
         ));
     };
     let target = target::prepare(host, &input, selected).await?;
+    let owner = host.executions.workhub_target(target.id());
+    let delivery = match (&target, &owner) {
+        (
+            target::Target::Existing {
+                configuration_digest,
+                ..
+            },
+            Some(_),
+        ) => DelegationDelivery::Steering {
+            configuration_digest: configuration_digest.clone(),
+        },
+        (_, None) => DelegationDelivery::NewTurn,
+        (target::Target::Created { .. }, Some(_)) => {
+            return Err(failure(
+                Code::OperationConflict,
+                "Created target already has an execution owner",
+            ));
+        }
+    };
     let delegation = Delegation {
         kind: target.kind(),
+        delivery,
         action_id: input.action_id,
         request_fingerprint: fingerprint,
         source_message_event_id: source.opening_event_id,
-        target: Invocation {
+        target: owner.unwrap_or_else(|| Invocation {
             session_id: target.id().to_owned(),
             turn_id: Uuid::new_v4().to_string(),
             run_id: Uuid::new_v4().to_string(),
             invocation_id: Uuid::new_v4().to_string(),
-        },
+        }),
         target_revision: target.revision(),
         delegation_text: input
             .delegation_text
@@ -181,9 +201,13 @@ async fn admit(
                     .get_session::<crate::session::SessionConfiguration>(target.id())
                     .await
                     .map_err(sessions::stored)?;
-                let code = if target.kind() == DelegationKind::Existing
-                    && current.is_none_or(|record| record.revision != target.revision())
-                {
+                let code = if let target::Target::Existing {
+                    configuration_digest,
+                    ..
+                } = &target
+                    && current.is_none_or(|record| {
+                        record.archived || record.configuration_digest != *configuration_digest
+                    }) {
                     Code::CandidateSetStale
                 } else {
                     Code::OperationConflict
@@ -205,6 +229,7 @@ fn receipt(delegation: &Delegation) -> ActResult {
         DelegationKind::Existing => ActResult::DelegateExisting {
             target_session_id,
             target_turn_id,
+            steered: delegation.delivery.is_steering(),
         },
         DelegationKind::Created => ActResult::CreateNew {
             target_session_id,

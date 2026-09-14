@@ -102,8 +102,9 @@ async fn candidates_rank_all_pages_by_canonical_activity_after_filtering_unsafe_
         record.configuration.eligible
     };
     let candidates = log.workhub_candidates(eligible).await.unwrap();
-    let expected = std::iter::once("session-00".to_string())
-        .chain((5..=35).rev().map(|index| format!("session-{index:02}")))
+    let expected = ["session-37".to_string(), "session-00".to_string()]
+        .into_iter()
+        .chain((6..=35).rev().map(|index| format!("session-{index:02}")))
         .collect::<Vec<_>>();
     assert_eq!(
         candidates
@@ -114,7 +115,7 @@ async fn candidates_rank_all_pages_by_canonical_activity_after_filtering_unsafe_
     );
     assert_eq!(
         maka_event_log::workhub::activity_at(&candidates[0]),
-        200_000
+        237_000
     );
     log.close().await.unwrap();
 }

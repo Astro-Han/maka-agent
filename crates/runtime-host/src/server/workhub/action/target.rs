@@ -29,6 +29,7 @@ pub(super) enum Target {
     Existing {
         id: String,
         revision: u64,
+        configuration_digest: String,
     },
     Created {
         id: String,
@@ -89,6 +90,7 @@ pub(super) async fn prepare(
                 return Ok(Target::Existing {
                     id: record.id,
                     revision: record.revision,
+                    configuration_digest: record.configuration_digest,
                 });
             }
             let candidates = super::super::candidates::query(host).await?;
@@ -107,6 +109,7 @@ pub(super) async fn prepare(
                     (&candidate.candidate_ref == candidate_ref).then_some(Target::Existing {
                         id: record.id,
                         revision: record.revision,
+                        configuration_digest: record.configuration_digest,
                     })
                 })
                 .ok_or_else(|| {

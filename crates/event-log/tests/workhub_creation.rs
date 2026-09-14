@@ -61,6 +61,7 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
             delegation: Box::new(Delegation {
                 action_id: "create-action".into(),
                 kind: DelegationKind::Created,
+                delivery: Default::default(),
                 request_fingerprint: content_digest(b"new request"),
                 source_message_event_id: opening.event().id.clone(),
                 target: Invocation {

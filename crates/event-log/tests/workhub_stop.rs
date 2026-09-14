@@ -52,6 +52,7 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
         let mut target = opening("target", None);
         let delegation = Delegation {
             kind: Default::default(),
+            delivery: Default::default(),
             action_id: "delegation".into(),
             request_fingerprint: content_digest(b"delegation"),
             source_message_event_id: coordinator.id.clone(),

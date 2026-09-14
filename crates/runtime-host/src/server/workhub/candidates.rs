@@ -19,7 +19,7 @@
 
 use super::{Host, failure, sessions};
 use crate::session::SessionConfiguration;
-use maka_event_log::sessions::SessionRecord;
+use maka_event_log::sessions::{SessionExecutionState, SessionRecord};
 use maka_protocol::{
     OperationError, OperationErrorCode as Code,
     session::{CollaborationMode, OrchestrationMode},
@@ -105,8 +105,17 @@ fn eligible(
     record: &SessionRecord<SessionConfiguration>,
 ) -> bool {
     let config = &record.configuration;
+    let execution_available = if let Some(execution) = &record.execution
+        && matches!(execution.state, SessionExecutionState::Live { .. })
+    {
+        executions
+            .workhub_target(&record.id)
+            .is_some_and(|owner| owner.turn_id == execution.turn_id)
+    } else {
+        !executions.has_active_session(&record.id)
+    };
     record.id != COORDINATION_SESSION_ID
-        && !executions.has_active_session(&record.id)
+        && execution_available
         && config.tool_profile.is_none()
         && config.collaboration_mode == CollaborationMode::Agent
         && config.orchestration_mode == OrchestrationMode::Default

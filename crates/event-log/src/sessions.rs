@@ -46,6 +46,9 @@ pub struct SessionRecord<T> {
     pub updated_at: u64,
     pub archived: bool,
     pub configuration: T,
+    /// Exact stored configuration basis, independent of execution-driven revision.
+    #[serde(skip)]
+    pub configuration_digest: String,
     #[serde(default)]
     pub read_state: SessionReadState,
     /// Bounded execution projection read in the same snapshot as metadata.
@@ -244,6 +247,7 @@ pub(crate) async fn read<T: DeserializeOwned>(
         if configuration.len() > MAX_CONFIGURATION_BYTES {
             return Err(invalid("oversized stored session configuration"));
         }
+        let configuration_digest = maka_runtime::artifact::content_digest(configuration.as_bytes());
         let configuration = serde_json::from_str(&configuration)?;
         let execution = execution::read(connection, id).await?;
         let read_state = read_state::read(connection, id).await?;
@@ -254,6 +258,7 @@ pub(crate) async fn read<T: DeserializeOwned>(
             updated_at: number(&row, 3)?,
             archived: row.try_get(4)?,
             configuration,
+            configuration_digest,
             execution,
             read_state,
         }))

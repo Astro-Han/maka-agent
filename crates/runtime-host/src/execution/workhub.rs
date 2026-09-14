@@ -32,6 +32,15 @@ use uuid::Uuid;
 mod profile;
 
 impl Executions {
+    pub(crate) fn workhub_target(&self, session: &str) -> Option<Invocation> {
+        self.active
+            .lock()
+            .unwrap()
+            .values()
+            .find(|run| run.invocation.session_id == session && !run.cancellation.is_cancelled())
+            .map(|run| run.invocation.clone())
+    }
+
     /// Caller owns admission; waiting for cleanup must happen after releasing it.
     pub(crate) async fn stop_workhub_owner(
         &self,
@@ -91,6 +100,10 @@ impl Executions {
 
     /// The action already owns a durable pending root. Reuse normal recovery/delivery.
     pub(crate) async fn dispatch_workhub_pending(self: &Arc<Self>, session: &str) -> Result<()> {
+        // The existing worker owns steering consumption and terminal handoff.
+        if self.has_active_session(session) {
+            return Ok(());
+        }
         match self.next_message(session).await {
             Ok(Some(running)) => self.track(running),
             Ok(None) => {}

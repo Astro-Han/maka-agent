@@ -265,11 +265,22 @@ pub(crate) async fn unsettled(
     connection: &mut sqlx::SqliteConnection,
     session: &str,
 ) -> Result<bool, StoreError> {
+    unsettled_outside(connection, session, None).await
+}
+
+pub(crate) async fn unsettled_outside(
+    connection: &mut sqlx::SqliteConnection,
+    session: &str,
+    current_run: Option<&str>,
+) -> Result<bool, StoreError> {
     Ok(sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM shell_runs WHERE session_id = ?
-         AND (active = 1 OR json_extract(record_json, '$.state.outcome.kind') = 'orphaned'))",
+         AND (json_extract(record_json, '$.state.outcome.kind') = 'orphaned'
+           OR (active = 1 AND (?2 IS NULL OR
+             json_extract(record_json, '$.sourceRunId') IS NOT ?2))))",
     )
     .bind(session)
+    .bind(current_run)
     .fetch_one(connection)
     .await?)
 }
