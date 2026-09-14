@@ -41,6 +41,7 @@ import {
   Timestamp,
   Token,
   useLightbox,
+  useMediaQuery,
 } from '@astryxdesign/core';
 import { ChatReasoning } from './astryx-chat-reasoning.js';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
@@ -1031,9 +1032,11 @@ export function TurnRunningStatus(props: {
 }) {
   const copy = getConversationCopy(useUiLocale()).messages;
   const rootRef = useRef<HTMLSpanElement>(null);
-  const elapsedMs = useTurnElapsedTime(props.startedAt, rootRef);
+  const elapsedMs = useTurnElapsedTime(props.startedAt);
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const phrase = copy.workingPhrases[
-    Math.floor((elapsedMs ?? 0) / WORKING_PHRASE_INTERVAL_MS) % copy.workingPhrases.length
+    reducedMotion || !isTimeDrivenMotionEnabled(rootRef.current) ? 0
+      : Math.floor((elapsedMs ?? 0) / WORKING_PHRASE_INTERVAL_MS) % copy.workingPhrases.length
   ];
 
   return (
@@ -1060,38 +1063,34 @@ export function TurnRunningStatus(props: {
   );
 }
 
-function useTurnElapsedTime(
-  startedAt: number | undefined,
-  rootRef: { readonly current: HTMLSpanElement | null },
-) {
+function useTurnElapsedTime(startedAt: number | undefined) {
   // Undefined until an effect measures it, which is also what keeps a static
   // render deterministic: the clock is a client-only value, so server markup
   // and the first paint carry the phrase alone.
   const [elapsedMs, setElapsedMs] = useState<number | undefined>(undefined);
 
   useEffect(() => {
-    // Frozen (fixture / reduced motion) the clock is dropped rather than
-    // pinned: any value it could show is a real wall-clock difference, so a
-    // capture taken a second later would differ from this one. The gate needs
-    // this node because the freeze can be declared on any ancestor.
-    if (startedAt === undefined || !isTimeDrivenMotionEnabled(rootRef.current)
-      || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    // Elapsed time is task information, independent of motion preferences.
+    // Screenshot fixtures can pin browser time without hiding this information.
+    if (startedAt === undefined) {
+      setElapsedMs(undefined);
+      return;
+    }
     setElapsedMs(Math.max(0, Date.now() - startedAt));
     const tick = window.setInterval(() => {
       setElapsedMs(Math.max(0, Date.now() - startedAt));
     }, ELAPSED_TICK_MS);
     return () => window.clearInterval(tick);
-  }, [startedAt, rootRef]);
+  }, [startedAt]);
 
   return elapsedMs;
 }
 
 function TurnElapsedTime(props: { startedAt?: number }) {
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const elapsedMs = useTurnElapsedTime(props.startedAt, rootRef);
+  const elapsedMs = useTurnElapsedTime(props.startedAt);
 
   return (
-    <span className="maka-turn-elapsed" aria-hidden="true" ref={rootRef}>
+    <span className="maka-turn-elapsed" aria-hidden="true">
       {elapsedMs !== undefined && formatTurnDuration(elapsedMs)}
     </span>
   );

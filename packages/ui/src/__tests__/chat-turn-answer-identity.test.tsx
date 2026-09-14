@@ -471,15 +471,27 @@ test('rotates working phrases on the elapsed clock without announcing each phras
   assert.doesNotMatch(status.textContent, /Tinkering/);
 });
 
-test('freezes working phrases for a reduced-motion host', async (context) => {
+test('keeps elapsed time while system motion preference changes the working phrase', async (context) => {
   const now = Date.UTC(2026, 8, 14, 12);
   context.mock.timers.enable({ apis: ['Date', 'setInterval'], now });
   const { container, root } = domRoot();
-  container.setAttribute('data-maka-reduced-motion', 'true');
+  let reduced = true;
+  const listeners = new Set<() => void>();
+  Object.assign(globalThis, { matchMedia: () => ({
+    get matches() { return reduced; },
+    addEventListener(_type: string, listener: () => void) { listeners.add(listener); },
+    removeEventListener(_type: string, listener: () => void) { listeners.delete(listener); },
+  }) });
   await act(() => root.render(<LocaleProvider locale="en"><TurnRunningStatus startedAt={now} /></LocaleProvider>));
-  await act(() => context.mock.timers.tick(60_000));
+  await act(() => context.mock.timers.tick(20_000));
   assert.equal(container.querySelector('.maka-turn-status-label')?.textContent, 'Pondering…');
-  assert.equal(container.querySelector('.maka-turn-elapsed'), null);
+  assert.equal(container.querySelector('.maka-turn-elapsed')?.textContent, '20s');
+  await act(() => { reduced = false; listeners.forEach((listener) => listener()); });
+  assert.equal(container.querySelector('.maka-turn-status-label')?.textContent, 'Tinkering…');
+  await act(() => { reduced = true; listeners.forEach((listener) => listener()); });
+  await act(() => context.mock.timers.tick(20_000));
+  assert.equal(container.querySelector('.maka-turn-status-label')?.textContent, 'Pondering…');
+  assert.equal(container.querySelector('.maka-turn-elapsed')?.textContent, '40s');
 });
 
 /**
