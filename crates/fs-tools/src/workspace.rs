@@ -154,7 +154,9 @@ impl Workspace {
         result?;
         cleanup?;
         #[cfg(unix)]
-        self.dir.try_clone()?.into_std_file().sync_all()?;
+        // A capability Dir may hold O_PATH on Linux, which cannot be fsynced.
+        // Open a readable descriptor relative to the captured directory itself.
+        self.dir.open(".")?.sync_all()?;
         self.validate_directory()
     }
 }
