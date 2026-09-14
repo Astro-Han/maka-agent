@@ -18,7 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { upload } from './client-artifact-upload.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -34,24 +34,6 @@ async function rows(connection, sessionId) {
   } finally {
     await observer.close();
   }
-}
-async function upload(request, sessionId, uploadId, bytes, name, mimeType) {
-  const command = { sessionId, uploadId };
-  await request('artifact.ingest', {
-    ...command,
-    kind: 'begin',
-    name,
-    mimeType,
-    totalBytes: bytes.length,
-    contentSha256: 'sha256:' + createHash('sha256').update(bytes).digest('hex'),
-  });
-  await request('artifact.ingest', {
-    ...command,
-    kind: 'chunk',
-    offset: 0,
-    chunkBase64: bytes.toString('base64'),
-  });
-  return (await request('artifact.ingest', { ...command, kind: 'commit' })).attachment;
 }
 export async function verifyConsumption(connection, workspace, reopened) {
   const request = (operation, input) => connection.request(operation, input, 3000);

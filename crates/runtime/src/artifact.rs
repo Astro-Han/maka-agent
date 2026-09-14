@@ -75,6 +75,27 @@ pub struct Artifact {
 }
 
 impl Artifact {
+    pub fn validate_attachment(
+        &self,
+        attachment: &crate::attachment::AttachmentRef,
+    ) -> Result<(), &'static str> {
+        use crate::attachment::AttachmentKind;
+        if self.name != attachment.name
+            || self.mime_type.as_deref() != Some(attachment.mime_type.as_str())
+            || self.size_bytes != attachment.bytes
+        {
+            return Err("Attachment metadata does not match its canonical Artifact");
+        }
+        let kind = AttachmentKind::from_metadata(&attachment.mime_type, &self.name);
+        if attachment.kind != kind
+            || (kind == AttachmentKind::Image) != (self.kind == ArtifactKind::Image)
+            || (kind == AttachmentKind::Pdf) != (self.kind == ArtifactKind::Pdf)
+        {
+            return Err("Attachment kind does not match its canonical Artifact");
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), &'static str> {
         crate::interaction::entity_id(&self.id)?;
         crate::interaction::entity_id(&self.session_id)?;
@@ -157,6 +178,65 @@ fn js_whitespace(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attachment::{AttachmentKind, AttachmentRef, StorageRef};
+
+    #[test]
+    fn canonical_metadata_and_bidirectional_modality_are_required_without_source_restriction() {
+        let attachment = AttachmentRef {
+            kind: AttachmentKind::Image,
+            name: "picture.png".into(),
+            mime_type: "image/png".into(),
+            bytes: 4,
+            storage_ref: StorageRef::SessionFile {
+                session_id: "session".into(),
+                relative_path: "artifact".into(),
+            },
+        };
+        let mut record = Artifact {
+            id: "artifact".into(),
+            session_id: "session".into(),
+            turn_id: "turn".into(),
+            created_at: 1,
+            name: attachment.name.clone(),
+            kind: ArtifactKind::Image,
+            size_bytes: attachment.bytes,
+            mime_type: Some(attachment.mime_type.clone()),
+            source: ArtifactSource::ToolResultProjection,
+            summary: None,
+        };
+        assert!(record.validate_attachment(&attachment).is_ok());
+        for changed in [
+            AttachmentRef {
+                name: "other.png".into(),
+                ..attachment.clone()
+            },
+            AttachmentRef {
+                mime_type: "image/jpeg".into(),
+                ..attachment.clone()
+            },
+            AttachmentRef {
+                bytes: 5,
+                ..attachment.clone()
+            },
+            AttachmentRef {
+                kind: AttachmentKind::Other,
+                ..attachment.clone()
+            },
+        ] {
+            assert!(record.validate_attachment(&changed).is_err());
+        }
+        record.kind = ArtifactKind::File;
+        assert!(record.validate_attachment(&attachment).is_err());
+        let mut text = attachment;
+        text.mime_type = "text/plain".into();
+        text.kind = AttachmentKind::Other;
+        record.mime_type = Some(text.mime_type.clone());
+        assert!(record.validate_attachment(&text).is_ok());
+        for kind in [ArtifactKind::Image, ArtifactKind::Pdf] {
+            record.kind = kind;
+            assert!(record.validate_attachment(&text).is_err());
+        }
+    }
 
     #[test]
     fn names_are_idempotent_with_javascript_whitespace_and_utf16_truncation() {

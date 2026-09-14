@@ -138,18 +138,35 @@ pub(crate) async fn apply(
     if crate::shell_runs::unsettled(tx, &delegation.target.session_id).await? {
         return Err(StoreError::SessionBusy);
     }
+    let admitted_at = event
+        .recorded_at
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| invalid("invalid WorkHub admission time"))?
+        .as_millis()
+        .try_into()
+        .map_err(|_| invalid("invalid WorkHub admission time"))?;
+    let message = delegation.message(&content).map_err(invalid)?;
+    for (source, destination) in content
+        .attachments
+        .iter()
+        .flatten()
+        .zip(message.message.content.attachments.iter().flatten())
+    {
+        crate::artifacts::copy_in_transaction(
+            tx,
+            source,
+            destination,
+            &delegation.target.turn_id,
+            admitted_at,
+        )
+        .await?;
+    }
     let admission = PendingMessageAdmission {
         invocation: delegation.target.clone(),
         steering_invocation: None,
-        source: delegation.message(&content).map_err(invalid)?,
+        source: message,
         required_tools: Default::default(),
-        admitted_at: event
-            .recorded_at
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| invalid("invalid WorkHub admission time"))?
-            .as_millis()
-            .try_into()
-            .map_err(|_| invalid("invalid WorkHub admission time"))?,
+        admitted_at,
     };
     crate::message_admissions::insert::insert(
         tx,

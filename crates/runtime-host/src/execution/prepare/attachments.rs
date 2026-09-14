@@ -20,8 +20,7 @@
 use super::{Code, Result, failure, internal};
 use maka_event_log::EventLog;
 use maka_runtime::{
-    artifact::{Artifact, ArtifactKind},
-    attachment::{AttachmentKind, AttachmentRef, StorageRef},
+    attachment::{AttachmentRef, StorageRef},
     interaction::entity_id,
 };
 
@@ -61,92 +60,9 @@ pub(super) async fn validate(
             .map_err(internal)?
             .record
             .ok_or_else(|| failure(Code::OperationConflict, "Attachment Artifact was not found"))?;
-        validate_descriptor(attachment, &record)
+        record
+            .validate_attachment(attachment)
             .map_err(|message| failure(Code::OperationConflict, message))?;
     }
     Ok(())
-}
-
-fn validate_descriptor(
-    attachment: &AttachmentRef,
-    record: &Artifact,
-) -> std::result::Result<(), &'static str> {
-    if record.name != attachment.name
-        || record.mime_type.as_deref() != Some(attachment.mime_type.as_str())
-        || record.size_bytes != attachment.bytes
-    {
-        return Err("Attachment metadata does not match its canonical Artifact");
-    }
-    let kind = AttachmentKind::from_metadata(&attachment.mime_type, &record.name);
-    if attachment.kind != kind
-        || (kind == AttachmentKind::Image) != (record.kind == ArtifactKind::Image)
-        || (kind == AttachmentKind::Pdf) != (record.kind == ArtifactKind::Pdf)
-    {
-        return Err("Attachment kind does not match its canonical Artifact");
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use maka_runtime::artifact::ArtifactSource;
-
-    #[test]
-    fn canonical_metadata_and_bidirectional_modality_are_required_without_source_restriction() {
-        let attachment = AttachmentRef {
-            kind: AttachmentKind::Image,
-            name: "picture.png".into(),
-            mime_type: "image/png".into(),
-            bytes: 4,
-            storage_ref: StorageRef::SessionFile {
-                session_id: "session".into(),
-                relative_path: "artifact".into(),
-            },
-        };
-        let mut record = Artifact {
-            id: "artifact".into(),
-            session_id: "session".into(),
-            turn_id: "turn".into(),
-            created_at: 1,
-            name: attachment.name.clone(),
-            kind: ArtifactKind::Image,
-            size_bytes: attachment.bytes,
-            mime_type: Some(attachment.mime_type.clone()),
-            source: ArtifactSource::ToolResultProjection,
-            summary: None,
-        };
-        assert!(validate_descriptor(&attachment, &record).is_ok());
-        for changed in [
-            AttachmentRef {
-                name: "other.png".into(),
-                ..attachment.clone()
-            },
-            AttachmentRef {
-                mime_type: "image/jpeg".into(),
-                ..attachment.clone()
-            },
-            AttachmentRef {
-                bytes: 5,
-                ..attachment.clone()
-            },
-            AttachmentRef {
-                kind: AttachmentKind::Other,
-                ..attachment.clone()
-            },
-        ] {
-            assert!(validate_descriptor(&changed, &record).is_err());
-        }
-        record.kind = ArtifactKind::File;
-        assert!(validate_descriptor(&attachment, &record).is_err());
-        let mut text = attachment;
-        text.mime_type = "text/plain".into();
-        text.kind = AttachmentKind::Other;
-        record.mime_type = Some(text.mime_type.clone());
-        assert!(validate_descriptor(&text, &record).is_ok());
-        for kind in [ArtifactKind::Image, ArtifactKind::Pdf] {
-            record.kind = kind;
-            assert!(validate_descriptor(&text, &record).is_err());
-        }
-    }
 }

@@ -19,6 +19,7 @@
 
 //! Durable WorkHub delegation identities; execution remains ordinary queued work.
 use crate::{
+    attachment::{AttachmentRef, StorageRef},
     event::Invocation,
     input::{DeliveredMessage, MessageInput},
     message::{MessageDisposition, Placement, RootSourceMessage},
@@ -70,19 +71,22 @@ impl Delegation {
 
     /// Derive the sole target message from its canonical source and recorded task.
     pub fn message(&self, user: &MessageInput) -> Result<RootSourceMessage, &'static str> {
-        if user
-            .attachments
-            .as_ref()
-            .is_some_and(|items| !items.is_empty())
-        {
-            return Err("WorkHub attachment transfer is not installed");
-        }
         let content = MessageInput {
             text: format!(
                 "User request:\n{}\n\nDelegated task:\n{}",
                 user.text, self.delegation_text
             ),
             display_text: None,
+            attachments: user
+                .attachments
+                .as_ref()
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|attachment| self.attachment(attachment))
+                        .collect()
+                })
+                .transpose()?,
             ..user.clone()
         };
         if content.text_bytes() > 64 * 1024 {
@@ -106,5 +110,30 @@ impl Delegation {
         };
         message.validate()?;
         Ok(message)
+    }
+
+    /// Stable destination; only the canonical coordination message supplies sources.
+    pub fn attachment(&self, source: &AttachmentRef) -> Result<AttachmentRef, &'static str> {
+        let StorageRef::SessionFile {
+            session_id,
+            relative_path,
+        } = &source.storage_ref
+        else {
+            return Err("WorkHub attachments require Session Artifact references");
+        };
+        if session_id != COORDINATION_SESSION_ID {
+            return Err("WorkHub attachment belongs to another Session");
+        }
+        crate::interaction::entity_id(relative_path)?;
+        Ok(AttachmentRef {
+            storage_ref: StorageRef::SessionFile {
+                session_id: self.target.session_id.clone(),
+                relative_path: crate::artifact::upload_artifact_id(
+                    &self.target.session_id,
+                    &format!("workhub:{}:{relative_path}", self.action_id),
+                ),
+            },
+            ..source.clone()
+        })
     }
 }

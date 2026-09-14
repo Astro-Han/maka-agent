@@ -18,7 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { upload } from './client-artifact-upload.mjs';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -155,29 +155,16 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     const session = await request('workhub.coordination.query', {});
     await writeFile(join(session.workspace.hostCwd, 'AGENTS.md'), forbidden);
     const bytes = Buffer.from('ATTACHMENT_EVIDENCE\nsecond line\n');
-    await request('artifact.ingest', {
-      kind: 'begin',
+    const attachment = await upload(
+      request,
       sessionId,
-      uploadId: 'workhub-upload',
-      name: 'evidence.txt',
-      mimeType: 'text/plain',
-      totalBytes: bytes.length,
-      contentSha256: 'sha256:' + createHash('sha256').update(bytes).digest('hex'),
-    });
-    await request('artifact.ingest', {
-      kind: 'chunk',
-      sessionId,
-      uploadId: 'workhub-upload',
-      offset: 0,
-      chunkBase64: bytes.toString('base64'),
-    });
-    const uploaded = await request('artifact.ingest', {
-      kind: 'commit',
-      sessionId,
-      uploadId: 'workhub-upload',
-    });
-    attachmentPath = 'maka://runtime/attachments/' + uploaded.attachment.ref.relativePath;
-    const input = { turnId, text: '请检查附件并确认 WorkHub', attachments: [uploaded.attachment] };
+      'workhub-upload',
+      bytes,
+      'evidence.txt',
+      'text/plain',
+    );
+    attachmentPath = 'maka://runtime/attachments/' + attachment.ref.relativePath;
+    const input = { turnId, text: '请检查附件并确认 WorkHub', attachments: [attachment] };
     await assert.rejects(
       request('workhub.coordination.answer', input),
       (e) => e.code === 'operation_unavailable',

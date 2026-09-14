@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
 import { createInput, querySession } from './client-runtime-policy-fixture.mjs';
+import { upload } from './client-artifact-upload.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'delegate-request';
@@ -57,7 +58,8 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
   let failure,
     calls = 0,
     input,
-    receipt;
+    receipt,
+    attachment;
   const server = createServer(async (req, response) => {
     try {
       let body = '';
@@ -69,20 +71,29 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
           message.content.includes('Delegated task:\nImplement the requested task'),
       );
       const finished = data.messages.some((message) => message.role === 'tool');
-      const delta = target
-        ? { content: 'target completed' }
-        : finished
-          ? { content: 'delegation completed' }
-          : {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: 'delegate-call',
-                  type: 'function',
-                  function: { name: 'mcp__desktop_workhub__tasks', arguments: '{}' },
+      const path = target
+        ? body.match(/maka:\/\/runtime\/attachments\/[A-Za-z0-9_-]+/u)?.[0]
+        : undefined;
+      if (target) {
+        assert(path);
+        assert(!path.endsWith('/' + attachment.ref.relativePath));
+        if (finished) assert(body.includes('TRANSFER_EVIDENCE'));
+      }
+      const delta = finished
+        ? { content: target ? 'target completed' : 'delegation completed' }
+        : {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'delegate-call',
+                type: 'function',
+                function: {
+                  name: target ? 'Read' : 'mcp__desktop_workhub__tasks',
+                  arguments: JSON.stringify(target ? { path } : {}),
                 },
-              ],
-            };
+              },
+            ],
+          };
       if (target) {
         assert(
           data.messages.some(
@@ -102,7 +113,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
       });
       response.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close' });
       response.end(
-        [chunk(delta, null), chunk({}, target || finished ? 'stop' : 'tool_calls')]
+        [chunk(delta, null), chunk({}, finished ? 'stop' : 'tool_calls')]
           .map((event) => 'data: ' + JSON.stringify(event) + '\n\n')
           .join('') + 'data: [DONE]\n\n',
       );
@@ -152,6 +163,14 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
       await request('session.create', { ...createInput(workspace, id, 'bypass'), ...extra });
     await request('session.lifecycle.set', { sessionId: 'archived', state: 'archived' });
     await request('workhub.coordination.resolve', {});
+    attachment = await upload(
+      request,
+      sessionId,
+      'transfer',
+      Buffer.from('TRANSFER_EVIDENCE'),
+      'evidence.txt',
+      'text/plain',
+    );
     const initial = await request('workhub.coordination.candidates', {});
     assert.deepEqual(
       initial.candidates.map((candidate) => candidate.sessionId),
@@ -210,6 +229,10 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
             receipt = await act(input);
             assert.equal(receipt.disposition, 'delegate_existing');
             assert.equal(receipt.targetSessionId, 'target');
+            await request('artifact.delete', {
+              sessionId,
+              artifactId: attachment.ref.relativePath,
+            });
             assert.deepEqual(await act(input), receipt);
             await assert.rejects(
               act({ ...input, delegationText: 'changed request' }),
@@ -230,6 +253,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
     await request('workhub.coordination.answer', {
       turnId,
       text: 'Please implement the requested task',
+      attachments: [attachment],
     });
     await sourceObserver.waitFor(
       (frame) =>

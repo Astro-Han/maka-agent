@@ -159,8 +159,8 @@ live verification are deferred.
 
 WorkHub supports session resolution, queries, model configuration and conversation
 with scoped Desktop tools and attachment reads, plus candidate discovery and delegation
-to existing idle sessions. Task creation, linked operations, multi-selection and attachment
-transfer remain incomplete.
+to existing idle sessions with atomic attachment transfer. Task creation, linked operations
+and multi-selection remain incomplete.
 
 Skill mutations and update previews,
 advanced recovery/reconciliation, WorkHub coordination and orchestration,
