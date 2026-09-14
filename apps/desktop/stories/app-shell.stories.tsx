@@ -3819,15 +3819,23 @@ export const CompletedProcessExpanded: Story = {
     const process = canvasElement.querySelector<HTMLDetailsElement>('.maka-processing-sequence')!;
     const summary = process.querySelector('summary')!;
     await within(canvasElement).findByText('已修复登录状态恢复。');
+    // Check the browser-applied motion contract without assuming a frame will
+    // run during the transition. A busy runner may paint only the endpoint;
+    // ::details-content does not reliably expose Animation objects/events.
+    const motion = getComputedStyle(process, '::details-content');
+    const properties = motion.transitionProperty.split(',').map((value) => value.trim());
+    const durations = motion.transitionDuration.split(',').map((value) => parseFloat(value));
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      await expect(durations.every((duration) => duration === 0)).toBe(true);
+    } else {
+      const gridIndex = properties.indexOf('grid-template-rows');
+      await expect(gridIndex).toBeGreaterThanOrEqual(0);
+      await expect(durations[gridIndex % durations.length]).toBeGreaterThan(0);
+      await expect(motion.transitionBehavior).toContain('allow-discrete');
+    }
     summary.focus();
     summary.click();
     await waitFor(() => expect(process.open).toBe(true));
-    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      const height = process.getBoundingClientRect().height;
-      await expect(height).toBeGreaterThan(summary.getBoundingClientRect().height + 1);
-      await expect(height).toBeLessThan(summary.getBoundingClientRect().height + process.querySelector<HTMLElement>('.maka-processing-content')!.offsetHeight - 1);
-    }
     await waitFor(() => expect(process.getBoundingClientRect().height).toBeGreaterThanOrEqual(summary.getBoundingClientRect().height + process.querySelector<HTMLElement>('.maka-processing-content')!.offsetHeight - 1));
     await expect(summary).toHaveFocus();
     await expect(await within(canvasElement).findByText('我先检查登录状态的存储和恢复逻辑。')).toBeVisible();
@@ -3844,10 +3852,6 @@ export const CompletedProcessExpanded: Story = {
     // this checks React/layout identity, rather than browser mouse semantics.
     summary.click();
     await waitFor(() => expect(process.open).toBe(false));
-    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      await expect(process.getBoundingClientRect().height).toBeGreaterThan(summary.getBoundingClientRect().height + 1);
-    }
     await waitFor(() => expect(process.getBoundingClientRect().height).toBeLessThanOrEqual(summary.getBoundingClientRect().height + 1));
     await expect(selection.toString()).toBe(selected);
     await expect(answer.isConnected).toBe(true);
