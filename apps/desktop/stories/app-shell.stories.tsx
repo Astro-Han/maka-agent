@@ -58,6 +58,7 @@ import {
   deriveSessionRevisionNavigation,
 } from '../src/renderer/features/session-navigation/testing';
 import { AppShell as AstryxAppShell } from '@astryxdesign/core/AppShell';
+import { Button } from '@astryxdesign/core';
 import { GoalDialog } from '../src/renderer/features/goals/testing';
 
 const NOW = Date.UTC(2026, 6, 1, 9, 30, 0);
@@ -3725,6 +3726,69 @@ const processDisclosureMessages: StoredMessage[] = [
   { type: 'assistant', id: 'process-answer', turnId: 'process-turn', ts: NOW, text: '已修复登录状态恢复。\n\n刷新页面后会恢复已有会话；相关测试通过。', modelId: 'claude-sonnet-4-5' },
   { type: 'turn_state', id: 'process-completed', turnId: 'process-turn', ts: NOW, status: 'completed' },
 ];
+
+function ProcessReplyLifecycle() {
+  const [startedAt, setStartedAt] = useState(() => Date.now());
+  const [count, setCount] = useState(4);
+  const [playing, setPlaying] = useState(false);
+  const [epoch, setEpoch] = useState(0);
+  const completed = count === processDisclosureMessages.length;
+  useEffect(() => {
+    if (!playing || completed) return;
+    const timer = window.setTimeout(() => setCount((value) => value + 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [count, playing, completed]);
+  const messages = processDisclosureMessages.slice(0, count).map((message, index) => ({
+    ...message,
+    ts: startedAt + Math.max(0, index - 3) * 1000,
+  }));
+  return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    {/* Review controls advance fixture events; the chat frame and disclosure
+        state below are entirely owned by production components. */}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 8, flexShrink: 0 }}>
+      <span>演示控制 · 每秒推进一条事件</span>
+      <Button size="sm" label={completed ? '重新播放' : playing ? '暂停' : '播放完整过程'} onClick={() => {
+        if (completed) {
+          setStartedAt(Date.now());
+          setCount(4);
+          setEpoch((value) => value + 1);
+        }
+        setPlaying(completed || !playing);
+      }} />
+    </div>
+    <ComposedShell key={epoch} motionEnabled sidebarCollapsed frameHeight="calc(100vh - 48px)"
+      session={{ name: '工作过程与最终回答', status: completed ? 'active' : 'running', streaming: !completed }}
+      chat={{ messages, scrollBehavior: 'auto',
+        activeTurn: completed ? undefined : { turnId: 'process-turn' },
+        liveTurns: completed ? [] : [{ turnId: 'process-turn', startedAt, steps: [] }],
+      }} />
+  </div>;
+}
+
+// Real path: a running turn receives tool results, then its final assistant
+// message, then a completed event. The same mounted turn automatically folds.
+export const ProcessReplyLifecycleComplete: Story = {
+  name: '完整过程：展开 → 最终回答 → 自动折叠',
+  render: () => <ProcessReplyLifecycle />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const process = canvasElement.querySelector<HTMLDetailsElement>('.maka-processing-sequence')!;
+    await expect(process.open).toBe(true);
+    await expect(process.querySelector('summary')).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(canvas.getByRole('button', { name: '播放完整过程' }));
+    const answer = await canvas.findByText('已修复登录状态恢复。', {}, { timeout: 12_000 });
+    await expect(process.open).toBe(true);
+    await expect(process.contains(answer)).toBe(false);
+    await waitFor(() => expect(process.open).toBe(false), { timeout: 3000 });
+    await expect(canvasElement.querySelector('.maka-processing-sequence')).toBe(process);
+    await expect(answer.isConnected).toBe(true);
+    await expect(answer).toBeVisible();
+    await expect(answer.getBoundingClientRect().top).toBeGreaterThanOrEqual(process.getBoundingClientRect().bottom);
+    await expect(await canvas.findByText('我先检查登录状态的存储和恢复逻辑。')).not.toBeVisible();
+    // The completed scene is the landing state; reviewers can replay it.
+    await expect(canvas.getByRole('button', { name: '重新播放' })).toBeVisible();
+  },
+};
 
 // Real path: session → a completed multi-step reply. Intermediate commentary,
 // reasoning and tools are collapsed above the answer in the real chat frame.
