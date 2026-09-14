@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { once } from 'node:events';
 import { parseArgs } from 'node:util';
-import { access, readFile, rmdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rmdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { connectRuntimeHostMessageTransport } from '../../packages/runtime-host/src/client/connection.ts';
 import { FramedTransport } from '../../packages/runtime-host/src/transport/framed-transport.ts';
@@ -192,11 +192,45 @@ try {
       await assert.rejects(access(initial.workspace.hostCwd), (e) => e.code === 'ENOENT');
       assert.deepEqual(await resolve(), { sessionId });
       await access(initial.workspace.hostCwd);
+      // A prerequisite-free Skill is invocable in an ordinary Session but not
+      // in WorkHub, even before a Desktop capability provider has been bound.
+      const skillDir = join(initial.workspace.hostCwd, '.agents', 'skills', 'ordinary-only');
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'SKILL.md'),
+        '---\nname: ordinary-only\ndescription: Ordinary Session instructions\n---\nDo not invoke in WorkHub.\n',
+      );
+      await request('session.create', {
+        sessionId: 'ordinary-skills',
+        workspace: { kind: 'host_path', path: initial.workspace.hostCwd },
+        modelTarget: { kind: 'default' },
+      });
+      const invocable = (input) => request('skill.catalog.invocable.query', input);
+      const target = { kind: 'session', sessionId };
+      const empty = await invocable({ kind: 'start', target });
+      assert.equal(empty.kind, 'page');
+      assert.deepEqual(empty.items, []);
+      assert.equal(empty.nextCursor, null);
+      const ordinary = await invocable({
+        kind: 'start',
+        target: { kind: 'session', sessionId: 'ordinary-skills' },
+      });
+      assert(ordinary.items.some((item) => item.id === 'ordinary-only'));
+      await assert.rejects(
+        invocable({
+          kind: 'continue',
+          target,
+          revision: empty.revision,
+          cursor: empty.revision + ':0',
+        }),
+        (error) => error.code === 'invalid_request',
+      );
       await request('connection.catalog.remove', {
         expected: { connectionId: model.connectionId, revision: model.revision },
       });
       assert.deepEqual(await resolve(), { sessionId });
       assert.deepEqual(await query(), configured.session);
+      assert.deepEqual(await invocable({ kind: 'start', target }), empty);
       await writeFile(file, JSON.stringify(configured.session));
       console.log('workhub-passed');
     }

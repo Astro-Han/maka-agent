@@ -77,6 +77,28 @@ async fn query(
             if session.archived {
                 return Err(failure(Code::SessionArchived, "Session is archived"));
             }
+            if session_id == maka_runtime::workhub::COORDINATION_SESSION_ID {
+                // WorkHub never loads Skills. Its invocable catalog is empty by
+                // execution policy, not by filesystem discovery or preferences.
+                super::workhub::record(host)
+                    .await
+                    .map_err(|mut error| {
+                        if error.code == Code::OperationConflict {
+                            error.code = Code::OperationUnavailable;
+                        }
+                        error
+                    })?
+                    .ok_or_else(|| failure(Code::NotFound, "WorkHub Session does not exist"))?;
+                return page::invocable(
+                    input,
+                    &session.configuration.workspace.host_cwd,
+                    &FrozenSkills {
+                        discovery: Default::default(),
+                        preferences: maka_skills::Preferences::Available(Default::default()),
+                        host: Default::default(),
+                    },
+                );
+            }
             let config = session.configuration;
             require_agent(config.collaboration_mode)?;
             (
