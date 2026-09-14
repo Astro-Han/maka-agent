@@ -56,7 +56,6 @@ import type { TransientUserMessageProjection } from './chat-view.js';
 import { type LiveProviderRetry } from './live-turn-projection.js';
 import { providerRetryDisplaySeconds } from '@maka/core/provider-retry-countdown';
 import {
-  finalAssistantReplyText,
   type TurnTimelineItem,
   type TurnViewModel,
 } from './materialize.js';
@@ -477,10 +476,13 @@ export const TurnView = memo(function TurnView(props: {
   const locale = useUiLocale();
   const copy = getConversationCopy(locale).messages;
   const { turn } = props;
+  // Derive disclosure entries and reply identity together, only when this
+  // turn's timeline changes. Rendering and copy share the original reply item.
+  const { entries: foldedTimeline, finalReply } = useMemo(() => foldTimeline(turn.timeline), [turn.timeline]);
   const forwardBadges = props.lineageBadges?.filter((b) => b.direction === 'forward') ?? [];
   const reverseBadges = props.lineageBadges?.filter((b) => b.direction === 'reverse') ?? [];
   const answerContext = accessibleActionContext(
-    turn.user?.text ?? finalAssistantReplyText(turn) ?? '',
+    turn.user?.text ?? finalReply?.text ?? '',
     turn.startedAt,
     locale,
   );
@@ -492,10 +494,6 @@ export const TurnView = memo(function TurnView(props: {
     turn.timeline.length > 0 ||
     !!props.liveStreaming ||
     (turn.user !== undefined && turn.statusSource === 'recorded' && turn.status !== 'running');
-  // #1307: the collapsed "Processing" fold is derived at render time from the
-  // flat timeline. Settled turn identities are stable (memoized projections),
-  // so this only recomputes for the turn whose timeline actually changed.
-  const foldedTimeline = useMemo(() => foldTimeline(turn.timeline), [turn.timeline]);
   const runningToolLabel = computerRunningLabel(turn.tools, locale);
   const conversationSegments = useMemo(
     () => splitTimelineAtUserMessages(foldedTimeline, showAssistantMessage),
@@ -811,7 +809,7 @@ export const TurnView = memo(function TurnView(props: {
                     ? (actionId) => props.onFooterAction?.(turn.turnId, actionId)
                     : undefined
                 }
-                assistantText={finalAssistantReplyText(turn)}
+                assistantText={finalReply?.text ?? ''}
               />
             ) : null}
             </LocalizedChatMessage>

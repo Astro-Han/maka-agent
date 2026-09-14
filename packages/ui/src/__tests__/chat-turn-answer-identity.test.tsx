@@ -670,6 +670,31 @@ test('automatically folds a running process on completion without remounting the
   assert.equal(container.querySelectorAll('.maka-chat-message-bubble-assistant')[1]?.isSameNode(answer!), true);
 });
 
+test('copy uses the visible final reply after completion and disclosure toggles', async () => {
+  const { container, root } = domRoot();
+  const copied: string[] = [];
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+    writeText: async (text: string) => { copied.push(text); },
+  } });
+  const timeline = [PROCESS_TEXT, COMPLETED_TOOL, { ...ANSWER, live: false }];
+  await renderTurn(root, turnWith(timeline));
+  await act(() => root.render(<LocaleProvider locale="en"><TurnView
+    turn={{ ...turnWith(timeline), status: 'completed' }}
+    footerActions={[{ id: 'copy', label: 'Copy', enabled: true }]}
+  /></LocaleProvider>));
+  const process = container.querySelector('details.maka-processing-sequence');
+  const summary = process?.querySelector('summary');
+  const copy = container.querySelector('[data-action="copy"]');
+  assert.ok(process && summary && copy);
+  assert.equal(process.hasAttribute('open'), false);
+  assert.doesNotMatch(process.textContent ?? '', /the answer/);
+  for (let index = 0; index < 3; index += 1) {
+    await act(async () => { copy.dispatchEvent(new window.Event('click', { bubbles: true })); });
+    await act(() => { summary.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true })); });
+  }
+  assert.deepEqual(copied, [ANSWER.text, ANSWER.text, ANSWER.text]);
+});
+
 test('keeps running work expanded and allows manual disclosure after settlement', async () => {
   const { container, root } = domRoot();
   await renderTurn(root, turnWith([PROCESS_TEXT, COMPLETED_TOOL]));
