@@ -84,7 +84,6 @@ export function observesOutput(part) {
 export async function forwardProviderStream(open, normalize, emit, kind) {
   let observedOutput = false;
   let replaySafe = true;
-  let finished = false;
   const truncated = () =>
     emit({
       type: 'error',
@@ -129,7 +128,7 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
         return await failed(error);
       }
       if (next.done) {
-        if (!finished) await truncated();
+        await truncated();
         return;
       }
       const raw = next.value;
@@ -146,9 +145,8 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
       }
       // Capture before normalization, filtering or asynchronous delivery. A
       // provider tool may already be running without a completed tool-call.
-      if (raw.type === 'finish') finished = true;
       if (
-        finished ||
+        raw.type === 'finish' ||
         raw.type === 'tool-result' ||
         (['tool-input-start', 'tool-call'].includes(raw.type) &&
           raw.providerExecuted !== undefined &&
@@ -165,6 +163,9 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
         part.timestamp = part.timestamp.toISOString();
       }
       await emit(part);
+      // The provider's terminal fact settles the response; transport EOF or a
+      // late connection error cannot revise it. finally releases the stream.
+      if (raw.type === 'finish') return;
     }
   } finally {
     // Match for-await cleanup without replacing a known failure with cancel noise.

@@ -35,7 +35,6 @@ const cases = [
   [[{ type: 'tool-call', toolCallId: 'tool', providerExecuted: true }], false],
   [[{ type: 'tool-result', toolCallId: 'tool' }], false],
   [[{ ...text, providerMetadata: { anthropic: { signature: 'signed' } } }], false],
-  [[{ type: 'finish' }], false],
 ];
 const result = [];
 for (const [parts, replaySafe] of cases) {
@@ -54,6 +53,34 @@ for (const [parts, replaySafe] of cases) {
   const failure = emitted.at(-1);
   assert.equal(failure.error.replaySafe, replaySafe);
   result.push(failure);
+}
+// A real finish is terminal even when the transport would later fail; cleanup
+// must still run. Synthetic Chat EOF is not a provider finish.
+for (const finish of [
+  { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' } },
+  { type: 'finish', finishReason: { unified: 'other' } },
+]) {
+  const emitted = [];
+  let closed = false;
+  await forwardProviderStream(
+    async () => ({
+      stream: (async function* () {
+        try {
+          yield text;
+          yield finish;
+          throw new Error('must not read past the terminal boundary');
+        } finally {
+          closed = true;
+        }
+      })(),
+    }),
+    (part) => part,
+    async (part) => emitted.push(part),
+    'openai_chat',
+  );
+  assert(closed);
+  if (finish.finishReason.raw) assert.deepEqual(emitted, [text, finish]);
+  else assert.equal(emitted.at(-1).error.reason, 'stream_truncated');
 }
 const local = new Error('local emit failed');
 await assert.rejects(

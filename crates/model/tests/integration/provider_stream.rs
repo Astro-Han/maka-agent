@@ -132,15 +132,29 @@ async fn sdk_text_and_tool_streams_cross_real_http_before_response_finishes() {
             let release = gate.clone();
             let expected_text = "hello😀".repeat(2048);
             let (first, last) = fixtures(kind.clone(), &expected_text);
+            let keep_open = matches!(kind, ProviderKind::Anthropic);
             let server = tokio::spawn(async move {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = read_request(&mut socket).await;
-                let header = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\nX-Latin-1: ÿ\r\n\r\n", first.len() + last.len());
+                let length = if keep_open {
+                    String::new()
+                } else {
+                    format!("Content-Length: {}\r\n", first.len() + last.len())
+                };
+                let header = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{length}Connection: close\r\nX-Latin-1: ÿ\r\n\r\n");
                 let header: Vec<u8> = header.chars().map(|ch| u8::try_from(ch).unwrap()).collect();
                 socket.write_all(&header).await.unwrap();
                 socket.write_all(first.as_bytes()).await.unwrap();
                 release.notified().await;
                 socket.write_all(last.as_bytes()).await.unwrap();
+                if keep_open {
+                    let mut byte = [0];
+                    let closed = tokio::time::timeout(Duration::from_secs(5), socket.read(&mut byte))
+                        .await
+                        .expect("provider finish must release HTTP without waiting for idle timeout")
+                        .unwrap();
+                    assert_eq!(closed, 0);
+                }
                 request
             });
             let mut customized = request(kind.clone(), base);

@@ -115,6 +115,8 @@ Do not run untrusted code or point test instances at existing user data.
   and unclassified network failures or idle timeouts are not retried.
   Model activity refreshes the 120-second idle budget; active streams have no fixed
   two-minute duration limit. User cancellation still closes and drains the request.
+  A real provider finish releases the stream without waiting for transport EOF;
+  synthetic finishes from truncated streams are not successful completions.
 
 ## Code layout
 

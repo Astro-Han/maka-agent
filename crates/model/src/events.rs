@@ -317,7 +317,7 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let events: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(events.len(), 8);
+        assert_eq!(events.len(), 7);
         for (index, event) in events.iter().enumerate() {
             let Err(ModelError::Provider(failure)) = Normalizer::default().push(event.clone())
             else {
