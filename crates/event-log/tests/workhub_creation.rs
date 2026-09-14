@@ -21,8 +21,12 @@ use maka_event_log::EventLog;
 use maka_runtime::{
     artifact::content_digest,
     event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent},
+    execution::{PermissionMode, WorkspaceTarget},
     input::InvocationInput,
-    workhub::{COORDINATION_SESSION_ID, Delegation, DelegationKind, created_session_id},
+    workhub::{
+        COORDINATION_SESSION_ID, CreateDefaults, CreateModel, CreateSpec, Delegation,
+        DelegationDescription, DelegationKind, created_session_id,
+    },
 };
 use serde_json::{Value, json};
 
@@ -61,6 +65,23 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
             delegation: Box::new(Delegation {
                 action_id: "create-action".into(),
                 kind: DelegationKind::Created,
+                description: Some(DelegationDescription::Created {
+                    name: "new task".into(),
+                    spec: CreateSpec {
+                        title: "  new task  ".into(),
+                        workspace: WorkspaceTarget::HostPath {
+                            path: "/workspace/.".into(),
+                        },
+                        defaults: Some(CreateDefaults {
+                            permission_mode: Some(PermissionMode::Explore),
+                            model: Some(CreateModel {
+                                llm_connection_id: "connection".into(),
+                                llm_connection_slug: "fixture".into(),
+                                model: "fixture-model".into(),
+                            }),
+                        }),
+                    },
+                }),
                 delivery: Default::default(),
                 request_fingerprint: content_digest(b"new request"),
                 source_message_event_id: opening.event().id.clone(),
@@ -76,7 +97,21 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
         },
     ))
     .unwrap();
-    let config = json!({"name": "new task"});
+    let config = json!({"name": "new task", "permission_mode": "explore",
+        "model": {"connection_id": "connection", "connection_slug": "fixture", "model": "fixture-model"}});
+    for (field, value) in [
+        ("permission_mode", json!("bypass")),
+        (
+            "model",
+            json!({"connection_id": "other", "connection_slug": "fixture", "model": "fixture-model"}),
+        ),
+    ] {
+        let mut changed = config.clone();
+        changed[field] = value;
+        assert!(log.create_workhub_session(&action, &changed).await.is_err());
+        assert!(log.get_session::<Value>(&target).await.unwrap().is_none());
+        assert!(log.workhub_action("create-action").await.unwrap().is_none());
+    }
     let before = log
         .list_sessions::<Value>(None, None, 32)
         .await
@@ -155,7 +190,9 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
     );
     let record = log.get_session::<Value>(&target).await.unwrap().unwrap();
     assert_eq!(record.revision, 2);
-    assert_eq!(record.configuration, json!({"name": "renamed"}));
+    let mut renamed = config.clone();
+    renamed["name"] = json!("renamed");
+    assert_eq!(record.configuration, renamed);
     assert_eq!(log.pending_messages(&target).await.unwrap().len(), 1);
     log.close().await.unwrap();
 }

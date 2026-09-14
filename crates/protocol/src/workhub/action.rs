@@ -18,10 +18,8 @@
  */
 
 use super::candidates::{text, workspace};
-use crate::{
-    ProtocolError, Result,
-    session::{PermissionMode, WorkspaceTarget},
-};
+use crate::{ProtocolError, Result, session::WorkspaceTarget};
+pub use maka_runtime::workhub::CreateDefaults;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -87,21 +85,6 @@ pub struct LinkedTarget {
 #[serde(deny_unknown_fields)]
 pub struct CreateContext {
     pub workspace: WorkspaceTarget,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CreateDefaults {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<CreateModel>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<PermissionMode>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CreateModel {
-    pub llm_connection_id: String,
-    pub llm_connection_slug: String,
-    pub model: String,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(

@@ -25,6 +25,111 @@ use maka_runtime::{
 use serde::Serialize;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum CoordinationRecord {
+    Stop(Box<StopMessage>),
+    Assigned(Box<AssignmentMessage>),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentMessage {
+    schema_version: u8,
+    kind: AssignmentKind,
+    action_id: String,
+    action_fingerprint: String,
+    coordination_turn_id: String,
+    delegation_id: String,
+    target_session_id: String,
+    target_turn_id: String,
+    target_message_id: String,
+    target_session_name: String,
+    disposition: Disposition,
+    user_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachments: Option<Vec<maka_runtime::attachment::AttachmentRef>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_attachments: Option<Vec<maka_runtime::attachment::AttachmentRef>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delegation_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    create: Option<maka_runtime::workhub::CreateSpec>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    steered: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AssignmentKind {
+    DelegationAssigned,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Disposition {
+    DelegateExisting,
+    CreateNew,
+}
+
+pub(crate) fn assigned(
+    event: &maka_runtime::event::RuntimeEvent,
+    delegation: &maka_runtime::workhub::Delegation,
+    source: &maka_runtime::input::MessageInput,
+) -> Result<Option<Message>, ProjectionError> {
+    use maka_runtime::workhub::DelegationDescription;
+    delegation
+        .validate(&event.invocation)
+        .map_err(ProjectionError::Invalid)?;
+    // Older facts have no canonical display description. Never substitute
+    // today's mutable Session metadata for missing historical evidence.
+    let Some(description) = &delegation.description else {
+        return Ok(None);
+    };
+    let (disposition, create) = match description {
+        DelegationDescription::Existing { .. } => (Disposition::DelegateExisting, None),
+        DelegationDescription::Created { spec, .. } => (Disposition::CreateNew, Some(spec.clone())),
+    };
+    let target_attachments = source
+        .attachments
+        .as_ref()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| delegation.attachment(item))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+        .map_err(ProjectionError::Invalid)?;
+    Ok(Some(Message {
+        id: event.id.clone(),
+        turn_id: event.invocation.turn_id.clone(),
+        ts: crate::message::timestamp(event)?,
+        content: Content::WorkhubCoordination {
+            record: CoordinationRecord::Assigned(Box::new(AssignmentMessage {
+                schema_version: 1,
+                kind: AssignmentKind::DelegationAssigned,
+                action_id: delegation.action_id.clone(),
+                action_fingerprint: delegation.request_fingerprint.clone(),
+                coordination_turn_id: event.invocation.turn_id.clone(),
+                delegation_id: event.id.clone(),
+                target_session_id: delegation.target.session_id.clone(),
+                target_turn_id: delegation.target.turn_id.clone(),
+                target_message_id: delegation.target_message_id(),
+                target_session_name: description.name().into(),
+                disposition,
+                user_text: source.text.clone(),
+                attachments: source.attachments.clone(),
+                target_attachments,
+                delegation_text: (delegation.delegation_text != source.text)
+                    .then(|| delegation.delegation_text.clone()),
+                create,
+                steered: delegation.delivery.is_steering(),
+            })),
+        },
+    }))
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StopMessage {
     schema_version: u8,
@@ -105,7 +210,7 @@ pub fn stop(
             turn_id: event.turn_id.clone(),
             ts: crate::message::capture_time(event.recorded_at)?,
             content: Content::WorkhubCoordination {
-                record: StopMessage {
+                record: CoordinationRecord::Stop(Box::new(StopMessage {
                     schema_version: 3,
                     action_id: intent.request.action_id.clone(),
                     action_fingerprint: intent.request.request_fingerprint.clone(),
@@ -114,7 +219,7 @@ pub fn stop(
                     stops_delegation_id: delegation_id.into(),
                     target_session_id: intent.request.target_session_id.clone(),
                     detail,
-                },
+                })),
             },
         },
     })

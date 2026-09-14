@@ -22,7 +22,7 @@ use maka_runtime::{
     artifact::content_digest,
     event::{CommitError, EventWrite, Fact, Invocation, RuntimeEvent},
     input::InvocationInput,
-    workhub::{COORDINATION_SESSION_ID, Delegation},
+    workhub::{COORDINATION_SESSION_ID, Delegation, DelegationDescription},
 };
 use serde_json::{Value, json};
 
@@ -65,6 +65,9 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
     assert_eq!(boundary.opening_event_id, source.event().id);
     let mut delegation = Delegation {
         kind: Default::default(),
+        description: Some(DelegationDescription::Existing {
+            name: "original".into(),
+        }),
         delivery: Default::default(),
         action_id: "action".into(),
         request_fingerprint: content_digest(b"request"),
@@ -101,6 +104,13 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
     assert!(log.pending_messages("target").await.unwrap().is_empty());
     assert!(log.workhub_action("action").await.unwrap().is_none());
     delegation.target_revision = 2;
+    assert!(
+        log.append(&write(delegation.clone())).await.is_err(),
+        "a fresh revision cannot authorize a false frozen name"
+    );
+    delegation.description = Some(DelegationDescription::Existing {
+        name: "changed after candidate selection".into(),
+    });
     let action = write(delegation);
     let receipt = log.append(&action).await.unwrap();
     log.update_session_metadata("target", 2, |config: &mut Value| {
@@ -111,5 +121,34 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
     .unwrap();
     assert_eq!(log.append(&action).await.unwrap(), receipt);
     assert_eq!(log.pending_messages("target").await.unwrap().len(), 1);
+    assert!(
+        log.prepare_transcript(COORDINATION_SESSION_ID, receipt, 32)
+            .await
+            .unwrap()
+    );
+    let rows = log
+        .transcript_headers(
+            COORDINATION_SESSION_ID,
+            &maka_event_log::transcript::TranscriptRead {
+                through: maka_presentation::watermark(receipt).unwrap(),
+                position: 0,
+                direction: maka_event_log::transcript::TranscriptDirection::Newer,
+                limit: 16,
+            },
+        )
+        .await
+        .unwrap();
+    let row = rows.last().unwrap();
+    let bytes = log
+        .transcript_fragment(COORDINATION_SESSION_ID, row.sequence, 0, row.total_bytes)
+        .await
+        .unwrap();
+    let record: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(record["kind"], "delegation_assigned");
+    assert_eq!(
+        record["targetSessionName"],
+        "changed after candidate selection"
+    );
+    assert_eq!(record["delegationId"], action.event().id);
     log.close().await.unwrap();
 }

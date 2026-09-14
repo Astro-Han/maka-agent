@@ -52,8 +52,8 @@ export async function prepareRouting({
   if (createNew) {
     const input = {
       ...base,
-      proposal: { disposition: 'create_new', title: 'Created task' },
-      create: { workspace: { kind: 'host_path', path: workspace } },
+      proposal: { disposition: 'create_new', title: '  Created task  ' },
+      create: { workspace: { kind: 'host_path', path: workspace + '/.' } },
       newWorkDefaults: {
         model: {
           llmConnectionId: model.connectionId,

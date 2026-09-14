@@ -31,7 +31,7 @@ mod control;
 mod create;
 mod resume;
 pub mod stop;
-pub use candidates::activity_at;
+pub use candidates::{Candidate, activity_at};
 
 /// The pending target and the action fact share append's transaction. Exact
 /// event replay returns before this hook, so it never recreates consumed work.
@@ -119,12 +119,47 @@ pub(crate) async fn apply(
         } => (
             configuration_digest.clone(),
             maka_runtime::artifact::content_digest(
-                configuration.ok_or(StoreError::PrefixTooLarge)?.as_bytes(),
+                configuration
+                    .as_ref()
+                    .ok_or(StoreError::PrefixTooLarge)?
+                    .as_bytes(),
             ),
         ),
     };
     if expected != actual {
         return Err(StoreError::RevisionConflict { expected, actual });
+    }
+    if let Some(description) = &delegation.description {
+        #[derive(serde::Deserialize)]
+        struct DescriptionEvidence {
+            name: String,
+            model: Option<maka_runtime::execution::ModelBinding>,
+            permission_mode: Option<maka_runtime::execution::PermissionMode>,
+        }
+        let evidence: DescriptionEvidence =
+            serde_json::from_str(configuration.as_ref().ok_or(StoreError::PrefixTooLarge)?)?;
+        if evidence.name != description.name() {
+            return Err(invalid("WorkHub target description changed"));
+        }
+        if let maka_runtime::workhub::DelegationDescription::Created { spec, .. } = description
+            && let Some(defaults) = &spec.defaults
+        {
+            if defaults
+                .permission_mode
+                .is_some_and(|mode| Some(mode) != evidence.permission_mode)
+            {
+                return Err(invalid("WorkHub creation permission choice changed"));
+            }
+            if let Some(choice) = &defaults.model
+                && evidence.model.as_ref().is_none_or(|model| {
+                    model.connection_id != choice.llm_connection_id
+                        || model.connection_slug != choice.llm_connection_slug
+                        || model.model != choice.model
+                })
+            {
+                return Err(invalid("WorkHub creation model choice changed"));
+            }
+        }
     }
     let owner = delegation
         .delivery

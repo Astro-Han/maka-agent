@@ -74,6 +74,7 @@ impl Delivery {
             if matches!(
                 stored.fact,
                 StreamFact::InvocationOpened
+                    | StreamFact::WorkhubDelegated
                     | StreamFact::MessageSteered
                     | StreamFact::StepEnded { .. }
                     | StreamFact::InvocationEnded { .. }

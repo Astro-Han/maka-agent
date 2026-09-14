@@ -25,6 +25,11 @@ use maka_runtime::event::Invocation;
 use serde::de::DeserializeOwned;
 use sqlx::Connection;
 
+pub struct Candidate<T> {
+    pub session: SessionRecord<T>,
+    pub latest_delegation_action_id: Option<String>,
+}
+
 impl EventLog {
     /// Revalidate an offered target independently of the current display window.
     pub async fn workhub_candidate<T, F>(
@@ -60,7 +65,7 @@ impl EventLog {
     pub async fn workhub_candidates<T, F>(
         &self,
         eligible: F,
-    ) -> Result<Vec<SessionRecord<T>>, StoreError>
+    ) -> Result<Vec<Candidate<T>>, StoreError>
     where
         T: DeserializeOwned + Send + Sync + 'static,
         F: Fn(&SessionRecord<T>) -> bool + Send + 'static,
@@ -100,8 +105,22 @@ impl EventLog {
                         }
                         cursor = ids.last().unwrap().clone();
                     }
+                    let mut result = Vec::with_capacity(candidates.len());
+                    for session in candidates {
+                        let latest_delegation_action_id = sqlx::query_scalar(
+                            "SELECT json_extract(assignment.event_json, '$.fact.delegation.action_id')
+                             FROM runtime_events assignment
+                             WHERE assignment.kind = 'workhub_delegated'
+                               AND json_extract(assignment.event_json, '$.fact.delegation.target.session_id') = ?
+                               AND NOT EXISTS (SELECT 1 FROM workhub_stops stop
+                                   WHERE stop.delegation_action_id = json_extract(assignment.event_json, '$.fact.delegation.action_id')
+                                     AND json_extract(stop.resolution_json, '$.outcome') != 'not_owned')
+                             ORDER BY assignment.sequence DESC LIMIT 1",
+                        ).bind(&session.id).fetch_optional(&mut *tx).await?;
+                        result.push(Candidate { session, latest_delegation_action_id });
+                    }
                     tx.commit().await?;
-                    Ok(candidates)
+                    Ok(result)
                 })
             })
             .await

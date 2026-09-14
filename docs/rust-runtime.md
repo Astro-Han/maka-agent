@@ -165,7 +165,9 @@ Interactive target selection preserves the original offer and answer across retr
 Linked stop and resume follow the delegated message's exact execution lineage,
 with durable action replay. Stop requests and resolutions are Session-owned log facts;
 recovery can publish a resolution after its coordinator Run ends without modifying that Run.
-Correction and complete WorkHub UI projection remain incomplete.
+Canonical assignment records preserve original creation choices and target-owned attachments;
+candidate queries expose the latest active association. Correction and full WorkHub Desktop
+acceptance remain incomplete.
 
 Skill mutations, update previews and their transaction recovery remain incomplete.
 Session branching, removal, import/export and recap, along with additional runtime

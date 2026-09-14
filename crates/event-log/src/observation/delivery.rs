@@ -38,6 +38,7 @@ pub struct StoreStreamEvent {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamFact {
     InvocationOpened,
+    WorkhubDelegated,
     MessageSteered,
     PartStarted {
         step_id: String,
@@ -235,7 +236,7 @@ SELECT json_object(
         WHEN kind = 'tool_settled' THEN
             json_object('kind', kind, 'operation_id', operation_id,
                 'outcome', json_extract(event_json, '$.fact.outcome.kind'))
-        WHEN kind IN ('invocation_opened', 'message_steered') THEN json_object('kind', kind)
+        WHEN kind IN ('invocation_opened', 'message_steered', 'workhub_delegated') THEN json_object('kind', kind)
         WHEN kind = 'invocation_ended' THEN json_object('kind', kind,
             'failed', json(CASE WHEN json_extract(event_json, '$.fact.outcome.kind') = 'failed' THEN 'true' ELSE 'false' END))
         WHEN kind IN ('model_completed', 'model_interrupted') THEN
@@ -273,7 +274,7 @@ AND (kind NOT IN ('model_observed', 'model_completed', 'model_interrupted') OR
              AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'))
 AND (kind IN ('invocation_opened', 'message_steered', 'invocation_ended', 'model_completed', 'model_interrupted',
-             'tool_dispatched', 'tool_rejected', 'tool_settled')
+             'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated')
      OR (kind = 'model_observed'
          AND json_extract(event_json, '$.fact.event.kind') IN
              ('part_started', 'part_delta', 'part_finished')))

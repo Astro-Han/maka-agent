@@ -54,7 +54,8 @@ pub(super) async fn query(host: &Arc<Host>) -> Result<Candidates, OperationError
         .map_err(sessions::stored)?;
     let mut candidates = records
         .iter()
-        .map(|record| {
+        .map(|candidate| {
+            let record = &candidate.session;
             let updated_at = maka_event_log::workhub::activity_at(record);
             let projection = sessions::projection::project(record.clone());
             Candidate {
@@ -64,9 +65,13 @@ pub(super) async fn query(host: &Arc<Host>) -> Result<Candidates, OperationError
                 workspace: projection.workspace,
                 state: projection.status,
                 updated_at,
-                latest_delegation_action_id: None,
+                latest_delegation_action_id: candidate.latest_delegation_action_id.clone(),
             }
         })
+        .collect::<Vec<_>>();
+    let records = records
+        .into_iter()
+        .map(|candidate| candidate.session)
         .collect::<Vec<_>>();
     let surface = candidates
         .iter()

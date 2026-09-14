@@ -26,6 +26,9 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+mod description;
+pub use description::{CreateDefaults, CreateModel, CreateSpec, DelegationDescription};
+
 pub const COORDINATION_SESSION_ID: &str = "maka_workhub_coordination";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +168,9 @@ pub struct Delegation {
     /// because the existing worker legitimately advances this revision.
     pub target_revision: u64,
     pub delegation_text: String,
+    /// Absent only in older facts that did not capture their display evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<DelegationDescription>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,6 +219,9 @@ pub fn stop_abort_source(action_id: &str) -> String {
 impl Delegation {
     pub fn validate(&self, coordinator: &Invocation) -> Result<(), &'static str> {
         use crate::interaction::entity_id;
+        if let Some(description) = &self.description {
+            description.validate(self.kind)?;
+        }
         if coordinator.session_id != COORDINATION_SESSION_ID
             || self.target.session_id == COORDINATION_SESSION_ID
         {

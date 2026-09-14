@@ -82,6 +82,7 @@ async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_ha
             .unwrap();
         let delegation = Delegation {
             kind: Default::default(),
+            description: None,
             delivery: DelegationDelivery::Steering {
                 configuration_digest: basis.configuration_digest.clone(),
             },
@@ -131,7 +132,7 @@ async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_ha
             .await
             .unwrap()
             .iter()
-            .all(|record| record.id != "target")
+            .all(|candidate| candidate.session.id != "target")
         );
         assert!(log.pending_messages("target").await.unwrap().is_empty());
         log.commit_interaction_outcome(
@@ -303,6 +304,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     let target = invocation("target", "delegated");
     let delegation = Delegation {
         kind: Default::default(),
+        description: None,
         delivery: Default::default(),
         action_id: "action".into(),
         request_fingerprint: content_digest(b"bound proposal"),

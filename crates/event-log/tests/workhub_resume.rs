@@ -76,6 +76,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
             .revision;
         let delegation = Delegation {
             kind: Default::default(),
+            description: None,
             delivery: Default::default(),
             action_id: id.into(),
             request_fingerprint: content_digest(id.as_bytes()),

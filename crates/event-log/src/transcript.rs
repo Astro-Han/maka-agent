@@ -131,7 +131,7 @@ impl EventLog {
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'))
                    AND kind IN ('invocation_opened', 'message_steered', 'model_completed',
                                 'model_interrupted', 'invocation_ended',
-                                'tool_dispatched', 'tool_rejected', 'tool_settled')
+                                'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated')
                  UNION ALL
                  SELECT sequence, NULL, NULL FROM session_events
                  WHERE json_extract(event_json, '$.session_id') = ?1

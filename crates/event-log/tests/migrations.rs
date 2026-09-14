@@ -113,7 +113,7 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
             .map(|(version, _)| *version)
             .collect::<Vec<_>>(),
         vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21
         ]
     );
     assert!(checksums.iter().all(|(_, checksum)| checksum.len() == 48));
@@ -201,7 +201,7 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
             .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
-        20
+        21
     );
 }
 
@@ -270,7 +270,7 @@ async fn mismatched_and_unknown_migrations_fail_closed_without_touching_committe
                 .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            20
+            21
         );
     }
 
@@ -332,7 +332,7 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        20
+        21
     );
     assert_eq!(
         connection
@@ -342,6 +342,6 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        20
+        21
     );
 }

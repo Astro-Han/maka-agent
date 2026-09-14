@@ -18,7 +18,7 @@
  */
 
 pub use maka_runtime::execution::{
-    CollaborationMode, OrchestrationMode, PermissionMode, ThinkingLevel,
+    CollaborationMode, OrchestrationMode, PermissionMode, ThinkingLevel, WorkspaceTarget,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,17 +37,6 @@ wire_enum!(RevisionState { Preparing=>"preparing", Committed=>"committed" });
 wire_enum!(SessionLifecycleState { Active=>"active", Archived=>"archived" });
 wire_enum!(UnsupportedReason { NotWireRepresentable=>"not_wire_representable" });
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum WorkspaceTarget {
-    Project { project_id: String },
-    HostPath { path: String },
-}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceProjection {

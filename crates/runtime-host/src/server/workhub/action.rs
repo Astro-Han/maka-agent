@@ -165,6 +165,7 @@ async fn admit(
     };
     let delegation = Delegation {
         kind: target.kind(),
+        description: Some(target.description()),
         delivery,
         action_id: input.action_id,
         request_fingerprint: fingerprint,

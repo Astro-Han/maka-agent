@@ -23,20 +23,37 @@ use maka_protocol::{
     session::*,
     workhub::{ActInput, Proposal, RoutingProposal},
 };
-use maka_runtime::workhub::{DelegationKind, created_session_id};
+use maka_runtime::workhub::{
+    CreateSpec, DelegationDescription, DelegationKind, created_session_id,
+};
 
 pub(super) enum Target {
     Existing {
         id: String,
+        name: String,
         revision: u64,
         configuration_digest: String,
     },
     Created {
         id: String,
-        configuration: SessionConfiguration,
+        configuration: Box<SessionConfiguration>,
+        spec: CreateSpec,
     },
 }
 impl Target {
+    pub(super) fn description(&self) -> DelegationDescription {
+        match self {
+            Self::Existing { name, .. } => DelegationDescription::Existing { name: name.clone() },
+            Self::Created {
+                spec,
+                configuration,
+                ..
+            } => DelegationDescription::Created {
+                name: configuration.name.clone(),
+                spec: spec.clone(),
+            },
+        }
+    }
     pub(super) fn id(&self) -> &str {
         match self {
             Self::Existing { id, .. } | Self::Created { id, .. } => id,
@@ -89,6 +106,7 @@ pub(super) async fn prepare(
                     })?;
                 return Ok(Target::Existing {
                     id: record.id,
+                    name: record.configuration.name,
                     revision: record.revision,
                     configuration_digest: record.configuration_digest,
                 });
@@ -108,6 +126,7 @@ pub(super) async fn prepare(
                 .find_map(|(candidate, record)| {
                     (&candidate.candidate_ref == candidate_ref).then_some(Target::Existing {
                         id: record.id,
+                        name: record.configuration.name,
                         revision: record.revision,
                         configuration_digest: record.configuration_digest,
                     })
@@ -163,7 +182,15 @@ pub(super) async fn prepare(
                     .await
                     .map_err(context_error)?;
             super::super::super::projects::record_usage(host, &configuration.workspace).await?;
-            Ok(Target::Created { id, configuration })
+            Ok(Target::Created {
+                id,
+                configuration: Box::new(configuration),
+                spec: CreateSpec {
+                    title: title.clone(),
+                    workspace: context.workspace.clone(),
+                    defaults: input.new_work_defaults.clone(),
+                },
+            })
         }
         Proposal::Linked(_) => Err(failure(
             Code::OperationUnavailable,

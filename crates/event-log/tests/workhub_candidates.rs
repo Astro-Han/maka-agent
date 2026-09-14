@@ -109,12 +109,12 @@ async fn candidates_rank_all_pages_by_canonical_activity_after_filtering_unsafe_
     assert_eq!(
         candidates
             .iter()
-            .map(|record| record.id.clone())
+            .map(|candidate| candidate.session.id.clone())
             .collect::<Vec<_>>(),
         expected
     );
     assert_eq!(
-        maka_event_log::workhub::activity_at(&candidates[0]),
+        maka_event_log::workhub::activity_at(&candidates[0].session),
         237_000
     );
     log.close().await.unwrap();

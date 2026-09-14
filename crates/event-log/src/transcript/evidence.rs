@@ -49,15 +49,30 @@ pub(super) async fn selected(
     boundary: bool,
 ) -> Result<Vec<StoredEvent>, StoreError> {
     if boundary {
-        let tool: bool = sqlx::query_scalar(
-            "SELECT kind IN ('tool_dispatched', 'tool_rejected', 'tool_settled')
-             FROM runtime_events WHERE sequence = ? AND invocation_id = ?",
+        let kind: String = sqlx::query_scalar(
+            "SELECT kind FROM runtime_events WHERE sequence = ? AND invocation_id = ?",
         )
         .bind(through)
         .bind(invocation)
         .fetch_one(&mut *tx)
         .await?;
-        if tool {
+        if kind == "workhub_delegated" {
+            return read(
+                tx,
+                sqlx::query(
+                    "SELECT sequence, length(CAST(event_json AS BLOB)) FROM runtime_events
+                 WHERE invocation_id = ?1 AND sequence <= ?2
+                   AND (kind = 'invocation_opened' OR sequence = ?2) ORDER BY sequence",
+                )
+                .bind(invocation)
+                .bind(through),
+            )
+            .await;
+        }
+        if matches!(
+            kind.as_str(),
+            "tool_dispatched" | "tool_rejected" | "tool_settled"
+        ) {
             return super::tools::selected(tx, invocation, through).await;
         }
     }

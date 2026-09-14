@@ -109,6 +109,19 @@ pub struct InvocationConfiguration {
     pub thinking_level: Option<ThinkingLevel>,
 }
 
+/// User-selected workspace locator, before Host path resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WorkspaceTarget {
+    Project { project_id: String },
+    HostPath { path: String },
+}
+
 /// Intrinsic workspace identity is distinct from its current filesystem location.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]

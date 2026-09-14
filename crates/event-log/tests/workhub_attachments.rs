@@ -101,6 +101,7 @@ async fn delegation_copies_attachments_atomically_and_replays_without_the_delete
         .unwrap();
     let delegation = Delegation {
         kind: Default::default(),
+        description: None,
         delivery: Default::default(),
         action_id: "copy-action".into(),
         request_fingerprint: content_digest(b"copy request"),

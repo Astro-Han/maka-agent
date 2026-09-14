@@ -85,7 +85,7 @@ pub struct Message {
 pub enum Content {
     WorkhubCoordination {
         #[serde(flatten)]
-        record: crate::workhub::StopMessage,
+        record: crate::workhub::CoordinationRecord,
     },
     User {
         text: String,
