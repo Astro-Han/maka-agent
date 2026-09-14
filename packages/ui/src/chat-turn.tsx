@@ -1377,8 +1377,7 @@ function ProcessingBlock(props: {
           <TurnRunningStatus
             startedAt={props.activity.startedAt}
             activityLabel={props.activity.label}
-            showSpinner={!props.entries.some((entry) =>
-              entry.kind === 'tools' && toolTrowHasVisibleSpinner(entry.items))}
+            showSpinner={false}
           />
         ) : <span>{label}</span>}
         {!props.running && <ChevronRight size={ICON_SIZE.meta} aria-hidden="true" />}
