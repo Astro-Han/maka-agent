@@ -101,6 +101,29 @@ impl Capabilities {
         .registrations())
     }
 
+    pub(crate) fn bind_required_tools(
+        &self,
+        session_id: &str,
+        connection_id: Uuid,
+        required: &[&str],
+        cwd: String,
+        interactions: Arc<dyn maka_tools::ClientInteractions>,
+    ) -> Result<Vec<ToolRegistration>, BindingError> {
+        let snapshot = self
+            .registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .bind_required_tools(session_id, connection_id, required)?;
+        Ok(ClientTools::new(
+            snapshot,
+            self.registry.clone(),
+            self.broker.clone(),
+            cwd,
+            interactions,
+        )
+        .registrations())
+    }
+
     pub(super) fn begin_drain(&self) {
         self.registry
             .lock()

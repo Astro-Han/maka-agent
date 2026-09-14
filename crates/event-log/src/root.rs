@@ -268,9 +268,9 @@ fn check_layout(path: &Path) -> io::Result<()> {
         if name == "model-facts.json" {
             continue;
         }
-        // User-editable Skills are data, not an alternate database layout.
-        // Do not accept a symlink/reparse point in place of their directory.
-        if name == "skills" && entry.file_type()?.is_dir() {
+        // These dedicated data directories are not alternate database layouts.
+        // Do not accept a symlink/reparse point in place of either directory.
+        if (name == "skills" || name == "workhub-coordination") && entry.file_type()?.is_dir() {
             continue;
         }
         if !matches!(

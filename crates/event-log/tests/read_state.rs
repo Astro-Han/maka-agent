@@ -261,7 +261,7 @@ async fn migration_backfills_only_existing_sessions_and_never_replays_over_ackno
     log.close().await.unwrap();
     // Legacy ledger adoption must also preserve an already durable acknowledgement.
     source
-        .execute_batch("DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations;")
+        .execute_batch("DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations;")
         .unwrap();
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(

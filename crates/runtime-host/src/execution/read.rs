@@ -40,14 +40,27 @@ pub(super) fn schema() -> Value {
 }
 
 pub(super) struct SessionRead {
-    filesystem: Arc<ReadExecutor>,
+    access: Access,
     log: Arc<EventLog>,
+}
+
+#[derive(Clone)]
+enum Access {
+    Session(Arc<ReadExecutor>),
+    Attachments,
 }
 
 impl SessionRead {
     pub(super) fn new(filesystem: ReadExecutor, log: Arc<EventLog>) -> Self {
         Self {
-            filesystem: Arc::new(filesystem),
+            access: Access::Session(Arc::new(filesystem)),
+            log,
+        }
+    }
+
+    pub(super) fn attachments(log: Arc<EventLog>) -> Self {
+        Self {
+            access: Access::Attachments,
             log,
         }
     }
@@ -65,7 +78,7 @@ impl ToolPreparer for SessionRead {
         context: ToolCallContext,
         _cancellation: CancellationToken,
     ) -> PreparationFuture {
-        let filesystem = self.filesystem.clone();
+        let access = self.access.clone();
         let log = self.log.clone();
         Box::pin(async move {
             // Even metadata reads belong to the journal-owned effect after T1.
@@ -77,16 +90,18 @@ impl ToolPreparer for SessionRead {
                     }
                     let input: ReadInput = serde_json::from_value(input).map_err(failed)?;
                     let request = input.resolve().map_err(failed)?;
-                    match target(request.path())? {
-                        Target::File => match filesystem.read(request, cancellation).await? {
-                            ReadOutput::Text(page) => {
-                                Ok(serde_json::to_value(page).expect("ReadPage is JSON").into())
+                    match (target(request.path())?, access) {
+                        (Target::File, Access::Session(filesystem)) => {
+                            match filesystem.read(request, cancellation).await? {
+                                ReadOutput::Text(page) => {
+                                    Ok(serde_json::to_value(page).expect("ReadPage is JSON").into())
+                                }
+                                ReadOutput::Image { bytes, mime_type } => {
+                                    ToolSuccess::image(bytes, mime_type).map_err(failed)
+                                }
                             }
-                            ReadOutput::Image { bytes, mime_type } => {
-                                ToolSuccess::image(bytes, mime_type).map_err(failed)
-                            }
-                        },
-                        Target::Attachment(id) => {
+                        }
+                        (Target::Attachment(id), _) => {
                             read_attachment(
                                 &log,
                                 &context.invocation.session_id,
@@ -96,7 +111,7 @@ impl ToolPreparer for SessionRead {
                             )
                             .await
                         }
-                        Target::Shell(id) => {
+                        (Target::Shell(id), Access::Session(_)) => {
                             let snapshot = super::shell::read(
                                 &log,
                                 &context.invocation.session_id,
@@ -112,7 +127,7 @@ impl ToolPreparer for SessionRead {
                                 projection,
                             ))
                         }
-                        Target::ToolResult(address) => {
+                        (Target::ToolResult(address), Access::Session(_)) => {
                             super::archive::read(
                                 &log,
                                 &context.invocation.session_id,
@@ -122,6 +137,9 @@ impl ToolPreparer for SessionRead {
                             )
                             .await
                         }
+                        (_, Access::Attachments) => Err(failed(
+                            "WorkHub Read accepts only this conversation's attachment references",
+                        )),
                     }
                 })
             });

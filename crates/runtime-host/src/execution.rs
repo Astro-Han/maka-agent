@@ -35,6 +35,7 @@ pub(crate) mod skills;
 pub(crate) mod snapshot;
 mod successor;
 mod tools;
+mod workhub;
 
 use crate::server::capabilities::Capabilities;
 use maka_agent::{Engine, RunError};
@@ -229,6 +230,16 @@ fn execution_error(error: RunError) -> OperationError {
     };
     failure(code, &error.to_string())
 }
+fn ordinary_session(session: &str) -> Result<()> {
+    if session == maka_runtime::workhub::COORDINATION_SESSION_ID {
+        return Err(failure(
+            Code::OperationConflict,
+            "Use the WorkHub execution entry point",
+        ));
+    }
+    Ok(())
+}
+
 fn internal(error: impl std::fmt::Display) -> OperationError {
     failure(Code::InternalFailure, &error.to_string())
 }

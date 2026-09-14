@@ -79,7 +79,7 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
             .iter()
             .map(|(version, _)| *version)
             .collect::<Vec<_>>(),
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
     );
     assert!(checksums.iter().all(|(_, checksum)| checksum.len() == 48));
     let payload: Vec<u8> = connection
@@ -114,7 +114,7 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
     // table also exercises idempotent backfill after interrupted adoption.
     connection
         .execute_batch(
-            "DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations; PRAGMA user_version = 1;",
+            "DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations; PRAGMA user_version = 1;",
         )
         .unwrap();
     drop(connection);
@@ -145,7 +145,7 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
             .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
-        16
+        17
     );
 }
 
@@ -214,7 +214,7 @@ async fn mismatched_and_unknown_migrations_fail_closed_without_touching_committe
                 .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            16
+            17
         );
     }
 
@@ -276,7 +276,7 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        16
+        17
     );
     assert_eq!(
         connection
@@ -286,6 +286,6 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        16
+        17
     );
 }

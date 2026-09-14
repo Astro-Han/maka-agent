@@ -113,6 +113,9 @@ pub enum Fact {
         )]
         skill_invocation: crate::skills::SkillInvocationResult,
     },
+    WorkhubDelegated {
+        delegation: Box<crate::workhub::Delegation>,
+    },
     ContextCheckpointRecorded {
         checkpoint: crate::context::ContextCheckpoint,
     },
@@ -160,6 +163,7 @@ impl Fact {
         match self {
             Self::InvocationOpened { .. } => "invocation_opened",
             Self::MessageSteered { .. } => "message_steered",
+            Self::WorkhubDelegated { .. } => "workhub_delegated",
             Self::ModelRequested { .. } => "model_requested",
             Self::ContextCheckpointRecorded { .. } => "context_checkpoint_recorded",
             Self::ToolResultArchived { .. } => "tool_result_archived",
@@ -276,6 +280,7 @@ impl LogPrefix {
                 Fact::InvocationEnded { outcome } => terminal = Some(outcome.status()),
                 Fact::InvocationOpened { .. }
                 | Fact::MessageSteered { .. }
+                | Fact::WorkhubDelegated { .. }
                 | Fact::ContextCheckpointRecorded { .. }
                 | Fact::ToolResultArchived { .. }
                 | Fact::ModelObserved { .. }

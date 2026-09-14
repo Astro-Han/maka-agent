@@ -32,6 +32,13 @@ pub(super) async fn update(host: &Host, value: &Value) -> Result<SessionUpdateRe
             "WorkHub configuration requires WorkHub authority",
         ));
     }
+    apply(host, input).await
+}
+
+pub(in crate::server) async fn apply(
+    host: &Host,
+    input: SessionConfigurationUpdateInput,
+) -> Result<SessionUpdateResult> {
     // The same admission lock spans turn.start's configuration capture through
     // durable opening. CAS alone cannot exclude a run prepared from old grants.
     let _admission = host.executions.lock_admission().await;
@@ -44,6 +51,11 @@ pub(super) async fn update(host: &Host, value: &Value) -> Result<SessionUpdateRe
         .await
         .map_err(stored)?
         .ok_or_else(|| failure(Code::NotFound, "Session does not exist"))?;
+    if input.session_id == maka_runtime::workhub::COORDINATION_SESSION_ID {
+        super::super::workhub::record(host)
+            .await?
+            .ok_or_else(|| failure(Code::NotFound, "WorkHub Session does not exist"))?;
+    }
     if current.revision != input.expected_revision {
         return Ok(SessionUpdateResult::RevisionConflict {
             expected_revision: input.expected_revision,

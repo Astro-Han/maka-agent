@@ -68,6 +68,7 @@ mod runtime_policy;
 mod system_prompt;
 mod transcript_limits;
 mod transcript_pager;
+mod workhub;
 mod workspace_images;
 
 mod support {

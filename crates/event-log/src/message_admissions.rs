@@ -26,7 +26,7 @@ use maka_runtime::{
 use serde::{Deserialize, Serialize};
 use sqlx::{Connection, SqliteConnection};
 
-mod insert;
+pub(crate) mod insert;
 mod receipts;
 pub use receipts::MessageSubmitReceipt;
 

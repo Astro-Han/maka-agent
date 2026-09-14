@@ -47,6 +47,7 @@ mod skills;
 mod subscriptions;
 mod turns;
 pub mod websocket;
+mod workhub;
 
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};

@@ -22,12 +22,12 @@ use crate::StoreError;
 use maka_runtime::{event::Invocation, message::MessageDisposition};
 use sqlx::SqliteConnection;
 
-pub(super) enum Owner {
+pub(crate) enum Owner {
     Unsealed,
     /// Host still owns this latest Run's cleanup/handoff under its admission gate.
     Current,
 }
-pub(super) async fn insert(
+pub(crate) async fn insert(
     tx: &mut SqliteConnection,
     admission: &PendingMessageAdmission,
     owner: Owner,

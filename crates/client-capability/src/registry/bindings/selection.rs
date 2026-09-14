@@ -26,6 +26,54 @@ use std::collections::{BTreeSet, HashSet};
 use uuid::Uuid;
 
 impl Registry {
+    /// Required tools must share one Session-affinity owner. Selection and
+    /// snapshot validation finish before any binding becomes visible.
+    pub fn bind_required_tools(
+        &mut self,
+        session_id: &str,
+        initiating: Uuid,
+        required: &[&str],
+    ) -> Result<super::Snapshot, BindingError> {
+        let next = self.select_bindings(
+            self.sessions.get(session_id),
+            Some(initiating),
+            BindingMode::Strict,
+        )?;
+        let mut missing: HashSet<_> = required.iter().copied().collect();
+        let mut selected = None;
+        for (contract, binding) in &next.session {
+            let Binding::Bound(provider) = binding else {
+                continue;
+            };
+            let Some(registration) = self
+                .providers
+                .get(&provider.id)
+                .and_then(|provider| provider.current.as_ref())
+                .filter(|r| r.available())
+            else {
+                continue;
+            };
+            let Some(offer) = registration.offer(contract) else {
+                continue;
+            };
+            for tool in &offer.tools {
+                if missing.remove(crate::proxy_tool_name(&tool.server_id, &tool.name).as_str()) {
+                    if selected.is_some_and(|selected| selected != provider) {
+                        return Err(BindingError::RequiredProvider);
+                    }
+                    selected = Some(provider);
+                }
+            }
+        }
+        if selected.is_none() || !missing.is_empty() {
+            return Err(BindingError::RequiredProvider);
+        }
+        let snapshot = self.snapshot_bindings(Some(&next))?;
+        self.sessions.insert(session_id.into(), next);
+        self.prune_sessions();
+        Ok(snapshot)
+    }
+
     /// Select all bindings atomically. A failed strict selection changes no
     /// Session state; callers serialize this with invocation admission.
     pub fn bind_session(

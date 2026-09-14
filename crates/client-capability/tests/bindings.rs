@@ -188,6 +188,66 @@ fn session_loss_restore_retirement_and_run_pins_are_distinct() {
 }
 
 #[test]
+fn required_tools_commit_only_one_session_owner_and_failed_selection_leaves_no_binding() {
+    let offers = |id: &str, affinity: &str, names: &[&str]| {
+        decode_replace_input(&json!({"registrationId": id, "offers": names.iter().map(|name| json!({
+            "offerId": name, "version": "1", "affinity": affinity, "hostPathAccess": "none",
+            "label": name, "tools": [{"serverId": "desktop", "name": name, "inputSchema": {"type": "object"}}]
+        })).collect::<Vec<_>>()})).unwrap()
+    };
+    let required = ["mcp__desktop__control", "mcp__desktop__tasks"];
+    let mut registry = Registry::default();
+    let (first, _, _first_output) = attach(&mut registry, identity("first"));
+    registry
+        .replace(first, offers("partial", "session", &["control"]))
+        .unwrap();
+    assert!(matches!(
+        registry.bind_required_tools("fresh", first, &required),
+        Err(BindingError::RequiredProvider)
+    ));
+    assert!(registry.snapshot("fresh").unwrap().offers().is_empty());
+    registry
+        .bind_session("mixed", Some(first), BindingMode::Strict)
+        .unwrap();
+    let (second, provider, _second_output) = attach(&mut registry, identity("second"));
+    registry
+        .replace(second, offers("other", "session", &["tasks"]))
+        .unwrap();
+    assert!(matches!(
+        registry.bind_required_tools("mixed", second, &required),
+        Err(BindingError::RequiredProvider)
+    ));
+    assert_eq!(registry.snapshot("mixed").unwrap().offers().len(), 1);
+    registry.detach(first);
+    for affinity in ["turn", "call"] {
+        registry
+            .replace(second, offers(affinity, affinity, &["control", "tasks"]))
+            .unwrap();
+        assert!(matches!(
+            registry.bind_required_tools("fresh", second, &required),
+            Err(BindingError::RequiredProvider)
+        ));
+    }
+    registry
+        .replace(second, offers("complete", "session", &["control", "tasks"]))
+        .unwrap();
+    let snapshot = registry
+        .bind_required_tools("fresh", second, &required)
+        .unwrap();
+    assert_eq!(snapshot.offers().len(), 2);
+    for offer in snapshot.offers() {
+        assert_eq!(offer.resolve(&registry).unwrap().provider_id(), provider);
+    }
+    assert!(
+        matches!(
+            registry.bind_required_tools("mixed", second, &required),
+            Err(BindingError::Lost)
+        ),
+        "A real prior binding remains authoritative; only failed selections leave nothing behind"
+    );
+}
+
+#[test]
 fn dynamic_calls_do_not_pin_and_remote_selection_never_inherits_unrelated_authority() {
     let mut registry = Registry::default();
     let (one, provider, mut out) = attach(&mut registry, identity("one"));

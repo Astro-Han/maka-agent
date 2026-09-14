@@ -47,12 +47,9 @@ impl EventLog {
         self.validate_root()?;
         maka_runtime::interaction::entity_id(session).map_err(invalid)?;
         let session = session.to_owned();
-        self.connection.run(move |connection| Box::pin(async move {
-            Ok(sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM shell_runs WHERE session_id = ?
-                 AND (active = 1 OR json_extract(record_json, '$.state.outcome.kind') = 'orphaned'))"
-            ).bind(session).fetch_one(connection).await?)
-        })).await
+        self.connection
+            .run(move |connection| Box::pin(async move { unsettled(connection, &session).await }))
+            .await
     }
 
     /// Register before reading snapshots. Lag requires observer reconstruction;
@@ -262,6 +259,19 @@ fn decode(raw: &str, session: &str, id: &str) -> Result<ShellRun, StoreError> {
         return Err(invalid("shell record identity mismatch"));
     }
     Ok(record)
+}
+
+pub(crate) async fn unsettled(
+    connection: &mut sqlx::SqliteConnection,
+    session: &str,
+) -> Result<bool, StoreError> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM shell_runs WHERE session_id = ?
+         AND (active = 1 OR json_extract(record_json, '$.state.outcome.kind') = 'orphaned'))",
+    )
+    .bind(session)
+    .fetch_one(connection)
+    .await?)
 }
 
 fn ids(session: &str, id: &str) -> Result<(), StoreError> {

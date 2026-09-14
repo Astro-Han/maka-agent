@@ -28,7 +28,7 @@ use maka_runtime::configuration::{
     ConnectionCredentialKind, ConnectionCredentialTarget, CredentialLocator, ProviderAuthKind,
 };
 
-pub(super) async fn resolve(
+pub(in crate::server) async fn resolve(
     configuration: &ConfigurationStore,
     target: &SessionModelTarget,
     thinking: Option<ThinkingLevel>,

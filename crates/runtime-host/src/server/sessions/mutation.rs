@@ -52,7 +52,9 @@ pub(super) async fn metadata(log: &EventLog, value: &Value) -> Result<SessionUpd
     Ok(output)
 }
 
-pub(super) fn result(mutation: SessionMutation<SessionConfiguration>) -> SessionUpdateResult {
+pub(in crate::server) fn result(
+    mutation: SessionMutation<SessionConfiguration>,
+) -> SessionUpdateResult {
     match mutation {
         SessionMutation::Committed(record) => SessionUpdateResult::Committed {
             session: item(record),

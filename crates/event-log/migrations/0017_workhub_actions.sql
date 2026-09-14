@@ -17,29 +17,12 @@
  * under the License.
  */
 
-//! Runtime facts and execution contracts; no V8 or SQLite dependency.
-pub mod access;
-pub mod archive;
-pub mod artifact;
-pub mod attachment;
-pub mod capability;
-pub mod configuration;
-pub mod context;
-pub mod continuation;
-pub mod event;
-mod event_write;
-pub mod execution;
-pub mod input;
-pub mod interaction;
-pub mod message;
-pub mod model;
-pub mod oauth;
-pub mod read;
-pub mod shell_result;
-pub mod shell_run;
-pub mod skills;
-pub mod terminal;
-pub mod tool_call;
-pub mod tool_output;
-pub mod tools;
-pub mod workhub;
+CREATE UNIQUE INDEX workhub_action_identity ON runtime_events (
+    json_extract(event_json, '$.fact.delegation.action_id')
+) WHERE kind = 'workhub_delegated';
+
+CREATE UNIQUE INDEX pending_root_invocation ON message_admissions (
+    json_extract(record_json, '$.invocation.invocation_id')
+) WHERE json_extract(record_json, '$.source.disposition') = 'turn_started';
+
+PRAGMA user_version = 17;

@@ -131,7 +131,9 @@ Grep 差分测试需要 PATH 中有 `rg`；runtime 本身不依赖该可执行�
 已实现项目／会话管理、已结束 Turn 导航、配置、附件、文件工具、shell／PTY、Client Capability 工具、
 模型流式交互与上下文压缩。Codex 订阅已接入执行；Copilot／xAI 推理适配和实测后置。
 
+WorkHub 已支持专属会话解析、查询、模型配置及使用受限 Desktop 工具和附件读取的对话；任务委派尚未接通。
+
 Skills 变更与更新预览、高级恢复与协调、WorkHub 协调、
 编排、部分 capability 服务、受管升级及其它协议域
 仍未完成。完整 Desktop 验收和 Linux、macOS、Windows 发布打包仍待完成。
-插件与 OS 沙箱暂缓；Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。
+插件实现排在 Agent Graph 之后；OS 沙箱暂缓。Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。

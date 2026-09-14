@@ -50,6 +50,7 @@ pub mod skills;
 pub mod subscription;
 pub mod transcript;
 pub mod turn;
+pub mod workhub;
 
 use codec::{exact, record, string};
 use serde::Serialize;

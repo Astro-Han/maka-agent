@@ -45,6 +45,8 @@ pub enum BindingError {
     Conflict,
     #[error("Client Capability registry is draining")]
     Draining,
+    #[error("Required Client Capability tools need one available Session-bound provider")]
+    RequiredProvider,
 }
 
 /// Retains authentication authority across a lost connection, not publication

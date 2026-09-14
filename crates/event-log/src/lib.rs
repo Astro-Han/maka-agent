@@ -49,6 +49,7 @@ mod tool_calls;
 mod tool_payloads;
 pub mod transcript;
 pub mod turns;
+pub mod workhub;
 
 use std::fs::OpenOptions;
 use std::path::Path;

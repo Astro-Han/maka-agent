@@ -41,6 +41,9 @@ impl Host {
         authority: &super::authority::Authority,
         client_instance_id: &str,
     ) -> Result<Outcome, HostError> {
+        if maka_protocol::workhub::supports(operation) {
+            return super::workhub::execute(self, operation, &input, connection_id).await;
+        }
         if operation == Operation::SkillCatalogQuery {
             return super::skills::sources::execute(self, &input).await;
         }

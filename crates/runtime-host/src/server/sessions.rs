@@ -19,7 +19,7 @@
 
 pub(super) mod configuration;
 mod create;
-mod model;
+pub(super) mod model;
 pub(super) mod mutation;
 pub(super) mod projection;
 pub(super) mod workspace;
@@ -129,6 +129,12 @@ pub(super) async fn execute(
         .map(Output::Query),
         Operation::SessionLifecycleSet => {
             let input = decode_session_lifecycle_set_input(value).map_err(invalid)?;
+            if input.session_id == maka_runtime::workhub::COORDINATION_SESSION_ID {
+                return Err(failure(
+                    OperationErrorCode::OperationConflict,
+                    "WorkHub lifecycle requires WorkHub authority",
+                ));
+            }
             let _admission = host.executions.lock_admission().await;
             if input.state == SessionLifecycleState::Archived
                 && host

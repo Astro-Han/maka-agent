@@ -222,6 +222,10 @@ fn path_free(request: &Request) -> bool {
         | Operation::CredentialVaultSet
         | Operation::CredentialVaultDelete
         | Operation::SessionCatalogQuery
+        | Operation::WorkhubCoordinationResolve
+        | Operation::WorkhubCoordinationAnswer
+        | Operation::WorkhubCoordinationQuery
+        | Operation::WorkhubCoordinationConfigureModel
         | Operation::SessionExecutionBoundaryQuery
         | Operation::SessionTurnsQuery
         | Operation::SessionTurnLandmarksQuery

@@ -44,6 +44,8 @@ impl Executions {
         input: TurnResumeQueryInput,
         connection: Uuid,
     ) -> Result<TurnResumePlan> {
+        super::ordinary_session(&input.session_id)
+            .map_err(|error| failure(Code::OperationUnavailable, &error.message))?;
         let _admission = self.lock_admission().await;
         let session = self.resume_session(&input.session_id).await?;
         if self
@@ -96,6 +98,7 @@ impl Executions {
         input: TurnResumeStartInput,
         connection: Uuid,
     ) -> Result<TurnResumeStartResult> {
+        super::ordinary_session(&input.session_id)?;
         let _admission = self.lock_admission().await;
         if self.shutdown.is_cancelled() {
             return Err(failure(Code::HostDraining, "Host is draining"));

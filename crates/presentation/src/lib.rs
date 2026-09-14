@@ -278,7 +278,9 @@ impl InvocationView {
                         messages.extend(self.tools.boundary(event, ts, resolved)?);
                     }
                     Fact::InvocationOpened { .. } => unreachable!(),
-                    Fact::ContextCheckpointRecorded { .. } | Fact::ToolResultArchived { .. } => {}
+                    Fact::ContextCheckpointRecorded { .. }
+                    | Fact::ToolResultArchived { .. }
+                    | Fact::WorkhubDelegated { .. } => {}
                 }
             }
         }

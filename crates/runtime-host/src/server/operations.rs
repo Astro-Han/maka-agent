@@ -29,6 +29,9 @@ pub(super) struct Operations;
 
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if maka_protocol::workhub::supports(operation) {
+            return maka_protocol::workhub::decode_input(operation, value);
+        }
         if operation == Operation::SkillCatalogQuery {
             maka_protocol::skills::decode_catalog_input(value)?;
             return Ok(value.clone());
@@ -110,6 +113,9 @@ impl OperationRegistry for Operations {
         }
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if maka_protocol::workhub::supports(operation) {
+            return maka_protocol::workhub::decode_output(operation, value);
+        }
         if operation == Operation::SkillCatalogQuery {
             maka_protocol::skills::decode_catalog_output(value)?;
             return Ok(value.clone());
@@ -183,6 +189,18 @@ impl OperationRegistry for Operations {
         }
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
+        if maka_protocol::workhub::supports(operation) {
+            if operation == Operation::WorkhubCoordinationAnswer {
+                return Some(super::workhub::TURN_ERRORS);
+            }
+            return Some(
+                if operation == Operation::WorkhubCoordinationConfigureModel {
+                    sessions::configuration::ERRORS
+                } else {
+                    super::workhub::ERRORS
+                },
+            );
+        }
         if operation == Operation::SkillCatalogQuery {
             return Some(super::skills::sources::ERRORS);
         }

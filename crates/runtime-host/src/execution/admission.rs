@@ -29,6 +29,7 @@ impl Executions {
         connection_id: Uuid,
         root_id: &str,
     ) -> Result<TurnStartResult> {
+        super::ordinary_session(&input.session_id)?;
         let _admission = self.lock_admission().await;
         if self.shutdown.is_cancelled() {
             return Err(failure(Code::HostDraining, "Host is draining"));
