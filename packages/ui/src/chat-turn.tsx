@@ -458,12 +458,9 @@ export const TurnView = memo(function TurnView(props: {
   liveStreaming?: {
     onStreamingSettled?: (messageId?: string) => void;
     /**
-     * Whether to show the running status line at the tail of the live turn.
-     *
-     * It stays up for the WHOLE turn, not just the wait before the first token.
-     * The cue it replaces was gated on the turn having no live content yet, so
-     * it vanished the moment a tool started — exactly the stretch where a turn
-     * looks abandoned and the user most needs to see it is still working.
+     * Whether to show activity for the live turn. The current process summary
+     * owns it when present; the footer is the fallback before a process exists.
+     * False while waiting for user input, whose prompt owns the next action.
      */
     runningStatus?: boolean;
     providerRetry?: LiveProviderRetry;
@@ -673,6 +670,9 @@ export const TurnView = memo(function TurnView(props: {
           );
         }
         const ownsTurnChrome = segmentIndex === conversationSegments.length - 1;
+        const activityProcessIndex = ownsTurnChrome
+          ? segment.items.findLastIndex((item) => item.kind === 'processing')
+          : -1;
         // Disjoint namespaces: a steering id is any string, so a bare
         // sentinel could collide with a real one.
         const assistantKey =
@@ -703,6 +703,11 @@ export const TurnView = memo(function TurnView(props: {
                     entries={item.children}
                     running={!!props.liveStreaming || turn.status === 'running'}
                     durationMs={ownsTurnChrome ? turn.durationMs : undefined}
+                    activity={index === activityProcessIndex
+                      && props.liveStreaming?.runningStatus
+                      && !props.liveStreaming.providerRetry
+                      ? { startedAt: turn.startedAt, label: runningToolLabel }
+                      : undefined}
                     onStreamingSettled={props.liveStreaming?.onStreamingSettled}
                     onOpenLinkedSession={props.onOpenLinkedSession}
                     onSwitchToBypassAndRetry={
@@ -793,7 +798,7 @@ export const TurnView = memo(function TurnView(props: {
                 live={!!props.liveStreaming}
                 activity={props.liveStreaming?.providerRetry ? (
                   <ModelProviderRetryIndicator retry={props.liveStreaming.providerRetry} />
-                ) : props.liveStreaming?.runningStatus ? (
+                ) : props.liveStreaming?.runningStatus && activityProcessIndex === -1 ? (
                   <TurnRunningStatus
                     startedAt={turn.startedAt}
                     showSpinner={!toolSurfaceOwnsSpinner}
@@ -1007,16 +1012,13 @@ const STATUS_FOOTER_ICON: Record<TurnFooterActionMeta['id'], ReactNode> = {
 };
 
 const ELAPSED_TICK_MS = 1_000;
+const WORKING_PHRASE_INTERVAL_MS = 20_000;
 
 /**
- * The live turn's running status line: a truthful activity label and the
- * elapsed clock beside it.
- *
- * A quiet provider request does not prove that the model is actively making
- * semantic progress. The default therefore says only that Maka is waiting for
- * model output. A concrete tool label can replace it when Runtime has direct
- * evidence of work in flight. The clock is local presentation state so ticking
- * it does not repaint the whole transcript.
+ * One live activity cue, inside the current process summary or, before any
+ * process exists, in the footer. Working phrases express liveness, not stages
+ * or completed progress. Concrete activity labels take precedence. Rotation
+ * shares the elapsed clock and never changes the accessible status name.
  *
  * `startedAt` is the turn's own first-message timestamp, so the clock measures
  * the wait the user actually experienced — from pressing send, not from
@@ -1030,12 +1032,18 @@ export function TurnRunningStatus(props: {
   activityLabel?: string;
 }) {
   const copy = getConversationCopy(useUiLocale()).messages;
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const elapsedMs = useTurnElapsedTime(props.startedAt, rootRef);
+  const phrase = copy.workingPhrases[
+    Math.floor((elapsedMs ?? 0) / WORKING_PHRASE_INTERVAL_MS) % copy.workingPhrases.length
+  ];
 
   return (
-    <div
+    <span
       className="maka-turn-processing"
       role="status"
-      aria-label={props.activityLabel ?? copy.awaitingModelOutput}
+      aria-label={props.activityLabel ?? copy.processing}
+      ref={rootRef}
     >
       {props.showSpinner !== false && (
         <Spinner size="md" shade="subtle" aria-hidden="true" />
@@ -1043,17 +1051,21 @@ export function TurnRunningStatus(props: {
       {/* Name the activity once; the clock must not announce each second. */}
       <span className="maka-turn-indicator-text" aria-hidden="true">
         <span className="maka-turn-status-label">
-          {props.activityLabel ?? copy.awaitingModelOutput}
+          {props.activityLabel ?? phrase}
         </span>
-        <TurnElapsedTime startedAt={props.startedAt} separator />
+        {elapsedMs !== undefined && <>
+          <span className="maka-turn-status-separator">·</span>
+          <span className="maka-turn-elapsed">{formatTurnDuration(elapsedMs)}</span>
+        </>}
       </span>
-    </div>
+    </span>
   );
 }
 
-function TurnElapsedTime(props: { startedAt?: number; separator?: boolean }) {
-  const { startedAt } = props;
-  const rootRef = useRef<HTMLSpanElement>(null);
+function useTurnElapsedTime(
+  startedAt: number | undefined,
+  rootRef: { readonly current: HTMLSpanElement | null },
+) {
   // Undefined until an effect measures it, which is also what keeps a static
   // render deterministic: the clock is a client-only value, so server markup
   // and the first paint carry the phrase alone.
@@ -1064,20 +1076,25 @@ function TurnElapsedTime(props: { startedAt?: number; separator?: boolean }) {
     // pinned: any value it could show is a real wall-clock difference, so a
     // capture taken a second later would differ from this one. The gate needs
     // this node because the freeze can be declared on any ancestor.
-    if (startedAt === undefined || !isTimeDrivenMotionEnabled(rootRef.current)) return;
+    if (startedAt === undefined || !isTimeDrivenMotionEnabled(rootRef.current)
+      || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
     setElapsedMs(Math.max(0, Date.now() - startedAt));
     const tick = window.setInterval(() => {
       setElapsedMs(Math.max(0, Date.now() - startedAt));
     }, ELAPSED_TICK_MS);
     return () => window.clearInterval(tick);
-  }, [startedAt]);
+  }, [startedAt, rootRef]);
+
+  return elapsedMs;
+}
+
+function TurnElapsedTime(props: { startedAt?: number }) {
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const elapsedMs = useTurnElapsedTime(props.startedAt, rootRef);
 
   return (
     <span className="maka-turn-elapsed" aria-hidden="true" ref={rootRef}>
-      {elapsedMs !== undefined && <>
-        {props.separator && <span className="maka-turn-status-separator">·</span>}
-        {formatTurnDuration(elapsedMs)}
-      </>}
+      {elapsedMs !== undefined && formatTurnDuration(elapsedMs)}
     </span>
   );
 }
@@ -1316,6 +1333,7 @@ function ProcessingBlock(props: {
   entries: FoldedTimelineChild[];
   running: boolean;
   durationMs?: number;
+  activity?: { startedAt?: number; label?: string };
   onStreamingSettled?: (messageId?: string) => void;
   onOpenLinkedSession?(sessionId: string): void;
   onSwitchToBypassAndRetry?(): void | Promise<void>;
@@ -1338,8 +1356,7 @@ function ProcessingBlock(props: {
     ? Math.floor(Math.max(0, props.durationMs) / 1000)
     : undefined;
   const label = needsAttention ? copy.processNeedsAttention
-    : props.running ? copy.processing
-    : seconds === undefined ? copy.processDetails
+    : props.running || seconds === undefined ? copy.processDetails
     : copy.processDuration(Math.floor(seconds / 60), seconds % 60);
   return (
     <details
@@ -1355,7 +1372,14 @@ function ProcessingBlock(props: {
           setManualOpen(!open);
         }}
       >
-        <span>{label}</span>
+        {props.activity && !needsAttention ? (
+          <TurnRunningStatus
+            startedAt={props.activity.startedAt}
+            activityLabel={props.activity.label}
+            showSpinner={!open || !props.entries.some((entry) =>
+              entry.kind === 'tools' && toolTrowHasVisibleSpinner(entry.items))}
+          />
+        ) : <span>{label}</span>}
         <ChevronRight size={ICON_SIZE.meta} aria-hidden="true" />
       </summary>
       <div className="maka-processing-content">

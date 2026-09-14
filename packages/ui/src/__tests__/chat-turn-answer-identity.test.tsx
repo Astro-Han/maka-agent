@@ -24,7 +24,7 @@ import { afterEach, test } from 'node:test';
 import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
-import { LocalizedChatMessage, TurnView } from '../chat-turn.js';
+import { LocalizedChatMessage, TurnRunningStatus, TurnView } from '../chat-turn.js';
 import { LocaleProvider } from '../locale-context.js';
 import type { TurnTimelineItem, TurnViewModel } from '../materialize.js';
 
@@ -451,6 +451,35 @@ test('keeps Astryx auto formatting live for user-message timestamps', async (con
 
   await act(() => context.mock.timers.tick(60 * 60 * 1_000));
   assert.match(timestamp.textContent ?? '', /3 hours ago/);
+});
+
+test('rotates working phrases on the elapsed clock without announcing each phrase', async (context) => {
+  const now = Date.UTC(2026, 8, 14, 12);
+  context.mock.timers.enable({ apis: ['Date', 'setInterval'], now });
+  const { container, root } = domRoot();
+  await act(() => root.render(<LocaleProvider locale="en"><TurnRunningStatus startedAt={now} /></LocaleProvider>));
+  const status = container.querySelector('[role="status"]')!;
+  assert.match(status.textContent, /Pondering/);
+  assert.equal(status.getAttribute('aria-label'), 'Working…');
+  await act(() => context.mock.timers.tick(20_000));
+  assert.match(status.textContent, /Tinkering/);
+  assert.match(status.textContent, /20s/);
+  assert.equal(status.getAttribute('aria-label'), 'Working…');
+  // Concrete activity takes precedence over the playful phrase.
+  await act(() => root.render(<LocaleProvider locale="en"><TurnRunningStatus startedAt={now} activityLabel="Clicking Save" /></LocaleProvider>));
+  assert.match(status.textContent, /Clicking Save/);
+  assert.doesNotMatch(status.textContent, /Tinkering/);
+});
+
+test('freezes working phrases for a reduced-motion host', async (context) => {
+  const now = Date.UTC(2026, 8, 14, 12);
+  context.mock.timers.enable({ apis: ['Date', 'setInterval'], now });
+  const { container, root } = domRoot();
+  container.setAttribute('data-maka-reduced-motion', 'true');
+  await act(() => root.render(<LocaleProvider locale="en"><TurnRunningStatus startedAt={now} /></LocaleProvider>));
+  await act(() => context.mock.timers.tick(60_000));
+  assert.equal(container.querySelector('.maka-turn-status-label')?.textContent, 'Pondering…');
+  assert.equal(container.querySelector('.maka-turn-elapsed'), null);
 });
 
 /**

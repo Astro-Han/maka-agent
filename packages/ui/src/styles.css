@@ -275,6 +275,7 @@
 .maka-processing-summary:hover { color: var(--foreground); }
 .maka-processing-summary:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring); outline-offset: calc(-1 * var(--focus-ring-width)); }
 .maka-processing-summary > svg { flex-shrink: 0; }
+.maka-processing-summary .maka-turn-processing { margin: 0; }
 .maka-processing-sequence[open] > .maka-processing-summary > svg { transform: rotate(90deg); }
 .maka-processing-content { display: flex; min-width: 0; flex-direction: column; gap: 8px; padding-block: 12px 4px; }
 .maka-deep-thinking { min-width: 0; }

@@ -600,10 +600,8 @@ export const StreamingTurn: Story = {
 };
 
 // Real path: ask for something long-running → a tool has been going for
-// minutes and the model has produced nothing to look at. The cue this replaced
-// was hidden exactly here — it only covered the gap before the first content
-// event — so this state used to offer no evidence the harness was still
-// working.
+// minutes and the model has produced no commentary. The current process
+// summary owns the working phrase; the tool owns the visible spinner.
 //
 // What renders is the frozen form: the shell frame carries the e2e-fixture
 // attribute, and the elapsed clock is dropped rather than pinned under it,
@@ -635,6 +633,24 @@ export const RunningStatusDuringToolRun: Story = {
       }}
     />
   ),
+  play: async ({ canvasElement }) => {
+    const process = canvasElement.querySelector<HTMLDetailsElement>('.maka-processing-sequence')!;
+    const activity = process.querySelector('.maka-turn-processing')!;
+    await expect(process.open).toBe(true);
+    await expect(activity).toHaveTextContent('正在琢磨…');
+    await expect(canvasElement.querySelectorAll('.maka-turn-processing')).toHaveLength(1);
+    await expect(canvasElement.querySelector('.maka-turn-footer .maka-turn-processing')).toBeNull();
+    // Closing the process hides the tool spinner. The summary takes it over
+    // so a reader still sees activity while the details are out of view.
+    const summary = process.querySelector('summary')!;
+    await expect(activity.querySelector('.astryx-spinner')).toBeNull();
+    await userEvent.click(summary);
+    await waitFor(() => expect(process.open).toBe(false));
+    await expect(activity.querySelector('.astryx-spinner')).not.toBeNull();
+    await userEvent.click(summary);
+    await waitFor(() => expect(process.open).toBe(true));
+    await expect(activity.querySelector('.astryx-spinner')).toBeNull();
+  },
 };
 
 // A real prefix of `npm test` stdout, copied verbatim from an actual run killed
