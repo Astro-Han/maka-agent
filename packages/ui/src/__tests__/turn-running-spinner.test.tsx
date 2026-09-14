@@ -70,13 +70,10 @@ function runningStatusText(locale: 'en' | 'zh-CN'): string {
   return parseHTML(markup).document.querySelector('.maka-turn-processing')?.textContent ?? '';
 }
 
-test('hands the spinner to the turn status after the tool settles', () => {
+test('keeps the process header spinner-free across tool settlement and grouping', () => {
   assert.equal(statusHasSpinner(['running']), false);
-  assert.equal(statusHasSpinner(['completed']), true);
-});
-
-test('keeps the turn spinner when a collapsed group hides the running tool', () => {
-  assert.equal(statusHasSpinner(['running', 'completed']), true);
+  assert.equal(statusHasSpinner(['completed']), false);
+  assert.equal(statusHasSpinner(['running', 'completed']), false);
 });
 
 test('keeps a working cue before any process content arrives', () => {
