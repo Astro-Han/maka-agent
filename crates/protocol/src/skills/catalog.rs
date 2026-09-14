@@ -79,7 +79,9 @@ pub enum ManagedSourceType {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-pub enum SourceItem {
+pub enum CatalogItem {
+    Skill(super::GovernanceItem),
+    DiscoveryDiagnostic(super::GovernanceItem),
     Bundled {
         id: String,
         name: String,
@@ -110,7 +112,7 @@ pub enum CatalogResult {
     Page {
         view: CatalogView,
         revision: String,
-        items: Vec<SourceItem>,
+        items: Vec<CatalogItem>,
         next_cursor: Option<String>,
         resolved_workspace: WorkspaceProjection,
     },
@@ -175,7 +177,14 @@ pub fn decode_catalog_output(value: &Value) -> Result<CatalogResult> {
             }
             for item in items {
                 let (id, name, description, category) = match item {
-                    SourceItem::Bundled {
+                    CatalogItem::Skill(item) | CatalogItem::DiscoveryDiagnostic(item) => {
+                        if *view != CatalogView::Governance {
+                            return Err(invalid("Invalid governance page"));
+                        }
+                        item.validate()?;
+                        continue;
+                    }
+                    CatalogItem::Bundled {
                         id,
                         name,
                         description,
@@ -191,7 +200,7 @@ pub fn decode_catalog_output(value: &Value) -> Result<CatalogResult> {
                         }
                         (id, name, description, category)
                     }
-                    SourceItem::ManagedSource {
+                    CatalogItem::ManagedSource {
                         id,
                         name,
                         description,

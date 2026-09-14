@@ -20,7 +20,9 @@
 type Result<T> = std::result::Result<T, &'static str>;
 use serde::{Deserialize, Serialize};
 mod receipt;
+mod validation;
 pub use receipt::{SkillFailedReceipt, SkillInvocationReceipt, SkillLoadedReceipt};
+pub use validation::SkillValidationCode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SkillPreference {

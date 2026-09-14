@@ -349,6 +349,26 @@ fn discovery_reads_only_contained_regular_files_and_reports_source_failures() {
         &root.join(".maka/skills/escape"),
     );
     directory_link(&outside, &root.join(".agents"));
+    fs::create_dir_all(root.join("skills/EmptyCase")).unwrap();
+    fs::write(root.join("skills/file-only"), "not a skill directory").unwrap();
+    directory_link(
+        &root.join("skills/EmptyCase"),
+        &root.join("skills/empty-alias"),
+    );
+    let governance =
+        maka_skills::governance_catalog(&root, &root, None, &CancellationToken::new()).unwrap();
+    assert_eq!(
+        governance
+            .publication
+            .empty
+            .iter()
+            .map(|s| s.reference.as_str())
+            .collect::<Vec<_>>(),
+        ["workspace:legacy:EmptyCase"],
+        "only real directories retain exact governance identity; files and empty links only occupy names",
+    );
+    assert!(governance.publication.occupied.contains("file-only"));
+    assert!(governance.publication.occupied.contains("empty-alias"));
     fs::create_dir_all(root.join(".maka/skills/large")).unwrap();
     fs::File::create(root.join(".maka/skills/large/SKILL.md"))
         .unwrap()

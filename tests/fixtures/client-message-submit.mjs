@@ -122,6 +122,59 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
     sourceContentSha256: hash,
   };
   await writeFile(join(alias, 'skill.lock.json'), JSON.stringify(lock));
+  const governance = await sourcePage('governance');
+  const installed = governance.items.find((item) => item.id === 'library-alias');
+  assert.equal(installed.kind, 'skill');
+  assert.equal(installed.sourceType, 'managed');
+  assert.equal(installed.userModified, true);
+  assert.equal(installed.managedUpdateStatus, 'local_modified');
+  assert.equal(installed.contextStatus, 'unknown');
+  assert.equal(installed.contextRank, null);
+  assert.equal(installed.manageable, false, 'query support does not imply mutation support');
+  const empty = governance.items.find((item) => item.id === 'computer-use');
+  assert.equal(empty.ref, 'workspace:legacy:computer-use');
+  assert.equal(empty.validationStatus, 'metadata_error');
+  assert.deepEqual(empty.validationCodes, ['missing_frontmatter']);
+  assert.equal(empty.enabled, false);
+  const disabled = governance.items.find((item) => item.id === 'disabled');
+  assert.equal(disabled.enabled, false);
+  assert.equal(disabled.runtimeStatus, 'disabled');
+  assert.equal(disabled.contextStatus, 'disabled');
+  const archival = governance.items.find((item) => item.id === 'archival');
+  assert.equal(archival.metadataTruncated, true);
+  assert(archival.validationCodes.includes('projection_truncated'));
+  assert(disabled.validationCodes.includes('duplicate_name'));
+  await writeFile(join(alias, 'SKILL.md'), original);
+  lock.sourceId = 'library';
+  await writeFile(join(alias, 'skill.lock.json'), JSON.stringify(lock));
+  assert.equal(
+    (await sourcePage('governance')).items.find((item) => item.id === 'library-alias')
+      .managedUpdateStatus,
+    'update_available',
+  );
+  const governanceChanged = await request('skill.catalog.query', {
+    kind: 'continue',
+    context: sourceContext,
+    view: 'governance',
+    revision: governance.revision,
+    cursor: 'obsolete',
+  });
+  assert.equal(governanceChanged.kind, 'revision_changed');
+  const libraryPath = join(workspace, 'skill-home/.maka/skill-sources/library/SKILL.md');
+  const sourceBody = await readFile(libraryPath, 'utf8');
+  await writeFile(libraryPath, original);
+  const upToDate = await sourcePage('governance');
+  assert.equal(
+    upToDate.items.find((item) => item.id === 'library-alias').managedUpdateStatus,
+    'up_to_date',
+  );
+  await mkdir(join(alias, 'skill.baseline.md'));
+  assert.equal(
+    (await sourcePage('governance')).revision,
+    upToDate.revision,
+    'read-only governance does not inspect an installation baseline',
+  );
+  await writeFile(libraryPath, sourceBody);
   const aliased = await sourcePage('managed_sources');
   assert.equal(
     aliased.items[0].installed,
@@ -143,6 +196,11 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
     'lock-only changes invalidate source pagination',
   );
   assert.equal((await sourcePage('managed_sources')).items[0].installed, false);
+  const invalidOrigin = (await sourcePage('governance')).items.find(
+    (item) => item.id === 'library-alias',
+  );
+  assert.equal(invalidOrigin.sourceType, 'unknown');
+  assert.deepEqual(invalidOrigin.validationCodes, ['id_mismatch']);
   await rm(alias, { recursive: true });
   await writeFile(
     join(workspace, 'skill-home/.maka/skill-sources/library/SKILL.md'),
@@ -159,7 +217,6 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
   const sourceQuery = { kind: 'start', context: sourceContext, view: 'managed_sources' };
   const sourceResult = await request('skill.catalog.query', sourceQuery);
   assert.equal(sourceResult.items[0].description, 'changed source');
-  await assert.rejects(sourcePage('governance'), (error) => error.code === 'operation_unavailable');
   const call = (name, input) => [
     {
       index: 0,

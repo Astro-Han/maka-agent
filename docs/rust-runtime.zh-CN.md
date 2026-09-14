@@ -78,7 +78,8 @@ Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要�
 - `SkillSearch`、`Skill` 与显式加载共用 Run 的冻结目录。搜索只返回有界元数据，
   加载的正文保留可读的归档分页。
 - Agent 模式的技能选择器按当前权限预览，不绑定 Session 或解析模型；分页绑定修订。
-  内置及本地来源目录反映真实安装占用，并识别经校验的托管来源别名。Plan 与技能治理仍未实现。
+  内置及本地来源目录反映真实安装占用，并识别经校验的托管来源别名。治理查询展示校验、
+  偏好和来源更新状态，不读取 baseline，也不冒充 Run 内已加载状态。Plan 与技能变更仍未实现。
 - Rust 管理存储、网络路由、工具和原生进程／PTY。一个惰性启动的长期 V8 并发处理模型
   请求与终端解析；Code Mode 使用独立短生命周期 isolate。数量与字节限制提供背压，
   V8 heap 限制不等于进程内存隔离。
@@ -126,7 +127,7 @@ Grep 差分测试需要 PATH 中有 `rg`；runtime 本身不依赖该可执行�
 已实现项目／会话管理、已结束 Turn 导航、配置、附件、文件工具、shell／PTY、Client Capability 工具、
 模型流式交互与上下文压缩。Codex 订阅已接入执行；Copilot／xAI 推理适配和实测后置。
 
-Skills 治理与变更、安全 resume／恢复协调、
+Skills 变更与更新预览、安全 resume／恢复协调、
 编排、部分 capability 服务、受管升级及其它协议域
 仍未完成。完整 Desktop 验收和 Linux、macOS、Windows 发布打包仍待完成。
 插件与 OS 沙箱暂缓，内容脱敏不实现。

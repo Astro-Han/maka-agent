@@ -42,10 +42,13 @@ pub(super) enum ReadError {
     Failure(DiscoveryFailure),
 }
 
-pub(super) struct SkillRead {
-    pub bytes: Vec<u8>,
-    pub origin: Option<super::origin::Origin>,
-    pub origin_bytes: usize,
+pub(super) enum SkillRead {
+    Empty,
+    Document {
+        bytes: Vec<u8>,
+        origin: Option<super::origin::Origin>,
+        origin_bytes: usize,
+    },
 }
 
 impl Captured {
@@ -120,7 +123,7 @@ impl Captured {
             Err(error) => return Err(read_error(error)),
         };
         let Some(bytes) = read_file(&directory, "SKILL.md", MAX_SOURCE_BYTES, cancellation)? else {
-            return Ok(None);
+            return Ok(metadata.is_dir().then_some(SkillRead::Empty));
         };
         let (origin, origin_bytes) = if collect_origin {
             let (origin, size) = super::origin::read(
@@ -132,7 +135,7 @@ impl Captured {
         } else {
             (None, 0)
         };
-        Ok(Some(SkillRead {
+        Ok(Some(SkillRead::Document {
             bytes,
             origin,
             origin_bytes,
@@ -266,15 +269,21 @@ mod tests {
                 .ok()
                 .flatten()
                 .unwrap();
-            assert_eq!(content.bytes, b"original link");
+            let SkillRead::Document { bytes, .. } = content else {
+                panic!("missing captured body")
+            };
+            assert_eq!(bytes, b"original link");
         }
         let content = captured
             .read_skill(OsStr::new("review"), true, &CancellationToken::new())
             .ok()
             .flatten()
             .unwrap();
-        assert_eq!(content.bytes, b"original");
-        assert!(matches!(content.origin.unwrap().status,
+        let SkillRead::Document { bytes, origin, .. } = content else {
+            panic!("missing captured body")
+        };
+        assert_eq!(bytes, b"original");
+        assert!(matches!(origin.unwrap().status,
             super::super::origin::OriginStatus::Managed { source_id, content_sha256 }
                 if source_id == "source" && content_sha256 == hash));
         #[cfg(windows)]

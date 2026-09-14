@@ -76,6 +76,29 @@ pub(super) fn validate_pending_tools(
 }
 
 impl Executions {
+    pub(crate) async fn skill_governance(
+        &self,
+        cwd: &str,
+    ) -> Result<(
+        maka_skills::SourceCatalog,
+        Option<maka_config::skills::SkillPreferences>,
+    )> {
+        let preferences = self.configuration.skill_preferences().await.ok();
+        let root = self.paths.state_root.clone();
+        let home = self.paths.skill_home.clone();
+        let cwd = std::path::PathBuf::from(cwd);
+        let cancellation = self.shutdown.clone();
+        let sources = tokio::task::spawn_blocking(move || {
+            maka_skills::governance_catalog(&cwd, &root, home.as_deref(), &cancellation)
+        })
+        .await
+        .map_err(internal)?;
+        if self.shutdown.is_cancelled() {
+            return Err(failure(Code::HostDraining, "Host is draining"));
+        }
+        let sources = sources.map_err(|e| failure(Code::PersistenceFailed, &e.to_string()))?;
+        Ok((sources, preferences))
+    }
     pub(crate) async fn skill_sources(&self) -> Result<maka_skills::SourceCatalog> {
         let root = self.paths.state_root.clone();
         let home = self.paths.skill_home.clone();

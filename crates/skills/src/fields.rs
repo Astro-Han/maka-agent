@@ -61,30 +61,7 @@ pub enum Severity {
     Error,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum IssueCode {
-    MissingFrontmatter,
-    MalformedFrontmatter,
-    MissingName,
-    InvalidName,
-    NameTooLong,
-    MissingDescription,
-    InvalidDescription,
-    DescriptionTooLong,
-    InvalidAllowedTools,
-    InvalidRequiredTools,
-    InvalidRequiredCapabilities,
-    InvalidLicense,
-    InvalidCompatibility,
-    CompatibilityTooLong,
-    InvalidMetadata,
-    InvalidCategory,
-    UnsupportedField,
-    BodyTooLarge,
-    DuplicateId,
-    DuplicateName,
-}
+pub use maka_runtime::skills::SkillValidationCode as IssueCode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Issue {

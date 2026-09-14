@@ -40,12 +40,6 @@ pub(in crate::server) async fn execute(host: &Host, value: &Value) -> Result<Out
             "Host is draining",
         )));
     }
-    if input.view() == CatalogView::Governance {
-        return Ok(Outcome::failure(failure(
-            Code::OperationUnavailable,
-            "Skill governance is not installed",
-        )));
-    }
     let result = query(host, &input).await;
     match result {
         Err(error) => Ok(Outcome::failure(error)),
@@ -65,14 +59,23 @@ async fn query(host: &Host, input: &CatalogInput) -> Result<CatalogResult, Opera
             }
             e
         })?;
-    let sources = host.executions.skill_sources().await?;
+    let (sources, preferences) = if input.view() == CatalogView::Governance {
+        host.executions
+            .skill_governance(&workspace.host_cwd)
+            .await?
+    } else {
+        (host.executions.skill_sources().await?, None)
+    };
+    let governance = super::governance::items(&sources, preferences.as_ref());
     let revision = maka_runtime::artifact::content_digest(&encode(&(
-        "skill.sources.v1",
+        "skill.catalog.v2",
         input.context(),
         input.view(),
         &workspace,
         &sources.publication.occupied,
         &sources.publication.origins,
+        &governance,
+        preferences.as_ref().map(|p| p.revision),
         sources
             .publication
             .discovery
@@ -144,7 +147,7 @@ async fn query(host: &Host, input: &CatalogInput) -> Result<CatalogResult, Opera
                     tools.iter().take(16).map(|s| bounded(s, 128).0).collect();
                 let tt = tools.len() != declared_tools.len()
                     || tools.iter().zip(&declared_tools).any(|(a, b)| a != b);
-                SourceItem::Bundled {
+                CatalogItem::Bundled {
                     id: s.id.into(),
                     name,
                     description,
@@ -194,7 +197,7 @@ async fn query(host: &Host, input: &CatalogInput) -> Result<CatalogResult, Opera
                         })
                         .unwrap_or("效率工具")
                         .to_owned();
-                    SourceItem::ManagedSource {
+                    CatalogItem::ManagedSource {
                         id: id.clone(),
                         name,
                         description,
@@ -206,7 +209,7 @@ async fn query(host: &Host, input: &CatalogInput) -> Result<CatalogResult, Opera
                 })
                 .collect()
         }
-        CatalogView::Governance => unreachable!("handled before source discovery"),
+        CatalogView::Governance => governance,
     };
     items.sort_by(|a, b| key(a).cmp(&key(b)));
     if offset > items.len()
@@ -253,14 +256,17 @@ async fn query(host: &Host, input: &CatalogInput) -> Result<CatalogResult, Opera
         resolved_workspace: workspace,
     })
 }
-fn key(item: &SourceItem) -> (&str, &str) {
+fn key(item: &CatalogItem) -> (&str, &str) {
     match item {
-        SourceItem::Bundled { name, id, .. } | SourceItem::ManagedSource { name, id, .. } => {
+        CatalogItem::Bundled { name, id, .. } | CatalogItem::ManagedSource { name, id, .. } => {
             (name, id)
+        }
+        CatalogItem::Skill(item) | CatalogItem::DiscoveryDiagnostic(item) => {
+            (&item.name, &item.reference)
         }
     }
 }
-fn bounded(text: &str, max: usize) -> (String, bool) {
+pub(super) fn bounded(text: &str, max: usize) -> (String, bool) {
     let end = text.floor_char_boundary(text.len().min(max));
     (text[..end].into(), end < text.len())
 }

@@ -23,6 +23,7 @@ use maka_protocol::{OperationError, OperationErrorCode as Code, Outcome, skills:
 use serde_json::Value;
 use uuid::Uuid;
 
+mod governance;
 mod page;
 pub(super) mod sources;
 pub(super) const ERRORS: &[Code] = &[

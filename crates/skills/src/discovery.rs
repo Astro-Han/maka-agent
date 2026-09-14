@@ -31,7 +31,8 @@ mod source;
 mod sources;
 pub use origin::{Origin, OriginFailure, OriginStatus};
 pub use sources::{
-    BundledSource, SourceCatalog, SourceCatalogError, safe_source_id, source_catalog,
+    BundledSource, SourceCatalog, SourceCatalogError, governance_catalog, safe_source_id,
+    source_catalog,
 };
 const MAX_ENTRIES: usize = 16_384;
 const MAX_CONTENT_BYTES: usize = 16 * 1024 * 1024;
@@ -192,6 +193,7 @@ pub struct QuerySnapshot {
     pub discovery: DiscoverySnapshot,
     pub origins: BTreeMap<String, Origin>,
     pub occupied: BTreeSet<String>,
+    pub empty: Vec<SkillLocation>,
 }
 
 fn scan_with_origins(
@@ -277,16 +279,26 @@ fn scan_impl(
                         continue;
                     }
                 };
-            remaining_bytes = remaining_bytes
-                .checked_sub(read.bytes.len() + read.origin_bytes)
-                .ok_or(ScanError::LimitExceeded)?;
             let location = source.location(id.into(), precedence);
-            if let Some(origin) = read.origin
+            let source::SkillRead::Document {
+                bytes,
+                origin,
+                origin_bytes,
+            } = read
+            else {
+                if publication && let Some(query) = query.as_deref_mut() {
+                    query.empty.push(location);
+                }
+                continue;
+            };
+            remaining_bytes = remaining_bytes
+                .checked_sub(bytes.len() + origin_bytes)
+                .ok_or(ScanError::LimitExceeded)?;
+            if let Some(origin) = origin
                 && let Some(query) = query.as_deref_mut()
             {
                 query.origins.insert(location.reference.clone(), origin);
             }
-            let bytes = read.bytes;
             match crate::parse(&String::from_utf8_lossy(&bytes)) {
                 Ok(document) => snapshot.inventory.push(DiscoveredSkill {
                     location,

@@ -28,6 +28,8 @@ pub const MAX_PAGE_BYTES: usize = 48 * 1024;
 pub const MAX_ITEMS: usize = 128;
 mod catalog;
 pub use catalog::*;
+mod governance;
+pub use governance::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

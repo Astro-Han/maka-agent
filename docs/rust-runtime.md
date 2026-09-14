@@ -90,8 +90,9 @@ Do not run untrusted code or point test instances at existing user data.
   Discovery exposes bounded metadata; loaded instructions retain readable archive pages.
 - The agent-mode Skill selector previews current permissions without binding a Session or
   resolving a model. Bundled and local-library source catalogs report actual installation
-  occupancy and validated managed-source aliases. Pages are revision-bound; Plan and
-  Skill governance remain unavailable.
+  occupancy and validated managed-source aliases. Governance exposes validation,
+  preferences and source updates without reading baselines or claiming Run advertisement.
+  Pages are revision-bound; Plan and Skill mutations remain unavailable.
 - Rust owns storage, network routing, tools and native process/PTY lifetimes.
   One lazy, long-lived V8 serves concurrent model requests and terminal parsers.
   Code Mode cells use separate short-lived isolates. Count and byte limits provide
@@ -148,7 +149,7 @@ Client Capability tools, model streaming and context compaction are implemented.
 Codex subscription execution is supported; Copilot/xAI inference adaptation and
 live verification are deferred.
 
-Skill governance and mutations,
+Skill mutations and update previews,
 safe resume/reconciliation, orchestration,
 some capability services, managed upgrades and other protocol domains remain incomplete. Full Desktop
 acceptance and release packaging across Linux, macOS and Windows are still

@@ -101,12 +101,6 @@ pub fn source_catalog(
     home: Option<&Path>,
     cancellation: &CancellationToken,
 ) -> Result<SourceCatalog, SourceCatalogError> {
-    let bundled = vec![BundledSource {
-        id: "computer-use",
-        document: crate::parse(COMPUTER_USE)
-            .map_err(|_| SourceCatalogError::InvalidBundledMetadata)?,
-        content_sha256: maka_runtime::artifact::content_digest(COMPUTER_USE.as_bytes()),
-    }];
     let publication = Source::at(
         root,
         "skills",
@@ -124,6 +118,33 @@ pub fn source_catalog(
     {
         return Err(SourceCatalogError::Read(error.reason));
     }
+    catalog(publication, home, cancellation)
+}
+
+/// Governance uses the runtime's discovery precedence, reading workspace body
+/// and installation origin from the same captured directory. No baseline I/O.
+pub fn governance_catalog(
+    cwd: &Path,
+    root: &Path,
+    home: Option<&Path>,
+    cancellation: &CancellationToken,
+) -> Result<SourceCatalog, SourceCatalogError> {
+    let publication = super::scan_with_origins(&Source::standard(cwd, root, home), cancellation)
+        .map_err(SourceCatalogError::Scan)?;
+    catalog(publication, home, cancellation)
+}
+
+fn catalog(
+    publication: QuerySnapshot,
+    home: Option<&Path>,
+    cancellation: &CancellationToken,
+) -> Result<SourceCatalog, SourceCatalogError> {
+    let bundled = vec![BundledSource {
+        id: "computer-use",
+        document: crate::parse(COMPUTER_USE)
+            .map_err(|_| SourceCatalogError::InvalidBundledMetadata)?,
+        content_sha256: maka_runtime::artifact::content_digest(COMPUTER_USE.as_bytes()),
+    }];
     let managed = if let Some(home) = home {
         // The library is its own containment root; aliases may not reach other
         // home content. SKILL.md retains the ordinary nofollow/regular-file gate.
