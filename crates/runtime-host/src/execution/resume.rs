@@ -26,6 +26,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 mod prepare;
+mod workhub;
 
 enum Selection {
     Ready(RunBoundary),
@@ -176,6 +177,13 @@ impl Executions {
             }
             Err(error) => return Err(error),
         };
+        self.launch_resume(run).await
+    }
+
+    async fn launch_resume(
+        self: &Arc<Self>,
+        run: maka_agent::RunInput,
+    ) -> Result<TurnResumeStartResult> {
         match self.engine.check_continuation(&run, &self.shutdown).await {
             Ok(()) => {}
             Err(RunError::Cancelled) => {
@@ -183,7 +191,10 @@ impl Executions {
             }
             Err(_) => {
                 return Ok(TurnResumeStartResult::Parked {
-                    plan: parked(input.session_id, TurnResumeParkReason::SafetyCheckFailed),
+                    plan: parked(
+                        run.invocation.session_id,
+                        TurnResumeParkReason::SafetyCheckFailed,
+                    ),
                 });
             }
         }

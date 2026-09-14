@@ -28,6 +28,8 @@ pub enum InvocationInput {
     Continuation {
         claim: Box<crate::continuation::ContinuationClaim>,
         request_fingerprint: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workhub_resume: Option<crate::workhub::ResumeOrigin>,
     },
     ContextCompact {
         request_fingerprint: String,

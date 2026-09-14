@@ -25,7 +25,9 @@ use serde_json::{Value, json};
 mod action;
 mod candidates;
 mod selection;
-pub use action::{ActInput, ActResult, LinkedProposal, Proposal, RoutingProposal, decode_act};
+pub use action::{
+    ActInput, ActResult, LinkedProposal, Proposal, ResumeOutcome, RoutingProposal, decode_act,
+};
 pub use candidates::{Candidate, CandidatesResult, decode_candidates};
 pub use selection::{SelectionInput, SelectionResult, decode_selection};
 

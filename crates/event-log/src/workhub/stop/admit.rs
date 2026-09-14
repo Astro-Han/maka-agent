@@ -29,15 +29,13 @@ pub(super) async fn apply(
     tx: &mut SqliteConnection,
     request: StopRequest,
 ) -> Result<StopRecord, StoreError> {
-    let collision: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE kind = 'workhub_delegated'
-         AND json_extract(event_json, '$.fact.delegation.action_id') = ?)",
-    )
-    .bind(&request.action_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if collision {
-        return Err(invalid("WorkHub action already belongs to a delegation"));
+    if super::super::actions::read(tx, &request.action_id)
+        .await?
+        .is_some()
+    {
+        return Err(invalid(
+            "WorkHub action already belongs to another operation",
+        ));
     }
     let source: Option<String> = sqlx::query_scalar(
         "SELECT event_json FROM runtime_events o WHERE o.kind = 'invocation_opened'

@@ -99,6 +99,7 @@ impl Executions {
             },
             work: RunWork::Continuation {
                 source,
+                workhub_resume: None,
                 tools,
                 max_steps: 64,
             },

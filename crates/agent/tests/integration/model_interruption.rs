@@ -212,7 +212,7 @@ async fn continuation_claim_replays_only_its_lineage_and_retries_at_fresh_bounda
             let mut child = input(&base, id);
             child.configuration = source.configuration.clone();
             child.request_fingerprint = Some(maka_runtime::artifact::content_digest(id.as_bytes()));
-            child.work = maka_agent::RunWork::Continuation { source: boundary.clone(), tools: Default::default(), max_steps: 2 };
+            child.work = maka_agent::RunWork::Continuation { source: boundary.clone(), workhub_resume: None, tools: Default::default(), max_steps: 2 };
             child
         };
         let server = tokio::spawn(async move {

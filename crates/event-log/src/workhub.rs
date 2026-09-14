@@ -17,57 +17,20 @@
  * under the License.
  */
 
-use crate::{EventLog, StoreError, message_admissions::PendingMessageAdmission, sequence_number};
+use crate::{StoreError, message_admissions::PendingMessageAdmission};
 use maka_runtime::{
-    event::{Fact, RuntimeEvent, StoredEvent},
+    event::{Fact, RuntimeEvent},
     input::InvocationInput,
     workhub::DelegationDelivery,
 };
 use sqlx::SqliteConnection;
 
+mod actions;
 mod candidates;
 mod create;
+mod resume;
 pub mod stop;
 pub use candidates::activity_at;
-
-impl EventLog {
-    /// Root-global action identity survives both source termination and Host epochs.
-    pub async fn workhub_action(&self, action: &str) -> Result<Option<StoredEvent>, StoreError> {
-        self.validate_root()?;
-        crate::sessions::validate_id(action)?;
-        let action = action.to_owned();
-        self.connection
-            .run(move |connection| {
-                Box::pin(async move {
-                    let row: Option<(i64, Option<String>)> = sqlx::query_as(
-                        "SELECT sequence, CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576
-                 THEN event_json END FROM runtime_events WHERE kind = 'workhub_delegated'
-                 AND json_extract(event_json, '$.fact.delegation.action_id') = ?",
-                    )
-                    .bind(&action)
-                    .fetch_optional(connection)
-                    .await?;
-                    row.map(|(sequence, json)| {
-                        let event: RuntimeEvent =
-                            serde_json::from_str(&json.ok_or(StoreError::PrefixTooLarge)?)?;
-                        let Fact::WorkhubDelegated { delegation } = &event.fact else {
-                            return Err(invalid("invalid WorkHub action index"));
-                        };
-                        delegation.validate(&event.invocation).map_err(invalid)?;
-                        if delegation.action_id != action {
-                            return Err(invalid("WorkHub action identity changed"));
-                        }
-                        Ok(StoredEvent {
-                            sequence: sequence_number(sequence)?,
-                            event,
-                        })
-                    })
-                    .transpose()
-                })
-            })
-            .await
-    }
-}
 
 /// The pending target and the action fact share append's transaction. Exact
 /// event replay returns before this hook, so it never recreates consumed work.
@@ -75,6 +38,7 @@ pub(crate) async fn apply(
     tx: &mut SqliteConnection,
     event: &RuntimeEvent,
 ) -> Result<(), StoreError> {
+    resume::validate(tx, event).await?;
     let Fact::WorkhubDelegated { delegation } = &event.fact else {
         return Ok(());
     };

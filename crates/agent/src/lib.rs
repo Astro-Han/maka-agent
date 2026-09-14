@@ -89,6 +89,7 @@ pub struct RunInput {
 pub enum RunWork {
     Continuation {
         source: maka_runtime::continuation::RunBoundary,
+        workhub_resume: Option<maka_runtime::workhub::ResumeOrigin>,
         tools: ToolCatalog,
         max_steps: usize,
     },

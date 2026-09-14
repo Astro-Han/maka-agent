@@ -29,6 +29,7 @@ import { createInput, querySession } from './client-runtime-policy-fixture.mjs';
 import { upload } from './client-artifact-upload.mjs';
 import { createdTarget, prepareRouting } from './client-workhub-routing.mjs';
 import { chooseTarget, setupSelection } from './client-workhub-selection.mjs';
+import { resumeDelegation } from './client-workhub-resume.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'delegate-request';
@@ -38,6 +39,9 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
   const selectTarget = mode === 'selected';
   const stopTarget = mode === 'stopped';
   const steerTarget = mode === 'steered';
+  const resumeTarget = mode === 'resumed';
+  let resumed = false;
+  let resumeReceipts = [];
   const targetReady = Promise.withResolvers();
   const initialTarget = Promise.withResolvers();
   const delegated = Promise.withResolvers();
@@ -56,10 +60,12 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     const saved = JSON.parse(await readFile(file, 'utf8'));
     assert.deepEqual(await act(saved.input), saved.receipt);
     if (saved.stopInput) assert.deepEqual(await act(saved.stopInput), saved.stopReceipt);
+    for (const item of saved.resumeReceipts ?? [])
+      assert.deepEqual(await act(item.input), item.receipt);
     assert.deepEqual(
       await request('turn.query', {
         sessionId: saved.receipt.targetSessionId,
-        turnId: saved.receipt.targetTurnId,
+        turnId: saved.target.turnId,
       }),
       saved.target,
     );
@@ -86,6 +92,15 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       let body = '';
       for await (const chunk of req) body += chunk;
       const data = JSON.parse(body);
+      if (data.messages.at(-1)?.content === 'UNRELATED_FAILURE') {
+        response.writeHead(400, { 'Content-Type': 'application/json', Connection: 'close' });
+        response.end(
+          JSON.stringify({
+            error: { message: 'unrelated failure', type: 'invalid_request_error' },
+          }),
+        );
+        return;
+      }
       const target = data.messages.some(
         (message) =>
           typeof message.content === 'string' &&
@@ -108,11 +123,11 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         assert(path);
         assert(!path.endsWith('/' + attachment.ref.relativePath));
         if (finished) assert(body.includes('TRANSFER_EVIDENCE'));
-        if (finished && (stopTarget || steerTarget)) {
+        if (finished && (stopTarget || steerTarget || (resumeTarget && !resumed))) {
           response.writeHead(200, { 'Content-Type': 'text/event-stream' });
           response.flushHeaders();
           targetReady.resolve();
-          if (stopTarget) return;
+          if (stopTarget || resumeTarget) return;
           await finishTarget.promise;
         }
       }
@@ -284,6 +299,19 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
               assert.equal(receipt.targetTurnId, 'already-running');
               delegated.resolve();
             }
+            if (resumeTarget) {
+              await targetReady.promise;
+              resumeReceipts = await resumeDelegation(
+                request,
+                act,
+                input,
+                receipt,
+                targetObserver,
+                () => {
+                  resumed = true;
+                },
+              );
+            }
             if (stopTarget || steerTarget) {
               await targetReady.promise;
               stopInput = {
@@ -358,8 +386,9 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       kind: 'tail',
       maxBytes: 2,
     });
+    const targetTurnId = resumeReceipts.at(-1)?.receipt.targetTurnId ?? receipt.targetTurnId;
     const targetFinished = (snapshot) =>
-      snapshot.rootTurn?.turnId === receipt.targetTurnId &&
+      snapshot.rootTurn?.turnId === targetTurnId &&
       ['completed', 'failed', 'cancelled'].includes(snapshot.rootTurn.status);
     // Creation can finish before subscribing; the bootstrap is authoritative too.
     if (!targetFinished(targetObserver.subscription.snapshot))
@@ -370,7 +399,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     if (failure) throw failure;
     const target = await request('turn.query', {
       sessionId: targetSessionId,
-      turnId: receipt.targetTurnId,
+      turnId: targetTurnId,
     });
     assert.equal(target.status, stopTarget ? 'cancelled' : 'completed');
     if (stopTarget)
@@ -379,6 +408,20 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         'workhub.direct_stop.' +
           createHash('sha256').update(stopInput.actionId).digest('hex').slice(0, 48),
       );
+    if (resumeTarget) {
+      await request('turn.start', {
+        sessionId: targetSessionId,
+        turnId: 'unrelated-failure',
+        content: { text: 'UNRELATED_FAILURE' },
+      });
+      const unrelatedFinished = (snapshot) =>
+        snapshot.rootTurn?.turnId === 'unrelated-failure' && snapshot.rootTurn.status === 'failed';
+      if (!unrelatedFinished(targetObserver.subscription.snapshot))
+        await targetObserver.waitFor(
+          (frame) =>
+            frame.kind === 'subscription.session_projection' && unrelatedFinished(frame.snapshot),
+        );
+    }
     await targetObserver.close();
     targetObserver = await watchSession(connection, targetSessionId, { kind: 'tail', maxBytes: 2 });
     const rows = await targetObserver.subscription.loadTranscript(decodeStoredMessage);
@@ -390,7 +433,11 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     });
     assert.deepEqual(await act(input), receipt);
     if (stopInput) assert.deepEqual(await act(stopInput), stopReceipt);
-    await writeFile(file, JSON.stringify({ input, receipt, target, rows, stopInput, stopReceipt }));
+    for (const item of resumeReceipts) assert.deepEqual(await act(item.input), item.receipt);
+    await writeFile(
+      file,
+      JSON.stringify({ input, receipt, target, rows, stopInput, stopReceipt, resumeReceipts }),
+    );
   } finally {
     await sourceObserver?.close();
     await targetObserver?.close();

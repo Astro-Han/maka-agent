@@ -29,6 +29,7 @@ async fn original_client_workhub_routing_runs_once_and_replays_after_reopen() {
         "--workhub-selection-workspace",
         "--workhub-stop-workspace",
         "--workhub-steering-workspace",
+        "--workhub-resume-workspace",
     ] {
         let fixture = ClientFixture::new("maka-workhub-delegation-");
         fixture.run(flag, false, "workhub-delegation-passed").await;
@@ -49,7 +50,11 @@ async fn original_client_workhub_routing_runs_once_and_replays_after_reopen() {
                 .iter()
                 .filter(|row| matches!(row.event.fact, Fact::InvocationOpened { .. }))
                 .count(),
-            2
+            if flag == "--workhub-resume-workspace" {
+                4
+            } else {
+                2
+            }
         );
         let delegation = before
             .events

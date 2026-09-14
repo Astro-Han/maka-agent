@@ -127,10 +127,31 @@ pub enum ActResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         target_turn_id: Option<String>,
     },
+    ResumeWork {
+        outcome: ResumeOutcome,
+        target_session_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_turn_id: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumeOutcome {
+    ResumeStarted,
+    AlreadyRunning,
 }
 
 impl ActResult {
     pub(super) fn validate(&self) -> Result<()> {
+        if let Self::ResumeWork {
+            outcome: ResumeOutcome::ResumeStarted,
+            target_turn_id: None,
+            ..
+        } = self
+        {
+            return Err(invalid());
+        }
         let (target_session_id, target_turn_id) = match self {
             Self::CreateNew {
                 target_session_id,
@@ -142,6 +163,11 @@ impl ActResult {
                 ..
             } => (target_session_id, Some(target_turn_id)),
             Self::StopWork {
+                target_session_id,
+                target_turn_id,
+                ..
+            }
+            | Self::ResumeWork {
                 target_session_id,
                 target_turn_id,
                 ..

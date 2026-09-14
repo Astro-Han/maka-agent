@@ -280,7 +280,8 @@ impl InvocationView {
                     Fact::InvocationOpened { .. } => unreachable!(),
                     Fact::ContextCheckpointRecorded { .. }
                     | Fact::ToolResultArchived { .. }
-                    | Fact::WorkhubDelegated { .. } => {}
+                    | Fact::WorkhubDelegated { .. }
+                    | Fact::WorkhubResumeObserved { .. } => {}
                 }
             }
         }

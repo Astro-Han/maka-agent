@@ -37,6 +37,42 @@ pub enum StopOutcome {
     NotOwned,
 }
 
+/// A resume action is owned by its real continuation opening, or by an
+/// immutable observation that the delegated execution was already running.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResumeOrigin {
+    pub action_id: String,
+    pub request_fingerprint: String,
+    pub coordinator: Invocation,
+    pub delegation_action_id: String,
+}
+
+impl ResumeOrigin {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.coordinator.session_id != COORDINATION_SESSION_ID
+            || !crate::archive::valid_projection_digest(&self.request_fingerprint)
+        {
+            return Err("invalid WorkHub resume origin");
+        }
+        for id in [
+            &self.action_id,
+            &self.delegation_action_id,
+            &self.coordinator.turn_id,
+            &self.coordinator.run_id,
+            &self.coordinator.invocation_id,
+        ] {
+            crate::interaction::entity_id(id)?;
+        }
+        Ok(())
+    }
+}
+
+pub fn resumed_turn_id(action_id: &str) -> String {
+    let digest = crate::artifact::content_digest(format!("resume\0{action_id}").as_bytes());
+    format!("wht_{}", &digest[7..55])
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Delegation {

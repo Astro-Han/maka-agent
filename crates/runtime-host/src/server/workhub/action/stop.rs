@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{ActInput, ActResult, Code, Host, OperationError, failure};
+use super::{ActInput, ActResult, Code, Host, OperationError, failure, stored};
 use maka_event_log::{
     StoreError,
     workhub::stop::{StopRecord, StopRequest},
@@ -109,15 +109,4 @@ fn receipt(record: StopRecord) -> Result<ActResult, OperationError> {
         target_session_id: record.intent.request.target_session_id,
         target_turn_id: result.target_turn_id,
     })
-}
-
-fn stored(host: &Host, error: StoreError) -> OperationError {
-    match error {
-        StoreError::InvalidTransition(reason) => failure(Code::OperationConflict, reason),
-        StoreError::CommitUnknown(_) | StoreError::OperationUnknown => {
-            host.executions.begin_drain();
-            failure(Code::CommitOutcomeUnknown, error.to_string())
-        }
-        other => super::sessions::stored(other),
-    }
 }

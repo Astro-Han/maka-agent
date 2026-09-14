@@ -31,6 +31,7 @@ use maka_runtime::{
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod resume;
 mod stop;
 mod target;
 
@@ -48,7 +49,19 @@ pub(in crate::server) const ERRORS: &[Code] = &[
     Code::CandidateSetStale,
 ];
 
-pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, OperationError> {
+pub(super) async fn act(
+    host: &Arc<Host>,
+    input: ActInput,
+    connection: Uuid,
+) -> Result<ActResult, OperationError> {
+    if matches!(
+        &input.proposal,
+        maka_protocol::workhub::Proposal::Linked(
+            maka_protocol::workhub::LinkedProposal::Resume { .. }
+        )
+    ) {
+        return resume::act(host, input, connection).await;
+    }
     if matches!(
         &input.proposal,
         maka_protocol::workhub::Proposal::Linked(
@@ -95,7 +108,10 @@ async fn admit(
         .map_err(sessions::stored)?
     {
         let Fact::WorkhubDelegated { delegation } = stored.event.fact else {
-            unreachable!()
+            return Err(failure(
+                Code::OperationConflict,
+                "WorkHub action belongs to another operation",
+            ));
         };
         if stored.event.invocation.session_id != COORDINATION_SESSION_ID
             || stored.event.invocation.turn_id != input.turn_id
@@ -242,4 +258,16 @@ fn fingerprint(input: &ActInput) -> Result<String, OperationError> {
     Ok(content_digest(&serde_json::to_vec(input).map_err(
         |error| failure(Code::InternalFailure, error.to_string()),
     )?))
+}
+
+fn stored(host: &Host, error: maka_event_log::StoreError) -> OperationError {
+    use maka_event_log::StoreError;
+    match error {
+        StoreError::InvalidTransition(reason) => failure(Code::OperationConflict, reason),
+        StoreError::CommitUnknown(_) | StoreError::OperationUnknown => {
+            host.executions.begin_drain();
+            failure(Code::CommitOutcomeUnknown, error.to_string())
+        }
+        other => sessions::stored(other),
+    }
 }

@@ -162,8 +162,8 @@ with scoped Desktop tools and attachment reads, plus candidate discovery and del
 to existing or newly created sessions with atomic attachment transfer. Running
 targets receive durable steering through the ordinary message queue.
 Interactive target selection preserves the original offer and answer across retries.
-Linked task stopping has durable ownership and replay. Correction, linked resume
-and complete WorkHub UI projection remain incomplete.
+Linked stop and resume follow the delegated message's exact execution lineage,
+with durable action replay. Correction and complete WorkHub UI projection remain incomplete.
 
 Skill mutations, update previews and their transaction recovery remain incomplete.
 Session branching, removal, import/export and recap, along with additional runtime

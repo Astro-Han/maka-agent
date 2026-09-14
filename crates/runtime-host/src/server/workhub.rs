@@ -69,9 +69,11 @@ pub(super) async fn execute(
             })
         }),
         Operation::WorkhubCoordinationQuery => query(host).await.and_then(serialize),
-        Operation::WorkhubCoordinationActFromTurn => action::act(host, workhub::decode_act(value)?)
-            .await
-            .and_then(serialize),
+        Operation::WorkhubCoordinationActFromTurn => {
+            action::act(host, workhub::decode_act(value)?, connection_id)
+                .await
+                .and_then(serialize)
+        }
         Operation::WorkhubCoordinationSelectAndDelegate => {
             selection::select(host, workhub::decode_selection(value)?)
                 .await

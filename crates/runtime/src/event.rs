@@ -116,6 +116,10 @@ pub enum Fact {
     WorkhubDelegated {
         delegation: Box<crate::workhub::Delegation>,
     },
+    WorkhubResumeObserved {
+        resume: Box<crate::workhub::ResumeOrigin>,
+        target: Invocation,
+    },
     ContextCheckpointRecorded {
         checkpoint: crate::context::ContextCheckpoint,
     },
@@ -164,6 +168,7 @@ impl Fact {
             Self::InvocationOpened { .. } => "invocation_opened",
             Self::MessageSteered { .. } => "message_steered",
             Self::WorkhubDelegated { .. } => "workhub_delegated",
+            Self::WorkhubResumeObserved { .. } => "workhub_resume_observed",
             Self::ModelRequested { .. } => "model_requested",
             Self::ContextCheckpointRecorded { .. } => "context_checkpoint_recorded",
             Self::ToolResultArchived { .. } => "tool_result_archived",
@@ -281,6 +286,7 @@ impl LogPrefix {
                 Fact::InvocationOpened { .. }
                 | Fact::MessageSteered { .. }
                 | Fact::WorkhubDelegated { .. }
+                | Fact::WorkhubResumeObserved { .. }
                 | Fact::ContextCheckpointRecorded { .. }
                 | Fact::ToolResultArchived { .. }
                 | Fact::ModelObserved { .. }

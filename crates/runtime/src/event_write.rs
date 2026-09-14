@@ -58,6 +58,7 @@ impl EventWrite {
                 crate::input::InvocationInput::Continuation {
                     claim,
                     request_fingerprint,
+                    ..
                 },
             ..
         } = &event.fact

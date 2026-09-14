@@ -55,8 +55,9 @@ pub async fn run(
     };
     let continuation_base = claim.as_ref().map(|claim| claim.base.high_water);
     let opening = match &input.work {
-        RunWork::Continuation { .. } => InvocationInput::Continuation {
+        RunWork::Continuation { workhub_resume, .. } => InvocationInput::Continuation {
             claim: Box::new(claim.expect("prepared continuation")),
+            workhub_resume: workhub_resume.clone(),
             request_fingerprint: input
                 .request_fingerprint
                 .clone()
