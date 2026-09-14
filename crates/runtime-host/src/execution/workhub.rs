@@ -32,6 +32,32 @@ use uuid::Uuid;
 mod profile;
 
 impl Executions {
+    /// Caller owns admission; waiting for cleanup must happen after releasing it.
+    pub(crate) async fn stop_workhub_owner(
+        &self,
+        owner: &Invocation,
+        action: &str,
+    ) -> Result<Option<tokio_util::sync::CancellationToken>> {
+        let active = self
+            .active
+            .lock()
+            .unwrap()
+            .get(&owner.run_id)
+            .filter(|run| run.invocation == *owner)
+            .cloned();
+        let Some(active) = active else {
+            return Ok(None);
+        };
+        let stopped = self.interactions.stop_run(owner).await;
+        active
+            .cancellation
+            .cancel_with(maka_agent::CancellationCause::WorkhubStop {
+                action_id: action.to_owned(),
+            });
+        stopped?;
+        Ok(Some(active.completed))
+    }
+
     pub(crate) async fn workhub_source(
         &self,
         turn: &str,
@@ -66,7 +92,7 @@ impl Executions {
     /// The action already owns a durable pending root. Reuse normal recovery/delivery.
     pub(crate) async fn dispatch_workhub_pending(self: &Arc<Self>, session: &str) -> Result<()> {
         match self.next_message(session).await {
-            Ok(Some((running, cancellation))) => self.track(running, cancellation),
+            Ok(Some(running)) => self.track(running),
             Ok(None) => {}
             Err(error) => {
                 self.begin_drain();

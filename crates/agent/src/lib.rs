@@ -23,10 +23,12 @@ mod continuation;
 mod history;
 mod model_attempt;
 pub use history::project as project_model_history;
+mod cancellation;
 mod prune;
 pub mod recovery;
 mod runner;
 mod running;
+pub use cancellation::{CancellationCause, RunCancellation};
 mod steps;
 pub use running::RunningInvocation;
 
@@ -253,6 +255,7 @@ impl Engine {
         };
         let cancellation = cancellation.child_token();
         let cancel_on_drop = cancellation.clone().drop_guard();
+        let cancellation = RunCancellation::new(cancellation);
         let inner = self.0.clone();
         let invocation = input.invocation.clone();
         let tool_names = Arc::new(match &input.work {

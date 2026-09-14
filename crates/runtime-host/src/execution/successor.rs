@@ -54,13 +54,13 @@ impl Executions {
                 previous.completed.cancel();
             }
             match next {
-                Ok(Some((next, cancellation))) => {
+                Ok(Some(next)) => {
                     active.insert(
                         next.invocation().run_id.clone(),
                         ActiveRun {
                             invocation: next.invocation().clone(),
                             tool_names: next.tool_names().clone(),
-                            cancellation,
+                            cancellation: next.cancellation(),
                             completed: CancellationToken::new(),
                         },
                     );
@@ -76,10 +76,7 @@ impl Executions {
         }
     }
 
-    pub(super) async fn next_message(
-        &self,
-        session: &str,
-    ) -> Result<Option<(RunningInvocation, CancellationToken)>> {
+    pub(super) async fn next_message(&self, session: &str) -> Result<Option<RunningInvocation>> {
         loop {
             if self.shutdown.is_cancelled() {
                 return Ok(None);
@@ -142,7 +139,7 @@ impl Executions {
                 Err(error) => Err(error),
             };
             match result {
-                Ok(running) => return Ok(Some((running, cancellation))),
+                Ok(running) => return Ok(Some(running)),
                 Err(error) if self.shutdown.is_cancelled() => return Err(error),
                 Err(error) => {
                     // Already accepted work keeps a canonical owner even if its

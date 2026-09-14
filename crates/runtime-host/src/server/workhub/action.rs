@@ -31,6 +31,7 @@ use maka_runtime::{
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod stop;
 mod target;
 
 pub(in crate::server) const ERRORS: &[Code] = &[
@@ -48,6 +49,14 @@ pub(in crate::server) const ERRORS: &[Code] = &[
 ];
 
 pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, OperationError> {
+    if matches!(
+        &input.proposal,
+        maka_protocol::workhub::Proposal::Linked(
+            maka_protocol::workhub::LinkedProposal::Stop { .. }
+        )
+    ) {
+        return stop::act(host, input).await;
+    }
     admit(host, input, None).await
 }
 
@@ -65,10 +74,19 @@ async fn admit(
     selected: Option<&super::selection::SelectedTarget>,
 ) -> Result<ActResult, OperationError> {
     let _admission = host.executions.lock_admission().await;
-    let fingerprint = content_digest(
-        &serde_json::to_vec(&input)
-            .map_err(|error| failure(Code::InternalFailure, error.to_string()))?,
-    );
+    let fingerprint = fingerprint(&input)?;
+    if host
+        .log
+        .workhub_stop(&input.action_id)
+        .await
+        .map_err(sessions::stored)?
+        .is_some()
+    {
+        return Err(failure(
+            Code::OperationConflict,
+            "WorkHub action already belongs to a stop",
+        ));
+    }
     // Receipt authority survives source termination, model removal and target changes.
     if let Some(stored) = host
         .log
@@ -193,4 +211,10 @@ fn receipt(delegation: &Delegation) -> ActResult {
             target_turn_id,
         },
     }
+}
+
+fn fingerprint(input: &ActInput) -> Result<String, OperationError> {
+    Ok(content_digest(&serde_json::to_vec(input).map_err(
+        |error| failure(Code::InternalFailure, error.to_string()),
+    )?))
 }

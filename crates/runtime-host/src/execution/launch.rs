@@ -46,7 +46,7 @@ impl Executions {
                 }
                 execution_error(error)
             })?;
-        self.track(running, cancellation);
+        self.track(running);
         self.query(TurnQueryInput {
             session_id: invocation.session_id,
             turn_id: invocation.turn_id,
@@ -54,17 +54,13 @@ impl Executions {
         .await
     }
 
-    pub(super) fn track(
-        self: &std::sync::Arc<Self>,
-        running: maka_agent::RunningInvocation,
-        cancellation: tokio_util::sync::CancellationToken,
-    ) {
+    pub(super) fn track(self: &std::sync::Arc<Self>, running: maka_agent::RunningInvocation) {
         self.active.lock().unwrap().insert(
             running.invocation().run_id.clone(),
             ActiveRun {
                 invocation: running.invocation().clone(),
                 tool_names: running.tool_names().clone(),
-                cancellation,
+                cancellation: running.cancellation(),
                 completed: tokio_util::sync::CancellationToken::new(),
             },
         );

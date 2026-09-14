@@ -28,6 +28,15 @@ use serde::{Deserialize, Serialize};
 
 pub const COORDINATION_SESSION_ID: &str = "maka_workhub_coordination";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopOutcome {
+    CancelledPending,
+    StopDelivered,
+    AlreadyTerminal,
+    NotOwned,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Delegation {
@@ -60,6 +69,11 @@ impl DelegationKind {
 pub fn created_session_id(action_id: &str) -> String {
     let digest = crate::artifact::content_digest(format!("create\0{action_id}").as_bytes());
     format!("whs_{}", &digest[7..55])
+}
+
+pub fn stop_abort_source(action_id: &str) -> String {
+    let digest = crate::artifact::content_digest(action_id.as_bytes());
+    format!("workhub.direct_stop.{}", &digest[7..55])
 }
 
 impl Delegation {
@@ -96,6 +110,13 @@ impl Delegation {
         Ok(())
     }
 
+    pub fn target_message_id(&self) -> String {
+        format!(
+            "workhub_{}",
+            &crate::artifact::content_digest(self.action_id.as_bytes())[7..]
+        )
+    }
+
     /// Derive the sole target message from its canonical source and recorded task.
     pub fn message(&self, user: &MessageInput) -> Result<RootSourceMessage, &'static str> {
         let content = MessageInput {
@@ -121,10 +142,7 @@ impl Delegation {
         }
         let message = RootSourceMessage {
             message: DeliveredMessage {
-                message_id: format!(
-                    "workhub_{}",
-                    &crate::artifact::content_digest(self.action_id.as_bytes())[7..]
-                ),
+                message_id: self.target_message_id(),
                 submitted_content_digest: content
                     .content_digest()
                     .map_err(|_| "invalid delegated message")?,

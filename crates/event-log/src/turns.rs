@@ -141,7 +141,7 @@ pub(crate) async fn run_invocation(
     Ok(ids.into_iter().next())
 }
 
-async fn project(
+pub(crate) async fn project(
     connection: &mut sqlx::SqliteConnection,
     opening: RuntimeEvent,
 ) -> Result<TurnBoundary, StoreError> {

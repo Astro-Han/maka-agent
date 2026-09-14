@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use maka_event_log::EventLog;
+use maka_event_log::{EventLog, message_resolution::MessageExecution};
 use maka_runtime::{
     event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
     execution::OrchestrationMode,
@@ -130,6 +130,10 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     };
     assert_eq!(log.admit_message(pending.clone()).await.unwrap(), pending);
     assert_eq!(log.admit_message(pending.clone()).await.unwrap(), pending);
+    assert!(matches!(
+        log.message_execution("a", "client-source").await.unwrap(),
+        MessageExecution::Pending
+    ));
     let mut changed = pending.clone();
     changed.source.message.content.text = "different intent".into();
     assert!(log.admit_message(changed).await.is_err());
@@ -170,6 +174,9 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     assert_eq!(proof.opening().event, event);
     assert_eq!(proof.source(), &first);
     assert!(
+        matches!(log.message_execution("a", "client-source").await.unwrap(), MessageExecution::Owned(owner) if owner.invocation == event.invocation)
+    );
+    assert!(
         log.steering_message("a", "client-source")
             .await
             .unwrap()
@@ -207,6 +214,9 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     .await
     .unwrap();
     end(&log, &event).await;
+    assert!(
+        matches!(log.message_execution("a", "already-steered").await.unwrap(), MessageExecution::Shared(owner) if owner.invocation == event.invocation)
+    );
     assert_eq!(log.append(&write).await.unwrap(), sequence);
     for id in ["client-source", "already-steered", event.id.as_str()] {
         assert!(
@@ -256,6 +266,9 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
             .unwrap();
         assert_eq!(proof.opening().event, combined);
         assert_eq!(proof.source(), source);
+        assert!(
+            matches!(log.message_execution("a", &source.message.message_id).await.unwrap(), MessageExecution::Shared(owner) if owner.invocation == combined.invocation)
+        );
     }
     let mut collision = RuntimeEvent::new(
         combined.invocation.clone(),
@@ -281,6 +294,10 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
         canonical
     );
     assert_eq!(support::transcript(&log, "a").await, rows);
+    assert!(
+        matches!(log.message_execution("a", "client-source").await.unwrap(), MessageExecution::Owned(owner) if owner.invocation == event.invocation),
+        "a later independent root cannot acquire an earlier Message"
+    );
     assert_eq!(
         log.root_message("a", "client-source")
             .await

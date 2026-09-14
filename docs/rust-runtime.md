@@ -152,7 +152,7 @@ opt-in and credentials. An isolated worktree can set `MAKA_JS_DEPS` and
 
 ## Current limits
 
-Project/session control and settled Turn navigation, configuration, attachments, file tools, shell/PTY,
+Project management, basic Session/Turn control, model configuration, attachments, file tools, shell/PTY,
 Client Capability tools, model streaming and context compaction are implemented.
 Codex subscription execution is supported; Copilot/xAI inference adaptation and
 live verification are deferred.
@@ -161,9 +161,12 @@ WorkHub supports session resolution, queries, model configuration and conversati
 with scoped Desktop tools and attachment reads, plus candidate discovery and delegation
 to existing idle or newly created sessions with atomic attachment transfer.
 Interactive target selection preserves the original offer and answer across retries.
-Linked operations and delegation to running sessions remain incomplete.
+Linked task stopping has durable ownership and replay. Correction, linked resume,
+delegation to running sessions and complete WorkHub UI projection remain incomplete.
 
 Skill mutations, update previews and their transaction recovery remain incomplete.
+Session branching, removal, import/export and recap, along with additional runtime
+policy settings, also remain incomplete.
 Orchestration, some capability services, managed upgrades and other protocol domains also remain incomplete. Full Desktop
 acceptance and release packaging across Linux, macOS and Windows are still
 required. Plugin implementation follows Agent Graph; OS sandboxing is deferred. Memory is excluded pending a

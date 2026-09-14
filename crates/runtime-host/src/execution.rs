@@ -76,7 +76,7 @@ pub(crate) struct Executions {
 struct ActiveRun {
     invocation: maka_runtime::event::Invocation,
     tool_names: Arc<std::collections::HashSet<String>>,
-    cancellation: CancellationToken,
+    cancellation: maka_agent::RunCancellation,
     completed: CancellationToken,
 }
 

@@ -20,16 +20,15 @@
 use maka_runtime::event::Invocation;
 use std::{collections::HashSet, sync::Arc};
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
-use crate::RunError;
+use crate::{RunCancellation, RunError};
 
 /// An admitted invocation's lifetime owner. Cancellation is a request, not a
 /// terminal result; wait observes completion only after durable finalization.
 pub struct RunningInvocation {
     invocation: Invocation,
     tool_names: Arc<HashSet<String>>,
-    cancellation: CancellationToken,
+    cancellation: RunCancellation,
     worker: JoinHandle<Result<Invocation, RunError>>,
 }
 
@@ -37,7 +36,7 @@ impl RunningInvocation {
     pub(crate) fn new(
         invocation: Invocation,
         tool_names: Arc<HashSet<String>>,
-        cancellation: CancellationToken,
+        cancellation: RunCancellation,
         worker: JoinHandle<Result<Invocation, RunError>>,
     ) -> Self {
         Self {
@@ -60,6 +59,10 @@ impl RunningInvocation {
 
     pub fn cancel(&self) {
         self.cancellation.cancel();
+    }
+
+    pub fn cancellation(&self) -> RunCancellation {
+        self.cancellation.clone()
     }
 
     pub async fn wait(mut self) -> Result<Invocation, RunError> {

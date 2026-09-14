@@ -264,7 +264,7 @@ async fn migration_and_recovery_commit_are_atomic_under_real_sqlite_faults() {
         .unwrap();
     // A prior Rust schema, not an old Maka/user database.
     sqlx::raw_sql(
-        "DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE shell_runs; DELETE FROM _sqlx_migrations WHERE version >= 6;
+        "DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE shell_runs; DELETE FROM _sqlx_migrations WHERE version >= 6;
         PRAGMA user_version = 5;",
     )
     .execute(&mut observer)

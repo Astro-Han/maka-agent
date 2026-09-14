@@ -38,6 +38,7 @@ const { values } = parseArgs({
     'workhub-delegation-workspace': { type: 'string' },
     'workhub-creation-workspace': { type: 'string' },
     'workhub-selection-workspace': { type: 'string' },
+    'workhub-stop-workspace': { type: 'string' },
     reopened: { type: 'boolean' },
   },
 });
@@ -59,19 +60,23 @@ try {
   if (
     values['workhub-delegation-workspace'] ||
     values['workhub-creation-workspace'] ||
-    values['workhub-selection-workspace']
+    values['workhub-selection-workspace'] ||
+    values['workhub-stop-workspace']
   ) {
     await verifyWorkhubDelegation(
       connection,
       values['workhub-delegation-workspace'] ??
         values['workhub-creation-workspace'] ??
-        values['workhub-selection-workspace'],
+        values['workhub-selection-workspace'] ??
+        values['workhub-stop-workspace'],
       values.reopened,
       values['workhub-creation-workspace']
         ? 'created'
         : values['workhub-selection-workspace']
           ? 'selected'
-          : 'existing',
+          : values['workhub-stop-workspace']
+            ? 'stopped'
+            : 'existing',
     );
     console.log(values.reopened ? 'workhub-delegation-reopened' : 'workhub-delegation-passed');
   } else if (values['workhub-answer-workspace']) {

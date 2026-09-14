@@ -1,0 +1,133 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::{StopIntent, StopRecord, StopRequest, StopResolution, invalid, subject};
+use crate::{StoreError, message_resolution::MessageExecution, turns::InvocationState};
+use maka_runtime::{
+    event::{Fact, RuntimeEvent},
+    workhub::StopOutcome,
+};
+use sqlx::SqliteConnection;
+
+pub(super) async fn apply(
+    tx: &mut SqliteConnection,
+    request: StopRequest,
+) -> Result<StopRecord, StoreError> {
+    let collision: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE kind = 'workhub_delegated'
+         AND json_extract(event_json, '$.fact.delegation.action_id') = ?)",
+    )
+    .bind(&request.action_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if collision {
+        return Err(invalid("WorkHub action already belongs to a delegation"));
+    }
+    let source: Option<String> = sqlx::query_scalar(
+        "SELECT event_json FROM runtime_events o WHERE o.kind = 'invocation_opened'
+         AND o.invocation_id = ? AND NOT EXISTS(SELECT 1 FROM runtime_events t
+           WHERE t.invocation_id = o.invocation_id AND t.kind = 'invocation_ended')",
+    )
+    .bind(&request.source.invocation_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let source: RuntimeEvent = serde_json::from_str(
+        &source.ok_or_else(|| invalid("WorkHub source is no longer active"))?,
+    )?;
+    if source.invocation != request.source
+        || !matches!(
+            source.fact,
+            Fact::InvocationOpened {
+                input: maka_runtime::input::InvocationInput::Message { .. },
+                ..
+            }
+        )
+    {
+        return Err(invalid("WorkHub stop source is not its authorized message"));
+    }
+    let archived: Option<bool> =
+        sqlx::query_scalar("SELECT archived FROM session_control WHERE id = ?")
+            .bind(&request.target_session_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    match archived {
+        None => return Err(StoreError::SessionNotFound),
+        Some(true) => return Err(invalid("WorkHub stop target is archived")),
+        Some(false) => {}
+    }
+    let (delegation, work) = subject::select(tx, &request.target_session_id).await?;
+    let claimed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workhub_stops WHERE delegation_action_id = ? AND (resolution_json IS NULL OR json_extract(resolution_json, '$.outcome') != 'not_owned'))")
+        .bind(&delegation.action_id).fetch_one(&mut *tx).await?;
+    if claimed {
+        return Err(invalid("WorkHub delegation already has a stop claim"));
+    }
+    let mut intent = StopIntent {
+        request,
+        delegation_action_id: delegation.action_id.clone(),
+        owner: None,
+    };
+    let result = match work {
+        MessageExecution::Pending => {
+            let message = delegation.target_message_id();
+            // Consumption, cancellation and command publication serialize in this transaction.
+            sqlx::query("INSERT INTO message_cancellations(session_id, message_id, cancellation_id) VALUES (?, ?, ?)")
+                .bind(&delegation.target.session_id).bind(&message).bind(&intent.request.action_id)
+                .execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM message_admissions WHERE session_id = ? AND message_id = ?")
+                .bind(&delegation.target.session_id)
+                .bind(&message)
+                .execute(&mut *tx)
+                .await?;
+            crate::message_queue::bump(tx, &delegation.target.session_id).await?;
+            Some(StopResolution {
+                outcome: StopOutcome::CancelledPending,
+                target_turn_id: None,
+            })
+        }
+        MessageExecution::Cancelled => Some(StopResolution {
+            outcome: StopOutcome::AlreadyTerminal,
+            target_turn_id: None,
+        }),
+        MessageExecution::Owned(boundary) => {
+            let terminal = matches!(boundary.state, InvocationState::Ended { .. });
+            intent.owner = Some(boundary.invocation.clone());
+            terminal.then_some(StopResolution {
+                outcome: StopOutcome::AlreadyTerminal,
+                target_turn_id: Some(boundary.invocation.turn_id),
+            })
+        }
+        MessageExecution::Shared(boundary) => Some(StopResolution {
+            outcome: StopOutcome::NotOwned,
+            target_turn_id: Some(boundary.invocation.turn_id),
+        }),
+        MessageExecution::Missing => {
+            return Err(invalid(
+                "WorkHub delegation has no recoverable Message owner",
+            ));
+        }
+    };
+    sqlx::query("INSERT INTO workhub_stops(action_id, delegation_action_id, record_json, resolution_json) VALUES (?, ?, ?, ?)")
+        .bind(&intent.request.action_id).bind(&intent.delegation_action_id)
+        .bind(serde_json::to_string(&intent)?).bind(result.as_ref().map(serde_json::to_string).transpose()?)
+        .execute(tx).await?;
+    Ok(StopRecord {
+        intent,
+        resolution: result,
+    })
+}

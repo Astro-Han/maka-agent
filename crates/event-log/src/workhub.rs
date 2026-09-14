@@ -26,6 +26,7 @@ use sqlx::SqliteConnection;
 
 mod candidates;
 mod create;
+pub mod stop;
 pub use candidates::activity_at;
 
 impl EventLog {
@@ -77,6 +78,14 @@ pub(crate) async fn apply(
         return Ok(());
     };
     delegation.validate(&event.invocation).map_err(invalid)?;
+    let control: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workhub_stops WHERE action_id = ?)")
+            .bind(&delegation.action_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if control {
+        return Err(invalid("WorkHub action already belongs to a stop"));
+    }
     let json: Option<Option<String>> = sqlx::query_scalar(
         "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
          FROM runtime_events WHERE event_id = ? AND kind = 'invocation_opened'",

@@ -50,9 +50,9 @@ impl Executions {
                     ));
                 }
                 if !self.has_active_session(session)
-                    && let Some((running, cancellation)) = self.next_message(session).await?
+                    && let Some(running) = self.next_message(session).await?
                 {
-                    self.track(running, cancellation);
+                    self.track(running);
                 }
             }
             after = sessions.last().cloned();

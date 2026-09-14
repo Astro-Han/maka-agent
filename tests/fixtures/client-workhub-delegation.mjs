@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { readFile, realpath, writeFile } from 'node:fs/promises';
@@ -35,6 +36,8 @@ const turnId = 'delegate-request';
 export async function verifyWorkhubDelegation(connection, workspace, reopened, mode = 'existing') {
   const createNew = mode === 'created';
   const selectTarget = mode === 'selected';
+  const stopTarget = mode === 'stopped';
+  const targetReady = Promise.withResolvers();
   const targetSessionId = createNew ? createdTarget('delegation-action') : 'target';
   const request = (operation, input) => connection.request(operation, input, 5000);
   const file = join(workspace, 'delegation.json');
@@ -48,6 +51,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
   if (reopened) {
     const saved = JSON.parse(await readFile(file, 'utf8'));
     assert.deepEqual(await act(saved.input), saved.receipt);
+    if (saved.stopInput) assert.deepEqual(await act(saved.stopInput), saved.stopReceipt);
     assert.deepEqual(
       await request('turn.query', {
         sessionId: saved.receipt.targetSessionId,
@@ -70,7 +74,9 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     calls = 0,
     input,
     receipt,
-    attachment;
+    attachment,
+    stopInput,
+    stopReceipt;
   const server = createServer(async (req, response) => {
     try {
       let body = '';
@@ -89,6 +95,12 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         assert(path);
         assert(!path.endsWith('/' + attachment.ref.relativePath));
         if (finished) assert(body.includes('TRANSFER_EVIDENCE'));
+        if (finished && stopTarget) {
+          response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          response.flushHeaders();
+          targetReady.resolve();
+          return;
+        }
       }
       const delta = finished
         ? { content: target ? 'target completed' : 'delegation completed' }
@@ -237,6 +249,32 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
               : await act(input);
             assert.equal(receipt.disposition, createNew ? 'create_new' : 'delegate_existing');
             assert.equal(receipt.targetSessionId, targetSessionId);
+            if (stopTarget) {
+              await targetReady.promise;
+              stopInput = {
+                turnId,
+                actionId: 'stop-action',
+                proposal: {
+                  operation: 'stop',
+                  expects: { targetSessionId },
+                },
+              };
+              stopReceipt = await act(stopInput);
+              assert.deepEqual(stopReceipt, {
+                disposition: 'stop_work',
+                outcome: 'stop_delivered',
+                targetSessionId,
+                targetTurnId: receipt.targetTurnId,
+              });
+              assert.deepEqual(await act(stopInput), stopReceipt);
+              await assert.rejects(
+                act({
+                  ...stopInput,
+                  proposal: { operation: 'stop', expects: { targetSessionId: 'side' } },
+                }),
+                (error) => error.code === 'operation_conflict',
+              );
+            }
             if (createNew) {
               const created = await querySession(request, targetSessionId);
               assert.equal(created.name, 'Created task');
@@ -298,17 +336,25 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       sessionId: targetSessionId,
       turnId: receipt.targetTurnId,
     });
-    assert.equal(target.status, 'completed');
+    assert.equal(target.status, stopTarget ? 'cancelled' : 'completed');
+    if (stopTarget)
+      assert.equal(
+        target.abortSource,
+        'workhub.direct_stop.' +
+          createHash('sha256').update(stopInput.actionId).digest('hex').slice(0, 48),
+      );
     await targetObserver.close();
     targetObserver = await watchSession(connection, targetSessionId, { kind: 'tail', maxBytes: 2 });
     const rows = await targetObserver.subscription.loadTranscript(decodeStoredMessage);
-    assert(rows.some((row) => row.type === 'assistant' && row.text === 'target completed'));
+    if (!stopTarget)
+      assert(rows.some((row) => row.type === 'assistant' && row.text === 'target completed'));
     await connection.unregisterClientCapabilities(3000);
     await request('connection.catalog.remove', {
       expected: { connectionId: basis.connectionId, revision: basis.revision },
     });
     assert.deepEqual(await act(input), receipt);
-    await writeFile(file, JSON.stringify({ input, receipt, target, rows }));
+    if (stopInput) assert.deepEqual(await act(stopInput), stopReceipt);
+    await writeFile(file, JSON.stringify({ input, receipt, target, rows, stopInput, stopReceipt }));
   } finally {
     await sourceObserver?.close();
     await targetObserver?.close();

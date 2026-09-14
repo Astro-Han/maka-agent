@@ -167,6 +167,7 @@ impl Host {
                 .as_millis(),
         )?;
         log.recover_shell_runs(recovered_at).await?;
+        log.recover_workhub_stops().await?;
         let configuration = Arc::new(ConfigurationStore::for_root(root.clone()).await?);
         let draining = CancellationToken::new();
         let startup_guard = draining.clone().drop_guard();

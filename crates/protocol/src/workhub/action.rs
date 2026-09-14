@@ -119,20 +119,36 @@ pub enum ActResult {
         target_session_id: String,
         target_turn_id: String,
     },
+    StopWork {
+        outcome: maka_runtime::workhub::StopOutcome,
+        target_session_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_turn_id: Option<String>,
+    },
 }
 
 impl ActResult {
     pub(super) fn validate(&self) -> Result<()> {
-        let (Self::CreateNew {
-            target_session_id,
-            target_turn_id,
-        }
-        | Self::DelegateExisting {
-            target_session_id,
-            target_turn_id,
-        }) = self;
+        let (target_session_id, target_turn_id) = match self {
+            Self::CreateNew {
+                target_session_id,
+                target_turn_id,
+            }
+            | Self::DelegateExisting {
+                target_session_id,
+                target_turn_id,
+            } => (target_session_id, Some(target_turn_id)),
+            Self::StopWork {
+                target_session_id,
+                target_turn_id,
+                ..
+            } => (target_session_id, target_turn_id.as_ref()),
+        };
         crate::turn::entity(target_session_id)?;
-        crate::turn::entity(target_turn_id)
+        if let Some(turn) = target_turn_id {
+            crate::turn::entity(turn)?;
+        }
+        Ok(())
     }
 }
 

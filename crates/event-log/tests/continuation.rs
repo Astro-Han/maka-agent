@@ -41,7 +41,29 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     let prior = opening("prior", None);
     append(&log, &prior).await;
     close(&log, &prior).await;
-    let source = opening("source", None);
+    let mut source = opening("source", None);
+    if let Fact::InvocationOpened {
+        input:
+            InvocationInput::Message {
+                content,
+                source_messages,
+                ..
+            },
+        ..
+    } = &mut source.fact
+    {
+        source_messages.push(maka_runtime::message::RootSourceMessage {
+            message: maka_runtime::input::DeliveredMessage {
+                message_id: "origin-message".into(),
+                submitted_content_digest: content.content_digest().unwrap(),
+                content: content.clone(),
+            },
+            submitted_placement: maka_runtime::message::Placement::NextTurn,
+            disposition: maka_runtime::message::MessageDisposition::TurnStarted,
+            skill_invocation: Default::default(),
+            submitted_intent: None,
+        });
+    }
     append(&log, &source).await;
     close(&log, &source).await;
     let context = log
@@ -199,9 +221,19 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     append(&log, &second).await;
     close(&log, &second).await;
     let third_claim = claim(&log, "claim-third", &second, base).await;
+    let unrelated = opening("unrelated", None);
+    append(&log, &unrelated).await;
+    close(&log, &unrelated).await;
     log.close().await.unwrap();
 
     let log = EventLog::open(&path).await.unwrap();
+    assert!(
+        matches!(
+            log.message_execution("session", "origin-message").await.unwrap(),
+            maka_event_log::message_resolution::MessageExecution::Owned(owner) if owner.invocation == second.invocation
+        ),
+        "Message ownership follows continuation claims, never the latest Session root"
+    );
     assert_eq!(
         log.continuation_for_source(&original.source)
             .await

@@ -128,14 +128,15 @@ Grep 差分测试需要 PATH 中有 `rg`；runtime 本身不依赖该可执行�
 
 ## 当前限制
 
-已实现项目／会话管理、已结束 Turn 导航、配置、附件、文件工具、shell／PTY、Client Capability 工具、
+已实现项目管理、基本 Session／Turn 控制、模型配置、附件、文件工具、shell／PTY、Client Capability 工具、
 模型流式交互与上下文压缩。Codex 订阅已接入执行；Copilot／xAI 推理适配和实测后置。
 
 WorkHub 已支持专属会话解析、查询、模型配置、受限 Desktop 工具与附件读取，以及候选发现和向已有空闲或新建会话委派任务。
 委派时原子转移附件；交互式目标选择在重试时复用原候选表单与答案。
-关联操作与向运行中会话委派仍未完成。
+关联任务停止已具备持久化归属与重放；修正、关联恢复、向运行中会话委派及完整 WorkHub UI 投影仍未完成。
 
 Skills 变更、更新预览及其事务恢复仍未完成。
+会话分支、删除、导入导出、回顾及其它 runtime policy 设置也未完成。
 编排、部分 capability 服务、受管升级及其它协议域也未完成。
 完整 Desktop 验收和 Linux、macOS、Windows 发布打包仍待完成。
 插件实现排在 Agent Graph 之后；OS 沙箱暂缓。Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。

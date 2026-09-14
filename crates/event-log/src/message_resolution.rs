@@ -23,6 +23,9 @@ use maka_runtime::event::Invocation;
 use sqlx::Connection;
 use std::collections::HashSet;
 
+pub(crate) mod owner;
+pub use owner::MessageExecution;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MessageResolution {
     Pending {

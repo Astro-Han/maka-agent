@@ -25,14 +25,14 @@ use maka_runtime::event::{
 use maka_runtime::input::InvocationInput;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
 
 pub async fn run(
     inner: Arc<Inner>,
     input: RunInput,
-    cancellation: CancellationToken,
+    cancellation_owner: crate::RunCancellation,
     admitted: tokio::sync::oneshot::Sender<()>,
 ) -> Result<Invocation, RunError> {
+    let cancellation = cancellation_owner.token().clone();
     if cancellation.is_cancelled() {
         return Err(RunError::Cancelled);
     }
@@ -134,7 +134,7 @@ pub async fn run(
         Ok((outcome, checkpoint)) => (outcome.clone(), checkpoint.clone()),
         Err(RunError::Cancelled | RunError::Model(maka_model::ModelError::Cancelled)) => (
             InvocationOutcome::Cancelled {
-                source: "runtime_cancellation".into(),
+                source: cancellation_owner.source(),
             },
             None,
         ),

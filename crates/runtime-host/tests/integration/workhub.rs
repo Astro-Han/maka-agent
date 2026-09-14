@@ -27,6 +27,7 @@ async fn original_client_workhub_routing_runs_once_and_replays_after_reopen() {
         "--workhub-delegation-workspace",
         "--workhub-creation-workspace",
         "--workhub-selection-workspace",
+        "--workhub-stop-workspace",
     ] {
         let fixture = ClientFixture::new("maka-workhub-delegation-");
         fixture.run(flag, false, "workhub-delegation-passed").await;
