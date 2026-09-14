@@ -24,8 +24,10 @@ use serde_json::{Value, json};
 
 mod action;
 mod candidates;
+mod selection;
 pub use action::{ActInput, ActResult, LinkedProposal, Proposal, RoutingProposal, decode_act};
 pub use candidates::{Candidate, CandidatesResult, decode_candidates};
+pub use selection::{SelectionInput, SelectionResult, decode_selection};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -90,6 +92,7 @@ pub fn supports(operation: Operation) -> bool {
             | Operation::WorkhubCoordinationAnswer
             | Operation::WorkhubCoordinationCandidates
             | Operation::WorkhubCoordinationActFromTurn
+            | Operation::WorkhubCoordinationSelectAndDelegate
     )
 }
 
@@ -108,6 +111,9 @@ pub fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
         }
         Operation::WorkhubCoordinationActFromTurn => {
             decode_act(value)?;
+        }
+        Operation::WorkhubCoordinationSelectAndDelegate => {
+            decode_selection(value)?;
         }
         _ => return Err(ProtocolError::invalid("Unknown WorkHub operation")),
     }
@@ -143,16 +149,14 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
             decode_candidates(value)?;
         }
         Operation::WorkhubCoordinationActFromTurn => {
-            let (ActResult::DelegateExisting {
-                target_session_id,
-                target_turn_id,
+            let result: ActResult = crate::turn::decode(value)?;
+            result.validate()?;
+        }
+        Operation::WorkhubCoordinationSelectAndDelegate => {
+            let result: SelectionResult = crate::turn::decode(value)?;
+            if let SelectionResult::Delegated { result } = result {
+                result.validate()?;
             }
-            | ActResult::CreateNew {
-                target_session_id,
-                target_turn_id,
-            }) = crate::turn::decode(value)?;
-            crate::turn::entity(&target_session_id)?;
-            crate::turn::entity(&target_turn_id)?;
         }
         _ => return Err(ProtocolError::invalid("Unknown WorkHub operation")),
     }

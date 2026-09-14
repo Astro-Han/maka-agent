@@ -160,11 +160,11 @@ live verification are deferred.
 WorkHub supports session resolution, queries, model configuration and conversation
 with scoped Desktop tools and attachment reads, plus candidate discovery and delegation
 to existing idle or newly created sessions with atomic attachment transfer.
-Linked operations and interactive target selection remain incomplete.
+Interactive target selection preserves the original offer and answer across retries.
+Linked operations and delegation to running sessions remain incomplete.
 
-Skill mutations and update previews,
-advanced recovery/reconciliation and orchestration,
-some capability services, managed upgrades and other protocol domains remain incomplete. Full Desktop
+Skill mutations, update previews and their transaction recovery remain incomplete.
+Orchestration, some capability services, managed upgrades and other protocol domains also remain incomplete. Full Desktop
 acceptance and release packaging across Linux, macOS and Windows are still
 required. Plugin implementation follows Agent Graph; OS sandboxing is deferred. Memory is excluded pending a
 separate redesign; its existing implementation is not ported. Content redaction is omitted.

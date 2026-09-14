@@ -22,10 +22,11 @@ use maka_runtime::{execution::ToolMode, workhub::COORDINATION_SESSION_ID};
 use maka_runtime_host::session::SessionConfiguration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn original_client_workhub_existing_and_created_tasks_run_once_and_replay_after_reopen() {
+async fn original_client_workhub_routing_runs_once_and_replays_after_reopen() {
     for flag in [
         "--workhub-delegation-workspace",
         "--workhub-creation-workspace",
+        "--workhub-selection-workspace",
     ] {
         let fixture = ClientFixture::new("maka-workhub-delegation-");
         fixture.run(flag, false, "workhub-delegation-passed").await;

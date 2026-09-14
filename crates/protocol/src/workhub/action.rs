@@ -121,6 +121,21 @@ pub enum ActResult {
     },
 }
 
+impl ActResult {
+    pub(super) fn validate(&self) -> Result<()> {
+        let (Self::CreateNew {
+            target_session_id,
+            target_turn_id,
+        }
+        | Self::DelegateExisting {
+            target_session_id,
+            target_turn_id,
+        }) = self;
+        crate::turn::entity(target_session_id)?;
+        crate::turn::entity(target_turn_id)
+    }
+}
+
 pub fn decode_act(value: &Value) -> Result<ActInput> {
     let input: ActInput = crate::turn::decode(value)?;
     for field in [

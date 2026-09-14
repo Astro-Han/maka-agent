@@ -49,18 +49,7 @@ pub(super) async fn query(host: &Arc<Host>) -> Result<Candidates, OperationError
     let executions = host.executions.clone();
     let records = host
         .log
-        .workhub_candidates(move |record: &SessionRecord<SessionConfiguration>| {
-            let config = &record.configuration;
-            record.id != COORDINATION_SESSION_ID
-                && !executions.has_active_session(&record.id)
-                && config.tool_profile.is_none()
-                && config.collaboration_mode == CollaborationMode::Agent
-                && config.orchestration_mode == OrchestrationMode::Default
-                && !config
-                    .labels
-                    .iter()
-                    .any(|label| label == "mode:side_conversation")
-        })
+        .workhub_candidates(move |record| eligible(&executions, record))
         .await
         .map_err(sessions::stored)?;
     let mut candidates = records
@@ -98,4 +87,31 @@ pub(super) async fn query(host: &Arc<Host>) -> Result<Candidates, OperationError
         },
         records,
     })
+}
+
+pub(super) async fn target(
+    host: &Arc<Host>,
+    id: &str,
+) -> Result<Option<SessionRecord<SessionConfiguration>>, OperationError> {
+    let executions = host.executions.clone();
+    host.log
+        .workhub_candidate(id, move |record| eligible(&executions, record))
+        .await
+        .map_err(sessions::stored)
+}
+
+fn eligible(
+    executions: &crate::execution::Executions,
+    record: &SessionRecord<SessionConfiguration>,
+) -> bool {
+    let config = &record.configuration;
+    record.id != COORDINATION_SESSION_ID
+        && !executions.has_active_session(&record.id)
+        && config.tool_profile.is_none()
+        && config.collaboration_mode == CollaborationMode::Agent
+        && config.orchestration_mode == OrchestrationMode::Default
+        && !config
+            .labels
+            .iter()
+            .any(|label| label == "mode:side_conversation")
 }

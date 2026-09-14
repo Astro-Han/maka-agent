@@ -25,6 +25,35 @@ use serde::de::DeserializeOwned;
 use sqlx::Connection;
 
 impl EventLog {
+    /// Revalidate an offered target independently of the current display window.
+    pub async fn workhub_candidate<T, F>(
+        &self,
+        id: &str,
+        eligible: F,
+    ) -> Result<Option<SessionRecord<T>>, StoreError>
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+        F: Fn(&SessionRecord<T>) -> bool + Send + 'static,
+    {
+        self.validate_root()?;
+        crate::sessions::validate_id(id)?;
+        let id = id.to_owned();
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    let Some(record) = crate::sessions::read(&mut tx, &id).await? else {
+                        return Ok(None);
+                    };
+                    if !eligible(&record) || !idle(&mut tx, &record).await? {
+                        return Ok(None);
+                    }
+                    Ok(Some(record))
+                })
+            })
+            .await
+    }
+
     /// One read snapshot, bounded resident records, no independent candidate authority.
     /// The Host supplies configuration eligibility; durable execution safety stays here.
     pub async fn workhub_candidates<T, F>(
@@ -32,7 +61,7 @@ impl EventLog {
         eligible: F,
     ) -> Result<Vec<SessionRecord<T>>, StoreError>
     where
-        T: DeserializeOwned + Send + 'static,
+        T: DeserializeOwned + Send + Sync + 'static,
         F: Fn(&SessionRecord<T>) -> bool + Send + 'static,
     {
         self.validate_root()?;
@@ -57,23 +86,8 @@ impl EventLog {
                             let record = crate::sessions::read(&mut tx, id)
                                 .await?
                                 .ok_or(StoreError::SessionNotFound)?;
-                            if !eligible(&record)
-                                || record.execution.as_ref().is_some_and(|execution| {
-                                    matches!(execution.state, SessionExecutionState::Live { .. })
-                                })
-                            {
+                            if !eligible(&record) || !idle(&mut tx, &record).await? {
                                 continue;
-                            }
-                            let pending: bool = sqlx::query_scalar(
-                        "SELECT EXISTS(SELECT 1 FROM message_admissions WHERE session_id = ?)"
-                    ).bind(id).fetch_one(&mut *tx).await?;
-                            if pending || crate::shell_runs::unsettled(&mut tx, id).await? {
-                                continue;
-                            }
-                            match crate::context::safety::require_safe(&mut tx, id, None).await {
-                                Ok(()) => {}
-                                Err(StoreError::InvalidTransition(_)) => continue,
-                                Err(error) => return Err(error),
                             }
                             candidates.push(record);
                             candidates.sort_by(|a, b| {
@@ -90,6 +104,33 @@ impl EventLog {
                 })
             })
             .await
+    }
+}
+
+async fn idle<T>(
+    tx: &mut sqlx::SqliteConnection,
+    record: &SessionRecord<T>,
+) -> Result<bool, StoreError> {
+    if record.archived
+        || record
+            .execution
+            .as_ref()
+            .is_some_and(|execution| matches!(execution.state, SessionExecutionState::Live { .. }))
+    {
+        return Ok(false);
+    }
+    let pending: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM message_admissions WHERE session_id = ?)")
+            .bind(&record.id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if pending || crate::shell_runs::unsettled(tx, &record.id).await? {
+        return Ok(false);
+    }
+    match crate::context::safety::require_safe(tx, &record.id, None).await {
+        Ok(()) => Ok(true),
+        Err(StoreError::InvalidTransition(_)) => Ok(false),
+        Err(error) => Err(error),
     }
 }
 

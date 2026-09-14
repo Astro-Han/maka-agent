@@ -27,15 +27,24 @@ import { watchSession } from './client-subscription.mjs';
 import { createInput, querySession } from './client-runtime-policy-fixture.mjs';
 import { upload } from './client-artifact-upload.mjs';
 import { createdTarget, prepareRouting } from './client-workhub-routing.mjs';
+import { chooseTarget, setupSelection } from './client-workhub-selection.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'delegate-request';
 
-export async function verifyWorkhubDelegation(connection, workspace, reopened, createNew = false) {
+export async function verifyWorkhubDelegation(connection, workspace, reopened, mode = 'existing') {
+  const createNew = mode === 'created';
+  const selectTarget = mode === 'selected';
   const targetSessionId = createNew ? createdTarget('delegation-action') : 'target';
   const request = (operation, input) => connection.request(operation, input, 5000);
   const file = join(workspace, 'delegation.json');
-  const act = (input) => request('workhub.coordination.actFromTurn', input);
+  const act = async (input) => {
+    const result = await request(
+      selectTarget ? 'workhub.coordination.selectAndDelegate' : 'workhub.coordination.actFromTurn',
+      input,
+    );
+    return selectTarget && result.kind === 'delegated' ? result.result : result;
+  };
   if (reopened) {
     const saved = JSON.parse(await readFile(file, 'utf8'));
     assert.deepEqual(await act(saved.input), saved.receipt);
@@ -167,6 +176,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, c
       await request('session.create', { ...createInput(workspace, id, 'bypass'), ...extra });
     if (!createNew)
       await request('session.lifecycle.set', { sessionId: 'archived', state: 'archived' });
+    if (selectTarget) await setupSelection(request, workspace);
     await request('workhub.coordination.resolve', {});
     attachment = await upload(
       request,
@@ -178,8 +188,8 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, c
     );
     const initial = await request('workhub.coordination.candidates', {});
     assert.deepEqual(
-      initial.candidates.map((candidate) => candidate.sessionId),
-      createNew ? [] : ['target'],
+      initial.candidates.map((candidate) => candidate.sessionId).sort(),
+      createNew ? [] : selectTarget ? ['another', 'target'] : ['target'],
     );
     if (!createNew)
       targetObserver = await watchSession(connection, targetSessionId, {
@@ -216,12 +226,15 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, c
               workspace,
               model: basis,
               createNew,
+              selectTarget,
             });
             await assert.rejects(
               act({ ...input, turnId: 'not-active' }),
               (error) => error.code === 'operation_conflict',
             );
-            receipt = await act(input);
+            receipt = selectTarget
+              ? await chooseTarget(request, act, sourceObserver, input, workspace)
+              : await act(input);
             assert.equal(receipt.disposition, createNew ? 'create_new' : 'delegate_existing');
             assert.equal(receipt.targetSessionId, targetSessionId);
             if (createNew) {

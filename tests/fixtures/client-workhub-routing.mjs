@@ -36,12 +36,19 @@ export async function prepareRouting({
   workspace,
   model,
   createNew,
+  selectTarget,
 }) {
   const base = {
     turnId,
     actionId: 'delegation-action',
     delegationText: 'Implement the requested task',
   };
+  if (selectTarget)
+    return {
+      ...base,
+      candidateSetId: initial.candidateSetId,
+      candidateRefs: initial.candidates.map((candidate) => candidate.candidateRef),
+    };
   if (createNew) {
     const input = {
       ...base,

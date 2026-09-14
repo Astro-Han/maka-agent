@@ -128,7 +128,10 @@ impl ClientFixture {
             server.abort();
             let _ = server.await;
         }
-        stopped.unwrap().unwrap().unwrap();
+        stopped
+            .unwrap_or_else(|error| panic!("Host did not drain: {error}; client: {output:?}"))
+            .unwrap()
+            .unwrap();
         let output = output.unwrap().unwrap();
         assert!(
             output.status.success(),

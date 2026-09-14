@@ -26,6 +26,7 @@ const entries = [
   ['--workhub-answer-workspace', 'client-workhub-entry.mjs'],
   ['--workhub-delegation-workspace', 'client-workhub-entry.mjs'],
   ['--workhub-creation-workspace', 'client-workhub-entry.mjs'],
+  ['--workhub-selection-workspace', 'client-workhub-entry.mjs'],
   ['--onboarding-workspace', 'client-onboarding-entry.mjs'],
   ['--project-workspace', 'client-project-entry.mjs'],
   ['--native-candidate', 'client-candidate-entry.mjs'],

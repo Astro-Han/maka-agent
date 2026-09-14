@@ -190,7 +190,11 @@ impl OperationRegistry for Operations {
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
         if maka_protocol::workhub::supports(operation) {
-            if operation == Operation::WorkhubCoordinationActFromTurn {
+            if matches!(
+                operation,
+                Operation::WorkhubCoordinationActFromTurn
+                    | Operation::WorkhubCoordinationSelectAndDelegate
+            ) {
                 return Some(super::workhub::ACTION_ERRORS);
             }
             if operation == Operation::WorkhubCoordinationCandidates {

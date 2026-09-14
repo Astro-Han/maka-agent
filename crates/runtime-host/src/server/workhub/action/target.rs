@@ -58,9 +58,39 @@ impl Target {
 pub(super) async fn prepare(
     host: &std::sync::Arc<Host>,
     input: &ActInput,
+    selected: Option<&super::super::selection::SelectedTarget>,
 ) -> Result<Target, OperationError> {
     match &input.proposal {
         Proposal::Route(RoutingProposal::DelegateExisting { candidate_ref }) => {
+            if let Some(selected) = selected {
+                let now = crate::server::configuration::now()
+                    .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
+                if now.saturating_sub(selected.created_at) > 600_000 {
+                    return Err(failure(
+                        Code::CandidateSetStale,
+                        "Target choice expired; discover candidates and ask again",
+                    ));
+                }
+                let record = super::super::candidates::target(host, &selected.session_id)
+                    .await?
+                    .filter(|record| {
+                        selected.candidate_ref == *candidate_ref
+                            && selected.workspace_digest
+                                == super::super::selection::workspace_digest(
+                                    &record.configuration.workspace,
+                                )
+                    })
+                    .ok_or_else(|| {
+                        failure(
+                            Code::CandidateSetStale,
+                            "Selected target is no longer eligible in its offered workspace",
+                        )
+                    })?;
+                return Ok(Target::Existing {
+                    id: record.id,
+                    revision: record.revision,
+                });
+            }
             let candidates = super::super::candidates::query(host).await?;
             if input.candidate_set_id.as_ref() != Some(&candidates.result.candidate_set_id) {
                 return Err(failure(

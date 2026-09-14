@@ -48,6 +48,22 @@ pub(in crate::server) const ERRORS: &[Code] = &[
 ];
 
 pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, OperationError> {
+    admit(host, input, None).await
+}
+
+pub(super) async fn selected(
+    host: &Arc<Host>,
+    input: ActInput,
+    selected: &super::selection::SelectedTarget,
+) -> Result<ActResult, OperationError> {
+    admit(host, input, Some(selected)).await
+}
+
+async fn admit(
+    host: &Arc<Host>,
+    input: ActInput,
+    selected: Option<&super::selection::SelectedTarget>,
+) -> Result<ActResult, OperationError> {
     let _admission = host.executions.lock_admission().await;
     let fingerprint = content_digest(
         &serde_json::to_vec(&input)
@@ -81,13 +97,19 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
         .await?
         .ok_or_else(|| failure(Code::NotFound, "WorkHub Session has not been resolved"))?;
     let source = host.executions.workhub_source(&input.turn_id).await?;
+    if selected.is_some_and(|selected| selected.invocation != source.invocation) {
+        return Err(failure(
+            Code::OperationConflict,
+            "The selecting Run is no longer active",
+        ));
+    }
     let InvocationInput::Message { content, .. } = &source.input else {
         return Err(failure(
             Code::OperationConflict,
             "WorkHub action requires a user message",
         ));
     };
-    let target = target::prepare(host, &input).await?;
+    let target = target::prepare(host, &input, selected).await?;
     let delegation = Delegation {
         kind: target.kind(),
         action_id: input.action_id,

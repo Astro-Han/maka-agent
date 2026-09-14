@@ -36,6 +36,42 @@ impl Interactions {
         cancellation: &CancellationToken,
     ) -> Result<InteractionRecord, OperationError> {
         let _gate = self.admission.lock().await;
+        self.admit_stable_request(
+            context.invocation,
+            uuid::Uuid::new_v4().to_string(),
+            request,
+            cancellation,
+        )
+        .await
+    }
+
+    /// Caller holds the shared admission gate through publication. A retried
+    /// control request reuses the original offer and outcome.
+    pub(in crate::server) async fn admit_stable_request(
+        &self,
+        invocation: Invocation,
+        request_id: String,
+        request: InteractionRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<InteractionRecord, OperationError> {
+        if let Some(record) = self
+            .log
+            .interaction(&request_id)
+            .await
+            .map_err(|error| self.store_failure(error))?
+        {
+            if record.session_id != invocation.session_id
+                || record.turn_id != invocation.turn_id
+                || record.run_id != invocation.run_id
+                || record.request != request
+            {
+                return Err(failure(
+                    Code::OperationConflict,
+                    "Interaction identity belongs to another request",
+                ));
+            }
+            return Ok(record);
+        }
         if self.shutdown.is_cancelled() || cancellation.is_cancelled() {
             return Err(failure(
                 Code::OperationConflict,
@@ -45,13 +81,12 @@ impl Interactions {
         request
             .validate()
             .map_err(|message| failure(Code::InvalidRequest, message))?;
-        let observation = self.active_projection(&context.invocation).await?;
-        let invocation = context.invocation;
+        let observation = self.active_projection(&invocation).await?;
         let record = InteractionRecord {
             session_id: invocation.session_id,
             turn_id: invocation.turn_id,
             run_id: invocation.run_id,
-            request_id: uuid::Uuid::new_v4().to_string(),
+            request_id,
             created_at: self.timestamp()?,
             request,
             outcome: None,
