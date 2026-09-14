@@ -48,7 +48,7 @@ import { verifyConnectionTest } from './client-connection-test.mjs';
 import { verifyAccess } from './client-access.mjs';
 import { verifyCapabilityService } from './client-capability-service.mjs';
 import { verifyRemoteAccess } from './client-remote-access.mjs';
-import { verifyLiveOpenrouter } from './client-live-openrouter.mjs';
+import { verifyLiveProvider } from './client-live-provider.mjs';
 import { verifyMessageQueue } from './client-message-queue.mjs';
 import { verifyMessageRecovery } from './client-message-recovery.mjs';
 import { verifyMessageSubmit } from './client-message-submit.mjs';
@@ -112,7 +112,7 @@ async function main() {
       'access-control-directory': { type: 'string' },
       'remote-access-url': { type: 'string' },
       'remote-access-control-directory': { type: 'string' },
-      'live-openrouter-workspace': { type: 'string' },
+      'live-provider-workspace': { type: 'string' },
       reopened: { type: 'boolean' },
       'allow-insecure-remote': { type: 'boolean' },
       help: { type: 'boolean' },
@@ -161,17 +161,19 @@ async function main() {
       console.error('Original-client interoperability failed: overall deadline exceeded');
       process.exit(1);
     },
-    values['live-openrouter-workspace'] || values['oauth-execution-workspace']
-      ? 140000
-      : values['message-queue-workspace']
-        ? 45000 // Includes 1,030 serial durable commands; each request still has its own deadline.
-        : values['large-output-workspace']
-          ? 120000
-          : values['bash-workspace']
-            ? 30000
-            : selected.length
-              ? 15000
-              : 10000,
+    values['live-provider-workspace']
+      ? 320000
+      : values['oauth-execution-workspace']
+        ? 140000
+        : values['message-queue-workspace']
+          ? 45000 // Includes 1,030 serial durable commands; each request still has its own deadline.
+          : values['large-output-workspace']
+            ? 120000
+            : values['bash-workspace']
+              ? 30000
+              : selected.length
+                ? 15000
+                : 10000,
   );
   try {
     ({ connection, transport } = await openClient(values, input));
@@ -207,8 +209,8 @@ async function main() {
         values.reopened,
       );
     }
-    if (values['live-openrouter-workspace']) {
-      await verifyLiveOpenrouter(connection, values['live-openrouter-workspace'], values.reopened);
+    if (values['live-provider-workspace']) {
+      await verifyLiveProvider(connection, values['live-provider-workspace'], values.reopened);
     }
     if (values['connection-test-workspace']) {
       await verifyConnectionTest(

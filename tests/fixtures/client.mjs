@@ -50,9 +50,9 @@ await withSourceBundle(fileURLToPath(new URL(entry, import.meta.url)), (bundle, 
   const child = spawnSync(process.execPath, [bundle, ...process.argv.slice(2)], {
     stdio: 'inherit',
     // The parent owns cleanup even if a failed fixture retains handles.
-    timeout:
-      process.argv.includes('--live-openrouter-workspace') ||
-      process.argv.includes('--oauth-execution-workspace')
+    timeout: process.argv.includes('--live-provider-workspace')
+      ? 330000
+      : process.argv.includes('--oauth-execution-workspace')
         ? 150000
         : process.argv.includes('--message-queue-workspace')
           ? 55000

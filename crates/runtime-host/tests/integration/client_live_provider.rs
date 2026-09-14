@@ -17,29 +17,31 @@
  * under the License.
  */
 
-#![cfg(unix)]
-
 use maka_event_log::{
     EventLog,
     root::{RootNamespaces, RootOwner},
 };
 use maka_runtime::event::{Fact, InvocationOutcome};
 use maka_runtime_host::server::{Host, local::LocalListener};
-use std::{os::unix::fs::PermissionsExt, path::Path, process::Command, time::Duration};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::{path::Path, process::Command, time::Duration};
 use tokio_util::sync::CancellationToken;
 
-/// Explicit opt-in: one real free-router request, no retry or paid fallback.
+/// Explicit opt-in: one real turn, normal safe retries, no provider fallback.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires OPENROUTER_API_KEY and external OpenRouter free-route availability"]
-async fn original_client_live_openrouter_stream_is_durable_and_not_replayed_on_reopen() {
-    assert!(
-        std::env::var("OPENROUTER_API_KEY").is_ok_and(|key| !key.is_empty()),
-        "OPENROUTER_API_KEY must be set for the explicitly requested live test"
-    );
+#[ignore = "requires explicit access to the configured MAKA_LIVE provider (defaults to SGLang)"]
+async fn original_client_live_provider_stream_is_durable_and_not_replayed_on_reopen() {
+    #[cfg(unix)]
     let directory = tempfile::Builder::new()
         .prefix("maka-live-")
         .permissions(std::fs::Permissions::from_mode(0o700))
         .tempdir_in("/tmp")
+        .unwrap();
+    #[cfg(windows)]
+    let directory = tempfile::Builder::new()
+        .prefix("maka-live-")
+        .tempdir()
         .unwrap();
     let ns = RootNamespaces {
         ownership: directory.path().join("owners"),
@@ -56,7 +58,11 @@ async fn original_client_live_openrouter_stream_is_durable_and_not_replayed_on_r
         let host = Host::open(RootOwner::open(&root, &ns).unwrap())
             .await
             .unwrap();
+        #[cfg(unix)]
         let socket = directory.path().join("h.sock");
+        #[cfg(windows)]
+        let socket =
+            std::path::PathBuf::from(format!(r"\\.\pipe\maka-live-{}", uuid::Uuid::new_v4()));
         let listener = LocalListener::bind(&socket).unwrap();
         let cancellation = CancellationToken::new();
         let server = tokio::spawn(listener.serve(host, cancellation.clone()));
@@ -69,14 +75,14 @@ async fn original_client_live_openrouter_stream_is_durable_and_not_replayed_on_r
                 .arg("--socket")
                 .arg(socket)
                 .args(["--root-id", &expected_id])
-                .arg("--live-openrouter-workspace")
+                .arg("--live-provider-workspace")
                 .arg(client_workspace);
             if reopened {
-                command.arg("--reopened").env_remove("OPENROUTER_API_KEY");
+                command.arg("--reopened").env_remove("MAKA_LIVE_API_KEY");
             }
             command.output().unwrap()
         });
-        // The probe owns its 140 s deadline and closes the transport on failure.
+        // The client bounds real network waits and closes transport on failure.
         let output = client.await.unwrap();
         cancellation.cancel();
         tokio::time::timeout(Duration::from_secs(10), server)
@@ -95,7 +101,7 @@ async fn original_client_live_openrouter_stream_is_durable_and_not_replayed_on_r
                 Fact::InvocationEnded { outcome } => Some(outcome),
                 _ => None,
             });
-        let key = std::env::var("OPENROUTER_API_KEY").unwrap();
+        let key = std::env::var("MAKA_LIVE_API_KEY").unwrap_or_else(|_| "fixture-only".into());
         let bytes = serde_json::to_vec(&prefix).unwrap();
         for evidence in [&output.stdout, &output.stderr, &bytes] {
             assert!(
@@ -110,13 +116,13 @@ async fn original_client_live_openrouter_stream_is_durable_and_not_replayed_on_r
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(terminal, Some(&InvocationOutcome::Completed));
-        assert_eq!(
+        assert!(
             prefix
                 .events
                 .iter()
                 .filter(|stored| matches!(stored.event.fact, Fact::ModelRequested { .. }))
-                .count(),
-            1
+                .count()
+                >= 1
         );
         let outputs: Vec<_> = prefix
             .events
@@ -140,7 +146,7 @@ async fn original_client_live_openrouter_stream_is_durable_and_not_replayed_on_r
                 .is_some_and(|tokens| tokens > 0)
         );
         println!(
-            "real free-router backend: {}",
+            "real provider backend: {}",
             outputs[0].model.as_deref().unwrap()
         );
         if let Some(original) = &original {

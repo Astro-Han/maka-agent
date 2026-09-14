@@ -120,7 +120,10 @@ node scripts/asf-license-headers.mjs check
 
 单元测试放源码模块末尾，集成测试放 `tests/`。业务契约优先使用 struct／enum，
 JSON Value 只用于真正开放的载荷和 schema。依赖 V8 的测试在各 crate 内共用一个
-测试二进制，避免重复链接。普通测试使用本地 fixture；真实服务测试需要显式启用及凭据。
+测试二进制，避免重复链接。普通测试使用本地 fixture；真实服务测试需要显式启用。
+ignored 测试 `original_client_live_provider` 接受 `MAKA_LIVE_PROTOCOL`（`chat`、
+`responses`、`messages`）、`MAKA_LIVE_BASE_URL`、`MAKA_LIVE_MODEL` 和
+`MAKA_LIVE_API_KEY`，默认使用开发环境的 SGLang 端点。
 独立 worktree 可将 `MAKA_JS_DEPS` 和 `NODE_PATH` 分别指向已有依赖的 checkout
 及其 `node_modules`。
 共享跨语言 fixture 放在根目录 `tests/fixtures`，通过 `tests/support/source.mjs` 加载当前 TypeScript 源码，不读取 workspace `dist`。

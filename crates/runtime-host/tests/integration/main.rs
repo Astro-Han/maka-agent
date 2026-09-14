@@ -30,7 +30,7 @@ mod client_connection_test;
 mod client_forms;
 mod client_interactions;
 mod client_interop;
-mod client_live_openrouter;
+mod client_live_provider;
 mod client_model_fetch;
 mod client_onboarding;
 mod client_openai_options;

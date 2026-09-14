@@ -24,23 +24,28 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
 
-const sessionId = 'live-openrouter';
-const turnId = 'live-free-once';
-const model = 'openrouter/free';
-const baseUrl = 'https://openrouter.ai/api/v1';
+const sessionId = 'live-provider';
+const turnId = 'live-once';
+const model = process.env.MAKA_LIVE_MODEL ?? 'deepseek-v4.1-flash';
+const baseUrl = process.env.MAKA_LIVE_BASE_URL ?? 'http://spark-1.tailf3107f.ts.net:8888/v1';
+const providerType = {
+  chat: 'openai-compatible',
+  responses: 'openai-responses-compatible',
+  messages: 'anthropic-compatible',
+}[process.env.MAKA_LIVE_PROTOCOL ?? 'chat'];
+assert(providerType, 'MAKA_LIVE_PROTOCOL must be chat, responses, or messages');
 
-export async function verifyLiveOpenrouter(connection, workspace, reopened) {
+export async function verifyLiveProvider(connection, workspace, reopened) {
   const request = (operation, input) => connection.request(operation, input, 5000);
   const snapshotPath = join(workspace, 'live-transcript.json');
   if (!reopened) {
-    const secret = process.env.OPENROUTER_API_KEY;
-    assert(secret, 'Explicit live test requires OPENROUTER_API_KEY');
+    const secret = process.env.MAKA_LIVE_API_KEY ?? 'fixture-only';
     const created = await request('connection.catalog.create', {
       expectedCatalogRevision: 0,
       connection: {
-        slug: 'live-openrouter',
+        slug: 'live-provider',
         name: 'Disposable live acceptance',
-        providerType: 'openrouter',
+        providerType,
         baseUrl,
         enabled: true,
         enabledModelIds: [model],
@@ -58,8 +63,8 @@ export async function verifyLiveOpenrouter(connection, workspace, reopened) {
           expected: null,
           expectedConnection: {
             ...created.connection,
-            slug: 'live-openrouter',
-            providerType: 'openrouter',
+            slug: 'live-provider',
+            providerType,
             effectiveBaseUrl: baseUrl,
           },
           secret,
@@ -75,7 +80,7 @@ export async function verifyLiveOpenrouter(connection, workspace, reopened) {
       modelTarget: {
         kind: 'explicit',
         connectionId: created.connection.connectionId,
-        connectionSlug: 'live-openrouter',
+        connectionSlug: 'live-provider',
         model,
       },
     });
@@ -89,7 +94,7 @@ export async function verifyLiveOpenrouter(connection, workspace, reopened) {
         },
         maxSteps: 1,
       });
-      const deadline = Date.now() + 120000;
+      const deadline = Date.now() + 300000;
       let turn;
       do {
         turn = await request('turn.query', { sessionId, turnId });
@@ -100,7 +105,7 @@ export async function verifyLiveOpenrouter(connection, workspace, reopened) {
         if (turn.runId) {
           await request('turn.stop', { sessionId, turnId, runId: turn.runId }).catch(() => {});
         }
-        throw new Error('Live OpenRouter turn did not complete: ' + turn.status);
+        throw new Error('Live provider turn did not complete: ' + turn.status);
       }
       await observer.terminal(turn);
       const deltas = observer.frames
@@ -115,20 +120,15 @@ export async function verifyLiveOpenrouter(connection, workspace, reopened) {
         deltas.some((delta) => delta.text.length > 0),
         'real stream must deliver text',
       );
-      let text = '';
+      const streams = new Map();
       for (const delta of deltas) {
-        assert.equal(delta.messageId, deltas[0].messageId);
-        assert.equal(delta.startOffset, text.length, 'live offsets use UTF-16');
-        text += delta.text;
+        const stream = streams.get(delta.messageId) ?? { id: delta.messageId, text: '' };
+        assert.equal(delta.startOffset, stream.text.length, 'live offsets use UTF-16');
+        stream.text += delta.text;
+        streams.set(delta.messageId, stream);
       }
       assert.equal(deltas.at(-1).complete, true);
-      await writeFile(
-        join(workspace, 'live-stream.json'),
-        JSON.stringify({
-          id: deltas[0].messageId,
-          text,
-        }),
-      );
+      await writeFile(join(workspace, 'live-stream.json'), JSON.stringify([...streams.values()]));
     } finally {
       await observer.close();
     }
@@ -136,15 +136,21 @@ export async function verifyLiveOpenrouter(connection, workspace, reopened) {
   const observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 128 });
   try {
     const rows = await observer.subscription.loadTranscript(decodeStoredMessage);
-    const assistant = rows.find((row) => row.type === 'assistant' && row.turnId === turnId);
-    const stream = JSON.parse(await readFile(join(workspace, 'live-stream.json'), 'utf8'));
-    assert.equal(assistant?.id, stream.id);
-    assert.equal(assistant?.text, stream.text, 'live stream equals durable transcript');
+    const assistants = rows.filter((row) => row.type === 'assistant' && row.turnId === turnId);
+    const streams = JSON.parse(await readFile(join(workspace, 'live-stream.json'), 'utf8'));
+    for (const stream of streams) {
+      const assistant = assistants.find((row) => row.id === stream.id);
+      assert.equal(assistant?.text, stream.text, 'each live fragment equals its durable row');
+    }
+    const completed = assistants.filter((row) => !row.interrupted);
+    assert.equal(completed.length, 1, 'one successful response follows any interrupted fragments');
+    assert(completed[0].text.length > 0);
+    assert(streams.some((stream) => stream.id === completed[0].id));
     const snapshot = JSON.stringify(rows);
     if (reopened) assert.equal(snapshot, await readFile(snapshotPath, 'utf8'));
     else await writeFile(snapshotPath, snapshot);
     console.log(
-      reopened ? 'original-client-live-openrouter-reopened' : 'original-client-live-openrouter',
+      reopened ? 'original-client-live-provider-reopened' : 'original-client-live-provider',
     );
   } finally {
     await observer.close();

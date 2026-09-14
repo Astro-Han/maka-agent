@@ -149,7 +149,10 @@ Shared cross-language fixtures live in root `tests/fixtures` and use
 Grep differential tests require `rg` on PATH; the runtime itself does not.
 V8-dependent suites share a test binary per crate to avoid repeated
 linking. Ordinary tests use local fixtures; real-provider tests require explicit
-opt-in and credentials. An isolated worktree can set `MAKA_JS_DEPS` and
+opt-in. The ignored `original_client_live_provider` test accepts `MAKA_LIVE_PROTOCOL`
+(`chat`, `responses`, `messages`), `MAKA_LIVE_BASE_URL`, `MAKA_LIVE_MODEL`, and
+`MAKA_LIVE_API_KEY`; its default is the development SGLang endpoint.
+An isolated worktree can set `MAKA_JS_DEPS` and
 `NODE_PATH` to the dependency-bearing checkout and its `node_modules`.
 
 ## Current limits
