@@ -145,5 +145,6 @@ async fn original_client_reads_frozen_archives_after_compaction_and_restart_with
         } else {
             original = Some(facts.as_array().unwrap().clone());
         }
+        log.close().await.unwrap();
     }
 }
