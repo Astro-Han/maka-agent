@@ -76,7 +76,7 @@ pub(super) async fn create(
     Ok(item(record))
 }
 
-async fn resolve(
+pub(in crate::server) async fn resolve(
     configuration: &ConfigurationStore,
     prepared: PreparedSession,
     thinking: Option<ThinkingLevel>,

@@ -20,17 +20,19 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
 import { createInput, querySession } from './client-runtime-policy-fixture.mjs';
 import { upload } from './client-artifact-upload.mjs';
+import { createdTarget, prepareRouting } from './client-workhub-routing.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'delegate-request';
 
-export async function verifyWorkhubDelegation(connection, workspace, reopened) {
+export async function verifyWorkhubDelegation(connection, workspace, reopened, createNew = false) {
+  const targetSessionId = createNew ? createdTarget('delegation-action') : 'target';
   const request = (operation, input) => connection.request(operation, input, 5000);
   const file = join(workspace, 'delegation.json');
   const act = (input) => request('workhub.coordination.actFromTurn', input);
@@ -154,14 +156,17 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
       expectedCatalogRevision: created.catalogRevision,
       target: { connectionId: basis.connectionId, modelId: 'fixture-model' },
     });
-    for (const [id, extra] of [
-      ['target', {}],
-      ['side', { labels: ['mode:side_conversation'] }],
-      ['planned', { collaborationMode: 'plan' }],
-      ['archived', {}],
-    ])
+    for (const [id, extra] of createNew
+      ? []
+      : [
+          ['target', {}],
+          ['side', { labels: ['mode:side_conversation'] }],
+          ['planned', { collaborationMode: 'plan' }],
+          ['archived', {}],
+        ])
       await request('session.create', { ...createInput(workspace, id, 'bypass'), ...extra });
-    await request('session.lifecycle.set', { sessionId: 'archived', state: 'archived' });
+    if (!createNew)
+      await request('session.lifecycle.set', { sessionId: 'archived', state: 'archived' });
     await request('workhub.coordination.resolve', {});
     attachment = await upload(
       request,
@@ -174,9 +179,13 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
     const initial = await request('workhub.coordination.candidates', {});
     assert.deepEqual(
       initial.candidates.map((candidate) => candidate.sessionId),
-      ['target'],
+      createNew ? [] : ['target'],
     );
-    targetObserver = await watchSession(connection, 'target', { kind: 'tail', maxBytes: 2 });
+    if (!createNew)
+      targetObserver = await watchSession(connection, targetSessionId, {
+        kind: 'tail',
+        maxBytes: 2,
+      });
     await connection.replaceClientCapabilities(
       {
         offers: () => [
@@ -199,36 +208,30 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
             assert.equal(frame.turnId, turnId);
             assert.equal(frame.toolName, 'tasks');
             await accept({ kind: 'none' });
-            assert.deepEqual(
-              await request('workhub.coordination.candidates', {}),
+            input = await prepareRouting({
+              request,
+              act,
               initial,
-              'WorkHub steps must not invalidate an unchanged candidate set',
-            );
-            const selected = initial.candidates[0];
-            const current = await querySession(request, selected.sessionId);
-            await request('session.metadata.update', {
-              sessionId: current.id,
-              expectedRevision: current.revision,
-              patch: { name: 'renamed target' },
-            });
-            input = {
               turnId,
-              actionId: 'delegation-action',
-              candidateSetId: initial.candidateSetId,
-              proposal: { disposition: 'delegate_existing', candidateRef: selected.candidateRef },
-              delegationText: 'Implement the requested task',
-            };
-            await assert.rejects(act(input), (error) => error.code === 'candidate_set_stale');
-            const fresh = await request('workhub.coordination.candidates', {});
-            input.candidateSetId = fresh.candidateSetId;
-            input.proposal.candidateRef = fresh.candidates[0].candidateRef;
+              workspace,
+              model: basis,
+              createNew,
+            });
             await assert.rejects(
               act({ ...input, turnId: 'not-active' }),
               (error) => error.code === 'operation_conflict',
             );
             receipt = await act(input);
-            assert.equal(receipt.disposition, 'delegate_existing');
-            assert.equal(receipt.targetSessionId, 'target');
+            assert.equal(receipt.disposition, createNew ? 'create_new' : 'delegate_existing');
+            assert.equal(receipt.targetSessionId, targetSessionId);
+            if (createNew) {
+              const created = await querySession(request, targetSessionId);
+              assert.equal(created.name, 'Created task');
+              assert.equal(created.permissionMode, 'bypass');
+              assert.equal(created.collaborationMode, 'agent');
+              assert.equal(created.orchestrationMode, 'default');
+              assert.equal(created.workspace.hostCwd, await realpath(workspace));
+            }
             await request('artifact.delete', {
               sessionId,
               artifactId: attachment.ref.relativePath,
@@ -264,20 +267,27 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened) {
     if (failure) throw failure;
     assert.equal(calls, 1);
     assert.equal((await request('turn.query', { sessionId, turnId })).status, 'completed');
-    await targetObserver.waitFor(
-      (frame) =>
-        frame.kind === 'subscription.session_projection' &&
-        frame.snapshot.rootTurn?.turnId === receipt.targetTurnId &&
-        ['completed', 'failed', 'cancelled'].includes(frame.snapshot.rootTurn.status),
-    );
+    targetObserver ??= await watchSession(connection, targetSessionId, {
+      kind: 'tail',
+      maxBytes: 2,
+    });
+    const targetFinished = (snapshot) =>
+      snapshot.rootTurn?.turnId === receipt.targetTurnId &&
+      ['completed', 'failed', 'cancelled'].includes(snapshot.rootTurn.status);
+    // Creation can finish before subscribing; the bootstrap is authoritative too.
+    if (!targetFinished(targetObserver.subscription.snapshot))
+      await targetObserver.waitFor(
+        (frame) =>
+          frame.kind === 'subscription.session_projection' && targetFinished(frame.snapshot),
+      );
     if (failure) throw failure;
     const target = await request('turn.query', {
-      sessionId: 'target',
+      sessionId: targetSessionId,
       turnId: receipt.targetTurnId,
     });
     assert.equal(target.status, 'completed');
     await targetObserver.close();
-    targetObserver = await watchSession(connection, 'target', { kind: 'tail', maxBytes: 2 });
+    targetObserver = await watchSession(connection, targetSessionId, { kind: 'tail', maxBytes: 2 });
     const rows = await targetObserver.subscription.loadTranscript(decodeStoredMessage);
     assert(rows.some((row) => row.type === 'assistant' && row.text === 'target completed'));
     await connection.unregisterClientCapabilities(3000);

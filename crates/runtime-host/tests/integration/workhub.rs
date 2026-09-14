@@ -22,50 +22,55 @@ use maka_runtime::{execution::ToolMode, workhub::COORDINATION_SESSION_ID};
 use maka_runtime_host::session::SessionConfiguration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn original_client_workhub_delegation_runs_once_and_replays_after_source_completion_and_reopen()
- {
-    let fixture = ClientFixture::new("maka-workhub-delegation-");
-    fixture
-        .run(
-            "--workhub-delegation-workspace",
-            false,
-            "workhub-delegation-passed",
-        )
-        .await;
-    let log = fixture.log().await;
-    let before = log.prefix(256, 512 * 1024).await.unwrap();
-    use maka_runtime::event::Fact;
-    assert_eq!(
-        before
+async fn original_client_workhub_existing_and_created_tasks_run_once_and_replay_after_reopen() {
+    for flag in [
+        "--workhub-delegation-workspace",
+        "--workhub-creation-workspace",
+    ] {
+        let fixture = ClientFixture::new("maka-workhub-delegation-");
+        fixture.run(flag, false, "workhub-delegation-passed").await;
+        let log = fixture.log().await;
+        let before = log.prefix(256, 512 * 1024).await.unwrap();
+        use maka_runtime::event::Fact;
+        assert_eq!(
+            before
+                .events
+                .iter()
+                .filter(|row| matches!(row.event.fact, Fact::WorkhubDelegated { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            before
+                .events
+                .iter()
+                .filter(|row| matches!(row.event.fact, Fact::InvocationOpened { .. }))
+                .count(),
+            2
+        );
+        let delegation = before
             .events
             .iter()
-            .filter(|row| matches!(row.event.fact, Fact::WorkhubDelegated { .. }))
-            .count(),
-        1
-    );
-    assert_eq!(
-        before
-            .events
-            .iter()
-            .filter(|row| matches!(row.event.fact, Fact::InvocationOpened { .. }))
-            .count(),
-        2
-    );
-    assert!(log.pending_messages("target").await.unwrap().is_empty());
-    log.close().await.unwrap();
-    fixture
-        .run(
-            "--workhub-delegation-workspace",
-            true,
-            "workhub-delegation-reopened",
-        )
-        .await;
-    let log = fixture.log().await;
-    assert_eq!(
-        serde_json::to_value(log.prefix(256, 512 * 1024).await.unwrap()).unwrap(),
-        serde_json::to_value(before).unwrap()
-    );
-    log.close().await.unwrap();
+            .find_map(|row| match &row.event.fact {
+                Fact::WorkhubDelegated { delegation } => Some(delegation),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            log.pending_messages(&delegation.target.session_id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        log.close().await.unwrap();
+        fixture.run(flag, true, "workhub-delegation-reopened").await;
+        let log = fixture.log().await;
+        assert_eq!(
+            serde_json::to_value(log.prefix(256, 512 * 1024).await.unwrap()).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+        log.close().await.unwrap();
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

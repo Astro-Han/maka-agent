@@ -63,6 +63,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     log.append(&source).await.unwrap();
     let target = invocation("target", "delegated");
     let delegation = Delegation {
+        kind: Default::default(),
         action_id: "action".into(),
         request_fingerprint: content_digest(b"bound proposal"),
         source_message_event_id: source.event().id.clone(),

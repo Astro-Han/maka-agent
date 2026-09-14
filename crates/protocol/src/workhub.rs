@@ -143,10 +143,14 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
             decode_candidates(value)?;
         }
         Operation::WorkhubCoordinationActFromTurn => {
-            let ActResult::DelegateExisting {
+            let (ActResult::DelegateExisting {
                 target_session_id,
                 target_turn_id,
-            } = crate::turn::decode(value)?;
+            }
+            | ActResult::CreateNew {
+                target_session_id,
+                target_turn_id,
+            }) = crate::turn::decode(value)?;
             crate::turn::entity(&target_session_id)?;
             crate::turn::entity(&target_turn_id)?;
         }

@@ -64,6 +64,7 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
         .unwrap();
     assert_eq!(boundary.opening_event_id, source.event().id);
     let mut delegation = Delegation {
+        kind: Default::default(),
         action_id: "action".into(),
         request_fingerprint: content_digest(b"request"),
         source_message_event_id: boundary.opening_event_id,

@@ -32,6 +32,8 @@ pub const COORDINATION_SESSION_ID: &str = "maka_workhub_coordination";
 #[serde(deny_unknown_fields)]
 pub struct Delegation {
     pub action_id: String,
+    #[serde(default, skip_serializing_if = "DelegationKind::is_existing")]
+    pub kind: DelegationKind,
     pub request_fingerprint: String,
     /// Canonical user input, never text supplied by a model strategy.
     pub source_message_event_id: String,
@@ -41,6 +43,25 @@ pub struct Delegation {
     pub delegation_text: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegationKind {
+    #[default]
+    Existing,
+    Created,
+}
+
+impl DelegationKind {
+    fn is_existing(&self) -> bool {
+        *self == Self::Existing
+    }
+}
+
+pub fn created_session_id(action_id: &str) -> String {
+    let digest = crate::artifact::content_digest(format!("create\0{action_id}").as_bytes());
+    format!("whs_{}", &digest[7..55])
+}
+
 impl Delegation {
     pub fn validate(&self, coordinator: &Invocation) -> Result<(), &'static str> {
         use crate::interaction::entity_id;
@@ -48,6 +69,12 @@ impl Delegation {
             || self.target.session_id == COORDINATION_SESSION_ID
         {
             return Err("invalid WorkHub delegation scope");
+        }
+        if self.kind == DelegationKind::Created
+            && (self.target.session_id != created_session_id(&self.action_id)
+                || self.target_revision != 1)
+        {
+            return Err("invalid WorkHub creation identity");
         }
         for id in [
             &self.action_id,

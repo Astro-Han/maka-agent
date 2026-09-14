@@ -102,15 +102,7 @@ impl EventLog {
                     if let Some(record) = probe(&mut tx, &id, &fingerprint).await? {
                         return Ok(record);
                     }
-                    sqlx::query("INSERT INTO session_control VALUES (?, ?, 1, ?, ?, 0, ?)")
-                        .bind(&id)
-                        .bind(&fingerprint)
-                        .bind(now as i64)
-                        .bind(now as i64)
-                        .bind(configuration)
-                        .execute(&mut *tx)
-                        .await?;
-                    advance_catalog(&mut tx).await?;
+                    insert(&mut tx, &id, &fingerprint, &configuration, now).await?;
                     let record = read(&mut tx, &id)
                         .await?
                         .ok_or(StoreError::SessionNotFound)?;
@@ -208,6 +200,36 @@ impl EventLog {
             })
             .await
     }
+}
+
+pub(crate) async fn insert(
+    tx: &mut SqliteConnection,
+    id: &str,
+    fingerprint: &str,
+    configuration: &str,
+    now: u64,
+) -> Result<(), StoreError> {
+    validate_id(id)?;
+    validate_time(now)?;
+    if configuration.len() > MAX_CONFIGURATION_BYTES {
+        return Err(invalid("session configuration exceeds 64 KiB"));
+    }
+    let inserted = sqlx::query(
+        "INSERT INTO session_control SELECT ?, ?, 1, ?, ?, 0, ?
+         WHERE NOT EXISTS (SELECT 1 FROM session_control WHERE id = ?)",
+    )
+    .bind(id)
+    .bind(fingerprint)
+    .bind(now as i64)
+    .bind(now as i64)
+    .bind(configuration)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    if inserted.rows_affected() != 1 {
+        return Err(StoreError::SessionConflict);
+    }
+    advance_catalog(tx).await
 }
 
 pub(crate) async fn read<T: DeserializeOwned>(

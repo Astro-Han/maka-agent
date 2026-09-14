@@ -36,6 +36,7 @@ const { values } = parseArgs({
     'workhub-workspace': { type: 'string' },
     'workhub-answer-workspace': { type: 'string' },
     'workhub-delegation-workspace': { type: 'string' },
+    'workhub-creation-workspace': { type: 'string' },
     reopened: { type: 'boolean' },
   },
 });
@@ -54,11 +55,12 @@ try {
   });
   assert.equal(connected.kind, 'connected');
   connection = connected.connection;
-  if (values['workhub-delegation-workspace']) {
+  if (values['workhub-delegation-workspace'] || values['workhub-creation-workspace']) {
     await verifyWorkhubDelegation(
       connection,
-      values['workhub-delegation-workspace'],
+      values['workhub-delegation-workspace'] ?? values['workhub-creation-workspace'],
       values.reopened,
+      Boolean(values['workhub-creation-workspace']),
     );
     console.log(values.reopened ? 'workhub-delegation-reopened' : 'workhub-delegation-passed');
   } else if (values['workhub-answer-workspace']) {

@@ -25,6 +25,7 @@ use maka_runtime::{
 use sqlx::SqliteConnection;
 
 mod candidates;
+mod create;
 pub use candidates::activity_at;
 
 impl EventLog {
@@ -123,11 +124,17 @@ pub(crate) async fn apply(
     if occupied {
         return Err(invalid("WorkHub target execution identity already exists"));
     }
-    let revision: i64 = sqlx::query_scalar("SELECT revision FROM session_control WHERE id = ?")
-        .bind(&delegation.target.session_id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(StoreError::SessionNotFound)?;
+    let (revision, fingerprint): (i64, String) =
+        sqlx::query_as("SELECT revision, fingerprint FROM session_control WHERE id = ?")
+            .bind(&delegation.target.session_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(StoreError::SessionNotFound)?;
+    if delegation.kind == maka_runtime::workhub::DelegationKind::Created
+        && fingerprint != format!("workhub.create:{}", delegation.request_fingerprint)
+    {
+        return Err(invalid("WorkHub target was not created by this action"));
+    }
     if u64::try_from(revision).ok() != Some(delegation.target_revision) {
         return Err(StoreError::RevisionConflict {
             expected: delegation.target_revision.to_string(),

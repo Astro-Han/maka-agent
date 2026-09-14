@@ -17,19 +17,21 @@
  * under the License.
  */
 
-use super::{Host, candidates, failure, record, sessions};
+use super::{Host, failure, record, sessions};
 use maka_protocol::{
     OperationError, OperationErrorCode as Code,
-    workhub::{ActInput, ActResult, Proposal, RoutingProposal},
+    workhub::{ActInput, ActResult},
 };
 use maka_runtime::{
     artifact::content_digest,
     event::{CommitError, EventWrite, Fact, Invocation, RuntimeEvent},
     input::InvocationInput,
-    workhub::{COORDINATION_SESSION_ID, Delegation},
+    workhub::{COORDINATION_SESSION_ID, Delegation, DelegationKind},
 };
 use std::sync::Arc;
 use uuid::Uuid;
+
+mod target;
 
 pub(in crate::server) const ERRORS: &[Code] = &[
     Code::HostNotReady,
@@ -70,7 +72,7 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
                 "WorkHub action belongs to another request",
             ));
         }
-        return Ok(receipt(&delegation.target));
+        return Ok(receipt(&delegation));
     }
     if host.draining.is_cancelled() {
         return Err(failure(Code::HostDraining, "Host is draining"));
@@ -78,13 +80,6 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
     record(host)
         .await?
         .ok_or_else(|| failure(Code::NotFound, "WorkHub Session has not been resolved"))?;
-    let Proposal::Route(RoutingProposal::DelegateExisting { candidate_ref }) = &input.proposal
-    else {
-        return Err(failure(
-            Code::OperationUnavailable,
-            "This WorkHub action is not installed",
-        ));
-    };
     let source = host.executions.workhub_source(&input.turn_id).await?;
     let InvocationInput::Message { content, .. } = &source.input else {
         return Err(failure(
@@ -92,38 +87,19 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
             "WorkHub action requires a user message",
         ));
     };
-    let candidates = candidates::query(host).await?;
-    if input.candidate_set_id.as_ref() != Some(&candidates.result.candidate_set_id) {
-        return Err(failure(
-            Code::CandidateSetStale,
-            "WorkHub candidate set changed",
-        ));
-    }
-    let target = candidates
-        .result
-        .candidates
-        .iter()
-        .zip(candidates.records)
-        .find_map(|(candidate, record)| {
-            (&candidate.candidate_ref == candidate_ref).then_some(record)
-        })
-        .ok_or_else(|| {
-            failure(
-                Code::CandidateSetStale,
-                "WorkHub candidate is no longer eligible",
-            )
-        })?;
+    let target = target::prepare(host, &input).await?;
     let delegation = Delegation {
+        kind: target.kind(),
         action_id: input.action_id,
         request_fingerprint: fingerprint,
         source_message_event_id: source.opening_event_id,
         target: Invocation {
-            session_id: target.id.clone(),
+            session_id: target.id().to_owned(),
             turn_id: Uuid::new_v4().to_string(),
             run_id: Uuid::new_v4().to_string(),
             invocation_id: Uuid::new_v4().to_string(),
         },
-        target_revision: target.revision,
+        target_revision: target.revision(),
         delegation_text: input
             .delegation_text
             .unwrap_or_else(|| content.text.clone()),
@@ -131,7 +107,7 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
     delegation
         .message(content)
         .map_err(|reason| failure(Code::OperationUnavailable, reason))?;
-    let result = receipt(&delegation.target);
+    let result = receipt(&delegation);
     let action = EventWrite::plain(RuntimeEvent::new(
         source.invocation,
         Fact::WorkhubDelegated {
@@ -139,7 +115,21 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
         },
     ))
     .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
-    if let Err(error) = host.log.append(&action).await {
+    let committed = match &target {
+        target::Target::Created { configuration, .. } => host
+            .log
+            .create_workhub_session(&action, configuration)
+            .await
+            .map_err(|error| match error {
+                maka_event_log::StoreError::CommitUnknown(_)
+                | maka_event_log::StoreError::OperationUnknown => {
+                    CommitError::OutcomeUnknown(error.to_string())
+                }
+                other => CommitError::Rejected(other.to_string()),
+            }),
+        target::Target::Existing { .. } => host.log.append(&action).await,
+    };
+    if let Err(error) = committed {
         return Err(match error {
             CommitError::OutcomeUnknown(reason) => {
                 host.executions.begin_drain();
@@ -148,10 +138,12 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
             CommitError::Rejected(reason) => {
                 let current = host
                     .log
-                    .get_session::<crate::session::SessionConfiguration>(&target.id)
+                    .get_session::<crate::session::SessionConfiguration>(target.id())
                     .await
                     .map_err(sessions::stored)?;
-                let code = if current.is_none_or(|record| record.revision != target.revision) {
+                let code = if target.kind() == DelegationKind::Existing
+                    && current.is_none_or(|record| record.revision != target.revision())
+                {
                     Code::CandidateSetStale
                 } else {
                     Code::OperationConflict
@@ -160,13 +152,23 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
             }
         });
     }
-    host.executions.dispatch_workhub_pending(&target.id).await?;
+    host.executions
+        .dispatch_workhub_pending(target.id())
+        .await?;
     Ok(result)
 }
 
-fn receipt(target: &Invocation) -> ActResult {
-    ActResult::DelegateExisting {
-        target_session_id: target.session_id.clone(),
-        target_turn_id: target.turn_id.clone(),
+fn receipt(delegation: &Delegation) -> ActResult {
+    let target_session_id = delegation.target.session_id.clone();
+    let target_turn_id = delegation.target.turn_id.clone();
+    match delegation.kind {
+        DelegationKind::Existing => ActResult::DelegateExisting {
+            target_session_id,
+            target_turn_id,
+        },
+        DelegationKind::Created => ActResult::CreateNew {
+            target_session_id,
+            target_turn_id,
+        },
     }
 }

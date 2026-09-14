@@ -18,7 +18,7 @@
  */
 
 pub(super) mod configuration;
-mod create;
+pub(super) mod create;
 pub(super) mod model;
 pub(super) mod mutation;
 pub(super) mod projection;

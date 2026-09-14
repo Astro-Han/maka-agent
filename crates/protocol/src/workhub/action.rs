@@ -111,6 +111,10 @@ pub struct CreateModel {
     deny_unknown_fields
 )]
 pub enum ActResult {
+    CreateNew {
+        target_session_id: String,
+        target_turn_id: String,
+    },
     DelegateExisting {
         target_session_id: String,
         target_turn_id: String,
