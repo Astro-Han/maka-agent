@@ -35,6 +35,7 @@ pub mod message;
 pub mod model;
 pub mod oauth;
 pub mod read;
+pub mod session_event;
 pub mod shell_result;
 pub mod shell_run;
 pub mod skills;

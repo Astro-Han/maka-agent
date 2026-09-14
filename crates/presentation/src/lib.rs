@@ -26,6 +26,7 @@ pub mod shell;
 mod step;
 mod tools;
 mod user;
+pub mod workhub;
 use maka_runtime::event::{Fact, Invocation, InvocationInput, StoredEvent};
 use maka_runtime::tool_output::ToolOutput;
 use message::timestamp;

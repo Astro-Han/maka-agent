@@ -52,7 +52,7 @@ async fn legacy_summary_bytes_remain_readable_and_replayable_but_new_legacy_writ
     // Materialize actual pre-extension canonical bytes, not an append exemption.
     inspect
         .execute(
-            "UPDATE runtime_events SET event_json=? WHERE event_id=?",
+            "UPDATE event_log SET event_json=? WHERE event_id=?",
             rusqlite::params![serde_json::to_string(&old).unwrap(), old.id],
         )
         .unwrap();

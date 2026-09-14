@@ -28,7 +28,7 @@ const MAX_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) async fn fence(tx: &mut SqliteConnection, through: u64) -> Result<i64, StoreError> {
     let through = i64::try_from(through).map_err(|_| ProjectionError::OutOfRange)?;
-    let high: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM runtime_events")
+    let high: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM event_log")
         .fetch_one(tx)
         .await?;
     if through > high {

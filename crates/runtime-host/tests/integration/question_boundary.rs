@@ -40,7 +40,7 @@ async fn question_commit_failures_never_publish_an_unjournaled_question_or_deliv
         .unwrap();
         let trigger = match cut {
             "dispatch" => {
-                "CREATE TRIGGER fail_question BEFORE INSERT ON runtime_events
+                "CREATE TRIGGER fail_question BEFORE INSERT ON event_log
                 WHEN NEW.kind = 'tool_dispatched'
                 BEGIN SELECT RAISE(ABORT, 'dispatch failure'); END;"
             }

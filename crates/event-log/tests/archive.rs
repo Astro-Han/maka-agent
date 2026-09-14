@@ -116,7 +116,7 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
     );
     assert!(!commits.has_changed().unwrap());
     let inspect = rusqlite::Connection::open(&path).unwrap();
-    inspect.execute_batch("CREATE TRIGGER reject_archive BEFORE INSERT ON runtime_events WHEN NEW.kind='tool_result_archived' BEGIN SELECT RAISE(ABORT,'injected archive failure'); END;").unwrap();
+    inspect.execute_batch("CREATE TRIGGER reject_archive BEFORE INSERT ON event_log WHEN NEW.kind='tool_result_archived' BEGIN SELECT RAISE(ABORT,'injected archive failure'); END;").unwrap();
     let commits = log.subscribe_commits();
     assert!(log.append(&write).await.is_err());
     assert!(!commits.has_changed().unwrap());
@@ -200,7 +200,7 @@ async fn archive_atomic_retry_reopen_scope_and_source_integrity() {
             .unwrap(),
         expected
     );
-    inspect.execute("UPDATE runtime_events SET event_json=replace(event_json,'xxxxxxxx','yyyyyyyy') WHERE event_id=?", [&target.event().id]).unwrap();
+    inspect.execute("UPDATE event_log SET event_json=replace(event_json,'xxxxxxxx','yyyyyyyy') WHERE event_id=?", [&target.event().id]).unwrap();
     assert!(
         log.read_tool_result("session", &target.event().id)
             .await

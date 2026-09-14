@@ -187,7 +187,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
 
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "CREATE TRIGGER reject_resume BEFORE INSERT ON runtime_events
+        "CREATE TRIGGER reject_resume BEFORE INSERT ON event_log
         WHEN json_extract(NEW.event_json,'$.fact.input.kind')='continuation'
         BEGIN SELECT RAISE(ABORT,'injected resume failure'); END;",
     )

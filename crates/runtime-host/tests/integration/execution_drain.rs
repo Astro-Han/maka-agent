@@ -99,10 +99,10 @@ async fn foreground_background_and_closure_commit_failures_drain_host() {
             support::fail_closure(&mut database).await;
             "SELECT 1;"
         } else if failed_kind == "invocation_opened" {
-            "CREATE TRIGGER drain_commit_failure AFTER INSERT ON runtime_events
+            "CREATE TRIGGER drain_commit_failure AFTER INSERT ON event_log
              WHEN NEW.kind = 'invocation_opened' BEGIN INSERT INTO drain_child VALUES (1); END;"
         } else {
-            "CREATE TRIGGER drain_commit_failure AFTER INSERT ON runtime_events
+            "CREATE TRIGGER drain_commit_failure AFTER INSERT ON event_log
              WHEN NEW.kind = 'model_requested' BEGIN INSERT INTO drain_child VALUES (1); END;"
         };
         sqlx::raw_sql(trigger).execute(&mut database).await.unwrap();

@@ -21,6 +21,7 @@ use super::{StopIntent, StopRecord, StopRequest, StopResolution, invalid, subjec
 use crate::{StoreError, message_resolution::MessageExecution, turns::InvocationState};
 use maka_runtime::{
     event::{Fact, RuntimeEvent},
+    session_event::{SessionEvent, SessionFact},
     workhub::StopOutcome,
 };
 use sqlx::SqliteConnection;
@@ -28,7 +29,7 @@ use sqlx::SqliteConnection;
 pub(super) async fn apply(
     tx: &mut SqliteConnection,
     request: StopRequest,
-) -> Result<StopRecord, StoreError> {
+) -> Result<(StopRecord, u64), StoreError> {
     if super::super::actions::read(tx, &request.action_id)
         .await?
         .is_some()
@@ -59,16 +60,23 @@ pub(super) async fn apply(
     {
         return Err(invalid("WorkHub stop source is not its authorized message"));
     }
-    let archived: Option<bool> =
-        sqlx::query_scalar("SELECT archived FROM session_control WHERE id = ?")
-            .bind(&request.target_session_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    match archived {
+    let target: Option<(bool, Option<String>)> = sqlx::query_as(
+        "SELECT archived, CASE
+            WHEN json_type(configuration, '$.name') = 'text'
+             AND length(CAST(json_extract(configuration, '$.name') AS BLOB)) <= 4096
+            THEN json_extract(configuration, '$.name') END
+            FROM session_control WHERE id = ?",
+    )
+    .bind(&request.target_session_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let target_session_name = match target {
         None => return Err(StoreError::SessionNotFound),
-        Some(true) => return Err(invalid("WorkHub stop target is archived")),
-        Some(false) => {}
-    }
+        Some((true, _)) => return Err(invalid("WorkHub stop target is archived")),
+        Some((false, name)) => {
+            name.ok_or_else(|| invalid("WorkHub stop target name is missing"))?
+        }
+    };
     let (delegation, work) = subject::select(tx, &request.target_session_id).await?;
     let claimed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workhub_stops WHERE delegation_action_id = ? AND (resolution_json IS NULL OR json_extract(resolution_json, '$.outcome') != 'not_owned'))")
         .bind(&delegation.action_id).fetch_one(&mut *tx).await?;
@@ -120,12 +128,43 @@ pub(super) async fn apply(
             ));
         }
     };
-    sqlx::query("INSERT INTO workhub_stops(action_id, delegation_action_id, record_json, resolution_json) VALUES (?, ?, ?, ?)")
-        .bind(&intent.request.action_id).bind(&intent.delegation_action_id)
-        .bind(serde_json::to_string(&intent)?).bind(result.as_ref().map(serde_json::to_string).transpose()?)
-        .execute(tx).await?;
-    Ok(StopRecord {
-        intent,
-        resolution: result,
-    })
+    let Fact::InvocationOpened {
+        input: maka_runtime::input::InvocationInput::Message { content, .. },
+        ..
+    } = source.fact
+    else {
+        unreachable!()
+    };
+    let mut sequence = super::super::control::append(
+        tx,
+        &SessionEvent::workhub(
+            intent.request.source.turn_id.clone(),
+            SessionFact::WorkhubStopRequested {
+                intent: Box::new(intent.clone()),
+                target_session_name,
+                user_text: content.text,
+            },
+        ),
+    )
+    .await?;
+    if let Some(resolution) = &result {
+        sequence = super::super::control::append(
+            tx,
+            &SessionEvent::workhub(
+                intent.request.source.turn_id.clone(),
+                SessionFact::WorkhubStopResolved {
+                    action_id: intent.request.action_id.clone(),
+                    resolution: resolution.clone(),
+                },
+            ),
+        )
+        .await?;
+    }
+    Ok((
+        StopRecord {
+            intent,
+            resolution: result,
+        },
+        sequence,
+    ))
 }

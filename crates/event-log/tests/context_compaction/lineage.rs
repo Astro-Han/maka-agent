@@ -210,7 +210,7 @@ async fn continuation_requests_and_checkpoints_prove_selected_source_across_repa
                 .is_err()
         );
         let inspect = rusqlite::Connection::open(&path).unwrap();
-        inspect.execute_batch("CREATE TRIGGER reject_checkpoint BEFORE INSERT ON runtime_events WHEN NEW.kind='context_checkpoint_recorded' BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;").unwrap();
+        inspect.execute_batch("CREATE TRIGGER reject_checkpoint BEFORE INSERT ON event_log WHEN NEW.kind='context_checkpoint_recorded' BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END;").unwrap();
         let commits = log.subscribe_commits();
         assert!(log.append(&checkpoint).await.is_err());
         assert!(!commits.has_changed().unwrap());

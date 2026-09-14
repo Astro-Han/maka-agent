@@ -208,7 +208,7 @@ async fn exact_run_cuts_bind_identity_and_bytes_without_admitting_unproven_repla
     {
         let db = rusqlite::Connection::open(&path).unwrap();
         db.execute(
-            "UPDATE runtime_events SET event_json = event_json || ' ' WHERE event_id = ?",
+            "UPDATE event_log SET event_json = event_json || ' ' WHERE event_id = ?",
             [&first.id],
         )
         .unwrap();

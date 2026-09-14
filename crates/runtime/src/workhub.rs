@@ -37,6 +37,82 @@ pub enum StopOutcome {
     NotOwned,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopRequest {
+    pub action_id: String,
+    pub request_fingerprint: String,
+    pub source: Invocation,
+    pub target_session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopResolution {
+    pub outcome: StopOutcome,
+    pub target_turn_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopIntent {
+    pub request: StopRequest,
+    pub delegation_action_id: String,
+    /// Frozen before cancellation; a retry never follows a later continuation.
+    pub owner: Option<Invocation>,
+}
+
+impl StopRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        for id in [
+            &self.action_id,
+            &self.source.session_id,
+            &self.source.turn_id,
+            &self.source.run_id,
+            &self.source.invocation_id,
+            &self.target_session_id,
+        ] {
+            crate::interaction::entity_id(id)?;
+        }
+        if self.source.session_id != COORDINATION_SESSION_ID
+            || self.target_session_id == COORDINATION_SESSION_ID
+            || !crate::archive::valid_projection_digest(&self.request_fingerprint)
+        {
+            return Err("invalid WorkHub stop authority");
+        }
+        Ok(())
+    }
+}
+
+impl StopIntent {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        self.request.validate()?;
+        crate::interaction::entity_id(&self.delegation_action_id)?;
+        if let Some(owner) = &self.owner {
+            if owner.session_id != self.request.target_session_id {
+                return Err("WorkHub stop owner belongs to another Session");
+            }
+            for id in [&owner.turn_id, &owner.run_id, &owner.invocation_id] {
+                crate::interaction::entity_id(id)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl StopResolution {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if let Some(turn) = &self.target_turn_id {
+            crate::interaction::entity_id(turn)?;
+        }
+        match (&self.outcome, self.target_turn_id.is_some()) {
+            (StopOutcome::StopDelivered | StopOutcome::NotOwned, false)
+            | (StopOutcome::CancelledPending, true) => Err("invalid WorkHub stop resolution"),
+            _ => Ok(()),
+        }
+    }
+}
+
 /// A resume action is owned by its real continuation opening, or by an
 /// immutable observation that the delegated execution was already running.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

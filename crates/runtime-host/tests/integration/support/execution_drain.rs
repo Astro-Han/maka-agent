@@ -25,7 +25,7 @@ pub async fn fail_closure(database: &mut sqlx::SqliteConnection) {
     // canonical closure INSERT fails, with an ordinary SQL error before COMMIT.
     sqlx::raw_sql(
         r#"
-        CREATE TRIGGER establish_approval AFTER INSERT ON runtime_events
+        CREATE TRIGGER establish_approval AFTER INSERT ON event_log
         WHEN NEW.kind = 'invocation_opened' BEGIN
             INSERT INTO interaction_requests VALUES (
                 'approval', json_extract(NEW.event_json, '$.invocation.session_id'), 1,

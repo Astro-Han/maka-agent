@@ -62,6 +62,17 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     if (saved.stopInput) assert.deepEqual(await act(saved.stopInput), saved.stopReceipt);
     for (const item of saved.resumeReceipts ?? [])
       assert.deepEqual(await act(item.input), item.receipt);
+    if (saved.coordinationRows) {
+      const source = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
+      try {
+        assert.deepEqual(
+          await source.subscription.loadTranscript(decodeStoredMessage),
+          saved.coordinationRows,
+        );
+      } finally {
+        await source.close();
+      }
+    }
     assert.deepEqual(
       await request('turn.query', {
         sessionId: saved.receipt.targetSessionId,
@@ -86,7 +97,8 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     receipt,
     attachment,
     stopInput,
-    stopReceipt;
+    stopReceipt,
+    coordinationRows;
   const server = createServer(async (req, response) => {
     try {
       let body = '';
@@ -322,7 +334,41 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                   expects: { targetSessionId },
                 },
               };
+              let sourceSequence = sourceObserver.frames.at(-1)?.sequence ?? 0;
               stopReceipt = await act(stopInput);
+              // The coordinator stays inside this tool call: no subsequent
+              // Invocation boundary or reconnect can hide a missed control wakeup.
+              for (;;) {
+                const frame = await sourceObserver.waitFor(
+                  (frame) =>
+                    frame.kind === 'subscription.transcript_advanced' &&
+                    frame.sequence > sourceSequence,
+                );
+                sourceSequence = frame.sequence;
+                // loadTranscript is the frozen bootstrap, not a live refresh.
+                const page = await sourceObserver.subscription.loadTranscriptPage({
+                  source: 'durable',
+                  direction: 'older',
+                  throughSequence: frame.throughSequence,
+                  cursor: null,
+                  anchorSequence: null,
+                  maxBytes: 48 * 1024,
+                });
+                const decoded = await sourceObserver.subscription.decodeTranscriptPage(
+                  page,
+                  decodeStoredMessage,
+                );
+                assert.equal(decoded.nextCursor, null);
+                if (
+                  decoded.messages.some(
+                    ({ message: row }) =>
+                      row.type === 'workhub_coordination' &&
+                      row.kind === 'delegation_stop_resolved' &&
+                      row.actionId === stopInput.actionId,
+                  )
+                )
+                  break;
+              }
               assert.deepEqual(stopReceipt, {
                 disposition: 'stop_work',
                 outcome: steerTarget ? 'not_owned' : 'stop_delivered',
@@ -425,6 +471,23 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     await targetObserver.close();
     targetObserver = await watchSession(connection, targetSessionId, { kind: 'tail', maxBytes: 2 });
     const rows = await targetObserver.subscription.loadTranscript(decodeStoredMessage);
+    if (stopInput) {
+      await sourceObserver.close();
+      sourceObserver = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
+      coordinationRows = await sourceObserver.subscription.loadTranscript(decodeStoredMessage);
+      const control = coordinationRows.filter((row) => row.type === 'workhub_coordination');
+      assert.equal(control.length, 2);
+      assert.equal(control[0].kind, 'delegation_stop_requested');
+      assert.equal(control[1].kind, 'delegation_stop_resolved');
+      for (const row of control) {
+        assert.equal(row.schemaVersion, 3);
+        assert.equal(row.actionId, stopInput.actionId);
+        assert.equal(row.stopsActionId, input.actionId);
+        assert.equal(row.targetSessionId, targetSessionId);
+        assert.equal(row.coordinationTurnId, turnId);
+      }
+      assert.equal(control[1].outcome, stopReceipt.outcome);
+    }
     if (!stopTarget)
       assert(rows.some((row) => row.type === 'assistant' && row.text === 'target completed'));
     await connection.unregisterClientCapabilities(3000);
@@ -436,7 +499,16 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     for (const item of resumeReceipts) assert.deepEqual(await act(item.input), item.receipt);
     await writeFile(
       file,
-      JSON.stringify({ input, receipt, target, rows, stopInput, stopReceipt, resumeReceipts }),
+      JSON.stringify({
+        input,
+        receipt,
+        target,
+        rows,
+        stopInput,
+        stopReceipt,
+        resumeReceipts,
+        coordinationRows,
+      }),
     );
   } finally {
     await sourceObserver?.close();

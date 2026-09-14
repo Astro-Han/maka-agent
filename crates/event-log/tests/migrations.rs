@@ -68,19 +68,52 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
     let path = temp.path().join("events.sqlite");
     let log = EventLog::open(&path).await.unwrap();
     let event = seed_session_and_event(&log).await;
+    log.append(
+        &EventWrite::plain(RuntimeEvent::new(
+            event.invocation.clone(),
+            Fact::ToolDispatched {
+                operation_id: "migration-tool".into(),
+                call: maka_runtime::tool_call::ToolCallIdentity::standalone(
+                    "migration-call".into(),
+                ),
+                name: "Read".into(),
+                input: json!({}),
+            },
+        ))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let (outcome, _) = EventWrite::tool_success(
+        "migration-result".into(),
+        event.recorded_at,
+        event.invocation.clone(),
+        "migration-tool".into(),
+        maka_runtime::tool_output::ToolOutput::Text("payload survives parent migration".into())
+            .into(),
+    )
+    .unwrap();
+    log.append(&outcome).await.unwrap();
     let before = log.prefix(10, 16_384).await.unwrap();
     let session = log.get_session::<Value>("session").await.unwrap();
     assert!(log.prepare_transcript("session", 1, 32).await.unwrap());
     log.close().await.unwrap();
     let connection = Connection::open(&path).unwrap();
     let checksums = migration_checksums(&connection);
+    let raw: Vec<u8> = connection
+        .query_row(
+            "SELECT payload FROM tool_result_payloads WHERE event_id = 'migration-result'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(
         checksums
             .iter()
             .map(|(version, _)| *version)
             .collect::<Vec<_>>(),
         vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20
         ]
     );
     assert!(checksums.iter().all(|(_, checksum)| checksum.len() == 48));
@@ -116,7 +149,10 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
     // table also exercises idempotent backfill after interrupted adoption.
     connection
         .execute_batch(
-            "DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations; PRAGMA user_version = 1;",
+            "DROP VIEW workhub_stops; ALTER TABLE legacy_workhub_stops RENAME TO workhub_stops;
+             DROP VIEW runtime_events; DROP VIEW session_events;
+             ALTER TABLE event_log RENAME TO runtime_events;
+             DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE _sqlx_migrations; PRAGMA user_version = 1;",
         )
         .unwrap();
     drop(connection);
@@ -144,10 +180,28 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
     assert_eq!(migration_checksums(&connection), checksums);
     assert_eq!(
         connection
+            .query_row(
+                "SELECT payload FROM tool_result_payloads WHERE event_id = 'migration-result'",
+                [],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .unwrap(),
+        raw
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get::<_, i64>(0)
+            },)
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        connection
             .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
-        19
+        20
     );
 }
 
@@ -216,7 +270,7 @@ async fn mismatched_and_unknown_migrations_fail_closed_without_touching_committe
                 .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            19
+            20
         );
     }
 
@@ -278,7 +332,7 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        19
+        20
     );
     assert_eq!(
         connection
@@ -288,6 +342,6 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        19
+        20
     );
 }

@@ -318,7 +318,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
         },
     );
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_action BEFORE INSERT ON runtime_events
+    db.execute_batch("CREATE TRIGGER fail_action BEFORE INSERT ON event_log
         WHEN NEW.kind = 'workhub_delegated' BEGIN SELECT RAISE(ABORT, 'injected action failure'); END;").unwrap();
     assert!(log.append(&action).await.is_err());
     assert!(log.workhub_action("action").await.unwrap().is_none());

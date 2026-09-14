@@ -82,12 +82,12 @@ pub(super) fn register_function(connection: &Connection) -> Result<(), StoreErro
 
 pub(super) async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError> {
     sqlx::raw_sql(
-        "CREATE INDEX IF NOT EXISTS catalog_partial_deltas ON runtime_events(
+        "CREATE INDEX IF NOT EXISTS catalog_partial_deltas ON event_log(
             invocation_id, json_extract(event_json, '$.fact.step_id'),
             json_extract(event_json, '$.fact.event.data.id'), sequence
          ) WHERE kind = 'model_observed'
            AND json_extract(event_json, '$.fact.event.kind') = 'part_delta';
-         CREATE INDEX IF NOT EXISTS catalog_model_boundaries ON runtime_events(
+         CREATE INDEX IF NOT EXISTS catalog_model_boundaries ON event_log(
             invocation_id, kind, sequence
          ) WHERE kind IN ('model_requested', 'model_completed', 'model_interrupted');",
     )
@@ -111,11 +111,11 @@ pub(super) async fn project(
         // Failed/cancelled terminal fallback: exclude steps already sealed before
         // this boundary, including during a rebuild with later events present.
         sqlx::query_scalar::<_, String>(
-            "WITH request AS (SELECT operation_id FROM runtime_events INDEXED BY catalog_model_boundaries
+            "WITH request AS (SELECT operation_id FROM event_log INDEXED BY catalog_model_boundaries
              WHERE invocation_id = ?1 AND sequence < ?2
              AND kind IN ('model_requested', 'model_completed', 'model_interrupted')
              AND kind = 'model_requested' ORDER BY sequence DESC LIMIT 1)
-             SELECT operation_id FROM request WHERE NOT EXISTS (SELECT 1 FROM runtime_events AS result INDEXED BY operation_fact
+             SELECT operation_id FROM request WHERE NOT EXISTS (SELECT 1 FROM event_log AS result INDEXED BY operation_fact
                 WHERE result.operation_id = request.operation_id
                 AND result.operation_id IS NOT NULL
                 AND result.invocation_id = ?1 AND result.sequence < ?2
@@ -148,7 +148,7 @@ pub(super) async fn project(
         "SELECT sequence, catalog_time(json_extract(event_json, '$.recorded_at')),
             json_extract(event_json, '$.fact.event.data.id'),
             json_extract(event_json, '$.fact.event.data.text_kind') = 'text', event_id
-         FROM runtime_events INDEXED BY catalog_part_starts
+         FROM event_log INDEXED BY catalog_part_starts
          WHERE json_extract(event_json, '$.invocation.session_id') = ?1
          AND invocation_id = ?2 AND json_extract(event_json, '$.fact.step_id') = ?3
          AND kind = 'model_observed'
@@ -176,7 +176,7 @@ pub(super) async fn project(
         if is_text {
             let mut rows = sqlx::query(
                 "SELECT json_extract(event_json, '$.fact.event.data.text')
-                 FROM runtime_events INDEXED BY catalog_partial_deltas
+                 FROM event_log INDEXED BY catalog_partial_deltas
                  WHERE invocation_id = ?1 AND json_extract(event_json, '$.fact.step_id') = ?2
                  AND json_extract(event_json, '$.fact.event.data.id') = ?3
                  AND kind = 'model_observed'

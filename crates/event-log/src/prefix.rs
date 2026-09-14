@@ -25,8 +25,9 @@ use sqlx::{Connection, Row};
 use crate::{EventLog, StoreError, context::selection::Selection, sequence_number};
 
 impl EventLog {
-    /// Read one complete bounded prefix, or fail without returning a partial
-    /// history that a caller could accidentally treat as complete.
+    /// Read one complete bounded execution prefix, or fail without returning a partial
+    /// history that a caller could accidentally treat as complete. Session-owned
+    /// control facts share the ledger order but are not execution history.
     pub async fn prefix(
         &self,
         max_events: usize,

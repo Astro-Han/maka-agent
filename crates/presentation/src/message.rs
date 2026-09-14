@@ -27,8 +27,13 @@ use serde_json::Value;
 pub(crate) fn timestamp(
     event: &maka_runtime::event::RuntimeEvent,
 ) -> Result<u64, crate::ProjectionError> {
-    event
-        .recorded_at
+    capture_time(event.recorded_at)
+}
+
+pub(crate) fn capture_time(
+    recorded_at: std::time::SystemTime,
+) -> Result<u64, crate::ProjectionError> {
+    recorded_at
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
         .and_then(|time| u64::try_from(time.as_millis()).ok())
@@ -78,6 +83,10 @@ pub struct Message {
     rename_all_fields = "camelCase"
 )]
 pub enum Content {
+    WorkhubCoordination {
+        #[serde(flatten)]
+        record: crate::workhub::StopMessage,
+    },
     User {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]

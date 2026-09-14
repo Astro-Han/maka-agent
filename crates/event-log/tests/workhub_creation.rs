@@ -83,7 +83,7 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
         .unwrap()
         .revision;
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_workhub_create BEFORE INSERT ON runtime_events
+    db.execute_batch("CREATE TRIGGER fail_workhub_create BEFORE INSERT ON event_log
         WHEN NEW.kind = 'workhub_delegated' BEGIN SELECT RAISE(ABORT, 'injected create failure'); END;").unwrap();
     assert!(log.create_workhub_session(&action, &config).await.is_err());
     assert!(log.get_session::<Value>(&target).await.unwrap().is_none());

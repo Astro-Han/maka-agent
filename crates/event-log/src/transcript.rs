@@ -17,13 +17,14 @@
  * under the License.
  */
 
-//! Disposable message index. Only runtime_events authorizes execution or recovery.
+//! Disposable message index; authority stays in the owner-typed canonical ledger.
 mod active;
 pub(crate) use active::interrupted_messages;
 mod evidence;
 pub mod navigation;
 mod read;
 mod tools;
+mod workhub;
 use crate::{EventLog, StoreError};
 use maka_presentation::{InvocationView, MAX_TOOL_ROW_BYTES, ProjectionError, Row, watermark};
 use maka_runtime::event::{Fact, ToolOutcome};
@@ -112,7 +113,8 @@ impl EventLog {
                     // and budget-checked separately, one boundary at a time.
                     let boundaries = {
                         let records = sqlx::query(
-                            "SELECT sequence, invocation_id, operation_id FROM runtime_events
+                            "SELECT sequence, invocation_id, operation_id FROM (
+                             SELECT sequence, invocation_id, operation_id FROM runtime_events
                  WHERE json_extract(event_json, '$.invocation.session_id') = ?1
                    AND sequence > ?2 AND sequence <= ?3
                    AND NOT EXISTS (SELECT 1 FROM runtime_events opening
@@ -130,7 +132,11 @@ impl EventLog {
                    AND kind IN ('invocation_opened', 'message_steered', 'model_completed',
                                 'model_interrupted', 'invocation_ended',
                                 'tool_dispatched', 'tool_rejected', 'tool_settled')
-                 ORDER BY sequence LIMIT ?4",
+                 UNION ALL
+                 SELECT sequence, NULL, NULL FROM session_events
+                 WHERE json_extract(event_json, '$.session_id') = ?1
+                   AND sequence > ?2 AND sequence <= ?3
+                 ) ORDER BY sequence LIMIT ?4",
                         )
                         .bind(&session)
                         .bind(progress)
@@ -143,7 +149,7 @@ impl EventLog {
                             .map(|row| {
                                 Ok((
                                     row.try_get::<i64, _>(0)?,
-                                    row.try_get::<String, _>(1)?,
+                                    row.try_get::<Option<String>, _>(1)?,
                                     row.try_get::<Option<String>, _>(2)?,
                                 ))
                             })
@@ -152,6 +158,12 @@ impl EventLog {
                     let ready = boundaries.len() <= max_boundaries;
                     let mut processed = progress;
                     for (sequence, invocation, step) in boundaries.iter().take(max_boundaries) {
+                        let Some(invocation) = invocation else {
+                            let row = workhub::project(&mut tx, *sequence).await?;
+                            persist(&mut tx, &session, row).await?;
+                            processed = *sequence;
+                            continue;
+                        };
                         let facts = evidence::selected(
                             &mut tx,
                             invocation,

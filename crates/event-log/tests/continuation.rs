@@ -137,7 +137,7 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     let first = opening("first", Some(original.clone()));
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "CREATE TRIGGER reject_continuation BEFORE INSERT ON runtime_events
+        "CREATE TRIGGER reject_continuation BEFORE INSERT ON event_log
         WHEN json_extract(NEW.event_json,'$.fact.input.kind')='continuation'
         BEGIN SELECT RAISE(ABORT,'injected opening failure'); END;",
     )
@@ -254,7 +254,7 @@ async fn canonical_claim_is_atomic_unique_and_authenticates_the_entire_lineage_a
     let committed_before_corruption = log.prefix(100, 65536).await.unwrap().high_water;
     // Current parent still hashes identically, but an ancestor's raw bytes changed.
     db.execute(
-        "UPDATE runtime_events SET event_json=event_json || ' ' WHERE event_id=?",
+        "UPDATE event_log SET event_json=event_json || ' ' WHERE event_id=?",
         [&source.id],
     )
     .unwrap();

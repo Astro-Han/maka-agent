@@ -147,7 +147,7 @@ async fn stale_after_opening_binds_summary_and_late_prune_rolls_back_checkpoint(
                 .unwrap();
             let imported = archive("next-compact", &second);
             let inspect = rusqlite::Connection::open(&path).unwrap();
-            inspect.execute("INSERT INTO runtime_events(event_id,invocation_id,kind,operation_id,event_json) VALUES (?,'next-compact','tool_result_archived',NULL,?)",
+            inspect.execute("INSERT INTO event_log(event_id,invocation_id,kind,operation_id,event_json) VALUES (?,'next-compact','tool_result_archived',NULL,?)",
                 rusqlite::params![imported.event().id,serde_json::to_string(imported.event()).unwrap()]).unwrap();
             assert!(
                 log.read_model_context("session", None, 100, 64 * 1024)

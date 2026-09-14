@@ -178,7 +178,7 @@ async fn forged_summary_source_and_hidden_old_unknowns_never_become_a_baseline()
             |row| row.get(0),
         )
         .unwrap();
-    inspect.execute("UPDATE runtime_events SET event_json = replace(event_json, 'part', 'changed') WHERE event_id = ?", [&observed]).unwrap();
+    inspect.execute("UPDATE event_log SET event_json = replace(event_json, 'part', 'changed') WHERE event_id = ?", [&observed]).unwrap();
     assert!(
         log.read_model_context("session", None, 100, 8192)
             .await
@@ -191,7 +191,7 @@ async fn forged_summary_source_and_hidden_old_unknowns_never_become_a_baseline()
         name: "write".into(),
         input: json!({}),
     };
-    inspect.execute("UPDATE runtime_events SET kind = 'tool_dispatched', operation_id = 'hidden', event_json = ? WHERE event_id = ?",
+    inspect.execute("UPDATE event_log SET kind = 'tool_dispatched', operation_id = 'hidden', event_json = ? WHERE event_id = ?",
         rusqlite::params![serde_json::to_string(&unknown).unwrap(), observed]).unwrap();
     let error = log
         .read_model_context("session", None, 100, 8192)

@@ -46,10 +46,10 @@ pub(crate) async fn initialize_execution(
 ) -> Result<(), StoreError> {
     partial::initialize(connection).await?;
     sqlx::raw_sql(
-        "CREATE INDEX IF NOT EXISTS catalog_message_facts ON runtime_events(
+        "CREATE INDEX IF NOT EXISTS catalog_message_facts ON event_log(
             json_extract(event_json, '$.invocation.session_id'), kind, sequence
          ) WHERE kind IN ('invocation_opened', 'model_completed');
-         CREATE INDEX IF NOT EXISTS catalog_part_starts ON runtime_events(
+         CREATE INDEX IF NOT EXISTS catalog_part_starts ON event_log(
             json_extract(event_json, '$.invocation.session_id'), invocation_id,
             json_extract(event_json, '$.fact.step_id'), sequence
          ) WHERE kind = 'model_observed'
@@ -234,7 +234,7 @@ pub(crate) async fn project_execution(
             "WITH starts AS (
                 SELECT catalog_time(json_extract(event_json, '$.recorded_at')) AS ts, event_id,
                     row_number() OVER (ORDER BY sequence) AS ordinal
-                FROM runtime_events INDEXED BY catalog_part_starts
+                FROM event_log INDEXED BY catalog_part_starts
                 WHERE json_extract(event_json, '$.invocation.session_id') = ?2
                 AND invocation_id = ?3 AND json_extract(event_json, '$.fact.step_id') = ?4
                 AND kind = 'model_observed'

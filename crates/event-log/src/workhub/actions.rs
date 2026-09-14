@@ -33,15 +33,17 @@ impl EventLog {
     }
 }
 
-pub(super) async fn read(
+pub(crate) async fn read(
     tx: &mut SqliteConnection,
     action: &str,
 ) -> Result<Option<StoredEvent>, StoreError> {
     let row: Option<(i64, Option<String>)> = sqlx::query_as(
         "SELECT sequence, CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-         FROM runtime_events
-         WHERE kind IN ('workhub_delegated', 'workhub_resume_observed', 'invocation_opened')
+         FROM event_log WHERE invocation_id IS NOT NULL
+         AND kind IN ('workhub_delegated', 'workhub_resume_observed', 'invocation_opened', 'workhub_stop_requested')
          AND CASE
+            WHEN kind = 'workhub_stop_requested'
+                THEN json_extract(event_json, '$.fact.intent.request.action_id')
             WHEN kind = 'workhub_delegated'
                 THEN json_extract(event_json, '$.fact.delegation.action_id')
             WHEN kind = 'workhub_resume_observed'

@@ -28,6 +28,16 @@ impl Delivery {
         &mut self,
         page: StreamEventPage,
     ) -> Result<(Vec<Value>, bool), HostError> {
+        if let Some(boundary) = page.session_boundary {
+            if boundary <= self.cursor
+                || boundary > page.next_after.unwrap_or(page.through_sequence)
+            {
+                return Err("Session transcript boundary exceeds the consumed page".into());
+            }
+            if let Some(transcript) = &mut self.transcript {
+                transcript.catch_up_to(boundary);
+            }
+        }
         let mut frames = Vec::new();
         let mut events = page.events.into_iter().peekable();
         while let Some(mut stored) = events.next() {
@@ -256,6 +266,7 @@ mod tests {
         // finish before the new Run can reset the unchanged client's projector.
         let (mut frames, more) = delivery
             .deliver_page(StreamEventPage {
+                session_boundary: None,
                 events: vec![
                     event("old", 2, delta("old tail")),
                     event("old", 3, finish()),
@@ -272,6 +283,7 @@ mod tests {
         );
         let (new, more) = delivery
             .deliver_page(StreamEventPage {
+                session_boundary: None,
                 events: vec![event("new", 4, start()), event("new", 5, delta("hello"))],
                 through_sequence: 40,
                 next_after: Some(5),
@@ -286,6 +298,7 @@ mod tests {
         // Run a second time, which would clear the partially assembled text.
         let (new, more) = delivery
             .deliver_page(StreamEventPage {
+                session_boundary: None,
                 events: vec![
                     event("new", 6, delta(" 🌍")),
                     event("new", 7, delta(" world")),
@@ -305,6 +318,7 @@ mod tests {
         });
         let (terminal, more) = delivery
             .deliver_page(StreamEventPage {
+                session_boundary: None,
                 events: vec![event("new", 41, delta("!")), event("new", 42, finish())],
                 through_sequence: 50,
                 next_after: None,

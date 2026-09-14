@@ -88,6 +88,8 @@ pub enum ToolSettlement {
 #[derive(Debug)]
 pub struct StreamEventPage {
     pub events: Vec<StoreStreamEvent>,
+    /// Latest Session-owned transcript boundary in this page's consumed range.
+    pub session_boundary: Option<u64>,
     pub through_sequence: u64,
     /// Continue strictly after this sequence; None means the fence is exhausted.
     pub next_after: Option<u64>,
@@ -189,9 +191,23 @@ impl EventLog {
                         bytes += size;
                         enriched.push(event);
                     }
+                    let consumed = next_after.unwrap_or(through);
+                    let session_boundary: Option<i64> = sqlx::query_scalar(
+                        "SELECT MAX(sequence) FROM session_events
+                         WHERE json_extract(event_json, '$.session_id') = ?1
+                           AND sequence > ?2 AND sequence <= ?3",
+                    )
+                    .bind(&session_id)
+                    .bind(after)
+                    .bind(i64::try_from(consumed).map_err(|_| invalid("invalid stream boundary"))?)
+                    .fetch_one(&mut *transaction)
+                    .await?;
+                    let session_boundary =
+                        session_boundary.map(crate::sequence_number).transpose()?;
                     transaction.commit().await?;
                     Ok(StreamEventPage {
                         events: enriched,
+                        session_boundary,
                         through_sequence: through,
                         next_after,
                     })

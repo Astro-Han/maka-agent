@@ -105,7 +105,7 @@ async fn original_client_interrupt_reports_unknown_when_terminal_commit_fails() 
     .await
     .unwrap();
     sqlx::query(
-        "CREATE TRIGGER reject_cancel_terminal BEFORE INSERT ON runtime_events
+        "CREATE TRIGGER reject_cancel_terminal BEFORE INSERT ON event_log
          WHEN NEW.kind = 'invocation_ended' AND json_extract(NEW.event_json, '$.fact.outcome.kind') = 'cancelled'
          BEGIN SELECT RAISE(ABORT, 'terminal fault'); END;"
     ).execute(&mut db).await.unwrap();

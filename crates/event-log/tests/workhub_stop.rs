@@ -37,12 +37,12 @@ use fixtures::*;
 
 #[tokio::test]
 async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exact_cause() {
-    for scenario in ["pending", "manual", "workhub", "interrupted"] {
+    for scenario in ["pending", "manual", "workhub", "interrupted", "legacy"] {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("events.sqlite");
         let log = EventLog::open(&path).await.unwrap();
         for session in [COORDINATION_SESSION_ID, "session"] {
-            log.create_session(session, "create", &json!({}), 1)
+            log.create_session(session, "create", &json!({"name": session}), 1)
                 .await
                 .unwrap();
         }
@@ -87,7 +87,17 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
             target_session_id: "session".into(),
         };
         let db = rusqlite::Connection::open(&path).unwrap();
-        db.execute_batch("CREATE TRIGGER reject_stop BEFORE INSERT ON workhub_stops BEGIN SELECT RAISE(ABORT,'stop publication failed'); END;").unwrap();
+        let rejected_kind = if scenario == "pending" {
+            "workhub_stop_resolved"
+        } else {
+            "workhub_stop_requested"
+        };
+        db.execute_batch(&format!(
+            "CREATE TRIGGER reject_stop BEFORE INSERT ON event_log
+            WHEN NEW.kind = '{rejected_kind}'
+            BEGIN SELECT RAISE(ABORT,'stop publication failed'); END;"
+        ))
+        .unwrap();
         assert!(log.request_workhub_stop(request.clone()).await.is_err());
         assert!(log.workhub_stop("stop").await.unwrap().is_none());
         if scenario == "pending" {
@@ -234,10 +244,22 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
             }
         }
         close(&log, &coordinator).await;
+        if scenario == "legacy" {
+            // Reconstruct the pre-cutover receipt format, which recorded no
+            // control timestamps or sequence. Its absent timeline stays absent.
+            db.execute_batch(
+                "INSERT INTO legacy_workhub_stops
+                SELECT * FROM workhub_stops WHERE action_id = 'stop';
+                DELETE FROM event_log WHERE invocation_id IS NULL;",
+            )
+            .unwrap();
+        }
         let before = serde_json::to_value(log.prefix(100, 1024 * 1024).await.unwrap()).unwrap();
         log.close().await.unwrap();
         drop(db);
         let log = EventLog::open(&path).await.unwrap();
+        let commits = log.subscribe_commits();
+        let before_recovery = *commits.borrow();
         assert_eq!(
             log.recover_workhub_stops().await.unwrap(),
             usize::from(scenario != "pending")
@@ -254,6 +276,61 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
         );
         assert_eq!(log.resolve_workhub_stop("stop").await.unwrap(), resolved);
         assert_eq!(log.recover_workhub_stops().await.unwrap(), 0);
+        let through = *commits.borrow();
+        assert_eq!(through > before_recovery, scenario != "pending");
+        let page = log
+            .session_stream_events(COORDINATION_SESSION_ID, before_recovery, through, 1, 4096)
+            .await
+            .unwrap();
+        assert!(page.events.is_empty());
+        assert_eq!(
+            page.session_boundary,
+            (scenario != "pending").then_some(through)
+        );
+        assert!(page.next_after.is_none());
+        assert_eq!(
+            log.observe_session::<serde_json::Value>(COORDINATION_SESSION_ID)
+                .await
+                .unwrap()
+                .unwrap()
+                .through_sequence,
+            through
+        );
+        while !log
+            .prepare_transcript(COORDINATION_SESSION_ID, through, 1)
+            .await
+            .unwrap()
+        {}
+        let rows = log
+            .transcript_headers(
+                COORDINATION_SESSION_ID,
+                &maka_event_log::transcript::TranscriptRead {
+                    through: maka_presentation::watermark(through).unwrap(),
+                    position: 0,
+                    direction: maka_event_log::transcript::TranscriptDirection::Newer,
+                    limit: 16,
+                },
+            )
+            .await
+            .unwrap();
+        let mut controls = Vec::new();
+        for row in rows {
+            let bytes = log
+                .transcript_fragment(COORDINATION_SESSION_ID, row.sequence, 0, row.total_bytes)
+                .await
+                .unwrap();
+            let message: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            if message["type"] == "workhub_coordination" {
+                assert_eq!(message["turnId"], coordinator.invocation.turn_id);
+                controls.push((row.sequence, message));
+            }
+        }
+        assert_eq!(controls.len(), if scenario == "legacy" { 1 } else { 2 });
+        let (sequence, resolution) = controls.last().unwrap();
+        assert_eq!(resolution["kind"], "delegation_stop_resolved");
+        if scenario != "pending" {
+            assert!(*sequence > maka_presentation::watermark(before_recovery).unwrap());
+        }
         assert_eq!(
             serde_json::to_value(log.prefix(100, 1024 * 1024).await.unwrap()).unwrap(),
             before,

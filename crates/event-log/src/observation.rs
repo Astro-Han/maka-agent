@@ -203,7 +203,7 @@ async fn read_projection<T: DeserializeOwned + Send>(
 
 async fn high_water(connection: &mut sqlx::SqliteConnection) -> Result<u64, StoreError> {
     sequence_number(
-        sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM runtime_events")
+        sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM event_log")
             .fetch_one(connection)
             .await?,
     )

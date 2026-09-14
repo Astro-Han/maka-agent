@@ -206,7 +206,7 @@ async fn frozen_base_preserves_original_checkpoint_tail_and_diagnostics_across_l
     let inspect = rusqlite::Connection::open(&path).unwrap();
     inspect
         .execute(
-            "UPDATE runtime_events SET event_json=' ' || event_json WHERE event_id=?",
+            "UPDATE event_log SET event_json=' ' || event_json WHERE event_id=?",
             [&hidden_evidence],
         )
         .unwrap();

@@ -18,67 +18,20 @@
  */
 
 use crate::{EventLog, StoreError};
+pub use maka_runtime::workhub::{StopIntent, StopRequest, StopResolution};
 use maka_runtime::{
-    event::Invocation,
-    workhub::{COORDINATION_SESSION_ID, StopOutcome},
+    session_event::{SessionEvent, SessionFact},
+    workhub::StopOutcome,
 };
-use serde::{Deserialize, Serialize};
 use sqlx::{Connection, SqliteConnection};
 
 mod admit;
 mod subject;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StopRequest {
-    pub action_id: String,
-    pub request_fingerprint: String,
-    pub source: Invocation,
-    pub target_session_id: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StopResolution {
-    pub outcome: StopOutcome,
-    pub target_turn_id: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StopIntent {
-    pub request: StopRequest,
-    pub delegation_action_id: String,
-    /// Frozen before cancellation. A retry must never follow a later continuation.
-    pub owner: Option<Invocation>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StopRecord {
     pub intent: StopIntent,
     pub resolution: Option<StopResolution>,
-}
-
-impl StopRequest {
-    fn validate(&self) -> Result<(), StoreError> {
-        for id in [
-            &self.action_id,
-            &self.source.session_id,
-            &self.source.turn_id,
-            &self.source.run_id,
-            &self.source.invocation_id,
-            &self.target_session_id,
-        ] {
-            crate::sessions::validate_id(id)?;
-        }
-        if self.source.session_id != COORDINATION_SESSION_ID
-            || self.target_session_id == COORDINATION_SESSION_ID
-            || !maka_runtime::archive::valid_projection_digest(&self.request_fingerprint)
-        {
-            return Err(invalid("Invalid WorkHub stop authority"));
-        }
-        Ok(())
-    }
 }
 
 impl EventLog {
@@ -98,7 +51,7 @@ impl EventLog {
         request: StopRequest,
     ) -> Result<StopRecord, StoreError> {
         self.validate_root()?;
-        request.validate()?;
+        request.validate().map_err(invalid)?;
         let commits = self.commits.clone();
         self.connection
             .run(move |connection| {
@@ -110,9 +63,9 @@ impl EventLog {
                         }
                         return Ok(previous);
                     }
-                    let record = admit::apply(&mut tx, request).await?;
+                    let (record, sequence) = admit::apply(&mut tx, request).await?;
                     tx.commit().await.map_err(StoreError::CommitUnknown)?;
-                    commits.send_modify(|_| {});
+                    commits.send_replace(sequence);
                     Ok(record)
                 })
             })
@@ -129,9 +82,11 @@ impl EventLog {
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-                    let record = resolve(&mut tx, &action).await?;
+                    let (record, sequence) = resolve(&mut tx, &action).await?;
                     tx.commit().await.map_err(StoreError::CommitUnknown)?;
-                    commits.send_modify(|_| {});
+                    if let Some(sequence) = sequence {
+                        commits.send_replace(sequence);
+                    }
                     Ok(record)
                 })
             })
@@ -141,6 +96,7 @@ impl EventLog {
     /// Startup only, after abandoned Run recovery and before pending work starts.
     pub async fn recover_workhub_stops(&self) -> Result<usize, StoreError> {
         self.validate_root()?;
+        let commits = self.commits.clone();
         self.connection.run(move |connection| Box::pin(async move {
             let mut recovered = 0;
             loop {
@@ -149,17 +105,25 @@ impl EventLog {
                     "SELECT action_id FROM workhub_stops WHERE resolution_json IS NULL ORDER BY action_id LIMIT 64"
                 ).fetch_all(&mut *tx).await?;
                 if actions.is_empty() { return Ok(recovered); }
+                let mut last = None;
                 for action in actions {
-                    resolve(&mut tx, &action).await?;
+                    let (_, sequence) = resolve(&mut tx, &action).await?;
+                    last = sequence.or(last);
                     recovered += 1;
                 }
                 tx.commit().await.map_err(StoreError::CommitUnknown)?;
+                if let Some(sequence) = last {
+                    commits.send_replace(sequence);
+                }
             }
         })).await
     }
 }
 
-async fn read(tx: &mut SqliteConnection, action: &str) -> Result<Option<StopRecord>, StoreError> {
+pub(crate) async fn read(
+    tx: &mut SqliteConnection,
+    action: &str,
+) -> Result<Option<StopRecord>, StoreError> {
     let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT CASE WHEN length(CAST(record_json AS BLOB)) <= 16384 THEN record_json END,
          resolution_json FROM workhub_stops WHERE action_id = ?",
@@ -171,18 +135,9 @@ async fn read(tx: &mut SqliteConnection, action: &str) -> Result<Option<StopReco
         return Ok(None);
     };
     let intent: StopIntent = serde_json::from_str(&record.ok_or(StoreError::PrefixTooLarge)?)?;
-    intent.request.validate()?;
+    intent.validate().map_err(invalid)?;
     if intent.request.action_id != action {
         return Err(invalid("WorkHub stop index changed"));
-    }
-    crate::sessions::validate_id(&intent.delegation_action_id)?;
-    if let Some(owner) = &intent.owner {
-        if owner.session_id != intent.request.target_session_id {
-            return Err(invalid("WorkHub stop owner belongs to another Session"));
-        }
-        for id in [&owner.turn_id, &owner.run_id, &owner.invocation_id] {
-            crate::sessions::validate_id(id)?;
-        }
     }
     let resolution: Option<StopResolution> = resolution
         .map(|json| serde_json::from_str(&json))
@@ -190,21 +145,21 @@ async fn read(tx: &mut SqliteConnection, action: &str) -> Result<Option<StopReco
     if resolution.is_none() && intent.owner.is_none() {
         return Err(invalid("Unresolved WorkHub stop has no owner"));
     }
-    if let Some(turn) = resolution
-        .as_ref()
-        .and_then(|result| result.target_turn_id.as_ref())
-    {
-        crate::sessions::validate_id(turn)?;
+    if let Some(resolution) = &resolution {
+        resolution.validate().map_err(invalid)?;
     }
     Ok(Some(StopRecord { intent, resolution }))
 }
 
-async fn resolve(tx: &mut SqliteConnection, action: &str) -> Result<StopRecord, StoreError> {
+async fn resolve(
+    tx: &mut SqliteConnection,
+    action: &str,
+) -> Result<(StopRecord, Option<u64>), StoreError> {
     let mut record = read(tx, action)
         .await?
         .ok_or_else(|| invalid("WorkHub stop intent is missing"))?;
     if record.resolution.is_some() {
-        return Ok(record);
+        return Ok((record, None));
     }
     let owner = record
         .intent
@@ -241,10 +196,19 @@ async fn resolve(tx: &mut SqliteConnection, action: &str) -> Result<StopRecord, 
         },
         target_turn_id: Some(owner.turn_id.clone()),
     };
-    sqlx::query("UPDATE workhub_stops SET resolution_json = ? WHERE action_id = ? AND resolution_json IS NULL")
-        .bind(serde_json::to_string(&resolution)?).bind(action).execute(tx).await?;
+    let sequence = super::control::append(
+        tx,
+        &SessionEvent::workhub(
+            record.intent.request.source.turn_id.clone(),
+            SessionFact::WorkhubStopResolved {
+                action_id: action.into(),
+                resolution: resolution.clone(),
+            },
+        ),
+    )
+    .await?;
     record.resolution = Some(resolution);
-    Ok(record)
+    Ok((record, Some(sequence)))
 }
 
 fn invalid(reason: &str) -> StoreError {

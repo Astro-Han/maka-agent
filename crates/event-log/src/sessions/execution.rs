@@ -52,8 +52,9 @@ pub(super) async fn read(
     let opening = sqlx::query(
         "SELECT invocation_id, json_extract(event_json, '$.invocation.turn_id'),
                 catalog_time(json_extract(event_json, '$.recorded_at'))
-         FROM runtime_events INDEXED BY catalog_message_facts
-         WHERE kind IN ('invocation_opened', 'model_completed') AND kind = 'invocation_opened'
+         FROM event_log INDEXED BY catalog_message_facts
+         WHERE invocation_id IS NOT NULL
+         AND kind IN ('invocation_opened', 'model_completed') AND kind = 'invocation_opened'
          AND json_extract(event_json, '$.invocation.session_id') = ?
          ORDER BY sequence DESC LIMIT 1",
     )
@@ -68,7 +69,7 @@ pub(super) async fn read(
     let opened_at = number(&opening, 2)?;
     let terminal = sqlx::query(
         "SELECT json_extract(event_json, '$.fact.outcome.kind'),
-                catalog_time(json_extract(event_json, '$.recorded_at')) FROM runtime_events
+                catalog_time(json_extract(event_json, '$.recorded_at')) FROM event_log
                 INDEXED BY invocation_boundary
          WHERE invocation_id = ? AND kind IN ('invocation_opened', 'invocation_ended')
          AND kind = 'invocation_ended' ORDER BY sequence DESC LIMIT 1",

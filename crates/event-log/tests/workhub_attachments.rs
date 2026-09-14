@@ -143,7 +143,7 @@ async fn delegation_copies_attachments_atomically_and_replays_without_the_delete
         .await
         .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_copy_action BEFORE INSERT ON runtime_events
+    db.execute_batch("CREATE TRIGGER fail_copy_action BEFORE INSERT ON event_log
         WHEN NEW.kind = 'workhub_delegated' BEGIN SELECT RAISE(ABORT, 'injected action failure'); END;").unwrap();
     assert!(log.append(&action).await.is_err());
     assert_eq!(

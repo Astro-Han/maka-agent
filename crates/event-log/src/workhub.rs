@@ -25,8 +25,9 @@ use maka_runtime::{
 };
 use sqlx::SqliteConnection;
 
-mod actions;
+pub(crate) mod actions;
 mod candidates;
+mod control;
 mod create;
 mod resume;
 pub mod stop;

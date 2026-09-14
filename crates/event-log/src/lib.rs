@@ -214,7 +214,7 @@ impl EventLog {
                 Box::pin(async move {
                     sequence_number(
                         sqlx::query_scalar::<_, i64>(
-                            "SELECT COALESCE(MAX(sequence), 0) FROM runtime_events",
+                            "SELECT COALESCE(MAX(sequence), 0) FROM event_log",
                         )
                         .fetch_one(connection)
                         .await?,
