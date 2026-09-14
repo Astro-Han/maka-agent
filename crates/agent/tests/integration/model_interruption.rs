@@ -138,7 +138,7 @@ async fn safe_retry_preserves_failed_evidence_and_cancellation_stops_backoff() {
                     loop {
                         let prefix = log.prefix(100, 128 * 1024).await.unwrap();
                         if prefix.events.iter().any(|event| matches!(event.event.fact,
-                            Fact::ModelInterrupted { status: ModelInterruption::Failed, .. })) { break; }
+                            Fact::ModelInterrupted { status: ModelInterruption::RetryableFailure, .. })) { break; }
                         commits.changed().await.unwrap();
                     }
                     cancellation.cancel();
@@ -159,13 +159,104 @@ async fn safe_retry_preserves_failed_evidence_and_cancellation_stops_backoff() {
             assert_eq!(requested.len(), requests.len());
             if !cancel { assert_ne!(requested[0].0, requested[1].0); assert_eq!(requested[0].1, requested[1].1); }
             assert_eq!(prefix.events.iter().filter(|event| matches!(event.event.fact,
-                Fact::ModelInterrupted { status: ModelInterruption::Failed, .. })).count(), 1);
+                Fact::ModelInterrupted { status: ModelInterruption::RetryableFailure, .. })).count(), 1);
             assert!(prefix.events.iter().any(|event| matches!(&event.event.fact,
                 Fact::ModelObserved { event: ModelEvent::PartDelta { text, .. }, .. } if text == "unfinished-secret-fragment")));
             assert!(!prefix.events.iter().any(|event| matches!(event.event.fact,
                 Fact::ToolDispatched { .. } | Fact::ToolRejected { .. })));
         }
     }).await.expect("retry and cancellation must settle within their bounds");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn continuation_claim_replays_only_its_lineage_and_retries_at_fresh_boundaries() {
+    use maka_runtime::{
+        continuation::RunBoundary,
+        event::{EventWrite, LogScope, RuntimeEvent},
+        input::InvocationInput,
+    };
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let directory = tempfile::tempdir().unwrap();
+        let log = Arc::new(EventLog::open(&directory.path().join("events.sqlite")).await.unwrap());
+        let mut source = input(&base, "source");
+        source.configuration.workspace_identity = Some(
+            maka_runtime::execution::WorkspaceIdentity::from_marker_id("c193cd58-f929-4ba2-bfb5-6887beaf8132").unwrap());
+        let opening = |text: &str| Fact::InvocationOpened {
+            configuration: Some(source.configuration.clone()),
+            input: InvocationInput::Message { content: text.into(), request_fingerprint: None,
+                source_messages: Vec::new(), skill_invocation: None },
+        };
+        let route = format!("sha256:{:x}", Sha256::digest(serde_json::to_vec(&source.provider).unwrap()));
+        for fact in [
+            opening("question source"),
+            Fact::ModelRequested { step_id: "old".into(), model_id: "test".into(), purpose: None, context: None,
+                source_scope: LogScope::Session { id: "session".into() }, source_high_water: 1,
+                source_digest: "fixture".into(), input_digest: "fixture".into(), route_identity: route,
+                checkpoint_event_id: None, effective_source_digest: None },
+            Fact::ModelCompleted { step_id: "old".into(), output: serde_json::from_value(json!({
+                "parts":[{"kind":"text","text_kind":"text","text":"trimmed old tail","provider_options":null}],
+                "finish_reason":"stop","usage":{}
+            })).unwrap() },
+            Fact::InvocationEnded { outcome: InvocationOutcome::Cancelled { source: "user".into() } },
+        ] {
+            log.append(&EventWrite::plain(RuntimeEvent::new(source.invocation.clone(), fact)).unwrap()).await.unwrap();
+        }
+        let prefix = log.run_prefix("session", &source.invocation.run_id, None, 100, 128 * 1024).await.unwrap().unwrap();
+        let boundary = RunBoundary { invocation: prefix.invocation, high_water: prefix.high_water, digest: prefix.digest };
+        for fact in [opening("unrelated later branch"), Fact::InvocationEnded { outcome: InvocationOutcome::Completed }] {
+            log.append(&EventWrite::plain(RuntimeEvent::new(input(&base, "branch").invocation, fact)).unwrap()).await.unwrap();
+        }
+        let continuation = |id: &str| {
+            let mut child = input(&base, id);
+            child.configuration = source.configuration.clone();
+            child.request_fingerprint = Some(maka_runtime::artifact::content_digest(id.as_bytes()));
+            child.work = maka_agent::RunWork::Continuation { source: boundary.clone(), tools: Default::default(), max_steps: 2 };
+            child
+        };
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for partial in [true, false] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                requests.push(read_request(&mut socket).await);
+                respond(&mut socket, partial).await;
+            }
+            (requests, listener)
+        });
+        let worker = engine(log.clone());
+        worker.run(continuation("child"), CancellationToken::new()).await.unwrap();
+        let (requests, listener) = server.await.unwrap();
+        assert_eq!(requests[0], requests[1]);
+        let prompt = serde_json::to_string(&requests[0]["messages"]).unwrap();
+        assert!(prompt.contains("question source"));
+        for excluded in ["trimmed old tail", "unrelated later branch", "question child", "unfinished-secret-fragment"] {
+            assert!(!prompt.contains(excluded), "{excluded}: {prompt}");
+        }
+        let mut moved = continuation("moved");
+        moved.configuration.workspace_identity = None;
+        assert!(worker.run(moved, CancellationToken::new()).await.is_err());
+        assert!(worker.run(continuation("duplicate"), CancellationToken::new()).await.is_err());
+        worker.drain().await;
+        assert!(tokio::time::timeout(Duration::from_millis(20), listener.accept()).await.is_err());
+        let facts = log.prefix(100, 128 * 1024).await.unwrap();
+        let claims: Vec<_> = facts.events.iter().filter_map(|s| match &s.event.fact {
+            Fact::InvocationOpened { input: InvocationInput::Continuation { claim, .. }, .. } => Some(claim),
+            _ => None,
+        }).collect();
+        assert_eq!(claims.len(), 1, "only one canonical claim may acquire the sealed source");
+        let attempts: Vec<_> = facts.events.iter().filter_map(|s| match &s.event.fact {
+            Fact::ModelRequested { source_high_water, input_digest, .. } if s.event.invocation.run_id == "run-child" =>
+                Some((*source_high_water, input_digest)),
+            _ => None,
+        }).collect();
+        assert_eq!(attempts.len(), 2);
+        assert!(attempts[1].0 > attempts[0].0, "retry authenticates the advanced canonical cut");
+        assert_eq!(attempts[0].1, &claims[0].replay.digest);
+        assert_eq!(attempts[0].1, attempts[1].1);
+        assert_eq!(facts.events.iter().filter(|s| matches!(s.event.fact,
+            Fact::ModelInterrupted { status: ModelInterruption::RetryableFailure, .. })).count(), 1);
+    }).await.expect("continuation must settle");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

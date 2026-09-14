@@ -19,6 +19,7 @@
 
 mod auto_context;
 mod compact;
+mod continuation;
 mod history;
 mod model_attempt;
 pub use history::project as project_model_history;
@@ -84,6 +85,11 @@ pub struct RunInput {
 }
 
 pub enum RunWork {
+    Continuation {
+        source: maka_runtime::continuation::RunBoundary,
+        tools: ToolCatalog,
+        max_steps: usize,
+    },
     Message {
         message: MessageInput,
         source_messages: Vec<maka_runtime::message::RootSourceMessage>,
@@ -158,6 +164,22 @@ impl Engine {
             } if *max_steps == 0 || *max_steps > 256 || message.text_bytes() > 64 * 1024 => {
                 return Err(RunError::InvalidInput("step or message limit".into()));
             }
+            RunWork::Continuation {
+                source, max_steps, ..
+            } => {
+                if *max_steps == 0
+                    || *max_steps > 256
+                    || source.invocation.session_id != input.invocation.session_id
+                    || input
+                        .request_fingerprint
+                        .as_ref()
+                        .is_none_or(|s| !maka_runtime::archive::valid_projection_digest(s))
+                {
+                    return Err(RunError::InvalidInput(
+                        "invalid continuation request".into(),
+                    ));
+                }
+            }
             RunWork::ContextCompact
                 if input
                     .request_fingerprint
@@ -215,7 +237,9 @@ impl Engine {
         let inner = self.0.clone();
         let invocation = input.invocation.clone();
         let tool_names = Arc::new(match &input.work {
-            RunWork::Message { tools, .. } => tools.names().into_iter().collect(),
+            RunWork::Message { tools, .. } | RunWork::Continuation { tools, .. } => {
+                tools.names().into_iter().collect()
+            }
             RunWork::ContextCompact => Default::default(),
         });
         let worker_cancellation = cancellation.clone();

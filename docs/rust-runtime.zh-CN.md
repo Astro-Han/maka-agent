@@ -83,6 +83,7 @@ Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要�
 - Rust 管理存储、网络路由、工具和原生进程／PTY。一个惰性启动的长期 V8 并发处理模型
   请求与终端解析；Code Mode 使用独立短生命周期 isolate。数量与字节限制提供背压，
   V8 heap 限制不等于进程内存隔离。
+- 插件后续须通过目录注册和有作用域的 Host 服务接入，复用日志、权限与排空机制，不替换 Engine。
 - Code Mode 限制累计 VM 执行时间，不计异步工具等待或收尾时间。
 - 请求的代理策略同时覆盖 HTTP 与 Responses WebSocket。WS 握手失败后指数退避重试
   5 次，再经同一网络策略降级 HTTP。主模型请求另对已识别的临时 provider 故障最多尝试
@@ -130,4 +131,4 @@ Grep 差分测试需要 PATH 中有 `rg`；runtime 本身不依赖该可执行�
 Skills 变更与更新预览、安全 resume／恢复协调、
 编排、部分 capability 服务、受管升级及其它协议域
 仍未完成。完整 Desktop 验收和 Linux、macOS、Windows 发布打包仍待完成。
-插件与 OS 沙箱暂缓，内容脱敏不实现。
+插件与 OS 沙箱暂缓；Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。

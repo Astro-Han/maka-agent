@@ -47,7 +47,21 @@ pub async fn run(
         }
         Err(error) => return Err(error.into()),
     }
+    let claim = match &input.work {
+        RunWork::Continuation { source, tools, .. } => {
+            Some(crate::continuation::prepare(&inner, &input, source, tools, &cancellation).await?)
+        }
+        _ => None,
+    };
+    let continuation_base = claim.as_ref().map(|claim| claim.base.high_water);
     let opening = match &input.work {
+        RunWork::Continuation { .. } => InvocationInput::Continuation {
+            claim: Box::new(claim.expect("prepared continuation")),
+            request_fingerprint: input
+                .request_fingerprint
+                .clone()
+                .expect("validated continuation fingerprint"),
+        },
         RunWork::Message {
             message,
             source_messages,
@@ -81,14 +95,25 @@ pub async fn run(
         match &input.work {
             RunWork::Message {
                 tools, max_steps, ..
-            } => steps::run(&inner, &input, tools, *max_steps, &cancellation)
-                .await
-                .map(|()| (InvocationOutcome::Completed, None)),
+            }
+            | RunWork::Continuation {
+                tools, max_steps, ..
+            } => steps::run(
+                &inner,
+                &input,
+                tools,
+                *max_steps,
+                &cancellation,
+                continuation_base,
+            )
+            .await
+            .map(|()| (InvocationOutcome::Completed, None)),
             RunWork::ContextCompact => compact::run(
                 &inner,
                 &input,
                 &maka_runtime::context::CheckpointMode::Standalone,
                 &cancellation,
+                None,
             )
             .await
             .map(|(outcome, checkpoint)| {

@@ -32,7 +32,9 @@ pub(super) fn build<'a>(
     session: &str,
     images: &mut Vec<images::Target<'a>>,
     vision: bool,
+    replay: Option<super::Replay<'a>>,
 ) -> Result<Vec<Message>, RunError> {
+    let cuts = replay.map(|policy| super::replay::Cuts::new(events.clone(), policy));
     let mut messages = Vec::new();
     let mut calls = HashMap::new();
     let mut dispatched = HashSet::new();
@@ -157,7 +159,7 @@ pub(super) fn build<'a>(
                     }
                 }
                 let mut content = Vec::new();
-                for part in &output.parts {
+                for (index, part) in output.parts.iter().enumerate() {
                     let value = match part {
                         ModelPart::Text {
                             text_kind,
@@ -205,12 +207,21 @@ pub(super) fn build<'a>(
                             provider_options: provider_options.clone(),
                         },
                     };
-                    content.push(value);
+                    if cuts
+                        .as_ref()
+                        .map(|cuts| cuts.allows(stored, step_id, index, part))
+                        .transpose()?
+                        .unwrap_or(true)
+                    {
+                        content.push(value);
+                    }
                 }
-                messages.push(Message::Assistant {
-                    content,
-                    provider_options: None,
-                });
+                if !content.is_empty() {
+                    messages.push(Message::Assistant {
+                        content,
+                        provider_options: None,
+                    });
+                }
             }
             Fact::ToolDispatched {
                 operation_id: operation,

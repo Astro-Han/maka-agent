@@ -62,6 +62,18 @@ pub(crate) async fn materialize(
     vision: bool,
     cancellation: &CancellationToken,
 ) -> Result<Vec<Message>, RunError> {
+    materialize_replay(log, events, anchor, session, vision, cancellation, None).await
+}
+
+pub(crate) async fn materialize_replay(
+    log: &EventLog,
+    events: &[maka_event_log::context::ContextEvent],
+    anchor: Option<&StoredEvent>,
+    session: &str,
+    vision: bool,
+    cancellation: &CancellationToken,
+    replay: Option<super::Replay<'_>>,
+) -> Result<Vec<Message>, RunError> {
     let mut targets = Vec::new();
     let mut messages = super::build(
         anchor
@@ -71,6 +83,7 @@ pub(crate) async fn materialize(
         session,
         &mut targets,
         vision,
+        replay,
     )?;
     let mut remaining = IMAGE_BUDGET;
     let mut omitted = BTreeMap::<usize, usize>::new();

@@ -72,7 +72,13 @@ pub(super) async fn require_safe_through(
               WHERE json_extract(p.value, '$.kind') = 'tool_call' AND json_extract(p.value, '$.call.provider_executed') = 0
               AND NOT EXISTS(SELECT 1 FROM runtime_events d WHERE d.invocation_id = e.invocation_id
                 AND d.operation_id = e.operation_id || ':' || json_extract(p.value, '$.call.id')
-                AND d.kind IN ('tool_dispatched','tool_rejected'))))))",
+                AND d.kind IN ('tool_dispatched','tool_rejected'))))
+           OR (e.kind = 'model_completed' AND EXISTS(SELECT 1 FROM json_each(e.event_json, '$.fact.output.parts') p
+              WHERE json_extract(p.value, '$.kind') = 'tool_call' AND json_extract(p.value, '$.call.provider_executed') = 1
+              AND NOT EXISTS(SELECT 1 FROM json_each(e.event_json, '$.fact.output.parts') result
+                WHERE json_extract(result.value, '$.kind') = 'tool_result'
+                  AND json_extract(result.value, '$.id') = json_extract(p.value, '$.call.id')
+                  AND json_extract(result.value, '$.name') = json_extract(p.value, '$.call.name'))))))",
     ).bind(session).bind(current).bind(through as i64).fetch_one(&mut *connection).await?;
     if unsafe_history {
         return Err(invalid(
@@ -167,6 +173,15 @@ async fn execution_boundary(
                AND d.operation_id = e.operation_id || ':' || json_extract(p.value, '$.call.id')
                AND d.kind IN ('tool_dispatched','tool_rejected') AND d.sequence <= ?2)))
           OR (e.kind = 'model_interrupted'
+             AND (json_extract(e.event_json, '$.fact.status') != 'retryable_failure'
+               OR EXISTS(SELECT 1 FROM runtime_events barrier WHERE barrier.invocation_id=e.invocation_id
+                 AND json_extract(barrier.event_json, '$.fact.step_id')=e.operation_id
+                 AND barrier.kind='model_observed' AND barrier.sequence <= ?2
+                 AND (json_extract(barrier.event_json, '$.fact.event.kind') IN ('provider_tool_result','finished')
+                   OR (json_extract(barrier.event_json, '$.fact.event.kind')='tool_call'
+                     AND json_extract(barrier.event_json, '$.fact.event.data.provider_executed')=1)
+                   OR (json_extract(barrier.event_json, '$.fact.event.data.provider_options') IS NOT NULL
+                     AND json_extract(barrier.event_json, '$.fact.event.data.provider_options') != '{}'))))
              AND NOT (?3 AND EXISTS(SELECT 1 FROM runtime_events r WHERE r.invocation_id=e.invocation_id AND r.operation_id=e.operation_id
                AND r.kind='model_requested' AND json_extract(r.event_json,'$.fact.purpose')='summary')
                AND NOT EXISTS(SELECT 1 FROM runtime_events o WHERE o.invocation_id=e.invocation_id

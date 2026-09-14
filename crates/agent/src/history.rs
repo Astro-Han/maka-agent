@@ -28,6 +28,8 @@ pub(super) use chat::project as project_chat;
 pub(super) use compatible::project as project_compatible;
 mod output;
 mod projection;
+mod replay;
+pub(super) use replay::Replay;
 mod user;
 
 #[derive(Clone, Copy)]
@@ -53,6 +55,7 @@ impl<'a> From<&'a maka_event_log::context::ContextEvent> for EventRef<'a> {
 }
 mod references;
 pub(super) use images::materialize;
+pub(super) use images::materialize_replay;
 use projection::build;
 
 pub fn operation_id(step_id: &str, call_id: &str) -> String {
@@ -77,6 +80,7 @@ pub fn project(prefix: &LogPrefix, session: &str) -> Result<Vec<Message>, RunErr
         session,
         &mut Vec::new(),
         false,
+        None,
     )
 }
 

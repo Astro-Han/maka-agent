@@ -30,6 +30,7 @@ pub(super) async fn run(
     catalog: &maka_tools::ToolCatalog,
     max_steps: usize,
     cancellation: &CancellationToken,
+    continuation_base: Option<u64>,
 ) -> Result<(), RunError> {
     let lane = maka_model::ResponsesLane::default();
     let tools = RunTools::new(
@@ -57,7 +58,16 @@ pub(super) async fn run(
             .await?;
         if !attempted && auto_context::due(input, &source) {
             attempted = true;
-            if auto_context::attempt(inner, input, &source, completed_step, cancellation).await? {
+            if auto_context::attempt(
+                inner,
+                input,
+                &source,
+                completed_step,
+                cancellation,
+                continuation_base,
+            )
+            .await?
+            {
                 tools.clear_loaded();
             }
             source = inner
@@ -70,15 +80,25 @@ pub(super) async fn run(
                 )
                 .await?;
         }
-        let prompt =
-            model_attempt::prompt(inner, input, &source, ModelPurpose::Main, cancellation).await?;
+        let prompt = model_attempt::prompt(
+            inner,
+            input,
+            &source,
+            ModelPurpose::Main,
+            cancellation,
+            continuation_base,
+        )
+        .await?;
         let result = model_attempt::execute(
             inner,
             input,
             &source,
             prompt,
             tools.definitions(),
-            model_attempt::Attempt::Main(lane.clone()),
+            model_attempt::Attempt::Main {
+                lane: lane.clone(),
+                continuation_base,
+            },
             cancellation,
         )
         .await;
@@ -90,8 +110,15 @@ pub(super) async fn run(
                 }),
             ) if !attempted && step + 1 < max_steps && !cancellation.is_cancelled() => {
                 attempted = true;
-                if auto_context::attempt(inner, input, &source, completed_step, cancellation)
-                    .await?
+                if auto_context::attempt(
+                    inner,
+                    input,
+                    &source,
+                    completed_step,
+                    cancellation,
+                    continuation_base,
+                )
+                .await?
                 {
                     tools.clear_loaded();
                     continue;
@@ -133,9 +160,15 @@ pub(super) async fn run(
                     8 * 1024 * 1024,
                 )
                 .await?;
-            let replay =
-                model_attempt::prompt(inner, input, &source, ModelPurpose::Main, cancellation)
-                    .await?;
+            let replay = model_attempt::prompt(
+                inner,
+                input,
+                &source,
+                ModelPurpose::Main,
+                cancellation,
+                continuation_base,
+            )
+            .await?;
             let ids: Vec<_> = local_calls.iter().map(|call| call.id.as_str()).collect();
             lane.confirm(&replay, &ids, output.response_id.as_deref());
         }

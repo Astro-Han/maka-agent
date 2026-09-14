@@ -80,6 +80,7 @@ pub(super) async fn attempt(
     source: &ModelContextSource,
     mid_turn: bool,
     cancellation: &CancellationToken,
+    continuation_base: Option<u64>,
 ) -> Result<bool, RunError> {
     let opening = source
         .anchor
@@ -104,7 +105,7 @@ pub(super) async fn attempt(
     } else {
         CheckpointMode::PreTurn
     };
-    let result = compact::run(inner, input, &mode, cancellation).await;
+    let result = compact::run(inner, input, &mode, cancellation, continuation_base).await;
     let (_, checkpoint) = match result {
         Ok(result) => result,
         Err(RunError::Model(

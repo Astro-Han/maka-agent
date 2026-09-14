@@ -35,7 +35,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub(super) enum Attempt {
-    Main(maka_model::ResponsesLane),
+    Main {
+        lane: maka_model::ResponsesLane,
+        continuation_base: Option<u64>,
+    },
     Summary,
 }
 
@@ -45,14 +48,23 @@ pub(super) async fn prompt(
     source: &ModelContextSource,
     purpose: ModelPurpose,
     cancellation: &CancellationToken,
+    continuation_base: Option<u64>,
 ) -> Result<Vec<Message>, RunError> {
-    let mut prompt = history::materialize(
+    let route = route_identity(input)?;
+    let replay = continuation_base.map(|base| history::Replay {
+        base,
+        current: &input.invocation.invocation_id,
+        route: &route,
+        model: &input.provider.model,
+    });
+    let mut prompt = history::materialize_replay(
         &inner.log,
         &source.tail,
         source.anchor.as_ref(),
         &input.invocation.session_id,
         input.supports_vision,
         cancellation,
+        replay,
     )
     .await?;
     if let Some(baseline) = &source.baseline {
@@ -91,7 +103,11 @@ pub(super) async fn execute(
     attempt: Attempt,
     cancellation: &CancellationToken,
 ) -> Result<(String, ModelStep), RunError> {
-    let Attempt::Main(lane) = attempt else {
+    let Attempt::Main {
+        lane,
+        continuation_base,
+    } = attempt
+    else {
         return execute_once(
             inner,
             input,
@@ -104,16 +120,20 @@ pub(super) async fn execute(
         .await;
     };
     let mut failures = 0;
+    let mut refreshed = None;
     loop {
         // Each physical request gets a new step and the same frozen inputs.
         // Never reuse a request shortened by Responses continuation preparation.
         let result = execute_once(
             inner,
             input,
-            source,
+            refreshed.as_ref().unwrap_or(source),
             prompt.clone(),
             definitions.clone(),
-            Attempt::Main(lane.clone()),
+            Attempt::Main {
+                lane: lane.clone(),
+                continuation_base,
+            },
             cancellation,
         )
         .await;
@@ -136,6 +156,32 @@ pub(super) async fn execute(
             _ = cancellation.cancelled() => return Err(RunError::Cancelled),
             _ = tokio::time::sleep(delay) => {}
         }
+        if continuation_base.is_some() {
+            let next = inner
+                .log
+                .read_model_context(
+                    &input.invocation.session_id,
+                    Some(&input.invocation.invocation_id),
+                    10_000,
+                    8 * 1024 * 1024,
+                )
+                .await?;
+            let replay = self::prompt(
+                inner,
+                input,
+                &next,
+                ModelPurpose::Main,
+                cancellation,
+                continuation_base,
+            )
+            .await?;
+            if replay != prompt {
+                return Err(RunError::ReconciliationRequired(
+                    "continuation retry changed frozen model input".into(),
+                ));
+            }
+            refreshed = Some(next);
+        }
     }
 }
 
@@ -149,12 +195,70 @@ async fn execute_once(
     cancellation: &CancellationToken,
 ) -> Result<(String, ModelStep), RunError> {
     let (purpose, lane) = match attempt {
-        Attempt::Main(lane) => (ModelPurpose::Main, Some(lane)),
+        Attempt::Main { lane, .. } => (ModelPurpose::Main, Some(lane)),
         Attempt::Summary => (ModelPurpose::Summary, None),
     };
     if cancellation.is_cancelled() {
         return Err(RunError::Cancelled);
     }
+    let prepared = prepare_request(input, prompt, definitions, purpose)?;
+    let step_id = Uuid::new_v4().to_string();
+    append(
+        inner,
+        &input.invocation,
+        Fact::ModelRequested {
+            effective_source_digest: (purpose == ModelPurpose::Summary
+                || matches!(
+                    source.source_evidence.scope,
+                    maka_runtime::event::LogScope::Lineage { .. }
+                ))
+            .then(|| source.effective_source_digest.clone()),
+            purpose: Some(purpose),
+            context: input.context.clone(),
+            step_id: step_id.clone(),
+            model_id: input.provider.model.clone(),
+            source_scope: source.source_evidence.scope.clone(),
+            source_high_water: source.source_evidence.high_water,
+            source_digest: source.source_evidence.digest.clone(),
+            input_digest: prepared.input_digest,
+            route_identity: prepared.route_identity,
+            checkpoint_event_id: source
+                .baseline
+                .as_ref()
+                .map(|baseline| baseline.event_id.clone()),
+        },
+    )
+    .await?;
+    let result: Result<_, RunError> = async {
+        let stream = inner
+            .model
+            .stream_in_lane(prepared.request, cancellation.clone(), lane)
+            .await?;
+        receive(inner, input, &step_id, purpose, stream).await
+    }
+    .await;
+    finish(inner, input, step_id, result, cancellation).await
+}
+
+pub(super) struct PreparedRequest {
+    pub request: ModelRequest,
+    pub input_digest: String,
+    pub route_identity: String,
+}
+
+pub(super) fn route_identity(input: &RunInput) -> Result<String, RunError> {
+    Ok(digest(
+        &serde_json::to_vec(&input.provider)
+            .map_err(|error| RunError::Internal(error.to_string()))?,
+    ))
+}
+
+pub(super) fn prepare_request(
+    input: &RunInput,
+    prompt: Vec<Message>,
+    definitions: Vec<ToolDefinition>,
+    purpose: ModelPurpose,
+) -> Result<PreparedRequest, RunError> {
     let max_output_tokens = match purpose {
         ModelPurpose::Main => input.main_output_limit,
         ModelPurpose::Summary => Some(8000),
@@ -178,96 +282,75 @@ async fn execute_once(
     let input_digest = digest(
         &serde_json::to_vec(&evidence).map_err(|error| RunError::Internal(error.to_string()))?,
     );
-    let route_identity = digest(
-        &serde_json::to_vec(&input.provider)
-            .map_err(|error| RunError::Internal(error.to_string()))?,
-    );
-    let step_id = Uuid::new_v4().to_string();
-    append(
-        inner,
-        &input.invocation,
-        Fact::ModelRequested {
-            effective_source_digest: (purpose == ModelPurpose::Summary
-                || matches!(
-                    source.source_evidence.scope,
-                    maka_runtime::event::LogScope::Lineage { .. }
-                ))
-            .then(|| source.effective_source_digest.clone()),
-            purpose: Some(purpose),
-            context: input.context.clone(),
-            step_id: step_id.clone(),
-            model_id: input.provider.model.clone(),
-            source_scope: source.source_evidence.scope.clone(),
-            source_high_water: source.source_evidence.high_water,
-            source_digest: source.source_evidence.digest.clone(),
-            input_digest,
-            route_identity,
-            checkpoint_event_id: source
-                .baseline
-                .as_ref()
-                .map(|baseline| baseline.event_id.clone()),
+    Ok(PreparedRequest {
+        request: ModelRequest {
+            provider: input.provider.clone(),
+            prompt,
+            tools: definitions,
+            provider_options: input.provider_options.clone(),
+            max_output_tokens,
         },
-    )
-    .await?;
+        input_digest,
+        route_identity: route_identity(input)?,
+    })
+}
+
+async fn receive(
+    inner: &Arc<Inner>,
+    input: &RunInput,
+    step_id: &str,
+    purpose: ModelPurpose,
+    mut stream: maka_model::ModelStream,
+) -> Result<ModelStep, RunError> {
+    let mut builder = StepBuilder::for_step(step_id)?;
     let result: Result<_, RunError> = async {
-        let mut stream = inner
-            .model
-            .stream_in_lane(
-                ModelRequest {
-                    provider: input.provider.clone(),
-                    prompt,
-                    tools: definitions,
-                    provider_options: input.provider_options.clone(),
-                    max_output_tokens,
+        while let Some(event) = stream.next().await {
+            let event = event?;
+            builder.push(event.clone())?;
+            append(
+                inner,
+                &input.invocation,
+                Fact::ModelObserved {
+                    step_id: step_id.to_owned(),
+                    event,
                 },
-                cancellation.clone(),
-                lane,
             )
             .await?;
-        let mut builder = StepBuilder::for_step(&step_id)?;
-        let result: Result<_, RunError> = async {
-            while let Some(event) = stream.next().await {
-                let event = event?;
-                builder.push(event.clone())?;
-                append(
-                    inner,
-                    &input.invocation,
-                    Fact::ModelObserved {
-                        step_id: step_id.clone(),
-                        event,
-                    },
-                )
-                .await?;
-            }
-            builder.finish().map_err(Into::into)
         }
-        .await;
-        stream.cancel_and_wait().await;
-        let output = result?;
-        if purpose == ModelPurpose::Main
-            && output.finish_reason == maka_runtime::model::ModelFinishReason::Length
-        {
-            return Err(maka_model::ModelError::Adapter(
-                "unsupported model finish reason: length".into(),
-            )
-            .into());
-        }
-        if purpose == ModelPurpose::Summary
-            && output.parts.iter().any(|part| {
-                matches!(
-                    part,
-                    maka_runtime::model::ModelPart::ToolCall { .. }
-                        | maka_runtime::model::ModelPart::ToolResult { .. }
-                )
-            })
-        {
-            return Err(
-                maka_model::ModelError::Adapter("summary contains tool content".into()).into(),
-            );
-        }
-        Ok(output)
+        builder.finish().map_err(Into::into)
     }
     .await;
+    stream.cancel_and_wait().await;
+    let output = result?;
+    if purpose == ModelPurpose::Main
+        && output.finish_reason == maka_runtime::model::ModelFinishReason::Length
+    {
+        return Err(maka_model::ModelError::Adapter(
+            "unsupported model finish reason: length".into(),
+        )
+        .into());
+    }
+    if purpose == ModelPurpose::Summary
+        && output.parts.iter().any(|part| {
+            matches!(
+                part,
+                maka_runtime::model::ModelPart::ToolCall { .. }
+                    | maka_runtime::model::ModelPart::ToolResult { .. }
+            )
+        })
+    {
+        return Err(maka_model::ModelError::Adapter("summary contains tool content".into()).into());
+    }
+    Ok(output)
+}
+
+async fn finish(
+    inner: &Arc<Inner>,
+    input: &RunInput,
+    step_id: String,
+    result: Result<ModelStep, RunError>,
+    cancellation: &CancellationToken,
+) -> Result<(String, ModelStep), RunError> {
     let output = match result {
         Ok(output) => output,
         Err(RunError::Model(error)) => {
@@ -276,6 +359,9 @@ async fn execute_once(
                 maka_model::ModelError::TimedOut => ModelInterruption::TimedOut,
                 maka_model::ModelError::Adapter(_) => ModelInterruption::Failed,
                 maka_model::ModelError::ContextOverflow { .. } => ModelInterruption::Failed,
+                maka_model::ModelError::Provider(ref failure) if failure.replay_safe() => {
+                    ModelInterruption::RetryableFailure
+                }
                 maka_model::ModelError::Provider(_) => ModelInterruption::Failed,
             };
             append(

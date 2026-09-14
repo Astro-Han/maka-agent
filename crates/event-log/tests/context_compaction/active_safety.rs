@@ -20,8 +20,13 @@
 use super::*;
 
 #[tokio::test]
-async fn partial_and_unsettled_provider_steps_are_not_active_cut_boundaries() {
-    for provider in [false, true] {
+async fn active_cuts_require_settled_effects_or_explicit_retry_safety() {
+    for (provider, retryable, barrier, safe) in [
+        (false, false, false, false),
+        (false, true, false, true),
+        (false, true, true, false),
+        (true, false, false, false),
+    ] {
         let directory = tempfile::tempdir().unwrap();
         let log = EventLog::open(&directory.path().join("provider.sqlite"))
             .await
@@ -50,7 +55,7 @@ async fn partial_and_unsettled_provider_steps_are_not_active_cut_boundaries() {
                     event: ModelEvent::PartDelta {
                         id: "partial".into(),
                         text: "visible".into(),
-                        provider_options: None,
+                        provider_options: barrier.then(|| json!({"signature":"provider state"})),
                     },
                 },
             ))
@@ -60,7 +65,11 @@ async fn partial_and_unsettled_provider_steps_are_not_active_cut_boundaries() {
                 "active",
                 Fact::ModelInterrupted {
                     step_id: "main".into(),
-                    status: maka_runtime::event::ModelInterruption::Failed,
+                    status: if retryable {
+                        maka_runtime::event::ModelInterruption::RetryableFailure
+                    } else {
+                        maka_runtime::event::ModelInterruption::Failed
+                    },
                 },
             ))
             .await
@@ -69,11 +78,29 @@ async fn partial_and_unsettled_provider_steps_are_not_active_cut_boundaries() {
         let mode = CheckpointMode::MidTurn {
             anchor_event_id: anchor.event().id.clone(),
         };
-        assert!(
+        assert_eq!(
             log.prepare_context_compaction("session", Some("active"), 100, 8192, &mode)
                 .await
-                .is_err()
+                .is_ok(),
+            safe,
+            "a retryable classification cannot override observed replay barriers",
         );
+        if provider {
+            log.append(&event(
+                "active",
+                Fact::InvocationEnded {
+                    outcome: InvocationOutcome::Completed,
+                },
+            ))
+            .await
+            .unwrap();
+            assert!(
+                log.read_model_context("session", None, 100, 8192)
+                    .await
+                    .is_err(),
+                "closing an invocation does not settle a provider tool effect",
+            );
+        }
         log.close().await.unwrap();
     }
 }

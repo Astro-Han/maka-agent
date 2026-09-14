@@ -35,6 +35,7 @@ pub(super) async fn run(
     input: &RunInput,
     mode: &CheckpointMode,
     cancellation: &CancellationToken,
+    continuation_base: Option<u64>,
 ) -> Result<(CompactOutcome, Option<RuntimeEvent>), RunError> {
     let source = match inner
         .log
@@ -76,8 +77,15 @@ pub(super) async fn run(
             None,
         ));
     }
-    let prompt =
-        model_attempt::prompt(inner, input, &source, ModelPurpose::Summary, cancellation).await?;
+    let prompt = model_attempt::prompt(
+        inner,
+        input,
+        &source,
+        ModelPurpose::Summary,
+        cancellation,
+        continuation_base,
+    )
+    .await?;
     let base = format!(
         "You are a context summarization assistant.\nRead the conversation between a user and an AI assistant, then produce a structured summary another LLM will use to continue the same task.\nDo NOT continue the conversation. Do NOT answer questions in it. ONLY output the structured summary.\n\nUse this exact format:\n\n{SUMMARY_FORMAT_TEMPLATE}\n\nKeep each section concise. Preserve exact file paths, function names, commands, and error messages."
     );

@@ -94,6 +94,8 @@ Do not run untrusted code or point test instances at existing user data.
   preferences and source updates without reading baselines or claiming Run advertisement.
   Pages are revision-bound; Plan and Skill mutations remain unavailable.
 - Rust owns storage, network routing, tools and native process/PTY lifetimes.
+  Future plugins must enter through catalogs and scoped Host services, sharing
+  journaled effects, permissions and draining rather than replacing the Engine.
   One lazy, long-lived V8 serves concurrent model requests and terminal parsers.
   Code Mode cells use separate short-lived isolates. Count and byte limits provide
   backpressure; V8 heap limits are not process-memory containment.
@@ -153,4 +155,5 @@ Skill mutations and update previews,
 safe resume/reconciliation, orchestration,
 some capability services, managed upgrades and other protocol domains remain incomplete. Full Desktop
 acceptance and release packaging across Linux, macOS and Windows are still
-required. Plugins and OS sandboxing are deferred; content redaction is omitted.
+required. Plugins and OS sandboxing are deferred. Memory is excluded pending a
+separate redesign; its existing implementation is not ported. Content redaction is omitted.

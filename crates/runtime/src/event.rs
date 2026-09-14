@@ -192,6 +192,9 @@ pub enum ModelInterruption {
     Cancelled,
     TimedOut,
     Failed,
+    /// Trusted ingress classified a transient failure with no raw replay barrier.
+    /// This records safety evidence, not an instruction to retry.
+    RetryableFailure,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
