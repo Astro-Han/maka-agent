@@ -107,6 +107,68 @@ fn engine(log: Arc<EventLog>) -> Engine {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn safe_retry_preserves_failed_evidence_and_cancellation_stops_backoff() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        for cancel in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/v1", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut requests = vec![read_request(&mut socket).await];
+                respond(&mut socket, true).await;
+                let intent = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test",
+                    "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"unexecuted","type":"function",
+                        "function":{"name":"Read","arguments":"{\"path\":\"never-read\"}"}}]},"finish_reason":null}]});
+                socket.write_all(format!("data: {intent}\n\n").as_bytes()).await.unwrap();
+                drop(socket); // Real SDK EOF, not a fabricated model error.
+                if !cancel {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    requests.push(read_request(&mut socket).await);
+                    respond(&mut socket, false).await;
+                }
+                (requests, listener)
+            });
+            let directory = tempfile::tempdir().unwrap();
+            let log = Arc::new(EventLog::open(&directory.path().join("events.sqlite")).await.unwrap());
+            let worker = engine(log.clone());
+            let cancellation = CancellationToken::new();
+            let mut commits = log.subscribe_commits();
+            let stop = async {
+                if cancel {
+                    loop {
+                        let prefix = log.prefix(100, 128 * 1024).await.unwrap();
+                        if prefix.events.iter().any(|event| matches!(event.event.fact,
+                            Fact::ModelInterrupted { status: ModelInterruption::Failed, .. })) { break; }
+                        commits.changed().await.unwrap();
+                    }
+                    cancellation.cancel();
+                }
+            };
+            let (result, ()) = tokio::join!(worker.run(input(&base, "retry"), cancellation.clone()), stop);
+            if cancel { assert!(matches!(result, Err(RunError::Cancelled))); }
+            else { result.unwrap(); }
+            worker.drain().await;
+            let (requests, listener) = server.await.unwrap();
+            assert_eq!(requests.len(), if cancel { 1 } else { 2 });
+            if !cancel { assert_eq!(requests[0], requests[1], "retry must use the identical frozen prompt, not failed text or tool intent"); }
+            assert!(tokio::time::timeout(Duration::from_millis(20), listener.accept()).await.is_err());
+            let prefix = log.prefix(100, 128 * 1024).await.unwrap();
+            let requested: Vec<_> = prefix.events.iter().filter_map(|event| match &event.event.fact {
+                Fact::ModelRequested { step_id, input_digest, .. } => Some((step_id, input_digest)), _ => None,
+            }).collect();
+            assert_eq!(requested.len(), requests.len());
+            if !cancel { assert_ne!(requested[0].0, requested[1].0); assert_eq!(requested[0].1, requested[1].1); }
+            assert_eq!(prefix.events.iter().filter(|event| matches!(event.event.fact,
+                Fact::ModelInterrupted { status: ModelInterruption::Failed, .. })).count(), 1);
+            assert!(prefix.events.iter().any(|event| matches!(&event.event.fact,
+                Fact::ModelObserved { event: ModelEvent::PartDelta { text, .. }, .. } if text == "unfinished-secret-fragment")));
+            assert!(!prefix.events.iter().any(|event| matches!(event.event.fact,
+                Fact::ToolDispatched { .. } | Fact::ToolRejected { .. })));
+        }
+    }).await.expect("retry and cancellation must settle within their bounds");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_timeout_cause_survives_reopening_the_log() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

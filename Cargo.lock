@@ -3916,6 +3916,7 @@ name = "maka-agent"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
+ "fastrand",
  "futures-util",
  "maka-event-log",
  "maka-js-runtime",

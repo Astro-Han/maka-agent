@@ -81,9 +81,35 @@ export function observesOutput(part) {
 // Local emit failures stay outside these catches, preserving cancellation/limits.
 export async function forwardProviderStream(open, normalize, emit, kind) {
   let observedOutput = false;
+  let replaySafe = true;
+  let finished = false;
+  const truncated = () =>
+    emit({
+      type: 'error',
+      error: {
+        kind: 'provider',
+        reason: 'stream_truncated',
+        replaySafe,
+        message: 'model stream ended without finish',
+      },
+    });
   const failed = async (error) => {
-    if (!isContextOverflow(error, kind)) throw error;
-    await emit({ type: 'error', error: { kind: 'context_overflow', observedOutput } });
+    // The compatible SDK synthesizes precisely this error on incomplete EOF.
+    if (
+      kind?.openai_compatible &&
+      error instanceof Error &&
+      error.name === 'AI_InvalidResponseDataError' &&
+      error.data === undefined &&
+      error.message === 'Response stream ended without a finish reason.'
+    )
+      return truncated();
+    if (isContextOverflow(error, kind)) {
+      await emit({ type: 'error', error: { kind: 'context_overflow', observedOutput } });
+      return;
+    }
+    const failure = transientFailure(error);
+    if (!failure) throw error;
+    await emit({ type: 'error', error: { kind: 'provider', ...failure, replaySafe } });
   };
   let result;
   try {
@@ -100,9 +126,36 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
       } catch (error) {
         return await failed(error);
       }
-      if (next.done) return;
+      if (next.done) {
+        if (!finished) await truncated();
+        return;
+      }
       const raw = next.value;
       if (raw.type === 'error') return await failed(raw.error);
+      // Chat's SDK emits a synthetic finish even when the provider never sent
+      // one. It is neither authoritative usage nor provider replay evidence.
+      if (
+        kind === 'openai_chat' &&
+        raw.type === 'finish' &&
+        raw.finishReason?.unified === 'other' &&
+        raw.finishReason.raw === undefined
+      ) {
+        return await truncated();
+      }
+      // Capture before normalization, filtering or asynchronous delivery. A
+      // provider tool may already be running without a completed tool-call.
+      if (raw.type === 'finish') finished = true;
+      if (
+        finished ||
+        raw.type === 'tool-result' ||
+        (['tool-input-start', 'tool-call'].includes(raw.type) &&
+          raw.providerExecuted !== undefined &&
+          raw.providerExecuted !== false) ||
+        (raw.providerMetadata != null &&
+          (!record(raw.providerMetadata) || Object.keys(raw.providerMetadata).length > 0))
+      ) {
+        replaySafe = false;
+      }
       observedOutput ||= observesOutput(raw);
       const part = normalize(raw);
       if (!part) continue;
@@ -115,4 +168,46 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
     // Match for-await cleanup without replacing a known failure with cancel noise.
     await iterator.return?.().catch(() => {});
   }
+}
+
+// Only structured provider evidence authorizes a retry. In particular a local
+// response-size failure wrapped by the SDK must not reset its budget by retrying.
+function transientFailure(error) {
+  if (!record(error)) return;
+  let cause = error;
+  for (let depth = 0; record(cause) && depth < 8; depth++, cause = cause.cause) {
+    if (cause.name === 'AbortError' || cause.name === 'ProviderResponseLimitError') return;
+  }
+  const status = error.name === 'AI_APICallError' ? error.statusCode : undefined;
+  const code = error.code ?? error.type ?? error.error?.code ?? error.error?.type;
+  const reason =
+    status === 429
+      ? 'rate_limit'
+      : (Number.isInteger(status) &&
+            (status === 408 || status === 409 || (status >= 500 && status <= 599))) ||
+          ['server_error', 'overloaded_error'].includes(code)
+        ? 'provider_unavailable'
+        : undefined;
+  if (!reason) return;
+  const headers = error.responseHeaders ?? {};
+  const milliseconds = headers['retry-after-ms'];
+  const seconds = headers['retry-after'];
+  let retryAfterMs;
+  if (milliseconds !== undefined || seconds !== undefined) {
+    const delay =
+      milliseconds !== undefined
+        ? Number(milliseconds)
+        : Number.isFinite(Number(seconds))
+          ? Number(seconds) * 1000
+          : Date.parse(seconds) - Date.now();
+    if (!Number.isFinite(delay) || delay <= 0 || delay > 2_147_483_647) return;
+    retryAfterMs = Math.ceil(delay);
+  }
+  if (reason === 'rate_limit' && retryAfterMs === undefined) return;
+  return {
+    reason,
+    message:
+      typeof error.message === 'string' ? error.message.slice(0, 1024) : 'provider request failed',
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  };
 }

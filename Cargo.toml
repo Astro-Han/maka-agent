@@ -64,6 +64,7 @@ thiserror = "2"
 libc = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "signal", "io-util"] }
 futures-util = { version = "0.3", features = ["sink"] }
+fastrand = "2"
 tokio-tungstenite = "0.29"
 tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { version = "1", features = ["v4"] }

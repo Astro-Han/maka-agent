@@ -20,6 +20,8 @@
 pub mod connection;
 mod delta;
 mod events;
+mod failure;
+pub use failure::{ProviderFailure, ProviderFailureReason};
 pub mod oauth;
 #[cfg(test)]
 mod overflow_tests;
@@ -105,6 +107,8 @@ pub enum ModelError {
     TimedOut,
     #[error("model input exceeds provider capacity (observed output: {observed_output})")]
     ContextOverflow { observed_output: bool },
+    #[error(transparent)]
+    Provider(ProviderFailure),
     #[error("model adapter failed: {0}")]
     Adapter(String),
 }

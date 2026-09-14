@@ -91,6 +91,63 @@ pub(super) async fn execute(
     attempt: Attempt,
     cancellation: &CancellationToken,
 ) -> Result<(String, ModelStep), RunError> {
+    let Attempt::Main(lane) = attempt else {
+        return execute_once(
+            inner,
+            input,
+            source,
+            prompt,
+            definitions,
+            Attempt::Summary,
+            cancellation,
+        )
+        .await;
+    };
+    let mut failures = 0;
+    loop {
+        // Each physical request gets a new step and the same frozen inputs.
+        // Never reuse a request shortened by Responses continuation preparation.
+        let result = execute_once(
+            inner,
+            input,
+            source,
+            prompt.clone(),
+            definitions.clone(),
+            Attempt::Main(lane.clone()),
+            cancellation,
+        )
+        .await;
+        let delay = match &result {
+            Err(RunError::Model(maka_model::ModelError::Provider(failure)))
+                if failure.replay_safe() && failures < 9 =>
+            {
+                let base_ms = 1_000u64 << failures.min(5);
+                failure.retry_after().unwrap_or_else(|| {
+                    std::time::Duration::from_millis(base_ms + fastrand::u64(0..=base_ms / 4))
+                })
+            }
+            _ => return result,
+        };
+        failures += 1;
+        // execute_once has drained the worker and committed ModelInterrupted.
+        // A local/storage error cannot reach this wait or authorize another send.
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(RunError::Cancelled),
+            _ = tokio::time::sleep(delay) => {}
+        }
+    }
+}
+
+async fn execute_once(
+    inner: &Arc<Inner>,
+    input: &RunInput,
+    source: &ModelContextSource,
+    prompt: Vec<Message>,
+    definitions: Vec<ToolDefinition>,
+    attempt: Attempt,
+    cancellation: &CancellationToken,
+) -> Result<(String, ModelStep), RunError> {
     let (purpose, lane) = match attempt {
         Attempt::Main(lane) => (ModelPurpose::Main, Some(lane)),
         Attempt::Summary => (ModelPurpose::Summary, None),
@@ -219,6 +276,7 @@ pub(super) async fn execute(
                 maka_model::ModelError::TimedOut => ModelInterruption::TimedOut,
                 maka_model::ModelError::Adapter(_) => ModelInterruption::Failed,
                 maka_model::ModelError::ContextOverflow { .. } => ModelInterruption::Failed,
+                maka_model::ModelError::Provider(_) => ModelInterruption::Failed,
             };
             append(
                 inner,

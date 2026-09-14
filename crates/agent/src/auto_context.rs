@@ -109,6 +109,7 @@ pub(super) async fn attempt(
         Ok(result) => result,
         Err(RunError::Model(
             maka_model::ModelError::Adapter(_)
+            | maka_model::ModelError::Provider(_)
             | maka_model::ModelError::TimedOut
             | maka_model::ModelError::ContextOverflow { .. },
         )) => return Ok(false),

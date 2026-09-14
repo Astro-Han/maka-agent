@@ -208,11 +208,19 @@ impl Normalizer {
                         #[serde(rename = "observedOutput")]
                         observed_output: bool,
                     },
+                    Provider(crate::ProviderFailure),
                 }
                 let failure = serde_json::from_value(value["error"].clone())
                     .map_err(|_| invalid("invalid provider error envelope"))?;
-                let Failure::ContextOverflow { observed_output } = failure;
-                return Err(ModelError::ContextOverflow { observed_output });
+                return Err(match failure {
+                    Failure::ContextOverflow { observed_output } => {
+                        ModelError::ContextOverflow { observed_output }
+                    }
+                    Failure::Provider(failure) => {
+                        failure.validate()?;
+                        ModelError::Provider(failure)
+                    }
+                });
             }
             _ => return Err(invalid(format!("unsupported provider event: {kind}"))),
         };
@@ -292,6 +300,46 @@ mod tests {
                 assert!(normalizer.push(valid.clone()).is_ok());
                 assert!(normalizer.end().is_ok());
             }
+        }
+    }
+
+    #[test]
+    fn provider_replay_evidence_survives_filtering_and_rejects_malformed_envelopes() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/provider-errors.mjs");
+        let output = std::process::Command::new("node")
+            .arg(fixture)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let events: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(events.len(), 8);
+        for (index, event) in events.iter().enumerate() {
+            let Err(ModelError::Provider(failure)) = Normalizer::default().push(event.clone())
+            else {
+                panic!("lost provider failure evidence");
+            };
+            assert_eq!(failure.replay_safe(), index < 3);
+            assert_eq!(
+                failure.reason(),
+                crate::ProviderFailureReason::ProviderUnavailable
+            );
+        }
+        for (field, value) in [
+            ("replaySafe", json!("true")),
+            ("retryAfterMs", json!(2_147_483_648u64)),
+            ("reason", json!("unknown")),
+        ] {
+            let mut event = events[0].clone();
+            event["error"][field] = value;
+            assert!(matches!(
+                Normalizer::default().push(event),
+                Err(ModelError::Adapter(_))
+            ));
         }
     }
 }

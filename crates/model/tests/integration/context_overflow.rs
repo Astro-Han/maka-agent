@@ -25,10 +25,24 @@ use tokio::{io::AsyncWriteExt, net::TcpListener};
 use tokio_util::sync::CancellationToken;
 
 async fn failure(kind: ProviderKind, status: u16, content_type: &str, body: String) -> ModelError {
+    failure_with_headers(kind, status, content_type, body, &[]).await
+}
+
+async fn failure_with_headers(
+    kind: ProviderKind,
+    status: u16,
+    content_type: &str,
+    body: String,
+    extra_headers: &[(&str, &str)],
+) -> ModelError {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let extra_headers: String = extra_headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect();
     let headers = format!(
-        "HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n{extra_headers}\r\n",
         body.len()
     );
     let server = tokio::spawn(async move {
@@ -69,7 +83,7 @@ fn sse(parts: &[Value]) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn http_and_sse_overflow_preserve_typed_evidence_across_sdk_families() {
+async fn http_and_sse_failures_preserve_typed_evidence_across_sdk_families() {
     tokio::time::timeout(Duration::from_secs(30), async {
         for kind in [ProviderKind::OpenaiChat, ProviderKind::OpenaiResponses,
             ProviderKind::OpenaiCompatible { name: "fixture".into() }, ProviderKind::Anthropic] {
@@ -90,6 +104,33 @@ async fn http_and_sse_overflow_preserve_typed_evidence_across_sdk_families() {
         }
         for body in [json!({"error":{"message":"context length rejected"}}).to_string(), String::new()] {
             assert!(matches!(failure(ProviderKind::OpenaiChat,413,"application/json",body).await,ModelError::Adapter(_)));
+        }
+        for (status, header, reason) in [
+            (503, None, Some(maka_model::ProviderFailureReason::ProviderUnavailable)),
+            (503, Some("invalid"), None),
+            (429, None, None),
+            (429, Some("0.01"), Some(maka_model::ProviderFailureReason::RateLimit)),
+            (401, Some("0.01"), None),
+        ] {
+            let headers: Vec<_> = header.map(|value| ("Retry-After", value)).into_iter().collect();
+            let result = failure_with_headers(ProviderKind::OpenaiChat, status, "application/json",
+                json!({"error":{"message":"temporary fixture"}}).to_string(), &headers).await;
+            match (reason, result) {
+                (Some(reason), ModelError::Provider(failure)) => {
+                    assert_eq!(failure.reason(), reason);
+                    assert!(failure.replay_safe());
+                    assert_eq!(failure.retry_after(), header.map(|_| Duration::from_millis(10)));
+                }
+                (None, ModelError::Adapter(_)) => {}
+                (_, result) => panic!("unexpected failure classification: {result}"),
+            }
+        }
+        for kind in [ProviderKind::OpenaiChat, ProviderKind::OpenaiCompatible { name: "fixture".into() }] {
+            let chunk = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test-model",
+                "choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]});
+            let error = failure(kind, 200, "text/event-stream", sse(&[chunk])).await;
+            assert!(matches!(error, ModelError::Provider(failure)
+                if failure.reason() == maka_model::ProviderFailureReason::StreamTruncated && failure.replay_safe()));
         }
     }).await.expect("bounded SDK error classification");
 }

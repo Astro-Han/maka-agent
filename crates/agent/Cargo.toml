@@ -37,6 +37,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 futures-util.workspace = true
+fastrand.workspace = true
 
 [dev-dependencies]
 maka-presentation.workspace = true

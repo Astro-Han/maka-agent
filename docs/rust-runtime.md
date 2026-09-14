@@ -100,7 +100,10 @@ Do not run untrusted code or point test instances at existing user data.
   and cleanup.
 - Request-scoped proxy policy applies to HTTP and Responses WebSocket transport.
   Failed WS handshakes retry five times with exponential backoff, then use HTTP
-  through the same policy. Dispatched requests are not automatically replayed.
+  through the same policy. Separately, main requests allow up to ten attempts for
+  identified transient provider failures, using frozen inputs and cancellable backoff.
+  Provider tool activity or replay metadata blocks retries. Unknown/local errors
+  and unclassified network failures or deadlines are not retried.
 
 ## Code layout
 
