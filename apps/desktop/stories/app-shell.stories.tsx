@@ -3780,6 +3780,7 @@ export const ProcessReplyLifecycleComplete: Story = {
     await expect(process.open).toBe(true);
     await expect(process.contains(answer)).toBe(false);
     await waitFor(() => expect(process.open).toBe(false), { timeout: 3000 });
+    await waitFor(() => expect(process.getBoundingClientRect().height).toBeLessThanOrEqual(process.querySelector('summary')!.getBoundingClientRect().height + 1));
     await expect(canvasElement.querySelector('.maka-processing-sequence')).toBe(process);
     await expect(answer.isConnected).toBe(true);
     await expect(answer).toBeVisible();
@@ -3809,7 +3810,7 @@ export const CompletedProcessCollapsed: Story = {
 };
 
 // Real path: the same completed reply → open the elapsed-time disclosure.
-// Browser coverage checks its focus and that collapsing the process preserves
+// Browser coverage checks bidirectional motion, focus, and that collapsing preserves
 // a selection in the final answer. Native summary keyboard activation remains
 // browser-owned; userEvent does not emulate its Enter or focus behavior.
 export const CompletedProcessExpanded: Story = {
@@ -3821,16 +3822,13 @@ export const CompletedProcessExpanded: Story = {
     summary.focus();
     summary.click();
     await waitFor(() => expect(process.open).toBe(true));
-    const content = process.querySelector<HTMLElement>('.maka-processing-content')!;
     if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      const reveal = content.getAnimations().find((animation) =>
-        animation instanceof CSSAnimation && animation.animationName === 'maka-process-reveal');
-      await expect(reveal).toBeDefined();
-      // Animate paint opacity, never the height of the full process.
-      await expect((reveal!.effect as KeyframeEffect).getKeyframes().every((frame) =>
-        'opacity' in frame && !('height' in frame))).toBe(true);
-      await reveal!.finished;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const height = process.getBoundingClientRect().height;
+      await expect(height).toBeGreaterThan(summary.getBoundingClientRect().height + 1);
+      await expect(height).toBeLessThan(summary.getBoundingClientRect().height + process.querySelector<HTMLElement>('.maka-processing-content')!.offsetHeight - 1);
     }
+    await waitFor(() => expect(process.getBoundingClientRect().height).toBeGreaterThanOrEqual(summary.getBoundingClientRect().height + process.querySelector<HTMLElement>('.maka-processing-content')!.offsetHeight - 1));
     await expect(summary).toHaveFocus();
     await expect(await within(canvasElement).findByText('我先检查登录状态的存储和恢复逻辑。')).toBeVisible();
     const answer = await within(canvasElement).findByText('已修复登录状态恢复。');
@@ -3846,6 +3844,11 @@ export const CompletedProcessExpanded: Story = {
     // this checks React/layout identity, rather than browser mouse semantics.
     summary.click();
     await waitFor(() => expect(process.open).toBe(false));
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await expect(process.getBoundingClientRect().height).toBeGreaterThan(summary.getBoundingClientRect().height + 1);
+    }
+    await waitFor(() => expect(process.getBoundingClientRect().height).toBeLessThanOrEqual(summary.getBoundingClientRect().height + 1));
     await expect(selection.toString()).toBe(selected);
     await expect(answer.isConnected).toBe(true);
     summary.click();

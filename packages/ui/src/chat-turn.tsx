@@ -1383,7 +1383,7 @@ function ProcessingBlock(props: {
         ) : <span>{label}</span>}
         {!props.running && <ChevronRight size={ICON_SIZE.meta} aria-hidden="true" />}
       </summary>
-      <div className="maka-processing-content">
+      <div className="maka-processing-clip"><div className="maka-processing-content">
         {props.entries.map((entry, index) => (
           <TurnTimelineEntry
             key={timelineEntryKey(entry, index)}
@@ -1395,7 +1395,7 @@ function ProcessingBlock(props: {
             initialLiveContent={props.initialLiveContent}
           />
         ))}
-      </div>
+      </div></div>
     </details>
   );
 }
