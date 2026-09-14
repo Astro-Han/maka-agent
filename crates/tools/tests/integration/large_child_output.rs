@@ -95,7 +95,8 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
             cells.clone(),
         );
         let result = run
-            .step(&invocation.invocation_id)
+            .capture()
+            .into_step(&invocation.invocation_id)
             .invoke(&call, CancellationToken::new())
             .await
             .unwrap();

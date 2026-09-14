@@ -46,6 +46,8 @@ impl ToolCallContext {
 
 /// Preparation may parse a remote call and obtain policy approval, but must not
 /// admit its effect. A returned one-shot effect is invoked only after durable T1.
+/// A revocable registration checks its captured generation here; retirement must
+/// reject a new call, never resolve a replacement handler by name.
 pub trait ToolPreparer: Send + Sync + 'static {
     fn names(&self) -> Vec<String>;
     fn prepare(

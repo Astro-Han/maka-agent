@@ -83,6 +83,8 @@ Do not run untrusted code or point test instances at existing user data.
 - Deferred tools become callable on the step after a successful search; committed
   compaction unloads them. Code Mode exposes only `exec`, with the available
   nested catalog in its description. Existing calls retain their captured scope.
+  Each logical step captures schemas and handlers together; physical retries
+  and returned tool calls reuse that view.
 - Explicit Skills in `turn.start` and `turn.message.submit` freeze instructions and receipts at
   admission. Queued messages retain their required tools; promotion and successor
   execution check the actual target Run without reloading Skill files.

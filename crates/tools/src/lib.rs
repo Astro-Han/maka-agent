@@ -26,7 +26,7 @@ pub use client::{ApprovalFuture, ClientInteractions, ClientTools, PermissionFutu
 mod dispatch;
 mod preparation;
 pub use catalog::*;
-pub use dispatch::{RunTools, StepTools};
+pub use dispatch::{RequestTools, RunTools, StepTools};
 pub use preparation::{
     PreparationFuture, PreparedEffect, ToolCallContext, ToolHandler, ToolPreparer,
 };

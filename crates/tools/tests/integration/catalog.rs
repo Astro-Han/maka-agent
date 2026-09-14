@@ -191,14 +191,16 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
             ToolMode::Direct,
             CodeExecutor::new(1, CellLimits::default()).unwrap(),
         );
+        let request = run.capture();
         assert_eq!(
-            run.definitions()
+            request
+                .definitions()
                 .iter()
                 .map(|d| d.name.as_str())
                 .collect::<Vec<_>>(),
             ["tool_search"]
         );
-        let mut step = run.step(&invocation.invocation_id);
+        let mut step = request.into_step(&invocation.invocation_id);
         assert!(
             step.invoke(&invalid, CancellationToken::new())
                 .await
@@ -221,13 +223,16 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
             }
         );
         assert!(result["blocked"]["schemaChars"].as_u64().unwrap() > 33_000);
+        let next = run.capture();
+        run.clear_loaded();
         assert_eq!(
-            run.definitions()
+            next.definitions()
                 .iter()
                 .filter(|d| d.name != "tool_search")
                 .count(),
             1
         );
+        assert_eq!(run.capture().definitions().len(), 1);
         assert_eq!(effects.0.load(Ordering::SeqCst), 0);
         drop(run);
         Arc::try_unwrap(log).ok().unwrap().close().await.unwrap();

@@ -61,17 +61,36 @@ impl RunTools {
         self.availability.clear();
     }
 
-    pub fn definitions(&self) -> Vec<ToolDefinition> {
+    /// Capture once per logical model step, before sending any physical attempt.
+    pub fn capture(&self) -> RequestTools<'_> {
         let availability = if self.mode == ToolMode::CodeMode {
             self.availability.nested()
         } else {
             self.availability.clone()
         };
-        let mut definitions: Vec<_> = availability.snapshot().definitions().cloned().collect();
-        if let Some(search) = availability.definition() {
+        RequestTools {
+            run: self,
+            catalog: availability.snapshot(),
+            availability,
+        }
+    }
+}
+
+/// The advertised schemas and their handlers share one captured capability view.
+/// Search settlement affects future captures, never this request or its retries.
+pub struct RequestTools<'a> {
+    run: &'a RunTools,
+    catalog: ToolCatalog,
+    availability: Availability,
+}
+
+impl<'a> RequestTools<'a> {
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions: Vec<_> = self.catalog.definitions().cloned().collect();
+        if let Some(search) = self.availability.definition() {
             definitions.push(search);
         }
-        if self.mode == ToolMode::CodeMode {
+        if self.run.mode == ToolMode::CodeMode {
             let mut exec = cell::definition();
             exec.description.push_str("\nThis is the only callable tool. After searching, return its result and use the refreshed catalog in the next exec call. Available nested functions:\n");
             exec.description.push_str(
@@ -83,12 +102,11 @@ impl RunTools {
         }
     }
 
-    pub fn step<'a>(&'a self, step_id: &'a str) -> StepTools<'a> {
+    pub fn into_step(self, step_id: &'a str) -> StepTools<'a> {
         StepTools {
-            run: self,
+            request: self,
             step_id,
             admission: Admission::Fresh,
-            catalog: self.availability.snapshot(),
         }
     }
 }
@@ -96,10 +114,9 @@ impl RunTools {
 /// Call-order admission is separate from execution scheduling. Serial execution
 /// alone does not make exclusive-step siblings legal.
 pub struct StepTools<'a> {
-    run: &'a RunTools,
+    request: RequestTools<'a>,
     step_id: &'a str,
     admission: Admission,
-    catalog: ToolCatalog,
 }
 
 #[derive(Default)]
@@ -127,7 +144,7 @@ impl StepTools<'_> {
         call: &ModelToolCall,
         cancellation: CancellationToken,
     ) -> Result<Value, ToolError> {
-        let run = self.run;
+        let run = self.request.run;
         let operation_id = format!("{}:{}", self.step_id, call.id);
         let identity = ToolCallIdentity::provider(self.step_id.into(), call.id.clone());
         let preparation: Result<PreparedEffect, ToolRejection> = async {
@@ -142,8 +159,8 @@ impl StepTools<'_> {
                 let executor = cell::CellTool::new(
                     run.cells.clone(),
                     cell::source(&call.input)?,
-                    self.catalog.nested(),
-                    run.availability.nested(),
+                    self.request.catalog.clone(),
+                    self.request.availability.clone(),
                     run.journal.clone(),
                     operation_id.clone(),
                     call.id.clone(),
@@ -157,12 +174,14 @@ impl StepTools<'_> {
                     })
                 });
                 Ok(effect)
-            } else if call.name == SEARCH && run.availability.enabled() {
+            } else if call.name == SEARCH && self.request.availability.enabled() {
                 self.admission.admit(ToolSemantics::Parallel)?;
-                run.availability.prepare_search(&call.input)
+                self.request.availability.prepare_search(&call.input)
             } else {
-                self.admission.admit(self.catalog.semantics(&call.name)?)?;
-                self.catalog
+                self.admission
+                    .admit(self.request.catalog.semantics(&call.name)?)?;
+                self.request
+                    .catalog
                     .prepare(
                         call.name.clone(),
                         call.input.clone(),
@@ -202,7 +221,7 @@ impl StepTools<'_> {
                 effect,
             )
             .await?;
-        run.availability.settled(&call.name, &result)?;
+        self.request.availability.settled(&call.name, &result)?;
         Ok(result)
     }
 }

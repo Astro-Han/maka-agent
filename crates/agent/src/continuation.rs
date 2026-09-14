@@ -123,7 +123,7 @@ pub(super) async fn prepare(
         input.configuration.tool_mode,
         inner.cells.clone(),
     );
-    let definitions = tools.definitions();
+    let definitions = tools.capture().definitions();
     let mut available: std::collections::HashSet<_> = catalog.names().into_iter().collect();
     available.extend(definitions.iter().map(|definition| definition.name.clone()));
     for message in &prompt {

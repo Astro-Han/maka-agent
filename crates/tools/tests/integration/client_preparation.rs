@@ -243,7 +243,8 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
     let run = RunTools::new(log.clone(), invocation.clone(), catalog, mode, cells);
     let cancellation = CancellationToken::new();
     let cancel = cancellation.clone();
-    let execution = tokio::spawn(async move { run.step("step").invoke(&call, cancel).await });
+    let execution =
+        tokio::spawn(async move { run.capture().into_step("step").invoke(&call, cancel).await });
     let HostFrame::Call {
         invocation_id: id,
         session_id,

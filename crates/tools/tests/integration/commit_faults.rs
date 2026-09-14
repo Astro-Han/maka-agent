@@ -210,7 +210,8 @@ async fn check_boundary(boundary: Boundary) {
             CodeExecutor::new(1, CellLimits::default()).unwrap(),
         );
         let result = run
-            .step("step")
+            .capture()
+            .into_step("step")
             .invoke(&call, CancellationToken::new())
             .await;
         match boundary {
@@ -291,7 +292,8 @@ async fn check_boundary(boundary: Boundary) {
         CodeExecutor::new(1, CellLimits::default()).unwrap(),
     );
     assert!(matches!(
-        run.step("step")
+        run.capture()
+            .into_step("step")
             .invoke(&call, CancellationToken::new())
             .await,
         Err(ToolError::Persistence(_))

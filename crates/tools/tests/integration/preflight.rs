@@ -134,7 +134,8 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
             mode,
             cells.clone(),
         );
-        let names: Vec<_> = run.definitions().into_iter().map(|d| d.name).collect();
+        let request = run.capture();
+        let names: Vec<_> = request.definitions().into_iter().map(|d| d.name).collect();
         assert_eq!(
             names,
             if mode == ToolMode::Direct {
@@ -148,7 +149,7 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
             token.cancel();
         }
         let step_id = &invocation.invocation_id;
-        let mut step = run.step(step_id);
+        let mut step = request.into_step(step_id);
         for (call, reason) in expectations {
             let result = step.invoke(&call, token.clone()).await;
             let prefix = log.prefix(200, 1024 * 1024).await.unwrap();
@@ -250,7 +251,8 @@ async fn nested_preflight_is_effect_free_and_diagnostics_are_successful_parent_v
             cells.clone(),
         );
         let value = run
-            .step(&invocation.invocation_id)
+            .capture()
+            .into_step(&invocation.invocation_id)
             .invoke(&call, CancellationToken::new())
             .await
             .unwrap();

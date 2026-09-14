@@ -144,7 +144,8 @@ async fn nested_image_is_committed_before_js_and_parent_stays_json() {
         CodeExecutor::new(1, CellLimits::default()).unwrap(),
     );
     let result = run
-        .step(&invocation.invocation_id)
+        .capture()
+        .into_step(&invocation.invocation_id)
         .invoke(&call, CancellationToken::new())
         .await
         .unwrap();

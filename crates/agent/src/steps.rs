@@ -80,6 +80,7 @@ pub(super) async fn run(
                 )
                 .await?;
         }
+        let request_tools = tools.capture();
         let prompt = model_attempt::prompt(
             inner,
             input,
@@ -94,7 +95,7 @@ pub(super) async fn run(
             input,
             &source,
             prompt,
-            tools.definitions(),
+            request_tools.definitions(),
             model_attempt::Attempt::Main {
                 lane: lane.clone(),
                 continuation_base,
@@ -134,7 +135,7 @@ pub(super) async fn run(
         if local_calls.is_empty() {
             return Ok(());
         }
-        let mut step_tools = tools.step(&step_id);
+        let mut step_tools = request_tools.into_step(&step_id);
         for call in &local_calls {
             let result = std::panic::AssertUnwindSafe(async {
                 step_tools.invoke(call, cancellation.clone()).await
