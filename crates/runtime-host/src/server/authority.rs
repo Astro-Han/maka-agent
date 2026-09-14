@@ -195,6 +195,9 @@ fn path_free(request: &Request) -> bool {
         Operation::SessionCreate | Operation::SessionWorkspaceRelocate => {
             request.input["workspace"]["kind"] != "host_path"
         }
+        Operation::WorkhubCoordinationActFromTurn => {
+            request.input["create"]["workspace"]["kind"] != "host_path"
+        }
         Operation::ClientCapabilityUnregister
         | Operation::ArtifactIngest
         | Operation::ArtifactQuery
@@ -224,6 +227,7 @@ fn path_free(request: &Request) -> bool {
         | Operation::SessionCatalogQuery
         | Operation::WorkhubCoordinationResolve
         | Operation::WorkhubCoordinationAnswer
+        | Operation::WorkhubCoordinationCandidates
         | Operation::WorkhubCoordinationQuery
         | Operation::WorkhubCoordinationConfigureModel
         | Operation::SessionExecutionBoundaryQuery

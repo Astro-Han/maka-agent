@@ -25,7 +25,6 @@ use maka_runtime::{
     workhub::{COORDINATION_SESSION_ID, Delegation},
 };
 use serde_json::json;
-
 fn invocation(session: &str, name: &str) -> Invocation {
     Invocation {
         session_id: session.into(),
@@ -50,8 +49,7 @@ fn message(text: &str) -> Fact {
 }
 
 #[tokio::test]
-async fn delegation_and_pending_target_commit_together_and_replay_without_reassigning_or_requeueing()
- {
+async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("events.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -69,6 +67,7 @@ async fn delegation_and_pending_target_commit_together_and_replay_without_reassi
         request_fingerprint: content_digest(b"bound proposal"),
         source_message_event_id: source.event().id.clone(),
         target: target.clone(),
+        target_revision: 1,
         delegation_text: "specific task from the coordinator".into(),
     };
     let action = write(
@@ -97,7 +96,6 @@ async fn delegation_and_pending_target_commit_together_and_replay_without_reassi
     );
     log.close().await.unwrap();
     drop(db);
-
     // The action committed, but the target did not start before process exit.
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(log.append(&action).await.unwrap(), sequence);
@@ -230,6 +228,12 @@ async fn delegation_and_pending_target_commit_together_and_replay_without_reassi
     let mut unsafe_target = delegation;
     unsafe_target.action_id = "unsafe-target".into();
     unsafe_target.target = invocation("other", "unsafe-target");
+    unsafe_target.target_revision = log
+        .get_session::<serde_json::Value>("other")
+        .await
+        .unwrap()
+        .unwrap()
+        .revision;
     assert!(
         log.append(&write(
             &coordinator,
@@ -241,7 +245,6 @@ async fn delegation_and_pending_target_commit_together_and_replay_without_reassi
         .is_err()
     );
     assert!(log.pending_messages("other").await.unwrap().is_empty());
-
     // Existing successor delivery consumes the exact admission, not a parallel queue.
     log.append(&write(
         &target,

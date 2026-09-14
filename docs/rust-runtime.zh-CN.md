@@ -131,7 +131,8 @@ Grep 差分测试需要 PATH 中有 `rg`；runtime 本身不依赖该可执行�
 已实现项目／会话管理、已结束 Turn 导航、配置、附件、文件工具、shell／PTY、Client Capability 工具、
 模型流式交互与上下文压缩。Codex 订阅已接入执行；Copilot／xAI 推理适配和实测后置。
 
-WorkHub 已支持专属会话解析、查询、模型配置及使用受限 Desktop 工具和附件读取的对话；任务委派尚未接通。
+WorkHub 已支持专属会话解析、查询、模型配置、受限 Desktop 工具与附件读取，以及候选发现和向已有空闲会话委派任务。
+任务创建、关联操作、多选及附件转移仍未完成。
 
 Skills 变更与更新预览、高级恢复与协调、WorkHub 协调、
 编排、部分 capability 服务、受管升级及其它协议域

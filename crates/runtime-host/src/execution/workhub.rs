@@ -32,6 +32,56 @@ use uuid::Uuid;
 mod profile;
 
 impl Executions {
+    pub(crate) async fn workhub_source(
+        &self,
+        turn: &str,
+    ) -> Result<maka_event_log::turns::TurnBoundary> {
+        let invocation = self
+            .active
+            .lock()
+            .unwrap()
+            .values()
+            .find(|run| {
+                run.invocation.session_id == COORDINATION_SESSION_ID
+                    && run.invocation.turn_id == turn
+                    && !run.cancellation.is_cancelled()
+            })
+            .map(|run| run.invocation.clone())
+            .ok_or_else(|| failure(Code::OperationConflict, "WorkHub Turn is not active"))?;
+        let boundary = self
+            .log
+            .run_boundary(COORDINATION_SESSION_ID, &invocation.run_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| failure(Code::OperationConflict, "WorkHub opening is missing"))?;
+        if matches!(
+            boundary.state,
+            maka_event_log::turns::InvocationState::Ended { .. }
+        ) {
+            return Err(failure(Code::OperationConflict, "WorkHub Turn has ended"));
+        }
+        Ok(boundary)
+    }
+
+    /// The action already owns a durable pending root. Reuse normal recovery/delivery.
+    pub(crate) async fn dispatch_workhub_pending(self: &Arc<Self>, session: &str) -> Result<()> {
+        match self.next_message(session).await {
+            Ok(Some((running, cancellation))) => self.track(running, cancellation),
+            Ok(None) => {}
+            Err(error) => {
+                self.begin_drain();
+                return Err(failure(
+                    Code::HostDraining,
+                    &format!(
+                        "Delegation committed; target startup failed: {}",
+                        error.message
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The WorkHub entry point holds the shared admission gate and proves the
     /// stable Session identity before calling this method.
     pub(crate) async fn answer_workhub(

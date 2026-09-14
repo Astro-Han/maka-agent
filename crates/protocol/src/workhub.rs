@@ -22,6 +22,11 @@ use maka_runtime::workhub::COORDINATION_SESSION_ID;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod action;
+mod candidates;
+pub use action::{ActInput, ActResult, LinkedProposal, Proposal, RoutingProposal, decode_act};
+pub use candidates::{Candidate, CandidatesResult, decode_candidates};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnswerInput {
@@ -83,12 +88,16 @@ pub fn supports(operation: Operation) -> bool {
             | Operation::WorkhubCoordinationQuery
             | Operation::WorkhubCoordinationConfigureModel
             | Operation::WorkhubCoordinationAnswer
+            | Operation::WorkhubCoordinationCandidates
+            | Operation::WorkhubCoordinationActFromTurn
     )
 }
 
 pub fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
     match operation {
-        Operation::WorkhubCoordinationResolve | Operation::WorkhubCoordinationQuery => {
+        Operation::WorkhubCoordinationResolve
+        | Operation::WorkhubCoordinationQuery
+        | Operation::WorkhubCoordinationCandidates => {
             codec::exact(codec::record(value, "WorkHub coordination")?, &[])?;
         }
         Operation::WorkhubCoordinationConfigureModel => {
@@ -96,6 +105,9 @@ pub fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
         }
         Operation::WorkhubCoordinationAnswer => {
             decode_answer_input(value)?;
+        }
+        Operation::WorkhubCoordinationActFromTurn => {
+            decode_act(value)?;
         }
         _ => return Err(ProtocolError::invalid("Unknown WorkHub operation")),
     }
@@ -126,6 +138,17 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
         Operation::WorkhubCoordinationAnswer => {
             let result: TurnResult = crate::turn::decode(value)?;
             crate::turn::entity(&result.turn_id)?;
+        }
+        Operation::WorkhubCoordinationCandidates => {
+            decode_candidates(value)?;
+        }
+        Operation::WorkhubCoordinationActFromTurn => {
+            let ActResult::DelegateExisting {
+                target_session_id,
+                target_turn_id,
+            } = crate::turn::decode(value)?;
+            crate::turn::entity(&target_session_id)?;
+            crate::turn::entity(&target_turn_id)?;
         }
         _ => return Err(ProtocolError::invalid("Unknown WorkHub operation")),
     }

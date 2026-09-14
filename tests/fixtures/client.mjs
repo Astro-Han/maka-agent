@@ -24,6 +24,7 @@ import { withSourceBundle } from '../support/source.mjs';
 const entries = [
   ['--workhub-workspace', 'client-workhub-entry.mjs'],
   ['--workhub-answer-workspace', 'client-workhub-entry.mjs'],
+  ['--workhub-delegation-workspace', 'client-workhub-entry.mjs'],
   ['--onboarding-workspace', 'client-onboarding-entry.mjs'],
   ['--project-workspace', 'client-project-entry.mjs'],
   ['--native-candidate', 'client-candidate-entry.mjs'],

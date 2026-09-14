@@ -158,7 +158,9 @@ Codex subscription execution is supported; Copilot/xAI inference adaptation and
 live verification are deferred.
 
 WorkHub supports session resolution, queries, model configuration and conversation
-with scoped Desktop tools and attachment reads. Task delegation is not yet connected.
+with scoped Desktop tools and attachment reads, plus candidate discovery and delegation
+to existing idle sessions. Task creation, linked operations, multi-selection and attachment
+transfer remain incomplete.
 
 Skill mutations and update previews,
 advanced recovery/reconciliation, WorkHub coordination and orchestration,

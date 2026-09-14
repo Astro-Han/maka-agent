@@ -24,6 +24,9 @@ use maka_runtime::{
 };
 use sqlx::SqliteConnection;
 
+mod candidates;
+pub use candidates::activity_at;
+
 impl EventLog {
     /// Root-global action identity survives both source termination and Host epochs.
     pub async fn workhub_action(&self, action: &str) -> Result<Option<StoredEvent>, StoreError> {
@@ -119,6 +122,17 @@ pub(crate) async fn apply(
     .await?;
     if occupied {
         return Err(invalid("WorkHub target execution identity already exists"));
+    }
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM session_control WHERE id = ?")
+        .bind(&delegation.target.session_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::SessionNotFound)?;
+    if u64::try_from(revision).ok() != Some(delegation.target_revision) {
+        return Err(StoreError::RevisionConflict {
+            expected: delegation.target_revision.to_string(),
+            actual: revision.to_string(),
+        });
     }
     crate::context::safety::require_safe(tx, &delegation.target.session_id, None).await?;
     if crate::shell_runs::unsettled(tx, &delegation.target.session_id).await? {

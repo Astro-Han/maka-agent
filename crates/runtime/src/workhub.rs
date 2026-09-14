@@ -35,6 +35,8 @@ pub struct Delegation {
     /// Canonical user input, never text supplied by a model strategy.
     pub source_message_event_id: String,
     pub target: Invocation,
+    /// Candidate metadata observed by admission, checked with the pending message commit.
+    pub target_revision: u64,
     pub delegation_text: String,
 }
 
@@ -56,7 +58,8 @@ impl Delegation {
         ] {
             entity_id(id).map_err(|_| "invalid WorkHub delegation identity")?;
         }
-        if !crate::archive::valid_projection_digest(&self.request_fingerprint)
+        if !(1..=9_007_199_254_740_991).contains(&self.target_revision)
+            || !crate::archive::valid_projection_digest(&self.request_fingerprint)
             || self.delegation_text.trim().is_empty()
             || self.delegation_text.len() > 48 * 1024
         {

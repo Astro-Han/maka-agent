@@ -24,6 +24,7 @@ use sqlx::Connection;
 
 /// A bounded projection of canonical boundaries, never a model-history prefix.
 pub struct TurnBoundary {
+    pub opening_event_id: String,
     pub invocation: Invocation,
     pub input: InvocationInput,
     pub state: InvocationState,
@@ -188,6 +189,7 @@ async fn project(
         }
     };
     Ok(TurnBoundary {
+        opening_event_id: opening.id,
         invocation: opening.invocation,
         input,
         state,

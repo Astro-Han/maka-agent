@@ -27,6 +27,7 @@ import { connectRuntimeHostMessageTransport } from '../../packages/runtime-host/
 import { FramedTransport } from '../../packages/runtime-host/src/transport/framed-transport.ts';
 import { configureModel } from './client-runtime-policy-fixture.mjs';
 import { verifyWorkhubAnswer } from './client-workhub-answer.mjs';
+import { verifyWorkhubDelegation } from './client-workhub-delegation.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -34,6 +35,7 @@ const { values } = parseArgs({
     'root-id': { type: 'string' },
     'workhub-workspace': { type: 'string' },
     'workhub-answer-workspace': { type: 'string' },
+    'workhub-delegation-workspace': { type: 'string' },
     reopened: { type: 'boolean' },
   },
 });
@@ -52,7 +54,14 @@ try {
   });
   assert.equal(connected.kind, 'connected');
   connection = connected.connection;
-  if (values['workhub-answer-workspace']) {
+  if (values['workhub-delegation-workspace']) {
+    await verifyWorkhubDelegation(
+      connection,
+      values['workhub-delegation-workspace'],
+      values.reopened,
+    );
+    console.log(values.reopened ? 'workhub-delegation-reopened' : 'workhub-delegation-passed');
+  } else if (values['workhub-answer-workspace']) {
     await verifyWorkhubAnswer(connection, values['workhub-answer-workspace'], values.reopened);
     console.log(values.reopened ? 'workhub-answer-reopened' : 'workhub-answer-passed');
   } else {

@@ -26,6 +26,11 @@ use maka_protocol::{
 use maka_runtime::{execution::ToolMode, workhub::COORDINATION_SESSION_ID};
 use serde_json::Value;
 
+mod action;
+mod candidates;
+pub(super) use action::ERRORS as ACTION_ERRORS;
+pub(super) use candidates::ERRORS as CANDIDATE_ERRORS;
+
 pub(super) const ERRORS: &[Code] = &[
     Code::HostNotReady,
     Code::HostDraining,
@@ -63,6 +68,12 @@ pub(super) async fn execute(
             })
         }),
         Operation::WorkhubCoordinationQuery => query(host).await.and_then(serialize),
+        Operation::WorkhubCoordinationActFromTurn => action::act(host, workhub::decode_act(value)?)
+            .await
+            .and_then(serialize),
+        Operation::WorkhubCoordinationCandidates => candidates::query(host)
+            .await
+            .and_then(|candidates| serialize(candidates.result)),
         Operation::WorkhubCoordinationAnswer => {
             let input = workhub::decode_answer_input(value)?;
             answer(host, input, connection_id).await.and_then(serialize)
@@ -78,7 +89,10 @@ pub(super) async fn execute(
     match result {
         Ok(value) => {
             workhub::decode_output(operation, &value)?;
-            if operation != Operation::WorkhubCoordinationQuery {
+            if !matches!(
+                operation,
+                Operation::WorkhubCoordinationQuery | Operation::WorkhubCoordinationCandidates
+            ) {
                 host.session_catalog
                     .publish_session(&host.changes, COORDINATION_SESSION_ID)
                     .await?;
