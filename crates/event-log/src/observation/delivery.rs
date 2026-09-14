@@ -254,7 +254,7 @@ AND (kind NOT IN ('model_observed', 'model_completed', 'model_interrupted') OR
              AND opening.kind = 'invocation_opened'
              WHERE request.kind = 'model_requested' AND request.invocation_id = runtime_events.invocation_id
              AND request.operation_id = json_extract(runtime_events.event_json, '$.fact.step_id')
-             AND json_extract(opening.event_json, '$.fact.input.kind') = 'message'
+             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'))
 AND (kind IN ('invocation_opened', 'message_steered', 'invocation_ended', 'model_completed', 'model_interrupted',
              'tool_dispatched', 'tool_rejected', 'tool_settled')

@@ -63,6 +63,7 @@ mod question_boundary;
 mod read_pages;
 mod relay_options;
 mod remote_capacity;
+mod resume;
 mod runtime_policy;
 mod system_prompt;
 mod transcript_limits;

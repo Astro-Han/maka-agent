@@ -132,6 +132,25 @@ impl Engine {
         self.start(input, cancellation).await?.wait().await
     }
 
+    /// Observe replay safety without reserving a source or creating a claim.
+    /// Admission always repeats this check against current canonical facts.
+    pub async fn check_continuation(
+        &self,
+        input: &RunInput,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RunError> {
+        let RunWork::Continuation { source, tools, .. } = &input.work else {
+            return Err(RunError::InvalidInput("not a continuation request".into()));
+        };
+        self.0
+            .log
+            .prepare_prune_candidates(&input.invocation.session_id, None, 0, 0, None)
+            .await?;
+        continuation::inspect(&self.0, input, source, tools, cancellation)
+            .await
+            .map(|_| ())
+    }
+
     /// The owner first stops admissions and requests cancellation. This barrier
     /// also covers workers whose admission waiter was dropped before receiving
     /// a RunningInvocation handle.

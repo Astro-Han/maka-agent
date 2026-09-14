@@ -22,11 +22,33 @@ use maka_model::{AuthResolver, ModelError, ProviderAuth};
 use maka_runtime::oauth::Provider;
 use std::{future::Future, pin::Pin};
 
-struct Binding {
-    credential: crate::oauth::Credential,
+pub(super) struct Binding {
+    snapshot: maka_config::oauth::OAuthCredential,
+    credential: std::sync::OnceLock<crate::oauth::Credential>,
     client: maka_model::oauth::Client,
     provider: Provider,
     session_id: String,
+}
+
+impl Binding {
+    pub fn auth(self: &Arc<Self>) -> Result<ProviderAuth, OperationError> {
+        Ok(ProviderAuth::Bound {
+            identity: serde_json::to_string(self.snapshot.basis())
+                .map_err(|_| unavailable("Invalid OAuth credential identity"))?,
+            resolver: self.clone(),
+        })
+    }
+
+    /// Caller holds Host admission, before exposing a new execution. A query
+    /// never admits this observation or changes the root's current generation.
+    pub fn admit(&self, authority: &crate::oauth::Authority) -> Result<(), OperationError> {
+        let credential = authority
+            .bind(self.snapshot.clone(), self.provider)
+            .map_err(|error| unavailable(error.to_string()))?;
+        self.credential
+            .set(credential)
+            .map_err(|_| unavailable("OAuth binding was already admitted"))
+    }
 }
 
 impl AuthResolver for Binding {
@@ -34,7 +56,10 @@ impl AuthResolver for Binding {
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<ProviderAuth, ModelError>> + Send + '_>> {
         Box::pin(async move {
-            let access_token = self.credential.access_token(self.client.clone()).await?;
+            let credential = self.credential.get().ok_or_else(|| {
+                ModelError::Adapter("OAuth observation is not admitted for execution".into())
+            })?;
+            let access_token = credential.access_token(self.client.clone()).await?;
             Ok(match self.provider {
                 Provider::OpenaiCodex => ProviderAuth::Codex {
                     access_token,
@@ -51,12 +76,11 @@ impl AuthResolver for Binding {
     }
 }
 
-pub(super) async fn bind(
+pub(super) async fn observe(
     config: &Arc<ConfigurationStore>,
-    authority: &crate::oauth::Authority,
     target: ConnectionCredentialTarget,
     session_id: &str,
-) -> Result<ProviderAuth, OperationError> {
+) -> Result<Arc<Binding>, OperationError> {
     let provider = match target.provider_type.as_str() {
         "openai-codex" => Provider::OpenaiCodex,
         "xai-oauth" => Provider::XaiOauth,
@@ -67,23 +91,16 @@ pub(super) async fn bind(
         .await
         .map_err(crate::server::configuration::failure)?
         .ok_or_else(|| unavailable("OAuth credential connection is no longer available"))?;
-    let identity = serde_json::to_string(snapshot.basis())
-        .map_err(|_| unavailable("Invalid OAuth credential identity"))?;
     let settings = snapshot.network_configuration();
     let policy = maka_network::Policy::from_settings(&settings.proxy, settings.password.as_deref())
         .map_err(|error| unavailable(error.to_string()))?;
     let client =
         maka_model::oauth::Client::new(&policy).map_err(|error| unavailable(error.to_string()))?;
-    let credential = authority
-        .bind(snapshot, provider)
-        .map_err(|error| unavailable(error.to_string()))?;
-    Ok(ProviderAuth::Bound {
-        identity,
-        resolver: Arc::new(Binding {
-            credential,
-            client,
-            provider,
-            session_id: session_id.into(),
-        }),
-    })
+    Ok(Arc::new(Binding {
+        snapshot,
+        credential: std::sync::OnceLock::new(),
+        client,
+        provider,
+        session_id: session_id.into(),
+    }))
 }

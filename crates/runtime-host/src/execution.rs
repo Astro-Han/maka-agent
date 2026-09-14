@@ -29,6 +29,7 @@ mod prompt;
 mod provider;
 mod read;
 mod recovery;
+mod resume;
 mod shell;
 pub(crate) mod skills;
 pub(crate) mod snapshot;

@@ -42,6 +42,19 @@ impl From<&ShellRun> for ShellChange {
 }
 
 impl EventLog {
+    /// A terminal orphan is still an unknown effect, not proof of native cleanup.
+    pub async fn has_unsettled_shells(&self, session: &str) -> Result<bool, StoreError> {
+        self.validate_root()?;
+        maka_runtime::interaction::entity_id(session).map_err(invalid)?;
+        let session = session.to_owned();
+        self.connection.run(move |connection| Box::pin(async move {
+            Ok(sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM shell_runs WHERE session_id = ?
+                 AND (active = 1 OR json_extract(record_json, '$.state.outcome.kind') = 'orphaned'))"
+            ).bind(session).fetch_one(connection).await?)
+        })).await
+    }
+
     /// Register before reading snapshots. Lag requires observer reconstruction;
     /// unlike the event log, this ephemeral feed has no replay cursor.
     pub fn subscribe_shell_changes(&self) -> tokio::sync::broadcast::Receiver<ShellChange> {

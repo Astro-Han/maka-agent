@@ -34,11 +34,11 @@ pub(crate) async fn validate_append(
         .map_err(|error| StoreError::InvalidTransition(error.into()))?;
     let eligible: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?
-         AND kind = 'invocation_opened' AND json_extract(event_json, '$.fact.input.kind') = 'message')"
+         AND kind = 'invocation_opened' AND json_extract(event_json, '$.fact.input.kind') IN ('message', 'continuation'))"
     ).bind(&event.invocation.invocation_id).fetch_one(&mut *tx).await?;
     if !eligible {
         return Err(StoreError::InvalidTransition(
-            "steering requires a message invocation".into(),
+            "steering requires a message or continuation invocation".into(),
         ));
     }
     let pending: bool = sqlx::query_scalar(crate::recovery::unresolved!(

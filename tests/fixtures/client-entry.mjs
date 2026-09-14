@@ -58,6 +58,7 @@ import { verifyOAuthExecution } from './client-oauth-execution.mjs';
 import { verifyAutoContext } from './client-auto-context-workflow.mjs';
 import { verifyPruning } from './client-pruning-workflow.mjs';
 import { verifyContextCompact } from './client-context-compact-workflow.mjs';
+import { verifyResume } from './client-resume-workflow.mjs';
 import { verifyWorkspaceImage } from './client-workspace-image-workflow.mjs';
 import { verifyLargeOutput } from './client-large-output-workflow.mjs';
 import { verifyCompatibleChat } from './client-compatible-workflow.mjs';
@@ -65,6 +66,7 @@ import { verifyRelayOptions } from './client-relay-workflow.mjs';
 import { verifyConsumption } from './client-attachment-workflow.mjs';
 
 const workflows = {
+  'resume-workspace': { verify: verifyResume, marker: 'resume' },
   'auto-context-workspace': { verify: verifyAutoContext, marker: 'auto-context' },
   'pruning-workspace': { verify: verifyPruning, marker: 'pruning' },
   'context-compact-workspace': { verify: verifyContextCompact, marker: 'context-compact' },

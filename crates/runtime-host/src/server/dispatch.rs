@@ -112,6 +112,28 @@ impl Host {
                     }
                     result.map(serde_json::to_value)
                 }
+                Operation::TurnResumeQuery => {
+                    let input = turn::decode_turn_resume_query_input(&input)?;
+                    let result = self
+                        .executions
+                        .resume_query(input.clone(), connection_id)
+                        .await;
+                    if let Ok(output) = &result {
+                        turn::assert_resume_query_output_for_input(&input, output)?;
+                    }
+                    result.map(serde_json::to_value)
+                }
+                Operation::TurnResumeStart => {
+                    let input = turn::decode_turn_resume_start_input(&input)?;
+                    let result = self
+                        .executions
+                        .resume_start(input.clone(), connection_id)
+                        .await;
+                    if let Ok(output) = &result {
+                        turn::assert_resume_start_output_for_input(&input, output)?;
+                    }
+                    result.map(serde_json::to_value)
+                }
                 Operation::TurnQuery => self
                     .executions
                     .query(turn::decode_turn_query_input(&input)?)

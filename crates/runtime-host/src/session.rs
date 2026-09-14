@@ -65,7 +65,14 @@ impl SessionConfiguration {
             &self.workspace.host_cwd,
         ))
         .await?;
-        Ok(maka_runtime::execution::InvocationConfiguration {
+        Ok(self.observed_configuration(workspace_identity))
+    }
+
+    pub(crate) fn observed_configuration(
+        &self,
+        workspace_identity: maka_runtime::execution::WorkspaceIdentity,
+    ) -> maka_runtime::execution::InvocationConfiguration {
+        maka_runtime::execution::InvocationConfiguration {
             system_prompt: None,
             cwd: self.workspace.host_cwd.clone(),
             workspace_identity: Some(workspace_identity),
@@ -75,7 +82,7 @@ impl SessionConfiguration {
             tool_mode: self.tool_mode,
             model: Some(self.model.clone()),
             thinking_level: self.thinking_level,
-        })
+        }
     }
 }
 

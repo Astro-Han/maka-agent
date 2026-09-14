@@ -24,7 +24,11 @@ use serde_json::Value;
 pub(super) fn supports(operation: Operation) -> bool {
     matches!(
         operation,
-        Operation::TurnStart | Operation::TurnQuery | Operation::TurnStop
+        Operation::TurnStart
+            | Operation::TurnQuery
+            | Operation::TurnStop
+            | Operation::TurnResumeQuery
+            | Operation::TurnResumeStart
     )
 }
 pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
@@ -32,21 +36,36 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> Result<Value>
         Operation::TurnStart => serde_json::to_value(turn::decode_turn_start_input(value)?),
         Operation::TurnQuery => serde_json::to_value(turn::decode_turn_query_input(value)?),
         Operation::TurnStop => serde_json::to_value(turn::decode_turn_stop_input(value)?),
+        Operation::TurnResumeQuery => {
+            serde_json::to_value(turn::decode_turn_resume_query_input(value)?)
+        }
+        Operation::TurnResumeStart => {
+            serde_json::to_value(turn::decode_turn_resume_start_input(value)?)
+        }
         _ => return Err(ProtocolError::invalid("Unknown Turn operation")),
     };
     normalized.map_err(|error| ProtocolError::invalid(error.to_string()))
 }
 pub(super) fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
-    if operation == Operation::TurnStart {
-        turn::decode_turn_start_result(value)?;
-    } else {
-        turn::decode_turn_snapshot(value)?;
+    match operation {
+        Operation::TurnStart => {
+            turn::decode_turn_start_result(value)?;
+        }
+        Operation::TurnResumeQuery => {
+            turn::decode_turn_resume_plan(value)?;
+        }
+        Operation::TurnResumeStart => {
+            turn::decode_turn_resume_start_result(value)?;
+        }
+        _ => {
+            turn::decode_turn_snapshot(value)?;
+        }
     }
     Ok(value.clone())
 }
 pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
     match operation {
-        Operation::TurnStart => Some(&[
+        Operation::TurnStart | Operation::TurnResumeStart => Some(&[
             Code::HostNotReady,
             Code::HostDraining,
             Code::OperationUnavailable,
@@ -54,6 +73,14 @@ pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
             Code::SessionArchived,
             Code::SessionBusy,
             Code::OperationConflict,
+            Code::InternalFailure,
+        ]),
+        Operation::TurnResumeQuery => Some(&[
+            Code::HostNotReady,
+            Code::HostDraining,
+            Code::OperationUnavailable,
+            Code::NotFound,
+            Code::SessionArchived,
             Code::InternalFailure,
         ]),
         Operation::TurnQuery => Some(&[

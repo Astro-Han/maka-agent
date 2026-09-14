@@ -201,6 +201,14 @@ impl ShellResources {
             .cloned()
     }
 
+    pub(crate) fn has_session(&self, session: &str) -> bool {
+        self.active
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|(owner, _)| owner == session)
+    }
+
     /// Caller fences Session admission, so no resource can appear during drain.
     pub(crate) async fn stop_session(&self, session: &str) -> Result<()> {
         let handles: Vec<_> = self

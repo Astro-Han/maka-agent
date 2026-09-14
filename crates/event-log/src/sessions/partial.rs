@@ -134,7 +134,7 @@ pub(super) async fn project(
              AND opening.kind = 'invocation_opened'
              WHERE request.kind = 'model_requested' AND request.invocation_id = ?1
              AND request.operation_id = ?2
-             AND json_extract(opening.event_json, '$.fact.input.kind') = 'message'
+             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main')",
     )
     .bind(invocation)

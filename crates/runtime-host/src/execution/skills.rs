@@ -122,6 +122,19 @@ impl Executions {
         mode: maka_protocol::session::PermissionMode,
         profile: Option<maka_protocol::session::SessionToolProfile>,
     ) -> Result<Arc<FrozenSkills>> {
+        self.preview_tool_catalog(session_id, connection_id, cwd, mode, profile)
+            .await
+            .map(|(_, skills)| skills)
+    }
+
+    pub(super) async fn preview_tool_catalog(
+        &self,
+        session_id: Option<&str>,
+        connection_id: uuid::Uuid,
+        cwd: &str,
+        mode: maka_protocol::session::PermissionMode,
+        profile: Option<maka_protocol::session::SessionToolProfile>,
+    ) -> Result<(maka_tools::ToolCatalog, Arc<FrozenSkills>)> {
         let mut additional = self
             .capabilities
             .preview_tools(
@@ -143,7 +156,7 @@ impl Executions {
         additional.push(self.interactions.question_tool());
         let skills = self.load_skills(cwd, Default::default()).await?;
         let native = self.native_tools(cwd, profile);
-        let (_, skills) = tokio::task::spawn_blocking(move || {
+        let prepared = tokio::task::spawn_blocking(move || {
             super::tools::catalog(native, mode, additional, skills)
         })
         .await
@@ -151,7 +164,7 @@ impl Executions {
         if self.shutdown.is_cancelled() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
-        Ok(skills)
+        Ok(prepared)
     }
 
     /// Caller holds admission ownership while the target's frozen catalog is used.

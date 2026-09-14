@@ -39,6 +39,7 @@ pub(super) struct PreparedProvider {
     pub supports_vision: bool,
     pub context: ModelRequestContext,
     pub main_output_limit: Option<u64>,
+    binding: Option<Arc<auth::Binding>>,
 }
 
 fn unavailable(message: impl Into<String>) -> OperationError {
@@ -51,6 +52,19 @@ fn unavailable(message: impl Into<String>) -> OperationError {
 pub(super) async fn resolve(
     config: &Arc<ConfigurationStore>,
     oauth: &crate::oauth::Authority,
+    session_id: &str,
+    session: &SessionConfiguration,
+) -> Result<PreparedProvider, OperationError> {
+    let prepared = observe(config, session_id, session).await?;
+    if let Some(binding) = &prepared.binding {
+        binding.admit(oauth)?;
+    }
+    Ok(prepared)
+}
+
+/// Read-only configuration and credential identity, without execution authority.
+pub(super) async fn observe(
+    config: &Arc<ConfigurationStore>,
     session_id: &str,
     session: &SessionConfiguration,
 ) -> Result<PreparedProvider, OperationError> {
@@ -121,6 +135,7 @@ pub(super) async fn resolve(
             .await
             .map_err(|_| unavailable("Credential connection basis changed or vault is unavailable"))
     };
+    let mut binding = None;
     let auth = match facts.auth_kind {
         ProviderAuthKind::ApiKey => maka_model::ProviderAuth::ApiKey(
             secret(ConnectionCredentialKind::ApiKey)
@@ -129,7 +144,10 @@ pub(super) async fn resolve(
                 .ok_or_else(|| unavailable("Provider API key is not configured"))?,
         ),
         ProviderAuthKind::OauthToken => {
-            auth::bind(config, oauth, expected.clone(), session_id).await?
+            let observed = auth::observe(config, expected.clone(), session_id).await?;
+            let auth = observed.auth()?;
+            binding = Some(observed);
+            auth
         }
         ProviderAuthKind::None | ProviderAuthKind::OptionalApiKey => {
             return Err(unavailable(
@@ -158,6 +176,7 @@ pub(super) async fn resolve(
         }),
     };
     Ok(PreparedProvider {
+        binding,
         config,
         options,
         supports_vision: model.supports_vision,

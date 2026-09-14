@@ -118,6 +118,11 @@ export async function modelOverridesFixture(port = 0) {
             }
           : { content: expected.answer };
         response.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close' });
+        if (expected.streamHold) {
+          response.write(frame({ content: expected.answer.slice(0, 4) }));
+          await expected.gate;
+          delta.content = expected.answer.slice(4);
+        }
         response.end(
           frame(delta) +
             frame({}, expected.read ? 'tool_calls' : 'stop', {

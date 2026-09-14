@@ -20,12 +20,15 @@
 //! Direct hosted execution, epoch 141. Use decode functions at JSON boundaries.
 #[path = "turn_content.rs"]
 mod content;
+#[path = "turn_resume.rs"]
+mod resume;
 #[path = "turn_skills.rs"]
 mod skills;
 #[path = "turn_types.rs"]
 mod types;
 use crate::{ProtocolError, Result, codec};
 pub use content::*;
+pub use resume::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 pub use skills::*;

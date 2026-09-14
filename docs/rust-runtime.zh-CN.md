@@ -62,6 +62,8 @@ Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要�
   工具 JSON、schema 和厂商扩展保留开放结构。
 - 每个 State Root 只有一个写入与执行 authority；Session、Turn、Run、invocation
   身份保持独立。
+- 手动 resume 先只读检查已封口的源，再原子开启续跑。模型只回放选定谱系，不混入后来的旁支或
+  未完成的响应片段。未知副作用阻止准入；重复已接受的请求返回原 Turn，重启后仍然如此。
 - 类型化模型列表贯通发现、存储和目录投影，连接自有声明单独保存；
   容量、主动压缩阈值与单次回复预算互相独立。
 - 工具先提交派发，再执行副作用，最后提交结果。结果未知不代表可以重做；取消必须等待
@@ -129,7 +131,7 @@ Grep 差分测试需要 PATH 中有 `rg`；runtime 本身不依赖该可执行�
 已实现项目／会话管理、已结束 Turn 导航、配置、附件、文件工具、shell／PTY、Client Capability 工具、
 模型流式交互与上下文压缩。Codex 订阅已接入执行；Copilot／xAI 推理适配和实测后置。
 
-Skills 变更与更新预览、安全 resume／恢复协调、
+Skills 变更与更新预览、高级恢复与协调、WorkHub 协调、
 编排、部分 capability 服务、受管升级及其它协议域
 仍未完成。完整 Desktop 验收和 Linux、macOS、Windows 发布打包仍待完成。
 插件与 OS 沙箱暂缓；Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。

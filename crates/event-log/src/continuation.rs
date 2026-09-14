@@ -28,6 +28,28 @@ use sqlx::{Connection, SqliteConnection};
 use std::collections::HashSet;
 
 impl EventLog {
+    /// Latest failed/cancelled inline Run, not simply the latest Session Turn.
+    pub async fn latest_continuation_candidate(
+        &self,
+        session: &str,
+    ) -> Result<Option<String>, StoreError> {
+        self.validate_root()?;
+        crate::sessions::validate_id(session)?;
+        let session = session.to_owned();
+        self.connection.run(move |connection| Box::pin(async move {
+            Ok(sqlx::query_scalar(
+                "SELECT json_extract(opening.event_json, '$.invocation.run_id')
+                 FROM runtime_events opening JOIN runtime_events terminal
+                   ON terminal.invocation_id = opening.invocation_id AND terminal.kind = 'invocation_ended'
+                 WHERE opening.kind = 'invocation_opened'
+                   AND json_extract(opening.event_json, '$.invocation.session_id') = ?
+                   AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
+                   AND json_extract(terminal.event_json, '$.fact.outcome.kind') IN ('failed', 'cancelled')
+                 ORDER BY opening.sequence DESC LIMIT 1"
+            ).bind(session).fetch_optional(connection).await?)
+        })).await
+    }
+
     /// The exact committed target for a source boundary, if one acquired it.
     /// A read never reserves the source or creates execution authority.
     pub async fn continuation_for_source(

@@ -69,6 +69,10 @@ Do not run untrusted code or point test instances at existing user data.
   provider extensions remain open-ended.
 - A State Root has one writer and execution authority. Session, Turn, Run and
   invocation identities remain distinct.
+- Manual resume checks a sealed source without claiming it, then atomically opens
+  a new continuation. Replay follows the selected lineage, excluding later branches
+  and unfinished response fragments. Unknown effects block admission; repeating
+  the same admitted request returns its original Turn, including after restart.
 - Typed model inventory flows from discovery through storage and catalog projection;
   connection-owned overrides remain separate. Capacity,
   proactive compaction threshold and per-request output budget are independent.
@@ -154,7 +158,7 @@ Codex subscription execution is supported; Copilot/xAI inference adaptation and
 live verification are deferred.
 
 Skill mutations and update previews,
-safe resume/reconciliation, orchestration,
+advanced recovery/reconciliation, WorkHub coordination and orchestration,
 some capability services, managed upgrades and other protocol domains remain incomplete. Full Desktop
 acceptance and release packaging across Linux, macOS and Windows are still
 required. Plugins and OS sandboxing are deferred. Memory is excluded pending a

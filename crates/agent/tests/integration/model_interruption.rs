@@ -225,6 +225,9 @@ async fn continuation_claim_replays_only_its_lineage_and_retries_at_fresh_bounda
             (requests, listener)
         });
         let worker = engine(log.clone());
+        let before = log.prefix(100, 128 * 1024).await.unwrap();
+        worker.check_continuation(&continuation("preview"), &CancellationToken::new()).await.unwrap();
+        assert_eq!(log.prefix(100, 128 * 1024).await.unwrap().digest, before.digest, "query cannot claim or mutate the source");
         worker.run(continuation("child"), CancellationToken::new()).await.unwrap();
         let (requests, listener) = server.await.unwrap();
         assert_eq!(requests[0], requests[1]);
@@ -256,6 +259,20 @@ async fn continuation_claim_replays_only_its_lineage_and_retries_at_fresh_bounda
         assert_eq!(attempts[0].1, attempts[1].1);
         assert_eq!(facts.events.iter().filter(|s| matches!(s.event.fact,
             Fact::ModelInterrupted { status: ModelInterruption::RetryableFailure, .. })).count(), 1);
+        for fact in [
+            opening("later unknown effect"),
+            Fact::ToolDispatched { operation_id: "unknown".into(),
+                call: maka_runtime::tool_call::ToolCallIdentity::standalone("unknown-call".into()),
+                name: "write".into(), input: json!({}) },
+            Fact::InvocationEnded { outcome: InvocationOutcome::Failed { class: "outcome_unknown".into(), message: None } },
+        ] {
+            log.append(&EventWrite::plain(RuntimeEvent::new(input(&base, "unknown").invocation, fact)).unwrap()).await.unwrap();
+        }
+        let unsafe_preview = worker.check_continuation(&continuation("unsafe-preview"), &CancellationToken::new()).await;
+        assert!(matches!(&unsafe_preview,
+            Err(RunError::Store(maka_event_log::StoreError::InvalidTransition(reason)))
+                if reason.ends_with("Session contains unsealed or unresolved prior execution")),
+            "a safe historical cut cannot hide a later unresolved Session effect: {unsafe_preview:?}");
     }).await.expect("continuation must settle");
 }
 

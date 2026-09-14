@@ -37,6 +37,27 @@ pub(super) async fn prepare(
     catalog: &maka_tools::ToolCatalog,
     cancellation: &CancellationToken,
 ) -> Result<ContinuationClaim, RunError> {
+    let (base, replay) = inspect(inner, input, source, catalog, cancellation).await?;
+    let claim = ContinuationClaim {
+        id: uuid::Uuid::new_v4().to_string(),
+        source: source.clone(),
+        base,
+        replay,
+    };
+    claim.validate(&input.invocation).map_err(invalid)?;
+    Ok(claim)
+}
+
+pub(super) async fn inspect(
+    inner: &Arc<Inner>,
+    input: &RunInput,
+    source: &RunBoundary,
+    catalog: &maka_tools::ToolCatalog,
+    cancellation: &CancellationToken,
+) -> Result<(SessionBase, ReplayEvidence), RunError> {
+    if source.invocation.session_id != input.invocation.session_id {
+        return Err(invalid("continuation belongs to another Session"));
+    }
     let prefix = inner
         .log
         .run_prefix(
@@ -143,21 +164,17 @@ pub(super) async fn prepare(
         }
     }
     let request = model_attempt::prepare_request(input, prompt, definitions, ModelPurpose::Main)?;
-    let claim = ContinuationClaim {
-        id: uuid::Uuid::new_v4().to_string(),
-        source: source.clone(),
+    if cancellation.is_cancelled() {
+        return Err(RunError::Cancelled);
+    }
+    Ok((
         base,
-        replay: ReplayEvidence {
+        ReplayEvidence {
             version: REPLAY_VERSION,
             digest: request.input_digest,
             route_identity: request.route_identity,
         },
-    };
-    claim.validate(&input.invocation).map_err(invalid)?;
-    if cancellation.is_cancelled() {
-        return Err(RunError::Cancelled);
-    }
-    Ok(claim)
+    ))
 }
 
 fn invalid(reason: &str) -> RunError {
