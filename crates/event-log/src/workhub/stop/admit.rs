@@ -22,7 +22,6 @@ use crate::{StoreError, message_resolution::MessageExecution, turns::InvocationS
 use maka_runtime::{
     event::{Fact, RuntimeEvent},
     session_event::{SessionEvent, SessionFact},
-    workhub::StopOutcome,
 };
 use sqlx::SqliteConnection;
 
@@ -78,8 +77,9 @@ pub(super) async fn apply(
         }
     };
     let (delegation, work) = subject::select(tx, &request.target_session_id).await?;
+    super::super::assignment::require_unclaimed(tx, &delegation.action_id).await?;
     let claimed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workhub_stops WHERE delegation_action_id = ? AND (resolution_json IS NULL OR json_extract(resolution_json, '$.outcome') != 'not_owned'))")
-        .bind(&delegation.action_id).fetch_one(&mut *tx).await?;
+        .bind(delegation.action_id.as_str()).fetch_one(&mut *tx).await?;
     if claimed {
         return Err(invalid("WorkHub delegation already has a stop claim"));
     }
@@ -93,7 +93,7 @@ pub(super) async fn apply(
             let message = delegation.target_message_id();
             // Consumption, cancellation and command publication serialize in this transaction.
             sqlx::query("INSERT INTO message_cancellations(session_id, message_id, cancellation_id) VALUES (?, ?, ?)")
-                .bind(&delegation.target.session_id).bind(&message).bind(&intent.request.action_id)
+                .bind(&delegation.target.session_id).bind(&message).bind(intent.request.action_id.as_str())
                 .execute(&mut *tx).await?;
             sqlx::query("DELETE FROM message_admissions WHERE session_id = ? AND message_id = ?")
                 .bind(&delegation.target.session_id)
@@ -101,26 +101,20 @@ pub(super) async fn apply(
                 .execute(&mut *tx)
                 .await?;
             crate::message_queue::bump(tx, &delegation.target.session_id).await?;
-            Some(StopResolution {
-                outcome: StopOutcome::CancelledPending,
-                target_turn_id: None,
-            })
+            Some(StopResolution::CancelledPending)
         }
-        MessageExecution::Cancelled => Some(StopResolution {
-            outcome: StopOutcome::AlreadyTerminal,
+        MessageExecution::Cancelled => Some(StopResolution::AlreadyTerminal {
             target_turn_id: None,
         }),
         MessageExecution::Owned(boundary) => {
             let terminal = matches!(boundary.state, InvocationState::Ended { .. });
             intent.owner = Some(boundary.invocation.clone());
-            terminal.then_some(StopResolution {
-                outcome: StopOutcome::AlreadyTerminal,
+            terminal.then_some(StopResolution::AlreadyTerminal {
                 target_turn_id: Some(boundary.invocation.turn_id),
             })
         }
-        MessageExecution::Shared(boundary) => Some(StopResolution {
-            outcome: StopOutcome::NotOwned,
-            target_turn_id: Some(boundary.invocation.turn_id),
+        MessageExecution::Shared(boundary) => Some(StopResolution::NotOwned {
+            target_turn_id: boundary.invocation.turn_id,
         }),
         MessageExecution::Missing => {
             return Err(invalid(

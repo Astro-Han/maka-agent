@@ -22,10 +22,8 @@ use crate::{
     message_resolution::{MessageExecution, owner},
     turns::InvocationState,
 };
-use maka_runtime::{
-    event::{Fact, RuntimeEvent},
-    workhub::Delegation,
-};
+use maka_runtime::workhub::ActionId;
+use maka_runtime::workhub::Delegation;
 use sqlx::SqliteConnection;
 
 /// One link is unambiguous even when finished. With several, exactly one must
@@ -40,10 +38,13 @@ pub(super) async fn select(
     let mut working = None;
     let mut working_count = 0usize;
     loop {
-        let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
-            "SELECT e.sequence, CASE WHEN length(CAST(e.event_json AS BLOB)) <= 1048576 THEN e.event_json END
-             FROM runtime_events e WHERE e.kind = 'workhub_delegated' AND e.sequence > ?
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT e.sequence, json_extract(e.event_json, '$.fact.delegation.action_id')
+             FROM workhub_assignments e WHERE e.sequence > ?
              AND json_extract(e.event_json, '$.fact.delegation.target.session_id') = ?
+             AND NOT EXISTS(SELECT 1 FROM workhub_corrections c
+               WHERE c.replaces_action_id = json_extract(e.event_json, '$.fact.delegation.action_id')
+               AND c.resolution_kind IS NOT NULL)
              AND NOT EXISTS(SELECT 1 FROM workhub_stops s
                WHERE s.delegation_action_id = json_extract(e.event_json, '$.fact.delegation.action_id')
                AND s.resolution_json IS NOT NULL
@@ -53,16 +54,13 @@ pub(super) async fn select(
         if rows.is_empty() {
             break;
         }
-        for (sequence, json) in rows {
+        for (sequence, action) in rows {
+            let action = ActionId::new(action).map_err(super::invalid)?;
             cursor = sequence;
-            let event: RuntimeEvent =
-                serde_json::from_str(&json.ok_or(StoreError::PrefixTooLarge)?)?;
-            let Fact::WorkhubDelegated { delegation } = event.fact else {
-                return Err(super::invalid("WorkHub delegation index changed"));
-            };
-            delegation
-                .validate(&event.invocation)
-                .map_err(super::invalid)?;
+            let delegation = super::super::assignment::read(tx, &action)
+                .await?
+                .ok_or_else(|| super::invalid("WorkHub delegation index changed"))?
+                .delegation;
             let work = owner::execution(tx, session, &delegation.target_message_id()).await?;
             let retired = match &work {
                 MessageExecution::Cancelled => true,

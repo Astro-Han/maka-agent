@@ -17,13 +17,15 @@
  * under the License.
  */
 
+use maka_runtime::workhub::ActionId;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
 pub enum CancellationCause {
     Runtime,
-    WorkhubStop { action_id: String },
+    WorkhubStop { action_id: ActionId },
+    WorkhubCorrection { action_id: ActionId },
 }
 
 #[derive(Clone)]
@@ -68,6 +70,9 @@ impl RunCancellation {
 
     pub(crate) fn source(&self) -> String {
         match self.cause.lock().unwrap().as_ref() {
+            Some(CancellationCause::WorkhubCorrection { action_id }) => {
+                maka_runtime::workhub::correction_abort_source(action_id)
+            }
             Some(CancellationCause::WorkhubStop { action_id }) => {
                 maka_runtime::workhub::stop_abort_source(action_id)
             }
@@ -91,22 +96,22 @@ mod tests {
                 owner.cancel();
             }
             owner.cancel_with(CancellationCause::WorkhubStop {
-                action_id: "later".into(),
+                action_id: "later".parse().unwrap(),
             });
             assert_eq!(owner.source(), "runtime_cancellation");
         }
         let owner = RunCancellation::new(CancellationToken::new());
         owner.cancel_with(CancellationCause::WorkhubStop {
-            action_id: "first".into(),
+            action_id: "first".parse().unwrap(),
         });
         owner.cancel_with(CancellationCause::WorkhubStop {
-            action_id: "second".into(),
+            action_id: "second".parse().unwrap(),
         });
         owner.cancel();
         assert!(owner.is_cancelled());
         assert_eq!(
             owner.source(),
-            maka_runtime::workhub::stop_abort_source("first")
+            maka_runtime::workhub::stop_abort_source(&"first".parse().unwrap())
         );
     }
 }

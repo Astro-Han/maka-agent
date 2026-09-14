@@ -30,6 +30,7 @@ import { upload } from './client-artifact-upload.mjs';
 import { createdTarget, prepareRouting } from './client-workhub-routing.mjs';
 import { chooseTarget, setupSelection } from './client-workhub-selection.mjs';
 import { resumeDelegation } from './client-workhub-resume.mjs';
+import { correctDelegation } from './client-workhub-correction.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'delegate-request';
@@ -67,9 +68,12 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
   const stopTarget = mode === 'stopped';
   const steerTarget = mode === 'steered';
   const resumeTarget = mode === 'resumed';
+  const correctTarget = mode === 'corrected' || mode === 'corrected_created';
+  let correction;
   let resumed = false;
   let resumeReceipts = [];
   const targetReady = Promise.withResolvers();
+  const replacementReady = Promise.withResolvers();
   const initialTarget = Promise.withResolvers();
   const delegated = Promise.withResolvers();
   const finishTarget = Promise.withResolvers();
@@ -88,6 +92,10 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     assert.deepEqual(await act(saved.input), saved.receipt);
     if (saved.stopInput) assert.deepEqual(await act(saved.stopInput), saved.stopReceipt);
     for (const item of saved.resumeReceipts ?? [])
+      assert.deepEqual(await act(item.input), item.receipt);
+    if (saved.correction)
+      assert.deepEqual(await act(saved.correction.input), saved.correction.receipt);
+    for (const item of saved.correction?.resumeReceipts ?? [])
       assert.deepEqual(await act(item.input), item.receipt);
     if (saved.coordinationRows) {
       const source = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
@@ -143,12 +151,12 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       }
       const target = data.messages.some(
         (message) =>
-          typeof message.content === 'string' &&
-          message.content.includes('Delegated task:\nImplement the requested task'),
+          typeof message.content === 'string' && message.content.includes('Delegated task:\n'),
       );
       const bootstrap =
         !target &&
         data.messages.some((message) => message.content === 'Existing task is already running');
+      const replacement = body.includes('Corrected replacement task');
       const finished = target
         ? data.messages.some(
             (message) =>
@@ -163,11 +171,18 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         assert(path);
         assert(!path.endsWith('/' + attachment.ref.relativePath));
         if (finished) assert(body.includes('TRANSFER_EVIDENCE'));
-        if (finished && (stopTarget || steerTarget || (resumeTarget && !resumed))) {
+        if (
+          finished &&
+          (stopTarget ||
+            steerTarget ||
+            (resumeTarget && !resumed) ||
+            (correctTarget && (!replacement || !resumed)))
+        ) {
           response.writeHead(200, { 'Content-Type': 'text/event-stream' });
           response.flushHeaders();
           targetReady.resolve();
-          if (stopTarget || resumeTarget) return;
+          if (replacement) replacementReady.resolve();
+          if (stopTarget || resumeTarget || correctTarget) return;
           await finishTarget.promise;
         }
       }
@@ -376,6 +391,25 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                 },
               );
             }
+            if (correctTarget) {
+              await targetReady.promise;
+              correction = await correctDelegation({
+                connection,
+                request,
+                act,
+                sourceObserver,
+                input,
+                receipt,
+                assignment,
+                workspace,
+                createNew: mode === 'corrected_created',
+                readRecord: coordinationRecord,
+                ready: replacementReady.promise,
+                release: () => {
+                  resumed = true;
+                },
+              });
+            }
             if (stopTarget || steerTarget) {
               await targetReady.promise;
               stopInput = {
@@ -474,7 +508,13 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       sessionId: targetSessionId,
       turnId: targetTurnId,
     });
-    assert.equal(target.status, stopTarget ? 'cancelled' : 'completed');
+    assert.equal(target.status, stopTarget || correctTarget ? 'cancelled' : 'completed');
+    if (correctTarget)
+      assert.equal(
+        target.abortSource,
+        'workhub.replacement_stop.' +
+          createHash('sha256').update(correction.input.actionId).digest('hex').slice(0, 48),
+      );
     if (stopTarget)
       assert.equal(
         target.abortSource,
@@ -511,12 +551,15 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       const assignments = coordinationRows.filter(
         (row) => row.type === 'workhub_coordination' && row.kind === 'delegation_assigned',
       );
-      assert.deepEqual(assignments, [assignmentRow]);
+      assert.deepEqual(
+        assignments,
+        correction ? [assignmentRow, correction.assignment] : [assignmentRow],
+      );
       const candidates = await request('workhub.coordination.candidates', {});
       assert.equal(
         candidates.candidates.find((candidate) => candidate.sessionId === targetSessionId)
           ?.latestDelegationActionId,
-        stopTarget ? undefined : input.actionId,
+        stopTarget || correctTarget ? undefined : input.actionId,
       );
     }
     if (stopInput) {
@@ -535,7 +578,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       }
       assert.equal(control[1].outcome, stopReceipt.outcome);
     }
-    if (!stopTarget)
+    if (!stopTarget && !correctTarget)
       assert(rows.some((row) => row.type === 'assistant' && row.text === 'target completed'));
     await connection.unregisterClientCapabilities(3000);
     await request('connection.catalog.remove', {
@@ -544,6 +587,9 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
     assert.deepEqual(await act(input), receipt);
     if (stopInput) assert.deepEqual(await act(stopInput), stopReceipt);
     for (const item of resumeReceipts) assert.deepEqual(await act(item.input), item.receipt);
+    if (correction) assert.deepEqual(await act(correction.input), correction.receipt);
+    for (const item of correction?.resumeReceipts ?? [])
+      assert.deepEqual(await act(item.input), item.receipt);
     await writeFile(
       file,
       JSON.stringify({
@@ -554,6 +600,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
         stopInput,
         stopReceipt,
         resumeReceipts,
+        correction,
         coordinationRows,
       }),
     );

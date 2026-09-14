@@ -30,6 +30,8 @@ const entries = [
   ['--workhub-stop-workspace', 'client-workhub-entry.mjs'],
   ['--workhub-steering-workspace', 'client-workhub-entry.mjs'],
   ['--workhub-resume-workspace', 'client-workhub-entry.mjs'],
+  ['--workhub-correction-workspace', 'client-workhub-entry.mjs'],
+  ['--workhub-correction-creation-workspace', 'client-workhub-entry.mjs'],
   ['--onboarding-workspace', 'client-onboarding-entry.mjs'],
   ['--project-workspace', 'client-project-entry.mjs'],
   ['--native-candidate', 'client-candidate-entry.mjs'],

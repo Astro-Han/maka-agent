@@ -86,7 +86,7 @@ async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_ha
             delivery: DelegationDelivery::Steering {
                 configuration_digest: basis.configuration_digest.clone(),
             },
-            action_id: "steer".into(),
+            action_id: "steer".parse().unwrap(),
             request_fingerprint: content_digest(b"steer"),
             source_message_event_id: opening.event().id.clone(),
             target: target.clone(),
@@ -306,7 +306,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
         kind: Default::default(),
         description: None,
         delivery: Default::default(),
-        action_id: "action".into(),
+        action_id: "action".parse().unwrap(),
         request_fingerprint: content_digest(b"bound proposal"),
         source_message_event_id: source.event().id.clone(),
         target: target.clone(),
@@ -323,7 +323,12 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     db.execute_batch("CREATE TRIGGER fail_action BEFORE INSERT ON event_log
         WHEN NEW.kind = 'workhub_delegated' BEGIN SELECT RAISE(ABORT, 'injected action failure'); END;").unwrap();
     assert!(log.append(&action).await.is_err());
-    assert!(log.workhub_action("action").await.unwrap().is_none());
+    assert!(
+        log.workhub_action(&"action".parse().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(
         log.pending_messages("target").await.unwrap().is_empty(),
         "no target can escape a failed action commit"
@@ -343,7 +348,11 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     let log = EventLog::open(&path).await.unwrap();
     assert_eq!(log.append(&action).await.unwrap(), sequence);
     assert_eq!(
-        log.workhub_action("action").await.unwrap().unwrap().event,
+        log.workhub_action(&"action".parse().unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .event,
         *action.event()
     );
     assert_eq!(log.pending_messages("target").await.unwrap(), pending);
@@ -352,7 +361,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
         ("live-alias", &coordinator.invocation_id),
     ] {
         let mut alias = delegation.clone();
-        alias.action_id = name.into();
+        alias.action_id = name.parse().unwrap();
         alias.target = invocation("other", name);
         alias.target.invocation_id = id.clone();
         let result = log
@@ -399,7 +408,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
             assert_eq!(log.recover_shell_runs(20).await.unwrap(), 1);
         }
         let mut shell = delegation.clone();
-        shell.action_id = "shell-action".into();
+        shell.action_id = "shell-action".parse().unwrap();
         shell.target = invocation("shell-target", "shell-action");
         assert!(
             log.append(&write(
@@ -411,7 +420,12 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
             .await
             .is_err()
         );
-        assert!(log.workhub_action("shell-action").await.unwrap().is_none());
+        assert!(
+            log.workhub_action(&"shell-action".parse().unwrap())
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert!(
             log.pending_messages("shell-target")
                 .await
@@ -439,7 +453,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
     let other_source = write(&other, message("not WorkHub user authority"));
     log.append(&other_source).await.unwrap();
     let mut borrowed = delegation.clone();
-    borrowed.action_id = "borrowed".into();
+    borrowed.action_id = "borrowed".parse().unwrap();
     borrowed.source_message_event_id = other_source.event().id.clone();
     borrowed.target = invocation("other", "borrowed");
     assert!(
@@ -469,7 +483,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
         log.append(&write(&other, fact)).await.unwrap();
     }
     let mut unsafe_target = delegation;
-    unsafe_target.action_id = "unsafe-target".into();
+    unsafe_target.action_id = "unsafe-target".parse().unwrap();
     unsafe_target.target = invocation("other", "unsafe-target");
     unsafe_target.target_revision = log
         .get_session::<serde_json::Value>("other")
@@ -532,7 +546,7 @@ async fn delegation_is_atomic_and_replay_does_not_reassign_or_requeue() {
         before.digest
     );
     assert_eq!(
-        log.workhub_action("action")
+        log.workhub_action(&"action".parse().unwrap())
             .await
             .unwrap()
             .unwrap()

@@ -54,7 +54,7 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
             kind: Default::default(),
             description: None,
             delivery: Default::default(),
-            action_id: "delegation".into(),
+            action_id: "delegation".parse().unwrap(),
             request_fingerprint: content_digest(b"delegation"),
             source_message_event_id: coordinator.id.clone(),
             target: target.invocation.clone(),
@@ -82,7 +82,7 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
             append(&log, &target).await;
         }
         let request = StopRequest {
-            action_id: "stop".into(),
+            action_id: "stop".parse().unwrap(),
             request_fingerprint: content_digest(b"stop"),
             source: coordinator.invocation.clone(),
             target_session_id: "session".into(),
@@ -100,7 +100,12 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
         ))
         .unwrap();
         assert!(log.request_workhub_stop(request.clone()).await.is_err());
-        assert!(log.workhub_stop("stop").await.unwrap().is_none());
+        assert!(
+            log.workhub_stop(&"stop".parse().unwrap())
+                .await
+                .unwrap()
+                .is_none()
+        );
         if scenario == "pending" {
             assert_eq!(
                 log.pending_messages("session").await.unwrap(),
@@ -123,7 +128,7 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
         changed.request_fingerprint = content_digest(b"another stop");
         assert!(log.request_workhub_stop(changed).await.is_err());
         let mut collision = delegation.clone();
-        collision.action_id = "stop".into();
+        collision.action_id = "stop".parse().unwrap();
         assert!(
             log.append(
                 &EventWrite::plain(RuntimeEvent::new(
@@ -138,12 +143,12 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
             .is_err()
         );
         let mut collision = request.clone();
-        collision.action_id = "delegation".into();
+        collision.action_id = "delegation".parse().unwrap();
         assert!(log.request_workhub_stop(collision).await.is_err());
 
         if scenario == "pending" {
             assert_eq!(
-                record.resolution.as_ref().unwrap().outcome,
+                record.resolution.as_ref().unwrap().outcome(),
                 StopOutcome::CancelledPending
             );
             assert!(log.pending_messages("session").await.unwrap().is_empty());
@@ -178,7 +183,7 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
             assert!(record.resolution.is_none());
             assert_eq!(record.intent.owner.as_ref(), Some(&target.invocation));
             let mut competing = request.clone();
-            competing.action_id = "competing-stop".into();
+            competing.action_id = "competing-stop".parse().unwrap();
             assert!(log.request_workhub_stop(competing).await.is_err());
             if scenario == "interrupted" {
                 append(
@@ -204,7 +209,7 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
                     Fact::InvocationEnded {
                         outcome: match scenario {
                             "workhub" => InvocationOutcome::Cancelled {
-                                source: stop_abort_source("stop"),
+                                source: stop_abort_source(&"stop".parse().unwrap()),
                             },
                             "manual" => InvocationOutcome::Cancelled {
                                 source: "runtime_cancellation".into(),
@@ -268,14 +273,19 @@ async fn stop_claim_cancellation_and_recovery_keep_the_original_message_and_exac
         let resolved = log.request_workhub_stop(request).await.unwrap();
         assert_eq!(resolved.intent.owner, record.intent.owner);
         assert_eq!(
-            resolved.resolution.as_ref().unwrap().outcome,
+            resolved.resolution.as_ref().unwrap().outcome(),
             match scenario {
                 "pending" => StopOutcome::CancelledPending,
                 "workhub" => StopOutcome::StopDelivered,
                 _ => StopOutcome::AlreadyTerminal,
             }
         );
-        assert_eq!(log.resolve_workhub_stop("stop").await.unwrap(), resolved);
+        assert_eq!(
+            log.resolve_workhub_stop(&"stop".parse().unwrap())
+                .await
+                .unwrap(),
+            resolved
+        );
         assert_eq!(log.recover_workhub_stops().await.unwrap(), 0);
         let through = *commits.borrow();
         assert_eq!(through > before_recovery, scenario != "pending");

@@ -105,8 +105,8 @@ fn receipt(record: StopRecord) -> Result<ActResult, OperationError> {
         .resolution
         .ok_or_else(|| failure(Code::InternalFailure, "Stop resolution is missing"))?;
     Ok(ActResult::StopWork {
-        outcome: result.outcome,
+        outcome: result.outcome(),
         target_session_id: record.intent.request.target_session_id,
-        target_turn_id: result.target_turn_id,
+        target_turn_id: result.target_turn_id().map(str::to_owned),
     })
 }

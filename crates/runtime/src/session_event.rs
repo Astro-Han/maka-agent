@@ -18,7 +18,14 @@
  */
 
 //! Session-owned control facts share log order without extending a sealed Run.
-use crate::workhub::{COORDINATION_SESSION_ID, StopIntent, StopResolution};
+use crate::workhub::ActionId;
+use crate::{
+    event::Invocation,
+    workhub::{
+        COORDINATION_SESSION_ID, CorrectionAbort, CorrectionIntent, Delegation, StopIntent,
+        StopResolution,
+    },
+};
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
@@ -36,13 +43,30 @@ pub struct SessionEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionFact {
+    WorkhubCorrectionRequested {
+        intent: Box<CorrectionIntent>,
+    },
+    WorkhubDelegated {
+        coordinator: Invocation,
+        delegation: Box<Delegation>,
+        replaces_action_id: ActionId,
+    },
+    WorkhubSuperseded {
+        action_id: ActionId,
+        replaces_action_id: ActionId,
+        replacement_delegation_id: String,
+    },
+    WorkhubCorrectionAborted {
+        action_id: ActionId,
+        reason: CorrectionAbort,
+    },
     WorkhubStopRequested {
         intent: Box<StopIntent>,
         target_session_name: String,
         user_text: String,
     },
     WorkhubStopResolved {
-        action_id: String,
+        action_id: ActionId,
         resolution: StopResolution,
     },
 }
@@ -65,6 +89,29 @@ impl SessionEvent {
             return Err("invalid WorkHub control owner");
         }
         match &self.fact {
+            SessionFact::WorkhubCorrectionRequested { intent } => {
+                intent.validate()?;
+                if intent.request.source.turn_id != self.turn_id {
+                    return Err("invalid WorkHub correction correlation");
+                }
+            }
+            SessionFact::WorkhubDelegated {
+                coordinator,
+                delegation,
+                ..
+            } => {
+                delegation.validate(coordinator)?;
+                if coordinator.turn_id != self.turn_id {
+                    return Err("invalid WorkHub assignment correlation");
+                }
+            }
+            SessionFact::WorkhubSuperseded {
+                replacement_delegation_id,
+                ..
+            } => {
+                crate::interaction::entity_id(replacement_delegation_id)?;
+            }
+            SessionFact::WorkhubCorrectionAborted { .. } => {}
             SessionFact::WorkhubStopRequested {
                 intent,
                 target_session_name,
@@ -80,11 +127,7 @@ impl SessionEvent {
                     return Err("invalid WorkHub stop request evidence");
                 }
             }
-            SessionFact::WorkhubStopResolved {
-                action_id,
-                resolution,
-            } => {
-                crate::interaction::entity_id(action_id)?;
+            SessionFact::WorkhubStopResolved { resolution, .. } => {
                 resolution.validate()?;
             }
         }
@@ -95,6 +138,10 @@ impl SessionEvent {
 impl SessionFact {
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::WorkhubCorrectionRequested { .. } => "workhub_correction_requested",
+            Self::WorkhubDelegated { .. } => "workhub_delegated",
+            Self::WorkhubSuperseded { .. } => "workhub_superseded",
+            Self::WorkhubCorrectionAborted { .. } => "workhub_correction_aborted",
             Self::WorkhubStopRequested { .. } => "workhub_stop_requested",
             Self::WorkhubStopResolved { .. } => "workhub_stop_resolved",
         }

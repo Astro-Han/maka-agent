@@ -26,7 +26,8 @@ mod action;
 mod candidates;
 mod selection;
 pub use action::{
-    ActInput, ActResult, LinkedProposal, Proposal, ResumeOutcome, RoutingProposal, decode_act,
+    ActInput, ActResult, CreateContext, DelegationDisposition, LinkedProposal, Proposal,
+    ResumeOutcome, RoutingProposal, decode_act,
 };
 pub use candidates::{Candidate, CandidatesResult, decode_candidates};
 pub use selection::{SelectionInput, SelectionResult, decode_selection};

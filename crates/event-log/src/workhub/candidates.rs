@@ -22,12 +22,13 @@ use crate::{
     sessions::{SessionExecutionState, SessionRecord},
 };
 use maka_runtime::event::Invocation;
+use maka_runtime::workhub::ActionId;
 use serde::de::DeserializeOwned;
 use sqlx::Connection;
 
 pub struct Candidate<T> {
     pub session: SessionRecord<T>,
-    pub latest_delegation_action_id: Option<String>,
+    pub latest_delegation_action_id: Option<ActionId>,
 }
 
 impl EventLog {
@@ -107,16 +108,21 @@ impl EventLog {
                     }
                     let mut result = Vec::with_capacity(candidates.len());
                     for session in candidates {
-                        let latest_delegation_action_id = sqlx::query_scalar(
+                        let latest_delegation_action_id: Option<String> = sqlx::query_scalar(
                             "SELECT json_extract(assignment.event_json, '$.fact.delegation.action_id')
-                             FROM runtime_events assignment
+                             FROM event_log assignment
                              WHERE assignment.kind = 'workhub_delegated'
                                AND json_extract(assignment.event_json, '$.fact.delegation.target.session_id') = ?
+                               AND NOT EXISTS (SELECT 1 FROM workhub_corrections correction
+                                   WHERE correction.replaces_action_id = json_extract(assignment.event_json, '$.fact.delegation.action_id')
+                                     AND correction.resolution_kind IS NOT NULL)
                                AND NOT EXISTS (SELECT 1 FROM workhub_stops stop
                                    WHERE stop.delegation_action_id = json_extract(assignment.event_json, '$.fact.delegation.action_id')
                                      AND json_extract(stop.resolution_json, '$.outcome') != 'not_owned')
                              ORDER BY assignment.sequence DESC LIMIT 1",
                         ).bind(&session.id).fetch_optional(&mut *tx).await?;
+                        let latest_delegation_action_id = latest_delegation_action_id
+                            .map(ActionId::new).transpose().map_err(super::invalid)?;
                         result.push(Candidate { session, latest_delegation_action_id });
                     }
                     tx.commit().await?;

@@ -103,7 +103,7 @@ async fn delegation_copies_attachments_atomically_and_replays_without_the_delete
         kind: Default::default(),
         description: None,
         delivery: Default::default(),
-        action_id: "copy-action".into(),
+        action_id: "copy-action".parse().unwrap(),
         request_fingerprint: content_digest(b"copy request"),
         source_message_event_id: opening.event().id.clone(),
         target_revision: 1,
@@ -159,7 +159,12 @@ async fn delegation_copies_attachments_atomically_and_replays_without_the_delete
             .is_empty()
     );
     assert!(log.pending_messages("target").await.unwrap().is_empty());
-    assert!(log.workhub_action("copy-action").await.unwrap().is_none());
+    assert!(
+        log.workhub_action(&"copy-action".parse().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
     db.execute_batch("DROP TRIGGER fail_copy_action;").unwrap();
     drop(db);
     let sequence = log.append(&action).await.unwrap();

@@ -68,7 +68,7 @@ pub(super) async fn build(
         })
         .collect::<Result<Vec<_>, OperationError>>()?;
     Ok(InteractionRequest::Form {
-        tool_use_id: input.action_id.clone(),
+        tool_use_id: input.action_id.to_string(),
         message: "Choose the work to continue".into(),
         requester: FormRequester {
             name: "WorkHub".into(),

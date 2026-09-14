@@ -21,6 +21,7 @@ use crate::{
     ProtocolError, Result, codec,
     session::{SessionStatus, WorkspaceProjection, WorkspaceTarget},
 };
+use maka_runtime::workhub::ActionId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -34,7 +35,7 @@ pub struct Candidate {
     pub state: SessionStatus,
     pub updated_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_delegation_action_id: Option<String>,
+    pub latest_delegation_action_id: Option<ActionId>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -62,9 +63,6 @@ pub fn decode_candidates(value: &Value) -> Result<CandidatesResult> {
             && path != &candidate.workspace.host_cwd
         {
             return Err(ProtocolError::invalid("Workspace path mismatch"));
-        }
-        if let Some(action) = &candidate.latest_delegation_action_id {
-            crate::turn::entity(action)?;
         }
     }
     Ok(result)

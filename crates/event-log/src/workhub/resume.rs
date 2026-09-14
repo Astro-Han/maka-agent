@@ -93,8 +93,8 @@ pub(super) async fn validate(
          OR (delegation_action_id = ?2 AND (resolution_json IS NULL
              OR json_extract(resolution_json, '$.outcome') != 'not_owned')))",
     )
-    .bind(&origin.action_id)
-    .bind(&origin.delegation_action_id)
+    .bind(origin.action_id.as_str())
+    .bind(origin.delegation_action_id.as_str())
     .fetch_one(&mut *tx)
     .await?;
     if stopped {
@@ -114,12 +114,11 @@ pub(super) async fn validate(
         Some(true) => return Err(invalid("WorkHub resume target is archived")),
         Some(false) => {}
     }
-    let delegated = actions::read(tx, &origin.delegation_action_id)
+    super::assignment::require_unclaimed(tx, &origin.delegation_action_id).await?;
+    let delegated = super::assignment::read(tx, &origin.delegation_action_id)
         .await?
         .ok_or_else(|| invalid("WorkHub resume delegation is missing"))?;
-    let Fact::WorkhubDelegated { delegation } = delegated.event.fact else {
-        return Err(invalid("WorkHub resume must reference a delegation"));
-    };
+    let delegation = delegated.delegation;
     if delegation.target.session_id != target.session_id {
         return Err(invalid("WorkHub resume target changed"));
     }

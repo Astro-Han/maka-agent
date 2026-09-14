@@ -224,7 +224,12 @@ impl Host {
             draining,
             requests: TaskTracker::new(),
         });
-        if let Err(error) = host.executions.recover_messages().await {
+        let recovery = async {
+            workhub::recover(&host).await?;
+            host.executions.recover_messages().await
+        }
+        .await;
+        if let Err(error) = recovery {
             host.capabilities.begin_drain();
             host.executions.shutdown().await;
             host.shells.shutdown().await;

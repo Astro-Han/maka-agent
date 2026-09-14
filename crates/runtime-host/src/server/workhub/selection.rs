@@ -122,7 +122,7 @@ pub(super) async fn select(
         if form.session_id != invocation.session_id
             || form.turn_id != invocation.turn_id
             || form.run_id != invocation.run_id
-            || !matches!(&form.request, InteractionRequest::Form { tool_use_id, .. } if tool_use_id == &input.action_id)
+            || !matches!(&form.request, InteractionRequest::Form { tool_use_id, .. } if tool_use_id == input.action_id.as_str())
         {
             return Err(conflict("Target choice belongs to another request"));
         }

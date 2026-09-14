@@ -25,6 +25,7 @@ use maka_protocol::{
     OperationErrorCode as Code,
     workhub::{AnswerInput, TurnResult},
 };
+use maka_runtime::workhub::ActionId;
 use maka_runtime::{artifact::content_digest, event::Invocation, workhub::COORDINATION_SESSION_ID};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -45,7 +46,21 @@ impl Executions {
     pub(crate) async fn stop_workhub_owner(
         &self,
         owner: &Invocation,
-        action: &str,
+        action_id: &ActionId,
+    ) -> Result<Option<tokio_util::sync::CancellationToken>> {
+        self.retire_workhub_owner(
+            owner,
+            maka_agent::CancellationCause::WorkhubStop {
+                action_id: action_id.clone(),
+            },
+        )
+        .await
+    }
+
+    pub(crate) async fn retire_workhub_owner(
+        &self,
+        owner: &Invocation,
+        cause: maka_agent::CancellationCause,
     ) -> Result<Option<tokio_util::sync::CancellationToken>> {
         let active = self
             .active
@@ -58,11 +73,7 @@ impl Executions {
             return Ok(None);
         };
         let stopped = self.interactions.stop_run(owner).await;
-        active
-            .cancellation
-            .cancel_with(maka_agent::CancellationCause::WorkhubStop {
-                action_id: action.to_owned(),
-            });
+        active.cancellation.cancel_with(cause);
         stopped?;
         Ok(Some(active.completed))
     }

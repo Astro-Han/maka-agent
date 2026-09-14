@@ -33,6 +33,7 @@ pub(super) enum Target {
         name: String,
         revision: u64,
         configuration_digest: String,
+        workspace_digest: String,
     },
     Created {
         id: String,
@@ -78,8 +79,18 @@ pub(super) async fn prepare(
     input: &ActInput,
     selected: Option<&super::super::selection::SelectedTarget>,
 ) -> Result<Target, OperationError> {
-    match &input.proposal {
-        Proposal::Route(RoutingProposal::DelegateExisting { candidate_ref }) => {
+    let route = match &input.proposal {
+        Proposal::Route(route) => route,
+        Proposal::Linked(maka_protocol::workhub::LinkedProposal::Correct { target, .. }) => target,
+        _ => {
+            return Err(failure(
+                Code::OperationConflict,
+                "WorkHub operation has no routing target",
+            ));
+        }
+    };
+    match route {
+        RoutingProposal::DelegateExisting { candidate_ref } => {
             if let Some(selected) = selected {
                 let now = crate::server::configuration::now()
                     .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
@@ -105,6 +116,9 @@ pub(super) async fn prepare(
                         )
                     })?;
                 return Ok(Target::Existing {
+                    workspace_digest: super::super::selection::workspace_digest(
+                        &record.configuration.workspace,
+                    ),
                     id: record.id,
                     name: record.configuration.name,
                     revision: record.revision,
@@ -125,6 +139,9 @@ pub(super) async fn prepare(
                 .zip(candidates.records)
                 .find_map(|(candidate, record)| {
                     (&candidate.candidate_ref == candidate_ref).then_some(Target::Existing {
+                        workspace_digest: super::super::selection::workspace_digest(
+                            &record.configuration.workspace,
+                        ),
                         id: record.id,
                         name: record.configuration.name,
                         revision: record.revision,
@@ -138,7 +155,7 @@ pub(super) async fn prepare(
                     )
                 })
         }
-        Proposal::Route(RoutingProposal::CreateNew { title }) => {
+        RoutingProposal::CreateNew { title } => {
             let id = created_session_id(&input.action_id);
             let context = input.create.as_ref().ok_or_else(|| {
                 failure(
@@ -192,10 +209,6 @@ pub(super) async fn prepare(
                 },
             })
         }
-        Proposal::Linked(_) => Err(failure(
-            Code::OperationUnavailable,
-            "This WorkHub action is not installed",
-        )),
     }
 }
 

@@ -58,12 +58,12 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
     ))
     .unwrap();
     log.append(&opening).await.unwrap();
-    let target = created_session_id("create-action");
+    let target = created_session_id(&"create-action".parse().unwrap());
     let action = EventWrite::plain(RuntimeEvent::new(
         source.clone(),
         Fact::WorkhubDelegated {
             delegation: Box::new(Delegation {
-                action_id: "create-action".into(),
+                action_id: "create-action".parse().unwrap(),
                 kind: DelegationKind::Created,
                 description: Some(DelegationDescription::Created {
                     name: "new task".into(),
@@ -110,7 +110,12 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
         changed[field] = value;
         assert!(log.create_workhub_session(&action, &changed).await.is_err());
         assert!(log.get_session::<Value>(&target).await.unwrap().is_none());
-        assert!(log.workhub_action("create-action").await.unwrap().is_none());
+        assert!(
+            log.workhub_action(&"create-action".parse().unwrap())
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
     let before = log
         .list_sessions::<Value>(None, None, 32)
@@ -123,7 +128,12 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
     assert!(log.create_workhub_session(&action, &config).await.is_err());
     assert!(log.get_session::<Value>(&target).await.unwrap().is_none());
     assert!(log.pending_messages(&target).await.unwrap().is_empty());
-    assert!(log.workhub_action("create-action").await.unwrap().is_none());
+    assert!(
+        log.workhub_action(&"create-action".parse().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(
         log.list_sessions::<Value>(None, None, 32)
             .await

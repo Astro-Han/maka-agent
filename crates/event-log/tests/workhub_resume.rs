@@ -62,7 +62,12 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
         )
     };
     append(&log, &rejected("before")).await;
-    assert!(log.workhub_action("resume").await.unwrap().is_none());
+    assert!(
+        log.workhub_action(&"resume".parse().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     let mut source = None;
     let mut observed = None;
@@ -78,7 +83,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
             kind: Default::default(),
             description: None,
             delivery: Default::default(),
-            action_id: id.into(),
+            action_id: id.parse().unwrap(),
             request_fingerprint: content_digest(id.as_bytes()),
             source_message_event_id: coordinator.id.clone(),
             target: target.invocation.clone(),
@@ -113,10 +118,10 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
                 coordinator.invocation.clone(),
                 Fact::WorkhubResumeObserved {
                     resume: Box::new(ResumeOrigin {
-                        action_id: "observation".into(),
+                        action_id: "observation".parse().unwrap(),
                         request_fingerprint: digest('f'),
                         coordinator: coordinator.invocation.clone(),
-                        delegation_action_id: id.into(),
+                        delegation_action_id: id.parse().unwrap(),
                     }),
                     target: target.invocation.clone(),
                 },
@@ -154,7 +159,10 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
         },
     )
     .await;
-    let mut resumed = opening(&resumed_turn_id("resume"), Some(claim.clone()));
+    let mut resumed = opening(
+        &resumed_turn_id(&"resume".parse().unwrap()),
+        Some(claim.clone()),
+    );
     let Fact::InvocationOpened {
         input: InvocationInput::Continuation { workhub_resume, .. },
         ..
@@ -163,10 +171,10 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
         unreachable!()
     };
     *workhub_resume = Some(ResumeOrigin {
-        action_id: "resume".into(),
+        action_id: "resume".parse().unwrap(),
         request_fingerprint: digest('f'),
         coordinator: coordinator.invocation.clone(),
-        delegation_action_id: "failed-delegation".into(),
+        delegation_action_id: "failed-delegation".parse().unwrap(),
     });
     let mut wrong = resumed.clone();
     if let Fact::InvocationOpened {
@@ -178,7 +186,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
         ..
     } = &mut wrong.fact
     {
-        origin.delegation_action_id = "completed-delegation".into();
+        origin.delegation_action_id = "completed-delegation".parse().unwrap();
     }
     assert!(
         log.append(&EventWrite::plain(wrong).unwrap())
@@ -198,7 +206,12 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
             .await
             .is_err()
     );
-    assert!(log.workhub_action("resume").await.unwrap().is_none());
+    assert!(
+        log.workhub_action(&"resume".parse().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(
         log.continuation_for_source(&claim.source)
             .await
@@ -208,7 +221,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
     db.execute_batch("DROP TRIGGER reject_resume;").unwrap();
     append(&log, &resumed).await;
     assert_eq!(
-        log.workhub_action("resume")
+        log.workhub_action(&"resume".parse().unwrap())
             .await
             .unwrap()
             .unwrap()
@@ -219,7 +232,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
     append(&log, &rejected("after")).await;
     assert!(
         log.request_workhub_stop(StopRequest {
-            action_id: "resume".into(),
+            action_id: "resume".parse().unwrap(),
             request_fingerprint: digest('f'),
             source: coordinator.invocation.clone(),
             target_session_id: "session".into(),
@@ -236,7 +249,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
     append(&log, &resumed).await;
     append(&log, observed.as_ref().unwrap()).await;
     assert_eq!(
-        log.workhub_action("resume")
+        log.workhub_action(&"resume".parse().unwrap())
             .await
             .unwrap()
             .unwrap()
@@ -245,7 +258,7 @@ async fn linked_resume_is_atomic_and_follows_its_message_not_other_delegations_o
         resumed.id
     );
     assert_eq!(
-        log.workhub_action("observation")
+        log.workhub_action(&"observation".parse().unwrap())
             .await
             .unwrap()
             .unwrap()

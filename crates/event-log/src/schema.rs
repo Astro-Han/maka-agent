@@ -38,7 +38,7 @@ pub(crate) async fn initialize_connection(
     .fetch_one(&mut *connection)
     .await?;
     if !((application_id == 0 && version == 0 && tables == 0)
-        || (application_id == 0x4d414b52 && matches!(version, 0..=21)))
+        || (application_id == 0x4d414b52 && matches!(version, 0..=22)))
     {
         return Err(StoreError::UnsupportedDatabase);
     }

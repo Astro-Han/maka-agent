@@ -19,6 +19,7 @@
 
 use super::candidates::{text, workspace};
 use crate::{ProtocolError, Result, session::WorkspaceTarget};
+use maka_runtime::workhub::ActionId;
 pub use maka_runtime::workhub::CreateDefaults;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,7 +28,7 @@ use serde_json::Value;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActInput {
     pub turn_id: String,
-    pub action_id: String,
+    pub action_id: ActionId,
     pub proposal: Proposal,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub candidate_set_id: Option<String>,
@@ -65,14 +66,14 @@ pub enum RoutingProposal {
 )]
 pub enum LinkedProposal {
     Correct {
-        replaces_action_id: String,
+        replaces_action_id: ActionId,
         target: RoutingProposal,
     },
     Stop {
         expects: LinkedTarget,
     },
     Resume {
-        resumes_action_id: String,
+        resumes_action_id: ActionId,
         expects: LinkedTarget,
     },
 }
@@ -94,6 +95,13 @@ pub struct CreateContext {
     deny_unknown_fields
 )]
 pub enum ActResult {
+    Replace {
+        replacement_disposition: DelegationDisposition,
+        target_session_id: String,
+        target_turn_id: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        steered: bool,
+    },
     CreateNew {
         target_session_id: String,
         target_turn_id: String,
@@ -125,6 +133,13 @@ pub enum ResumeOutcome {
     AlreadyRunning,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DelegationDisposition {
+    DelegateExisting,
+    CreateNew,
+}
+
 impl ActResult {
     pub(super) fn validate(&self) -> Result<()> {
         if let Self::ResumeWork {
@@ -141,6 +156,11 @@ impl ActResult {
                 target_turn_id,
             }
             | Self::DelegateExisting {
+                target_session_id,
+                target_turn_id,
+                ..
+            }
+            | Self::Replace {
                 target_session_id,
                 target_turn_id,
                 ..
@@ -177,25 +197,14 @@ pub fn decode_act(value: &Value) -> Result<ActInput> {
         }
     }
     crate::turn::entity(&input.turn_id)?;
-    crate::turn::entity(&input.action_id)?;
     let route = match &input.proposal {
         Proposal::Route(route) => Some(route),
-        Proposal::Linked(LinkedProposal::Correct {
-            replaces_action_id,
-            target,
-        }) => {
-            crate::turn::entity(replaces_action_id)?;
-            Some(target)
-        }
+        Proposal::Linked(LinkedProposal::Correct { target, .. }) => Some(target),
         Proposal::Linked(LinkedProposal::Stop { expects }) => {
             crate::turn::entity(&expects.target_session_id)?;
             None
         }
-        Proposal::Linked(LinkedProposal::Resume {
-            resumes_action_id,
-            expects,
-        }) => {
-            crate::turn::entity(resumes_action_id)?;
+        Proposal::Linked(LinkedProposal::Resume { expects, .. }) => {
             crate::turn::entity(&expects.target_session_id)?;
             None
         }

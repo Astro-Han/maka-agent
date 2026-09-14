@@ -157,17 +157,15 @@ Client Capability tools, model streaming and context compaction are implemented.
 Codex subscription execution is supported; Copilot/xAI inference adaptation and
 live verification are deferred.
 
-WorkHub supports session resolution, queries, model configuration and conversation
-with scoped Desktop tools and attachment reads, plus candidate discovery and delegation
-to existing or newly created sessions with atomic attachment transfer. Running
-targets receive durable steering through the ordinary message queue.
-Interactive target selection preserves the original offer and answer across retries.
-Linked stop and resume follow the delegated message's exact execution lineage,
-with durable action replay. Stop requests and resolutions are Session-owned log facts;
-recovery can publish a resolution after its coordinator Run ends without modifying that Run.
-Canonical assignment records preserve original creation choices and target-owned attachments;
-candidate queries expose the latest active association. Correction and full WorkHub Desktop
-acceptance remain incomplete.
+WorkHub supports scoped conversation, candidate discovery, interactive target selection,
+delegation to existing or new sessions, steering, stop, resume and correction.
+Control actions follow the exact delegated Message, never an unrelated Run.
+Correction records intent before retirement, then atomically commits the replacement,
+attachments and queued delivery. Recovery can finish after the coordinator Run ends;
+unavailable replacements produce durable aborts. Shared Runs are not cancelled.
+Canonical records preserve original creation choices and attachment ownership;
+candidate queries expose the latest active association. Full WorkHub Desktop
+acceptance across all three platforms remains incomplete.
 
 Skill mutations, update previews and their transaction recovery remain incomplete.
 Session branching, removal, import/export and recap, along with additional runtime

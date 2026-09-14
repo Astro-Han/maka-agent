@@ -19,15 +19,18 @@
 
 use crate::{StoreError, message_admissions::PendingMessageAdmission};
 use maka_runtime::{
-    event::{Fact, RuntimeEvent},
+    event::{Fact, Invocation, RuntimeEvent},
     input::InvocationInput,
     workhub::DelegationDelivery,
 };
 use sqlx::SqliteConnection;
 
 pub(crate) mod actions;
+pub(crate) mod assignment;
+pub use assignment::Assignment;
 mod candidates;
 mod control;
+pub mod correction;
 mod create;
 mod resume;
 pub mod stop;
@@ -43,10 +46,19 @@ pub(crate) async fn apply(
     let Fact::WorkhubDelegated { delegation } = &event.fact else {
         return Ok(());
     };
-    delegation.validate(&event.invocation).map_err(invalid)?;
+    deliver(tx, &event.invocation, delegation, event.recorded_at).await
+}
+
+async fn deliver(
+    tx: &mut SqliteConnection,
+    coordinator: &Invocation,
+    delegation: &maka_runtime::workhub::Delegation,
+    recorded_at: std::time::SystemTime,
+) -> Result<(), StoreError> {
+    delegation.validate(coordinator).map_err(invalid)?;
     let control: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workhub_stops WHERE action_id = ?)")
-            .bind(&delegation.action_id)
+            .bind(delegation.action_id.as_str())
             .fetch_one(&mut *tx)
             .await?;
     if control {
@@ -64,7 +76,7 @@ pub(crate) async fn apply(
             .ok_or_else(|| invalid("WorkHub source message is missing"))?
             .ok_or(StoreError::PrefixTooLarge)?,
     )?;
-    if source.invocation != event.invocation {
+    if source.invocation != *coordinator {
         return Err(invalid(
             "WorkHub action cannot borrow another Turn's user authority",
         ));
@@ -166,8 +178,7 @@ pub(crate) async fn apply(
         .is_steering()
         .then_some(&delegation.target);
     candidates::require_available(tx, &delegation.target.session_id, owner).await?;
-    let admitted_at = event
-        .recorded_at
+    let admitted_at = recorded_at
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| invalid("invalid WorkHub admission time"))?
         .as_millis()

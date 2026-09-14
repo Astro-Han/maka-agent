@@ -58,10 +58,16 @@ pub(super) async fn act(
         .await
         .map_err(|e| super::stored(host, e))?
         .is_some()
+        || host
+            .log
+            .workhub_correction(&input.action_id)
+            .await
+            .map_err(|e| super::stored(host, e))?
+            .is_some()
     {
         return Err(failure(
             Code::OperationConflict,
-            "WorkHub action already belongs to a stop",
+            "WorkHub action already belongs to a control operation",
         ));
     }
     if host.draining.is_cancelled() {
@@ -78,7 +84,7 @@ pub(super) async fn act(
         })?;
     let delegated = host
         .log
-        .workhub_action(resumes_action_id)
+        .workhub_assignment(resumes_action_id)
         .await
         .map_err(|e| super::stored(host, e))?
         .ok_or_else(|| {
@@ -87,12 +93,7 @@ pub(super) async fn act(
                 "WorkHub resume delegation is missing",
             )
         })?;
-    let Fact::WorkhubDelegated { delegation } = delegated.event.fact else {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub resume must reference a delegation",
-        ));
-    };
+    let delegation = delegated.delegation;
     if delegation.target.session_id != expects.target_session_id {
         return Err(failure(
             Code::OperationConflict,

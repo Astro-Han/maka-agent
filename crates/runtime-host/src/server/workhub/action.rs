@@ -31,7 +31,9 @@ use maka_runtime::{
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod correction;
 mod resume;
+pub(in crate::server) use correction::recover;
 mod stop;
 mod target;
 
@@ -54,6 +56,14 @@ pub(super) async fn act(
     input: ActInput,
     connection: Uuid,
 ) -> Result<ActResult, OperationError> {
+    if matches!(
+        &input.proposal,
+        maka_protocol::workhub::Proposal::Linked(
+            maka_protocol::workhub::LinkedProposal::Correct { .. }
+        )
+    ) {
+        return correction::act(host, input).await;
+    }
     if matches!(
         &input.proposal,
         maka_protocol::workhub::Proposal::Linked(
@@ -94,10 +104,16 @@ async fn admit(
         .await
         .map_err(sessions::stored)?
         .is_some()
+        || host
+            .log
+            .workhub_correction(&input.action_id)
+            .await
+            .map_err(sessions::stored)?
+            .is_some()
     {
         return Err(failure(
             Code::OperationConflict,
-            "WorkHub action already belongs to a stop",
+            "WorkHub action already belongs to a control operation",
         ));
     }
     // Receipt authority survives source termination, model removal and target changes.

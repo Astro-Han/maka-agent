@@ -69,7 +69,7 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
             name: "original".into(),
         }),
         delivery: Default::default(),
-        action_id: "action".into(),
+        action_id: "action".parse().unwrap(),
         request_fingerprint: content_digest(b"request"),
         source_message_event_id: boundary.opening_event_id,
         target: Invocation {
@@ -102,7 +102,12 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
         "{rejected:?}"
     );
     assert!(log.pending_messages("target").await.unwrap().is_empty());
-    assert!(log.workhub_action("action").await.unwrap().is_none());
+    assert!(
+        log.workhub_action(&"action".parse().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
     delegation.target_revision = 2;
     assert!(
         log.append(&write(delegation.clone())).await.is_err(),

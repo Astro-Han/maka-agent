@@ -18,11 +18,9 @@
  */
 
 use crate::{EventLog, StoreError};
+use maka_runtime::session_event::{SessionEvent, SessionFact};
+use maka_runtime::workhub::ActionId;
 pub use maka_runtime::workhub::{StopIntent, StopRequest, StopResolution};
-use maka_runtime::{
-    session_event::{SessionEvent, SessionFact},
-    workhub::StopOutcome,
-};
 use sqlx::{Connection, SqliteConnection};
 
 mod admit;
@@ -35,9 +33,8 @@ pub struct StopRecord {
 }
 
 impl EventLog {
-    pub async fn workhub_stop(&self, action: &str) -> Result<Option<StopRecord>, StoreError> {
+    pub async fn workhub_stop(&self, action: &ActionId) -> Result<Option<StopRecord>, StoreError> {
         self.validate_root()?;
-        crate::sessions::validate_id(action)?;
         let action = action.to_owned();
         self.connection
             .run(move |tx| Box::pin(async move { read(tx, &action).await }))
@@ -73,9 +70,8 @@ impl EventLog {
     }
 
     /// Finalize only the frozen owner; this never dispatches work or cancellation.
-    pub async fn resolve_workhub_stop(&self, action: &str) -> Result<StopRecord, StoreError> {
+    pub async fn resolve_workhub_stop(&self, action: &ActionId) -> Result<StopRecord, StoreError> {
         self.validate_root()?;
-        crate::sessions::validate_id(action)?;
         let action = action.to_owned();
         let commits = self.commits.clone();
         self.connection
@@ -107,6 +103,7 @@ impl EventLog {
                 if actions.is_empty() { return Ok(recovered); }
                 let mut last = None;
                 for action in actions {
+                    let action = ActionId::new(action).map_err(invalid)?;
                     let (_, sequence) = resolve(&mut tx, &action).await?;
                     last = sequence.or(last);
                     recovered += 1;
@@ -122,13 +119,13 @@ impl EventLog {
 
 pub(crate) async fn read(
     tx: &mut SqliteConnection,
-    action: &str,
+    action: &ActionId,
 ) -> Result<Option<StopRecord>, StoreError> {
     let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT CASE WHEN length(CAST(record_json AS BLOB)) <= 16384 THEN record_json END,
          resolution_json FROM workhub_stops WHERE action_id = ?",
     )
-    .bind(action)
+    .bind(action.as_str())
     .fetch_optional(tx)
     .await?;
     let Some((record, resolution)) = row else {
@@ -136,7 +133,7 @@ pub(crate) async fn read(
     };
     let intent: StopIntent = serde_json::from_str(&record.ok_or(StoreError::PrefixTooLarge)?)?;
     intent.validate().map_err(invalid)?;
-    if intent.request.action_id != action {
+    if &intent.request.action_id != action {
         return Err(invalid("WorkHub stop index changed"));
     }
     let resolution: Option<StopResolution> = resolution
@@ -153,7 +150,7 @@ pub(crate) async fn read(
 
 async fn resolve(
     tx: &mut SqliteConnection,
-    action: &str,
+    action: &ActionId,
 ) -> Result<(StopRecord, Option<u64>), StoreError> {
     let mut record = read(tx, action)
         .await?
@@ -184,24 +181,25 @@ async fn resolve(
     let maka_runtime::event::Fact::InvocationEnded { outcome } = terminal.fact else {
         return Err(invalid("WorkHub stop owner has no terminal"));
     };
-    let resolution = StopResolution {
-        outcome: if matches!(
-            outcome,
-            maka_runtime::event::InvocationOutcome::Cancelled { source }
-                if source == maka_runtime::workhub::stop_abort_source(action)
-        ) {
-            StopOutcome::StopDelivered
-        } else {
-            StopOutcome::AlreadyTerminal
-        },
-        target_turn_id: Some(owner.turn_id.clone()),
+    let resolution = if matches!(
+        outcome,
+        maka_runtime::event::InvocationOutcome::Cancelled { source }
+            if source == maka_runtime::workhub::stop_abort_source(action)
+    ) {
+        StopResolution::StopDelivered {
+            target_turn_id: owner.turn_id.clone(),
+        }
+    } else {
+        StopResolution::AlreadyTerminal {
+            target_turn_id: Some(owner.turn_id.clone()),
+        }
     };
     let sequence = super::control::append(
         tx,
         &SessionEvent::workhub(
             record.intent.request.source.turn_id.clone(),
             SessionFact::WorkhubStopResolved {
-                action_id: action.into(),
+                action_id: action.clone(),
                 resolution: resolution.clone(),
             },
         ),

@@ -18,10 +18,7 @@
  */
 
 use crate::{StoreError, sequence_number};
-use maka_runtime::{
-    event::Fact,
-    session_event::{SessionEvent, SessionFact},
-};
+use maka_runtime::session_event::{SessionEvent, SessionFact};
 use sqlx::SqliteConnection;
 
 pub(super) async fn project(
@@ -49,15 +46,12 @@ pub(super) async fn project(
                 })?
                 .intent
         }
+        _ => return correction(tx, sequence, &event).await,
     };
-    let assigned = crate::workhub::actions::read(tx, &intent.delegation_action_id)
+    let assigned = crate::workhub::assignment::read(tx, &intent.delegation_action_id)
         .await?
         .ok_or_else(|| StoreError::InvalidTransition("WorkHub delegation is missing".into()))?;
-    let Fact::WorkhubDelegated { delegation } = &assigned.event.fact else {
-        return Err(StoreError::InvalidTransition(
-            "WorkHub stop has no delegation".into(),
-        ));
-    };
+    let delegation = &assigned.delegation;
     if delegation.target.session_id != intent.request.target_session_id {
         return Err(StoreError::InvalidTransition(
             "WorkHub stop target changed".into(),
@@ -67,7 +61,72 @@ pub(super) async fn project(
         sequence_number(sequence)?,
         &event,
         &intent,
-        &assigned.event.id,
+        &assigned.id,
         &delegation.target_message_id(),
+    )?)
+}
+
+async fn correction(
+    tx: &mut SqliteConnection,
+    sequence: i64,
+    event: &SessionEvent,
+) -> Result<maka_presentation::Row, StoreError> {
+    let action = match &event.fact {
+        SessionFact::WorkhubCorrectionRequested { intent } => &intent.request.action_id,
+        SessionFact::WorkhubDelegated { delegation, .. } => &delegation.action_id,
+        SessionFact::WorkhubSuperseded { action_id, .. }
+        | SessionFact::WorkhubCorrectionAborted { action_id, .. } => action_id,
+        _ => {
+            return Err(StoreError::InvalidTransition(
+                "not a WorkHub correction fact".into(),
+            ));
+        }
+    };
+    let intent = crate::workhub::correction::read(tx, action)
+        .await?
+        .ok_or_else(|| {
+            StoreError::InvalidTransition("WorkHub correction intent is missing".into())
+        })?
+        .intent;
+    let assigned = crate::workhub::assignment::read(tx, &intent.request.replaces_action_id)
+        .await?
+        .ok_or_else(|| {
+            StoreError::InvalidTransition("WorkHub replaced delegation is missing".into())
+        })?;
+    let json: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
+         FROM runtime_events WHERE event_id = ? AND kind = 'invocation_opened'",
+    )
+    .bind(&intent.request.source_message_event_id)
+    .fetch_optional(tx)
+    .await?;
+    let source: maka_runtime::event::RuntimeEvent = serde_json::from_str(
+        &json
+            .ok_or_else(|| {
+                StoreError::InvalidTransition("WorkHub correction source is missing".into())
+            })?
+            .ok_or(StoreError::PrefixTooLarge)?,
+    )?;
+    if source.invocation != intent.request.source {
+        return Err(StoreError::InvalidTransition(
+            "WorkHub correction source changed".into(),
+        ));
+    }
+    let maka_runtime::event::Fact::InvocationOpened {
+        input: maka_runtime::input::InvocationInput::Message { content, .. },
+        ..
+    } = source.fact
+    else {
+        return Err(StoreError::InvalidTransition(
+            "WorkHub correction requires a user message".into(),
+        ));
+    };
+    Ok(maka_presentation::workhub::correction(
+        sequence_number(sequence)?,
+        event,
+        &intent,
+        &assigned.id,
+        &assigned.delegation,
+        &content,
     )?)
 }

@@ -19,6 +19,7 @@
 
 use super::{ActResult, candidates::text};
 use crate::{ProtocolError, Result};
+use maka_runtime::workhub::ActionId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -27,7 +28,7 @@ use std::collections::HashSet;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionInput {
     pub turn_id: String,
-    pub action_id: String,
+    pub action_id: ActionId,
     pub candidate_set_id: String,
     pub candidate_refs: Vec<String>,
     pub delegation_text: String,
@@ -43,7 +44,6 @@ pub enum SelectionResult {
 pub fn decode_selection(value: &Value) -> Result<SelectionInput> {
     let input: SelectionInput = crate::turn::decode(value)?;
     crate::turn::entity(&input.turn_id)?;
-    crate::turn::entity(&input.action_id)?;
     text(&input.candidate_set_id, 256)?;
     text(&input.delegation_text, 48 * 1024)?;
     let mut seen = HashSet::new();

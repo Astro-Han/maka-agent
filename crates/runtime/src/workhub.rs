@@ -26,7 +26,13 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+mod action_id;
+mod correction;
+pub use action_id::ActionId;
 mod description;
+pub use correction::{
+    CorrectionAbort, CorrectionIntent, CorrectionRequest, CorrectionTarget, correction_abort_source,
+};
 pub use description::{CreateDefaults, CreateModel, CreateSpec, DelegationDescription};
 
 pub const COORDINATION_SESSION_ID: &str = "maka_workhub_coordination";
@@ -43,24 +49,26 @@ pub enum StopOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StopRequest {
-    pub action_id: String,
+    pub action_id: ActionId,
     pub request_fingerprint: String,
     pub source: Invocation,
     pub target_session_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StopResolution {
-    pub outcome: StopOutcome,
-    pub target_turn_id: Option<String>,
+#[serde(try_from = "StopResolutionWire", into = "StopResolutionWire")]
+pub enum StopResolution {
+    CancelledPending,
+    StopDelivered { target_turn_id: String },
+    AlreadyTerminal { target_turn_id: Option<String> },
+    NotOwned { target_turn_id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StopIntent {
     pub request: StopRequest,
-    pub delegation_action_id: String,
+    pub delegation_action_id: ActionId,
     /// Frozen before cancellation; a retry never follows a later continuation.
     pub owner: Option<Invocation>,
 }
@@ -68,7 +76,6 @@ pub struct StopIntent {
 impl StopRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
         for id in [
-            &self.action_id,
             &self.source.session_id,
             &self.source.turn_id,
             &self.source.run_id,
@@ -90,7 +97,6 @@ impl StopRequest {
 impl StopIntent {
     pub fn validate(&self) -> Result<(), &'static str> {
         self.request.validate()?;
-        crate::interaction::entity_id(&self.delegation_action_id)?;
         if let Some(owner) = &self.owner {
             if owner.session_id != self.request.target_session_id {
                 return Err("WorkHub stop owner belongs to another Session");
@@ -104,15 +110,64 @@ impl StopIntent {
 }
 
 impl StopResolution {
+    pub fn outcome(&self) -> StopOutcome {
+        match self {
+            Self::CancelledPending => StopOutcome::CancelledPending,
+            Self::StopDelivered { .. } => StopOutcome::StopDelivered,
+            Self::AlreadyTerminal { .. } => StopOutcome::AlreadyTerminal,
+            Self::NotOwned { .. } => StopOutcome::NotOwned,
+        }
+    }
+    pub fn target_turn_id(&self) -> Option<&str> {
+        match self {
+            Self::CancelledPending => None,
+            Self::AlreadyTerminal { target_turn_id } => target_turn_id.as_deref(),
+            Self::StopDelivered { target_turn_id } | Self::NotOwned { target_turn_id } => {
+                Some(target_turn_id)
+            }
+        }
+    }
     pub fn validate(&self) -> Result<(), &'static str> {
-        if let Some(turn) = &self.target_turn_id {
+        if let Some(turn) = self.target_turn_id() {
             crate::interaction::entity_id(turn)?;
         }
-        match (&self.outcome, self.target_turn_id.is_some()) {
-            (StopOutcome::StopDelivered | StopOutcome::NotOwned, false)
-            | (StopOutcome::CancelledPending, true) => Err("invalid WorkHub stop resolution"),
-            _ => Ok(()),
+        Ok(())
+    }
+}
+
+// Keep the established durable shape, including explicit null for no Turn.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StopResolutionWire {
+    outcome: StopOutcome,
+    target_turn_id: Option<String>,
+}
+
+impl From<StopResolution> for StopResolutionWire {
+    fn from(value: StopResolution) -> Self {
+        Self {
+            outcome: value.outcome(),
+            target_turn_id: value.target_turn_id().map(str::to_owned),
         }
+    }
+}
+
+impl TryFrom<StopResolutionWire> for StopResolution {
+    type Error = &'static str;
+    fn try_from(value: StopResolutionWire) -> Result<Self, Self::Error> {
+        let resolution = match (value.outcome, value.target_turn_id) {
+            (StopOutcome::CancelledPending, None) => Self::CancelledPending,
+            (StopOutcome::StopDelivered, Some(target_turn_id)) => {
+                Self::StopDelivered { target_turn_id }
+            }
+            (StopOutcome::AlreadyTerminal, target_turn_id) => {
+                Self::AlreadyTerminal { target_turn_id }
+            }
+            (StopOutcome::NotOwned, Some(target_turn_id)) => Self::NotOwned { target_turn_id },
+            _ => return Err("invalid WorkHub stop resolution"),
+        };
+        resolution.validate()?;
+        Ok(resolution)
     }
 }
 
@@ -121,10 +176,10 @@ impl StopResolution {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResumeOrigin {
-    pub action_id: String,
+    pub action_id: ActionId,
     pub request_fingerprint: String,
     pub coordinator: Invocation,
-    pub delegation_action_id: String,
+    pub delegation_action_id: ActionId,
 }
 
 impl ResumeOrigin {
@@ -135,8 +190,6 @@ impl ResumeOrigin {
             return Err("invalid WorkHub resume origin");
         }
         for id in [
-            &self.action_id,
-            &self.delegation_action_id,
             &self.coordinator.turn_id,
             &self.coordinator.run_id,
             &self.coordinator.invocation_id,
@@ -147,7 +200,7 @@ impl ResumeOrigin {
     }
 }
 
-pub fn resumed_turn_id(action_id: &str) -> String {
+pub fn resumed_turn_id(action_id: &ActionId) -> String {
     let digest = crate::artifact::content_digest(format!("resume\0{action_id}").as_bytes());
     format!("wht_{}", &digest[7..55])
 }
@@ -155,7 +208,7 @@ pub fn resumed_turn_id(action_id: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Delegation {
-    pub action_id: String,
+    pub action_id: ActionId,
     #[serde(default, skip_serializing_if = "DelegationKind::is_existing")]
     pub kind: DelegationKind,
     #[serde(default, skip_serializing_if = "DelegationDelivery::is_new_turn")]
@@ -206,13 +259,13 @@ impl DelegationKind {
     }
 }
 
-pub fn created_session_id(action_id: &str) -> String {
+pub fn created_session_id(action_id: &ActionId) -> String {
     let digest = crate::artifact::content_digest(format!("create\0{action_id}").as_bytes());
     format!("whs_{}", &digest[7..55])
 }
 
-pub fn stop_abort_source(action_id: &str) -> String {
-    let digest = crate::artifact::content_digest(action_id.as_bytes());
+pub fn stop_abort_source(action_id: &ActionId) -> String {
+    let digest = crate::artifact::content_digest(action_id.as_str().as_bytes());
     format!("workhub.direct_stop.{}", &digest[7..55])
 }
 
@@ -235,7 +288,6 @@ impl Delegation {
             return Err("invalid WorkHub creation identity");
         }
         for id in [
-            &self.action_id,
             &self.source_message_event_id,
             &self.target.session_id,
             &self.target.turn_id,
@@ -264,7 +316,7 @@ impl Delegation {
     pub fn target_message_id(&self) -> String {
         format!(
             "workhub_{}",
-            &crate::artifact::content_digest(self.action_id.as_bytes())[7..]
+            &crate::artifact::content_digest(self.action_id.as_str().as_bytes())[7..]
         )
     }
 

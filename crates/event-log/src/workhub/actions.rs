@@ -19,13 +19,16 @@
 
 use crate::{EventLog, StoreError, sequence_number};
 use maka_runtime::event::{Fact, Invocation, RuntimeEvent, StoredEvent};
+use maka_runtime::workhub::ActionId;
 use sqlx::SqliteConnection;
 
 impl EventLog {
     /// Root-global identity across delegation, continuation and observation facts.
-    pub async fn workhub_action(&self, action: &str) -> Result<Option<StoredEvent>, StoreError> {
+    pub async fn workhub_action(
+        &self,
+        action: &ActionId,
+    ) -> Result<Option<StoredEvent>, StoreError> {
         self.validate_root()?;
-        crate::sessions::validate_id(action)?;
         let action = action.to_owned();
         self.connection
             .run(move |connection| Box::pin(async move { read(connection, &action).await }))
@@ -35,16 +38,16 @@ impl EventLog {
 
 pub(crate) async fn read(
     tx: &mut SqliteConnection,
-    action: &str,
+    action: &ActionId,
 ) -> Result<Option<StoredEvent>, StoreError> {
     let row: Option<(i64, Option<String>)> = sqlx::query_as(
         "SELECT sequence, CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
          FROM event_log WHERE invocation_id IS NOT NULL
-         AND kind IN ('workhub_delegated', 'workhub_resume_observed', 'invocation_opened', 'workhub_stop_requested')
+         AND kind IN ('workhub_delegated', 'workhub_resume_observed', 'invocation_opened', 'workhub_stop_requested', 'workhub_correction_requested')
          AND CASE
-            WHEN kind = 'workhub_stop_requested'
+            WHEN kind IN ('workhub_stop_requested', 'workhub_correction_requested')
                 THEN json_extract(event_json, '$.fact.intent.request.action_id')
-            WHEN kind = 'workhub_delegated'
+            WHEN kind = 'workhub_delegated' AND invocation_id IS NOT NULL
                 THEN json_extract(event_json, '$.fact.delegation.action_id')
             WHEN kind = 'workhub_resume_observed'
                 THEN json_extract(event_json, '$.fact.resume.action_id')
@@ -53,7 +56,7 @@ pub(crate) async fn read(
                 THEN json_extract(event_json, '$.fact.input.workhub_resume.action_id')
          END = ?",
     )
-    .bind(action)
+    .bind(action.as_str())
     .fetch_optional(tx)
     .await?;
     row.map(|(sequence, json)| {
