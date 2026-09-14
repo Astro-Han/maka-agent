@@ -58,16 +58,14 @@ impl Interactions {
             }
             let _gate = self.admission.lock().await;
             return self
-                .log
-                .commit_interaction_outcome(
+                .commit_outcome(
                     request_id,
                     InteractionOutcome::Closure {
                         reason: ClosureReason::ProducerCancelled,
                         committed_at: self.timestamp()?,
                     },
                 )
-                .await
-                .map_err(|error| self.store_failure(error))?
+                .await?
                 .record
                 .outcome
                 .ok_or_else(|| self.missing_outcome());

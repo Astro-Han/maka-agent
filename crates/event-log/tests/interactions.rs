@@ -69,8 +69,23 @@ async fn first_outcome_and_atomic_grant_survive_conflicts_faults_and_reopen() {
         .await
         .unwrap();
     let mut wake = log.subscribe_commits();
+    let initial = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap();
     let candidate = request("request");
     assert!(log.establish_interaction(&candidate).await.unwrap().matches);
+    let waiting = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(waiting.revision, initial.revision + 1);
+    assert_eq!(
+        waiting.pending_interaction_since,
+        Some(candidate.created_at)
+    );
     wake.changed().await.unwrap();
     assert_eq!(
         *wake.borrow_and_update(),
@@ -82,6 +97,13 @@ async fn first_outcome_and_atomic_grant_survive_conflicts_faults_and_reopen() {
     let result = log.establish_interaction(&conflict).await.unwrap();
     assert!(!result.matches);
     assert_eq!(result.record, candidate);
+    assert_eq!(
+        log.get_session::<serde_json::Value>("session")
+            .await
+            .unwrap()
+            .unwrap(),
+        waiting
+    );
     assert_eq!(
         log.pending_interactions("session").await.unwrap(),
         std::slice::from_ref(&candidate)
@@ -126,6 +148,13 @@ async fn first_outcome_and_atomic_grant_survive_conflicts_faults_and_reopen() {
             .is_none()
     );
     assert!(!wake.has_changed().unwrap());
+    assert_eq!(
+        log.get_session::<serde_json::Value>("session")
+            .await
+            .unwrap()
+            .unwrap(),
+        waiting
+    );
     sqlx::raw_sql("DROP TRIGGER fail_grant")
         .execute(&mut observer)
         .await
@@ -139,6 +168,13 @@ async fn first_outcome_and_atomic_grant_survive_conflicts_faults_and_reopen() {
     assert_ne!(allow.matches, deny.matches);
     assert_eq!(allow.record, deny.record);
     let canonical = allow.record;
+    let settled = log
+        .get_session::<serde_json::Value>("session")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(settled.revision, waiting.revision + 1);
+    assert_eq!(settled.pending_interaction_since, None);
     let allowed = matches!(
         canonical.outcome,
         Some(InteractionOutcome::ClientCapabilityDecision {

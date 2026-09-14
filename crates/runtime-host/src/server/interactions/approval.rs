@@ -109,8 +109,7 @@ impl Interactions {
                 if first {
                     let _gate = owner.admission.lock().await;
                     owner
-                        .log
-                        .commit_interaction_outcome(
+                        .commit_outcome(
                             &record.request_id,
                             InteractionOutcome::Closure {
                                 reason,
@@ -119,7 +118,7 @@ impl Interactions {
                             },
                         )
                         .await
-                        .map_err(|error| failed(owner.store_failure(error).message))?;
+                        .map_err(|error| failed(error.message))?;
                 }
                 return if reason == ClosureReason::ProviderDisconnected {
                     Err(denied(

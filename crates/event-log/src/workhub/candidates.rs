@@ -62,7 +62,7 @@ impl EventLog {
     }
 
     /// One read snapshot, bounded resident records, no independent candidate authority.
-    /// The Host supplies configuration eligibility; durable execution safety stays here.
+    /// Discovery includes waiting and blocked work; action admission checks write safety.
     pub async fn workhub_candidates<T, F>(
         &self,
         eligible: F,
@@ -93,7 +93,7 @@ impl EventLog {
                             let record = crate::sessions::read(&mut tx, id)
                                 .await?
                                 .ok_or(StoreError::SessionNotFound)?;
-                            if !eligible(&record) || !available(&mut tx, &record).await? {
+                            if !eligible(&record) {
                                 continue;
                             }
                             candidates.push(record);
@@ -169,7 +169,7 @@ async fn available<T>(
     }
 }
 
-/// Shared candidate and action guard. Current effects stay with their live owner;
+/// Target admission guard. Current effects stay with their live owner;
 /// a sealed owner cannot hide unknown effects behind a late steering admission.
 pub(super) async fn require_available(
     tx: &mut sqlx::SqliteConnection,

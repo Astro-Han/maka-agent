@@ -125,14 +125,20 @@ async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_ha
             log.append(&action).await.is_err(),
             "waiting target cannot accept delegation"
         );
-        assert!(
-            log.workhub_candidates(
-                |_: &maka_event_log::sessions::SessionRecord<serde_json::Value>| true
+        let candidates = log
+            .workhub_candidates(
+                |_: &maka_event_log::sessions::SessionRecord<serde_json::Value>| true,
             )
             .await
-            .unwrap()
-            .iter()
-            .all(|candidate| candidate.session.id != "target")
+            .unwrap();
+        assert!(
+            candidates
+                .iter()
+                .find(|candidate| candidate.session.id == "target")
+                .expect("waiting work remains discoverable")
+                .session
+                .pending_interaction_since
+                .is_some()
         );
         assert!(log.pending_messages("target").await.unwrap().is_empty());
         log.commit_interaction_outcome(
@@ -186,16 +192,26 @@ async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_ha
             log.recover_shell_runs(20).await.unwrap();
         }
         if scenario == "changed" {
-            log.update_session_metadata(
-                "target",
-                basis.revision,
-                |config: &mut serde_json::Value| {
-                    config["name"] = json!("changed target");
-                    Ok(())
-                },
-            )
-            .await
-            .unwrap();
+            let current = log
+                .get_session::<serde_json::Value>("target")
+                .await
+                .unwrap()
+                .unwrap();
+            let mutation = log
+                .update_session_metadata(
+                    "target",
+                    current.revision,
+                    |config: &mut serde_json::Value| {
+                        config["name"] = json!("changed target");
+                        Ok(())
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(matches!(
+                mutation,
+                maka_event_log::sessions::SessionMutation::Committed(_)
+            ));
         }
         if scenario == "unknown" {
             log.append(&write(

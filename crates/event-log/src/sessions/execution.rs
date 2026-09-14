@@ -119,7 +119,7 @@ pub(super) async fn read(
     }))
 }
 
-pub(crate) async fn advance_execution(
+pub(crate) async fn advance_revision(
     connection: &mut SqliteConnection,
     id: &str,
 ) -> Result<(), StoreError> {

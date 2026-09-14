@@ -182,31 +182,53 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
           response.flushHeaders();
           targetReady.resolve();
           if (replacement) replacementReady.resolve();
-          if (stopTarget || resumeTarget || correctTarget) return;
-          await finishTarget.promise;
+          if (resumeTarget || correctTarget) return;
+          if (!stopTarget) await finishTarget.promise;
         }
       }
       if (bootstrap) {
         initialTarget.resolve();
         await delegated.promise;
       }
-      const delta = finished
-        ? { content: target ? 'target completed' : 'delegation completed' }
-        : {
+      const asking = target && finished && stopTarget;
+      const delta = asking
+        ? {
             tool_calls: [
               {
                 index: 0,
-                id: 'delegate-call',
+                id: 'waiting-question',
                 type: 'function',
                 function: {
-                  name: target || bootstrap ? 'Read' : 'mcp__desktop_workhub__tasks',
-                  arguments: JSON.stringify(
-                    target ? { path } : bootstrap ? { path: join(workspace, 'seed.txt') } : {},
-                  ),
+                  name: 'AskUserQuestion',
+                  arguments: JSON.stringify({
+                    questions: [
+                      {
+                        question: 'Proceed with this task?',
+                        options: [{ label: 'Yes' }, { label: 'No' }],
+                      },
+                    ],
+                  }),
                 },
               },
             ],
-          };
+          }
+        : finished
+          ? { content: target ? 'target completed' : 'delegation completed' }
+          : {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'delegate-call',
+                  type: 'function',
+                  function: {
+                    name: target || bootstrap ? 'Read' : 'mcp__desktop_workhub__tasks',
+                    arguments: JSON.stringify(
+                      target ? { path } : bootstrap ? { path: join(workspace, 'seed.txt') } : {},
+                    ),
+                  },
+                },
+              ],
+            };
       if (target) {
         assert(
           data.messages.some(
@@ -227,7 +249,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       if (!response.headersSent)
         response.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'close' });
       response.end(
-        [chunk(delta, null), chunk({}, finished ? 'stop' : 'tool_calls')]
+        [chunk(delta, null), chunk({}, finished && !asking ? 'stop' : 'tool_calls')]
           .map((event) => 'data: ' + JSON.stringify(event) + '\n\n')
           .join('') + 'data: [DONE]\n\n',
       );
@@ -412,6 +434,49 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
             }
             if (stopTarget || steerTarget) {
               await targetReady.promise;
+              if (stopTarget) {
+                const waiting = await targetObserver.waitFor(
+                  (frame) =>
+                    frame.kind === 'subscription.session_projection' &&
+                    frame.snapshot.interactions.pending.some(
+                      (item) => item.turnId === receipt.targetTurnId,
+                    ),
+                );
+                const pending = waiting.snapshot.interactions.pending.find(
+                  (item) => item.turnId === receipt.targetTurnId,
+                );
+                const page = await request('workhub.coordination.candidates', {});
+                const candidate = page.candidates.find(
+                  (item) => item.sessionId === targetSessionId,
+                );
+                assert(candidate, 'waiting work must remain discoverable for stop and correction');
+                assert.equal(candidate.state, 'waiting_for_user');
+                const session = await querySession(request, targetSessionId);
+                assert.equal(session.status, candidate.state);
+                assert.equal(candidate.latestDelegationActionId, input.actionId);
+                await assert.rejects(
+                  act({
+                    ...input,
+                    actionId: 'cannot-delegate-while-waiting',
+                    candidateSetId: page.candidateSetId,
+                    proposal: {
+                      disposition: 'delegate_existing',
+                      candidateRef: candidate.candidateRef,
+                    },
+                  }),
+                  (error) => error.code === 'operation_conflict',
+                );
+                assert.equal(
+                  (
+                    await request('interaction.query', {
+                      sessionId: targetSessionId,
+                      interactionId: pending.interactionId,
+                    })
+                  ).status,
+                  'pending',
+                );
+                assert.deepEqual(await request('workhub.coordination.candidates', {}), page);
+              }
               stopInput = {
                 turnId,
                 actionId: 'stop-action',
@@ -509,6 +574,14 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
       turnId: targetTurnId,
     });
     assert.equal(target.status, stopTarget || correctTarget ? 'cancelled' : 'completed');
+    if (stopTarget) {
+      assert.equal(targetObserver.subscription.snapshot.interactions.pending.length, 0);
+      const page = await request('workhub.coordination.candidates', {});
+      const stopped = page.candidates.find((item) => item.sessionId === targetSessionId);
+      assert.equal(stopped.state, 'aborted');
+      assert.equal((await querySession(request, targetSessionId)).status, stopped.state);
+      assert.equal(stopped.latestDelegationActionId, undefined);
+    }
     if (correctTarget)
       assert.equal(
         target.abortSource,

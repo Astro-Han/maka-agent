@@ -132,7 +132,7 @@ pub(super) async fn prepare(
                     "WorkHub candidate set changed",
                 ));
             }
-            candidates
+            let target = candidates
                 .result
                 .candidates
                 .iter()
@@ -153,7 +153,17 @@ pub(super) async fn prepare(
                         Code::CandidateSetStale,
                         "WorkHub candidate is no longer eligible",
                     )
-                })
+                })?;
+            if super::super::candidates::target(host, target.id())
+                .await?
+                .is_none()
+            {
+                return Err(failure(
+                    Code::OperationConflict,
+                    "WorkHub target cannot accept a delegation in its current state",
+                ));
+            }
+            Ok(target)
         }
         RoutingProposal::CreateNew { title } => {
             if matches!(

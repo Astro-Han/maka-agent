@@ -250,7 +250,7 @@ impl EventLog {
                 | Fact::InvocationEnded { .. }
         ) {
             crate::sessions::project_execution(transaction, sequence).await?;
-            crate::sessions::advance_execution(transaction, &event.invocation.session_id).await?;
+            crate::sessions::advance_revision(transaction, &event.invocation.session_id).await?;
         }
         Ok(AppendResult::Inserted(sequence))
     }

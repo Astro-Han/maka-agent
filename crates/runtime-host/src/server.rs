@@ -109,7 +109,7 @@ pub struct Host {
     change_revision: AtomicU64,
     access_revocations: broadcast::Sender<String>,
     access_changed: tokio::sync::Notify,
-    session_catalog: catalog_feed::CatalogFeed,
+    session_catalog: Arc<catalog_feed::CatalogFeed>,
     subscriptions: subscriptions::Registry,
     transcript_budget: Arc<tokio::sync::Semaphore>,
     root: Arc<RootOwner>,
@@ -174,10 +174,16 @@ impl Host {
         let capabilities = Arc::new(capabilities::Capabilities::default());
         let epoch = Uuid::new_v4().to_string();
         log.begin_message_epoch(&epoch).await?;
+        let changes = broadcast::channel(64).0;
+        let session_catalog = Arc::new(catalog_feed::CatalogFeed::new(
+            *log.subscribe_commits().borrow(),
+        ));
         let interactions = Arc::new(interactions::Interactions::new(
             log.clone(),
             draining.clone(),
             epoch.clone(),
+            session_catalog.clone(),
+            changes.clone(),
         ));
         let runtime = maka_js_runtime::trusted::TrustedRuntime::default();
         let executions = Arc::new(crate::execution::Executions::new(
@@ -193,7 +199,6 @@ impl Host {
             },
             runtime.clone(),
         )?);
-        let session_catalog = catalog_feed::CatalogFeed::new(*log.subscribe_commits().borrow());
         let host = Arc::new(Self {
             options,
             handshake_gate: Mutex::new(false),
@@ -211,7 +216,7 @@ impl Host {
             configuration,
             connection_effects: connection_effects::ConnectionEffects::default(),
             oauth: oauth::Coordinator::default(),
-            changes: broadcast::channel(64).0,
+            changes,
             change_revision: AtomicU64::new(0),
             access_revocations: broadcast::channel(64).0,
             access_changed: tokio::sync::Notify::new(),

@@ -24,8 +24,13 @@ use maka_runtime::event::TerminalStatus;
 
 pub(crate) fn project(mut record: SessionRecord<SessionConfiguration>) -> SessionCatalogProjection {
     let execution = record.execution.take();
+    let pending_since = record.pending_interaction_since;
     let mut projection = metadata_projection(record);
     projection.activity_at = projection.created_at;
+    if let Some(since) = pending_since {
+        projection.status = SessionStatus::WaitingForUser;
+        projection.status_updated_at = Some(since);
+    }
     let Some(execution) = execution else {
         return projection;
     };
@@ -51,8 +56,10 @@ pub(crate) fn project(mut record: SessionRecord<SessionConfiguration>) -> Sessio
             (SessionStatus::Blocked, recorded_at)
         }
     };
-    projection.status = status;
-    projection.status_updated_at = Some(recorded_at);
+    if pending_since.is_none() {
+        projection.status = status;
+        projection.status_updated_at = Some(recorded_at);
+    }
     projection.live_run_state = Some(SessionCatalogLiveRunState {
         schema_version: 1,
         running_turn_ids,

@@ -25,6 +25,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { events } from './client-capability-model-fixture.mjs';
 import { watchSession } from './client-subscription.mjs';
+import { querySession } from './client-runtime-policy-fixture.mjs';
 
 const sessionId = 'native-questions';
 const questions = ['Pick\u0001one', 'Explain your choice', 'Optional detail'].map((question) => ({
@@ -67,6 +68,26 @@ export async function verifyQuestions(connection, workspace, reopened, permissio
   let modelCalls = 0,
     failure,
     live;
+  const catalogStates = [];
+  const unsubscribe = connection.subscribeSessionCatalogChanges((notice) => {
+    if (notice.sessionId === sessionId)
+      querySession(request, sessionId).then(
+        (session) => catalogStates.push(session.status),
+        (error) => {
+          failure = error;
+        },
+      );
+  });
+  async function catalogStatus(expected) {
+    const deadline = Date.now() + 3000;
+    while (!catalogStates.includes(expected) && Date.now() < deadline) {
+      if (failure) throw failure;
+      await delay(5);
+    }
+    assert(catalogStates.includes(expected), `catalog notice must expose ${expected}`);
+    assert.equal((await querySession(request, sessionId)).status, expected);
+    catalogStates.length = 0;
+  }
   const server = createServer(async (req, res) => {
     try {
       assert.equal(req.url, '/v1/responses');
@@ -164,6 +185,7 @@ export async function verifyQuestions(connection, workspace, reopened, permissio
         );
         const pending = projection.snapshot.interactions.pending.find((p) => p.turnId === turnId);
         assert.equal(projection.snapshot.rootTurn.status, 'waiting_for_user');
+        await catalogStatus('waiting_for_user');
         assert.equal(
           (await request('turn.query', { sessionId, turnId })).status,
           'waiting_for_user',
@@ -188,6 +210,9 @@ export async function verifyQuestions(connection, workspace, reopened, permissio
           await checkpoint('invalid', { pending });
           const value = { kind: 'question', answers };
           const resolved = await answer(pending.interactionId, value);
+          // The next provider request is held at model-result: no model event
+          // or reconnect may stand in for the interaction's catalog notice.
+          await catalogStatus('running');
           assert.equal(resolved.status, 'answered');
           assert.equal(resolved.outcome.kind, 'question_answer');
           assert.deepEqual(resolved.outcome.answers, answers);
@@ -207,6 +232,7 @@ export async function verifyQuestions(connection, workspace, reopened, permissio
               f.snapshot.rootTurn.status === 'cancelled',
           );
           const closed = await query(pending.interactionId);
+          await catalogStatus('aborted');
           assert.equal(closed.status, 'closed');
           assert.equal(closed.outcome.reason, 'turn_stopped');
           await assert.rejects(
@@ -232,6 +258,7 @@ export async function verifyQuestions(connection, workspace, reopened, permissio
     await writeFile(saved, JSON.stringify(snapshots));
     await checkpoint('final', snapshots);
   } finally {
+    unsubscribe();
     server.closeAllConnections();
     await live?.close();
     await new Promise((resolve) => server.close(resolve));

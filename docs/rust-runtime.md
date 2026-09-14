@@ -171,8 +171,10 @@ Correction records intent before retirement, then atomically commits the replace
 attachments and queued delivery. Recovery can finish after the coordinator Run ends;
 unavailable replacements produce durable aborts. Shared Runs are not cancelled.
 Canonical records preserve original creation choices and attachment ownership;
-candidate queries expose the latest active association. Full WorkHub Desktop
-acceptance across all three platforms remains incomplete.
+candidate queries expose the latest active association, including waiting and blocked work.
+Discovery does not authorize delegation; admission rechecks interactions and unsettled effects.
+Pending interactions drive the shared Session catalog and its change notifications,
+so WorkHub's “Needs you” view agrees with candidate discovery and clears after resolution.
 
 Skill mutations, update previews and their transaction recovery remain incomplete.
 Session branching, removal, import/export and recap, along with additional runtime

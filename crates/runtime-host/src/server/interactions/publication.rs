@@ -153,6 +153,7 @@ impl Interactions {
                 "Interaction request identity conflicts with canonical state",
             ));
         }
+        self.publish_catalog(&committed.record.session_id).await?;
         Ok(committed.record)
     }
 }

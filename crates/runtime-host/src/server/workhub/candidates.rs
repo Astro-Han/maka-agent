@@ -46,10 +46,9 @@ pub(super) async fn query(host: &Arc<Host>) -> Result<Candidates, OperationError
     if host.draining.is_cancelled() {
         return Err(failure(Code::HostDraining, "Host is draining"));
     }
-    let executions = host.executions.clone();
     let records = host
         .log
-        .workhub_candidates(move |record| eligible(&executions, record))
+        .workhub_candidates(eligible)
         .await
         .map_err(sessions::stored)?;
     let mut candidates = records
@@ -100,17 +99,18 @@ pub(super) async fn target(
 ) -> Result<Option<SessionRecord<SessionConfiguration>>, OperationError> {
     let executions = host.executions.clone();
     host.log
-        .workhub_candidate(id, move |record| eligible(&executions, record))
+        .workhub_candidate(id, move |record| {
+            eligible(record) && execution_available(&executions, record)
+        })
         .await
         .map_err(sessions::stored)
 }
 
-fn eligible(
+fn execution_available(
     executions: &crate::execution::Executions,
     record: &SessionRecord<SessionConfiguration>,
 ) -> bool {
-    let config = &record.configuration;
-    let execution_available = if let Some(execution) = &record.execution
+    if let Some(execution) = &record.execution
         && matches!(execution.state, SessionExecutionState::Live { .. })
     {
         executions
@@ -118,9 +118,12 @@ fn eligible(
             .is_some_and(|owner| owner.turn_id == execution.turn_id)
     } else {
         !executions.has_active_session(&record.id)
-    };
+    }
+}
+
+fn eligible(record: &SessionRecord<SessionConfiguration>) -> bool {
+    let config = &record.configuration;
     record.id != COORDINATION_SESSION_ID
-        && execution_available
         && config.tool_profile.is_none()
         && config.collaboration_mode == CollaborationMode::Agent
         && config.orchestration_mode == OrchestrationMode::Default

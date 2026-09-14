@@ -24,7 +24,7 @@ mod execution;
 mod metadata;
 pub(crate) mod read_state;
 pub(crate) use activity::{initialize_execution, project_execution, register_functions};
-pub(crate) use execution::advance_execution;
+pub(crate) use execution::advance_revision;
 pub use execution::{CatalogMessage, SessionExecution, SessionExecutionState};
 pub use metadata::SessionMutation;
 pub use read_state::SessionReadState;
@@ -54,6 +54,9 @@ pub struct SessionRecord<T> {
     /// Bounded execution projection read in the same snapshot as metadata.
     #[serde(skip)]
     pub execution: Option<SessionExecution>,
+    /// Oldest unresolved interaction, read from canonical facts in the same snapshot.
+    #[serde(skip)]
+    pub pending_interaction_since: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -251,6 +254,18 @@ pub(crate) async fn read<T: DeserializeOwned>(
         let configuration = serde_json::from_str(&configuration)?;
         let execution = execution::read(connection, id).await?;
         let read_state = read_state::read(connection, id).await?;
+        let pending_since: Option<i64> = sqlx::query_scalar(
+            "SELECT MIN(created_at) FROM interaction_requests request
+             WHERE session_id = ? AND NOT EXISTS (
+                 SELECT 1 FROM interaction_outcomes outcome
+                 WHERE outcome.request_id = request.request_id)",
+        )
+        .bind(id)
+        .fetch_one(&mut *connection)
+        .await?;
+        let pending_interaction_since = pending_since
+            .map(|time| u64::try_from(time).map_err(|_| invalid("invalid interaction timestamp")))
+            .transpose()?;
         Ok(Some(SessionRecord {
             id: row.try_get(0)?,
             revision: number(&row, 1)?,
@@ -261,6 +276,7 @@ pub(crate) async fn read<T: DeserializeOwned>(
             configuration_digest,
             execution,
             read_state,
+            pending_interaction_since,
         }))
     } else {
         Ok(None)

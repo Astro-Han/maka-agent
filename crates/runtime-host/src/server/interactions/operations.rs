@@ -121,17 +121,15 @@ impl Interactions {
                 .answer
                 .validate_for_request(&record.request)
                 .map_err(|message| failure(Code::OperationConflict, message))?;
-            self.log
-                .commit_interaction_outcome(
-                    &record.request_id,
-                    input
-                        .answer
-                        .clone()
-                        .into_outcome(crate::server::configuration::now().map_err(internal)?),
-                )
-                .await
-                .map_err(|error| self.store_failure(error))?
-                .record
+            self.commit_outcome(
+                &record.request_id,
+                input
+                    .answer
+                    .clone()
+                    .into_outcome(crate::server::configuration::now().map_err(internal)?),
+            )
+            .await?
+            .record
         } else {
             record
         };

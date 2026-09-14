@@ -142,6 +142,7 @@ async fn visit_pending(
                 .execute(&mut *connection)
                 .await?;
             count += 1;
+            crate::sessions::advance_revision(connection, &record.session_id).await?;
         }
         after = ids.last().expect("nonempty page").clone();
     }

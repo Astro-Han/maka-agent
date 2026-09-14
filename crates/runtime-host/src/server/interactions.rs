@@ -42,6 +42,8 @@ pub(crate) struct Interactions {
     admission: Arc<tokio::sync::Mutex<()>>,
     shutdown: CancellationToken,
     epoch: String,
+    catalog: Arc<super::catalog_feed::CatalogFeed>,
+    changes: tokio::sync::broadcast::Sender<serde_json::Value>,
 }
 impl ClientInteractions for Interactions {
     fn permission_mode(&self, context: ToolCallContext) -> maka_tools::PermissionFuture {
@@ -87,12 +89,20 @@ impl ClientInteractions for Interactions {
     }
 }
 impl Interactions {
-    pub(crate) fn new(log: Arc<EventLog>, shutdown: CancellationToken, epoch: String) -> Self {
+    pub(super) fn new(
+        log: Arc<EventLog>,
+        shutdown: CancellationToken,
+        epoch: String,
+        catalog: Arc<super::catalog_feed::CatalogFeed>,
+        changes: tokio::sync::broadcast::Sender<serde_json::Value>,
+    ) -> Self {
         Self {
             log,
             admission: Arc::new(tokio::sync::Mutex::new(())),
             shutdown,
             epoch,
+            catalog,
+            changes,
         }
     }
 
@@ -107,7 +117,8 @@ impl Interactions {
     ) -> Result<(), OperationError> {
         let now = super::configuration::now()
             .map_err(|error| failure(Code::InternalFailure, &error.to_string()))?;
-        self.log
+        let closed = self
+            .log
             .close_run_interactions(
                 invocation,
                 maka_runtime::interaction::ClosureReason::TurnStopped,
@@ -115,7 +126,34 @@ impl Interactions {
             )
             .await
             .map_err(|error| self.store_failure(error))?;
+        if closed > 0 {
+            self.publish_catalog(&invocation.session_id).await?;
+        }
         Ok(())
+    }
+
+    async fn publish_catalog(&self, session_id: &str) -> Result<(), OperationError> {
+        self.catalog
+            .publish_session(&self.changes, session_id)
+            .await
+            .map_err(|error| {
+                self.shutdown.cancel();
+                failure(Code::InternalFailure, &error.to_string())
+            })
+    }
+
+    async fn commit_outcome(
+        &self,
+        request_id: &str,
+        outcome: maka_runtime::interaction::InteractionOutcome,
+    ) -> Result<maka_event_log::interactions::InteractionCommit, OperationError> {
+        let committed = self
+            .log
+            .commit_interaction_outcome(request_id, outcome)
+            .await
+            .map_err(|error| self.store_failure(error))?;
+        self.publish_catalog(&committed.record.session_id).await?;
+        Ok(committed)
     }
 
     async fn query_record(

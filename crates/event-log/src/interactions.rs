@@ -65,6 +65,7 @@ impl EventLog {
                         .bind(encoded)
                         .execute(&mut *tx)
                         .await?;
+                    crate::sessions::advance_revision(&mut tx, &request.session_id).await?;
                     tx.commit().await.map_err(StoreError::CommitUnknown)?;
                     commits.send_modify(|_| {});
                     Ok(InteractionCommit {
@@ -132,6 +133,7 @@ impl EventLog {
                         .await?;
                     }
                     record.outcome = Some(outcome);
+                    crate::sessions::advance_revision(&mut tx, &record.session_id).await?;
                     tx.commit().await.map_err(StoreError::CommitUnknown)?;
                     commits.send_modify(|_| {});
                     Ok(InteractionCommit {

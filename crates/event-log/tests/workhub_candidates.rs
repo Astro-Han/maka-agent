@@ -29,7 +29,7 @@ struct Configuration {
 }
 
 #[tokio::test]
-async fn candidates_rank_all_pages_by_canonical_activity_after_filtering_unsafe_targets() {
+async fn candidates_rank_all_pages_by_canonical_activity_including_blocked_work() {
     let temp = tempfile::tempdir().unwrap();
     let log = EventLog::open(&temp.path().join("events.sqlite"))
         .await
@@ -102,9 +102,10 @@ async fn candidates_rank_all_pages_by_canonical_activity_after_filtering_unsafe_
         record.configuration.eligible
     };
     let candidates = log.workhub_candidates(eligible).await.unwrap();
-    let expected = ["session-37".to_string(), "session-00".to_string()]
+    let expected = ["session-37", "session-36", "session-00"]
+        .map(str::to_string)
         .into_iter()
-        .chain((6..=35).rev().map(|index| format!("session-{index:02}")))
+        .chain((7..=35).rev().map(|index| format!("session-{index:02}")))
         .collect::<Vec<_>>();
     assert_eq!(
         candidates
@@ -116,6 +117,13 @@ async fn candidates_rank_all_pages_by_canonical_activity_after_filtering_unsafe_
     assert_eq!(
         maka_event_log::workhub::activity_at(&candidates[0].session),
         237_000
+    );
+    assert!(
+        log.workhub_candidate("session-36", eligible)
+            .await
+            .unwrap()
+            .is_none(),
+        "unknown effects prevent new delegation, not discovery"
     );
     log.close().await.unwrap();
 }
