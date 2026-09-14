@@ -128,7 +128,7 @@ async function main() {
   }
   assert.equal(
     RUNTIME_HOST_COMPATIBILITY_EPOCH,
-    152,
+    154,
     'Probe baseline changed; review compatibility',
   );
   console.log(

@@ -21,7 +21,7 @@
 
 [English](./rust-runtime.md)
 
-Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 152。
+Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 154。
 重写尚未完成；未实现的操作明确返回错误。
 
 ## 构建与运行

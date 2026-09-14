@@ -240,7 +240,7 @@ pub fn decode_act(value: &Value) -> Result<ActInput> {
         }
     }
     if let Some(defaults) = &input.new_work_defaults {
-        for field in ["model", "permissionMode"] {
+        for field in ["model", "executorId", "permissionMode"] {
             if value["newWorkDefaults"]
                 .get(field)
                 .is_some_and(Value::is_null)
@@ -248,7 +248,7 @@ pub fn decode_act(value: &Value) -> Result<ActInput> {
                 return Err(invalid());
             }
         }
-        if let Some(model) = &defaults.model {
+        if let Some(model) = defaults.model() {
             for field in [
                 &model.llm_connection_id,
                 &model.llm_connection_slug,

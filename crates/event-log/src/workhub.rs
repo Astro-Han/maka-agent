@@ -162,7 +162,15 @@ async fn deliver(
             {
                 return Err(invalid("WorkHub creation permission choice changed"));
             }
-            if let Some(choice) = &defaults.model
+            if matches!(
+                defaults.execution,
+                Some(maka_runtime::workhub::CreateExecution::Executor(_))
+            ) {
+                return Err(invalid(
+                    "WorkHub executor creation requires executor evidence",
+                ));
+            }
+            if let Some(choice) = defaults.model()
                 && evidence.model.as_ref().is_none_or(|model| {
                     model.connection_id != choice.llm_connection_id
                         || model.connection_slug != choice.llm_connection_slug

@@ -33,7 +33,9 @@ mod description;
 pub use correction::{
     CorrectionAbort, CorrectionIntent, CorrectionRequest, CorrectionTarget, correction_abort_source,
 };
-pub use description::{CreateDefaults, CreateModel, CreateSpec, DelegationDescription};
+pub use description::{
+    CreateDefaults, CreateExecution, CreateModel, CreateSpec, DelegationDescription,
+};
 
 pub const COORDINATION_SESSION_ID: &str = "maka_workhub_coordination";
 

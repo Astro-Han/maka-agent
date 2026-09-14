@@ -82,6 +82,18 @@ export async function prepareRouting({
       sessionId: createdTarget(input.actionId),
     });
     assert.deepEqual(missing, { kind: 'session', session: null });
+    await assert.rejects(
+      act({ ...input, newWorkDefaults: { executorId: 'fixture.Executor:v1' } }),
+      (error) => error.code === 'operation_unavailable',
+    );
+    assert.deepEqual(
+      await request('session.catalog.query', {
+        kind: 'get',
+        sessionId: createdTarget(input.actionId),
+      }),
+      missing,
+      'executor rejection must not create a Session or consume the action identity',
+    );
     return input;
   }
   assert.deepEqual(

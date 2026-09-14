@@ -42,6 +42,12 @@ pub(super) async fn create(
             "Session identity is reserved for WorkHub coordination",
         ));
     }
+    if matches!(input.target, SessionCreateTarget::Executor { .. }) {
+        return Err(failure(
+            OperationErrorCode::OperationUnavailable,
+            "Plugin executors are not implemented by this Host",
+        ));
+    }
     let thinking = input.thinking_level;
     let prepared = PreparedSession::new(input).map_err(invalid)?;
     let fingerprint = prepared.fingerprint();

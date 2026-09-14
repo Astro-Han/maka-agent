@@ -38,7 +38,7 @@ const { values } = parseArgs({
     reopened: { type: 'boolean' },
   },
 });
-assert.equal(RUNTIME_HOST_COMPATIBILITY_EPOCH, 152);
+assert.equal(RUNTIME_HOST_COMPATIBILITY_EPOCH, 154);
 const clients = [];
 async function connectClient() {
   const socket = connect(values.socket);

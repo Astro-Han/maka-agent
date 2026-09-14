@@ -34,6 +34,14 @@ fn projection() -> Value {
 }
 #[test]
 fn create_accepts_wire_options_without_materializing_defaults() {
+    for executor in ["a", "Agent.v1_foo:bar-1", &"a".repeat(128)] {
+        let value = json!({"sessionId":"s1","workspace":{"kind":"host_path","path":"/work"},"executorId":executor});
+        let decoded = decode_session_create_input(&value).unwrap();
+        assert!(
+            matches!(&decoded.target, SessionCreateTarget::Executor { executor_id } if executor_id.as_str() == executor)
+        );
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+    }
     let decoded = decode_session_create_input(&create()).unwrap();
     assert_eq!(decoded.name, None);
     assert_eq!(decoded.permission_mode, None);
@@ -66,6 +74,29 @@ fn create_accepts_wire_options_without_materializing_defaults() {
 }
 #[test]
 fn create_rejects_unknown_null_invalid_ids_and_invalid_text() {
+    let mut missing = create();
+    missing.as_object_mut().unwrap().remove("modelTarget");
+    assert!(decode_session_create_input(&missing).is_err());
+    for executor in [
+        json!(null),
+        json!(""),
+        json!("1agent"),
+        json!("a b"),
+        json!("é"),
+        json!("a/agent"),
+        json!("a".repeat(129)),
+    ] {
+        let mut value = missing.clone();
+        value["executorId"] = executor;
+        assert!(decode_session_create_input(&value).is_err());
+    }
+    let mut both = create();
+    both["executorId"] = json!("valid");
+    assert!(decode_session_create_input(&both).is_err());
+    let mut extra = missing;
+    extra["executorId"] = json!("valid");
+    extra["unknown"] = json!(1);
+    assert!(decode_session_create_input(&extra).is_err());
     for field in [
         "mode",
         "name",

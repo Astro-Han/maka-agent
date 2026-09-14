@@ -22,7 +22,7 @@
 [简体中文](./rust-runtime.zh-CN.md)
 
 The Rust workspace replaces Maka's runtime and host while preserving the
-TypeScript client protocol and interactions. Both use protocol epoch 152. The rewrite is incomplete;
+TypeScript client protocol and interactions. Both use protocol epoch 154. The rewrite is incomplete;
 unsupported operations return explicit errors.
 
 ## Build and run

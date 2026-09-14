@@ -20,6 +20,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { HOST_OPERATION_SPECS } from '../../../../packages/runtime-host/src/protocol/operations.ts';
+import { RUNTIME_HOST_COMPATIBILITY_EPOCH } from '../../../../packages/runtime-host/src/protocol/index.ts';
 
 const actual = JSON.parse(readFileSync(0, 'utf8'));
 const expected = Object.fromEntries(
@@ -34,7 +35,17 @@ const expected = Object.fromEntries(
     },
   ]),
 );
-assert.deepEqual(actual, expected, 'Rust operation vocabulary differs from current source');
+assert.deepEqual(
+  actual.operations,
+  expected,
+  'Rust operation vocabulary differs from current source',
+);
+assert.equal(actual.epoch, RUNTIME_HOST_COMPATIBILITY_EPOCH);
+for (const { operation, input, decoded } of actual.targets) {
+  const decode = () => HOST_OPERATION_SPECS[operation].decodeInput(input);
+  if (decoded === null) assert.throws(decode, JSON.stringify({ operation, input }));
+  else assert.deepEqual(JSON.parse(JSON.stringify(decode())), decoded);
+}
 console.log(
   JSON.stringify({ check: 'operation-contract', operationCount: Object.keys(expected).length }),
 );

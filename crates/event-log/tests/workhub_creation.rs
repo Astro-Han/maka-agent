@@ -74,11 +74,13 @@ async fn workhub_creation_rolls_back_with_its_action_and_replay_preserves_later_
                         },
                         defaults: Some(CreateDefaults {
                             permission_mode: Some(PermissionMode::Explore),
-                            model: Some(CreateModel {
-                                llm_connection_id: "connection".into(),
-                                llm_connection_slug: "fixture".into(),
-                                model: "fixture-model".into(),
-                            }),
+                            execution: Some(maka_runtime::workhub::CreateExecution::Model(
+                                CreateModel {
+                                    llm_connection_id: "connection".into(),
+                                    llm_connection_slug: "fixture".into(),
+                                    model: "fixture-model".into(),
+                                },
+                            )),
                         }),
                     },
                 }),

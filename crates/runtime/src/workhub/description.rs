@@ -39,12 +39,68 @@ pub struct CreateSpec {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(try_from = "CreateDefaultsWire", into = "CreateDefaultsWire")]
 pub struct CreateDefaults {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<CreateModel>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<CreateExecution>,
     pub permission_mode: Option<PermissionMode>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CreateExecution {
+    Model(CreateModel),
+    Executor(crate::executor::ExecutorId),
+}
+
+impl CreateDefaults {
+    pub fn model(&self) -> Option<&CreateModel> {
+        match &self.execution {
+            Some(CreateExecution::Model(model)) => Some(model),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateDefaultsWire {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<CreateModel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    executor_id: Option<crate::executor::ExecutorId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    permission_mode: Option<PermissionMode>,
+}
+
+impl TryFrom<CreateDefaultsWire> for CreateDefaults {
+    type Error = &'static str;
+
+    fn try_from(wire: CreateDefaultsWire) -> Result<Self, Self::Error> {
+        let execution = match (wire.model, wire.executor_id) {
+            (Some(model), None) => Some(CreateExecution::Model(model)),
+            (None, Some(executor)) => Some(CreateExecution::Executor(executor)),
+            (None, None) => None,
+            (Some(_), Some(_)) => return Err("WorkHub model and executor are mutually exclusive"),
+        };
+        Ok(Self {
+            execution,
+            permission_mode: wire.permission_mode,
+        })
+    }
+}
+
+impl From<CreateDefaults> for CreateDefaultsWire {
+    fn from(defaults: CreateDefaults) -> Self {
+        let (model, executor_id) = match defaults.execution {
+            Some(CreateExecution::Model(model)) => (Some(model), None),
+            Some(CreateExecution::Executor(executor)) => (None, Some(executor)),
+            None => (None, None),
+        };
+        Self {
+            model,
+            executor_id,
+            permission_mode: defaults.permission_mode,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,11 +135,7 @@ impl DelegationDescription {
                 if locator.trim().is_empty() || locator.contains('\0') || locator.len() > 32768 {
                     return Err("invalid WorkHub creation workspace");
                 }
-                if let Some(model) = spec
-                    .defaults
-                    .as_ref()
-                    .and_then(|defaults| defaults.model.as_ref())
-                {
+                if let Some(model) = spec.defaults.as_ref().and_then(CreateDefaults::model) {
                     for field in [
                         &model.llm_connection_id,
                         &model.llm_connection_slug,

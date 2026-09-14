@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Epoch 141 Session catalog and retirement wire contracts.
+//! Session catalog and retirement wire contracts.
 //! Use the decode functions at the JSON boundary; they enforce semantic limits
 //! in addition to the owned serde representations.
 #[path = "session_configuration.rs"]
@@ -36,11 +36,12 @@ use serde_json::Value;
 pub use types::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionCreateInput {
     pub session_id: String,
     pub workspace: WorkspaceTarget,
-    pub model_target: SessionModelTarget,
+    #[serde(flatten)]
+    pub target: SessionCreateTarget,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<SessionStartMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,6 +58,19 @@ pub struct SessionCreateInput {
     pub collaboration_mode: Option<CollaborationMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orchestration_mode: Option<OrchestrationMode>,
+}
+
+/// The untagged wire contract selects exactly one backend. The flattened
+/// target rejects leftover fields, including a second target or unknown keys.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, rename_all_fields = "camelCase", deny_unknown_fields)]
+pub enum SessionCreateTarget {
+    Model {
+        model_target: SessionModelTarget,
+    },
+    Executor {
+        executor_id: maka_runtime::executor::ExecutorId,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(

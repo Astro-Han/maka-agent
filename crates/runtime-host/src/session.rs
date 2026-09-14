@@ -89,14 +89,25 @@ impl SessionConfiguration {
 /// Preparing the stable request identity precedes model/workspace resolution.
 /// An exact replay can therefore succeed even if its old connection was removed.
 pub struct PreparedSession {
-    input: SessionCreateInput,
+    session_id: String,
+    workspace: WorkspaceTarget,
+    model_target: SessionModelTarget,
     name: String,
     labels: Vec<String>,
     permission_mode: Option<PermissionMode>,
+    thinking_level: Option<ThinkingLevel>,
+    tool_profile: Option<SessionToolProfile>,
+    collaboration_mode: CollaborationMode,
+    orchestration_mode: OrchestrationMode,
 }
 
 impl PreparedSession {
     pub fn new(input: SessionCreateInput) -> Result<Self> {
+        let SessionCreateTarget::Model { model_target } = input.target else {
+            return Err(ProtocolError::invalid(
+                "Native Session preparation requires a model target",
+            ));
+        };
         if input.labels.as_ref().is_some_and(|labels| {
             labels
                 .iter()
@@ -128,29 +139,37 @@ impl PreparedSession {
             input.permission_mode
         };
         Ok(Self {
-            input,
+            session_id: input.session_id,
+            workspace: input.workspace,
+            model_target,
             name,
             labels,
             permission_mode,
+            thinking_level: input.thinking_level,
+            tool_profile: input.tool_profile,
+            collaboration_mode: input.collaboration_mode.unwrap_or(CollaborationMode::Agent),
+            orchestration_mode: input
+                .orchestration_mode
+                .unwrap_or(OrchestrationMode::Default),
         })
     }
 
     pub fn session_id(&self) -> &str {
-        &self.input.session_id
+        &self.session_id
     }
     pub fn workspace(&self) -> &WorkspaceTarget {
-        &self.input.workspace
+        &self.workspace
     }
     pub fn model_target(&self) -> &SessionModelTarget {
-        &self.input.model_target
+        &self.model_target
     }
 
     pub fn fingerprint(&self) -> String {
-        let workspace = match &self.input.workspace {
+        let workspace = match &self.workspace {
             WorkspaceTarget::HostPath { path } => json!(["host_path", path]),
             WorkspaceTarget::Project { project_id } => json!(["project", project_id]),
         };
-        let model = match &self.input.model_target {
+        let model = match &self.model_target {
             SessionModelTarget::Default => json!(["default"]),
             SessionModelTarget::Explicit {
                 connection_id,
@@ -164,20 +183,16 @@ impl PreparedSession {
             .unwrap_or_else(|| json!(["runtime_default"]));
         let identity = json!([
             "session.create.v4",
-            self.input.session_id,
+            self.session_id,
             workspace,
             self.name,
             self.labels,
             model,
-            self.input.thinking_level,
-            self.input.tool_profile,
+            self.thinking_level,
+            self.tool_profile,
             permission,
-            self.input
-                .collaboration_mode
-                .unwrap_or(CollaborationMode::Agent),
-            self.input
-                .orchestration_mode
-                .unwrap_or(OrchestrationMode::Default),
+            self.collaboration_mode,
+            self.orchestration_mode,
         ]);
         format!(
             "sha256:{:x}",
@@ -200,19 +215,13 @@ impl PreparedSession {
             title_is_manual: false,
             model,
             connection_locked: false,
-            thinking_level: self.input.thinking_level,
-            tool_profile: self.input.tool_profile,
+            thinking_level: self.thinking_level,
+            tool_profile: self.tool_profile,
             tool_mode,
             permission_mode: self.permission_mode.unwrap_or(default_permission),
             boundary_revision: 0,
-            collaboration_mode: self
-                .input
-                .collaboration_mode
-                .unwrap_or(CollaborationMode::Agent),
-            orchestration_mode: self
-                .input
-                .orchestration_mode
-                .unwrap_or(OrchestrationMode::Default),
+            collaboration_mode: self.collaboration_mode,
+            orchestration_mode: self.orchestration_mode,
         }
     }
 }

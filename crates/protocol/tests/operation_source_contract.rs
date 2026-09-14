@@ -25,7 +25,7 @@ use maka_protocol::Operation;
 use serde_json::{Map, Value, json};
 
 #[test]
-fn every_operation_matches_current_typescript_name_mode_and_availability() {
+fn operation_inventory_and_execution_targets_match_current_typescript() {
     let mut operations = Map::new();
     for &operation in Operation::ALL {
         let name = operation.as_str();
@@ -61,7 +61,14 @@ fn every_operation_matches_current_typescript_name_mode_and_availability() {
         .stdin
         .take()
         .unwrap()
-        .write_all(&serde_json::to_vec(&Value::Object(operations)).unwrap())
+        .write_all(
+            &serde_json::to_vec(&json!({
+                "epoch": maka_protocol::COMPATIBILITY_EPOCH,
+                "operations": operations,
+                "targets": execution_targets(),
+            }))
+            .unwrap(),
+        )
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(
@@ -74,4 +81,50 @@ fn every_operation_matches_current_typescript_name_mode_and_availability() {
     let report: Value = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
     assert_eq!(report["check"], "operation-contract");
     assert_eq!(report["operationCount"], Operation::ALL.len());
+}
+
+fn execution_targets() -> Vec<Value> {
+    let model =
+        json!({"llmConnectionId":"connection", "llmConnectionSlug":"fixture", "model":"fixture"});
+    let mut cases = Vec::new();
+    for target in [
+        json!({"modelTarget":{"kind":"default"}}),
+        json!({"executorId":"Agent.v1:fixture"}),
+        json!({"executorId":"a".repeat(128)}),
+        json!({"executorId":"a".repeat(129)}),
+        json!({"executorId":"1agent"}),
+        json!({"executorId":null}),
+        json!({"executorId":"Agent", "modelTarget":{"kind":"default"}}),
+        json!({"executorId":"Agent", "unexpected":true}),
+        json!({}),
+    ] {
+        let mut input =
+            json!({"sessionId":"session", "workspace":{"kind":"host_path", "path":"/work"}});
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(target.as_object().unwrap().clone());
+        let decoded = maka_protocol::session::decode_session_create_input(&input)
+            .ok()
+            .map(|value| serde_json::to_value(value).unwrap());
+        cases.push(json!({"operation":Operation::SessionCreate, "input":input, "decoded":decoded}));
+    }
+    for defaults in [
+        json!({}),
+        json!({"model":model}),
+        json!({"executorId":"Agent.v1:fixture", "permissionMode":"bypass"}),
+        json!({"executorId":"Agent", "model":model}),
+        json!({"executorId":"Agent/invalid"}),
+        json!({"executorId":null}),
+        json!({"model":null}),
+        json!({"executorId":"Agent", "unexpected":true}),
+    ] {
+        let input = json!({"turnId":"turn", "actionId":"action", "proposal":{"disposition":"create_new", "title":"Task"},
+            "create":{"workspace":{"kind":"host_path", "path":"/work"}}, "newWorkDefaults":defaults});
+        let decoded = maka_protocol::workhub::decode_act(&input)
+            .ok()
+            .map(|value| serde_json::to_value(value).unwrap());
+        cases.push(json!({"operation":Operation::WorkhubCoordinationActFromTurn, "input":input, "decoded":decoded}));
+    }
+    cases
 }

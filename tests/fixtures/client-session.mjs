@@ -35,6 +35,20 @@ export async function verifySessionWorkflow(connection, workspace, reopened, con
     modelTarget: { kind: 'default' },
     name: 'Rust  会话',
   };
+  const pluginSessionId = 'unavailable-executor-session';
+  await assert.rejects(
+    request('session.create', {
+      sessionId: pluginSessionId,
+      workspace: create.workspace,
+      executorId: 'fixture.Executor:v1',
+    }),
+    (error) => error.code === 'operation_unavailable',
+  );
+  assert.deepEqual(
+    await request('session.catalog.query', { kind: 'get', sessionId: pluginSessionId }),
+    { kind: 'session', session: null },
+    'an unavailable executor must not create a native Session, including after reopen',
+  );
   if (reopened) {
     const query = await request('session.catalog.query', {
       kind: 'get',
