@@ -82,12 +82,12 @@ async fn real_pty_queries_and_mode_aware_input_cross_the_screen_cut() {
             }
             // This fixture emits ASCII; native UTF-8 input is checked by the
             // child byte-for-byte, independent of read chunk boundaries.
-            let replies = screen
+            let cut = screen
                 .write(std::str::from_utf8(&bytes[..count]).unwrap())
                 .await
                 .unwrap();
-            write_pty(&io, replies.as_bytes()).await;
-            let cut = screen.snapshot().await.unwrap();
+            write_pty(&io, cut.replies.as_bytes()).await;
+            let cut = cut.screen;
             if !sent && cut.screen.contains("ready") {
                 let input = encode_actions(&actions, cut.input, cut.size).unwrap();
                 assert_eq!(input, expected);
@@ -132,10 +132,11 @@ async fn screen_matches_original_collector_across_parser_cuts_modes_and_reflow()
     let mut screen = Screen::new(TerminalSize::new(10, 3).unwrap()).unwrap();
     let mut observations = vec![];
     for action in actions.as_array().unwrap() {
-        let replies = if let Some(data) = action["write"].as_str() {
-            screen.write(data).await.unwrap()
+        let (replies, cut) = if let Some(data) = action["write"].as_str() {
+            let cut = screen.write(data).await.unwrap();
+            (cut.replies, cut.screen)
         } else {
-            screen
+            let cut = screen
                 .resize(
                     TerminalSize::new(
                         action["cols"].as_u64().unwrap() as u16,
@@ -145,9 +146,9 @@ async fn screen_matches_original_collector_across_parser_cuts_modes_and_reflow()
                 )
                 .await
                 .unwrap();
-            String::new()
+            (String::new(), cut)
         };
-        observations.push(json!({"screen":screen.snapshot().await.unwrap(),"replies":replies}));
+        observations.push(json!({"screen":cut,"replies":replies}));
     }
     let oracle = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/terminal-screen-oracle.mjs");

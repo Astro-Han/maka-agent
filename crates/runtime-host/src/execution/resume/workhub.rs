@@ -34,7 +34,7 @@ impl Executions {
         self: &Arc<Self>,
         origin: ResumeOrigin,
         owner: Invocation,
-        connection: uuid::Uuid,
+        environment: super::super::prepare::Environment,
     ) -> Result<TurnResumeStartResult> {
         let session = self.resume_session(&owner.session_id).await?;
         if self
@@ -69,7 +69,7 @@ impl Executions {
                 source,
                 resumed_turn_id(&origin.action_id),
                 Some(origin.request_fingerprint.clone()),
-                prepare::Mode::Execute(connection),
+                prepare::Mode::Prepared(Box::new(environment)),
             )
             .await?;
         let maka_agent::RunWork::Continuation { workhub_resume, .. } = &mut run.work else {

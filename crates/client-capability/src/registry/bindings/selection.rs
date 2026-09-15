@@ -25,7 +25,62 @@ use maka_runtime::capability::Affinity;
 use std::collections::{BTreeSet, HashSet};
 use uuid::Uuid;
 
+/// A candidate owns no Session binding. Commit verifies the same selection and
+/// publications under the registry lock before making it authoritative.
+pub struct PreparedBindings {
+    session_id: String,
+    initiating: Option<Uuid>,
+    mode: BindingMode,
+    previous: Option<SessionBindings>,
+    selected: SessionBindings,
+    snapshot: super::Snapshot,
+}
+
 impl Registry {
+    pub fn prepare_bindings(
+        &self,
+        session_id: &str,
+        initiating: Option<Uuid>,
+        mode: BindingMode,
+    ) -> Result<(PreparedBindings, super::Snapshot), BindingError> {
+        let previous = self.sessions.get(session_id).cloned();
+        let selected = self.select_bindings(previous.as_ref(), initiating, mode)?;
+        let snapshot = self.snapshot_bindings(Some(&selected))?;
+        Ok((
+            PreparedBindings {
+                session_id: session_id.into(),
+                initiating,
+                mode,
+                previous,
+                selected,
+                snapshot: snapshot.clone(),
+            },
+            snapshot,
+        ))
+    }
+
+    /// False means stale preparation; no binding was changed.
+    pub fn commit_bindings(&mut self, prepared: PreparedBindings) -> Result<bool, BindingError> {
+        if self.sessions.get(&prepared.session_id) != prepared.previous.as_ref() {
+            return Ok(false);
+        }
+        let selected = self.select_bindings(
+            prepared.previous.as_ref(),
+            prepared.initiating,
+            prepared.mode,
+        )?;
+        if selected != prepared.selected
+            || !self
+                .snapshot_bindings(Some(&selected))?
+                .same_bindings(&prepared.snapshot)
+        {
+            return Ok(false);
+        }
+        self.sessions.insert(prepared.session_id, selected);
+        self.prune_sessions();
+        Ok(true)
+    }
+
     /// Required tools must share one Session-affinity owner. Selection and
     /// snapshot validation finish before any binding becomes visible.
     pub fn bind_required_tools(

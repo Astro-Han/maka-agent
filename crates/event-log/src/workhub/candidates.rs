@@ -21,6 +21,7 @@ use crate::{
     EventLog, StoreError,
     sessions::{SessionExecutionState, SessionRecord},
 };
+use futures_util::TryStreamExt;
 use maka_runtime::event::Invocation;
 use maka_runtime::workhub::ActionId;
 use serde::de::DeserializeOwned;
@@ -61,7 +62,8 @@ impl EventLog {
             .await
     }
 
-    /// One read snapshot, bounded resident records, no independent candidate authority.
+    /// Rank lightweight rows in one read snapshot, then hydrate only the visible
+    /// candidates. No per-session projection scan or independent candidate authority.
     /// Discovery includes waiting and blocked work; action admission checks write safety.
     pub async fn workhub_candidates<T, F>(
         &self,
@@ -69,45 +71,49 @@ impl EventLog {
     ) -> Result<Vec<Candidate<T>>, StoreError>
     where
         T: DeserializeOwned + Send + Sync + 'static,
-        F: Fn(&SessionRecord<T>) -> bool + Send + 'static,
+        F: Fn(&str, &T) -> bool + Send + 'static,
     {
         self.validate_root()?;
         self.connection
             .run(move |connection| {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
-                    let mut cursor = String::new();
-                    let mut candidates = Vec::new();
-                    loop {
-                        let ids: Vec<String> = sqlx::query_scalar(
-                            "SELECT id FROM session_control WHERE archived = 0 AND id > ?
-                     ORDER BY id LIMIT 32",
-                        )
-                        .bind(&cursor)
-                        .fetch_all(&mut *tx)
-                        .await?;
-                        if ids.is_empty() {
-                            break;
+                    let mut rows = sqlx::query_as::<_, (String, String)>(
+                        "SELECT session.id, session.configuration
+                         FROM session_control session
+                         LEFT JOIN event_log opening ON opening.sequence = (
+                             SELECT sequence FROM event_log INDEXED BY catalog_message_facts
+                             WHERE invocation_id IS NOT NULL
+                               AND kind IN ('invocation_opened', 'model_completed')
+                               AND kind = 'invocation_opened'
+                               AND json_extract(event_json, '$.invocation.session_id') = session.id
+                             ORDER BY sequence DESC LIMIT 1)
+                         WHERE session.archived = 0
+                         ORDER BY CASE WHEN opening.sequence IS NULL THEN session.created_at
+                           ELSE COALESCE(
+                             (SELECT message_at FROM catalog_messages INDEXED BY catalog_latest_message
+                              WHERE session_id = session.id
+                              ORDER BY message_at DESC, sequence DESC, ordinal DESC LIMIT 1),
+                             (SELECT catalog_time(json_extract(event_json, '$.recorded_at'))
+                              FROM event_log INDEXED BY invocation_boundary
+                              WHERE invocation_id = opening.invocation_id
+                                AND kind IN ('invocation_opened', 'invocation_ended')
+                                AND kind = 'invocation_ended' ORDER BY sequence DESC LIMIT 1),
+                             catalog_time(json_extract(opening.event_json, '$.recorded_at')))
+                           END DESC, session.id ASC",
+                    ).fetch(&mut *tx);
+                    let mut ids = Vec::with_capacity(32);
+                    while let Some((id, configuration)) = rows.try_next().await? {
+                        if eligible(&id, &serde_json::from_str::<T>(&configuration)?) {
+                            ids.push(id);
+                            if ids.len() == 32 { break; }
                         }
-                        for id in &ids {
-                            let record = crate::sessions::read(&mut tx, id)
-                                .await?
-                                .ok_or(StoreError::SessionNotFound)?;
-                            if !eligible(&record) {
-                                continue;
-                            }
-                            candidates.push(record);
-                            candidates.sort_by(|a, b| {
-                                activity_at(b)
-                                    .cmp(&activity_at(a))
-                                    .then_with(|| a.id.cmp(&b.id))
-                            });
-                            candidates.truncate(32);
-                        }
-                        cursor = ids.last().unwrap().clone();
                     }
-                    let mut result = Vec::with_capacity(candidates.len());
-                    for session in candidates {
+                    drop(rows);
+                    let mut result = Vec::with_capacity(ids.len());
+                    for id in ids {
+                        let session = crate::sessions::read(&mut tx, &id)
+                            .await?.ok_or(StoreError::SessionNotFound)?;
                         let latest_delegation_action_id: Option<String> = sqlx::query_scalar(
                             "SELECT json_extract(assignment.event_json, '$.fact.delegation.action_id')
                              FROM event_log assignment

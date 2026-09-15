@@ -24,6 +24,7 @@ use maka_runtime::capability::{Affinity, Offer};
 use maka_runtime::{capability::AdmissionEvidence, interaction::GrantTarget};
 use std::{collections::HashSet, sync::Arc};
 
+#[derive(Clone)]
 pub struct Snapshot {
     offers: Vec<SnapshotOffer>,
 }
@@ -31,12 +32,35 @@ impl Snapshot {
     pub fn offers(&self) -> &[SnapshotOffer] {
         &self.offers
     }
+
+    pub(super) fn same_bindings(&self, other: &Self) -> bool {
+        self.offers.len() == other.offers.len()
+            && self.offers.iter().zip(&other.offers).all(|(a, b)| {
+                a.contract == b.contract
+                    && match (&a.source, &b.source) {
+                        (Source::Pinned(a), Source::Pinned(b)) => Arc::ptr_eq(a, b),
+                        (
+                            Source::Call {
+                                offer: a,
+                                selector: sa,
+                            },
+                            Source::Call {
+                                offer: b,
+                                selector: sb,
+                            },
+                        ) => a == b && sa == sb,
+                        _ => false,
+                    }
+            })
+    }
 }
 
+#[derive(Clone)]
 pub struct SnapshotOffer {
     contract: ContractId,
     source: Source,
 }
+#[derive(Clone)]
 enum Source {
     Pinned(Arc<Registration>),
     Call {

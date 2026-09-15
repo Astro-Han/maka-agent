@@ -65,21 +65,15 @@ impl Terminal {
         let Some(screen) = &mut self.screen else {
             return Ok(());
         };
-        let result = async {
-            let reply = screen.write(&text).await?;
-            let snapshot = screen.snapshot().await?;
-            Ok::<_, maka_js_runtime::terminal::ScreenError>((reply, snapshot))
-        }
-        .await;
-        match result {
-            Ok((reply, snapshot)) => {
-                self.snapshot = snapshot;
+        match screen.write(&text).await {
+            Ok(cut) => {
+                self.snapshot = cut.screen;
                 // Observational stream, not a durable outcome. Publish only a
                 // completed parser cut, including final output during drain.
                 self.output.publish(&text)?;
-                if !reply.is_empty() {
+                if !cut.replies.is_empty() {
                     self.writes
-                        .push_back(PendingWrite::new(reply, None, false, false));
+                        .push_back(PendingWrite::new(cut.replies, None, false, false));
                 }
                 Ok(())
             }
@@ -97,8 +91,7 @@ impl Terminal {
             .screen
             .as_mut()
             .ok_or(ShellError::Rejected("terminal parser unavailable"))?;
-        screen.resize(size).await?;
-        self.snapshot = screen.snapshot().await?;
+        self.snapshot = screen.resize(size).await?;
         self.output.resize(size);
         Ok(())
     }

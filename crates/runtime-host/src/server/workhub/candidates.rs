@@ -100,7 +100,7 @@ pub(super) async fn target(
     let executions = host.executions.clone();
     host.log
         .workhub_candidate(id, move |record| {
-            eligible(record) && execution_available(&executions, record)
+            eligible(&record.id, &record.configuration) && execution_available(&executions, record)
         })
         .await
         .map_err(sessions::stored)
@@ -121,9 +121,8 @@ fn execution_available(
     }
 }
 
-fn eligible(record: &SessionRecord<SessionConfiguration>) -> bool {
-    let config = &record.configuration;
-    record.id != COORDINATION_SESSION_ID
+fn eligible(id: &str, config: &SessionConfiguration) -> bool {
+    id != COORDINATION_SESSION_ID
         && config.tool_profile.is_none()
         && config.collaboration_mode == CollaborationMode::Agent
         && config.orchestration_mode == OrchestrationMode::Default

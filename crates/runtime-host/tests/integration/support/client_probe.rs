@@ -135,7 +135,7 @@ impl ClientFixture {
         let output = output.unwrap().unwrap();
         assert!(
             output.status.success(),
-            "stdout: {}\nstderr: {}",
+            "{flag} (reopened={reopened})\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

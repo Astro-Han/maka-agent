@@ -43,6 +43,19 @@ async fn fenced_bootstrap_and_bounded_catchup_survive_coalescing_and_reopen() {
     assert!(fresh.root_turn.is_none());
     assert!(fresh.active_streams.is_empty());
     assert_eq!(fresh.through_sequence, 0);
+    log.create_session("idle", "idle-create", &json!({}), 1)
+        .await
+        .unwrap();
+    let targets = ["session".into(), "idle".into()];
+    let versions = log.observation_versions(&targets).await.unwrap();
+    assert_eq!(
+        versions["session"],
+        maka_event_log::observation::ObservationVersion {
+            metadata: 1,
+            queue: 0,
+            event: 0
+        }
+    );
     let first = Invocation {
         session_id: "session".into(),
         turn_id: "first".into(),
@@ -105,6 +118,15 @@ async fn fenced_bootstrap_and_bounded_catchup_survive_coalescing_and_reopen() {
         .unwrap();
     // Several commits collapse to one hint. The stored cursor still covers all facts.
     assert_eq!(*wake.borrow_and_update(), 4);
+    let advanced = log.observation_versions(&targets).await.unwrap();
+    assert_eq!(
+        advanced["idle"], versions["idle"],
+        "unrelated commits do not invalidate an idle observer"
+    );
+    assert_eq!(
+        advanced["session"].event, 3,
+        "observer versions track their Session, not the global fence"
+    );
     log.append(&EventWrite::plain((opening).clone()).unwrap())
         .await
         .unwrap();

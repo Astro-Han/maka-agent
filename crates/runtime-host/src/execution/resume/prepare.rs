@@ -26,7 +26,7 @@ use uuid::Uuid;
 
 pub(super) enum Mode {
     Observe(Uuid),
-    Execute(Uuid),
+    Prepared(Box<super::super::prepare::Environment>),
 }
 impl Executions {
     pub(super) async fn prepare_resume(
@@ -44,51 +44,45 @@ impl Executions {
                 .map_err(internal)?
                 .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
         let session_id = &source.invocation.session_id;
-        let provider = match mode {
+        let provider = match &mode {
             Mode::Observe(_) => provider::observe(&self.configuration, session_id, session).await?,
-            Mode::Execute(_) => {
+            Mode::Prepared(_) => {
                 provider::resolve(&self.configuration, &self.oauth, session_id, session).await?
             }
         };
         let mut configuration = session.observed_configuration(workspace);
-        let mut system_prompt = prompt::resolve(
-            self.configuration
-                .runtime_policy()
-                .await
-                .map_err(crate::server::configuration::failure)?,
-            configuration.cwd.clone().into(),
-            self.paths.global_instructions.clone(),
-        )
-        .await
-        .map_err(internal)?;
-        let (tools, skills) = match mode {
+        let (tools, system_prompt) = match mode {
+            Mode::Prepared(environment) => (environment.tools, environment.prompt),
             Mode::Observe(connection) => {
-                self.preview_tool_catalog(
-                    Some(session_id),
-                    connection,
-                    &configuration.cwd,
-                    session.permission_mode,
-                    session.tool_profile,
+                let mut system_prompt = prompt::resolve(
+                    self.configuration
+                        .runtime_policy()
+                        .await
+                        .map_err(crate::server::configuration::failure)?,
+                    configuration.cwd.clone().into(),
+                    self.paths.global_instructions.clone(),
                 )
-                .await?
-            }
-            Mode::Execute(connection) => {
-                self.prepare_tools(
-                    session_id,
-                    session,
-                    Some(connection),
-                    maka_client_capability::BindingMode::Strict,
-                )
-                .await?
+                .await
+                .map_err(internal)?;
+                let (tools, skills) = self
+                    .preview_tool_catalog(
+                        Some(session_id),
+                        connection,
+                        &configuration.cwd,
+                        session.permission_mode,
+                        session.tool_profile,
+                    )
+                    .await?;
+                let fragment = skills
+                    .catalog()
+                    .prompt((64 * 1024usize).saturating_sub(system_prompt.text.len() + 2));
+                if !fragment.is_empty() {
+                    system_prompt.text.push_str("\n\n");
+                    system_prompt.text.push_str(&fragment);
+                }
+                (tools, system_prompt)
             }
         };
-        let fragment = skills
-            .catalog()
-            .prompt((64 * 1024usize).saturating_sub(system_prompt.text.len() + 2));
-        if !fragment.is_empty() {
-            system_prompt.text.push_str("\n\n");
-            system_prompt.text.push_str(&fragment);
-        }
         configuration.system_prompt = Some(system_prompt);
         Ok(RunInput {
             invocation: Invocation {

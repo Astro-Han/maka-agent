@@ -44,6 +44,8 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
     append(&log, &first, opening()).await;
     let mut notices = log.subscribe_commits();
     let before = *notices.borrow_and_update();
+    let targets = ["session".into()];
+    let version = log.observation_versions(&targets).await.unwrap()["session"];
     for id in ["one", "two", "three"] {
         log.admit_message(admission(&first, id, Disposition::Followup))
             .await
@@ -57,6 +59,12 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
     );
     let queue = log.message_queue("session").await.unwrap();
     assert_eq!(queue.revision, 3);
+    let queued_version = log.observation_versions(&targets).await.unwrap()["session"];
+    assert_eq!(queued_version.event, version.event);
+    assert_eq!(
+        queued_version.queue, queue.revision,
+        "queue-only commits must invalidate observation"
+    );
     let reordered = log
         .edit_message_queue(
             "session",

@@ -33,7 +33,6 @@ pub(in crate::server) const ERRORS: &[Code] = &[
 
 pub(in crate::server) async fn execute(host: &Host, value: &Value) -> Result<Outcome, HostError> {
     let input = decode_catalog_input(value)?;
-    let _admission = host.executions.lock_admission().await;
     if host.draining.is_cancelled() {
         return Ok(Outcome::failure(failure(
             Code::HostDraining,

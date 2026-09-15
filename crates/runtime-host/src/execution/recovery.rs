@@ -42,7 +42,7 @@ impl Executions {
                 return Ok(());
             }
             for session in &sessions {
-                let _admission = self.lock_admission().await;
+                let mut admission = Some(self.lock_admission().await);
                 if self.shutdown.is_cancelled() {
                     return Err(super::failure(
                         maka_protocol::OperationErrorCode::HostDraining,
@@ -50,7 +50,7 @@ impl Executions {
                     ));
                 }
                 if !self.has_active_session(session)
-                    && let Some(running) = self.next_message(session).await?
+                    && let Some(running) = self.next_message(session, &mut admission, None).await?
                 {
                     self.track(running);
                 }

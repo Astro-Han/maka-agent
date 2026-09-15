@@ -47,7 +47,6 @@ impl Executions {
     ) -> Result<TurnResumePlan> {
         super::ordinary_session(&input.session_id)
             .map_err(|error| failure(Code::OperationUnavailable, &error.message))?;
-        let _admission = self.lock_admission().await;
         let session = self.resume_session(&input.session_id).await?;
         if self
             .has_session_work(&input.session_id)
@@ -100,84 +99,114 @@ impl Executions {
         connection: Uuid,
     ) -> Result<TurnResumeStartResult> {
         super::ordinary_session(&input.session_id)?;
-        let _admission = self.lock_admission().await;
-        if self.shutdown.is_cancelled() {
-            return Err(failure(Code::HostDraining, "Host is draining"));
-        }
-        // Canonical identity wins even if files, tools or the model disappeared.
-        if let Some(boundary) = self
-            .log
-            .turn_boundary(&input.session_id, &input.turn_id)
-            .await
-            .map_err(internal)?
-        {
-            if !matches!(&boundary.input, InvocationInput::Continuation { claim, .. }
+        let mut prepared = None;
+        loop {
+            let admission = self.lock_admission().await;
+            if self.shutdown.is_cancelled() {
+                return Err(failure(Code::HostDraining, "Host is draining"));
+            }
+            // Canonical identity wins even if files, tools or the model disappeared.
+            if let Some(boundary) = self
+                .log
+                .turn_boundary(&input.session_id, &input.turn_id)
+                .await
+                .map_err(internal)?
+            {
+                if !matches!(&boundary.input, InvocationInput::Continuation { claim, .. }
                 if claim.source.invocation.run_id == input.source_run_id
                     && claim.source.high_water == input.source_runtime_event_high_water)
+                {
+                    return Err(failure(
+                        Code::OperationConflict,
+                        "Turn identity belongs to another request",
+                    ));
+                }
+                return Ok(TurnResumeStartResult::Started {
+                    turn: snapshot::project(boundary).snapshot,
+                });
+            }
+            let session = self.resume_session(&input.session_id).await?;
+            if self
+                .has_session_work(&input.session_id)
+                .await
+                .map_err(internal)?
             {
                 return Err(failure(
-                    Code::OperationConflict,
-                    "Turn identity belongs to another request",
+                    Code::SessionBusy,
+                    "Session has pending or active work",
                 ));
             }
-            return Ok(TurnResumeStartResult::Started {
-                turn: snapshot::project(boundary).snapshot,
-            });
+            let source = match self
+                .resume_source(&TurnResumeQueryInput {
+                    session_id: input.session_id.clone(),
+                    source_run_id: Some(input.source_run_id.clone()),
+                    expected_runtime_event_high_water: Some(input.source_runtime_event_high_water),
+                })
+                .await?
+            {
+                Selection::Ready(source) => source,
+                Selection::Parked(reason) => {
+                    return Ok(TurnResumeStartResult::Parked {
+                        plan: parked(input.session_id, reason),
+                    });
+                }
+            };
+            let fingerprint = format!(
+                "sha256:{:x}",
+                Sha256::digest(
+                    serde_json::to_vec(&(Operation::TurnResumeStart, &input)).map_err(internal)?
+                )
+            );
+            let Some(candidate) = prepared.take() else {
+                drop(admission);
+                prepared = Some(
+                    self.prepare_environment(
+                        &input.session_id,
+                        Some(connection),
+                        maka_client_capability::BindingMode::Strict,
+                    )
+                    .await,
+                );
+                continue;
+            };
+            let candidate = match candidate {
+                Ok(candidate) => candidate,
+                Err(error) if error.code == Code::OperationUnavailable => {
+                    return Ok(TurnResumeStartResult::Parked {
+                        plan: parked(
+                            input.session_id,
+                            TurnResumeParkReason::SafetyObservationUnavailable,
+                        ),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
+            let Some(environment) = candidate.commit(self, &input.session_id).await? else {
+                continue;
+            };
+            let run = match self
+                .prepare_resume(
+                    &session,
+                    source,
+                    input.turn_id,
+                    Some(fingerprint),
+                    prepare::Mode::Prepared(Box::new(environment)),
+                )
+                .await
+            {
+                Ok(run) => run,
+                Err(error) if error.code == Code::OperationUnavailable => {
+                    return Ok(TurnResumeStartResult::Parked {
+                        plan: parked(
+                            input.session_id,
+                            TurnResumeParkReason::SafetyObservationUnavailable,
+                        ),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
+            return self.launch_resume(run).await;
         }
-        let session = self.resume_session(&input.session_id).await?;
-        if self
-            .has_session_work(&input.session_id)
-            .await
-            .map_err(internal)?
-        {
-            return Err(failure(
-                Code::SessionBusy,
-                "Session has pending or active work",
-            ));
-        }
-        let source = match self
-            .resume_source(&TurnResumeQueryInput {
-                session_id: input.session_id.clone(),
-                source_run_id: Some(input.source_run_id.clone()),
-                expected_runtime_event_high_water: Some(input.source_runtime_event_high_water),
-            })
-            .await?
-        {
-            Selection::Ready(source) => source,
-            Selection::Parked(reason) => {
-                return Ok(TurnResumeStartResult::Parked {
-                    plan: parked(input.session_id, reason),
-                });
-            }
-        };
-        let fingerprint = format!(
-            "sha256:{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&(Operation::TurnResumeStart, &input)).map_err(internal)?
-            )
-        );
-        let run = match self
-            .prepare_resume(
-                &session,
-                source,
-                input.turn_id,
-                Some(fingerprint),
-                prepare::Mode::Execute(connection),
-            )
-            .await
-        {
-            Ok(run) => run,
-            Err(error) if error.code == Code::OperationUnavailable => {
-                return Ok(TurnResumeStartResult::Parked {
-                    plan: parked(
-                        input.session_id,
-                        TurnResumeParkReason::SafetyObservationUnavailable,
-                    ),
-                });
-            }
-            Err(error) => return Err(error),
-        };
-        self.launch_resume(run).await
     }
 
     async fn launch_resume(

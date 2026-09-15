@@ -96,7 +96,7 @@ async fn admit(
     input: ActInput,
     selected: Option<&super::selection::SelectedTarget>,
 ) -> Result<ActResult, OperationError> {
-    let _admission = host.executions.lock_admission().await;
+    let mut admission = Some(host.executions.lock_admission().await);
     let fingerprint = fingerprint(&input)?;
     if host
         .log
@@ -250,7 +250,7 @@ async fn admit(
         });
     }
     host.executions
-        .dispatch_workhub_pending(target.id())
+        .dispatch_workhub_pending(target.id(), &mut admission)
         .await?;
     Ok(result)
 }

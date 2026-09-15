@@ -43,7 +43,6 @@ pub(super) async fn execute(
     value: &Value,
 ) -> Result<Outcome, HostError> {
     let input = decode_invocable_input(value)?;
-    let _admission = host.executions.lock_admission().await;
     if host.draining.is_cancelled() {
         return Ok(Outcome::failure(failure(
             Code::HostDraining,
@@ -93,6 +92,7 @@ async fn query(
                     input,
                     &session.configuration.workspace.host_cwd,
                     &FrozenSkills {
+                        preference_revision: None,
                         discovery: Default::default(),
                         preferences: maka_skills::Preferences::Available(Default::default()),
                         host: Default::default(),

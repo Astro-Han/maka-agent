@@ -223,8 +223,26 @@ impl Subscriptions {
     pub async fn poll(&mut self, host: &Host) -> Result<(Vec<Value>, bool), HostError> {
         let mut frames = Vec::new();
         let mut more = false;
+        if self.owned.is_empty() {
+            return Ok((frames, more));
+        }
+        let sessions = self
+            .owned
+            .values()
+            .map(|delivery| delivery.session_id().to_owned())
+            .collect::<Vec<_>>();
+        let versions = host.log.observation_versions(&sessions).await?;
         for delivery in self.owned.values_mut() {
+            let version = *versions
+                .get(delivery.session_id())
+                .ok_or("observed Session disappeared")?;
+            if delivery.version == Some(version) {
+                continue;
+            }
             let (mut next, pending) = delivery.poll(host).await?;
+            // A paged fence or unfinished transcript always continues, even if
+            // no new fact arrived since the previous page.
+            delivery.version = (!pending).then_some(version);
             frames.append(&mut next);
             more |= pending;
         }

@@ -37,7 +37,7 @@ impl Executions {
         loop {
             let invocation = running.invocation().clone();
             let outcome = running.wait().await;
-            let _admission = self.lock_admission().await;
+            let mut admission = Some(self.lock_admission().await);
             if let Err(error) = outcome {
                 if requires_drain(&error) {
                     self.begin_drain();
@@ -47,7 +47,8 @@ impl Executions {
             let next = if self.shutdown.is_cancelled() {
                 Ok(None)
             } else {
-                self.next_message(&invocation.session_id).await
+                self.next_message(&invocation.session_id, &mut admission, Some(&invocation))
+                    .await
             };
             let mut active = self.active.lock().unwrap();
             if let Some(previous) = active.remove(&invocation.run_id) {
@@ -76,15 +77,71 @@ impl Executions {
         }
     }
 
-    pub(super) async fn next_message(&self, session: &str) -> Result<Option<RunningInvocation>> {
+    pub(super) async fn next_message<'a>(
+        &'a self,
+        session: &str,
+        admission: &mut Option<tokio::sync::MutexGuard<'a, ()>>,
+        owner: Option<&Invocation>,
+    ) -> Result<Option<RunningInvocation>> {
+        let mut environment = None;
         loop {
             if self.shutdown.is_cancelled() {
+                return Ok(None);
+            }
+            // The previous worker retains cleanup ownership while preparation
+            // yields admission. An unowned pending root may have been picked up
+            // by another worker; only that worker may now perform its handoff.
+            if self
+                .active
+                .lock()
+                .unwrap()
+                .values()
+                .any(|run| run.invocation.session_id == session && Some(&run.invocation) != owner)
+            {
                 return Ok(None);
             }
             let queue = self.log.pending_messages(session).await.map_err(internal)?;
             if queue.is_empty() {
                 return Ok(None);
             }
+            let Some((basis, candidate)) = environment.take() else {
+                let record = self
+                    .log
+                    .get_session::<crate::session::SessionConfiguration>(session)
+                    .await
+                    .map_err(internal)?
+                    .ok_or_else(|| failure(Code::NotFound, "Session does not exist"))?;
+                let basis = record.configuration_digest.clone();
+                drop(admission.take());
+                let candidate = self
+                    .prepare_environment_for(
+                        record,
+                        None,
+                        maka_client_capability::BindingMode::Degrade,
+                    )
+                    .await;
+                *admission = Some(self.lock_admission().await);
+                environment = Some((basis, candidate));
+                continue;
+            };
+            let candidate = match candidate {
+                Ok(candidate) => match candidate.commit(self, session).await {
+                    Ok(Some(candidate)) => Ok(candidate),
+                    Ok(None) => continue,
+                    Err(error) => Err(error),
+                },
+                Err(error) => {
+                    let current = self
+                        .log
+                        .get_session::<crate::session::SessionConfiguration>(session)
+                        .await
+                        .map_err(internal)?;
+                    if current.is_some_and(|record| record.configuration_digest != basis) {
+                        continue;
+                    }
+                    Err(error)
+                }
+            };
             let sources = successor_sources(&queue)?;
             let content = message::aggregate(sources.iter().map(|source| &source.message.content));
             let invocation = if sources[0].disposition == Disposition::TurnStarted {
@@ -98,26 +155,31 @@ impl Executions {
                 }
             };
             let intent = sources[0].submitted_intent.as_ref();
-            let prepared = self
-                .prepare_message(
-                    TurnStartInput {
-                        session_id: session.into(),
-                        turn_id: invocation.turn_id.clone(),
-                        content: content.into(),
-                        // Accepted source content already contains the frozen
-                        // instructions; recovery must not load it a second time.
-                        skill_ids: intent
-                            .filter(|_| sources[0].skill_invocation.loaded.is_empty())
-                            .map(|intent| intent.skill_ids.clone()),
-                        turn_orchestration: intent
-                            .and_then(|intent| intent.turn_orchestration.clone()),
-                        max_steps: None,
-                    },
-                    MessageOrigin::Successor,
-                    None,
-                    sources.clone(),
-                )
-                .await;
+            let prepared = match candidate {
+                Err(error) => Err(error),
+                Ok(environment) => {
+                    self.prepare_message(
+                        TurnStartInput {
+                            session_id: session.into(),
+                            turn_id: invocation.turn_id.clone(),
+                            content: content.into(),
+                            // Accepted source content already contains the frozen
+                            // instructions; recovery must not load it a second time.
+                            skill_ids: intent
+                                .filter(|_| sources[0].skill_invocation.loaded.is_empty())
+                                .map(|intent| intent.skill_ids.clone()),
+                            turn_orchestration: intent
+                                .and_then(|intent| intent.turn_orchestration.clone()),
+                            max_steps: None,
+                        },
+                        MessageOrigin::Successor,
+                        None,
+                        sources.clone(),
+                        environment,
+                    )
+                    .await
+                }
+            };
             let prepared = prepared.and_then(|(input, _)| {
                 super::skills::validate_pending_tools(&input, &queue, &sources)?;
                 Ok(input)

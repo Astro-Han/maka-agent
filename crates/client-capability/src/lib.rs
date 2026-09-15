@@ -29,7 +29,9 @@ mod tool_name;
 pub use tool_name::proxy_tool_name;
 
 pub use endpoint::Endpoint;
-pub use registry::{BindingError, BindingMode, Registration, Registry, Snapshot, SnapshotOffer};
+pub use registry::{
+    BindingError, BindingMode, PreparedBindings, Registration, Registry, Snapshot, SnapshotOffer,
+};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use maka_runtime::access::CapabilityOwnerIdentity;

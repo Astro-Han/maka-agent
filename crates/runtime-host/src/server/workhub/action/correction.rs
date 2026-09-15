@@ -158,11 +158,11 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
     if let Some(completed) = completed {
         completed.cancelled().await;
     }
-    let _gate = host.executions.lock_admission().await;
+    let mut admission = Some(host.executions.lock_admission().await);
     let record = finish(host, &record.intent.request.action_id).await?;
     if let Some(CorrectionResolution::Assigned(assigned)) = &record.resolution {
         host.executions
-            .dispatch_workhub_pending(&assigned.delegation.target.session_id)
+            .dispatch_workhub_pending(&assigned.delegation.target.session_id, &mut admission)
             .await?;
     }
     receipt(record)

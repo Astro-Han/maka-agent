@@ -38,6 +38,46 @@ pub(crate) struct Capabilities {
 }
 
 impl Capabilities {
+    pub(crate) fn prepare_tools(
+        &self,
+        session_id: &str,
+        connection_id: Option<Uuid>,
+        mode: BindingMode,
+        cwd: String,
+        interactions: Arc<dyn maka_tools::ClientInteractions>,
+    ) -> Result<
+        (
+            maka_client_capability::PreparedBindings,
+            Vec<ToolRegistration>,
+        ),
+        BindingError,
+    > {
+        let (bindings, snapshot) = self
+            .registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .prepare_bindings(session_id, connection_id, mode)?;
+        let tools = ClientTools::new(
+            snapshot,
+            self.registry.clone(),
+            self.broker.clone(),
+            cwd,
+            interactions,
+        )
+        .registrations();
+        Ok((bindings, tools))
+    }
+
+    pub(crate) fn commit_tools(
+        &self,
+        bindings: maka_client_capability::PreparedBindings,
+    ) -> Result<bool, BindingError> {
+        self.registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .commit_bindings(bindings)
+    }
+
     pub(super) fn attach(
         self: &Arc<Self>,
         connection_id: Uuid,
@@ -52,31 +92,6 @@ impl Capabilities {
             capabilities: self.clone(),
             connection_id,
         })
-    }
-
-    /// Called under the Host's execution admission gate, after replay and Busy
-    /// checks. A run owns its snapshot; replacement never edits that snapshot.
-    pub(crate) fn bind_tools(
-        &self,
-        session_id: &str,
-        connection_id: Option<Uuid>,
-        mode: BindingMode,
-        cwd: String,
-        interactions: Arc<dyn maka_tools::ClientInteractions>,
-    ) -> Result<Vec<ToolRegistration>, BindingError> {
-        let snapshot = {
-            let mut registry = self.registry.lock().unwrap_or_else(|e| e.into_inner());
-            registry.bind_session(session_id, connection_id, mode)?;
-            registry.snapshot(session_id)?
-        };
-        Ok(ClientTools::new(
-            snapshot,
-            self.registry.clone(),
-            self.broker.clone(),
-            cwd,
-            interactions,
-        )
-        .registrations())
     }
 
     pub(crate) fn preview_tools(

@@ -49,6 +49,14 @@ pub struct SessionProjection<T> {
     pub message_queue: crate::message_queue::MessageQueue,
 }
 
+/// Cheap invalidation basis for an observer, not a delivery or replay cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObservationVersion {
+    pub metadata: u64,
+    pub queue: u64,
+    pub event: u64,
+}
+
 /// Observation pages are ordered delivery material, not model replay proofs.
 pub struct EventPage {
     pub events: Vec<StoredEvent>,
@@ -58,6 +66,40 @@ pub struct EventPage {
 }
 
 impl EventLog {
+    pub async fn observation_versions(
+        &self,
+        sessions: &[String],
+    ) -> Result<std::collections::BTreeMap<String, ObservationVersion>, StoreError> {
+        self.validate_root()?;
+        if sessions.len() > 64 {
+            return Err(invalid("too many observation targets"));
+        }
+        for id in sessions {
+            crate::sessions::validate_id(id)?;
+        }
+        let sessions = serde_json::to_string(sessions)?;
+        self.connection.run(move |connection| Box::pin(async move {
+            let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+                "SELECT session.id, session.revision,
+                    COALESCE((SELECT revision FROM message_queue_state WHERE session_id = session.id), 0),
+                    MAX(COALESCE((SELECT sequence FROM event_log INDEXED BY session_event_sequence
+                        WHERE invocation_id IS NOT NULL
+                        AND json_extract(event_json, '$.invocation.session_id') = session.id
+                        ORDER BY sequence DESC LIMIT 1), 0),
+                        COALESCE((SELECT sequence FROM event_log INDEXED BY session_control_sequence
+                            WHERE invocation_id IS NULL
+                              AND json_extract(event_json, '$.session_id') = session.id
+                            ORDER BY sequence DESC LIMIT 1), 0))
+                 FROM session_control session WHERE session.id IN (SELECT value FROM json_each(?))"
+            ).bind(sessions).fetch_all(connection).await?;
+            rows.into_iter().map(|(id, metadata, queue, event)| Ok((id, ObservationVersion {
+                metadata: sequence_number(metadata)?,
+                queue: sequence_number(queue)?,
+                event: sequence_number(event)?,
+            }))).collect()
+        })).await
+    }
+
     pub async fn session_projection<T: DeserializeOwned + Send + 'static>(
         &self,
         session_id: &str,

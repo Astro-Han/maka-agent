@@ -110,12 +110,16 @@ impl Executions {
     }
 
     /// The action already owns a durable pending root. Reuse normal recovery/delivery.
-    pub(crate) async fn dispatch_workhub_pending(self: &Arc<Self>, session: &str) -> Result<()> {
+    pub(crate) async fn dispatch_workhub_pending<'a>(
+        self: &'a Arc<Self>,
+        session: &str,
+        admission: &mut Option<tokio::sync::MutexGuard<'a, ()>>,
+    ) -> Result<()> {
         // The existing worker owns steering consumption and terminal handoff.
         if self.has_active_session(session) {
             return Ok(());
         }
-        match self.next_message(session).await {
+        match self.next_message(session, admission, None).await {
             Ok(Some(running)) => self.track(running),
             Ok(None) => {}
             Err(error) => {

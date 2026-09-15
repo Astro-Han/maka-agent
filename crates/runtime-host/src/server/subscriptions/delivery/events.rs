@@ -244,6 +244,7 @@ mod tests {
     #[test]
     fn run_start_precedes_its_deltas_without_overtaking_old_tail_or_terminal_text() {
         let mut delivery = Delivery {
+            version: None,
             epoch: "epoch".into(),
             id: "sub".into(),
             session_id: "s".into(),

@@ -41,6 +41,11 @@ type PendingReply = (
     Option<tokio_util::task::task_tracker::TaskTrackerToken>,
 );
 
+enum CompletedRequest {
+    Reply(PendingReply),
+    Subscription { active: bool },
+}
+
 impl Host {
     pub(super) async fn authorized_connection(
         self: Arc<Self>,
@@ -57,7 +62,11 @@ impl Host {
         let mut shell_changes = self.log.subscribe_shell_changes();
         let mut pty_changes = self.shells.subscribe_output();
         let mut pty_pending = false;
-        let mut subscriptions = subscriptions::Subscriptions::new(self.subscriptions.clone());
+        let subscriptions = Arc::new(tokio::sync::Mutex::new(subscriptions::Subscriptions::new(
+            self.subscriptions.clone(),
+        )));
+        let mut observing = false;
+        let mut shell_change = None;
         let mut pending = false;
         let value = timeout(self.options.handshake_timeout, reader.read())
             .await??
@@ -85,6 +94,7 @@ impl Host {
         let outbound = Outbound::default();
         let delivery = outbound.run(writer, &closed);
         let connection = async {
+            let mut refresh: Option<BoxFuture<'_, Result<bool, HostError>>> = None;
             let provider_closed = closed.child_token();
             let mut controllers = Some(self.controllers.connection(connection_id));
             let (endpoint, mut reverse) =
@@ -96,7 +106,7 @@ impl Host {
                 .capability_identity(hello.client_instance_id.clone())
                 .map(|identity| self.capabilities.attach(connection_id, identity, endpoint))
                 .transpose()?;
-            let mut requests: FuturesUnordered<BoxFuture<'_, Result<PendingReply, HostError>>> =
+            let mut requests: FuturesUnordered<BoxFuture<'_, Result<CompletedRequest, HostError>>> =
                 FuturesUnordered::new();
             let mut in_flight = HashMap::new();
             let mut input_open = true;
@@ -118,9 +128,12 @@ impl Host {
                     break;
                 }
                 Some(reply) = requests.next(), if !requests.is_empty() => {
-                    let reply = reply?;
-                    enqueue_reply(&self, &outbound, reply).await?;
+                    match reply? {
+                        CompletedRequest::Reply(reply) => enqueue_reply(&self, &outbound, reply).await?,
+                        CompletedRequest::Subscription { active } => observing = active,
+                    }
                     pending = true;
+                    pty_pending = true;
                     continue;
                 }
                 frame = reverse.recv(), if capability_connection.is_some() => {
@@ -155,35 +168,51 @@ impl Host {
                     pending = true;
                     continue;
                 }
-                change = shell_changes.recv(), if input_open && !subscriptions.is_empty() => {
+                change = shell_changes.recv(), if input_open && observing && shell_change.is_none() => {
                     // Lag cannot be silently skipped: reconnect reconstructs the
                     // resource view from SQL. Only this observer is abandoned.
-                    for frame in subscriptions.resource_changed(&self, &change?)? {
+                    shell_change = Some(change?);
+                    continue;
+                }
+                mut subscriptions = subscriptions.lock(), if shell_change.is_some() => {
+                    for frame in subscriptions.resource_changed(&self, &shell_change.take().unwrap())? {
                         outbound.enqueue(frame).await?;
                     }
                     pty_pending = true;
                     continue;
                 }
-                _ = std::future::ready(()), if input_open && pending && changes.is_empty() => {
-                    let through = *commits.borrow_and_update();
-                    let catalog_pending = self.session_catalog.publish_commits(&self.log, &self.changes, through).await?;
-                    let (frames, subscription_pending) = subscriptions.poll(&self).await?;
-                    pending = catalog_pending || subscription_pending;
-                    for frame in frames {
-                        outbound.enqueue(frame).await?;
-                    }
+                refreshed = async { refresh.as_mut().unwrap().await }, if refresh.is_some() => {
+                    pending |= refreshed?;
+                    refresh = None;
                     continue;
                 }
-                changed = pty_changes.changed(), if input_open && !subscriptions.is_empty() => {
+                _ = std::future::ready(()), if input_open && pending && refresh.is_none() && changes.is_empty() => {
+                    let through = *commits.borrow_and_update();
+                    pending = false;
+                    let (host, outbound, subscriptions) = (&self, &outbound, subscriptions.clone());
+                    // Keep this future alive across select iterations: refresh
+                    // awaits must not suspend reading or cancel a partial cut.
+                    refresh = Some(Box::pin(async move {
+                        let catalog_pending = host.session_catalog.publish_commits(&host.log, &host.changes, through).await?;
+                        let mut subscriptions = subscriptions.lock().await;
+                        let (frames, subscription_pending) = subscriptions.poll(host).await?;
+                        // Delivery state and queue order have one owner. Open,
+                        // close and resource frames cannot overtake this cut.
+                        for frame in frames { outbound.enqueue(frame).await?; }
+                        Ok(catalog_pending || subscription_pending)
+                    }));
+                    continue;
+                }
+                changed = pty_changes.changed(), if input_open && observing => {
                     changed?;
                     pty_pending = true;
                     continue;
                 }
-                _ = outbound.pty_flushed(), if input_open && !subscriptions.is_empty() => {
+                _ = outbound.pty_flushed(), if input_open && observing => {
                     pty_pending = true;
                     continue;
                 }
-                _ = std::future::ready(()), if input_open && pty_pending => {
+                mut subscriptions = subscriptions.lock(), if input_open && pty_pending => {
                     if let Some(frame) = subscriptions.poll_pty(&self, &outbound)? {
                         outbound.enqueue(frame).await?;
                     } else {
@@ -259,13 +288,23 @@ impl Host {
                     message: format!("{} is not implemented by this Rust Host", request.operation),
                 })
             } else if subscriptions::errors(request.operation).is_some() {
-                if request.operation == Operation::SubscriptionOpen && subscriptions.is_empty() {
+                if request.operation == Operation::SubscriptionOpen && !observing {
                     // Old invalidations cannot affect a newly bootstrapped view.
                     shell_changes = self.log.subscribe_shell_changes();
+                    observing = true;
                 }
-                subscriptions
-                    .dispatch(&self, request.operation, request.input, &outbound)
-                    .await?
+                let (host, outbound, subscriptions) = (&self, &outbound, subscriptions.clone());
+                requests.push(Box::pin(async move {
+                    let mut subscriptions = subscriptions.lock().await;
+                    let outcome = subscriptions.dispatch(host, request.operation, request.input, outbound).await?;
+                    enqueue_reply(host, outbound, (Response {
+                        request_id: request.request_id,
+                        operation: request.operation,
+                        outcome,
+                    }, residency)).await?;
+                    Ok(CompletedRequest::Subscription { active: !subscriptions.is_empty() })
+                }));
+                continue;
             } else {
                 let (host, authority, client, closed) = (&self, &authority, &hello.client_instance_id, &closed);
                 requests.push(Box::pin(async move {
@@ -279,14 +318,14 @@ impl Host {
                             client,
                         )
                         .await?;
-                    Ok((
+                    Ok(CompletedRequest::Reply((
                         Response {
                             request_id: request.request_id,
                             operation: request.operation,
                             outcome,
                         },
                         residency,
-                    ))
+                    )))
                 }));
                 continue;
             };
@@ -308,10 +347,13 @@ impl Host {
             }
             drop(controllers);
             drop(capability_connection);
-            drop(subscriptions);
+            // Drop observation-only work before draining accepted operations;
+            // otherwise a paused refresh could retain their subscription lock.
+            drop(refresh.take());
             // Revocation/error stops transport delivery, not accepted dispatch. Its
             // durable/effect boundary retains request/root residency until settled.
             while requests.next().await.is_some() {}
+            drop(subscriptions);
             outbound.close();
             result
         };

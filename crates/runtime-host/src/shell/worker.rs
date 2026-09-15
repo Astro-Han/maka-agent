@@ -25,6 +25,7 @@ use super::{
     output::Output,
     terminal::Terminal,
 };
+use futures_util::FutureExt;
 use maka_event_log::EventLog;
 use maka_process::pty::{self, PtyChild, PtyCommand, PtyIo};
 use maka_runtime::{
@@ -181,11 +182,24 @@ impl Worker {
                 _ = &mut timeout => return Ok(ShellOutcome::TimedOut { message: None }),
                 status = child.wait() => return Ok(exit_outcome(status?)),
                 read = io.read(&mut buffer), if !eof => {
-                    let count = read?;
+                    let mut count = read?;
                     eof = count == 0;
+                    // Coalesce only ready bytes, within the existing 16 KiB cut.
+                    // Both native readers are cancellation-safe; never wait here
+                    // for a fuller batch or delay a pending input/stop for one.
+                    let mut failure = None;
+                    while !eof && count < buffer.len() {
+                        match io.read(&mut buffer[count..]).now_or_never() {
+                            Some(Ok(0)) => eof = true,
+                            Some(Ok(read)) => count += read,
+                            Some(Err(error)) => { failure = Some(error); break; }
+                            None => break,
+                        }
+                    }
                     // Parser cuts are awaited to completion outside select.
                     terminal.output(&buffer[..count], eof).await?;
                     self.persist(terminal, None).await?;
+                    if let Some(error) = failure { return Err(error.into()); }
                 }
                 written = async { io.write(terminal.writes.front().unwrap().remaining()).await }, if !terminal.writes.is_empty() => {
                     let count = written?;

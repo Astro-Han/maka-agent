@@ -28,13 +28,6 @@ pub(super) async fn create(
     host: &super::super::Host,
     input: SessionCreateInput,
 ) -> Result<SessionCatalogItem> {
-    let _admission = host.executions.lock_admission().await;
-    if host.draining.is_cancelled() {
-        return Err(failure(
-            OperationErrorCode::HostDraining,
-            "Host is draining",
-        ));
-    }
     let log = &host.log;
     if input.session_id == "maka_workhub_coordination" {
         return Err(failure(
@@ -51,35 +44,71 @@ pub(super) async fn create(
     let thinking = input.thinking_level;
     let prepared = PreparedSession::new(input).map_err(invalid)?;
     let fingerprint = prepared.fingerprint();
-    if let Some(record) = log
-        .probe_session_create(prepared.session_id(), &fingerprint)
-        .await
-        .map_err(stored)?
-    {
-        return Ok(item(record));
-    }
-    let id = prepared.session_id().to_owned();
-    let workspace = super::workspace::resolve(host, prepared.workspace())
-        .await
-        .map_err(|mut error| {
+    let mut observed = None;
+    loop {
+        let admission = host.executions.lock_admission().await;
+        if host.draining.is_cancelled() {
+            return Err(failure(
+                OperationErrorCode::HostDraining,
+                "Host is draining",
+            ));
+        }
+        if let Some(record) = log
+            .probe_session_create(prepared.session_id(), &fingerprint)
+            .await
+            .map_err(stored)?
+        {
+            return Ok(item(record));
+        }
+        let id = prepared.session_id().to_owned();
+        let Some((project, workspace)) = observed.take() else {
+            let project = match prepared.workspace() {
+                WorkspaceTarget::Project { project_id } => Some(
+                    log.get_project(project_id)
+                        .await
+                        .map_err(stored)?
+                        .ok_or_else(|| {
+                            failure(
+                                OperationErrorCode::OperationConflict,
+                                "Project does not exist",
+                            )
+                        })?,
+                ),
+                WorkspaceTarget::HostPath { .. } => None,
+            };
+            drop(admission);
+            let workspace = match &project {
+                Some(record) => super::super::projects::resolve_record(record.clone()).await,
+                None => super::workspace::resolve(host, prepared.workspace()).await,
+            };
+            observed = Some((project, workspace));
+            continue;
+        };
+        if let Some(project) = project
+            && log.get_project(&project.id).await.map_err(stored)?.as_ref() != Some(&project)
+        {
+            continue;
+        }
+        let workspace = workspace.map_err(|mut error| {
             // session.create declares conflicts, not a not_found outcome.
             if error.code == OperationErrorCode::NotFound {
                 error.code = OperationErrorCode::OperationConflict;
             }
             error
         })?;
-    let config = resolve(&host.configuration, prepared, thinking, workspace).await?;
-    super::super::projects::record_usage(host, &config.workspace).await?;
-    let record = log
-        .create_session(
-            &id,
-            &fingerprint,
-            &config,
-            super::super::configuration::now().map_err(super::super::configuration::failure)?,
-        )
-        .await
-        .map_err(stored)?;
-    Ok(item(record))
+        let config = resolve(&host.configuration, prepared, thinking, workspace).await?;
+        super::super::projects::record_usage(host, &config.workspace).await?;
+        let record = log
+            .create_session(
+                &id,
+                &fingerprint,
+                &config,
+                super::super::configuration::now().map_err(super::super::configuration::failure)?,
+            )
+            .await
+            .map_err(stored)?;
+        return Ok(item(record));
+    }
 }
 
 pub(in crate::server) async fn resolve(

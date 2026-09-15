@@ -69,9 +69,13 @@ fn session_loss_restore_retirement_and_run_pins_are_distinct() {
         "preview does not publish Session/Turn bindings"
     );
     drop(preview);
-    registry
-        .bind_session("s", Some(one), BindingMode::Strict)
+    let (prepared, candidate) = registry
+        .prepare_bindings("s", Some(one), BindingMode::Strict)
         .unwrap();
+    assert_eq!(registry.snapshot("s").unwrap().offers().len(), 1);
+    assert_eq!(candidate.offers().len(), 3);
+    drop(candidate);
+    assert!(registry.commit_bindings(prepared).unwrap());
     let old = registry.snapshot("s").unwrap();
     assert_eq!(old.offers().len(), 3);
     assert_eq!(
@@ -80,9 +84,17 @@ fn session_loss_restore_retirement_and_run_pins_are_distinct() {
         "call affinity is never trusted from its representative"
     );
     let weak = Arc::downgrade(&registry.current(&provider).unwrap());
+    let (prepared, candidate) = registry
+        .prepare_bindings("s", Some(one), BindingMode::Strict)
+        .unwrap();
+    drop(candidate);
     registry
         .replace(one, manifest("b", &["session", "turn", "call"]))
         .unwrap();
+    assert!(
+        !registry.commit_bindings(prepared).unwrap(),
+        "publication replacement invalidates prepared handlers"
+    );
     for offer in old.offers() {
         let registration = offer.resolve(&registry).unwrap();
         let expected = if offer.offer().offer_id == "call" {
@@ -179,7 +191,15 @@ fn session_loss_restore_retirement_and_run_pins_are_distinct() {
         .bind_session("s", None, BindingMode::Strict)
         .unwrap();
     assert_eq!(registry.snapshot("s").unwrap().offers().len(), 3);
+    let (prepared, candidate) = registry
+        .prepare_bindings("s", None, BindingMode::Strict)
+        .unwrap();
+    drop(candidate);
     registry.release_session("s");
+    assert!(
+        !registry.commit_bindings(prepared).unwrap(),
+        "preparation cannot restore bindings released by another admission"
+    );
     assert_eq!(
         registry.snapshot("s").unwrap().offers().len(),
         1,

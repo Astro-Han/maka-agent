@@ -30,80 +30,106 @@ impl Executions {
         root_id: &str,
     ) -> Result<TurnStartResult> {
         super::ordinary_session(&input.session_id)?;
-        let _admission = self.lock_admission().await;
-        if self.shutdown.is_cancelled() {
-            return Err(failure(Code::HostDraining, "Host is draining"));
-        }
         let fingerprint = format!(
             "sha256:{:x}",
             Sha256::digest(serde_json::to_vec(&input).map_err(internal)?)
         );
-        if let Some(record) = self.recorded(&input.session_id, &input.turn_id).await? {
-            if record.fingerprint.as_deref() != Some(&fingerprint) {
-                return Err(failure(
-                    Code::OperationConflict,
-                    "Turn identity belongs to another request",
-                ));
+        let mut prepared = None;
+        loop {
+            let admission = self.lock_admission().await;
+            if self.shutdown.is_cancelled() {
+                return Err(failure(Code::HostDraining, "Host is draining"));
             }
+            if let Some(record) = self.recorded(&input.session_id, &input.turn_id).await? {
+                if record.fingerprint.as_deref() != Some(&fingerprint) {
+                    return Err(failure(
+                        Code::OperationConflict,
+                        "Turn identity belongs to another request",
+                    ));
+                }
+                return Ok(TurnStartResult::Started {
+                    turn: record.snapshot,
+                    skill_invocation: record.skill_invocation,
+                });
+            }
+            if self
+                .active
+                .lock()
+                .unwrap()
+                .values()
+                .any(|run| run.invocation.session_id == input.session_id)
+            {
+                return Err(failure(Code::SessionBusy, "Session has an active Run"));
+            }
+            if !self
+                .log
+                .pending_messages(&input.session_id)
+                .await
+                .map_err(internal)?
+                .is_empty()
+            {
+                return Err(failure(Code::SessionBusy, "Session has pending Messages"));
+            }
+            let Some(candidate) = prepared.take() else {
+                drop(admission);
+                prepared = Some(
+                    async {
+                        let environment = self
+                            .prepare_environment(
+                                &input.session_id,
+                                Some(connection_id),
+                                maka_client_capability::BindingMode::Strict,
+                            )
+                            .await?;
+                        environment
+                            .expand(
+                                input.content.clone().into(),
+                                input.skill_ids.clone().unwrap_or_default(),
+                            )
+                            .await
+                    }
+                    .await,
+                );
+                continue;
+            };
+            let (environment, content, selection) = candidate?;
+            let Some(environment) = environment.commit(self, &input.session_id).await? else {
+                continue;
+            };
+            let selection_result = match selection {
+                super::skills::SkillPreparation::Ready {
+                    skill_invocation, ..
+                } => skill_invocation,
+                super::skills::SkillPreparation::Blocked(skill_invocation) => {
+                    return Ok(TurnStartResult::Blocked { skill_invocation });
+                }
+            };
+            input.skill_ids = None;
+            let (mut run, _) = self
+                .prepare_message(
+                    input,
+                    super::prepare::MessageOrigin::Client { root_id },
+                    Some(fingerprint),
+                    Vec::new(),
+                    environment,
+                )
+                .await?;
+            let maka_agent::RunWork::Message {
+                message,
+                skill_invocation,
+                ..
+            } = &mut run.work
+            else {
+                return Err(internal("Message preparation produced a non-message Run"));
+            };
+            *message = content;
+            *skill_invocation =
+                (!selection_result.is_empty()).then(|| Box::new(selection_result.clone()));
+            let turn = self.launch(run).await?;
             return Ok(TurnStartResult::Started {
-                turn: record.snapshot,
-                skill_invocation: record.skill_invocation,
+                turn,
+                skill_invocation: selection_result,
             });
         }
-        if self
-            .active
-            .lock()
-            .unwrap()
-            .values()
-            .any(|run| run.invocation.session_id == input.session_id)
-        {
-            return Err(failure(Code::SessionBusy, "Session has an active Run"));
-        }
-        if !self
-            .log
-            .pending_messages(&input.session_id)
-            .await
-            .map_err(internal)?
-            .is_empty()
-        {
-            return Err(failure(Code::SessionBusy, "Session has pending Messages"));
-        }
-        let skill_ids = input.skill_ids.take().unwrap_or_default();
-        let (mut run, skills) = self
-            .prepare_message(
-                input,
-                super::prepare::MessageOrigin::Client {
-                    connection_id,
-                    root_id,
-                },
-                Some(fingerprint),
-                Vec::new(),
-            )
-            .await?;
-        let maka_agent::RunWork::Message {
-            message,
-            skill_invocation,
-            ..
-        } = &mut run.work
-        else {
-            return Err(internal("Message preparation produced a non-message Run"));
-        };
-        match skills.prepare(message, &skill_ids)? {
-            super::skills::SkillPreparation::Ready {
-                skill_invocation: result,
-                ..
-            } => {
-                *skill_invocation = (!result.is_empty()).then(|| Box::new(result));
-            }
-            super::skills::SkillPreparation::Blocked(skill_invocation) => {
-                return Ok(TurnStartResult::Blocked { skill_invocation });
-            }
-        }
-        let skill_invocation = skill_invocation.as_deref().cloned().unwrap_or_default();
-        let turn = self.launch(run).await?;
-        Ok(TurnStartResult::Started {
-            turn,
-            skill_invocation,
-        })
     }
 }

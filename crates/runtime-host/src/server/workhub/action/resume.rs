@@ -42,136 +42,158 @@ pub(super) async fn act(
     else {
         unreachable!()
     };
-    let _gate = host.executions.lock_admission().await;
     let fingerprint = super::fingerprint(&input)?;
-    if let Some(stored) = host
-        .log
-        .workhub_action(&input.action_id)
-        .await
-        .map_err(|e| super::stored(host, e))?
-    {
-        return receipt(&stored.event, &input, &fingerprint);
-    }
-    if host
-        .log
-        .workhub_stop(&input.action_id)
-        .await
-        .map_err(|e| super::stored(host, e))?
-        .is_some()
-        || host
+    let mut prepared = None;
+    loop {
+        let gate = host.executions.lock_admission().await;
+        if let Some(stored) = host
             .log
-            .workhub_correction(&input.action_id)
+            .workhub_action(&input.action_id)
+            .await
+            .map_err(|e| super::stored(host, e))?
+        {
+            return receipt(&stored.event, &input, &fingerprint);
+        }
+        if host
+            .log
+            .workhub_stop(&input.action_id)
             .await
             .map_err(|e| super::stored(host, e))?
             .is_some()
-    {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub action already belongs to a control operation",
-        ));
-    }
-    if host.draining.is_cancelled() {
-        return Err(failure(Code::HostDraining, "Host is draining"));
-    }
-    let source = host.executions.workhub_source(&input.turn_id).await?;
-    super::super::candidates::target(host, &expects.target_session_id)
-        .await?
-        .ok_or_else(|| {
-            failure(
+            || host
+                .log
+                .workhub_correction(&input.action_id)
+                .await
+                .map_err(|e| super::stored(host, e))?
+                .is_some()
+        {
+            return Err(failure(
                 Code::OperationConflict,
-                "WorkHub resume target is unavailable",
-            )
-        })?;
-    let delegated = host
-        .log
-        .workhub_assignment(resumes_action_id)
-        .await
-        .map_err(|e| super::stored(host, e))?
-        .ok_or_else(|| {
-            failure(
-                Code::OperationConflict,
-                "WorkHub resume delegation is missing",
-            )
-        })?;
-    let delegation = delegated.delegation;
-    if delegation.target.session_id != expects.target_session_id {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub resume target changed",
-        ));
-    }
-    let work = host
-        .log
-        .message_execution(&expects.target_session_id, &delegation.target_message_id())
-        .await
-        .map_err(|e| super::stored(host, e))?;
-    let MessageExecution::Owned(owner) = work else {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub resume requires an exclusively owned Message",
-        ));
-    };
-    let origin = ResumeOrigin {
-        action_id: input.action_id.clone(),
-        request_fingerprint: fingerprint.clone(),
-        coordinator: source.invocation.clone(),
-        delegation_action_id: resumes_action_id.clone(),
-    };
-    match owner.state {
-        InvocationState::Admitted | InvocationState::Running => {
-            if host
-                .executions
-                .workhub_target(&owner.invocation.session_id)
-                .as_ref()
-                != Some(&owner.invocation)
-            {
-                return Err(failure(
-                    Code::OperationUnavailable,
-                    "Delegated execution owner is recovering",
-                ));
-            }
-            let event = RuntimeEvent::new(
-                source.invocation,
-                Fact::WorkhubResumeObserved {
-                    resume: Box::new(origin),
-                    target: owner.invocation,
-                },
-            );
-            let write = EventWrite::plain(event)
-                .map_err(|e| failure(Code::OperationConflict, e.to_string()))?;
-            host.log.append(&write).await.map_err(|error| match error {
-                CommitError::OutcomeUnknown(reason) => {
-                    host.executions.begin_drain();
-                    failure(Code::CommitOutcomeUnknown, reason)
-                }
-                CommitError::Rejected(reason) => failure(Code::OperationConflict, reason),
-            })?;
-            receipt(write.event(), &input, &fingerprint)
+                "WorkHub action already belongs to a control operation",
+            ));
         }
-        InvocationState::Ended {
-            outcome: InvocationOutcome::Failed { .. } | InvocationOutcome::Cancelled { .. },
-            ..
-        } => {
-            match host
-                .executions
-                .resume_workhub(origin, owner.invocation, connection)
-                .await?
-            {
-                TurnResumeStartResult::Started { turn } => Ok(ActResult::ResumeWork {
-                    outcome: ResumeOutcome::ResumeStarted,
-                    target_session_id: turn.session_id,
-                    target_turn_id: Some(turn.turn_id),
-                }),
-                TurnResumeStartResult::Parked { .. } => Err(failure(
+        if host.draining.is_cancelled() {
+            return Err(failure(Code::HostDraining, "Host is draining"));
+        }
+        let source = host.executions.workhub_source(&input.turn_id).await?;
+        super::super::candidates::target(host, &expects.target_session_id)
+            .await?
+            .ok_or_else(|| {
+                failure(
                     Code::OperationConflict,
-                    "Delegated execution has no safe resume boundary",
-                )),
-            }
+                    "WorkHub resume target is unavailable",
+                )
+            })?;
+        let delegated = host
+            .log
+            .workhub_assignment(resumes_action_id)
+            .await
+            .map_err(|e| super::stored(host, e))?
+            .ok_or_else(|| {
+                failure(
+                    Code::OperationConflict,
+                    "WorkHub resume delegation is missing",
+                )
+            })?;
+        let delegation = delegated.delegation;
+        if delegation.target.session_id != expects.target_session_id {
+            return Err(failure(
+                Code::OperationConflict,
+                "WorkHub resume target changed",
+            ));
         }
-        _ => Err(failure(
-            Code::OperationConflict,
-            "Delegated execution is not resumable",
-        )),
+        let work = host
+            .log
+            .message_execution(&expects.target_session_id, &delegation.target_message_id())
+            .await
+            .map_err(|e| super::stored(host, e))?;
+        let MessageExecution::Owned(owner) = work else {
+            return Err(failure(
+                Code::OperationConflict,
+                "WorkHub resume requires an exclusively owned Message",
+            ));
+        };
+        let origin = ResumeOrigin {
+            action_id: input.action_id.clone(),
+            request_fingerprint: fingerprint.clone(),
+            coordinator: source.invocation.clone(),
+            delegation_action_id: resumes_action_id.clone(),
+        };
+        return match owner.state {
+            InvocationState::Admitted | InvocationState::Running => {
+                if host
+                    .executions
+                    .workhub_target(&owner.invocation.session_id)
+                    .as_ref()
+                    != Some(&owner.invocation)
+                {
+                    return Err(failure(
+                        Code::OperationUnavailable,
+                        "Delegated execution owner is recovering",
+                    ));
+                }
+                let event = RuntimeEvent::new(
+                    source.invocation,
+                    Fact::WorkhubResumeObserved {
+                        resume: Box::new(origin),
+                        target: owner.invocation,
+                    },
+                );
+                let write = EventWrite::plain(event)
+                    .map_err(|e| failure(Code::OperationConflict, e.to_string()))?;
+                host.log.append(&write).await.map_err(|error| match error {
+                    CommitError::OutcomeUnknown(reason) => {
+                        host.executions.begin_drain();
+                        failure(Code::CommitOutcomeUnknown, reason)
+                    }
+                    CommitError::Rejected(reason) => failure(Code::OperationConflict, reason),
+                })?;
+                receipt(write.event(), &input, &fingerprint)
+            }
+            InvocationState::Ended {
+                outcome: InvocationOutcome::Failed { .. } | InvocationOutcome::Cancelled { .. },
+                ..
+            } => {
+                let Some(candidate) = prepared.take() else {
+                    drop(gate);
+                    prepared = Some(
+                        host.executions
+                            .prepare_environment(
+                                &owner.invocation.session_id,
+                                Some(connection),
+                                maka_client_capability::BindingMode::Strict,
+                            )
+                            .await,
+                    );
+                    continue;
+                };
+                let Some(environment) = candidate?
+                    .commit(&host.executions, &owner.invocation.session_id)
+                    .await?
+                else {
+                    continue;
+                };
+                match host
+                    .executions
+                    .resume_workhub(origin, owner.invocation, environment)
+                    .await?
+                {
+                    TurnResumeStartResult::Started { turn } => Ok(ActResult::ResumeWork {
+                        outcome: ResumeOutcome::ResumeStarted,
+                        target_session_id: turn.session_id,
+                        target_turn_id: Some(turn.turn_id),
+                    }),
+                    TurnResumeStartResult::Parked { .. } => Err(failure(
+                        Code::OperationConflict,
+                        "Delegated execution has no safe resume boundary",
+                    )),
+                }
+            }
+            _ => Err(failure(
+                Code::OperationConflict,
+                "Delegated execution is not resumable",
+            )),
+        };
     }
 }
 

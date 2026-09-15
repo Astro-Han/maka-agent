@@ -101,7 +101,10 @@ async fn candidates_rank_all_pages_by_canonical_activity_including_blocked_work(
     let eligible = |record: &maka_event_log::sessions::SessionRecord<Configuration>| {
         record.configuration.eligible
     };
-    let candidates = log.workhub_candidates(eligible).await.unwrap();
+    let candidates = log
+        .workhub_candidates(|_, config: &Configuration| config.eligible)
+        .await
+        .unwrap();
     let expected = ["session-37", "session-36", "session-00"]
         .map(str::to_string)
         .into_iter()

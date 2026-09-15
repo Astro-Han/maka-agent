@@ -18,6 +18,7 @@
  */
 
 mod selection;
+pub use selection::PreparedBindings;
 mod snapshot;
 pub use snapshot::{Snapshot, SnapshotOffer};
 

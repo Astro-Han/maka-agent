@@ -126,9 +126,7 @@ async fn steering_keeps_delivery_ownership_across_waiting_shells_and_terminal_ha
             "waiting target cannot accept delegation"
         );
         let candidates = log
-            .workhub_candidates(
-                |_: &maka_event_log::sessions::SessionRecord<serde_json::Value>| true,
-            )
+            .workhub_candidates(|_, _: &serde_json::Value| true)
             .await
             .unwrap();
         assert!(

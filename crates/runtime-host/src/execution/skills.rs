@@ -40,12 +40,15 @@ pub(crate) enum SkillPreparation {
 }
 
 pub(crate) struct FrozenSkills {
+    pub preference_revision: Option<u64>,
     pub discovery: maka_skills::DiscoverySnapshot,
     pub preferences: Preferences,
     pub host: HostCapabilities,
 }
 
 mod model;
+mod prepared;
+pub(crate) use prepared::PreparedSkillInput;
 
 /// A successor checks only the batch it will consume. Other queued messages
 /// keep their own target and prerequisites for a later Run.
@@ -180,15 +183,19 @@ impl Executions {
             .map(|run| run.tool_names.clone())
     }
 
-    /// Caller retains admission ownership until blocking discovery has joined.
+    /// Read-only discovery. Admission revalidates the captured preferences before use.
     pub(crate) async fn load_skills(
         &self,
         cwd: &str,
         tools: HashSet<String>,
     ) -> Result<FrozenSkills> {
-        let preferences = match self.configuration.skill_preferences().await {
-            Ok(snapshot) => Preferences::Available(snapshot.entries),
-            Err(_) => Preferences::Unavailable,
+        let (preference_revision, preferences) = match self.configuration.skill_preferences().await
+        {
+            Ok(snapshot) => (
+                Some(snapshot.revision),
+                Preferences::Available(snapshot.entries),
+            ),
+            Err(_) => (None, Preferences::Unavailable),
         };
         let sources = Source::standard(
             Path::new(cwd),
@@ -218,6 +225,7 @@ impl Executions {
             capabilities: Default::default(),
         };
         Ok(FrozenSkills {
+            preference_revision,
             discovery,
             preferences,
             host,

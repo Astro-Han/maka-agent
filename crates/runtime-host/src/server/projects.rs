@@ -212,6 +212,13 @@ pub(super) async fn resolve(host: &Host, id: &str) -> Result<WorkspaceProjection
         .await
         .map_err(stored)?
         .ok_or_else(|| failure(Code::NotFound, "Project does not exist"))?;
+    resolve_record(record).await
+}
+
+/// Filesystem observation only. Admission revalidates the captured record.
+pub(super) async fn resolve_record(
+    record: maka_event_log::projects::ProjectRecord,
+) -> Result<WorkspaceProjection> {
     if record.archived_at.is_some() {
         return Err(failure(Code::OperationConflict, "Project is archived"));
     }

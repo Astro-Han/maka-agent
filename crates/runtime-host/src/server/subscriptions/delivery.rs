@@ -33,6 +33,7 @@ struct Pending {
 }
 
 pub(super) struct Delivery {
+    pub(super) version: Option<maka_event_log::observation::ObservationVersion>,
     epoch: String,
     id: String,
     session_id: String,
@@ -118,6 +119,7 @@ impl Delivery {
                 sequence: 1,
                 cursor,
                 snapshot,
+                version: None,
                 streams,
                 pending: None,
                 transcript,

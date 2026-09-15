@@ -45,7 +45,9 @@
     async terminal(id, operation, argument) {
       const terminal = terminals.get(id);
       if (!terminal) throw new Error('terminal parser closed');
-      const result = await terminal[operation](argument);
+      let result = await terminal[operation](argument);
+      if (operation === 'write') result = { replies: result, screen: terminal.snapshot() };
+      else if (operation === 'resize') result = terminal.snapshot();
       const json = JSON.stringify(result ?? null);
       if (Deno.core.byteLength(json) > 2 * 1024 * 1024)
         throw new Error('terminal snapshot budget exceeded');

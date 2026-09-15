@@ -82,6 +82,12 @@ async fn first_outcome_and_atomic_grant_survive_conflicts_faults_and_reopen() {
         .unwrap()
         .unwrap();
     assert_eq!(waiting.revision, initial.revision + 1);
+    let version = log.observation_versions(&["session".into()]).await.unwrap()["session"];
+    assert_eq!(
+        version.metadata, waiting.revision,
+        "pending interactions must invalidate observation without an execution event"
+    );
+    assert_eq!(version.event, 0);
     assert_eq!(
         waiting.pending_interaction_since,
         Some(candidate.created_at)

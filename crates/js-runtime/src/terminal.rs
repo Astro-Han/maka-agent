@@ -19,6 +19,7 @@
 
 use crate::trusted::TrustedRuntime;
 use maka_runtime::terminal::{TerminalScreen, TerminalSize};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -28,6 +29,13 @@ const MAX_WRITE_BYTES: usize = 64 * 1024;
 #[derive(Debug, thiserror::Error)]
 #[error("terminal screen failed: {0}")]
 pub struct ScreenError(String);
+
+/// Replies and screen belong to the same completed parser cut.
+#[derive(Debug, Deserialize)]
+pub struct ScreenCut {
+    pub replies: String,
+    pub screen: TerminalScreen,
+}
 
 /// One terminal's serial parser state, hosted by a shared trusted JS worker.
 /// A dropped/failed cut poisons only this handle, never another terminal/model.
@@ -69,14 +77,14 @@ impl Screen {
         })
     }
 
-    pub async fn write(&mut self, data: &str) -> Result<String, ScreenError> {
+    pub async fn write(&mut self, data: &str) -> Result<ScreenCut, ScreenError> {
         if data.len() > MAX_WRITE_BYTES {
             return Err(ScreenError("write exceeds 64 KiB".into()));
         }
         self.call(Operation::Write(data.into())).await
     }
 
-    pub async fn resize(&mut self, size: TerminalSize) -> Result<(), ScreenError> {
+    pub async fn resize(&mut self, size: TerminalSize) -> Result<TerminalScreen, ScreenError> {
         self.call(Operation::Resize(size)).await
     }
 

@@ -36,7 +36,7 @@ impl Executions {
         invocation: Invocation,
         mut source: RootSourceMessage,
         root_id: &str,
-        connection_id: uuid::Uuid,
+        prepared: Option<crate::execution::skills::PreparedSkillInput>,
     ) -> Result<SubmitResult> {
         if source.submitted_intent.is_some() {
             return Err(failure(
@@ -52,41 +52,10 @@ impl Executions {
         .await?;
         let mut required_tools = Default::default();
         if source.message.content.text.contains("/skill:") {
-            let session = self
-                .log
-                .get_session::<crate::session::SessionConfiguration>(&invocation.session_id)
-                .await
-                .map_err(super::internal)?
-                .ok_or_else(|| failure(Code::NotFound, "Session does not exist"))?;
-            if session.archived {
-                return Err(failure(Code::SessionArchived, "Session is archived"));
-            }
-            let skills = if source.submitted_placement == Placement::CurrentTurn {
-                let tools = self
-                    .active_tool_names(&invocation)
-                    .ok_or_else(|| {
-                        failure(
-                            Code::OperationConflict,
-                            "Steering target is no longer active",
-                        )
-                    })?
-                    .as_ref()
-                    .clone();
-                std::sync::Arc::new(
-                    self.load_skills(&session.configuration.workspace.host_cwd, tools)
-                        .await?,
-                )
-            } else {
-                self.prepare_tools(
-                    &invocation.session_id,
-                    &session.configuration,
-                    Some(connection_id),
-                    maka_client_capability::BindingMode::Strict,
-                )
-                .await?
-                .1
-            };
-            match skills.prepare(&mut source.message.content, &[])? {
+            let prepared =
+                prepared.ok_or_else(|| super::internal("Queued Skills were not prepared"))?;
+            source.message.content = prepared.content;
+            match prepared.selection {
                 crate::execution::skills::SkillPreparation::Ready {
                     skill_invocation,
                     required_tools: requirements,
