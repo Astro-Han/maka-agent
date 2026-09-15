@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Deployment, Mode, RootId, activation, directory, package, store, updates};
+use super::{Deployment, RootId, activation, directory, package, store, updates};
 use crate::host_client::{HostClient, LiveHost};
 use clap::Args;
 use maka_event_log::root::{self, FileLease, RootNamespaces, RootOwner};
@@ -66,9 +66,6 @@ impl Update {
         if current.root_id != self.root_id.0 || current.deployment_id != self.expected_deployment_id
         {
             return Err("deployment identity or revision changed".into());
-        }
-        if current.mode != Mode::OnDemand {
-            return Err("supervised updates require service coordination".into());
         }
         let (observed, pending) = updates::read(&directory, lease.clone()).await?;
         if observed != current
@@ -133,7 +130,7 @@ impl Update {
         };
         // The executor is already held. Calling the public activate command here
         // would acquire it twice. A Ready failure never restores older code.
-        let (client, host) = activation::connect_or_launch(&deployment).await?;
+        let (client, host) = activation::connect_or_launch(&deployment, lease.clone()).await?;
         lease.validate()?;
         println!(
             "{}",

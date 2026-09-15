@@ -1,0 +1,132 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::Deployment;
+use maka_event_log::root::{FileLease, RootOwner};
+use maka_runtime_host::server::HostError;
+use std::sync::Arc;
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux as platform;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos as platform;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as platform;
+
+/// The worker owns both leases until their actual effects finish, even if the
+/// caller stops awaiting it. A service definition is only a projection of Active.
+pub(super) async fn start(
+    deployment: Deployment,
+    lease: Arc<FileLease>,
+    owner: RootOwner,
+) -> Result<(), HostError> {
+    tokio::task::spawn_blocking(move || {
+        lease.validate()?;
+        owner.validate_current()?;
+        if owner.root_id() != deployment.root_id {
+            return Err("State Root changed before service activation".into());
+        }
+        let service = platform::Service::new(&deployment)?;
+        // Root is held: an OS restart cannot begin user work during replacement.
+        service.prepare()?;
+        owner.validate_current()?;
+        drop(owner);
+        service.start()?;
+        lease.validate()?;
+        Ok::<_, HostError>(())
+    })
+    .await?
+}
+
+fn arguments(deployment: &Deployment) -> Result<[&str; 5], HostError> {
+    let executable = deployment
+        .executable
+        .to_str()
+        .ok_or("service executable must be UTF-8")?;
+    let root = deployment
+        .root_path
+        .to_str()
+        .ok_or("service root must be UTF-8")?;
+    if executable.chars().chain(root.chars()).any(char::is_control) {
+        return Err("service paths cannot contain control characters".into());
+    }
+    Ok([executable, "host", "service-run", "--root", root])
+}
+
+fn label(deployment: &Deployment) -> String {
+    format!("org.apache.maka.host.{}", deployment.root_id)
+}
+
+#[cfg(any(target_os = "macos", windows))]
+fn xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+#[cfg(unix)]
+fn command(program: &str, args: &[&str]) -> Result<std::process::Output, HostError> {
+    Ok(std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()?)
+}
+
+#[cfg(unix)]
+fn checked(output: std::process::Output) -> Result<String, HostError> {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "service manager failed ({}): {}",
+            output.status,
+            stderr.chars().take(2048).collect::<String>()
+        )
+        .into());
+    }
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+#[cfg(unix)]
+fn publish(path: &std::path::Path, contents: &str) -> Result<(), HostError> {
+    use std::io::Write;
+    let parent = path.parent().ok_or("service definition has no parent")?;
+    std::fs::create_dir_all(parent)?;
+    match path.symlink_metadata() {
+        Ok(metadata) if !metadata.is_file() => {
+            return Err("service definition is not a regular file".into());
+        }
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(contents.as_bytes())?;
+    file.as_file().sync_all()?;
+    file.persist(path)?;
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}

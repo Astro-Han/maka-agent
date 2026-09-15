@@ -30,7 +30,22 @@ pub(super) async fn run(
     use maka_runtime_host::server::{Host, websocket::WebSocketListener};
     let namespaces = RootNamespaces::for_current_account()?;
     let owner = if path.join(ROOT_MARKER).exists() {
-        RootOwner::open(path, &namespaces)?
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match RootOwner::open(path, &namespaces) {
+                Ok(owner) => break owner,
+                Err(error)
+                    if require_managed
+                        && error.kind() == std::io::ErrorKind::WouldBlock
+                        && tokio::time::Instant::now() < deadline =>
+                {
+                    // launchd can start the job while its registrar still
+                    // holds Root. Admission happens only after acquisition.
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
     } else if !require_managed {
         RootOwner::create(path, &namespaces)?
     } else {

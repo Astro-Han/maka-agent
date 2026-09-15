@@ -19,6 +19,7 @@
 
 mod activation;
 mod package;
+mod service;
 mod store;
 mod update;
 mod updates;

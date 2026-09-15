@@ -69,7 +69,11 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             command
                 .args([
                     "host",
-                    if candidate { "candidate" } else { "serve" },
+                    if candidate {
+                        "candidate"
+                    } else {
+                        "service-run"
+                    },
                     "--root",
                 ])
                 .arg(&fixture.root);
@@ -180,16 +184,13 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert!(fixture.wait_for_exit().success());
         drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
 
-        let started = Instant::now();
-        let activated = activate.output().unwrap();
         if !candidate {
-            assert!(
-                !activated.status.success(),
-                "must not bypass service ownership"
-            );
-            assert_eq!(decode_activation(&activated.stdout)["kind"], "error");
+            // Registering an account OS service is an explicit platform
+            // acceptance check, never a side effect of ordinary cargo tests.
             continue;
         }
+        let started = Instant::now();
+        let activated = activate.output().unwrap();
         #[cfg(windows)]
         if requires_containment() {
             // Cargo's own Job forbids independent children. Refusal must not

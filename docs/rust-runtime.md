@@ -52,12 +52,17 @@ maka host retire --root /absolute/path/to/new-root
 Use `target/debug/maka` if the binary is not on PATH. Local transport is a Unix
 socket on Linux/macOS or a private named pipe on Windows. An optional
 `--websocket 127.0.0.1:0` listener requires authentication; TLS is not implemented.
+Development builds retain line-number backtraces; `CARGO_PROFILE_DEV_DEBUG=full`
+enables full debugger information.
 
 `host install --root <directory>` pins the current executable and on-demand policy;
 `--mode supervised` selects persistent serving. Only the returned `executable`
 may start that managed root. `host activate --root-id <rootId> --framed` reuses a ready
-Host or starts the pinned on-demand executable; supervised mode requires a running
-service. Installation does not yet register OS services or automate updates.
+Host or starts the pinned executable. In supervised mode, activation registers and
+starts an account-level systemd service, LaunchAgent or Windows scheduled task.
+Linux requires an active user manager with lingering enabled; macOS requires an
+Aqua login and Windows an interactive user session. Installation alone does not
+start a service or change account policy.
 Deployment authority lives in account-level
 SQLite, outside the State Root; startup checks it before database migrations.
 On Windows, supervised installations use the sibling `maka-service.exe`, a
@@ -65,12 +70,13 @@ windowless entry to the same Host. Distribute it alongside `maka.exe`.
 On-demand activation requires permission to leave the launcher's Windows Job;
 run the built executable directly, not through `cargo run`.
 
-For an on-demand code update, run the new binary with
+For a code update, run the new binary with
 `host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`.
 Active clients or non-cooperative work defer the switch; `host reconcile` with the
 same identity arguments finishes the recorded update. A committed target is never
-automatically rolled back, even if startup fails. Supervised updates and unattended
-release selection are not yet connected.
+automatically rolled back, even if startup fails. Supervised activation replaces
+the service definition only while holding the Root. Unattended release selection
+and uninterrupted listener handoff are not yet connected.
 
 The `maka` command also provides `host candidate` for Desktop-owned startup,
 `code --log <file>` for a JavaScript cell read from stdin, and

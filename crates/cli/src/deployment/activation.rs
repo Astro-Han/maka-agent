@@ -28,6 +28,7 @@ use serde::Serialize;
 use std::{
     io::Write,
     num::{NonZeroU16, NonZeroU32},
+    sync::Arc,
     time::Duration,
 };
 use tokio::io::AsyncWriteExt;
@@ -106,7 +107,7 @@ impl Activate {
         if !directory.is_dir() {
             return Err("Host deployment is not installed".into());
         }
-        let lease = FileLease::acquire(&directory.join("executor.lock"))?;
+        let lease = Arc::new(FileLease::acquire(&directory.join("executor.lock"))?);
         let store::Installation::Installed(deployment) = store::read(&directory).await? else {
             return Err("Host deployment is absent or incomplete".into());
         };
@@ -116,7 +117,7 @@ impl Activate {
         }
         deployment.validate(&root, &directory)?;
         lease.validate()?;
-        let (client, live) = connect_or_launch(&deployment).await?;
+        let (client, live) = connect_or_launch(&deployment, lease.clone()).await?;
         lease.validate()?;
         emit(
             &Frame::Result {
@@ -143,8 +144,10 @@ impl Activate {
 
 pub(super) async fn connect_or_launch(
     deployment: &Deployment,
+    lease: Arc<FileLease>,
 ) -> Result<(HostClient, LiveHost), HostError> {
     let mut child: Option<Child> = None;
+    let mut service_started = false;
     let result = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(mut client) =
@@ -157,10 +160,7 @@ pub(super) async fn connect_or_launch(
                 if let Some(status) = child.try_wait()? {
                     return Err(format!("Host candidate exited before Ready: {status}").into());
                 }
-            } else {
-                if deployment.mode != Mode::OnDemand {
-                    return Err("the supervised Host must be started by its service".into());
-                }
+            } else if !service_started {
                 match RootOwner::open(
                     &deployment.root_path,
                     &RootNamespaces::for_current_account()?,
@@ -169,29 +169,34 @@ pub(super) async fn connect_or_launch(
                         if owner.root_id() != deployment.root_id {
                             return Err("State Root changed before launch".into());
                         }
-                        drop(owner);
-                        child = Some(
-                            detached::spawn(
-                                &deployment.executable,
-                                &[
-                                    "host",
-                                    "candidate",
-                                    "--root",
-                                    deployment
-                                        .root_path
-                                        .to_str()
-                                        .ok_or("State Root must be UTF-8")?,
-                                    "--expected-root-id",
-                                    &deployment.root_id,
-                                    "--startup-attempt-id",
-                                    &Uuid::new_v4().to_string(),
-                                    "--owner-stdin",
-                                    "--initial-connection-timeout-ms",
-                                    "30000",
-                                ],
-                            )
-                            .await?,
-                        );
+                        if deployment.mode == Mode::Supervised {
+                            super::service::start(deployment.clone(), lease.clone(), owner).await?;
+                            service_started = true;
+                        } else {
+                            drop(owner);
+                            child = Some(
+                                detached::spawn(
+                                    &deployment.executable,
+                                    &[
+                                        "host",
+                                        "candidate",
+                                        "--root",
+                                        deployment
+                                            .root_path
+                                            .to_str()
+                                            .ok_or("State Root must be UTF-8")?,
+                                        "--expected-root-id",
+                                        &deployment.root_id,
+                                        "--startup-attempt-id",
+                                        &Uuid::new_v4().to_string(),
+                                        "--owner-stdin",
+                                        "--initial-connection-timeout-ms",
+                                        "30000",
+                                    ],
+                                )
+                                .await?,
+                            );
+                        }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(error) => return Err(error.into()),

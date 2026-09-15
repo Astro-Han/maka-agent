@@ -30,7 +30,7 @@ mod signals;
 mod windows;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::process::ExitCode {
     let cli = args::Cli::parse();
     let error_exit = cli.error_exit_code();
     let result = if env!("CARGO_BIN_NAME") == "maka-service" {
@@ -40,6 +40,10 @@ async fn main() {
     };
     if let Err(error) = result {
         eprintln!("{error}");
-        std::process::exit(error_exit);
+        // Let Tokio wait for accepted blocking work to finish before the OS
+        // releases its leases. A reported timeout does not cancel that work.
+        std::process::ExitCode::from(error_exit)
+    } else {
+        std::process::ExitCode::SUCCESS
     }
 }

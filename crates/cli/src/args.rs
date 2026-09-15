@@ -53,7 +53,7 @@ enum HostCommand {
     Install(crate::deployment::Install),
     /// Activate an installed Host and report its verified loopback endpoint.
     Activate(crate::deployment::Activate),
-    /// Update an on-demand deployment to this executable at a safe boundary.
+    /// Update a deployment to this executable at a safe boundary.
     Update(crate::deployment::Update),
     /// Finish an interrupted deployment update without choosing another target.
     Reconcile(crate::deployment::Update),
@@ -71,6 +71,9 @@ enum HostCommand {
     },
     /// Run a discoverable ephemeral Host under its launcher.
     Candidate(candidate::Candidate),
+    /// Run only the currently admitted supervised deployment.
+    #[command(hide = true)]
+    ServiceRun(Root),
     /// Serve a native State Root over a private local endpoint.
     Serve {
         #[command(flatten)]
@@ -112,7 +115,7 @@ impl Cli {
         }
     }
 
-    pub(super) fn error_exit_code(&self) -> i32 {
+    pub(super) fn error_exit_code(&self) -> u8 {
         if matches!(self.command, Command::Host(HostCommand::Candidate(_))) {
             70
         } else {
@@ -134,6 +137,11 @@ impl Cli {
             }
             Command::Host(HostCommand::Serve { root, websocket }) => {
                 serve::run(&root.root, websocket, false).await
+            }
+            Command::Host(HostCommand::ServiceRun(root)) => {
+                #[cfg(windows)]
+                crate::windows::own_process_tree()?;
+                serve::run(&root.root, None, true).await
             }
             Command::Host(HostCommand::Status(root)) => {
                 let mut client = crate::host_client::HostClient::connect(&root.root, None).await?;

@@ -1,0 +1,210 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::{Deployment, HostError, arguments, label, xml};
+use std::time::{Duration, Instant};
+use windows::{
+    Win32::{
+        Foundation::RPC_E_CHANGED_MODE,
+        System::{
+            Com::{
+                CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+                CoUninitialize,
+            },
+            TaskScheduler::{
+                ITaskFolder, ITaskService, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN,
+                TaskScheduler,
+            },
+            Variant::VARIANT,
+        },
+    },
+    core::BSTR,
+};
+
+pub(super) struct Service {
+    folder: ITaskFolder,
+    scheduler: ITaskService,
+    name: String,
+    user: String,
+    definition: String,
+    // COM interfaces must be released before their thread's apartment.
+    _apartment: Apartment,
+}
+
+impl Service {
+    pub fn new(deployment: &Deployment) -> Result<Self, HostError> {
+        let apartment = Apartment::open()?;
+        // SAFETY: initialization and every interface stay on this blocking worker.
+        let (scheduler, folder, user) = unsafe {
+            let scheduler: ITaskService =
+                CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER)?;
+            let empty = VARIANT::default();
+            scheduler.Connect(&empty, &empty, &empty, &empty)?;
+            let folder = scheduler.GetFolder(&BSTR::from("\\"))?;
+            let domain = scheduler.ConnectedDomain()?.to_string();
+            let account = scheduler.ConnectedUser()?.to_string();
+            let user = if domain.is_empty() {
+                account
+            } else {
+                format!("{domain}\\{account}")
+            };
+            (scheduler, folder, user)
+        };
+        let name = label(deployment);
+        let args = arguments(deployment)?;
+        let executable = xml(args[0]);
+        let args = xml(&args[1..]
+            .iter()
+            .map(|arg| quote(arg))
+            .collect::<Vec<_>>()
+            .join(" "));
+        let principal = xml(&user);
+        let definition = format!(
+            concat!(
+                "<?xml version=\"1.0\" encoding=\"UTF-16\"?>",
+                "<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">",
+                "<RegistrationInfo><Description>{name}</Description></RegistrationInfo>",
+                "<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{principal}</UserId></LogonTrigger></Triggers>",
+                "<Principals><Principal id=\"Maka\"><UserId>{principal}</UserId><LogonType>InteractiveToken</LogonType>",
+                "<RunLevel>LeastPrivilege</RunLevel></Principal></Principals>",
+                "<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+                "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+                "<AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable>",
+                "<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>",
+                "<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>",
+                "<AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled>",
+                "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>5</Count></RestartOnFailure></Settings>",
+                "<Actions Context=\"Maka\"><Exec><Command>{executable}</Command><Arguments>{args}</Arguments></Exec></Actions></Task>"
+            ),
+            name = name,
+            principal = principal,
+            executable = executable,
+            args = args
+        );
+        Ok(Self {
+            folder,
+            scheduler,
+            name,
+            user,
+            definition,
+            _apartment: apartment,
+        })
+    }
+
+    pub fn prepare(&self) -> Result<(), HostError> {
+        // Root is held by the caller; no instance can be executing user work.
+        // SAFETY: these COM interfaces are confined to their initialized thread.
+        unsafe {
+            match self.folder.GetTask(&BSTR::from(&self.name)) {
+                Ok(task) => {
+                    let mut description = BSTR::new();
+                    task.Definition()?
+                        .RegistrationInfo()?
+                        .Description(&mut description)?;
+                    if description != self.name.as_str() {
+                        return Err("scheduled task ownership marker differs".into());
+                    }
+                    if task.GetInstances(0)?.Count()? != 0 {
+                        task.Stop(0)?;
+                        let deadline = Instant::now() + Duration::from_secs(45);
+                        while task.GetInstances(0)?.Count()? != 0 {
+                            if Instant::now() >= deadline {
+                                return Err("scheduled task did not stop".into());
+                            }
+                            std::thread::sleep(Duration::from_millis(25));
+                        }
+                    }
+                }
+                Err(error) if error.code().0 as u32 == 0x80070002 => {}
+                Err(error) => return Err(error.into()),
+            }
+            let definition = self.scheduler.NewTask(0)?;
+            definition.SetXmlText(&BSTR::from(&self.definition))?;
+            let empty = VARIANT::default();
+            self.folder.RegisterTaskDefinition(
+                &BSTR::from(&self.name),
+                &definition,
+                TASK_CREATE_OR_UPDATE.0,
+                &VARIANT::from(self.user.as_str()),
+                &empty,
+                TASK_LOGON_INTERACTIVE_TOKEN,
+                &empty,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn start(&self) -> Result<(), HostError> {
+        // SAFETY: registration has completed on this same COM thread.
+        unsafe {
+            self.folder
+                .GetTask(&BSTR::from(&self.name))?
+                .Run(&VARIANT::default())?;
+        }
+        Ok(())
+    }
+}
+
+fn quote(value: &str) -> String {
+    let mut result = String::from("\"");
+    let mut slashes = 0;
+    for character in value.chars() {
+        if character == '\\' {
+            slashes += 1;
+        } else {
+            result.extend(std::iter::repeat_n(
+                '\\',
+                if character == '"' {
+                    slashes * 2 + 1
+                } else {
+                    slashes
+                },
+            ));
+            slashes = 0;
+            result.push(character);
+        }
+    }
+    result.extend(std::iter::repeat_n('\\', slashes * 2));
+    result.push('"');
+    result
+}
+
+struct Apartment(bool);
+
+impl Apartment {
+    fn open() -> windows::core::Result<Self> {
+        // SAFETY: balanced on this thread, including the already-initialized case.
+        let result = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        if result == RPC_E_CHANGED_MODE {
+            Ok(Self(false))
+        } else {
+            result.ok()?;
+            Ok(Self(true))
+        }
+    }
+}
+
+impl Drop for Apartment {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: paired with successful initialization on this thread.
+            unsafe { CoUninitialize() };
+        }
+    }
+}
