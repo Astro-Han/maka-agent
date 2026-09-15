@@ -187,7 +187,7 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
         let run = RunTools::new(
             log.clone(),
             invocation.clone(),
-            catalog,
+            catalog.clone(),
             ToolMode::Direct,
             CodeExecutor::new(1, CellLimits::default()).unwrap(),
         );
@@ -224,6 +224,41 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
         );
         assert!(result["blocked"]["schemaChars"].as_u64().unwrap() > 33_000);
         let next = run.capture();
+        let checkpoint = run.checkpoint();
+        let restored = RunTools::new(
+            log.clone(),
+            invocation.clone(),
+            catalog.clone(),
+            ToolMode::Direct,
+            CodeExecutor::new(1, CellLimits::default()).unwrap(),
+        );
+        restored.restore(&checkpoint).unwrap();
+        assert_eq!(restored.capture().definitions(), next.definitions());
+        let mut invalid = checkpoint.clone();
+        invalid.loaded.insert("withheld".into());
+        assert!(restored.restore(&invalid).is_err());
+        assert_eq!(
+            restored.checkpoint(),
+            checkpoint,
+            "failed restore preserves the admitted view"
+        );
+        let changed = RunTools::new(
+            log.clone(),
+            invocation.clone(),
+            ToolCatalog::default(),
+            ToolMode::Direct,
+            CodeExecutor::new(1, CellLimits::default()).unwrap(),
+        );
+        assert!(changed.restore(&checkpoint).is_err());
+        drop(changed);
+        restored.clear_loaded();
+        assert!(restored.checkpoint().loaded.is_empty());
+        assert_eq!(
+            run.checkpoint(),
+            checkpoint,
+            "successor state does not share the old cache"
+        );
+        drop(restored);
         run.clear_loaded();
         assert_eq!(
             next.definitions()

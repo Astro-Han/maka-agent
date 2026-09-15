@@ -172,6 +172,19 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time_and_original_decode
                     claim_id: "claim".into(),
                 },
                 remaining_steps: std::num::NonZeroU16::new(2).unwrap(),
+                execution: Box::new(maka_runtime::handoff::HandoffExecution {
+                    route_identity: format!("sha256:{}", "b".repeat(64)),
+                    context: None,
+                    provider_options: serde_json::json!({}),
+                    main_output_limit: None,
+                    supports_vision: false,
+                    tools: maka_runtime::handoff::HandoffTools {
+                        catalog_digest: format!("sha256:{}", "c".repeat(64)),
+                        loaded: Default::default(),
+                    },
+                    compaction_attempted: false,
+                    replay_base: None,
+                }),
             },
         },
     ] {

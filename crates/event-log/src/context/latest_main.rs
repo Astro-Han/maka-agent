@@ -129,7 +129,8 @@ pub(super) async fn read_selected(
             let purpose: Option<&str> = row.try_get("purpose").ok()?;
             let purpose = match (kind, purpose) {
                 ("message" | "continuation", None | Some("main")) => ModelPurpose::Main,
-                ("message" | "continuation" | "context_compact", Some("summary"))
+                ("handoff", Some("main")) => ModelPurpose::Main,
+                ("message" | "continuation" | "handoff" | "context_compact", Some("summary"))
                 | ("context_compact", None) => ModelPurpose::Summary,
                 _ => return None,
             };

@@ -26,6 +26,23 @@ use maka_runtime::{
 };
 use std::num::NonZeroU16;
 
+pub(super) fn execution() -> Box<maka_runtime::handoff::HandoffExecution> {
+    use maka_runtime::handoff::{HandoffExecution, HandoffTools};
+    Box::new(HandoffExecution {
+        route_identity: digest('b'),
+        context: None,
+        provider_options: serde_json::json!({}),
+        main_output_limit: None,
+        supports_vision: false,
+        tools: HandoffTools {
+            catalog_digest: digest('c'),
+            loaded: Default::default(),
+        },
+        compaction_attempted: false,
+        replay_base: None,
+    })
+}
+
 #[tokio::test]
 async fn handoff_rejects_unresolved_provider_effects_but_accepts_effect_free_summary_failure() {
     for provider_effect in [false, true] {
@@ -85,6 +102,7 @@ async fn handoff_rejects_unresolved_provider_effects_but_accepts_effect_free_sum
                             claim_id: "claim".into(),
                         },
                         remaining_steps: NonZeroU16::new(2).unwrap(),
+                        execution: execution(),
                     },
                 },
             },

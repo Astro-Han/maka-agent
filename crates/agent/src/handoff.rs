@@ -18,7 +18,7 @@
  */
 
 use maka_runtime::handoff::{HandoffIntent, HandoffPause};
-use std::{num::NonZeroU16, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
@@ -95,25 +95,23 @@ impl HandoffGate {
             .ok_or(crate::RunError::Busy)
     }
 
-    pub(crate) async fn boundary<F: std::future::Future<Output = bool>>(
+    pub(crate) async fn boundary<F: std::future::Future<Output = Option<HandoffPause>>>(
         &self,
-        remaining_steps: NonZeroU16,
         cancellation: &CancellationToken,
-        preflight: impl FnOnce(HandoffPause) -> F,
+        preflight: impl FnOnce(HandoffIntent) -> F,
     ) -> Option<HandoffPause> {
         let mut changes = self.state.subscribe();
         let ticket = match &*changes.borrow_and_update() {
             State::Requested(ticket) => ticket.clone(),
             _ => return None,
         };
-        let pause = HandoffPause {
-            intent: ticket.as_ref().clone(),
-            remaining_steps,
-        };
-        if !preflight(pause.clone()).await || cancellation.is_cancelled() {
+        let pause = preflight(ticket.as_ref().clone()).await;
+        let Some(pause) =
+            pause.filter(|pause| pause.intent == *ticket && !cancellation.is_cancelled())
+        else {
             self.cancel(&ticket);
             return None;
-        }
+        };
         self.state.send_if_modified(|state| {
             let State::Requested(intent) = state else {
                 return false;
@@ -252,6 +250,27 @@ impl PendingSeal {
 mod tests {
     use super::*;
 
+    fn prepared(intent: HandoffIntent) -> std::future::Ready<Option<HandoffPause>> {
+        use maka_runtime::handoff::{HandoffExecution, HandoffTools};
+        std::future::ready(Some(HandoffPause {
+            intent,
+            remaining_steps: std::num::NonZeroU16::new(2).unwrap(),
+            execution: Box::new(HandoffExecution {
+                route_identity: format!("sha256:{}", "b".repeat(64)),
+                context: None,
+                provider_options: serde_json::json!({}),
+                main_output_limit: None,
+                supports_vision: false,
+                tools: HandoffTools {
+                    catalog_digest: format!("sha256:{}", "c".repeat(64)),
+                    loaded: Default::default(),
+                },
+                compaction_attempted: false,
+                replay_base: None,
+            }),
+        }))
+    }
+
     #[tokio::test]
     async fn cancellation_prevents_commit_and_worker_exit_never_forges_a_seal() {
         let source = maka_runtime::event::Invocation {
@@ -272,9 +291,7 @@ mod tests {
         let cancellation = CancellationToken::new();
         let reservation = gate.reserve(intent.clone()).unwrap();
         let (result, held) = tokio::join!(
-            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
-                std::future::ready(false)
-            }),
+            gate.boundary(&cancellation, |_| { std::future::ready(None) }),
             reservation.ready(),
         );
         assert!(
@@ -282,40 +299,27 @@ mod tests {
             "failed preflight releases the same Run"
         );
         let reservation = gate.reserve(intent.clone()).unwrap();
-        let (result, ()) = tokio::join!(
-            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
-                std::future::ready(true)
-            }),
-            async {
-                let held = reservation.ready().await.unwrap();
-                cancellation.cancel();
-                assert!(held.commit().is_none());
-            },
-        );
+        let (result, ()) = tokio::join!(gate.boundary(&cancellation, prepared), async {
+            let held = reservation.ready().await.unwrap();
+            cancellation.cancel();
+            assert!(held.commit().is_none());
+        },);
         assert!(result.is_none());
 
         let cancellation = CancellationToken::new();
         let reservation = gate.reserve(intent.clone()).unwrap();
-        let (result, stale) = tokio::join!(
-            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
-                std::future::ready(true)
-            }),
-            async {
-                let held = reservation.ready().await.unwrap();
-                cancellation.cancel();
-                held
-            },
-        );
+        let (result, stale) = tokio::join!(gate.boundary(&cancellation, prepared), async {
+            let held = reservation.ready().await.unwrap();
+            cancellation.cancel();
+            held
+        },);
         assert!(result.is_none());
         let cancellation = CancellationToken::new();
         let reservation = gate.reserve(intent).unwrap();
         drop(stale); // The same durable intent does not reuse a scheduling owner.
-        let (result, pending) = tokio::join!(
-            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
-                std::future::ready(true)
-            }),
-            async { reservation.ready().await.unwrap().commit().unwrap() },
-        );
+        let (result, pending) = tokio::join!(gate.boundary(&cancellation, prepared), async {
+            reservation.ready().await.unwrap().commit().unwrap()
+        },);
         assert!(result.is_some());
         gate.close();
         assert!(

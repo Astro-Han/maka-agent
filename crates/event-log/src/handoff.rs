@@ -21,6 +21,8 @@ use crate::{EventLog, StoreError};
 use maka_runtime::event::{Fact, InvocationInput, InvocationOutcome, RuntimeEvent};
 use sqlx::{Connection, SqliteConnection};
 
+mod budget;
+
 impl EventLog {
     /// Eligibility only. The source still owns execution until its seal commits.
     pub async fn check_handoff(
@@ -182,6 +184,14 @@ pub(crate) async fn validate(
             ));
         }
     };
+    let replay_base = match input {
+        InvocationInput::Continuation { claim, .. } => Some(claim.base.high_water),
+        InvocationInput::Handoff { pause, .. } => pause.execution.replay_base,
+        _ => None,
+    };
+    if pause.execution.replay_base != replay_base {
+        return Err(invalid("handoff changes its admitted history projection"));
+    }
     if &pause.intent.root_run_id != root {
         return Err(invalid(
             "handoff must preserve its admitted logical model Run",
@@ -192,25 +202,7 @@ pub(crate) async fn validate(
     crate::context::safety::settled_boundary(tx, &event.invocation.invocation_id, i64::MAX as u64)
         .await?;
     crate::interactions::lifecycle::require_closed(tx, &event.invocation).await?;
-    // Use a stable upper bound in both preflight and append: time advancing
-    // while held must not consume the headroom a second time.
-    let mut envelope = event.clone();
-    envelope.recorded_at = std::time::UNIX_EPOCH;
-    let seal_bytes =
-        serde_json::to_vec(&envelope)?.len() + (u64::MAX.ilog10() + u32::MAX.ilog10()) as usize;
-    let source_bytes = maka_runtime::continuation::MAX_SOURCE_BYTES
-        .checked_sub(seal_bytes)
-        .ok_or(StoreError::PrefixTooLarge)?;
-    crate::run_prefix::read(
-        tx,
-        &event.invocation.session_id,
-        &event.invocation.run_id,
-        &event.invocation.invocation_id,
-        i64::MAX,
-        maka_runtime::continuation::MAX_SOURCE_EVENTS - 1,
-        source_bytes,
-    )
-    .await?;
+    budget::check(tx, event, &opening, pause).await?;
     let occupied: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE kind='invocation_opened'
          AND (invocation_id=?1 OR json_extract(event_json,'$.invocation.run_id')=?2

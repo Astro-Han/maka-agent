@@ -97,6 +97,30 @@ impl Availability {
     pub fn clear(&self) {
         self.active.lock().unwrap().clear();
     }
+
+    pub fn checkpoint(&self) -> maka_runtime::handoff::HandoffTools {
+        maka_runtime::handoff::HandoffTools {
+            catalog_digest: self.catalog.digest(),
+            loaded: self.active.lock().unwrap().clone(),
+        }
+    }
+
+    pub fn restore(
+        &self,
+        checkpoint: &maka_runtime::handoff::HandoffTools,
+    ) -> Result<(), ToolError> {
+        if checkpoint.catalog_digest != self.catalog.digest()
+            || (!checkpoint.loaded.is_empty() && !self.enabled())
+            || checkpoint
+                .loaded
+                .iter()
+                .any(|name| direct(name) || !self.catalog.contains(name))
+        {
+            return Err(ToolError::Failed("handoff tool catalog changed".into()));
+        }
+        *self.active.lock().unwrap() = checkpoint.loaded.clone();
+        Ok(())
+    }
     pub fn definition(&self) -> Option<ToolDefinition> {
         if !self.enabled() {
             return None;

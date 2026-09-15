@@ -28,6 +28,7 @@ mod context_stop;
 mod dynamic_tools;
 mod frozen_projection;
 mod handoff;
+mod handoff_compaction;
 mod image_projection;
 mod lifetime;
 mod model_interruption;

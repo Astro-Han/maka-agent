@@ -49,13 +49,20 @@ pub async fn run(
         Err(error) => return Err(error.into()),
     }
     let claim = match &input.work {
-        RunWork::Continuation { source, tools, .. } => {
+        RunWork::Continuation { source, tools, .. } | RunWork::Handoff { source, tools, .. } => {
             Some(crate::continuation::prepare(&inner, &input, source, tools, &cancellation).await?)
         }
         _ => None,
     };
-    let continuation_base = claim.as_ref().map(|claim| claim.base.high_water);
+    let continuation_base = match &input.work {
+        RunWork::Handoff { pause, .. } => pause.execution.replay_base,
+        _ => claim.as_ref().map(|claim| claim.base.high_water),
+    };
     let opening = match &input.work {
+        RunWork::Handoff { pause, .. } => InvocationInput::Handoff {
+            claim: Box::new(claim.expect("prepared handoff")),
+            pause: pause.clone(),
+        },
         RunWork::Continuation { workhub_resume, .. } => InvocationInput::Continuation {
             claim: Box::new(claim.expect("prepared continuation")),
             workhub_resume: workhub_resume.clone(),
@@ -105,6 +112,17 @@ pub async fn run(
                 &input,
                 tools,
                 *max_steps,
+                &cancellation,
+                continuation_base,
+                handoff.as_ref().expect("model Runs own a handoff gate"),
+            )
+            .await
+            .map(|outcome| (outcome, None)),
+            RunWork::Handoff { tools, pause, .. } => steps::run(
+                &inner,
+                &input,
+                tools,
+                usize::from(pause.remaining_steps.get()),
                 &cancellation,
                 continuation_base,
                 handoff.as_ref().expect("model Runs own a handoff gate"),

@@ -42,25 +42,42 @@ pub(super) async fn run(
         inner.cells.clone(),
     );
     let mut attempted = false;
+    // This tracks work after this physical opening, not after the logical root.
+    // A successor may compact the sealed prefix with a PreTurn boundary.
     let mut completed_step = false;
+    if let crate::RunWork::Handoff { pause, .. } = &input.work {
+        tools.restore(&pause.execution.tools)?;
+        attempted = pause.execution.compaction_attempted;
+    }
     for step in 0..max_steps {
         if cancellation.is_cancelled() {
             return Err(RunError::Cancelled);
         }
         inner.log.commit_pending_steering(&input.invocation).await?;
         if let Some(pause) = handoff
-            .boundary(
-                std::num::NonZeroU16::new((max_steps - step) as u16)
-                    .expect("validated step budget"),
-                cancellation,
-                |pause| async move {
-                    inner
-                        .log
-                        .check_handoff(&input.invocation, &pause)
-                        .await
-                        .is_ok()
-                },
-            )
+            .boundary(cancellation, |intent| async {
+                let pause = maka_runtime::handoff::HandoffPause {
+                    intent,
+                    remaining_steps: std::num::NonZeroU16::new((max_steps - step) as u16)
+                        .expect("validated step budget"),
+                    execution: Box::new(maka_runtime::handoff::HandoffExecution {
+                        route_identity: model_attempt::route_identity(input).ok()?,
+                        context: input.context.clone(),
+                        provider_options: input.provider_options.clone(),
+                        main_output_limit: input.main_output_limit,
+                        supports_vision: input.supports_vision,
+                        tools: tools.checkpoint(),
+                        compaction_attempted: attempted,
+                        replay_base: continuation_base,
+                    }),
+                };
+                inner
+                    .log
+                    .check_handoff(&input.invocation, &pause)
+                    .await
+                    .ok()?;
+                Some(pause)
+            })
             .await
         {
             return Ok(maka_runtime::event::InvocationOutcome::HandoffPaused { pause });

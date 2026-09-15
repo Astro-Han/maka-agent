@@ -48,6 +48,7 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
                 claim_id: format!("claim-{round}"),
             },
             remaining_steps: NonZeroU16::new(3 - round).unwrap(),
+            execution: super::handoff::execution(),
         };
         append(
             &log,
@@ -176,6 +177,31 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
     let last = claim(&log, "manual", &source, base).await;
     let manual = opening("manual-turn", Some(last));
     append(&log, &manual).await;
+    let Fact::InvocationOpened {
+        input: InvocationInput::Continuation { claim, .. },
+        ..
+    } = &manual.fact
+    else {
+        unreachable!()
+    };
+    let mut pause = HandoffPause {
+        intent: HandoffIntent {
+            handoff_id: "manual-handoff".into(),
+            host_epoch: "host".into(),
+            root_run_id: manual.invocation.run_id.clone(),
+            successor_run_id: "manual-successor-run".into(),
+            successor_invocation_id: "manual-successor-invocation".into(),
+            claim_id: "manual-successor-claim".into(),
+        },
+        remaining_steps: NonZeroU16::new(2).unwrap(),
+        execution: super::handoff::execution(),
+    };
+    assert!(
+        log.check_handoff(&manual.invocation, &pause).await.is_err(),
+        "a physical handoff cannot discard manual resume's stable-cut policy"
+    );
+    pause.execution.replay_base = Some(claim.base.high_water);
+    log.check_handoff(&manual.invocation, &pause).await.unwrap();
     close(&log, &manual).await;
     let prefix = log
         .run_prefix("session", &manual.invocation.run_id, None, 100, 65536)
@@ -245,6 +271,7 @@ async fn ineligible_handoff_never_seals_or_reserves_a_successor() {
             claim_id: "claim".into(),
         },
         remaining_steps: NonZeroU16::new(3).unwrap(),
+        execution: super::handoff::execution(),
     };
     assert!(
         log.check_handoff(&missing.invocation, &pause)

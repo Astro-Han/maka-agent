@@ -89,6 +89,11 @@ pub struct RunInput {
 }
 
 pub enum RunWork {
+    Handoff {
+        source: maka_runtime::continuation::RunBoundary,
+        pause: Box<maka_runtime::handoff::HandoffPause>,
+        tools: ToolCatalog,
+    },
     Continuation {
         source: maka_runtime::continuation::RunBoundary,
         workhub_resume: Option<maka_runtime::workhub::ResumeOrigin>,
@@ -183,6 +188,23 @@ impl Engine {
                 .map_err(|reason| RunError::InvalidInput(reason.into()))?;
         }
         match &input.work {
+            RunWork::Handoff { source, pause, .. } => {
+                pause
+                    .validate(&source.invocation)
+                    .map_err(|reason| RunError::InvalidInput(reason.into()))?;
+                if input.invocation != pause.intent.successor(&source.invocation)
+                    || input.request_fingerprint.is_some()
+                    || input.context != pause.execution.context
+                    || input.provider_options != pause.execution.provider_options
+                    || input.main_output_limit != pause.execution.main_output_limit
+                    || input.supports_vision != pause.execution.supports_vision
+                    || model_attempt::route_identity(&input)? != pause.execution.route_identity
+                {
+                    return Err(RunError::InvalidInput(
+                        "handoff execution settings changed".into(),
+                    ));
+                }
+            }
             RunWork::Message {
                 message, max_steps, ..
             } if *max_steps == 0 || *max_steps > 256 || message.text_bytes() > 64 * 1024 => {
@@ -252,8 +274,13 @@ impl Engine {
         {
             return Err(RunError::Busy);
         }
-        let handoff = (!matches!(input.work, RunWork::ContextCompact))
-            .then(|| HandoffGate::new(input.invocation.clone(), input.invocation.run_id.clone()));
+        let handoff = (!matches!(input.work, RunWork::ContextCompact)).then(|| {
+            let root = match &input.work {
+                RunWork::Handoff { pause, .. } => &pause.intent.root_run_id,
+                _ => &input.invocation.run_id,
+            };
+            HandoffGate::new(input.invocation.clone(), root.clone())
+        });
         let admission = Admission {
             inner: self.0.clone(),
             session_id,
@@ -265,9 +292,9 @@ impl Engine {
         let inner = self.0.clone();
         let invocation = input.invocation.clone();
         let tool_names = Arc::new(match &input.work {
-            RunWork::Message { tools, .. } | RunWork::Continuation { tools, .. } => {
-                tools.names().into_iter().collect()
-            }
+            RunWork::Message { tools, .. }
+            | RunWork::Continuation { tools, .. }
+            | RunWork::Handoff { tools, .. } => tools.names().into_iter().collect(),
             RunWork::ContextCompact => Default::default(),
         });
         let worker_cancellation = cancellation.clone();

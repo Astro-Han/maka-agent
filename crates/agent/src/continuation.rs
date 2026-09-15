@@ -41,13 +41,24 @@ pub(super) async fn prepare(
     cancellation: &CancellationToken,
 ) -> Result<ContinuationClaim, RunError> {
     let (base, replay) = inspect(inner, input, source, catalog, cancellation).await?;
+    let pause = match &input.work {
+        crate::RunWork::Handoff { pause, .. } => Some(pause),
+        _ => None,
+    };
     let claim = ContinuationClaim {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: pause.map_or_else(
+            || uuid::Uuid::new_v4().to_string(),
+            |pause| pause.intent.claim_id.clone(),
+        ),
         source: source.clone(),
         base,
         replay,
     };
-    claim.validate(&input.invocation).map_err(invalid)?;
+    match pause {
+        Some(pause) => pause.validate_claim(&claim, &input.invocation),
+        None => claim.validate(&input.invocation),
+    }
+    .map_err(invalid)?;
     Ok(claim)
 }
 
@@ -101,6 +112,17 @@ pub(super) async fn inspect(
     {
         return Err(invalid("continuation workspace identity changed"));
     }
+    if let crate::RunWork::Handoff { pause, .. } = &input.work
+        && (configuration != &input.configuration
+            || !matches!(
+                &prefix.events.last().expect("checked nonempty source").event.fact,
+                Fact::InvocationEnded {
+                    outcome: maka_runtime::event::InvocationOutcome::HandoffPaused { pause: sealed }
+                } if sealed == pause.as_ref()
+            ))
+    {
+        return Err(invalid("handoff does not match its sealed source"));
+    }
     let base = match opening {
         InvocationInput::Message { .. } => {
             let base = inner
@@ -127,7 +149,10 @@ pub(super) async fn inspect(
         &context,
         ModelPurpose::Main,
         cancellation,
-        Some(base.high_water),
+        match &input.work {
+            crate::RunWork::Handoff { pause, .. } => pause.execution.replay_base,
+            _ => Some(base.high_water),
+        },
     )
     .await?;
     if !matches!(
@@ -149,10 +174,18 @@ pub(super) async fn inspect(
         input.configuration.tool_mode,
         inner.cells.clone(),
     );
+    if let crate::RunWork::Handoff { pause, .. } = &input.work {
+        tools.restore(&pause.execution.tools)?;
+    }
     let definitions = tools.capture().definitions();
     let mut available: std::collections::HashSet<_> = catalog.names().into_iter().collect();
     available.extend(definitions.iter().map(|definition| definition.name.clone()));
-    for message in &prompt {
+    // A handoff replays settled facts, including rejected calls to unavailable
+    // tools. It never executes them again; the live catalog is checked above.
+    for message in prompt
+        .iter()
+        .filter(|_| !matches!(input.work, crate::RunWork::Handoff { .. }))
+    {
         if let Message::Assistant { content, .. } = message {
             for part in content {
                 if let AssistantPart::ToolCall {

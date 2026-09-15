@@ -157,6 +157,25 @@ impl ToolCatalog {
         }
     }
 
+    /// Stable request-surface identity; process-local handler addresses are excluded.
+    pub fn digest(&self) -> String {
+        let entries: Vec<_> = self
+            .entries
+            .values()
+            .map(|entry| {
+                let r = &entry.registration;
+                (
+                    &r.definition,
+                    r.nesting == ToolNesting::Nestable,
+                    r.semantics == ToolSemantics::ExclusiveStep,
+                )
+            })
+            .collect();
+        maka_runtime::artifact::content_digest(
+            &serde_json::to_vec(&(self.discovery, entries)).expect("tool definitions are JSON"),
+        )
+    }
+
     pub fn semantics(&self, name: &str) -> Result<ToolSemantics, ToolRejection> {
         self.entries
             .get(name)
@@ -178,6 +197,10 @@ impl ToolCatalog {
 impl ToolCatalog {
     pub fn names(&self) -> Vec<String> {
         self.entries.keys().cloned().collect()
+    }
+
+    pub(super) fn contains(&self, name: &str) -> bool {
+        self.entries.contains_key(name)
     }
 
     pub fn prepare(

@@ -181,14 +181,18 @@ pub(crate) async fn enqueue(log: &EventLog, invocation: Invocation) {
 }
 
 pub(crate) async fn respond(socket: &mut tokio::net::TcpStream, tool: bool) {
+    respond_tool(socket, tool.then_some("echo")).await;
+}
+
+pub(crate) async fn respond_tool(socket: &mut tokio::net::TcpStream, tool: Option<&str>) {
     use tokio::io::AsyncWriteExt;
-    let delta = if tool {
-        json!({"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"echo","arguments":"{\"value\":42}"}}]})
+    let delta = if let Some(name) = tool {
+        json!({"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":name,"arguments":"{\"value\":42}"}}]})
     } else {
         json!({"content":"done"})
     };
     let first = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":delta,"finish_reason":null}]});
-    let last = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":if tool {"tool_calls"} else {"stop"}}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}});
+    let last = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":if tool.is_some() {"tool_calls"} else {"stop"}}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}});
     let body = format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n");
     socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
 }

@@ -61,6 +61,17 @@ impl RunTools {
         self.availability.clear();
     }
 
+    pub fn checkpoint(&self) -> maka_runtime::handoff::HandoffTools {
+        self.availability.checkpoint()
+    }
+
+    pub fn restore(
+        &self,
+        checkpoint: &maka_runtime::handoff::HandoffTools,
+    ) -> Result<(), ToolError> {
+        self.availability.restore(checkpoint)
+    }
+
     /// Capture once per logical model step, before sending any physical attempt.
     pub fn capture(&self) -> RequestTools<'_> {
         let availability = if self.mode == ToolMode::CodeMode {

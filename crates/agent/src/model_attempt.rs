@@ -156,7 +156,10 @@ pub(super) async fn execute(
             _ = cancellation.cancelled() => return Err(RunError::Cancelled),
             _ = tokio::time::sleep(delay) => {}
         }
-        if continuation_base.is_some() {
+        if matches!(
+            input.work,
+            crate::RunWork::Continuation { .. } | crate::RunWork::Handoff { .. }
+        ) {
             let next = inner
                 .log
                 .read_model_context(

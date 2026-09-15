@@ -104,6 +104,28 @@ impl EventLog {
     }
 }
 
+/// Use the same effective-tail/anchor accounting as the successor's first read.
+pub(crate) async fn check_handoff_capacity(
+    connection: &mut SqliteConnection,
+    opening: &maka_runtime::event::RuntimeEvent,
+    max_events: usize,
+    max_bytes: usize,
+) -> Result<(), StoreError> {
+    let selection = Selection::for_opening(connection, opening).await?;
+    let high = selection.high_water(connection, i64::MAX as u64).await?;
+    materialize_selected(
+        connection,
+        &selection,
+        high,
+        i64::MAX as u64,
+        max_events,
+        max_bytes,
+        super::LatestMainContext::TraceUnavailable,
+    )
+    .await?;
+    Ok(())
+}
+
 pub(super) async fn materialize_selected(
     connection: &mut SqliteConnection,
     selection: &Selection,
