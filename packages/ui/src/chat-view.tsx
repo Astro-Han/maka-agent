@@ -405,10 +405,6 @@ export function ChatView(props: {
   const tailTurnId = streamingActive ? props.activeTurn?.turnId : undefined;
   const runningStatus = streamingActive && !props.activeTurn?.awaitingInput;
   const hasRenderedLiveTurn = tailTurnId !== undefined && turns.some((turn) => turn.turnId === tailTurnId);
-  const pendingRunningStartedAt = transientMessages.findLast((message) =>
-    message.transientPlacement === 'current_turn'
-    && tailTurnId !== undefined && message.hostTurnId === tailTurnId,
-  )?.ts ?? activeContent?.startedAt;
   const boundaryOverlayTurnId = activeContent?.turnId
     ?? (streamingActive ? tailTurnId : undefined);
   // One rail tick per turn that carries a user prompt (Codex-style prompt
@@ -657,7 +653,10 @@ export function ChatView(props: {
                   ))}
                 </section>
               )}
-              {/* The optimistic message supplies the clock while the session is created. */}
+              {/* Send feedback while the session is created. The elapsed clock
+                  stays off until the Turn's own start time reaches the client
+                  (turn.startedAt): a client send timestamp is not a second
+                  authority for when the Turn began. */}
               {runningStatus && (
                 <section className="maka-turn" data-live-streaming="true">
                   <LocalizedChatMessage
@@ -665,9 +664,7 @@ export function ChatView(props: {
                     sender="assistant"
                     className="maka-chat-message maka-assistant-answer"
                   >
-                    <TurnFooter actions={[]} live context="" activity={
-                      <TurnRunningStatus startedAt={pendingRunningStartedAt} />
-                    } />
+                    <TurnFooter actions={[]} live context="" activity={<TurnRunningStatus />} />
                   </LocalizedChatMessage>
                 </section>
               )}
@@ -865,7 +862,7 @@ export function ChatView(props: {
                       activeContent?.turnId === tailTurnId && activeContent?.providerRetry ? (
                         <ModelProviderRetryIndicator retry={activeContent.providerRetry} />
                       ) : (
-                        (runningStatus && <TurnRunningStatus startedAt={pendingRunningStartedAt} />)
+                        (runningStatus && <TurnRunningStatus />)
                       )
                     } />
                   </LocalizedChatMessage>
