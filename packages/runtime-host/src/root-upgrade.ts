@@ -247,6 +247,11 @@ export async function prepareRuntimeHostRoot(
       await assertCompatibleDeployment(target);
     }
     if (plan.locator) {
+      // The locator is a projection of the completed root snapshot. Recreate its
+      // directory without recreating or rereading any legacy data source.
+      let locatorBoundary = dirname(plan.locator);
+      while (!(await present(locatorBoundary))) locatorBoundary = dirname(locatorBoundary);
+      await hardenDirectory(dirname(plan.locator));
       const temporary = `${plan.locator}.${transaction.id}.tmp`;
       await writeFile(
         temporary,
@@ -255,7 +260,7 @@ export async function prepareRuntimeHostRoot(
       );
       await syncFile(temporary);
       await rename(temporary, plan.locator);
-      await syncDirectoryChain(dirname(plan.locator), dirname(plan.locator));
+      await syncDirectoryChain(dirname(plan.locator), locatorBoundary);
     }
     await session.commit();
   });
