@@ -17,6 +17,7 @@
  * under the License.
  */
 
+pub mod access_delivery;
 mod controllers;
 mod execution;
 pub mod oauth;

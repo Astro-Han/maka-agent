@@ -18,6 +18,7 @@
  */
 
 use clap::Parser;
+mod access;
 mod args;
 mod candidate;
 mod code;

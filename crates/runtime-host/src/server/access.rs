@@ -24,7 +24,7 @@ use maka_runtime::access::{
 };
 use serde_json::Value;
 
-mod delivery;
+use crate::access_delivery as delivery;
 mod issuance;
 
 #[derive(serde::Serialize)]

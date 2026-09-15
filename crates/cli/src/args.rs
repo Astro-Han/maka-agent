@@ -47,6 +47,9 @@ enum Command {
 
 #[derive(Subcommand)]
 enum HostCommand {
+    /// Prepare one-time remote Desktop pairing or revoke a credential.
+    #[command(subcommand)]
+    Access(crate::access::Access),
     /// Initialize an empty native State Root, or verify its existing identity.
     Init(Root),
     /// Install this native executable as the root's managed Host.
@@ -116,6 +119,7 @@ impl Cli {
 
     pub(super) async fn run(self) -> Result<(), HostError> {
         match self.command {
+            Command::Host(HostCommand::Access(args)) => args.run().await,
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
             Command::Host(HostCommand::Install(args)) => args.run().await,
             Command::Host(HostCommand::Activate(args)) => args.run().await,

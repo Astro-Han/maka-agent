@@ -68,6 +68,10 @@ pub(super) struct HostClient {
 }
 
 impl HostClient {
+    pub fn root_id(&self) -> &str {
+        &self.discovery.root_id
+    }
+
     pub async fn connect(root: &Path, generation: Option<&str>) -> Result<Self, HostError> {
         let root = root.to_owned();
         tokio::time::timeout(Duration::from_secs(5), async move {
@@ -195,7 +199,11 @@ impl HostClient {
         Ok(result)
     }
 
-    async fn request(&mut self, operation: Operation, input: Value) -> Result<Value, HostError> {
+    pub(super) async fn request(
+        &mut self,
+        operation: Operation,
+        input: Value,
+    ) -> Result<Value, HostError> {
         // A timeout is not evidence of rollback. The caller must rediscover the
         // exact owner before deciding whether any subsequent mutation is safe.
         tokio::time::timeout(Duration::from_secs(15), async {

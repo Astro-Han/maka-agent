@@ -17,6 +17,7 @@
  * under the License.
  */
 
+mod access;
 mod candidate;
 mod code_command;
 mod deployment;

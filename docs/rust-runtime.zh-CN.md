@@ -48,6 +48,11 @@ maka host retire --root /absolute/path/to/new-root
 
 二进制未加入 PATH 时使用 `target/debug/maka`。Linux/macOS 使用 Unix socket，
 Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要认证，尚不支持 TLS。
+对运行中的 Host 执行 `host access prepare --root <目录> --principal <id>` 可获得配对 JSON，
+其中包含秘密凭据，须私密传递。待确认凭据在 15 分钟后过期；导入客户端须先确认配对，再用相同客户端身份重连。
+该 Desktop owner 策略不授予任意 Host 路径访问权。
+`host access revoke --root <目录> --credential-id <id>` 撤销凭据并关闭其远程连接。
+这些命令不会启动 Host 或迁移数据。
 开发构建保留文件与行号回溯；`CARGO_PROFILE_DEV_DEBUG=full` 可启用完整调试信息。
 Windows MSVC 构建使用与官方 V8 静态库一致的静态 CRT。
 两份随仓库保存的 Deno TypeScript 须与 `deno_telemetry` 完全一致，升级依赖时须同步；

@@ -20,7 +20,7 @@
 #[cfg(not(windows))]
 use std::fs::OpenOptions;
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
@@ -30,14 +30,14 @@ const PREFIX: &str = "runtime-host-access-delivery-";
 
 // Keep the file open until cleanup so an unlinked inode cannot be reused for a
 // replacement. No Debug implementation: delivery contents are credentials.
-pub(super) struct Delivery {
+pub(crate) struct Delivery {
     id: String,
     path: PathBuf,
     file: File,
 }
 
 impl Delivery {
-    pub(super) fn create(
+    pub(crate) fn create(
         control: &Path,
         credential_id: &str,
         credential: &str,
@@ -88,7 +88,7 @@ impl Delivery {
         Ok(delivery)
     }
 
-    pub(super) fn id(&self) -> &str {
+    pub(crate) fn id(&self) -> &str {
         &self.id
     }
 }
@@ -147,7 +147,7 @@ fn validate_control(control: &Path) -> io::Result<()> {
     }
 }
 
-pub(super) fn purge(control: &Path) -> io::Result<()> {
+pub(crate) fn purge(control: &Path) -> io::Result<()> {
     validate_control(control)?;
     for entry in fs::read_dir(control)? {
         let entry = entry?;
@@ -176,6 +176,68 @@ pub(super) fn purge(control: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Consume a private, short-lived delivery from an already verified local Host.
+/// The credential is never returned through the ordinary Host response stream.
+pub fn consume(control: &Path, delivery_id: &str, credential_id: &str) -> io::Result<String> {
+    let id = uuid::Uuid::parse_str(delivery_id)
+        .map_err(|_| io::Error::other("invalid access delivery identity"))?;
+    if id.get_version_num() != 4
+        || id.get_variant() != uuid::Variant::RFC4122
+        || id.to_string() != delivery_id
+    {
+        return Err(io::Error::other("invalid access delivery identity"));
+    }
+    validate_control(control)?;
+    let path = control.join(format!("{PREFIX}{delivery_id}.json"));
+    #[cfg(unix)]
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&path)?;
+    #[cfg(windows)]
+    let mut file = maka_event_log::root::windows::open_nofollow(&path, false)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::other("access delivery must be a regular file"));
+    }
+    #[cfg(unix)]
+    // SAFETY: geteuid has no preconditions or pointer arguments.
+    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+        return Err(io::Error::other("access delivery must be account-private"));
+    }
+    #[cfg(windows)]
+    maka_event_log::root::windows::validate_private(&file)?;
+    let mut bytes = Vec::new();
+    (&mut file).take(1025).read_to_end(&mut bytes)?;
+    if bytes.len() > 1024 {
+        return Err(io::Error::other("access delivery exceeds size limit"));
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Payload {
+        credential_id: String,
+        credential: String,
+    }
+    let payload: Payload = serde_json::from_slice(&bytes)
+        .map_err(|_| io::Error::other("invalid access delivery payload"))?;
+    if payload.credential_id != credential_id
+        || payload.credential.is_empty()
+        || payload.credential.encode_utf16().count() > 512
+    {
+        return Err(io::Error::other(
+            "access delivery identity or credential is invalid",
+        ));
+    }
+    // Reuse the producer's inode-bound cleanup. A replaced pathname is never
+    // removed, and the producer's later cleanup cannot remove a new delivery.
+    drop(Delivery {
+        id: delivery_id.into(),
+        path,
+        file,
+    });
+    Ok(payload.credential)
 }
 
 #[cfg(test)]
@@ -207,6 +269,20 @@ mod tests {
         assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
         #[cfg(windows)]
         maka_event_log::root::windows::validate_private(&delivery.file).unwrap();
+        assert!(consume(&root, delivery.id(), "another-credential").is_err());
+        assert!(
+            path.exists(),
+            "identity mismatch must not consume the delivery"
+        );
+        fs::write(&path, vec![b'x'; 1025]).unwrap();
+        assert!(consume(&root, delivery.id(), "id").is_err());
+        fs::write(
+            &path,
+            b"{\"credentialId\":\"id\",\"credential\":\"secret\"}\n",
+        )
+        .unwrap();
+        assert_eq!(consume(&root, delivery.id(), "id").unwrap(), "secret");
+        assert!(consume(&root, delivery.id(), "id").is_err());
         drop(delivery);
         assert!(!path.exists());
 

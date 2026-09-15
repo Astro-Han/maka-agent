@@ -52,6 +52,12 @@ maka host retire --root /absolute/path/to/new-root
 Use `target/debug/maka` if the binary is not on PATH. Local transport is a Unix
 socket on Linux/macOS or a private named pipe on Windows. An optional
 `--websocket 127.0.0.1:0` listener requires authentication; TLS is not implemented.
+Against a running Host, `host access prepare --root <directory> --principal <id>`
+prints pairing JSON containing a secret. Keep it private. It expires after 15
+minutes unless the importing client finalizes it, then reconnects with the same
+client identity. This Desktop-owner policy does not grant arbitrary Host paths.
+`host access revoke --root <directory> --credential-id <id>` revokes it and closes
+its remote connections. These commands neither start the Host nor migrate data.
 Development builds retain line-number backtraces; `CARGO_PROFILE_DEV_DEBUG=full`
 enables full debugger information.
 Windows MSVC builds use the static CRT required by the official V8 archive.
