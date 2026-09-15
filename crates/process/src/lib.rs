@@ -21,6 +21,7 @@
 //! Durable background/PTY resource ownership belongs to the runtime.
 
 mod output;
+pub mod system;
 pub use output::{Captured as PipeResult, Outcome as ProcessOutcome, Termination};
 #[cfg(unix)]
 mod process;

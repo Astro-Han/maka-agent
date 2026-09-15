@@ -1,0 +1,164 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use maka_event_log::root::{RootNamespaces, RootOwner};
+use maka_runtime_host::server::{Host, local::LocalListener};
+use maka_transport::{MessageReader, MessageWriter, TransportError};
+use serde_json::{Value, json};
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+struct Reader(mpsc::UnboundedReceiver<Value>);
+impl MessageReader for Reader {
+    async fn read(&mut self) -> Result<Option<Value>, TransportError> {
+        Ok(self.0.recv().await)
+    }
+}
+
+struct Writer {
+    frames: mpsc::UnboundedSender<Value>,
+    gate: Option<(CancellationToken, CancellationToken)>,
+    fail: bool,
+}
+impl MessageWriter for Writer {
+    async fn write(&mut self, value: &Value) -> Result<(), TransportError> {
+        if value["requestId"] == "retire"
+            && let Some((entered, release)) = &self.gate
+        {
+            entered.cancel();
+            release.cancelled().await;
+            if self.fail {
+                return Err(TransportError::Closed);
+            }
+        }
+        self.frames
+            .send(value.clone())
+            .map_err(|_| TransportError::Closed)
+    }
+    async fn close_after_flush(&mut self) -> Result<(), TransportError> {
+        Ok(())
+    }
+}
+
+fn hello() -> Value {
+    json!({"kind":"hello", "clientInstanceId":"retirement", "surface":"desktop",
+        "protocolMin":0, "protocolMax":0, "compositionId":"maka.interactive",
+        "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH})
+}
+
+async fn receive(frames: &mut mpsc::UnboundedReceiver<Value>) -> Value {
+    tokio::time::timeout(Duration::from_secs(5), frames.recv())
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_abandoned() {
+    for fail in [false, true] {
+        #[cfg(unix)]
+        let directory = {
+            use std::os::unix::fs::PermissionsExt;
+            tempfile::Builder::new()
+                .permissions(std::fs::Permissions::from_mode(0o700))
+                .tempdir_in("/tmp")
+                .unwrap()
+        };
+        #[cfg(windows)]
+        let directory = tempfile::tempdir().unwrap();
+        let namespaces = RootNamespaces {
+            ownership: directory.path().join("owners"),
+            control: directory.path().join("control"),
+        };
+        let root = directory.path().join("root");
+        let owner = RootOwner::create(&root, &namespaces).unwrap();
+        let host = Host::open(owner).await.unwrap();
+        #[cfg(unix)]
+        let endpoint = directory.path().join("h.sock");
+        #[cfg(windows)]
+        let endpoint =
+            std::path::PathBuf::from(format!(r"\\.\pipe\maka-test-{}", uuid::Uuid::new_v4()));
+        let server = tokio::spawn(
+            LocalListener::bind(&endpoint)
+                .unwrap()
+                .serve(host.clone(), CancellationToken::new()),
+        );
+        let entered = CancellationToken::new();
+        let release = CancellationToken::new();
+        let (requests, reader) = mpsc::unbounded_channel();
+        let (frames, mut responses) = mpsc::unbounded_channel();
+        let connection = tokio::spawn(host.clone().local_owner_connection(
+            Reader(reader),
+            Writer {
+                frames,
+                gate: Some((entered.clone(), release.clone())),
+                fail,
+            },
+        ));
+        requests.send(hello()).unwrap();
+        let handshake = receive(&mut responses).await;
+        assert_eq!(handshake["state"], "ready");
+        requests.send(json!({"requestId":"retire", "operation":"host.upgrade.prepare",
+            "input":{"expectedHostEpoch":handshake["hostEpoch"], "allowInterruptActiveTasks":false}}))
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), entered.cancelled())
+            .await
+            .unwrap();
+        assert!(!server.is_finished(), "retirement receipt is still owned");
+        assert!(responses.try_recv().is_err(), "receipt has not flushed");
+        assert!(RootOwner::open(&root, &namespaces).is_err());
+
+        let (other_requests, reader) = mpsc::unbounded_channel();
+        let (frames, mut responses_after_fence) = mpsc::unbounded_channel();
+        let other = tokio::spawn(host.clone().local_owner_connection(
+            Reader(reader),
+            Writer {
+                frames,
+                gate: None,
+                fail: false,
+            },
+        ));
+        other_requests.send(hello()).unwrap();
+        assert_eq!(
+            receive(&mut responses_after_fence).await["kind"],
+            "draining"
+        );
+        other.await.unwrap().unwrap();
+        drop(other_requests);
+
+        release.cancel();
+        if !fail {
+            let receipt = receive(&mut responses).await;
+            assert_eq!(
+                receipt["result"],
+                json!({"kind":"prepared", "pid":std::process::id()})
+            );
+        }
+        drop(requests);
+        assert_eq!(connection.await.unwrap().is_err(), fail);
+        drop(host);
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(RootOwner::open(&root, &namespaces).unwrap());
+    }
+}

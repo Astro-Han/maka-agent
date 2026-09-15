@@ -18,8 +18,7 @@
  */
 
 use super::{
-    Host, HostError, access, bootstrap, capabilities, configuration, context, operations, sessions,
-    turns,
+    Host, HostError, access, capabilities, configuration, context, operations, sessions, turns,
 };
 use maka_protocol::turn;
 use maka_protocol::{Operation, OperationRegistry, Outcome};
@@ -41,6 +40,15 @@ impl Host {
         authority: &super::authority::Authority,
         client_instance_id: &str,
     ) -> Result<Outcome, HostError> {
+        if operation == Operation::HostUpgradePrepare {
+            return match self
+                .prepare_retirement(maka_protocol::host::decode_retirement_input(&input)?)
+                .await
+            {
+                Ok(result) => Ok(Outcome::success(serde_json::to_value(result)?)),
+                Err(error) => Ok(Outcome::failure(error)),
+            };
+        }
         if maka_protocol::workhub::supports(operation) {
             return super::workhub::execute(self, operation, &input, connection_id).await;
         }
@@ -95,12 +103,12 @@ impl Host {
             };
         }
         if operation == Operation::HostStatus {
-            return Ok(Outcome::success(bootstrap::status(
-                &self.epoch,
-                self.connections.load(Ordering::SeqCst),
-                self.executions.active_count(),
-                self.lifecycle(),
-            )));
+            return Ok(Outcome::success(serde_json::to_value(
+                self.status(&self.activity()),
+            )?));
+        }
+        if operation == Operation::HostDiagnosticsQuery {
+            return Ok(Outcome::success(serde_json::to_value(self.diagnostics()?)?));
         }
         if turns::supports(operation) {
             let result = match operation {

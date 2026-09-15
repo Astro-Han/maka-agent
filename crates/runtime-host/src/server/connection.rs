@@ -36,10 +36,14 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-type PendingReply = (
-    Response,
-    Option<tokio_util::task::task_tracker::TaskTrackerToken>,
-);
+type PendingReply = (Response, Option<RequestResidency>);
+
+/// The full request stays resident through response flush. Only mutations
+/// block cooperative maintenance; a concurrent status query is not work.
+pub(super) struct RequestResidency {
+    _request: tokio_util::task::task_tracker::TaskTrackerToken,
+    _command: Option<tokio_util::task::task_tracker::TaskTrackerToken>,
+}
 
 enum CompletedRequest {
     Reply(PendingReply),
@@ -266,9 +270,16 @@ impl Host {
             }
             // Register before checking admission, with no await between them:
             // drain cannot observe zero while an admitted request is untracked.
-            let mut residency = Some(self.requests.token());
+            let mut residency = Some(RequestResidency {
+                _request: self.requests.token(),
+                _command: (request.operation.mode() != maka_protocol::operation::OperationMode::Query)
+                    .then(|| self.commands.token()),
+            });
             in_flight.insert(request.request_id.clone(), request.operation);
-            let draining = self.draining.is_cancelled();
+            let draining = {
+                let retiring = self.handshake_gate.lock().unwrap_or_else(|e| e.into_inner());
+                *retiring || self.draining.is_cancelled()
+            };
             if draining {
                 residency.take();
             }
@@ -277,7 +288,7 @@ impl Host {
                     code: OperationErrorCode::Unauthorized,
                     message: "Runtime Host operation is not authorized".into(),
                 })
-            } else if draining && request.operation != Operation::HostStatus {
+            } else if draining && !matches!(request.operation, Operation::HostStatus | Operation::HostDiagnosticsQuery) {
                 Outcome::failure(OperationError {
                     code: OperationErrorCode::HostDraining,
                     message: "Host is draining".into(),

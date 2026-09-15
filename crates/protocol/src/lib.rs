@@ -31,6 +31,7 @@ pub mod context;
 mod display;
 pub mod execution_boundary;
 pub mod handshake;
+pub mod host;
 pub mod interaction;
 pub mod message;
 pub mod navigation;

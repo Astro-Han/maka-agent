@@ -18,68 +18,56 @@
  */
 
 use maka_protocol::OperationErrorCode;
-use maka_protocol::codec::{count, exact, record, string};
-use maka_protocol::{COMPOSITION_ID, Operation, OperationRegistry, ProtocolError, Result};
+use maka_protocol::codec::{exact, record};
+use maka_protocol::{Operation, OperationRegistry, ProtocolError, Result, host};
 use serde_json::{Value, json};
 
 pub(super) struct Operations;
 
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
-        if operation != Operation::HostStatus {
+        if operation == Operation::HostUpgradePrepare {
+            maka_protocol::host::decode_retirement_input(value)?;
+            return Ok(value.clone());
+        }
+        if !matches!(
+            operation,
+            Operation::HostStatus | Operation::HostDiagnosticsQuery
+        ) {
             return Err(ProtocolError::invalid("Unknown operation"));
         }
         exact(record(value, "host.status input")?, &[])?;
         Ok(json!({}))
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
-        if operation != Operation::HostStatus {
-            return Err(ProtocolError::invalid("Unknown operation"));
+        if operation == Operation::HostUpgradePrepare {
+            maka_protocol::host::decode_retirement_result(value)?;
+            return Ok(value.clone());
         }
-        exact(
-            record(value, "host.status output")?,
-            &[
-                "hostEpoch",
-                "compositionId",
-                "compositionRevision",
-                "state",
-                "connections",
-                "activeOperations",
-                "activeResidencies",
-            ],
-        )?;
-        for key in ["hostEpoch", "compositionId", "compositionRevision"] {
-            string(&value[key], key, 128)?;
-        }
-        for key in ["connections", "activeOperations", "activeResidencies"] {
-            count(&value[key], key)?;
-        }
-        if !matches!(
-            value["state"].as_str(),
-            Some("starting" | "containing" | "recovering" | "ready" | "draining")
-        ) {
-            return Err(ProtocolError::invalid("Invalid host lifecycle"));
+        match operation {
+            Operation::HostStatus => host::decode_status(value)?,
+            Operation::HostDiagnosticsQuery => host::decode_diagnostics(value)?,
+            _ => return Err(ProtocolError::invalid("Unknown operation")),
         }
         Ok(value.clone())
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
-        (operation == Operation::HostStatus).then_some(
+        if operation == Operation::HostUpgradePrepare {
+            return Some(&[
+                OperationErrorCode::OperationConflict,
+                OperationErrorCode::OperationUnavailable,
+                OperationErrorCode::InternalFailure,
+            ]);
+        }
+        matches!(
+            operation,
+            Operation::HostStatus | Operation::HostDiagnosticsQuery
+        )
+        .then_some(
             &[
                 OperationErrorCode::HostDraining,
                 OperationErrorCode::InternalFailure,
             ][..],
         )
     }
-}
-
-pub(super) fn status(
-    epoch: &str,
-    connections: usize,
-    active: usize,
-    state: maka_protocol::handshake::Lifecycle,
-) -> Value {
-    json!({
-        "hostEpoch": epoch, "compositionId": COMPOSITION_ID, "compositionRevision": "3",
-        "state": state, "connections": connections, "activeOperations": active, "activeResidencies": active,
-    })
 }

@@ -34,7 +34,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 async fn initiating_client_admission_replay_disconnect_cancel_and_drain_own_authorization() {
     let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = Fixture::new(Some(proxy.local_addr().unwrap().port())).await;
-    let (host, drain, server) = fixture.serve().await;
+    let (host, _drain, server) = fixture.serve().await;
     let mut first = Peer::new(host.clone(), "oauth-first").await;
     let mut second = Peer::new(host.clone(), "oauth-second").await;
     first.publish("first-publication").await;
@@ -78,6 +78,26 @@ async fn initiating_client_admission_replay_disconnect_cancel_and_drain_own_auth
         queried["result"], started["result"],
         "disconnect must not abandon authorization"
     );
+    let diagnostics = second.rpc("host.diagnostics.query", json!({})).await;
+    assert_eq!(diagnostics["result"]["connections"], 1);
+    assert_eq!(diagnostics["result"]["upgradeBlockingActivity"], true);
+    assert_eq!(
+        diagnostics["result"]["residencies"],
+        json!([{"label":"oauth", "count":1}])
+    );
+    let epoch = diagnostics["result"]["hostEpoch"].clone();
+    for cooperate in [false, true] {
+        let refused = second
+            .rpc(
+                "host.upgrade.prepare",
+                json!({
+                    "expectedHostEpoch":epoch, "allowInterruptActiveTasks":false,
+                    "allowCooperativeHandoff":cooperate,
+                }),
+            )
+            .await;
+        assert_eq!(refused["result"], json!({"kind":"active_tasks"}));
+    }
     let cancelled = second
         .rpc("oauth.login.cancel", json!({"attemptId":"active"}))
         .await;
@@ -118,7 +138,18 @@ async fn initiating_client_admission_replay_disconnect_cancel_and_drain_own_auth
         .await;
     assert_eq!(settled["result"]["phase"], "cancelled");
     let mut socket = pending_connect(&proxy).await;
-    drain.cancel();
+    let retired = second
+        .rpc(
+            "host.upgrade.prepare",
+            json!({
+                "expectedHostEpoch":epoch, "allowInterruptActiveTasks":true,
+            }),
+        )
+        .await;
+    assert_eq!(
+        retired["result"],
+        json!({"kind":"prepared", "pid":std::process::id()})
+    );
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(5), socket.read_u8())
             .await

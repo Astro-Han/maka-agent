@@ -66,7 +66,7 @@ pub(super) async fn serve(
                 };
             },
             Some(result) = connections.join_next(), if !connections.is_empty() => {
-                if let Err(error) = result { eprintln!("host connection task failed: {error}"); }
+                if let Err(error) = result { host.record_diagnostic(format_args!("host connection task failed: {error}")); }
             },
             accepted = local.accept(), if connections.len() < 128 => {
                 let socket = match accepted {
@@ -78,7 +78,7 @@ pub(super) async fn serve(
                 connections.spawn(async move {
                     let (reader, writer) = ndjson::split(socket, token.clone());
                     let _cancel_on_exit = token.clone().drop_guard();
-                    report(host.authorized_connection(
+                    report(&host, host.clone().authorized_connection(
                         reader,
                         writer,
                         super::authority::Authority::LocalOwner,
@@ -99,12 +99,13 @@ pub(super) async fn serve(
                 connections.spawn(async move {
                     let _permit = permit;
                     let _cancel_on_exit = token.clone().drop_guard();
-                    report(super::websocket::connection(socket, host, origins, token).await);
+                    report(&host, super::websocket::connection(socket, host.clone(), origins, token).await);
                 });
             }
         }
     };
     host.draining.cancel();
+    host.record_diagnostic("Host admission closed; awaiting accepted response flush");
     host.requests.close();
     host.requests.wait().await;
     // Registry drain closes provider transports. Admitted ordinary responses
@@ -117,14 +118,15 @@ pub(super) async fn serve(
     host.capabilities.shutdown().await;
     let (log_closed, configuration_closed) =
         tokio::join!(host.log.shutdown(), host.configuration.shutdown());
+    host.record_diagnostic("Host execution, transport and storage drain finished");
     result
         .and(log_closed.map_err(Into::into))
         .and(configuration_closed.map_err(Into::into))
 }
 
-fn report(result: Result<(), HostError>) {
+fn report(host: &Host, result: Result<(), HostError>) {
     if let Err(error) = result {
         // Individual malformed/closed connections never terminate the Host.
-        eprintln!("host connection closed: {error}");
+        host.record_diagnostic(format_args!("host connection closed: {error}"));
     }
 }

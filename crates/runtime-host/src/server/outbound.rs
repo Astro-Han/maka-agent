@@ -18,6 +18,7 @@
  */
 
 use super::HostError;
+use super::connection::RequestResidency;
 use maka_protocol::Response;
 mod pty;
 mod scheduling;
@@ -30,7 +31,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Notify;
-use tokio_util::{sync::CancellationToken, task::task_tracker::TaskTrackerToken};
+use tokio_util::sync::CancellationToken;
 
 const MAX_FRAMES: usize = 64;
 const MAX_BYTES: usize = 2 * 1024 * 1024;
@@ -41,7 +42,7 @@ struct Frame {
     bytes: usize,
     fatal: bool,
     // Kept until this exact frame flushes or the transport is abandoned.
-    _residency: Option<TaskTrackerToken>,
+    _residency: Option<RequestResidency>,
 }
 #[derive(Default)]
 struct State {
@@ -85,7 +86,7 @@ impl Outbound {
     pub async fn reply(
         &self,
         response: Response,
-        residency: Option<TaskTrackerToken>,
+        residency: Option<RequestResidency>,
         fatal: bool,
     ) -> Result<(), HostError> {
         self.push(serde_json::to_value(response)?, residency, fatal)
@@ -94,7 +95,7 @@ impl Outbound {
     async fn push(
         &self,
         value: Value,
-        residency: Option<TaskTrackerToken>,
+        residency: Option<RequestResidency>,
         fatal: bool,
     ) -> Result<(), HostError> {
         let bytes = serde_json::to_vec(&value)?.len() + 1;

@@ -124,21 +124,15 @@ impl Host {
     }
 
     fn activity_snapshot(&self, version: Option<u8>) -> Value {
-        let executions = self.executions.active_count();
-        let shells = self.shells.active_count();
-        let residencies: Vec<_> = [("execution", executions), ("shell", shells)]
-            .into_iter()
-            .filter(|(_, count)| *count != 0)
-            .map(|(label, count)| json!({"label": label, "count": count}))
-            .collect();
+        let activity = self.activity();
         let mut result = json!({
             "connections": self.accepted_connections.load(Ordering::SeqCst),
-            "activeOperations": self.requests.len(),
+            "activeOperations": self.commands.len(),
             "processUptimeSeconds": self.started.elapsed().as_secs(),
-            "residencies": residencies,
+            "residencies": activity.residencies(),
         });
         if version == Some(2) {
-            result["drainResidencies"] = (executions + shells).into();
+            result["drainResidencies"] = activity.resident_count().into();
         }
         result
     }

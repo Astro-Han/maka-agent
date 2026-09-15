@@ -69,6 +69,10 @@ Do not run untrusted code or point test instances at existing user data.
   provider extensions remain open-ended.
 - A State Root has one writer and execution authority. Session, Turn, Run and
   invocation identities remain distinct.
+- Host diagnostics and retirement share active-work accounting, including pending
+  OAuth authorization. Retirement targets an exact Host epoch and retains authority
+  through response flush and resource cleanup. Cooperative step handoff is not yet
+  advertised. The legacy `nodeVersion` field reports `not applicable (Rust)`.
 - Manual resume checks a sealed source without claiming it, then atomically opens
   a new continuation. Replay follows the selected lineage, excluding later branches
   and unfinished response fragments. Unknown effects block admission; repeating

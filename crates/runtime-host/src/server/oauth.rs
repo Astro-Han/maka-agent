@@ -38,6 +38,18 @@ pub(super) struct Coordinator {
     admission: tokio::sync::Mutex<()>,
     state: Mutex<State>,
 }
+
+impl Coordinator {
+    pub(super) fn active_count(&self) -> usize {
+        usize::from(
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .active
+                .is_some(),
+        )
+    }
+}
 #[derive(Default)]
 struct State {
     active: Option<Arc<Attempt>>,

@@ -27,6 +27,7 @@ pub(crate) mod configuration;
 mod connection;
 mod connection_effects;
 mod context;
+mod diagnostics;
 mod dispatch;
 mod execution_boundary;
 mod handshake;
@@ -42,6 +43,7 @@ mod outbound;
 mod projects;
 mod registration;
 mod resources;
+mod retirement;
 mod sessions;
 mod skills;
 mod subscriptions;
@@ -117,6 +119,8 @@ pub struct Host {
     connections: AtomicUsize,
     draining: CancellationToken,
     requests: TaskTracker,
+    commands: TaskTracker,
+    diagnostic_log: Mutex<diagnostics::Log>,
 }
 
 impl Host {
@@ -228,6 +232,8 @@ impl Host {
             connections: AtomicUsize::new(0),
             draining,
             requests: TaskTracker::new(),
+            commands: TaskTracker::new(),
+            diagnostic_log: Mutex::default(),
         });
         let recovery = async {
             workhub::recover(&host).await?;
@@ -243,6 +249,7 @@ impl Host {
             return Err(error.message.into());
         }
         startup_guard.disarm();
+        host.record_diagnostic(format_args!("Host ready: epoch {}", host.epoch));
         Ok(host)
     }
 
