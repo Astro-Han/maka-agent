@@ -1393,15 +1393,21 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
         isDefault: true,
       });
     },
-    recoverLocalHost: (signal) => localRuntimeHostRemoteAccess.recoverBeforeLocalHostStart(signal),
-    resolveStartupRepair: (error, signal) => localRuntimeHostRemoteAccess.resolveStartupRepair(error, signal),
+    recoverLocalHost: (signal) => isE2e
+      ? localRuntimeHostRemoteAccess.recoverBeforeLocalHostStart(signal)
+      : Promise.resolve(false),
+    resolveStartupRepair: (error, signal) => isE2e
+      ? localRuntimeHostRemoteAccess.resolveStartupRepair(error, signal)
+      : Promise.resolve(undefined),
     resolveWslHostHandoff: async (profile, error, signal) => resolveDesktopWslHostHandoff(profile, error, signal, {
       locale: await desktopLocale.resolve(),
       resolveBinding: (profileId) => runtimeHostProfileService.resolveManagedService(profileId),
       resolvePackage: (packageSignal) => runtimeHostSetupPackage.resolve('none', packageSignal),
     }),
     resolveLocalHostReplacement: (registration, signal) =>
-      localRuntimeHostRemoteAccess.resolveConflictingHostReplacement(registration, signal),
+      isE2e
+        ? localRuntimeHostRemoteAccess.resolveConflictingHostReplacement(registration, signal)
+        : Promise.resolve(undefined),
     onFatalError: (error, target) => {
       // Initial failure is handled after manager.start() has closed its own
       // observations. Do not quit before startup-owned resources are drained.
@@ -1482,9 +1488,11 @@ windowsAppTray.start();
 await guestSessionMountService.start().catch((error: unknown) => {
   console.error('[runtime-host] shared Sessions could not be restored:', error);
 });
-await localRuntimeHostRemoteAccess.recover().catch((error: unknown) => {
-  console.error('[runtime-host] interrupted Local Host setup could not be recovered:', error);
-});
+if (isE2e) {
+  await localRuntimeHostRemoteAccess.recover().catch((error: unknown) => {
+    console.error('[runtime-host] interrupted Local Host setup could not be recovered:', error);
+  });
+}
 void runtimeHostProfileService.startEnabledProfiles();
 const unavailableDefault = runtimeHostStartup.unavailable.get(
   runtimeHostStartup.preferences.defaultProfileId,

@@ -21,11 +21,13 @@ import assert from 'node:assert/strict';
 import { parseArgs } from 'node:util';
 import { connectExistingRuntimeHost } from '../../packages/runtime-host/src/client/connection.js';
 import { decodeRuntimeHostActivationFrame } from '../../packages/runtime-host/src/operator/activation-frame.js';
+import { createNativeRuntimeHostCandidateLaunchBarrier } from '../../apps/desktop/src/main/native-runtime-host.js';
 
 const { values } = parseArgs({
   options: {
     'activation-frame': { type: 'string' },
     'lifecycle-mode': { type: 'string' },
+    'native-host': { type: 'string' },
     root: { type: 'string' },
   },
 });
@@ -41,6 +43,28 @@ const connection = await connectExistingRuntimeHost(input);
 assert.equal(connection.kind, 'connected', JSON.stringify(connection));
 assert.equal(connection.registration.lifecycleMode, values['lifecycle-mode']);
 try {
+  const barrier = createNativeRuntimeHostCandidateLaunchBarrier(values['native-host']);
+  try {
+    const managed = await barrier.connect({
+      ...input,
+      generation: 'desktop-generation',
+      takeoverHostEpoch: frame.hostEpoch,
+      candidateEntrypoint: 'must-not-spawn-this',
+    });
+    assert.equal(managed.kind, 'connected');
+    try {
+      assert.equal(managed.spawnedProcess, undefined);
+      assert.equal(managed.connection.hostEpoch, frame.hostEpoch);
+      assert.deepEqual(managed.managedDeployment, {
+        deploymentId: frame.deploymentId,
+        configRevision: frame.configRevision,
+      });
+    } finally {
+      await managed.connection.close();
+    }
+  } finally {
+    barrier.release();
+  }
   assert.equal(connection.connection.rootId, frame.rootId);
   assert.equal(connection.connection.hostEpoch, frame.hostEpoch);
   const diagnostics = await connection.connection.request('host.diagnostics.query', {});

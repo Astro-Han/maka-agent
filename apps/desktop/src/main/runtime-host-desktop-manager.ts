@@ -1215,12 +1215,12 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
       }
       if (result.kind === 'incompatible' || result.kind === 'upgrade_required') {
         const conflict = result;
-        const idleTakeover = result.kind === 'upgrade_required' && result.restartable &&
+        const idleTakeover = !result.managedDeployment && result.kind === 'upgrade_required' && result.restartable &&
           !target.input.profileTarget && target.input.generation !== undefined;
-        const cooperativeRetirement = !target.input.profileTarget &&
+        const cooperativeRetirement = !result.managedDeployment && !target.input.profileTarget &&
           result.registration.lifecycleMode === 'ephemeral' &&
           result.handshake?.activity?.cooperativeHandoff === true;
-        const replacement = target.input.profileTarget
+        const replacement = target.input.profileTarget || result.managedDeployment
           ? undefined
           : this.#registeredEphemeralHostReplacement(target, result, signal) ??
             (await this.resolveLocalHostReplacement?.(result.registration, signal));

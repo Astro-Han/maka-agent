@@ -79,6 +79,9 @@ starts an account-level systemd service, LaunchAgent or Windows scheduled task.
 Linux requires an active user manager with lingering enabled; macOS requires an
 Aqua login and Windows an interactive user session. Installation alone does not
 start a service or change account policy.
+Desktop reuses managed native Hosts and activates pinned code when needed;
+its own generation and exit do not govern their lifetime. Pausing local launches
+waits for outstanding activations before handing off the Root.
 Deployment authority lives in account-level
 SQLite, outside the State Root; startup checks it before database migrations.
 On Windows, supervised installations use the sibling `maka-service.exe`, a

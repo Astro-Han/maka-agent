@@ -132,7 +132,7 @@ export function electionDeadlineMsFromEnvironment(
   return parsed;
 }
 
-export type ConnectOrSpawnRuntimeHostResult =
+export type ConnectOrSpawnRuntimeHostResult = (
   | {
       kind: 'connected';
       connection: RuntimeHostConnection;
@@ -151,7 +151,14 @@ export type ConnectOrSpawnRuntimeHostResult =
       kind: 'failed';
       reason: CandidateStartupFailure['reason'] | 'startup_timeout' | 'host_unresponsive';
       diagnostic?: RuntimeHostElectionDiagnostic;
-    };
+    }
+) & {
+  /** The deployment operator owns this Host, including an on-demand process. */
+  readonly managedDeployment?: {
+    readonly deploymentId: string;
+    readonly configRevision: number;
+  };
+};
 
 export interface RuntimeHostElectionDiagnostic {
   readonly deadlineMs: number;

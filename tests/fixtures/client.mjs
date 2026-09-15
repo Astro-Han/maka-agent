@@ -36,6 +36,7 @@ const entries = [
   ['--project-workspace', 'client-project-entry.mjs'],
   ['--native-candidate', 'client-candidate-entry.mjs'],
   ['--native-access', 'client-access-entry.mjs'],
+  ['--native-managed', 'client-native-managed-entry.mjs'],
   ['--activation-frame', 'client-activation-entry.mjs'],
   ['--bridge', 'client-bridge-entry.mjs'],
   ['--system-prompt-workspace', 'client-system-prompt-entry.mjs'],

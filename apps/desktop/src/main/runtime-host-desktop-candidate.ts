@@ -209,7 +209,7 @@ export interface DesktopRuntimeHostCandidateControls {
   refreshClientCapabilities(): Promise<void>;
 }
 
-export type DesktopRuntimeHostOwnership = 'owned_ephemeral' | 'supervised' | 'external';
+export type DesktopRuntimeHostOwnership = 'owned_ephemeral' | 'managed' | 'supervised' | 'external';
 
 export interface DesktopRuntimeHostCandidateStartInput
   extends Omit<DesktopRuntimeHostCandidateDeps, "ipcMain"> {
@@ -396,7 +396,9 @@ export async function startDesktopRuntimeHostCandidate(
         connection.connection,
         { ...input, ipcMain },
         observationRegistry,
-        connection.registration.lifecycleMode === 'ephemeral'
+        connection.managedDeployment
+          ? 'managed'
+          : connection.registration.lifecycleMode === 'ephemeral'
           ? 'owned_ephemeral'
           : 'supervised',
         "local",

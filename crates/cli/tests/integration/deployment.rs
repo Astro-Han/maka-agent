@@ -246,6 +246,27 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert_eq!(observed["host"]["identity"]["pid"], registration["pid"]);
         assert_eq!(observed["host"]["activity"]["state"], "ready");
         assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
+        // Both lifecycle modes use the original Desktop connector. In
+        // particular, a service cannot be replaced by Desktop generation.
+        let client = Command::new("node")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+            .arg("--activation-frame")
+            .arg(String::from_utf8(activate.output().unwrap().stdout).unwrap())
+            .args([
+                "--native-host",
+                env!("CARGO_BIN_EXE_maka"),
+                "--lifecycle-mode",
+                if candidate { "ephemeral" } else { "service" },
+            ])
+            .arg("--root")
+            .arg(&fixture.root)
+            .output()
+            .unwrap();
+        assert!(
+            client.status.success(),
+            "{}",
+            String::from_utf8_lossy(&client.stderr)
+        );
         let retired = Command::new("node")
             .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
             .args([
@@ -299,23 +320,6 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert_eq!(frame["deploymentId"], installed["deploymentId"]);
         // The operator has exited; a relay still has time to establish its client.
         std::thread::sleep(Duration::from_millis(1100));
-        let client = Command::new("node")
-            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
-            .arg("--activation-frame")
-            .arg(String::from_utf8(activated.stdout).unwrap())
-            .args([
-                "--lifecycle-mode",
-                if candidate { "ephemeral" } else { "service" },
-            ])
-            .arg("--root")
-            .arg(&fixture.root)
-            .output()
-            .unwrap();
-        assert!(
-            client.status.success(),
-            "{}",
-            String::from_utf8_lossy(&client.stderr)
-        );
         let reused = activate.output().unwrap();
         assert!(reused.status.success(), "{reused:?}");
         assert_eq!(decode_activation(&reused.stdout), frame);
@@ -346,6 +350,30 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             "stopped"
         );
         drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
+        let native_desktop = |revoked: bool| {
+            let mut client = Command::new("node");
+            client
+                .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+                .args([
+                    "--native-managed",
+                    env!("CARGO_BIN_EXE_maka"),
+                    "--root-id",
+                    &fixture.root_id,
+                ])
+                .arg("--root")
+                .arg(&fixture.root);
+            if revoked {
+                client.arg("--revoked");
+            }
+            let output = client.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        native_desktop(false);
+        drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
         let uninstalled = control("uninstall").output().unwrap();
         assert!(uninstalled.status.success(), "{uninstalled:?}");
         let uninstalled: Value = serde_json::from_slice(&uninstalled.stdout).unwrap();
@@ -356,6 +384,8 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         let observed = query("status");
         assert_eq!(observed["deployment"], uninstalled["deployment"]);
         assert_eq!(observed["host"]["kind"], "not_admitted");
+        native_desktop(true);
+        drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
         let repeated = control("uninstall").output().unwrap();
         assert!(repeated.status.success(), "{repeated:?}");
         assert_eq!(

@@ -26,6 +26,7 @@ import {
   type RuntimeHostCandidateLaunchBarrier,
   type RuntimeHostCandidateLaunchBarrierDependencies,
 } from '@maka/runtime-host/client';
+import { createNativeRuntimeHostDeploymentConnector } from './native-runtime-host-deployment.js';
 
 const run = promisify(execFile);
 type Launch = RuntimeHostCandidateLaunchBarrierDependencies['launchCandidate'];
@@ -53,7 +54,7 @@ export async function initializeNativeRuntimeHost(
 export function createNativeRuntimeHostCandidateLaunchBarrier(
   executable: string,
 ): RuntimeHostCandidateLaunchBarrier {
-  return createRuntimeHostCandidateLaunchBarrierWithDependencies({
+  const candidates = createRuntimeHostCandidateLaunchBarrierWithDependencies({
     retireTimeoutMs: 1000,
     launchCandidate: (input) => launchCandidate(executable, input),
     connect(input, launchCandidate) {
@@ -65,6 +66,50 @@ export function createNativeRuntimeHostCandidateLaunchBarrier(
       });
     },
   });
+  let launchesAllowed = true;
+  let released = false;
+  const activations = new Map<string, Promise<string>>();
+  const connect = createNativeRuntimeHostDeploymentConnector({
+    executable,
+    connectUnmanaged: (input) => candidates.connect(input),
+    activate(rootId) {
+      if (!launchesAllowed) throw new Error('Native Host launches are paused');
+      const existing = activations.get(rootId);
+      if (existing) return existing;
+      const activation = run(executable, ['host', 'activate', '--root-id', rootId, '--framed'], {
+        maxBuffer: 32 * 1024,
+        windowsHide: true,
+      }).then(({ stdout }) => stdout);
+      activations.set(rootId, activation);
+      void activation.finally(() => activations.delete(rootId)).catch(() => undefined);
+      return activation;
+    },
+  });
+  return {
+    connect(input) {
+      if (!launchesAllowed) return Promise.reject(new Error('Native Host launches are paused'));
+      return connect(input);
+    },
+    pause() {
+      candidates.pause();
+      launchesAllowed = false;
+    },
+    async retireExcept(protectedPid) {
+      if (launchesAllowed) throw new Error('Native Host launches must be paused before retirement');
+      await Promise.allSettled(activations.values());
+      await candidates.retireExcept(protectedPid);
+    },
+    resume() {
+      if (released) return;
+      candidates.resume();
+      launchesAllowed = true;
+    },
+    release() {
+      released = true;
+      launchesAllowed = false;
+      candidates.release();
+    },
+  };
 }
 
 function launchCandidate(executable: string, input: Parameters<Launch>[0]): ReturnType<Launch> {
