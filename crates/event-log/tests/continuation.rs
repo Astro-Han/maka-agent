@@ -35,6 +35,8 @@ mod fixtures;
 mod handoff;
 #[path = "continuation/handoff_budget.rs"]
 mod handoff_budget;
+#[path = "continuation/handoff_cancel.rs"]
+mod handoff_cancel;
 #[path = "continuation/handoff_claim.rs"]
 mod handoff_claim;
 #[path = "continuation/handoff_consumers.rs"]

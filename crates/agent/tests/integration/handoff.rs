@@ -26,7 +26,7 @@ use maka_event_log::EventLog;
 use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::ModelExecutor;
 use maka_runtime::{
-    event::{Fact, InvocationOutcome, TerminalStatus},
+    event::{EventWrite, Fact, InvocationInput, InvocationOutcome, RuntimeEvent, TerminalStatus},
     handoff::HandoffIntent,
 };
 use std::{
@@ -53,7 +53,8 @@ fn intent(id: &str) -> HandoffIntent {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reopen() {
-    tokio::time::timeout(Duration::from_secs(20), async {
+    for manual in [false, true] {
+        tokio::time::timeout(Duration::from_secs(20), async {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("events.sqlite");
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -88,6 +89,36 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
         run.configuration.workspace_identity = Some(maka_runtime::execution::WorkspaceIdentity::from_marker_id(
             "ef751105-55b5-4d65-a364-646281586a17").unwrap());
         run.main_output_limit = Some(120);
+        if manual {
+            run.request_fingerprint = Some(maka_runtime::artifact::content_digest(b"manual-resume"));
+            let mut source = run.invocation.clone();
+            source.turn_id = "turn-source".into();
+            source.run_id = "run-source".into();
+            source.invocation_id = "invocation-source".into();
+            for (invocation, text) in [(source.clone(), "question source"), ({
+                let mut branch = source.clone();
+                branch.turn_id = "turn-branch".into();
+                branch.run_id = "run-branch".into();
+                branch.invocation_id = "invocation-branch".into();
+                branch
+            }, "unrelated branch")] {
+                for fact in [
+                    Fact::InvocationOpened { configuration: Some(run.configuration.clone()),
+                        input: InvocationInput::Message { content: text.into(), request_fingerprint: None,
+                            source_messages: Vec::new(), skill_invocation: None } },
+                    Fact::InvocationEnded { outcome: InvocationOutcome::Cancelled { source: "user".into() } },
+                ] {
+                    log.append(&EventWrite::plain(RuntimeEvent::new(invocation.clone(), fact)).unwrap()).await.unwrap();
+                }
+            }
+            let prefix = log.run_prefix("session", &source.run_id, None, 100, 128 * 1024).await.unwrap().unwrap();
+            let maka_agent::RunWork::Message { tools, max_steps, .. } = run.work else { unreachable!() };
+            run.work = maka_agent::RunWork::Continuation {
+                source: maka_runtime::continuation::RunBoundary {
+                    invocation: source, high_water: prefix.high_water, digest: prefix.digest,
+                }, workhub_resume: None, tools, max_steps,
+            };
+        }
         let configuration = run.configuration.clone();
         let running = engine.start(run, CancellationToken::new()).await.unwrap();
         first.await.unwrap();
@@ -111,6 +142,7 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
         let held = next.ready().await.unwrap();
         assert_eq!(held.preview().remaining_steps.get(), 1);
         let expected = held.preview().clone();
+        assert_eq!(expected.execution.replay_base.is_some(), manual);
         let receipt = held.commit().unwrap().wait().await.unwrap();
         assert_eq!(receipt, expected);
         running.wait().await.unwrap();
@@ -119,7 +151,7 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
         assert!(tokio::time::timeout(Duration::from_millis(30), &mut third).await.is_err(),
             "no model request follows the committed hold");
         let before = log.prefix(100, 128 * 1024).await.unwrap();
-        assert_eq!(before.events.iter().filter(|e| matches!(e.event.fact, Fact::InvocationOpened { .. })).count(), 1);
+        assert_eq!(before.events.iter().filter(|e| matches!(e.event.fact, Fact::InvocationOpened { .. })).count(), if manual { 3 } else { 1 });
         assert!(matches!(&before.events.last().unwrap().event.fact,
             Fact::InvocationEnded { outcome: InvocationOutcome::HandoffPaused { pause } } if pause == &expected));
         let effect = Arc::new(Effect { log: log.clone(), count: count.clone() });
@@ -176,10 +208,14 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
         let messages = requests[2]["messages"].as_array().unwrap();
         assert_eq!(messages.iter().filter(|m| m["role"] == "user").count(), 1);
         assert_eq!(messages.iter().filter(|m| m["role"] == "tool").count(), 2);
+        let prompt = serde_json::to_string(messages).unwrap();
+        assert!(prompt.contains(if manual { "question source" } else { "question first" }));
+        assert!(!prompt.contains("unrelated branch"));
         assert_eq!(count.load(Ordering::SeqCst), 1, "settled effects are replayed as facts, never executed");
         let finished = reopened.prefix(100, 128 * 1024).await.unwrap();
         assert_eq!(finished.project_invocation("invocation-committed").terminal, Some(TerminalStatus::Completed));
         assert!(!serde_json::to_string(&finished.events).unwrap().contains("do-not-persist-this-secret"));
         reopened.shutdown().await.unwrap();
     }).await.unwrap();
+    }
 }

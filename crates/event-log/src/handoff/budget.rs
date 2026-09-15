@@ -20,10 +20,9 @@
 use crate::StoreError;
 use maka_runtime::{
     continuation::{
-        ContinuationClaim, MAX_SOURCE_BYTES, MAX_SOURCE_EVENTS, REPLAY_VERSION, ReplayEvidence,
-        RunBoundary, SessionBase,
+        ContinuationClaim, MAX_SOURCE_BYTES, MAX_SOURCE_EVENTS, RunBoundary, SessionBase,
     },
-    event::{Fact, InvocationInput, RuntimeEvent},
+    event::{CancellationCause, Fact, InvocationInput, InvocationOutcome, RuntimeEvent},
     handoff::HandoffPause,
 };
 use sqlx::SqliteConnection;
@@ -53,7 +52,7 @@ pub(super) async fn check(
         ));
     };
     // Sizing only: no claim is acquired and no guessed proof is persisted.
-    // Reserve the widest ordinals, fixed-width digests and both new envelopes.
+    // Reserve both new envelopes and room to cancel the successor immediately.
     let digest = format!("sha256:{}", "0".repeat(64));
     let successor = RuntimeEvent::new(
         pause.intent.successor(&seal.invocation),
@@ -72,19 +71,37 @@ pub(super) async fn check(
                         high_water: u64::MAX,
                         digest: digest.clone(),
                     },
-                    replay: ReplayEvidence {
-                        version: REPLAY_VERSION,
-                        digest,
-                        route_identity: pause.execution.route_identity.clone(),
-                    },
+                    replay: pause.execution.replay.clone(),
                 }),
             },
         },
     );
+    // Attribution strings are fixed prefixes plus fixed-width digests, regardless
+    // of the action ID. Size every supported cause, never a guessed byte allowance.
+    let action_id = maka_runtime::workhub::ActionId::new(pause.intent.claim_id.clone())
+        .map_err(super::invalid)?;
+    let mut cancelled_bytes = 0;
+    for cause in [
+        CancellationCause::Runtime,
+        CancellationCause::WorkhubStop {
+            action_id: action_id.clone(),
+        },
+        CancellationCause::WorkhubCorrection { action_id },
+    ] {
+        let cancelled = RuntimeEvent::new(
+            successor.invocation.clone(),
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::Cancelled {
+                    source: cause.source(),
+                },
+            },
+        );
+        cancelled_bytes = cancelled_bytes.max(envelope_bytes(&cancelled)?);
+    }
     let bytes = MAX_SOURCE_BYTES
-        .checked_sub(seal_bytes + envelope_bytes(&successor)?)
+        .checked_sub(seal_bytes + envelope_bytes(&successor)? + cancelled_bytes)
         .ok_or(StoreError::PrefixTooLarge)?;
-    crate::context::read::check_handoff_capacity(tx, opening, MAX_SOURCE_EVENTS - 2, bytes).await
+    crate::context::read::check_handoff_capacity(tx, opening, MAX_SOURCE_EVENTS - 3, bytes).await
 }
 
 fn envelope_bytes(event: &RuntimeEvent) -> Result<usize, StoreError> {

@@ -44,6 +44,7 @@ mod connection_multiplex;
 mod context_compaction;
 mod execution_boundary;
 mod execution_drain;
+mod handoff;
 mod host_drain;
 mod large_outputs;
 mod live_pipes;

@@ -173,7 +173,11 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time_and_original_decode
                 },
                 remaining_steps: std::num::NonZeroU16::new(2).unwrap(),
                 execution: Box::new(maka_runtime::handoff::HandoffExecution {
-                    route_identity: format!("sha256:{}", "b".repeat(64)),
+                    replay: maka_runtime::continuation::ReplayEvidence {
+                        version: maka_runtime::continuation::REPLAY_VERSION,
+                        digest: format!("sha256:{}", "a".repeat(64)),
+                        route_identity: format!("sha256:{}", "b".repeat(64)),
+                    },
                     context: None,
                     provider_options: serde_json::json!({}),
                     main_output_limit: None,

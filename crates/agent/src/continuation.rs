@@ -153,20 +153,9 @@ pub(super) async fn inspect(
             crate::RunWork::Handoff { pause, .. } => pause.execution.replay_base,
             _ => Some(base.high_water),
         },
+        &input.invocation.invocation_id,
     )
     .await?;
-    if !matches!(
-        prompt.iter().find(|m| !matches!(m, Message::System { .. })),
-        Some(Message::User { .. })
-    ) || !matches!(
-        prompt.last(),
-        Some(Message::User { .. } | Message::Tool { .. })
-    ) && !matches!(prompt.last(), Some(Message::Assistant { content, .. }) if matches!(content.last(), Some(AssistantPart::ToolResult { .. })))
-    {
-        return Err(invalid(
-            "continuation requires stable user/tool replay boundaries",
-        ));
-    }
     let tools = maka_tools::RunTools::new(
         inner.log.clone(),
         input.invocation.clone(),
@@ -201,18 +190,43 @@ pub(super) async fn inspect(
             }
         }
     }
+    let replay = replay(input, prompt, definitions, cancellation)?;
+    if let crate::RunWork::Handoff { pause, .. } = &input.work
+        && replay != pause.execution.replay
+    {
+        return Err(invalid("handoff admission replay changed after sealing"));
+    }
+    Ok((base, replay))
+}
+
+/// Shared by reversible handoff preparation and independently verified admission.
+pub(super) fn replay(
+    input: &RunInput,
+    prompt: Vec<Message>,
+    definitions: Vec<maka_model::ToolDefinition>,
+    cancellation: &CancellationToken,
+) -> Result<ReplayEvidence, RunError> {
+    if !matches!(
+        prompt.iter().find(|m| !matches!(m, Message::System { .. })),
+        Some(Message::User { .. })
+    ) || !matches!(
+        prompt.last(),
+        Some(Message::User { .. } | Message::Tool { .. })
+    ) && !matches!(prompt.last(), Some(Message::Assistant { content, .. }) if matches!(content.last(), Some(AssistantPart::ToolResult { .. })))
+    {
+        return Err(invalid(
+            "continuation requires stable user/tool replay boundaries",
+        ));
+    }
     let request = model_attempt::prepare_request(input, prompt, definitions, ModelPurpose::Main)?;
     if cancellation.is_cancelled() {
         return Err(RunError::Cancelled);
     }
-    Ok((
-        base,
-        ReplayEvidence {
-            version: REPLAY_VERSION,
-            digest: request.input_digest,
-            route_identity: request.route_identity,
-        },
-    ))
+    Ok(ReplayEvidence {
+        version: REPLAY_VERSION,
+        digest: request.input_digest,
+        route_identity: request.route_identity,
+    })
 }
 
 fn invalid(reason: &str) -> RunError {

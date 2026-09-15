@@ -186,11 +186,32 @@ impl Executions {
             .await
             .map_err(internal)?
             .ok_or_else(|| failure(Code::NotFound, "Turn does not exist"))?;
-        let invocation = boundary.invocation.clone();
-        let snapshot = snapshot::project(boundary).snapshot;
-        if snapshot.run_id != input.run_id {
+        if boundary.root_invocation().run_id != input.run_id {
             return Err(failure(Code::OperationConflict, "Run identity changed"));
         }
+        let boundary = if matches!(
+            boundary.state,
+            maka_event_log::turns::InvocationState::Ended {
+                outcome: maka_runtime::event::InvocationOutcome::HandoffPaused { .. },
+                ..
+            }
+        ) {
+            self.log
+                .cancel_handoff(&boundary.invocation, maka_agent::CancellationCause::Runtime)
+                .await
+                .map_err(|error| match error {
+                    StoreError::CommitUnknown(_) | StoreError::OperationUnknown => {
+                        self.begin_drain();
+                        // turn.stop has no commit_outcome_unknown wire outcome.
+                        // Fence admission without inventing a client protocol code.
+                        failure(Code::HostDraining, &error.to_string())
+                    }
+                    _ => internal(error),
+                })?
+        } else {
+            boundary
+        };
+        let invocation = boundary.invocation;
         let cancellation = self
             .active
             .lock()

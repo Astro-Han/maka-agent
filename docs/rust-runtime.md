@@ -70,6 +70,7 @@ Do not run untrusted code or point test instances at existing user data.
 - A State Root has one writer and execution authority. Session, Turn, Run and
   invocation identities remain distinct. Cooperative continuation preserves the
   public Run identity; claims and cleanup still address exact physical Runs.
+  Sealed work can be cancelled without loading a provider or repeating effects.
 - Host diagnostics and retirement share active-work accounting, including pending
   OAuth authorization. Retirement targets an exact Host epoch and retains authority
   through response flush and resource cleanup. Cooperative step handoff is not yet

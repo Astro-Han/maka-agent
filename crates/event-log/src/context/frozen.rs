@@ -195,15 +195,23 @@ pub(crate) async fn verify_base(
     opening_sequence: u64,
     expected: &maka_runtime::continuation::SessionBase,
 ) -> Result<(), StoreError> {
-    let session = &invocation.session_id;
-    let through = evidence::high_water(connection, session, opening_sequence as i64).await?;
-    if through != expected.high_water
-        || evidence::evidence(connection, session, through)
-            .await?
-            .digest
-            != expected.digest
-    {
+    if fresh_base(connection, invocation, opening_sequence).await? != *expected {
         return Err(invalid("continuation's fresh Session base changed"));
     }
     Ok(())
+}
+
+pub(crate) async fn fresh_base(
+    connection: &mut SqliteConnection,
+    invocation: &Invocation,
+    opening_sequence: u64,
+) -> Result<maka_runtime::continuation::SessionBase, StoreError> {
+    let session = &invocation.session_id;
+    let through = evidence::high_water(connection, session, opening_sequence as i64).await?;
+    Ok(maka_runtime::continuation::SessionBase {
+        high_water: through,
+        digest: evidence::evidence(connection, session, through)
+            .await?
+            .digest,
+    })
 }

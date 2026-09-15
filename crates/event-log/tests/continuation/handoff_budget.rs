@@ -29,7 +29,7 @@ use std::{
 };
 
 #[tokio::test]
-async fn handoff_reserves_both_envelopes_before_sealing_a_near_capacity_context() {
+async fn handoff_reserves_successor_and_cancellation_before_sealing_a_near_capacity_context() {
     for reserve_successor in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let log = EventLog::open(&directory.path().join("capacity.sqlite"))
@@ -110,6 +110,13 @@ async fn handoff_reserves_both_envelopes_before_sealing_a_near_capacity_context(
         });
         if reserve_successor {
             reserved_bytes += serde_json::to_vec(&future).unwrap().len();
+            let mut cancelled = future.clone();
+            cancelled["fact"] = serde_json::json!({"kind":"invocation_ended", "outcome":{
+                "kind":"cancelled", "source": maka_runtime::event::CancellationCause::WorkhubCorrection {
+                    action_id: pause.intent.claim_id.parse().unwrap(),
+                }.source(),
+            }});
+            reserved_bytes += serde_json::to_vec(&cancelled).unwrap().len();
         }
         let mut completed = RuntimeEvent::new(
             source.invocation.clone(),

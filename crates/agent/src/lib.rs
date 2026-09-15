@@ -198,7 +198,8 @@ impl Engine {
                     || input.provider_options != pause.execution.provider_options
                     || input.main_output_limit != pause.execution.main_output_limit
                     || input.supports_vision != pause.execution.supports_vision
-                    || model_attempt::route_identity(&input)? != pause.execution.route_identity
+                    || model_attempt::route_identity(&input)?
+                        != pause.execution.replay.route_identity
                 {
                     return Err(RunError::InvalidInput(
                         "handoff execution settings changed".into(),

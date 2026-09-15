@@ -22,6 +22,7 @@ use maka_runtime::event::{Fact, InvocationInput, InvocationOutcome, RuntimeEvent
 use sqlx::{Connection, SqliteConnection};
 
 mod budget;
+mod cancel;
 
 impl EventLog {
     /// Eligibility only. The source still owns execution until its seal commits.

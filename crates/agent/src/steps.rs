@@ -56,12 +56,42 @@ pub(super) async fn run(
         inner.log.commit_pending_steering(&input.invocation).await?;
         if let Some(pause) = handoff
             .boundary(cancellation, |intent| async {
+                let source = inner
+                    .log
+                    .read_model_context(
+                        &input.invocation.session_id,
+                        Some(&input.invocation.invocation_id),
+                        10_000,
+                        8 * 1024 * 1024,
+                    )
+                    .await
+                    .ok()?;
+                // Read the live source, but project from the successor's point of
+                // view: manual replay cuts distinguish current from inherited work.
+                let prompt = model_attempt::prompt(
+                    inner,
+                    input,
+                    &source,
+                    ModelPurpose::Main,
+                    cancellation,
+                    continuation_base,
+                    &intent.successor_invocation_id,
+                )
+                .await
+                .ok()?;
+                let replay = crate::continuation::replay(
+                    input,
+                    prompt,
+                    tools.capture().definitions(),
+                    cancellation,
+                )
+                .ok()?;
                 let pause = maka_runtime::handoff::HandoffPause {
                     intent,
                     remaining_steps: std::num::NonZeroU16::new((max_steps - step) as u16)
                         .expect("validated step budget"),
                     execution: Box::new(maka_runtime::handoff::HandoffExecution {
-                        route_identity: model_attempt::route_identity(input).ok()?,
+                        replay,
                         context: input.context.clone(),
                         provider_options: input.provider_options.clone(),
                         main_output_limit: input.main_output_limit,
@@ -126,6 +156,7 @@ pub(super) async fn run(
             ModelPurpose::Main,
             cancellation,
             continuation_base,
+            &input.invocation.invocation_id,
         )
         .await?;
         let result = model_attempt::execute(
@@ -206,6 +237,7 @@ pub(super) async fn run(
                 ModelPurpose::Main,
                 cancellation,
                 continuation_base,
+                &input.invocation.invocation_id,
             )
             .await?;
             let ids: Vec<_> = local_calls.iter().map(|call| call.id.as_str()).collect();

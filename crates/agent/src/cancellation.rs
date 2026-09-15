@@ -17,16 +17,9 @@
  * under the License.
  */
 
-use maka_runtime::workhub::ActionId;
+pub use maka_runtime::event::CancellationCause;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
-
-#[derive(Clone, Debug)]
-pub enum CancellationCause {
-    Runtime,
-    WorkhubStop { action_id: ActionId },
-    WorkhubCorrection { action_id: ActionId },
-}
 
 #[derive(Clone)]
 pub struct RunCancellation {
@@ -69,15 +62,12 @@ impl RunCancellation {
     }
 
     pub(crate) fn source(&self) -> String {
-        match self.cause.lock().unwrap().as_ref() {
-            Some(CancellationCause::WorkhubCorrection { action_id }) => {
-                maka_runtime::workhub::correction_abort_source(action_id)
-            }
-            Some(CancellationCause::WorkhubStop { action_id }) => {
-                maka_runtime::workhub::stop_abort_source(action_id)
-            }
-            Some(CancellationCause::Runtime) | None => "runtime_cancellation".into(),
-        }
+        self.cause
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap_or(&CancellationCause::Runtime)
+            .source()
     }
 }
 

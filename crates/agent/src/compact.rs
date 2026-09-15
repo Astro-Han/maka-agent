@@ -84,6 +84,7 @@ pub(super) async fn run(
         ModelPurpose::Summary,
         cancellation,
         continuation_base,
+        &input.invocation.invocation_id,
     )
     .await?;
     let base = format!(

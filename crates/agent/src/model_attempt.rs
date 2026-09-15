@@ -49,11 +49,12 @@ pub(super) async fn prompt(
     purpose: ModelPurpose,
     cancellation: &CancellationToken,
     continuation_base: Option<u64>,
+    current: &str,
 ) -> Result<Vec<Message>, RunError> {
     let route = route_identity(input)?;
     let replay = continuation_base.map(|base| history::Replay {
         base,
-        current: &input.invocation.invocation_id,
+        current,
         route: &route,
         model: &input.provider.model,
     });
@@ -176,6 +177,7 @@ pub(super) async fn execute(
                 ModelPurpose::Main,
                 cancellation,
                 continuation_base,
+                &input.invocation.invocation_id,
             )
             .await?;
             if replay != prompt {

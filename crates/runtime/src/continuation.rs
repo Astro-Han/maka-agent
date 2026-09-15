@@ -63,6 +63,18 @@ pub const MAX_ANCESTRY: usize = 64;
 pub const MAX_SOURCE_EVENTS: usize = 10_000;
 pub const MAX_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 
+impl ReplayEvidence {
+    pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.version != REPLAY_VERSION
+            || !valid_projection_digest(&self.digest)
+            || !valid_projection_digest(&self.route_identity)
+        {
+            return Err("invalid provider replay evidence");
+        }
+        Ok(())
+    }
+}
+
 impl ContinuationClaim {
     pub fn validate(&self, target: &Invocation) -> Result<(), &'static str> {
         self.validate_boundary(target)?;
@@ -96,12 +108,9 @@ impl ContinuationClaim {
             || self.base.high_water >= i64::MAX as u64
             || !valid_projection_digest(&self.source.digest)
             || !valid_projection_digest(&self.base.digest)
-            || self.replay.version != REPLAY_VERSION
-            || !valid_projection_digest(&self.replay.digest)
-            || !valid_projection_digest(&self.replay.route_identity)
         {
             return Err("invalid continuation boundary or replay evidence");
         }
-        Ok(())
+        self.replay.validate()
     }
 }

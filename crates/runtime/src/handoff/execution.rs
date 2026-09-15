@@ -26,7 +26,8 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HandoffExecution {
-    pub route_identity: String,
+    /// Admission projection, before any successor-side automatic compaction.
+    pub replay: crate::continuation::ReplayEvidence,
     pub context: Option<ModelRequestContext>,
     /// Provider-specific options intentionally retain their extensible JSON shape.
     pub provider_options: Value,
@@ -50,8 +51,8 @@ pub struct HandoffTools {
 
 impl HandoffExecution {
     pub(super) fn validate(&self) -> Result<(), &'static str> {
-        if !valid_projection_digest(&self.route_identity)
-            || !valid_projection_digest(&self.tools.catalog_digest)
+        self.replay.validate()?;
+        if !valid_projection_digest(&self.tools.catalog_digest)
             || self
                 .main_output_limit
                 .is_some_and(|n| n == 0 || n > 10_000_000_000)

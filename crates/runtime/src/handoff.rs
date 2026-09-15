@@ -88,7 +88,7 @@ impl HandoffPause {
         claim.validate_boundary(target)?;
         self.validate(&claim.source.invocation)?;
         if claim.id != self.intent.claim_id
-            || claim.replay.route_identity != self.execution.route_identity
+            || claim.replay != self.execution.replay
             || self
                 .execution
                 .replay_base

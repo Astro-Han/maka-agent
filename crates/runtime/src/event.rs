@@ -61,6 +61,25 @@ pub enum InvocationOutcome {
     },
 }
 
+#[derive(Clone, Debug)]
+pub enum CancellationCause {
+    Runtime,
+    WorkhubStop { action_id: crate::workhub::ActionId },
+    WorkhubCorrection { action_id: crate::workhub::ActionId },
+}
+
+impl CancellationCause {
+    pub fn source(&self) -> String {
+        match self {
+            Self::Runtime => "runtime_cancellation".into(),
+            Self::WorkhubStop { action_id } => crate::workhub::stop_abort_source(action_id),
+            Self::WorkhubCorrection { action_id } => {
+                crate::workhub::correction_abort_source(action_id)
+            }
+        }
+    }
+}
+
 impl InvocationOutcome {
     pub fn status(&self) -> TerminalStatus {
         match self {

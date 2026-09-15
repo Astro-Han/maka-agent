@@ -29,7 +29,11 @@ use std::num::NonZeroU16;
 pub(super) fn execution() -> Box<maka_runtime::handoff::HandoffExecution> {
     use maka_runtime::handoff::{HandoffExecution, HandoffTools};
     Box::new(HandoffExecution {
-        route_identity: digest('b'),
+        replay: ReplayEvidence {
+            version: REPLAY_VERSION,
+            digest: digest('a'),
+            route_identity: digest('b'),
+        },
         context: None,
         provider_options: serde_json::json!({}),
         main_output_limit: None,
