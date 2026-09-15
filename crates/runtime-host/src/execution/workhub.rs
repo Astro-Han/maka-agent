@@ -30,7 +30,7 @@ use maka_runtime::{artifact::content_digest, event::Invocation, workhub::COORDIN
 use std::sync::Arc;
 use uuid::Uuid;
 
-mod profile;
+pub(super) mod profile;
 
 impl Executions {
     pub(crate) fn workhub_target(&self, session: &str) -> Option<Invocation> {

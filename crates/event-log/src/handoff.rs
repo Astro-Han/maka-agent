@@ -27,7 +27,49 @@ mod owner;
 pub(crate) use cancel::apply as cancel;
 pub(crate) use owner::read as owner;
 
+/// Bounded discovery metadata. Only a canonical successor opening claims work.
+pub struct PendingHandoff {
+    pub sequence: u64,
+    pub invocation: maka_runtime::event::Invocation,
+    pub host_epoch: String,
+}
+
 impl EventLog {
+    pub async fn pending_handoffs(&self, after: u64) -> Result<Vec<PendingHandoff>, StoreError> {
+        self.validate_root()?;
+        let after = i64::try_from(after).map_err(|_| invalid("invalid handoff cursor"))?;
+        self.connection
+            .run(move |tx| {
+                Box::pin(async move {
+                    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+                        "SELECT pause.sequence, json_extract(pause.event_json,'$.invocation'),
+                   json_extract(pause.event_json,'$.fact.outcome.pause.intent.host_epoch')
+                 FROM runtime_events pause
+                 WHERE pause.sequence > ? AND pause.kind='invocation_ended'
+                   AND json_extract(pause.event_json,'$.fact.outcome.kind')='handoff_paused'
+                   AND NOT EXISTS (SELECT 1 FROM runtime_events successor
+                     WHERE successor.kind='invocation_opened'
+                     AND successor.invocation_id=json_extract(pause.event_json,
+                       '$.fact.outcome.pause.intent.successor_invocation_id'))
+                 ORDER BY pause.sequence LIMIT 64",
+                    )
+                    .bind(after)
+                    .fetch_all(tx)
+                    .await?;
+                    rows.into_iter()
+                        .map(|(sequence, invocation, host_epoch)| {
+                            Ok(PendingHandoff {
+                                sequence: sequence as u64,
+                                invocation: serde_json::from_str(&invocation)?,
+                                host_epoch,
+                            })
+                        })
+                        .collect()
+                })
+            })
+            .await
+    }
+
     /// Ordinary queued work cannot cross an unclaimed cooperative seal.
     pub async fn has_pending_handoff(&self, session: &str) -> Result<bool, StoreError> {
         self.validate_root()?;

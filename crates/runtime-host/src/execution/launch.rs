@@ -33,7 +33,7 @@ impl Executions {
     ) -> Result<TurnSnapshot> {
         let invocation = input.invocation.clone();
         let cancellation = self.shutdown.child_token();
-        if cancellation.is_cancelled() {
+        if self.retiring() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
         let running = self
@@ -62,6 +62,7 @@ impl Executions {
                 tool_names: running.tool_names().clone(),
                 cancellation: running.cancellation(),
                 completed: tokio_util::sync::CancellationToken::new(),
+                handoff: running.handoff().cloned(),
             },
         );
         self.workers.spawn(self.clone().drive(running));

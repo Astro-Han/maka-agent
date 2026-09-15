@@ -41,16 +41,13 @@ impl Host {
         authority: &Authority,
         connection_id: Uuid,
     ) -> Result<Admission<'_>, HostError> {
-        let mut retiring = self
-            .handshake_gate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut retiring = self.retirement.lock().unwrap_or_else(|e| e.into_inner());
         let draining = || HostHandshake::Draining {
             host_epoch: self.epoch.clone(),
             composition_id: COMPOSITION_ID.into(),
             composition_revision: "3".into(),
         };
-        if *retiring || self.draining.is_cancelled() {
+        if *retiring != super::retirement::Phase::Ready || self.draining.is_cancelled() {
             return Ok((draining(), None, None));
         }
         let generation_mismatch =
@@ -69,7 +66,7 @@ impl Host {
             && settled
             && self.connections.load(Ordering::SeqCst) == 1
         {
-            *retiring = true;
+            *retiring = super::retirement::Phase::Retiring;
             // Close admission now, but let the owner flush its draining reply before
             // stopping the listener. Errors/drop still finish the reserved retirement.
             return Ok((draining(), None, Some(self.draining.clone().drop_guard())));
@@ -116,7 +113,7 @@ impl Host {
                 composition_id: COMPOSITION_ID.into(),
                 composition_revision: "3".into(),
                 state: Lifecycle::Ready,
-                cooperative_handoff: None,
+                cooperative_handoff: Some(true),
             },
             Some(ConnectionCount(&self.accepted_connections)),
             None,

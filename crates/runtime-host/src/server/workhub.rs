@@ -71,14 +71,34 @@ pub(super) async fn execute(
         }),
         Operation::WorkhubCoordinationQuery => query(host).await.and_then(serialize),
         Operation::WorkhubCoordinationActFromTurn => {
-            action::act(host, workhub::decode_act(value)?, connection_id)
+            let input = workhub::decode_act(value)?;
+            if let Err(error) = admit_callback(
+                host,
+                connection_id,
+                &input.turn_id,
+                input.action_id.as_str(),
+            )
+            .await
+            {
+                return Ok(Outcome::failure(error));
+            }
+            action::act(host, input, connection_id)
                 .await
                 .and_then(serialize)
         }
         Operation::WorkhubCoordinationSelectAndDelegate => {
-            selection::select(host, workhub::decode_selection(value)?)
-                .await
-                .and_then(serialize)
+            let input = workhub::decode_selection(value)?;
+            if let Err(error) = admit_callback(
+                host,
+                connection_id,
+                &input.turn_id,
+                input.action_id.as_str(),
+            )
+            .await
+            {
+                return Ok(Outcome::failure(error));
+            }
+            selection::select(host, input).await.and_then(serialize)
         }
         Operation::WorkhubCoordinationCandidates => candidates::query(host)
             .await
@@ -288,6 +308,37 @@ async fn resolve(host: &Host) -> Result<(), OperationError> {
         .await
         .map_err(sessions::stored)?;
     validate(&record)
+}
+
+/// Ordinary RPC residency pins this check through the eventual reply. During
+/// preparation only the exact already-admitted client tool may create work.
+async fn admit_callback(
+    host: &Host,
+    connection: uuid::Uuid,
+    turn: &str,
+    action: &str,
+) -> Result<(), OperationError> {
+    let _admission = host.executions.lock_admission().await;
+    let phase = *host.retirement.lock().unwrap_or_else(|e| e.into_inner());
+    match phase {
+        super::retirement::Phase::Ready if !host.draining.is_cancelled() => Ok(()),
+        super::retirement::Phase::Preparing
+            if host.capabilities.broker.admitted_tool(
+                connection,
+                COORDINATION_SESSION_ID,
+                turn,
+                action,
+                "desktop_workhub",
+                "tasks",
+            ) =>
+        {
+            Ok(())
+        }
+        _ => Err(failure(
+            Code::HostDraining,
+            "Host is not admitting new WorkHub work",
+        )),
+    }
 }
 
 fn failure(code: Code, message: impl Into<String>) -> OperationError {

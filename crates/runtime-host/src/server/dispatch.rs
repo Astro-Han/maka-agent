@@ -213,6 +213,7 @@ impl Host {
                         }
                     }
                     Change::Configuration => {
+                        self.executions.request_handoff_recovery();
                         let revision = self.change_revision.fetch_add(1, Ordering::SeqCst) + 1;
                         let _ = self
                             .changes

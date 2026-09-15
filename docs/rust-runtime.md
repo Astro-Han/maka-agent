@@ -73,8 +73,11 @@ Do not run untrusted code or point test instances at existing user data.
   Sealed work can be cancelled without loading a provider or repeating effects.
 - Host diagnostics and retirement share active-work accounting, including pending
   OAuth authorization. Retirement targets an exact Host epoch and retains authority
-  through response flush and resource cleanup. Cooperative step handoff is not yet
-  advertised. The legacy `nodeVersion` field reports `not applicable (Rust)`.
+  through response flush and resource cleanup. Cooperative handoff seals settled
+  steps and resumes their frozen composition after restart; missing client owners
+  leave work paused. Preparation can be withdrawn before sealing and never grants
+  permission to interrupt other connected clients, PTYs or OAuth flows.
+  The legacy `nodeVersion` field reports `not applicable (Rust)`.
 - Manual resume checks a sealed source without claiming it, then atomically opens
   a new continuation. Replay follows the selected lineage, excluding later branches
   and unfinished response fragments. Unknown effects block admission; repeating

@@ -40,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct Interactions {
     log: Arc<EventLog>,
     admission: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) retirement: Arc<std::sync::Mutex<super::retirement::Phase>>,
     shutdown: CancellationToken,
     epoch: String,
     catalog: Arc<super::catalog_feed::CatalogFeed>,
@@ -99,6 +100,7 @@ impl Interactions {
         Self {
             log,
             admission: Arc::new(tokio::sync::Mutex::new(())),
+            retirement: Arc::default(),
             shutdown,
             epoch,
             catalog,

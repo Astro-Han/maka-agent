@@ -187,7 +187,7 @@ impl Environment {
         {
             return Ok(None);
         }
-        if executions.shutdown.is_cancelled() {
+        if executions.retiring() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
         self.directory

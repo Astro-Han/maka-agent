@@ -249,7 +249,10 @@ pub(super) async fn execute(
         }
     };
     Ok(match result {
-        Ok(output) => Outcome::success(decode_output(operation, &serde_json::to_value(output)?)?),
+        Ok(output) => {
+            host.executions.request_handoff_recovery();
+            Outcome::success(decode_output(operation, &serde_json::to_value(output)?)?)
+        }
         Err(error) => Outcome::failure(OperationError {
             code: match error {
                 maka_client_capability::Error::Draining => Code::HostDraining,

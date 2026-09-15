@@ -21,6 +21,8 @@
 mod admission;
 mod archive;
 mod compact;
+mod handoff;
+pub(crate) use handoff::CooperativeRun;
 mod interrupt;
 mod launch;
 mod message;
@@ -69,6 +71,7 @@ pub(crate) struct Executions {
     interactions: Arc<crate::server::interactions::Interactions>,
     active: Mutex<HashMap<String, ActiveRun>>,
     workers: TaskTracker,
+    handoff_wake: tokio::sync::Notify,
     shutdown: CancellationToken,
 }
 
@@ -78,6 +81,7 @@ struct ActiveRun {
     tool_names: Arc<std::collections::HashSet<String>>,
     cancellation: maka_agent::RunCancellation,
     completed: CancellationToken,
+    handoff: Option<maka_agent::HandoffGate>,
 }
 
 pub(crate) struct ExecutionPaths {
@@ -118,12 +122,33 @@ impl Executions {
             writes: Arc::new(maka_fs_tools::WriteCoordinator::default()),
             active: Mutex::new(HashMap::new()),
             workers,
+            handoff_wake: tokio::sync::Notify::new(),
             shutdown,
         })
     }
 
     pub(crate) fn active_count(&self) -> usize {
         self.active.lock().unwrap().len()
+    }
+    pub(crate) fn accepting(&self) -> bool {
+        !self.shutdown.is_cancelled()
+            && *self
+                .interactions
+                .retirement
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                == crate::server::retirement::Phase::Ready
+    }
+    /// Existing admitted commands may complete derived work while the Host
+    /// prepares a handoff. Fresh queue/recovery admissions still require Ready.
+    pub(crate) fn retiring(&self) -> bool {
+        self.shutdown.is_cancelled()
+            || *self
+                .interactions
+                .retirement
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                == crate::server::retirement::Phase::Retiring
     }
     pub(crate) fn has_active_session(&self, session: &str) -> bool {
         self.active

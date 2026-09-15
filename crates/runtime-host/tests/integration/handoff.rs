@@ -34,6 +34,256 @@ use std::{num::NonZeroU16, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects() {
+    let fixture = ClientFixture::new("maka-cooperative-");
+    let (provider, mut requests) = super::support::message_recovery::Provider::controlled().await;
+    let model = super::support::message_recovery::configure(&fixture, &provider.base_url).await;
+    let cwd = fixture.workspace.to_string_lossy().into_owned();
+    let configuration = PreparedSession::new(
+        serde_json::from_value(json!({
+            "sessionId":"session", "workspace":{"kind":"host_path", "path":cwd},
+            "modelTarget":{"kind":"default"}
+        }))
+        .unwrap(),
+    )
+    .unwrap()
+    .bind(
+        WorkspaceProjection {
+            target: WorkspaceTarget::HostPath { path: cwd.clone() },
+            host_cwd: cwd,
+        },
+        model,
+        PermissionMode::Bypass,
+        ToolMode::Direct,
+    );
+    let log = fixture.log().await;
+    log.create_session("session", "fixture", &configuration, 1)
+        .await
+        .unwrap();
+    log.close().await.unwrap();
+
+    #[cfg(unix)]
+    let endpoint = fixture.workspace.parent().unwrap().join("cooperative.sock");
+    #[cfg(windows)]
+    let endpoint = std::path::PathBuf::from(format!(
+        r"\\.\pipe\maka-cooperative-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let host = Host::open(fixture.owner()).await.unwrap();
+    let server = tokio::spawn(
+        LocalListener::bind(&endpoint)
+            .unwrap()
+            .serve(host.clone(), CancellationToken::new()),
+    );
+    let (mut peer, hello) = Peer::handshake(host.clone(), "cooperative").await;
+    assert_eq!(hello["cooperativeHandoff"], true, "{hello}");
+    let publication = json!({"registrationId":"before-upgrade", "offers":[{
+        "offerId":"desktop", "version":"1", "affinity":"session", "hostPathAccess":"none",
+        "label":"Desktop", "tools":[{"serverId":"desktop", "name":"inspect",
+            "inputSchema":{"type":"object"}}]
+    }]});
+    let registered = peer
+        .rpc("client.capability.replace", publication.clone())
+        .await;
+    assert_eq!(registered["ok"], true, "{registered}");
+    let started = peer
+        .rpc(
+            "turn.start",
+            json!({"sessionId":"session", "turnId":"turn",
+        "content":{"text":"write once, then finish"}, "maxSteps":3}),
+        )
+        .await;
+    assert_eq!(started["result"]["kind"], "started", "{started}");
+    let public_run = started["result"]["turn"]["runId"].clone();
+    let first = tokio::time::timeout(Duration::from_secs(5), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    // No safe boundary exists while this request is still outstanding. The
+    // bounded preparation must release its ticket without ending the Run.
+    let rolled_back = peer
+        .rpc(
+            "host.upgrade.prepare",
+            json!({
+                "expectedHostEpoch":hello["hostEpoch"], "allowInterruptActiveTasks":false,
+                "allowCooperativeHandoff":true,
+            }),
+        )
+        .await;
+    assert_eq!(
+        rolled_back["result"]["kind"], "active_tasks",
+        "{rolled_back}"
+    );
+    let probe = Peer::new(host.clone(), "rollback-probe").await;
+    probe.close().await;
+    assert_eq!(
+        provider.requests.lock().unwrap().len(),
+        1,
+        "rollback must not retry the model"
+    );
+    let retire = |mut peer: Peer| {
+        let epoch = hello["hostEpoch"].clone();
+        tokio::spawn(async move {
+            let receipt = peer
+                .rpc(
+                    "host.upgrade.prepare",
+                    json!({
+                        "expectedHostEpoch":epoch, "allowInterruptActiveTasks":false,
+                        "allowCooperativeHandoff":true,
+                    }),
+                )
+                .await;
+            (receipt, peer)
+        })
+    };
+    let mut retiring = retire(peer);
+    // Hello admission observes the fence without adding an ordinary command
+    // that would itself make cooperative preparation busy.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let (probe, hello) = Peer::handshake(host.clone(), "fence-probe").await;
+            probe.close().await;
+            if hello["kind"] == "draining" {
+                break;
+            }
+            if retiring.is_finished() {
+                // A hello that won the Ready race was another live client.
+                // Retry only after closing it, preserving interruption consent.
+                let (receipt, peer) = (&mut retiring).await.unwrap();
+                assert_eq!(receipt["result"]["kind"], "active_tasks", "{receipt}");
+                retiring = retire(peer);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    first
+        .reply
+        .send(json!({"index":0,"delta":{"tool_calls":[{
+        "index":0,"id":"write-once","type":"function","function":{
+            "name":"Write","arguments":json!({"path":"effect.txt","content":"once"}).to_string()
+        }
+    }]},"finish_reason":"tool_calls"}))
+        .unwrap();
+    let (receipt, peer) = retiring.await.unwrap();
+    peer.close().await;
+    assert_eq!(receipt["result"]["kind"], "prepared", "{receipt}");
+    tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop(host);
+    assert_eq!(
+        std::fs::read_to_string(fixture.workspace.join("effect.txt")).unwrap(),
+        "once"
+    );
+    assert!(
+        requests.try_recv().is_err(),
+        "retiring Host must not start another model step"
+    );
+    let log = fixture.log().await;
+    let pending = log.pending_handoffs(0).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    let source = pending[0].invocation.clone();
+    assert_eq!(public_run, source.run_id);
+    let prefix = log.prefix(100, 1024 * 1024).await.unwrap();
+    assert!(matches!(
+        prefix.events.last().unwrap().event.fact,
+        Fact::InvocationEnded {
+            outcome: InvocationOutcome::HandoffPaused { .. }
+        }
+    ));
+    log.close().await.unwrap();
+
+    let host = Host::open(fixture.owner()).await.unwrap();
+    let cancel = CancellationToken::new();
+    let server = tokio::spawn(
+        LocalListener::bind(&endpoint)
+            .unwrap()
+            .serve(host.clone(), cancel.clone()),
+    );
+    // Ready does not depend on a disconnected client. An identical offer from
+    // another client cannot substitute for the original admitted owner.
+    let mut wrong = Peer::new(host.clone(), "another-desktop").await;
+    let registered = wrong
+        .rpc("client.capability.replace", publication.clone())
+        .await;
+    assert_eq!(registered["ok"], true, "{registered}");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), requests.recv())
+            .await
+            .is_err(),
+        "successor ran without its original capability owner"
+    );
+    wrong.close().await;
+    let mut peer = Peer::new(host.clone(), "cooperative").await;
+    let mut publication = publication;
+    publication["registrationId"] = json!("after-upgrade");
+    let registered = peer.rpc("client.capability.replace", publication).await;
+    assert_eq!(registered["ok"], true, "{registered}");
+    let second = tokio::time::timeout(Duration::from_secs(10), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        second.body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|message| message["role"] == "tool" && message["tool_call_id"] == "write-once")
+            .count(),
+        1,
+        "successor must inherit the settled result"
+    );
+    second
+        .reply
+        .send(json!({"index":0,"delta":{"content":"finished"},"finish_reason":"stop"}))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let turn = peer
+                .rpc("turn.query", json!({"sessionId":"session","turnId":"turn"}))
+                .await;
+            assert_eq!(turn["result"]["runId"], public_run, "{turn}");
+            assert_ne!(turn["result"]["status"], "failed", "{turn}");
+            if turn["result"]["status"] == "completed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    peer.close().await;
+    cancel.cancel();
+    tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop(host);
+    let log = fixture.log().await;
+    assert!(log.pending_handoffs(0).await.unwrap().is_empty());
+    let prefix = log.prefix(100, 1024 * 1024).await.unwrap();
+    assert_eq!(
+        prefix
+            .events
+            .iter()
+            .filter(|event| matches!(&event.event.fact,
+        Fact::ToolDispatched { name, .. } if name == "Write"))
+            .count(),
+        1
+    );
+    let owner = log.handoff_owner(&source).await.unwrap();
+    assert_ne!(owner.invocation.run_id, source.run_id);
+    assert_eq!(owner.invocation.turn_id, source.turn_id);
+    log.close().await.unwrap();
+    assert_eq!(provider.requests.lock().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_restart() {
     for queued in [false, true] {
         let fixture = ClientFixture::new("maka-handoff-stop-");

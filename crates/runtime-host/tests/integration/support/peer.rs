@@ -47,6 +47,11 @@ pub struct Peer {
 }
 impl Peer {
     pub async fn new(host: Arc<Host>, id: &str) -> Self {
+        let (peer, hello) = Self::handshake(host, id).await;
+        assert_eq!(hello["state"], "ready", "{hello}");
+        peer
+    }
+    pub async fn handshake(host: Arc<Host>, id: &str) -> (Self, Value) {
         let (send, reader) = mpsc::unbounded_channel();
         let (writer, receive) = mpsc::unbounded_channel();
         let task = tokio::spawn(async move {
@@ -66,11 +71,11 @@ impl Peer {
             "compatibilityEpoch":maka_protocol::COMPATIBILITY_EPOCH,"compositionId":"maka.interactive"}),
             )
             .unwrap();
-        assert_eq!(peer.frame().await["state"], "ready");
-        peer
+        let hello = peer.frame().await;
+        (peer, hello)
     }
     async fn frame(&mut self) -> Value {
-        tokio::time::timeout(Duration::from_secs(5), self.receive.recv())
+        tokio::time::timeout(Duration::from_secs(15), self.receive.recv())
             .await
             .unwrap()
             .expect("Host closed before response")

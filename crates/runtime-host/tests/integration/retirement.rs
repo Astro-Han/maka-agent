@@ -89,6 +89,19 @@ async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_aba
         };
         let root = directory.path().join("root");
         let owner = RootOwner::create(&root, &namespaces).unwrap();
+        // Listener startup can fail after Host recovery has started. Dropping
+        // that unused Host must release its idle worker and root authority.
+        drop(Host::open(owner).await.unwrap());
+        let owner = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(owner) = RootOwner::open(&root, &namespaces) {
+                    break owner;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("unused Host retained the root");
         let host = Host::open(owner).await.unwrap();
         #[cfg(unix)]
         let endpoint = directory.path().join("h.sock");

@@ -149,7 +149,9 @@ impl Engine {
         input: &RunInput,
         cancellation: &CancellationToken,
     ) -> Result<(), RunError> {
-        let RunWork::Continuation { source, tools, .. } = &input.work else {
+        let (RunWork::Continuation { source, tools, .. } | RunWork::Handoff { source, tools, .. }) =
+            &input.work
+        else {
             return Err(RunError::InvalidInput("not a continuation request".into()));
         };
         self.0

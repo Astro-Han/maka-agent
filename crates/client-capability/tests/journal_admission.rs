@@ -142,6 +142,10 @@ async fn run(boundary: Boundary) {
         )
         .unwrap();
     let accepted = pending.accepted().await.unwrap();
+    let session = invocation.session_id.clone();
+    let turn = invocation.turn_id.clone();
+    let admitted = || broker.admitted_tool(connection, &session, &turn, "call", "server", "effect");
+    assert!(!admitted(), "acceptance is not permission for callbacks");
     assert_eq!(
         log.prefix(8, 16384).await.unwrap().events.len(),
         1,
@@ -181,6 +185,25 @@ async fn run(boundary: Boundary) {
         assert!(
             matches!(outbound.recv().await.unwrap(),HostFrame::Admitted{invocation_id} if invocation_id==id)
         );
+        registry.unregister(connection, "r").unwrap();
+        assert!(admitted(), "callbacks retain the admitted publication");
+        assert!(!broker.admitted_tool(Uuid::new_v4(), &session, &turn, "call", "server", "effect"));
+        assert!(!broker.admitted_tool(
+            connection,
+            &session,
+            "other-turn",
+            "call",
+            "server",
+            "effect"
+        ));
+        assert!(!broker.admitted_tool(
+            connection,
+            &session,
+            &turn,
+            "other-call",
+            "server",
+            "effect"
+        ));
         let prefix = log.prefix(8, 16384).await.unwrap();
         assert!(
             matches!(&prefix.events.last().unwrap().event.fact,Fact::ToolDispatched{operation_id,..} if operation_id=="operation")
@@ -204,6 +227,7 @@ async fn run(boundary: Boundary) {
         }
     }
     let result = execution.await.unwrap();
+    assert!(!admitted(), "settlement or cancellation revokes callbacks");
     match boundary {
         Boundary::Success => {
             assert!(result.is_ok());

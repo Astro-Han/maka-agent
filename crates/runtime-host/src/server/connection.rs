@@ -276,10 +276,8 @@ impl Host {
                     .then(|| self.commands.token()),
             });
             in_flight.insert(request.request_id.clone(), request.operation);
-            let draining = {
-                let retiring = self.handshake_gate.lock().unwrap_or_else(|e| e.into_inner());
-                *retiring || self.draining.is_cancelled()
-            };
+            let phase = *self.retirement.lock().unwrap_or_else(|e| e.into_inner());
+            let draining = phase == super::retirement::Phase::Retiring || self.draining.is_cancelled();
             if draining {
                 residency.take();
             }
@@ -292,6 +290,13 @@ impl Host {
                 Outcome::failure(OperationError {
                     code: OperationErrorCode::HostDraining,
                     message: "Host is draining".into(),
+                })
+            } else if phase == super::retirement::Phase::Preparing
+                && !super::retirement::allows_preparing(request.operation)
+            {
+                Outcome::failure(OperationError {
+                    code: OperationErrorCode::HostDraining,
+                    message: "Host is preparing a cooperative handoff".into(),
                 })
             } else if !implemented {
                 Outcome::failure(OperationError {

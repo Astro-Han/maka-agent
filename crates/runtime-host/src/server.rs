@@ -43,7 +43,7 @@ mod outbound;
 mod projects;
 mod registration;
 mod resources;
-mod retirement;
+pub(crate) mod retirement;
 mod sessions;
 mod skills;
 mod subscriptions;
@@ -91,7 +91,7 @@ impl Default for HostOptions {
 
 pub struct Host {
     options: HostOptions,
-    handshake_gate: Mutex<bool>,
+    retirement: Arc<Mutex<retirement::Phase>>,
     accepted_connections: AtomicUsize,
     started: std::time::Instant,
     accepted_connection: AtomicBool,
@@ -121,6 +121,15 @@ pub struct Host {
     requests: TaskTracker,
     commands: TaskTracker,
     diagnostic_log: Mutex<diagnostics::Log>,
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        // Recovery starts before listener setup. Losing the last Host owner
+        // must cancel it even when no listener ever reached its shutdown path.
+        // Workers retain root authority until their cleanup completes.
+        self.draining.cancel();
+    }
 }
 
 impl Host {
@@ -205,7 +214,7 @@ impl Host {
         )?);
         let host = Arc::new(Self {
             options,
-            handshake_gate: Mutex::new(false),
+            retirement: interactions.retirement.clone(),
             accepted_connections: AtomicUsize::new(0),
             started: std::time::Instant::now(),
             accepted_connection: AtomicBool::new(false),
@@ -249,6 +258,7 @@ impl Host {
             return Err(error.message.into());
         }
         startup_guard.disarm();
+        host.executions.start_handoff_recovery(host.epoch.clone());
         host.record_diagnostic(format_args!("Host ready: epoch {}", host.epoch));
         Ok(host)
     }
@@ -303,10 +313,8 @@ impl Host {
 
     fn lifecycle(&self) -> Lifecycle {
         if self.draining.is_cancelled()
-            || *self
-                .handshake_gate
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
+            || *self.retirement.lock().unwrap_or_else(|e| e.into_inner())
+                == retirement::Phase::Retiring
         {
             Lifecycle::Draining
         } else {

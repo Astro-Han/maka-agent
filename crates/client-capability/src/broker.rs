@@ -30,7 +30,7 @@ use crate::Registration;
 pub use call::{AcceptedCall, PendingCall};
 use maka_protocol::capability::decode_host_frame;
 use maka_runtime::capability::{ClientFrame, HostFrame};
-use state::{Active, Inner, Invocation, Stage};
+use state::{Active, Inner, Invocation, Stage, ToolInvocation};
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -91,6 +91,37 @@ impl Default for Broker {
 }
 
 impl Broker {
+    /// Authorizes a callback from an already admitted tool, including calls
+    /// pinned to a publication that has since been replaced or withdrawn.
+    pub fn admitted_tool(
+        &self,
+        connection: Uuid,
+        session: &str,
+        turn: &str,
+        tool_call: &str,
+        server: &str,
+        tool_name: &str,
+    ) -> bool {
+        let state = self.inner.active.lock().unwrap_or_else(|e| e.into_inner());
+        !self.inner.draining.is_cancelled()
+            && state.calls.values().any(|call| {
+                let endpoint = call.registration.endpoint();
+                call.registration.connection_id() == connection
+                    && call.stage.admitted()
+                    && call.pending_terminal.is_none()
+                    && !call.cancellation.is_cancelled()
+                    && !endpoint.closed().is_cancelled()
+                    && !endpoint.invocations().is_cancelled()
+                    && call.tool.as_ref().is_some_and(|tool| {
+                        tool.session_id == session
+                            && tool.turn_id == turn
+                            && tool.tool_call_id == tool_call
+                            && tool.server_id == server
+                            && tool.tool_name == tool_name
+                    })
+            })
+    }
+
     fn prepare(
         &self,
         registration: Arc<Registration>,
@@ -103,6 +134,23 @@ impl Broker {
         }
         let invocation_id = Uuid::new_v4().to_string();
         let frame = frame(invocation_id.clone());
+        let tool = match &frame {
+            HostFrame::Call {
+                session_id,
+                turn_id,
+                tool_call_id,
+                server_id,
+                tool_name,
+                ..
+            } => Some(ToolInvocation {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                tool_call_id: tool_call_id.clone(),
+                server_id: server_id.clone(),
+                tool_name: tool_name.clone(),
+            }),
+            _ => None,
+        };
         let encoded =
             serde_json::to_value(&frame).map_err(|_| CallError::Invalid("JSON encoding"))?;
         decode_host_frame(&encoded).map_err(|_| CallError::Invalid("outbound wire boundary"))?;
@@ -135,6 +183,7 @@ impl Broker {
             invocation_id.clone(),
             Invocation {
                 registration,
+                tool,
                 stage: Stage::Dispatched(accepted_tx),
                 result: result_tx,
                 timeout,

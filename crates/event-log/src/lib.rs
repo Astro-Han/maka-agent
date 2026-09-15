@@ -27,6 +27,7 @@ pub mod connection;
 pub mod context;
 mod continuation;
 mod handoff;
+pub use handoff::PendingHandoff;
 pub mod interactions;
 pub mod message_admissions;
 mod message_identity;

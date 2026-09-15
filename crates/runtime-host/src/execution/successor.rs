@@ -85,6 +85,7 @@ impl Executions {
                             invocation: next.invocation().clone(),
                             tool_names: next.tool_names().clone(),
                             cancellation: next.cancellation(),
+                            handoff: next.handoff().cloned(),
                             completed: CancellationToken::new(),
                         },
                     );
@@ -108,7 +109,7 @@ impl Executions {
     ) -> Result<Option<RunningInvocation>> {
         let mut environment = None;
         loop {
-            if self.shutdown.is_cancelled() {
+            if !self.accepting() {
                 return Ok(None);
             }
             // The previous worker retains cleanup ownership while preparation

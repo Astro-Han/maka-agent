@@ -30,6 +30,9 @@ pub(super) struct Activity {
 }
 
 impl Activity {
+    pub(super) fn blocks_cooperation(&self, own_commands: usize) -> bool {
+        self.connections > 1 || self.commands > own_commands || self.shells != 0 || self.oauth != 0
+    }
     pub(super) fn blocks_retirement(&self, own_commands: usize) -> bool {
         self.connections > 1 || self.commands > own_commands || self.resident_count() != 0
     }

@@ -42,6 +42,15 @@ pub(super) struct PreparedProvider {
     binding: Option<Arc<auth::Binding>>,
 }
 
+impl PreparedProvider {
+    pub(super) fn admit(self, oauth: &crate::oauth::Authority) -> Result<Self, OperationError> {
+        if let Some(binding) = &self.binding {
+            binding.admit(oauth)?;
+        }
+        Ok(self)
+    }
+}
+
 fn unavailable(message: impl Into<String>) -> OperationError {
     OperationError {
         code: OperationErrorCode::OperationUnavailable,
@@ -55,11 +64,7 @@ pub(super) async fn resolve(
     session_id: &str,
     session: &SessionConfiguration,
 ) -> Result<PreparedProvider, OperationError> {
-    let prepared = observe(config, session_id, session).await?;
-    if let Some(binding) = &prepared.binding {
-        binding.admit(oauth)?;
-    }
-    Ok(prepared)
+    observe(config, session_id, session).await?.admit(oauth)
 }
 
 /// Read-only configuration and credential identity, without execution authority.
@@ -67,6 +72,16 @@ pub(super) async fn observe(
     config: &Arc<ConfigurationStore>,
     session_id: &str,
     session: &SessionConfiguration,
+) -> Result<PreparedProvider, OperationError> {
+    observe_binding(config, session_id, &session.model, session.thinking_level).await
+}
+
+/// The caller supplies the admitted model identity, never a replacement Session.
+pub(super) async fn observe_binding(
+    config: &Arc<ConfigurationStore>,
+    session_id: &str,
+    target: &maka_runtime::execution::ModelBinding,
+    thinking_level: Option<maka_runtime::execution::ThinkingLevel>,
 ) -> Result<PreparedProvider, OperationError> {
     let network = config
         .network_configuration()
@@ -82,7 +97,6 @@ pub(super) async fn observe(
         },
         message: error.to_string().chars().take(1024).collect(),
     })?;
-    let target = &session.model;
     let row = catalog
         .connections
         .iter()
@@ -106,14 +120,14 @@ pub(super) async fn observe(
         .iter()
         .find(|model| model.id == target.model && model.can_use_as_chat_default)
         .ok_or_else(|| unavailable("Session model is not available for chat"))?;
-    if let Some(level) = session.thinking_level
+    if let Some(level) = thinking_level
         && !model.thinking_levels.contains(&level)
     {
         return Err(unavailable("Session thinking level is no longer supported"));
     }
     let route = provider_route::resolve(row, facts, &target.model)?;
     route.check_execution()?;
-    let options = options::resolve(row, facts, session, &route)?;
+    let options = options::resolve(row, facts, &target.model, thinking_level, &route)?;
     let main_output_limit = output::resolve(row, facts, &target.model, route.wire, &options)?;
     let endpoint = row.base_url.as_deref().unwrap_or(&facts.base_url);
     let expected = ConnectionCredentialTarget {

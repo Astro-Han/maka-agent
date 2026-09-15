@@ -19,7 +19,6 @@
 
 use super::{Wire, unavailable};
 use crate::provider_route::Route;
-use crate::session::SessionConfiguration;
 use maka_config::model_catalog::{ProviderFacts, ThinkingOffBehavior};
 use maka_model::ProviderKind;
 use maka_protocol::OperationError;
@@ -35,13 +34,13 @@ mod relay;
 pub(super) fn resolve(
     row: &ConnectionCatalogEntry,
     facts: &ProviderFacts,
-    session: &SessionConfiguration,
+    model: &str,
+    thinking_level: Option<ThinkingLevel>,
     route: &Route,
 ) -> Result<Value, OperationError> {
     let wire = route.wire;
-    let model = &session.model.model;
     let known = facts.models.get(model);
-    let stored = row.models.iter().find(|item| item.id == *model);
+    let stored = row.models.iter().find(|item| item.id == model);
     let parallel = row
         .model_overrides
         .as_ref()
@@ -59,16 +58,16 @@ pub(super) fn resolve(
                 .and_then(|caps| caps.parallel_tool_calls)
         });
     if row.provider_type == "anthropic" {
-        return Ok(anthropic(facts, model, session.thinking_level));
+        return Ok(anthropic(facts, model, thinking_level));
     }
     if row.provider_type == "openai-responses-compatible" && wire == Wire::OpenaiResponses {
-        return relay::responses(row, model, session.thinking_level, parallel.unwrap_or(true));
+        return relay::responses(row, model, thinking_level, parallel.unwrap_or(true));
     }
     if let ProviderKind::OpenaiCompatible { name } = &route.kind {
-        return compatible::chat(name, model, session.thinking_level, parallel);
+        return compatible::chat(name, model, thinking_level, parallel);
     }
     if !matches!(row.provider_type.as_str(), "openai" | "openai-codex") {
-        if session.thinking_level.is_some() || parallel == Some(false) {
+        if thinking_level.is_some() || parallel == Some(false) {
             return Err(unavailable(
                 "Thinking or parallel-call policy is not supported for this provider",
             ));
@@ -77,7 +76,7 @@ pub(super) fn resolve(
     }
     Ok(openai(
         wire,
-        session.thinking_level,
+        thinking_level,
         default_medium(facts, model),
         parallel.unwrap_or(true),
     ))

@@ -38,7 +38,7 @@ pub(super) fn tools(
     session: &SessionConfiguration,
     connection_id: Uuid,
 ) -> Result<(ToolCatalog, maka_runtime::execution::ToolComposition)> {
-    let (mut tools, clients) = executions
+    let (tools, clients) = executions
         .capabilities
         .bind_required_tools(
             COORDINATION_SESSION_ID,
@@ -59,6 +59,19 @@ pub(super) fn tools(
                 &error.to_string(),
             )
         })?;
+    Ok((
+        catalog(executions, tools)?,
+        maka_runtime::execution::ToolComposition {
+            clients,
+            skills_digest: None,
+        },
+    ))
+}
+
+pub(in crate::execution) fn catalog(
+    executions: &Executions,
+    mut tools: Vec<ToolRegistration>,
+) -> Result<ToolCatalog> {
     tools.retain(|tool| CLIENT_TOOLS.contains(&tool.definition.name.as_str()));
     tools.push(executions.interactions.question_tool());
     tools.push(ToolRegistration {
@@ -71,13 +84,7 @@ pub(super) fn tools(
         nesting: ToolNesting::Nestable,
         semantics: ToolSemantics::Parallel,
     });
-    Ok((
-        ToolCatalog::new(tools).map_err(|e| failure(Code::OperationUnavailable, &e.to_string()))?,
-        maka_runtime::execution::ToolComposition {
-            clients,
-            skills_digest: None,
-        },
-    ))
+    ToolCatalog::new(tools).map_err(|e| failure(Code::OperationUnavailable, &e.to_string()))
 }
 
 pub(super) fn prompt() -> SystemPrompt {

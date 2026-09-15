@@ -48,6 +48,7 @@ impl Stage {
 }
 pub(super) struct Invocation {
     pub registration: Arc<Registration>,
+    pub tool: Option<ToolInvocation>,
     pub stage: Stage,
     pub result: oneshot::Sender<Result<CallResult, CallError>>,
     pub timeout: Duration,
@@ -56,6 +57,14 @@ pub(super) struct Invocation {
     pub cancellation: CancellationToken,
     pub form_handler: Option<Arc<dyn FormHandler>>,
     pub pending_terminal: Option<(Result<CallResult, CallError>, bool)>,
+}
+
+pub(super) struct ToolInvocation {
+    pub session_id: String,
+    pub turn_id: String,
+    pub tool_call_id: String,
+    pub server_id: String,
+    pub tool_name: String,
 }
 #[derive(Default)]
 pub(super) struct Active {

@@ -61,6 +61,16 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
             ),
         )
         .await;
+        let pending = log.pending_handoffs(0).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].invocation, source.invocation);
+        assert_eq!(pending[0].host_epoch, pause.intent.host_epoch);
+        assert!(
+            log.pending_handoffs(pending[0].sequence)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         let frozen = log
             .run_prefix("session", "source", None, 100, 65536)
             .await
@@ -162,6 +172,10 @@ async fn paused_cancellation_claim_is_atomic_idempotent_and_never_cancels_an_exi
                 "cancel requires neither model request nor tool dispatch"
             );
         }
+        assert!(
+            log.pending_handoffs(0).await.unwrap().is_empty(),
+            "the successor opening is the only handoff claim authority"
+        );
         assert_eq!(
             log.run_prefix("session", "source", None, 100, 65536)
                 .await

@@ -62,6 +62,10 @@ pub struct PendingSeal {
 }
 
 impl HandoffGate {
+    pub fn root_run_id(&self) -> &str {
+        &self.root_run_id
+    }
+
     pub(crate) fn new(source: maka_runtime::event::Invocation, root_run_id: String) -> Self {
         Self {
             state: watch::channel(State::Running).0,
