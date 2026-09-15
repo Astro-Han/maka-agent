@@ -224,8 +224,28 @@ export async function resolveStorageRoot<K extends StorageRootKind>(
   input: ResolveStorageRootInput<K>,
 ): Promise<StorageRootCapability<K>> {
   assertStorageRootKind(input.kind);
-  return withAuthorityFailure('root_io_failed', 'Unable to resolve the storage root', () =>
-    resolveStorageRootUnchecked(input),
+  return withAuthorityFailure('root_io_failed', 'Unable to resolve the storage root', async () => {
+    const { canonicalPath, identity, marker } = await resolveStorageRootSnapshot(input);
+    assertCurrentRootFormat(canonicalPath, marker);
+    return createCapability(input.kind, canonicalPath, marker.rootId, identity);
+  });
+}
+
+/** Resolve or initialize identity without granting business access or upgrading an existing root. */
+export async function resolveStorageRootIdentity(
+  input: ResolveStorageRootInput<StorageRootKind>,
+): Promise<{
+  readonly canonicalPath: string;
+  readonly rootId: string;
+}> {
+  assertStorageRootKind(input.kind);
+  return withAuthorityFailure(
+    'root_io_failed',
+    'Unable to resolve the storage root identity',
+    async () => {
+      const { canonicalPath, marker } = await resolveStorageRootSnapshot(input);
+      return { canonicalPath, rootId: marker.rootId };
+    },
   );
 }
 
@@ -247,9 +267,9 @@ export async function discoverMarkedStorageRoot(
   });
 }
 
-async function resolveStorageRootUnchecked<K extends StorageRootKind>(
+async function resolveStorageRootSnapshot<K extends StorageRootKind>(
   input: ResolveStorageRootInput<K>,
-): Promise<StorageRootCapability<K>> {
+) {
   const requestedPath = resolve(input.path);
   await ensureRootDirectory(requestedPath);
   const canonicalPath = canonicalizePath(await realpath(requestedPath));
@@ -269,7 +289,7 @@ async function resolveStorageRootUnchecked<K extends StorageRootKind>(
     markerMismatchCode: 'root_identity_collision',
     markerMismatchMessage: `Storage root marker belongs to a different directory: ${canonicalPath}`,
   });
-  return createCapability(input.kind, canonicalPath, marker.rootId, identity);
+  return { canonicalPath, marker, identity };
 }
 
 export async function resolveExistingStorageRoot<K extends StorageRootKind>(
@@ -1078,7 +1098,7 @@ async function ensureRootMarker(
   const markerPath = join(root, STORAGE_ROOT_MARKER_FILE);
   try {
     await lstat(markerPath);
-    return await readRootMarker(root);
+    return await readPersistedRootMarker(root);
   } catch (error) {
     if (!isNodeError(error, 'ENOENT')) throw error;
   }
@@ -1110,7 +1130,7 @@ async function ensureRootMarker(
         `Storage root marker candidate exceeds the size limit: ${markerPath}`,
       ),
   });
-  return readRootMarker(root);
+  return readPersistedRootMarker(root);
 }
 
 async function replaceRootMarkerIdentity(
@@ -1212,13 +1232,17 @@ async function assertRootPathIdentity(
 
 async function readRootMarker(root: string): Promise<RootMarker> {
   const marker = await readPersistedRootMarker(root);
+  assertCurrentRootFormat(root, marker);
+  return marker;
+}
+
+function assertCurrentRootFormat(root: string, marker: RootMarker): void {
   if (marker.schemaVersion !== STORAGE_ROOT_MARKER_SCHEMA_VERSION || marker.upgrade) {
     throw new StorageRootAuthorityError(
       'legacy_root_requires_migration',
       `State Root upgrade must complete before business access: ${root}`,
     );
   }
-  return marker;
 }
 
 async function readPersistedRootMarker(root: string): Promise<RootMarker> {

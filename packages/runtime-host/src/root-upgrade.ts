@@ -110,13 +110,12 @@ export async function prepareRuntimeHostRoot(
         session.canonicalPath,
       );
       if (current) {
-        const active = current.state === 'active' ? current : current.to;
-        if (!active)
-          throw new Error('Finish the legacy deployment retirement before upgrading its root');
-        const target =
-          current.state === 'active' && options.prepareDeployment
-            ? decodeRuntimeHostManagedDeploymentConfig(await options.prepareDeployment(current))
-            : active;
+        if (current.state !== 'active')
+          throw new Error('Recover the source lifecycle transaction before upgrading its root');
+        const active = current;
+        const target = options.prepareDeployment
+          ? decodeRuntimeHostManagedDeploymentConfig(await options.prepareDeployment(current))
+          : active;
         if (
           target.root.id !== session.rootId ||
           target.root.path !== session.canonicalPath ||

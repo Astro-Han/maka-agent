@@ -25,6 +25,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   resolveExistingStorageRoot,
   inspectStorageRootFormat,
+  resolveStorageRootIdentity,
   tryAcquireStateRootOwner,
   type StateRootOwner,
 } from '@maka/storage/root-authority';
@@ -45,7 +46,7 @@ import {
   resolveRuntimeHostManagedDeploymentAuthority,
   prepareRuntimeHostManagedRoot,
   prepareRuntimeHostRoot,
-  readLegacyRuntimeHostManagedDeployment,
+  inspectRuntimeHostManagedDeployment,
   type RuntimeHostRootUpgradeOptions,
   resolveRuntimeHostNpmDeploymentLayout,
   runtimeHostManagedOperatorModulePath,
@@ -128,7 +129,8 @@ export type RuntimeHostRecoverableDeployment =
 
 /** The installed source interprets its own format; no old capability escapes this boundary. */
 export async function resolveLegacyRuntimeHostPackage(rootId: string) {
-  const record = await readLegacyRuntimeHostManagedDeployment(rootId);
+  const inspection = await inspectRuntimeHostManagedDeployment(rootId);
+  const record = inspection?.format === 'legacy' ? inspection.record : undefined;
   if (!record) return undefined;
   const config = record.state === 'active' ? record : (record.from ?? record.to);
   if (!config) throw new Error('Legacy deployment has no source package');
@@ -153,7 +155,10 @@ export async function prepareRuntimeHostRootForDeployment(
   path: string,
   options: {
     readonly prepareDeployment: NonNullable<RuntimeHostRootUpgradeOptions['prepareDeployment']>;
-    readonly resolveProvider: RuntimeHostLifecycleTransactionDeps['resolveProvider'];
+    readonly deps: RuntimeHostLifecycleTransactionDeps;
+    readonly expectedTarget?: NonNullable<
+      Parameters<typeof resolveRecoverableRuntimeHostManagedDeployment>[2]
+    >['expectedTarget'];
     readonly allowInterruptActiveTasks?: boolean;
     readonly expectedOwner?: { readonly hostEpoch: string; readonly pid: number };
     readonly validateRetiredState?: () => Promise<void>;
@@ -161,6 +166,14 @@ export async function prepareRuntimeHostRootForDeployment(
 ) {
   let restorePrevious: (() => Promise<void>) | undefined;
   try {
+    const identity = await resolveStorageRootIdentity({ path, kind: 'interactive' });
+    if ((await inspectStorageRootFormat(identity.canonicalPath)).format === 'legacy') {
+      await resolveRecoverableRuntimeHostManagedDeployment(identity.rootId, options.deps, {
+        ...(options.expectedTarget ? { expectedTarget: options.expectedTarget } : {}),
+        ...(options.expectedOwner ? { expectedOwner: options.expectedOwner } : {}),
+        allowInterruptActiveTasks: options.allowInterruptActiveTasks ?? false,
+      });
+    }
     return await prepareRuntimeHostRoot(path, {
       prepareDeployment: options.prepareDeployment,
       async retireDeployment(current) {
@@ -173,7 +186,9 @@ export async function prepareRuntimeHostRootForDeployment(
             .href
         );
         const provider =
-          current.lifecycle.mode === 'supervised' ? options.resolveProvider(current) : undefined;
+          current.lifecycle.mode === 'supervised'
+            ? options.deps.resolveProvider(current)
+            : undefined;
         const retirement = await source.retireRuntimeHostLifecycleOwner({
           rootPath: current.root.path,
           rootId: current.root.id,
@@ -674,8 +689,8 @@ export async function replaceRuntimeHostLifecycle(input: {
   if (desired.lifecycle.mode === 'supervised') {
     await input.deps.resolveProvider(desired).supervisor.preflight();
   }
-  const legacy = await readLegacyRuntimeHostManagedDeployment(desired.root.id);
-  if (legacy) {
+  const rootFormat = await inspectStorageRootFormat(desired.root.path);
+  if (rootFormat.format === 'legacy') {
     try {
       await prepareRuntimeHostRootForDeployment(desired.root.path, {
         async prepareDeployment(observed) {
@@ -686,7 +701,7 @@ export async function replaceRuntimeHostLifecycle(input: {
             );
           return desired;
         },
-        resolveProvider: input.deps.resolveProvider,
+        deps: input.deps,
         ...(input.expectedOwner ? { expectedOwner: input.expectedOwner } : {}),
         ...(input.allowInterruptActiveTasks === undefined
           ? {}

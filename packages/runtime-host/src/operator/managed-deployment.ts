@@ -637,29 +637,33 @@ export async function resolveRuntimeHostManagedDeploymentAuthority(
   return { capability, record };
 }
 
-/** Legacy metadata is only an upgrade-planning input, never a business capability. */
-export async function readLegacyRuntimeHostManagedDeployment(
+/** Management can inspect identity and metadata before business access is available. */
+export async function inspectRuntimeHostManagedDeployment(
   rootId: string,
   options: RuntimeHostManagedDeploymentAuthorityOptions = {},
-): Promise<RuntimeHostManagedDeploymentAuthorityRecord | undefined> {
+): Promise<
+  | {
+      readonly format: 'legacy' | 'upgrading' | 'current';
+      readonly record?: RuntimeHostManagedDeploymentAuthorityRecord;
+    }
+  | undefined
+> {
   const location = await locateRuntimeHostManagedRoot(rootId, options);
   if (!location) return undefined;
   const identity = await inspectStorageRootFormat(location.rootPath);
   if (identity.rootId !== rootId)
-    throw deploymentTransactionMismatch('Legacy locator points to another root');
-  if (identity.format !== 'legacy') return undefined;
-  const value = await readBoundedJson(
-    join(
-      resolveRuntimeHostManagedDeploymentAuthorityRoot(options),
-      rootId,
-      RUNTIME_HOST_MANAGED_DEPLOYMENT_CONFIG_FILE,
-    ),
-  );
-  if (value === undefined) return undefined;
-  const record = decodeRuntimeHostManagedDeploymentAuthorityRecord(value);
-  if (record.root.id !== rootId || record.root.path !== identity.canonicalPath)
-    throw deploymentTransactionMismatch('Legacy deployment does not match its root');
-  return record;
+    throw deploymentTransactionMismatch('Managed locator points to another root');
+  if (identity.format === 'upgrading') return { format: identity.format };
+  const path =
+    identity.format === 'legacy'
+      ? join(
+          resolveRuntimeHostManagedDeploymentAuthorityRoot(options),
+          rootId,
+          RUNTIME_HOST_MANAGED_DEPLOYMENT_CONFIG_FILE,
+        )
+      : resolveRuntimeHostManagedDeploymentConfigPath(identity.canonicalPath);
+  const record = await readDeploymentAuthorityForCapability(path, identity);
+  return { format: identity.format, ...(record ? { record } : {}) };
 }
 
 export async function claimRuntimeHostManagedDeployment(
@@ -1041,7 +1045,7 @@ async function readDeploymentConfigForCapability(
 
 async function readDeploymentAuthorityForCapability(
   path: string,
-  capability: StorageRootCapability<'interactive'>,
+  capability: Pick<StorageRootCapability<'interactive'>, 'rootId' | 'canonicalPath'>,
 ): Promise<RuntimeHostManagedDeploymentAuthorityRecord | undefined> {
   const value = await readBoundedJson(path);
   if (value === undefined) return undefined;
@@ -1128,7 +1132,7 @@ function assertConfigTargetsCapability(
 
 function assertAuthorityTargetsCapability(
   record: RuntimeHostManagedDeploymentAuthorityRecord,
-  capability: StorageRootCapability<'interactive'>,
+  capability: Pick<StorageRootCapability<'interactive'>, 'rootId' | 'canonicalPath'>,
 ): void {
   if (
     record.root.id !== capability.rootId ||

@@ -21,6 +21,8 @@ import { randomUUID } from 'node:crypto';
 import {
   prepareStorageRootControlDirectory,
   StorageRootAuthorityError,
+  resolveStorageRootIdentity,
+  inspectStorageRootFormat,
 } from '@maka/storage/root-authority';
 import { readStateRootCompositionBinding } from '@maka/storage/state-root-composition';
 import { prepareRuntimeHostRoot } from '../root-upgrade.js';
@@ -64,6 +66,7 @@ import {
   readRuntimeHostManagedDeploymentConfig,
   runtimeHostManagedLaunchRejection,
   RuntimeHostManagedDeploymentError,
+  inspectRuntimeHostManagedDeployment,
   type RuntimeHostManagedDeploymentAuthorityOptions,
   type RuntimeHostManagedLaunchClaim,
 } from '../operator/managed-deployment.js';
@@ -361,6 +364,14 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
       : decodeRuntimeHostManagedLaunchClaim(input.managedLaunchClaim);
   input.signal?.throwIfAborted();
   const clientInstanceId = requireClientInstanceId(input.clientInstanceId ?? randomUUID());
+  const identity = await resolveStorageRootIdentity({ path: input.rootPath, kind: 'interactive' });
+  if (
+    (await inspectStorageRootFormat(identity.canonicalPath)).format === 'legacy' &&
+    (await inspectRuntimeHostManagedDeployment(identity.rootId))?.record
+  ) {
+    // Only the managed lifecycle can prepare a successor before format takeover.
+    return { kind: 'failed', reason: 'managed_root_requires_operator' };
+  }
   const capability = await prepareRuntimeHostRoot(input.rootPath);
   const composition = await readStateRootCompositionBinding(capability.canonicalPath);
   if (composition && composition.compositionId !== input.compositionId) {

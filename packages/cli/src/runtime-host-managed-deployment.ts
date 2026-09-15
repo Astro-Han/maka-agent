@@ -36,7 +36,7 @@ import { resolveExistingStorageRoot, tryAcquireStateRootOwner } from '@maka/stor
 import {
   resolveRuntimeHostManagedDeploymentAuthorityRoot,
   resolveRuntimeHostManagedDeploymentAuthority,
-  readLegacyRuntimeHostManagedDeployment,
+  inspectRuntimeHostManagedDeployment,
   resolveRuntimeHostNpmDeploymentLayout,
   runtimeHostManagedOperatorModulePath,
   type RuntimeHostManagedDeploymentAuthorityOptions,
@@ -461,9 +461,7 @@ export async function assertRuntimeHostManagedOperatorDeployment(
   } = {},
 ): Promise<void> {
   if (!deploymentId) return;
-  const record =
-    (await readLegacyRuntimeHostManagedDeployment(serviceId, options.authority)) ??
-    (await resolveRuntimeHostManagedDeploymentAuthority(serviceId, options.authority))?.record;
+  const record = (await inspectRuntimeHostManagedDeployment(serviceId, options.authority))?.record;
   if (!record && options.allowAbsent) return;
   const endpoints = record?.state === 'active' ? [record] : record ? [record.from, record.to] : [];
   if (
