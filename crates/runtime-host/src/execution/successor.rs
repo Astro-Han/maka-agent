@@ -31,6 +31,29 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 impl Executions {
+    /// Dispatch accepted pending work unless an existing worker owns its cleanup.
+    pub(crate) async fn dispatch_pending<'a>(
+        self: &'a Arc<Self>,
+        session: &str,
+        admission: &mut Option<tokio::sync::MutexGuard<'a, ()>>,
+    ) -> Result<()> {
+        if self.has_active_session(session) {
+            return Ok(());
+        }
+        match self.next_message(session, admission, None).await {
+            Ok(Some(running)) => self.track(running),
+            Ok(None) => {}
+            Err(error) => {
+                self.begin_drain();
+                return Err(failure(
+                    Code::HostDraining,
+                    &format!("Pending work startup failed: {}", error.message),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// One worker owns the whole chain; root ownership survives cleanup and
     /// the gate-protected handoff. Never await effects while holding the gate.
     pub(super) async fn drive(self: Arc<Self>, mut running: RunningInvocation) {
@@ -102,6 +125,14 @@ impl Executions {
             }
             let queue = self.log.pending_messages(session).await.map_err(internal)?;
             if queue.is_empty() {
+                return Ok(None);
+            }
+            if self
+                .log
+                .has_pending_handoff(session)
+                .await
+                .map_err(internal)?
+            {
                 return Ok(None);
             }
             let Some((basis, candidate)) = environment.take() else {

@@ -35,13 +35,12 @@ use maka_runtime::{
 };
 use serde_json::{Value, json};
 
-async fn successor(log: &EventLog, source: &RuntimeEvent) -> RuntimeEvent {
+async fn seal(
+    log: &EventLog,
+    source: &RuntimeEvent,
+) -> (maka_runtime::handoff::HandoffPause, SessionBase) {
     use maka_runtime::handoff::{HandoffIntent, HandoffPause};
-    let Fact::InvocationOpened {
-        configuration,
-        input,
-    } = &source.fact
-    else {
+    let Fact::InvocationOpened { input, .. } = &source.fact else {
         unreachable!()
     };
     let base = if let Some(claim) = input.inherited_claim() {
@@ -85,6 +84,14 @@ async fn successor(log: &EventLog, source: &RuntimeEvent) -> RuntimeEvent {
         ),
     )
     .await;
+    (pause, base)
+}
+
+async fn successor(log: &EventLog, source: &RuntimeEvent) -> RuntimeEvent {
+    let (pause, base) = seal(log, source).await;
+    let Fact::InvocationOpened { configuration, .. } = &source.fact else {
+        unreachable!()
+    };
     let claim = claim(log, &pause.intent.claim_id, source, base).await;
     let next = RuntimeEvent::new(
         pause.intent.successor(&source.invocation),
@@ -382,7 +389,19 @@ async fn workhub_handoff_keeps_user_authority_and_recovers_correction_after_coor
         },
     );
     append(&log, &event).await;
-    assert_eq!(log.pending_messages("old").await.unwrap().len(), 1);
+    let pending = log.pending_messages("old").await.unwrap().remove(0);
+    let mut target = opening("target", None);
+    target.invocation = delegation.target.clone();
+    let Fact::InvocationOpened { input, .. } = &mut target.fact else {
+        unreachable!()
+    };
+    *input = InvocationInput::Message {
+        content: pending.source.message.content.clone(),
+        source_messages: vec![pending.source],
+        request_fingerprint: None,
+        skill_invocation: None,
+    };
+    append(&log, &target).await;
     let request = CorrectionRequest {
         action_id: "correction".parse().unwrap(),
         request_fingerprint: content_digest(b"correction"),
@@ -408,7 +427,9 @@ async fn workhub_handoff_keeps_user_authority_and_recovers_correction_after_coor
         .request_workhub_correction(request.clone(), Some(1), None)
         .await
         .unwrap();
-    assert!(intent.intent.owner.is_none());
+    assert_eq!(intent.intent.owner.as_ref(), Some(&target.invocation));
+    let tip = successor(&log, &target).await;
+    seal(&log, &tip).await;
     assert!(log.pending_messages("old").await.unwrap().is_empty());
     close(&log, &coordinator).await;
     let rows = transcript(&log, COORDINATION_SESSION_ID).await;
@@ -432,6 +453,22 @@ async fn workhub_handoff_keeps_user_authority_and_recovers_correction_after_coor
         description: Some(DelegationDescription::Existing { name: "new".into() }),
         ..delegation
     };
+    assert!(
+        matches!(
+            log.finish_workhub_correction::<Value>(&request.action_id, replacement.clone(), None)
+                .await,
+            Err(maka_event_log::StoreError::SessionBusy)
+        ),
+        "a physical seal is not retirement of delegated work"
+    );
+    log.cancel_handoff(
+        &tip.invocation,
+        maka_runtime::event::CancellationCause::WorkhubCorrection {
+            action_id: request.action_id.clone(),
+        },
+    )
+    .await
+    .unwrap();
     let resolved = log
         .finish_workhub_correction::<Value>(&request.action_id, replacement.clone(), None)
         .await
@@ -486,6 +523,150 @@ async fn workhub_handoff_keeps_user_authority_and_recovers_correction_after_coor
     close(&log, &stop).await;
     assert!(transcript(&log, COORDINATION_SESSION_ID).await.len() > after.len());
     log.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn stop_recovers_a_frozen_owner_through_handoffs_but_never_manual_resume() {
+    use maka_runtime::workhub::{StopOutcome, StopRequest};
+    for admitted_before_handoff in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stop.sqlite");
+        let log = EventLog::open(&path).await.unwrap();
+        for session in [COORDINATION_SESSION_ID, "session"] {
+            log.create_session(session, "fixture", &json!({"name":session}), 1)
+                .await
+                .unwrap();
+        }
+        let mut coordinator = opening("coordinator", None);
+        coordinator.invocation.session_id = COORDINATION_SESSION_ID.into();
+        append(&log, &coordinator).await;
+        let mut target = opening("target", None);
+        let delegation = Delegation {
+            kind: Default::default(),
+            description: None,
+            delivery: Default::default(),
+            action_id: "assignment".parse().unwrap(),
+            request_fingerprint: content_digest(b"assignment"),
+            source_message_event_id: coordinator.id.clone(),
+            target: target.invocation.clone(),
+            target_revision: 1,
+            delegation_text: "finish this work".into(),
+        };
+        append(
+            &log,
+            &RuntimeEvent::new(
+                coordinator.invocation.clone(),
+                Fact::WorkhubDelegated {
+                    delegation: Box::new(delegation),
+                },
+            ),
+        )
+        .await;
+        let pending = log.pending_messages("session").await.unwrap().remove(0);
+        let Fact::InvocationOpened { input, .. } = &mut target.fact else {
+            unreachable!()
+        };
+        *input = InvocationInput::Message {
+            content: pending.source.message.content.clone(),
+            source_messages: vec![pending.source],
+            request_fingerprint: None,
+            skill_invocation: None,
+        };
+        append(&log, &target).await;
+        let request = StopRequest {
+            action_id: "stop".parse().unwrap(),
+            request_fingerprint: content_digest(b"stop"),
+            source: coordinator.invocation.clone(),
+            target_session_id: "session".into(),
+        };
+        if admitted_before_handoff {
+            log.request_workhub_stop(request.clone()).await.unwrap();
+        }
+        let first = successor(&log, &target).await;
+        let tip = successor(&log, &first).await;
+        seal(&log, &tip).await;
+        let intent = log.request_workhub_stop(request.clone()).await.unwrap();
+        assert!(intent.resolution.is_none());
+        assert_eq!(
+            intent.intent.owner.as_ref(),
+            Some(if admitted_before_handoff {
+                &target.invocation
+            } else {
+                &tip.invocation
+            })
+        );
+        assert!(matches!(
+            log.resolve_workhub_stop(&request.action_id).await,
+            Err(maka_event_log::StoreError::SessionBusy)
+        ));
+        assert!(log.has_pending_handoff("session").await.unwrap());
+        let sealed = log.prefix(100, 128 * 1024).await.unwrap();
+        close(&log, &coordinator).await;
+        log.close().await.unwrap();
+        let log = EventLog::open(&path).await.unwrap();
+        let before_recovery = log.prefix(100, 128 * 1024).await.unwrap();
+        let database = rusqlite::Connection::open(&path).unwrap();
+        database.execute_batch("CREATE TRIGGER reject_stop_recovery BEFORE INSERT ON event_log
+            WHEN NEW.kind='workhub_stop_resolved' BEGIN SELECT RAISE(ABORT,'resolution failed'); END;").unwrap();
+        assert!(log.recover_workhub_stops().await.is_err());
+        assert_eq!(
+            log.prefix(100, 128 * 1024).await.unwrap().digest,
+            before_recovery.digest,
+            "failed receipt publication must roll back its cancellation and claim"
+        );
+        database
+            .execute_batch("DROP TRIGGER reject_stop_recovery;")
+            .unwrap();
+        drop(database);
+        assert_eq!(log.recover_workhub_stops().await.unwrap(), 1);
+        let resolved = log.workhub_stop(&request.action_id).await.unwrap().unwrap();
+        assert_eq!(
+            resolved.intent, intent.intent,
+            "recovery must not rewrite the frozen physical owner"
+        );
+        assert_eq!(
+            resolved.resolution.as_ref().unwrap().outcome(),
+            StopOutcome::StopDelivered
+        );
+        let cancelled = log.handoff_owner(&target.invocation).await.unwrap();
+        assert!(
+            matches!(cancelled.state.terminal_outcome(), Some(InvocationOutcome::Cancelled { source })
+            if source == &maka_runtime::workhub::stop_abort_source(&request.action_id))
+        );
+        assert!(!log.has_pending_handoff("session").await.unwrap());
+        let after = log.prefix(100, 128 * 1024).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&after.events[..sealed.events.len()]).unwrap(),
+            serde_json::to_value(&sealed.events).unwrap()
+        );
+        let source = after
+            .events
+            .iter()
+            .find(|event| {
+                event.event.invocation == cancelled.invocation
+                    && matches!(event.event.fact, Fact::InvocationOpened { .. })
+            })
+            .unwrap()
+            .event
+            .clone();
+        let base = cancelled.input.inherited_claim().unwrap().base.clone();
+        let manual = opening("manual", Some(claim(&log, "manual", &source, base).await));
+        append(&log, &manual).await;
+        assert_eq!(
+            log.handoff_owner(&target.invocation)
+                .await
+                .unwrap()
+                .invocation,
+            cancelled.invocation
+        );
+        assert_eq!(
+            log.resolve_workhub_stop(&request.action_id).await.unwrap(),
+            resolved
+        );
+        assert_eq!(log.recover_workhub_stops().await.unwrap(), 0);
+        close(&log, &manual).await;
+        log.close().await.unwrap();
+    }
 }
 
 async fn transcript(log: &EventLog, session: &str) -> Vec<Value> {

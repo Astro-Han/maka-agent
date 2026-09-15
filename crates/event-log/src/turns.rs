@@ -61,6 +61,22 @@ pub enum InvocationState {
     },
 }
 
+impl InvocationState {
+    /// A sealed physical Run still owns unfinished logical work.
+    pub fn terminal_outcome(&self) -> Option<&InvocationOutcome> {
+        match self {
+            Self::Ended {
+                outcome: InvocationOutcome::HandoffPaused { .. },
+                ..
+            }
+            | Self::Admitted
+            | Self::Running
+            | Self::WaitingForUser => None,
+            Self::Ended { outcome, .. } => Some(outcome),
+        }
+    }
+}
+
 impl EventLog {
     /// Exact physical Run, including an earlier Run of the same logical Turn.
     pub async fn run_boundary(

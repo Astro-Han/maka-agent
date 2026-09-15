@@ -23,8 +23,21 @@ use sqlx::{Connection, SqliteConnection};
 
 mod budget;
 mod cancel;
+mod owner;
+pub(crate) use cancel::apply as cancel;
+pub(crate) use owner::read as owner;
 
 impl EventLog {
+    /// Ordinary queued work cannot cross an unclaimed cooperative seal.
+    pub async fn has_pending_handoff(&self, session: &str) -> Result<bool, StoreError> {
+        self.validate_root()?;
+        crate::sessions::validate_id(session)?;
+        let session = session.to_owned();
+        self.connection
+            .run(move |tx| Box::pin(async move { Ok(reservation(tx, &session).await?.is_some()) }))
+            .await
+    }
+
     /// Eligibility only. The source still owns execution until its seal commits.
     pub async fn check_handoff(
         &self,
@@ -81,12 +94,7 @@ pub(crate) async fn validate(
         }
         // Admission permits one physical owner per Session. A paused owner
         // blocks the next opening, so only the latest opening can reserve it.
-        let reserved: Option<String> = sqlx::query_scalar(
-            "SELECT pause.invocation_id FROM runtime_events pause
-             WHERE pause.kind='invocation_ended' AND json_extract(pause.event_json,'$.fact.outcome.kind')='handoff_paused'
-             AND pause.invocation_id=(SELECT invocation_id FROM runtime_events WHERE kind='invocation_opened'
-               AND json_extract(event_json,'$.invocation.session_id')=?1 ORDER BY sequence DESC LIMIT 1)",
-        ).bind(&event.invocation.session_id).fetch_optional(&mut *tx).await?;
+        let reserved = reservation(tx, &event.invocation.session_id).await?;
         if let InvocationInput::Handoff { claim, pause } = input {
             if reserved.as_deref() != Some(&claim.source.invocation.invocation_id) {
                 return Err(invalid(
@@ -229,6 +237,18 @@ pub(crate) async fn validate(
         return Err(invalid("handoff successor identity is already reserved"));
     }
     Ok(())
+}
+
+async fn reservation(
+    tx: &mut SqliteConnection,
+    session: &str,
+) -> Result<Option<String>, StoreError> {
+    Ok(sqlx::query_scalar(
+        "SELECT pause.invocation_id FROM runtime_events pause
+         WHERE pause.kind='invocation_ended' AND json_extract(pause.event_json,'$.fact.outcome.kind')='handoff_paused'
+         AND pause.invocation_id=(SELECT invocation_id FROM runtime_events WHERE kind='invocation_opened'
+           AND json_extract(event_json,'$.invocation.session_id')=? ORDER BY sequence DESC LIMIT 1)"
+    ).bind(session).fetch_optional(tx).await?)
 }
 
 async fn reservation_conflict(

@@ -19,7 +19,6 @@
 
 use super::{Assignment, CorrectionIntent, Delegation, StoreError, control, invalid};
 use maka_runtime::{
-    event::{Fact, RuntimeEvent},
     session_event::{SessionEvent, SessionFact},
     workhub::DelegationKind,
 };
@@ -32,20 +31,13 @@ pub(super) async fn retired(
     let Some(owner) = &intent.owner else {
         return Ok(());
     };
-    let json: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-         FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_ended'",
-    )
-    .bind(&owner.invocation_id)
-    .fetch_optional(tx)
-    .await?;
-    let terminal: RuntimeEvent = serde_json::from_str(
-        &json
-            .ok_or(StoreError::SessionBusy)?
-            .ok_or(StoreError::PrefixTooLarge)?,
-    )?;
-    if terminal.invocation != *owner || !matches!(terminal.fact, Fact::InvocationEnded { .. }) {
-        return Err(invalid("WorkHub correction retirement owner changed"));
+    if crate::handoff::owner(tx, owner)
+        .await?
+        .state
+        .terminal_outcome()
+        .is_none()
+    {
+        return Err(StoreError::SessionBusy);
     }
     Ok(())
 }

@@ -18,7 +18,7 @@
  */
 
 use super::{StopIntent, StopRecord, StopRequest, StopResolution, invalid, subject};
-use crate::{StoreError, message_resolution::MessageExecution, turns::InvocationState};
+use crate::{StoreError, message_resolution::MessageExecution};
 use maka_runtime::session_event::{SessionEvent, SessionFact};
 use sqlx::SqliteConnection;
 
@@ -83,7 +83,7 @@ pub(super) async fn apply(
             target_turn_id: None,
         }),
         MessageExecution::Owned(boundary) => {
-            let terminal = matches!(boundary.state, InvocationState::Ended { .. });
+            let terminal = boundary.state.terminal_outcome().is_some();
             intent.owner = Some(boundary.invocation.clone());
             terminal.then_some(StopResolution::AlreadyTerminal {
                 target_turn_id: Some(boundary.invocation.turn_id),

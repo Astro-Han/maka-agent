@@ -25,7 +25,7 @@ use maka_runtime::{
         RuntimeEvent,
     },
 };
-use sqlx::Connection;
+use sqlx::{Connection, SqliteConnection};
 
 impl EventLog {
     /// Settle an unclaimed seal without loading a provider or replaying effects.
@@ -47,70 +47,118 @@ impl EventLog {
         }
         let source = source.clone();
         let commits = self.commits.clone();
-        self.connection.run(move |connection| Box::pin(async move {
-            let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
-            let prefix = crate::run_prefix::read(
-                &mut tx, &source.session_id, &source.run_id, &source.invocation_id,
-                i64::MAX, MAX_SOURCE_EVENTS, MAX_SOURCE_BYTES,
-            ).await?;
-            if prefix.invocation != source {
-                return Err(super::invalid("handoff cancellation source changed"));
-            }
-            let Some(seal) = prefix.events.last() else {
-                return Err(super::invalid("handoff cancellation source is missing"));
-            };
-            let Fact::InvocationEnded { outcome: InvocationOutcome::HandoffPaused { pause } } = &seal.event.fact else {
-                return Err(super::invalid("handoff cancellation requires a sealed pause"));
-            };
-            let claimed: bool = sqlx::query_scalar(
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin_with("BEGIN IMMEDIATE").await?;
+                    let (boundary, sequence) = apply(&mut tx, &source, cause).await?;
+                    tx.commit().await.map_err(StoreError::CommitUnknown)?;
+                    if let Some(sequence) = sequence {
+                        commits.send_replace(sequence);
+                    }
+                    Ok(boundary)
+                })
+            })
+            .await
+    }
+}
+
+pub(crate) async fn apply(
+    tx: &mut SqliteConnection,
+    source: &Invocation,
+    cause: CancellationCause,
+) -> Result<(TurnBoundary, Option<u64>), StoreError> {
+    let prefix = crate::run_prefix::read(
+        tx,
+        &source.session_id,
+        &source.run_id,
+        &source.invocation_id,
+        i64::MAX,
+        MAX_SOURCE_EVENTS,
+        MAX_SOURCE_BYTES,
+    )
+    .await?;
+    if prefix.invocation != *source {
+        return Err(super::invalid("handoff cancellation source changed"));
+    }
+    let Some(seal) = prefix.events.last() else {
+        return Err(super::invalid("handoff cancellation source is missing"));
+    };
+    let Fact::InvocationEnded {
+        outcome: InvocationOutcome::HandoffPaused { pause },
+    } = &seal.event.fact
+    else {
+        return Err(super::invalid(
+            "handoff cancellation requires a sealed pause",
+        ));
+    };
+    let claimed: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id=? AND kind='invocation_opened')"
             ).bind(&pause.intent.successor_invocation_id).fetch_one(&mut *tx).await?;
-            if claimed {
-                return crate::turns::read(&mut tx, &source.session_id, Some(&source.turn_id)).await?
-                    .ok_or_else(|| super::invalid("claimed handoff has no Turn"));
-            }
-            let opening = prefix.events.first().expect("checked nonempty prefix");
-            let Fact::InvocationOpened { input, configuration: Some(configuration) } = &opening.event.fact else {
-                return Err(super::invalid("handoff source has no admitted configuration"));
-            };
-            let base = match input {
-                InvocationInput::Message { .. } => {
-                    crate::context::frozen::fresh_base(&mut tx, &source, opening.sequence).await?
-                }
-                InvocationInput::Handoff { claim, .. } | InvocationInput::Continuation { claim, .. } => claim.base.clone(),
-                _ => return Err(super::invalid("handoff source is not a model Run")),
-            };
-            let invocation = pause.intent.successor(&source);
-            let opening = RuntimeEvent::new(invocation.clone(), Fact::InvocationOpened {
-                configuration: Some(configuration.clone()),
-                input: InvocationInput::Handoff {
-                    pause: Box::new(pause.clone()),
-                    claim: Box::new(ContinuationClaim {
-                        id: pause.intent.claim_id.clone(),
-                        source: RunBoundary { invocation: source, high_water: prefix.high_water, digest: prefix.digest },
-                        base,
-                        replay: pause.execution.replay.clone(),
-                    }),
-                },
-            });
-            let writes = [
-                EventWrite::plain(opening.clone()),
-                EventWrite::plain(RuntimeEvent::new(invocation, Fact::InvocationEnded {
-                    outcome: InvocationOutcome::Cancelled { source: cause.source() },
-                })),
-            ].into_iter().collect::<Result<Vec<_>, _>>().map_err(|e| super::invalid(&e.to_string()))?;
-            let mut last = 0;
-            for write in &writes {
-                last = match EventLog::append_in_transaction(&mut tx, write).await? {
-                    crate::append::AppendResult::Existing(sequence)
-                    | crate::append::AppendResult::Inserted(sequence) => sequence,
-                };
-            }
-            crate::context::validate_batch(&mut tx, &writes).await?;
-            let boundary = crate::turns::project(&mut tx, opening).await?;
-            tx.commit().await.map_err(StoreError::CommitUnknown)?;
-            commits.send_replace(last);
-            Ok(boundary)
-        })).await
+    if claimed {
+        return Ok((super::owner(tx, source).await?, None));
     }
+    let opening = prefix.events.first().expect("checked nonempty prefix");
+    let Fact::InvocationOpened {
+        input,
+        configuration: Some(configuration),
+    } = &opening.event.fact
+    else {
+        return Err(super::invalid(
+            "handoff source has no admitted configuration",
+        ));
+    };
+    let base = match input {
+        InvocationInput::Message { .. } => {
+            crate::context::frozen::fresh_base(tx, source, opening.sequence).await?
+        }
+        InvocationInput::Handoff { claim, .. } | InvocationInput::Continuation { claim, .. } => {
+            claim.base.clone()
+        }
+        _ => return Err(super::invalid("handoff source is not a model Run")),
+    };
+    let invocation = pause.intent.successor(source);
+    let opening = RuntimeEvent::new(
+        invocation.clone(),
+        Fact::InvocationOpened {
+            configuration: Some(configuration.clone()),
+            input: InvocationInput::Handoff {
+                pause: Box::new(pause.clone()),
+                claim: Box::new(ContinuationClaim {
+                    id: pause.intent.claim_id.clone(),
+                    source: RunBoundary {
+                        invocation: source.clone(),
+                        high_water: prefix.high_water,
+                        digest: prefix.digest,
+                    },
+                    base,
+                    replay: pause.execution.replay.clone(),
+                }),
+            },
+        },
+    );
+    let writes = [
+        EventWrite::plain(opening.clone()),
+        EventWrite::plain(RuntimeEvent::new(
+            invocation,
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::Cancelled {
+                    source: cause.source(),
+                },
+            },
+        )),
+    ]
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| super::invalid(&e.to_string()))?;
+    let mut last = 0;
+    for write in &writes {
+        last = match EventLog::append_in_transaction(tx, write).await? {
+            crate::append::AppendResult::Existing(sequence)
+            | crate::append::AppendResult::Inserted(sequence) => sequence,
+        };
+    }
+    crate::context::validate_batch(tx, &writes).await?;
+    let boundary = crate::turns::project(tx, opening).await?;
+    Ok((boundary, Some(last)))
 }

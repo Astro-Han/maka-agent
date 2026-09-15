@@ -104,6 +104,18 @@ impl EventLog {
                 let mut last = None;
                 for action in actions {
                     let action = ActionId::new(action).map_err(invalid)?;
+                    let record = read(&mut tx, &action).await?
+                        .ok_or_else(|| invalid("WorkHub stop disappeared during recovery"))?;
+                    if let Some(owner) = &record.intent.owner {
+                        let boundary = crate::handoff::owner(&mut tx, owner).await?;
+                        if matches!(boundary.state, crate::turns::InvocationState::Ended {
+                            outcome: maka_runtime::event::InvocationOutcome::HandoffPaused { .. }, ..
+                        }) {
+                            crate::handoff::cancel(&mut tx, &boundary.invocation,
+                                maka_runtime::event::CancellationCause::WorkhubStop { action_id: action.clone() }
+                            ).await?;
+                        }
+                    }
                     let (_, sequence) = resolve(&mut tx, &action).await?;
                     last = sequence.or(last);
                     recovered += 1;
@@ -163,28 +175,15 @@ async fn resolve(
         .owner
         .as_ref()
         .ok_or_else(|| invalid("WorkHub stop owner is missing"))?;
-    let terminal: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-         FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_ended'",
-    )
-    .bind(&owner.invocation_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let terminal: maka_runtime::event::RuntimeEvent = serde_json::from_str(
-        &terminal
-            .ok_or(StoreError::SessionBusy)?
-            .ok_or(StoreError::PrefixTooLarge)?,
-    )?;
-    if terminal.invocation != *owner {
-        return Err(invalid("WorkHub stop terminal owner changed"));
-    }
-    let maka_runtime::event::Fact::InvocationEnded { outcome } = terminal.fact else {
-        return Err(invalid("WorkHub stop owner has no terminal"));
-    };
+    let boundary = crate::handoff::owner(tx, owner).await?;
+    let outcome = boundary
+        .state
+        .terminal_outcome()
+        .ok_or(StoreError::SessionBusy)?;
     let resolution = if matches!(
         outcome,
         maka_runtime::event::InvocationOutcome::Cancelled { source }
-            if source == maka_runtime::workhub::stop_abort_source(action)
+            if source == &maka_runtime::workhub::stop_abort_source(action)
     ) {
         StopResolution::StopDelivered {
             target_turn_id: owner.turn_id.clone(),

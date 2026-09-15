@@ -97,6 +97,10 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
                 stored(host, error)
             }
         })?;
+    let mut admission = Some(host.executions.lock_admission().await);
+    host.executions
+        .dispatch_pending(&record.intent.request.target_session_id, &mut admission)
+        .await?;
     receipt(resolved)
 }
 

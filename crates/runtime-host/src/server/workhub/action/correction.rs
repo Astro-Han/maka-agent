@@ -162,7 +162,12 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
     let record = finish(host, &record.intent.request.action_id).await?;
     if let Some(CorrectionResolution::Assigned(assigned)) = &record.resolution {
         host.executions
-            .dispatch_workhub_pending(&assigned.delegation.target.session_id, &mut admission)
+            .dispatch_pending(&assigned.delegation.target.session_id, &mut admission)
+            .await?;
+    }
+    if let Some(owner) = &record.intent.owner {
+        host.executions
+            .dispatch_pending(&owner.session_id, &mut admission)
             .await?;
     }
     receipt(record)
@@ -182,6 +187,16 @@ pub(in crate::server) async fn recover(host: &Arc<Host>) -> Result<(), Operation
             return Ok(());
         }
         for record in records {
+            if let Some(owner) = &record.intent.owner {
+                host.executions
+                    .retire_workhub_owner(
+                        owner,
+                        maka_agent::CancellationCause::WorkhubCorrection {
+                            action_id: record.intent.request.action_id.clone(),
+                        },
+                    )
+                    .await?;
+            }
             finish(host, &record.intent.request.action_id).await?;
         }
     }

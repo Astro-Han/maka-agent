@@ -62,6 +62,34 @@ impl Executions {
         owner: &Invocation,
         cause: maka_agent::CancellationCause,
     ) -> Result<Option<tokio_util::sync::CancellationToken>> {
+        let stored = |error: maka_event_log::StoreError| {
+            if matches!(
+                error,
+                maka_event_log::StoreError::CommitUnknown(_)
+                    | maka_event_log::StoreError::OperationUnknown
+            ) {
+                self.begin_drain();
+                failure(Code::CommitOutcomeUnknown, &error.to_string())
+            } else {
+                internal(error)
+            }
+        };
+        let boundary = self.log.handoff_owner(owner).await.map_err(stored)?;
+        let boundary = if matches!(
+            boundary.state,
+            maka_event_log::turns::InvocationState::Ended {
+                outcome: maka_runtime::event::InvocationOutcome::HandoffPaused { .. },
+                ..
+            }
+        ) {
+            self.log
+                .cancel_handoff(&boundary.invocation, cause.clone())
+                .await
+                .map_err(stored)?
+        } else {
+            boundary
+        };
+        let owner = &boundary.invocation;
         let active = self
             .active
             .lock()
@@ -107,33 +135,6 @@ impl Executions {
             return Err(failure(Code::OperationConflict, "WorkHub Turn has ended"));
         }
         Ok(boundary)
-    }
-
-    /// The action already owns a durable pending root. Reuse normal recovery/delivery.
-    pub(crate) async fn dispatch_workhub_pending<'a>(
-        self: &'a Arc<Self>,
-        session: &str,
-        admission: &mut Option<tokio::sync::MutexGuard<'a, ()>>,
-    ) -> Result<()> {
-        // The existing worker owns steering consumption and terminal handoff.
-        if self.has_active_session(session) {
-            return Ok(());
-        }
-        match self.next_message(session, admission, None).await {
-            Ok(Some(running)) => self.track(running),
-            Ok(None) => {}
-            Err(error) => {
-                self.begin_drain();
-                return Err(failure(
-                    Code::HostDraining,
-                    &format!(
-                        "Delegation committed; target startup failed: {}",
-                        error.message
-                    ),
-                ));
-            }
-        }
-        Ok(())
     }
 
     /// The WorkHub entry point holds the shared admission gate and proves the

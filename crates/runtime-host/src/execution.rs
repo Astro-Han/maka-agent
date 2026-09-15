@@ -178,8 +178,8 @@ impl Executions {
             .ok_or_else(|| failure(Code::NotFound, "Turn does not exist"))
     }
 
-    pub(crate) async fn stop(&self, input: TurnStopInput) -> Result<TurnSnapshot> {
-        let _admission = self.lock_admission().await;
+    pub(crate) async fn stop(self: &Arc<Self>, input: TurnStopInput) -> Result<TurnSnapshot> {
+        let mut admission = Some(self.lock_admission().await);
         let boundary = self
             .log
             .turn_boundary(&input.session_id, &input.turn_id)
@@ -189,13 +189,14 @@ impl Executions {
         if boundary.root_invocation().run_id != input.run_id {
             return Err(failure(Code::OperationConflict, "Run identity changed"));
         }
-        let boundary = if matches!(
+        let paused = matches!(
             boundary.state,
             maka_event_log::turns::InvocationState::Ended {
                 outcome: maka_runtime::event::InvocationOutcome::HandoffPaused { .. },
                 ..
             }
-        ) {
+        );
+        let boundary = if paused {
             self.log
                 .cancel_handoff(&boundary.invocation, maka_agent::CancellationCause::Runtime)
                 .await
@@ -221,6 +222,10 @@ impl Executions {
         if let Some(cancellation) = cancellation {
             self.interactions.stop_run(&invocation).await?;
             cancellation.cancel();
+        }
+        if paused {
+            self.dispatch_pending(&input.session_id, &mut admission)
+                .await?;
         }
         self.query(TurnQueryInput {
             session_id: input.session_id,

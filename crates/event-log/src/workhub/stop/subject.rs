@@ -20,7 +20,6 @@
 use crate::{
     StoreError,
     message_resolution::{MessageExecution, owner},
-    turns::InvocationState,
 };
 use maka_runtime::workhub::ActionId;
 use maka_runtime::workhub::Delegation;
@@ -65,7 +64,7 @@ pub(super) async fn select(
             let retired = match &work {
                 MessageExecution::Cancelled => true,
                 MessageExecution::Owned(boundary) | MessageExecution::Shared(boundary) => {
-                    matches!(boundary.state, InvocationState::Ended { .. })
+                    boundary.state.terminal_outcome().is_some()
                 }
                 MessageExecution::Pending | MessageExecution::Missing => false,
             };

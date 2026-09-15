@@ -250,7 +250,7 @@ async fn admit(
         });
     }
     host.executions
-        .dispatch_workhub_pending(target.id(), &mut admission)
+        .dispatch_pending(target.id(), &mut admission)
         .await?;
     Ok(result)
 }
