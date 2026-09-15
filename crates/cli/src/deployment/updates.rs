@@ -122,7 +122,7 @@ fn validate_target(current: &Deployment, target: &Deployment) -> Result<(), Stor
     Ok(())
 }
 
-async fn load(
+pub(super) async fn load(
     connection: &mut SqliteConnection,
 ) -> Result<(Deployment, Option<Deployment>), StoreError> {
     let (active, pending): (String, Option<String>) = sqlx::query_as(
@@ -171,6 +171,7 @@ mod tests {
             sha256: "a".repeat(64),
             mode: Mode::OnDemand,
             websocket: "127.0.0.1:0".parse().unwrap(),
+            admission: super::super::Admission::Active,
         };
         store::install(&directory, lease.clone(), owner, current.clone())
             .await
@@ -246,7 +247,57 @@ mod tests {
         commit(&directory, lease.clone(), owner, current, target.clone())
             .await
             .unwrap();
-        assert_eq!(read(&directory, lease).await.unwrap(), (target, None));
+        // Uninstall cancels pending intent atomically, but retains a tombstone.
+        // Only explicit reinstallation can grant a fresh deployment identity.
+        let mut pending = target.clone();
+        pending.config_revision += 1;
+        pending.sha256 = "d".repeat(64);
+        pending.executable = package::path(&directory, &pending.sha256);
+        prepare(&directory, lease.clone(), target.clone(), pending)
+            .await
+            .unwrap();
+        let owner = Arc::new(RootOwner::open(&root_path, &namespaces).unwrap());
+        let revoked = store::change(
+            &directory,
+            lease.clone(),
+            owner.clone(),
+            target.clone(),
+            store::Change::Revoke,
+        )
+        .await
+        .unwrap();
+        assert_eq!(revoked.config_revision, 3);
+        assert!(revoked.require_active().is_err());
+        assert_eq!(
+            read(&directory, lease.clone()).await.unwrap(),
+            (revoked.clone(), None)
+        );
+        // A stale operator cannot overwrite the tombstone after a lost response.
+        assert!(
+            store::change(
+                &directory,
+                lease.clone(),
+                owner.clone(),
+                target.clone(),
+                store::Change::Revoke
+            )
+            .await
+            .is_err()
+        );
+        let mut reinstalled = target;
+        reinstalled.deployment_id = uuid::Uuid::new_v4();
+        reinstalled.config_revision = 1;
+        let active = store::change(
+            &directory,
+            lease.clone(),
+            owner.clone(),
+            revoked,
+            store::Change::Reinstall(reinstalled.clone()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read(&directory, lease).await.unwrap(), (active, None));
+        drop(owner);
         drop(RootOwner::open(&root_path, &namespaces).unwrap());
     }
 }

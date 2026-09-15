@@ -62,6 +62,14 @@ impl Service {
                 format!("persistent user services require lingering for user {uid}").into(),
             );
         }
+        self.stop()?;
+        publish(&self.path, &self.definition)?;
+        checked(command("systemctl", &["--user", "daemon-reload"])?)?;
+        checked(command("systemctl", &["--user", "enable", &self.unit])?)?;
+        Ok(())
+    }
+
+    pub fn stop(&self) -> Result<(), HostError> {
         let loaded = checked(command(
             "systemctl",
             &[
@@ -80,9 +88,35 @@ impl Service {
             }
             _ => return Err("unrecognized systemd service load state".into()),
         }
-        publish(&self.path, &self.definition)?;
+        Ok(())
+    }
+
+    pub fn remove(&self) -> Result<(), HostError> {
+        let fragment = checked(command(
+            "systemctl",
+            &[
+                "--user",
+                "show",
+                "--property=FragmentPath",
+                "--value",
+                &self.unit,
+            ],
+        )?)?;
+        if !fragment.trim().is_empty() && std::path::Path::new(fragment.trim()) != self.path {
+            return Err("service definition location differs; restore its original XDG_CONFIG_HOME before cleanup".into());
+        }
+        self.stop()?;
+        match self.path.symlink_metadata() {
+            Ok(metadata) if metadata.is_file() => {
+                checked(command("systemctl", &["--user", "disable", &self.unit])?)?;
+                std::fs::remove_file(&self.path)?;
+                std::fs::File::open(self.path.parent().ok_or("service path has no parent")?)?
+                    .sync_all()?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return Err("service definition is not a regular file".into()),
+        }
         checked(command("systemctl", &["--user", "daemon-reload"])?)?;
-        checked(command("systemctl", &["--user", "enable", &self.unit])?)?;
         Ok(())
     }
 

@@ -60,6 +60,50 @@ pub(super) async fn start(
     .await?
 }
 
+pub(super) async fn stop(
+    deployment: Deployment,
+    lease: Arc<FileLease>,
+    owner: Arc<RootOwner>,
+) -> Result<(), HostError> {
+    change(deployment, lease, owner, false).await
+}
+
+pub(super) async fn remove(
+    deployment: Deployment,
+    lease: Arc<FileLease>,
+    owner: Arc<RootOwner>,
+) -> Result<(), HostError> {
+    change(deployment, lease, owner, true).await
+}
+
+async fn change(
+    deployment: Deployment,
+    lease: Arc<FileLease>,
+    owner: Arc<RootOwner>,
+    remove: bool,
+) -> Result<(), HostError> {
+    if deployment.mode == super::Mode::OnDemand {
+        return Ok(());
+    }
+    tokio::task::spawn_blocking(move || {
+        lease.validate()?;
+        owner.validate_current()?;
+        if owner.root_id() != deployment.root_id || owner.canonical_path() != deployment.root_path {
+            return Err("State Root changed before service control".into());
+        }
+        let service = platform::Service::new(&deployment)?;
+        if remove {
+            service.remove()?;
+        } else {
+            service.stop()?;
+        }
+        owner.validate_current()?;
+        lease.validate()?;
+        Ok::<_, HostError>(())
+    })
+    .await?
+}
+
 fn arguments(deployment: &Deployment) -> Result<[&str; 5], HostError> {
     let executable = deployment
         .executable

@@ -65,6 +65,10 @@ Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host �
 目标一旦提交，即使启动失败也不自动回退。Supervised 激活仅在持有 Root 时替换服务定义。
 无人值守版本选择和不中断监听的交接尚未接通。
 
+`host stop`、`host restart`、`host uninstall` 使用相同的身份参数。
+停止和重启保留待更新目标。卸载先撤销启动资格，再注销服务；Root 数据、代码包及部署撤销记录均保留。
+若 `cleanup.kind` 为 `pending`，重试相同卸载命令；显式安装会在旧服务清理完成后授予新的部署身份。
+
 `maka` 命令还提供 Desktop 启动用的 `host candidate`、从 stdin 读取 JavaScript cell 的
 `code --log <file>`，以及查看已提交执行事实的 `inspect --log <file>`。
 

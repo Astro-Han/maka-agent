@@ -64,6 +64,8 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert_eq!(installed["rootId"], fixture.root_id);
         assert_eq!(installed["configRevision"], 1);
 
+        let launch_root = fixture.root.clone();
+        let launch_root_id = fixture.root_id.clone();
         let command = |executable: &str, candidate: bool| {
             let mut command = Command::new(executable);
             command
@@ -76,11 +78,11 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
                     },
                     "--root",
                 ])
-                .arg(&fixture.root);
+                .arg(&launch_root);
             if candidate {
                 command.args([
                     "--expected-root-id",
-                    &fixture.root_id,
+                    &launch_root_id,
                     "--startup-attempt-id",
                     &uuid::Uuid::new_v4().to_string(),
                     "--owner-stdin",
@@ -233,6 +235,63 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         let reused = activate.output().unwrap();
         assert!(reused.status.success(), "{reused:?}");
         assert_eq!(decode_activation(&reused.stdout), frame);
+        let control = |action: &str| {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_maka"));
+            command.args([
+                "host",
+                action,
+                "--root-id",
+                &fixture.root_id,
+                "--expected-deployment-id",
+                installed["deploymentId"].as_str().unwrap(),
+                "--expected-revision",
+                "1",
+            ]);
+            command
+        };
+        let restarted = control("restart").output().unwrap();
+        assert!(restarted.status.success(), "{restarted:?}");
+        let restarted: Value = serde_json::from_slice(&restarted.stdout).unwrap();
+        assert_eq!(restarted["kind"], "ready");
+        assert_eq!(restarted["deployment"], installed);
+        assert_ne!(restarted["host"]["hostEpoch"], frame["hostEpoch"]);
+        let stopped = control("stop").output().unwrap();
+        assert!(stopped.status.success(), "{stopped:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&stopped.stdout).unwrap()["kind"],
+            "stopped"
+        );
+        drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
+        let uninstalled = control("uninstall").output().unwrap();
+        assert!(uninstalled.status.success(), "{uninstalled:?}");
+        let uninstalled: Value = serde_json::from_slice(&uninstalled.stdout).unwrap();
+        assert_eq!(uninstalled["kind"], "unregistered");
+        assert_eq!(uninstalled["deployment"]["admission"], "revoked");
+        assert_eq!(uninstalled["deployment"]["configRevision"], 2);
+        assert_eq!(uninstalled["cleanup"]["kind"], "complete");
+        let repeated = control("uninstall").output().unwrap();
+        assert!(repeated.status.success(), "{repeated:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&repeated.stdout).unwrap(),
+            uninstalled
+        );
+        assert!(!activate.output().unwrap().status.success());
+        let revoked = command(executable, true).output().unwrap();
+        assert!(!revoked.status.success());
+        assert!(String::from_utf8_lossy(&revoked.stderr).contains("uninstalled"));
+        assert!(fixture.root.join("runtime-rust.sqlite").is_file());
+        let reinstalled = install.output().unwrap();
+        assert!(reinstalled.status.success(), "{reinstalled:?}");
+        let reinstalled: Value = serde_json::from_slice(&reinstalled.stdout).unwrap();
+        assert_ne!(reinstalled["deploymentId"], installed["deploymentId"]);
+        assert_eq!(reinstalled["configRevision"], 1);
+        assert_eq!(reinstalled["rootId"], fixture.root_id);
+        let ready = activate.output().unwrap();
+        assert!(ready.status.success(), "{ready:?}");
+        let ready = decode_activation(&ready.stdout);
+        assert_eq!(ready["deploymentId"], reinstalled["deploymentId"]);
+        assert!(!control("stop").output().unwrap().status.success());
+        assert_eq!(decode_activation(&activate.output().unwrap().stdout), ready);
         fixture.retire_registered();
     }
 }

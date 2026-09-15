@@ -18,12 +18,14 @@
  */
 
 mod activation;
+mod control;
 mod package;
 mod service;
 mod store;
 mod update;
 mod updates;
 pub(super) use activation::Activate;
+pub(super) use control::{Control, ControlAction};
 pub(super) use update::Update;
 
 use clap::{Args, ValueEnum};
@@ -73,7 +75,21 @@ pub(super) struct Install {
     websocket: SocketAddr,
 }
 
-/// Active configuration authorizes startup; it does not assert process health.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Admission {
+    #[default]
+    Active,
+    Revoked,
+}
+
+impl Admission {
+    fn is_active(&self) -> bool {
+        *self == Self::Active
+    }
+}
+
+/// Deployment admission authorizes startup; it does not assert process health.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Deployment {
@@ -85,9 +101,20 @@ pub(super) struct Deployment {
     sha256: String,
     pub mode: Mode,
     pub websocket: SocketAddr,
+    // Active remains readable by previously installed executables. Older readers
+    // reject the explicit tombstone through deny_unknown_fields.
+    #[serde(default, skip_serializing_if = "Admission::is_active")]
+    admission: Admission,
 }
 
 impl Deployment {
+    fn require_active(&self) -> Result<(), HostError> {
+        if !self.admission.is_active() {
+            return Err("deployment has been uninstalled".into());
+        }
+        Ok(())
+    }
+
     pub fn generation(&self) -> String {
         format!("{}:{}", self.deployment_id, self.config_revision)
     }
@@ -138,7 +165,9 @@ impl Install {
         })
         .await??;
         let existing = store::read(&directory).await?;
-        if let store::Installation::Installed(existing) = &existing {
+        if let store::Installation::Installed(existing) = &existing
+            && existing.admission.is_active()
+        {
             existing.validate(&root, &directory)?;
             if existing.mode != self.mode || existing.websocket != self.websocket {
                 return Err("deployment configuration changes require an update".into());
@@ -167,18 +196,37 @@ impl Install {
             sha256,
             mode: self.mode,
             websocket: self.websocket,
+            admission: Admission::Active,
         };
         let deployment = if let store::Installation::Installed(existing) = existing {
             existing.validate(&root, &directory)?;
-            if existing.executable != requested.executable
-                || existing.mode != requested.mode
-                || existing.websocket != requested.websocket
-            {
-                return Err(
-                    "deployment is already installed; changing it requires an update".into(),
-                );
+            if existing.admission == Admission::Revoked {
+                let owner = Arc::new(RootOwner::open(
+                    root.canonical_path(),
+                    &RootNamespaces::for_current_account()?,
+                )?);
+                // Remove the old projection before granting a new installation:
+                // an old login trigger must not resurrect it across the cut.
+                service::remove(existing.clone(), lease.clone(), owner.clone()).await?;
+                store::change(
+                    &directory,
+                    lease.clone(),
+                    owner,
+                    existing,
+                    store::Change::Reinstall(requested),
+                )
+                .await?
+            } else {
+                if existing.executable != requested.executable
+                    || existing.mode != requested.mode
+                    || existing.websocket != requested.websocket
+                {
+                    return Err(
+                        "deployment is already installed; changing it requires an update".into(),
+                    );
+                }
+                existing
             }
-            existing
         } else {
             // No deployment database is created before obtaining the Root. A busy
             // unmanaged Host remains unmanaged; staging alone cannot fence startup.
@@ -209,6 +257,7 @@ pub(super) async fn admit(owner: &RootOwner, mode: Mode) -> Result<Option<Deploy
         store::Installation::Installed(deployment) => deployment,
     };
     deployment.validate(&root, &directory)?;
+    deployment.require_active()?;
     if !deployment.executable.symlink_metadata()?.is_file()
         || deployment.executable.canonicalize()? != deployment.executable
         || deployment.mode != mode

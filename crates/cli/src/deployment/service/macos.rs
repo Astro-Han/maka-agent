@@ -67,6 +67,21 @@ impl Service {
     }
 
     pub fn prepare(&self) -> Result<(), HostError> {
+        self.stop()?;
+        publish(&self.path, &self.definition)?;
+        checked(command("/bin/launchctl", &["enable", &self.target])?)?;
+        checked(command(
+            "/bin/launchctl",
+            &[
+                "bootstrap",
+                &format!("gui/{}", self.uid),
+                self.path.to_str().ok_or("service path must be UTF-8")?,
+            ],
+        )?)?;
+        Ok(())
+    }
+
+    pub fn stop(&self) -> Result<(), HostError> {
         if self.in_user_domain(&["managername"])?.trim() != "Aqua"
             || self.in_user_domain(&["manageruid"])?.trim() != self.uid
         {
@@ -86,16 +101,20 @@ impl Service {
                 std::thread::sleep(Duration::from_millis(25));
             }
         }
-        publish(&self.path, &self.definition)?;
-        checked(command("/bin/launchctl", &["enable", &self.target])?)?;
-        checked(command(
-            "/bin/launchctl",
-            &[
-                "bootstrap",
-                &format!("gui/{}", self.uid),
-                self.path.to_str().ok_or("service path must be UTF-8")?,
-            ],
-        )?)?;
+        Ok(())
+    }
+
+    pub fn remove(&self) -> Result<(), HostError> {
+        self.stop()?;
+        match self.path.symlink_metadata() {
+            Ok(metadata) if metadata.is_file() => {
+                std::fs::remove_file(&self.path)?;
+                std::fs::File::open(self.path.parent().ok_or("service path has no parent")?)?
+                    .sync_all()?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return Err("service definition is not a regular file".into()),
+        }
         Ok(())
     }
 

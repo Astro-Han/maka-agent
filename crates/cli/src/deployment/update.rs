@@ -63,6 +63,7 @@ impl Update {
         };
         let root = root::resolve(&current.root_path)?;
         current.validate(&root, &directory)?;
+        current.require_active()?;
         if current.root_id != self.root_id.0 || current.deployment_id != self.expected_deployment_id
         {
             return Err("deployment identity or revision changed".into());
@@ -142,14 +143,21 @@ impl Update {
 }
 
 /// A prepared receipt is not proof of release: only acquiring RootOwner is.
-async fn retire(deployment: &Deployment) -> Result<Option<RootOwner>, HostError> {
+pub(super) async fn retire(deployment: &Deployment) -> Result<Option<RootOwner>, HostError> {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match RootOwner::open(
                 &deployment.root_path,
                 &RootNamespaces::for_current_account()?,
             ) {
-                Ok(owner) => return Ok(Some(owner)),
+                Ok(owner) => {
+                    if owner.root_id() != deployment.root_id
+                        || owner.canonical_path() != deployment.root_path
+                    {
+                        return Err("State Root changed during retirement".into());
+                    }
+                    return Ok(Some(owner));
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(error) => return Err(error.into()),
             }

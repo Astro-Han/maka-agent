@@ -116,6 +116,7 @@ impl Activate {
             return Err("deployment root identity changed".into());
         }
         deployment.validate(&root, &directory)?;
+        deployment.require_active()?;
         lease.validate()?;
         let (client, live) = connect_or_launch(&deployment, lease.clone()).await?;
         lease.validate()?;
@@ -146,6 +147,7 @@ pub(super) async fn connect_or_launch(
     deployment: &Deployment,
     lease: Arc<FileLease>,
 ) -> Result<(HostClient, LiveHost), HostError> {
+    deployment.require_active()?;
     let mut child: Option<Child> = None;
     let mut service_started = false;
     let result = tokio::time::timeout(Duration::from_secs(30), async {

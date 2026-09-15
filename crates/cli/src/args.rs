@@ -57,6 +57,12 @@ enum HostCommand {
     Update(crate::deployment::Update),
     /// Finish an interrupted deployment update without choosing another target.
     Reconcile(crate::deployment::Update),
+    /// Stop a deployment without changing its configuration or pending update.
+    Stop(crate::deployment::Control),
+    /// Restart the current deployment without applying a pending update.
+    Restart(crate::deployment::Control),
+    /// Revoke startup and unregister its service, retaining State Root data.
+    Uninstall(crate::deployment::Control),
     /// Query the existing Host without opening its State Root for writing.
     Status(Root),
     /// Retire the exact current Host, preserving work at safe step boundaries.
@@ -130,6 +136,15 @@ impl Cli {
             Command::Host(HostCommand::Activate(args)) => args.run().await,
             Command::Host(HostCommand::Update(args)) => args.run(false).await,
             Command::Host(HostCommand::Reconcile(args)) => args.run(true).await,
+            Command::Host(HostCommand::Stop(args)) => {
+                args.run(crate::deployment::ControlAction::Stop).await
+            }
+            Command::Host(HostCommand::Restart(args)) => {
+                args.run(crate::deployment::ControlAction::Restart).await
+            }
+            Command::Host(HostCommand::Uninstall(args)) => {
+                args.run(crate::deployment::ControlAction::Uninstall).await
+            }
             Command::Host(HostCommand::Init(args)) => {
                 let root_id = initialize(&args.root, &RootNamespaces::for_current_account()?)?;
                 println!("{}", serde_json::json!({"rootId": root_id}));

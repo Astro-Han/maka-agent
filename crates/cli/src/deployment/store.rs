@@ -127,6 +127,75 @@ pub(super) async fn open_writer(
     .await?)
 }
 
+pub(super) enum Change {
+    Revoke,
+    Reinstall(Deployment),
+}
+
+/// Revocation and reinstallation are authority changes, not code updates.
+/// The connection retains Root through actual COMMIT/rollback and close.
+pub(super) async fn change(
+    directory: &Path,
+    lease: Arc<FileLease>,
+    owner: Arc<RootOwner>,
+    expected: Deployment,
+    change: Change,
+) -> Result<Deployment, HostError> {
+    use super::Admission;
+    if owner.root_id() != expected.root_id || owner.canonical_path() != expected.root_path {
+        return Err("deployment change does not own the expected State Root".into());
+    }
+    let target = match change {
+        Change::Revoke => {
+            expected.require_active()?;
+            if expected.config_revision >= 9_007_199_254_740_991 {
+                return Err("deployment revision is exhausted".into());
+            }
+            let mut target = expected.clone();
+            target.config_revision += 1;
+            target.admission = Admission::Revoked;
+            target
+        }
+        Change::Reinstall(target) => {
+            if expected.admission != Admission::Revoked
+                || target.admission != Admission::Active
+                || target.root_id != expected.root_id
+                || target.root_path != expected.root_path
+                || target.deployment_id == expected.deployment_id
+                || target.config_revision != 1
+            {
+                return Err("invalid deployment reinstallation".into());
+            }
+            target
+        }
+    };
+    let connection = open_writer(directory, lease, Some(owner)).await?;
+    let result = connection
+        .run(move |connection| {
+            Box::pin(async move {
+                let mut transaction = connection.begin().await?;
+                let (active, _) = super::updates::load(&mut transaction).await?;
+                if active != expected {
+                    return Err(StoreError::InvalidTransition("deployment changed".into()));
+                }
+                sqlx::query("UPDATE deployment SET configuration = ? WHERE singleton = 1")
+                    .bind(serde_json::to_string(&target)?)
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query("DELETE FROM deployment_update WHERE singleton = 1")
+                    .execute(&mut *transaction)
+                    .await?;
+                transaction.commit().await?;
+                Ok(target)
+            })
+        })
+        .await;
+    let closed = connection.close().await;
+    let target = result?;
+    closed?;
+    Ok(target)
+}
+
 fn private_file(path: &Path) -> Result<File, HostError> {
     #[cfg(unix)]
     let file = {

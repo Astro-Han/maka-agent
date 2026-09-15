@@ -78,6 +78,12 @@ automatically rolled back, even if startup fails. Supervised activation replaces
 the service definition only while holding the Root. Unattended release selection
 and uninterrupted listener handoff are not yet connected.
 
+`host stop`, `host restart` and `host uninstall` take the same identity arguments.
+Stop and restart preserve pending updates. Uninstall revokes startup before removing
+the service; it retains Root data, packages and a deployment tombstone. Retry the
+same uninstall if `cleanup.kind` is `pending`. Explicit installation grants a new
+deployment identity after the old service has been removed.
+
 The `maka` command also provides `host candidate` for Desktop-owned startup,
 `code --log <file>` for a JavaScript cell read from stdin, and
 `inspect --log <file>` for committed execution facts.

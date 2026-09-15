@@ -21,15 +21,15 @@ use super::{Deployment, HostError, arguments, label, xml};
 use std::time::{Duration, Instant};
 use windows::{
     Win32::{
-        Foundation::RPC_E_CHANGED_MODE,
+        Foundation::{RPC_E_CHANGED_MODE, VARIANT_BOOL},
         System::{
             Com::{
                 CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
                 CoUninitialize,
             },
             TaskScheduler::{
-                ITaskFolder, ITaskService, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN,
-                TaskScheduler,
+                IRegisteredTask, ITaskFolder, ITaskService, TASK_CREATE_OR_UPDATE,
+                TASK_LOGON_INTERACTIVE_TOKEN, TASK_STATE_DISABLED, TaskScheduler,
             },
             Variant::VARIANT,
         },
@@ -108,32 +108,9 @@ impl Service {
     }
 
     pub fn prepare(&self) -> Result<(), HostError> {
-        // Root is held by the caller; no instance can be executing user work.
+        self.stop()?;
         // SAFETY: these COM interfaces are confined to their initialized thread.
         unsafe {
-            match self.folder.GetTask(&BSTR::from(&self.name)) {
-                Ok(task) => {
-                    let mut description = BSTR::new();
-                    task.Definition()?
-                        .RegistrationInfo()?
-                        .Description(&mut description)?;
-                    if description != self.name.as_str() {
-                        return Err("scheduled task ownership marker differs".into());
-                    }
-                    if task.GetInstances(0)?.Count()? != 0 {
-                        task.Stop(0)?;
-                        let deadline = Instant::now() + Duration::from_secs(45);
-                        while task.GetInstances(0)?.Count()? != 0 {
-                            if Instant::now() >= deadline {
-                                return Err("scheduled task did not stop".into());
-                            }
-                            std::thread::sleep(Duration::from_millis(25));
-                        }
-                    }
-                }
-                Err(error) if error.code().0 as u32 == 0x80070002 => {}
-                Err(error) => return Err(error.into()),
-            }
             let definition = self.scheduler.NewTask(0)?;
             definition.SetXmlText(&BSTR::from(&self.definition))?;
             let empty = VARIANT::default();
@@ -148,6 +125,69 @@ impl Service {
             )?;
         }
         Ok(())
+    }
+
+    pub fn stop(&self) -> Result<(), HostError> {
+        // Root is held by the caller; no instance can be executing user work.
+        // SAFETY: these COM interfaces are confined to their initialized thread.
+        unsafe {
+            if let Some(task) = self.task()?
+                && task.GetInstances(0)?.Count()? != 0
+            {
+                task.Stop(0)?;
+                let deadline = Instant::now() + Duration::from_secs(45);
+                while task.GetInstances(0)?.Count()? != 0 {
+                    if Instant::now() >= deadline {
+                        return Err("scheduled task did not stop".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn remove(&self) -> Result<(), HostError> {
+        let Some(task) = self.task()? else {
+            return Ok(());
+        };
+        // SAFETY: the owned task stays on this COM thread. Disabling first
+        // prevents login/restart triggers from racing the final drain/delete.
+        unsafe {
+            task.SetEnabled(VARIANT_BOOL(0))?;
+            if task.State()? != TASK_STATE_DISABLED {
+                task.Stop(0)?;
+                let deadline = Instant::now() + Duration::from_secs(45);
+                while task.State()? != TASK_STATE_DISABLED {
+                    if Instant::now() >= deadline {
+                        return Err("scheduled task did not finish disabling".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            }
+            self.folder.DeleteTask(&BSTR::from(&self.name), 0)?;
+        }
+        Ok(())
+    }
+
+    fn task(&self) -> Result<Option<IRegisteredTask>, HostError> {
+        // SAFETY: retrieval and ownership validation share this COM apartment.
+        unsafe {
+            match self.folder.GetTask(&BSTR::from(&self.name)) {
+                Ok(task) => {
+                    let mut description = BSTR::new();
+                    task.Definition()?
+                        .RegistrationInfo()?
+                        .Description(&mut description)?;
+                    if description != self.name.as_str() {
+                        return Err("scheduled task ownership marker differs".into());
+                    }
+                    Ok(Some(task))
+                }
+                Err(error) if error.code().0 as u32 == 0x80070002 => Ok(None),
+                Err(error) => Err(error.into()),
+            }
+        }
     }
 
     pub fn start(&self) -> Result<(), HostError> {
