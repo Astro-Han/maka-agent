@@ -49,7 +49,6 @@ fn main() {
 }
 
 fn bundle_providers() {
-    use std::io::Write;
     println!("cargo:rerun-if-changed=trusted/adapter.js");
     println!("cargo:rerun-if-changed=trusted/codex-auth.js");
     println!("cargo:rerun-if-changed=trusted/provider-errors.js");
@@ -58,32 +57,14 @@ fn bundle_providers() {
     println!("cargo:rerun-if-changed=trusted/responses-transport.js");
     println!("cargo:rerun-if-changed=trusted/network-fetch.js");
     println!("cargo:rerun-if-changed=../../scripts/rust/bundle-providers.mjs");
-    let sources: std::collections::BTreeMap<_, _> = deno_telemetry::deno_telemetry::init()
-        .lazy_loaded_js_files
-        .iter()
-        .map(|source| {
-            (
-                source.specifier,
-                source
-                    .load()
-                    .expect("embedded telemetry source")
-                    .to_string(),
-            )
-        })
-        .collect();
-    let mut child = std::process::Command::new("node")
+    println!("cargo:rerun-if-changed=third-party/deno-telemetry/telemetry.ts");
+    println!("cargo:rerun-if-changed=third-party/deno-telemetry/util.ts");
+    let status = std::process::Command::new("node")
         .arg("../../scripts/rust/bundle-providers.mjs")
         .arg(std::env::var("OUT_DIR").expect("Cargo OUT_DIR"))
-        .stdin(std::process::Stdio::piped())
-        .spawn()
+        .stdin(std::process::Stdio::null())
+        .status()
         .expect("Node is required to bundle the provider SDKs at build time");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(&serde_json::to_vec(&sources).unwrap())
-        .unwrap();
-    let status = child.wait().expect("provider bundler process");
     assert!(
         status.success(),
         "provider bundle failed; install repository npm dependencies first"

@@ -47,8 +47,3 @@ tokio-tungstenite.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 maka-process.workspace = true
-
-[build-dependencies]
-deno_core.workspace = true
-deno_telemetry = "=0.80.0"
-serde_json.workspace = true

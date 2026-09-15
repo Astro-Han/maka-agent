@@ -32,6 +32,9 @@
       "!**/dist",
       "!**/node_modules",
       "!package-lock.json",
+      // Verbatim Deno sources; tests verify their exact bytes.
+      "!crates/js-runtime/third-party/deno-telemetry/telemetry.ts",
+      "!crates/js-runtime/third-party/deno-telemetry/util.ts",
       // Generated shadcn/ui config — not hand-authored source.
       "!components.json"
     ]

@@ -226,6 +226,9 @@ export const exclusionRules = [
         'crates/apply-patch/src/seek_sequence.rs',
         'crates/apply-patch/src/text_file.rs',
         'crates/apply-patch/src/update.rs',
+        // Verbatim Deno MIT sources; exact revision and license in LICENSE.
+        'crates/js-runtime/third-party/deno-telemetry/telemetry.ts',
+        'crates/js-runtime/third-party/deno-telemetry/util.ts',
         // Adapted from Vercel AI SDK material; recorded by the #2907 origin audit.
         'packages/runtime/src/model-protocol.ts',
         'packages/eval/harbor/deepseek-harness-profile/cordis.patch.yml',

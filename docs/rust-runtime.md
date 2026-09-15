@@ -54,6 +54,9 @@ socket on Linux/macOS or a private named pipe on Windows. An optional
 `--websocket 127.0.0.1:0` listener requires authentication; TLS is not implemented.
 Development builds retain line-number backtraces; `CARGO_PROFILE_DEV_DEBUG=full`
 enables full debugger information.
+Windows MSVC builds use the static CRT required by the official V8 archive.
+The two vendored Deno TypeScript files must match `deno_telemetry` exactly;
+update them together when upgrading that dependency. They avoid a build-time V8.
 
 `host install --root <directory>` pins the current executable and on-demand policy;
 `--mode supervised` selects persistent serving. Only the returned `executable`

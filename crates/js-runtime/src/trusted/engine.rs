@@ -172,3 +172,30 @@ pub(super) fn string(runtime: &mut JsRuntime, value: v8::Global<v8::Value>) -> R
     let value = v8::Local::new(scope, value);
     deno_core::serde_v8::from_v8(scope, value).map_err(failed)
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bundled_telemetry_matches_the_locked_extension_sources() {
+        let extension = deno_telemetry::deno_telemetry::init();
+        assert_eq!(extension.lazy_loaded_js_files.len(), 2);
+        for source in extension.lazy_loaded_js_files.iter() {
+            let expected = match source.specifier {
+                "ext:deno_telemetry/telemetry.ts" => {
+                    include_str!("../../third-party/deno-telemetry/telemetry.ts")
+                }
+                "ext:deno_telemetry/util.ts" => {
+                    include_str!("../../third-party/deno-telemetry/util.ts")
+                }
+                other => panic!("unbundled extension source: {other}"),
+            };
+            // Deno stores build-machine paths here. Never load them in production.
+            assert_eq!(
+                source.load().unwrap().as_str(),
+                expected,
+                "{}",
+                source.specifier
+            );
+        }
+    }
+}

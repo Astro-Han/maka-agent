@@ -18,7 +18,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { resolve, join, basename } from 'node:path';
+import { resolve, join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -61,15 +61,17 @@ await build({
   ],
   legalComments: 'eof',
 });
-// Transpile Deno's embedded TypeScript at build time; no compiler or npm
-// resolution is installed in the running host.
-let input = '';
-for await (const chunk of process.stdin) input += chunk;
-for (const [specifier, source] of Object.entries(JSON.parse(input))) {
+// Tests check these unmodified sources against the locked Deno extension.
+// Transpilation needs neither a build-time V8 nor a compiler in the running host.
+for (const name of ['telemetry', 'util']) {
+  const source = readFileSync(
+    join(root, 'crates/js-runtime/third-party/deno-telemetry', `${name}.ts`),
+    'utf8',
+  );
   const { code } = await transform(source, {
     loader: 'ts',
     target: 'es2024',
     legalComments: 'inline',
   });
-  await writeFile(join(output, basename(specifier).replace(/\.ts$/, '.js')), code);
+  await writeFile(join(output, `${name}.js`), code);
 }
