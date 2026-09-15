@@ -1,0 +1,11 @@
+{
+  "before": "d2e6c1f273b7daa23ff75b84c8a30dca3f316713",
+  "after": "3ec48f6f70d98f566d3aca62246c4e7fcbdc4d2d",
+  "scope": "Whole feature: before PR #5259 through current PR #5301. Historical baseline is NOT current main.",
+  "viewport": {
+    "width": 1100,
+    "height": 950
+  },
+  "clock": "2026-07-01T09:30:00Z",
+  "fixture": "Same durable login-repair messages rendered through each revision ComposedShell, ChatView and TurnView. Running screenshot is a fixed post-tool snapshot, not lifecycle validation. Historical app-shell story appended only fixture export; product components unchanged."
+}
