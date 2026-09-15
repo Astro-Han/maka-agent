@@ -636,7 +636,7 @@ test('two Clients share stable Session creation, CAS configuration, and catalog 
     await assertRetirementCleanup(root, capability, [retirementSessionId, recoverySessionId]);
   } finally {
     await terminateHost(host);
-    await rm(join(resolveRootControlNamespace(), capability.rootId), {
+    await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
       recursive: true,
       force: true,
     });
@@ -743,7 +743,7 @@ test('deleted account identity survives same-slug reuse until explicit recovery'
     host = undefined;
   } finally {
     await terminateHost(host);
-    await rm(join(resolveRootControlNamespace(), capability.rootId), {
+    await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
       recursive: true,
       force: true,
     });
@@ -794,7 +794,7 @@ test('stable Session creation survives response loss and Host restart', {
   } finally {
     dropped?.abort();
     await terminateHost(host);
-    await rm(join(resolveRootControlNamespace(), capability.rootId), {
+    await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
       recursive: true,
       force: true,
     });

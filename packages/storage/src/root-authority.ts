@@ -19,7 +19,21 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import type { BigIntStats } from 'node:fs';
-import { chmod, lstat, mkdir, open, realpath, stat, type FileHandle } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { isAbsolute, join, normalize, parse, resolve } from 'node:path';
 import { tryLock, unlock, waitForLock } from 'fs-native-extensions';
@@ -29,7 +43,7 @@ import { publishMarkerFile, readBoundedMarkerFile } from './marker-file.js';
 import { syncDirectoryChain } from './stable-storage.js';
 
 export const STORAGE_ROOT_MARKER_FILE = '.maka-storage-root.json';
-export const STORAGE_ROOT_MARKER_SCHEMA_VERSION = 1 as const;
+export const STORAGE_ROOT_MARKER_SCHEMA_VERSION = 2 as const;
 const MAX_STORAGE_ROOT_MARKER_BYTES = 1_024;
 const ARTIFACT_WRITER_BOOTSTRAP_DIRECTORY = 'artifact-writer-bootstrap';
 
@@ -66,7 +80,7 @@ export interface StorageRootLease<
 
 export interface ArtifactWriterLockAuthority {
   readonly bootstrapLockPath: string;
-  readonly controlDirectory: string;
+  readonly lockDirectory: string;
   readonly assertCurrentRoot: () => Promise<void>;
   readonly [artifactWriterLockAuthorityBrand]: true;
 }
@@ -111,6 +125,7 @@ export interface StateRootOwner<K extends StorageRootKind = StorageRootKind> {
   readonly capability: StorageRootCapability<K>;
   readonly lease: StorageRootLease<K, 'write'>;
   readonly controlDirectory: string;
+  readonly hostDataDirectory: string;
   readonly lockPath: string;
   readonly closed: boolean;
   close(): Promise<void>;
@@ -120,6 +135,7 @@ export interface StateRootReader<K extends StorageRootKind = StorageRootKind> {
   readonly capability: StorageRootCapability<K>;
   readonly lease: StorageRootLease<K, 'read'>;
   readonly controlDirectory: string;
+  readonly hostDataDirectory: string;
   readonly lockPath: string;
   readonly closed: boolean;
   close(): Promise<void>;
@@ -171,6 +187,8 @@ const storageRootIdentityRepairs = new WeakMap<object, StorageRootIdentityRepair
 
 export type StorageRootAuthorityErrorCode =
   | 'invalid_root'
+  | 'legacy_root_requires_migration'
+  | 'root_migration_busy'
   | 'invalid_root_kind'
   | 'root_not_found'
   | 'root_unmarked'
@@ -536,26 +554,8 @@ async function ensureRootDirectory(path: string): Promise<void> {
   }
 }
 
-export function resolveRootControlNamespace(): string {
-  try {
-    const accountHome = userInfo().homedir;
-    if (!isAbsolute(accountHome)) {
-      throw new Error('OS account home must be an absolute path');
-    }
-    if (process.platform === 'darwin') {
-      return join(accountHome, 'Library', 'Caches', 'Maka', 'runtime-hosts');
-    }
-    if (process.platform === 'win32') {
-      return join(accountHome, 'AppData', 'Local', 'Maka', 'runtime-hosts');
-    }
-    return join(accountHome, '.cache', 'maka', 'runtime-hosts');
-  } catch (error) {
-    throw normalizeAuthorityFailure(
-      error,
-      'control_io_failed',
-      'Unable to resolve the Runtime Host control namespace',
-    );
-  }
+export function resolveRootControlNamespace(rootPath: string): string {
+  return join(resolveRootOwnershipNamespace(rootPath), 'runtime');
 }
 
 /**
@@ -565,26 +565,13 @@ export function resolveRootControlNamespace(): string {
  * namespace. The owner lock must not: deleting a cache directory while a Host
  * is running must never make the same State Root acquirable again.
  */
-export function resolveRootOwnershipNamespace(): string {
-  try {
-    const accountHome = userInfo().homedir;
-    if (!isAbsolute(accountHome)) {
-      throw new Error('OS account home must be an absolute path');
-    }
-    if (process.platform === 'darwin') {
-      return join(accountHome, 'Library', 'Application Support', 'Maka', 'state-root-owners');
-    }
-    if (process.platform === 'win32') {
-      return join(accountHome, 'AppData', 'Local', 'Maka', 'state-root-owners');
-    }
-    return join(accountHome, '.local', 'share', 'Maka', 'state-root-owners');
-  } catch (error) {
-    throw normalizeAuthorityFailure(
-      error,
-      'control_io_failed',
-      'Unable to resolve the State Root ownership namespace',
-    );
-  }
+export function resolveRootOwnershipNamespace(rootPath: string): string {
+  if (!isAbsolute(rootPath)) throw new TypeError('State Root path must be absolute');
+  return join(rootPath, '.maka-host');
+}
+
+export function resolveRootHostDataDirectory(rootPath: string): string {
+  return join(resolveRootOwnershipNamespace(rootPath), 'data');
 }
 
 export async function tryAcquireInteractiveRootOwner(
@@ -623,7 +610,7 @@ export async function resolveExistingStorageRootControlDirectory(
     async () => {
       const record = requireCapability(capability, capability.kind);
       await assertRootIdentity(record);
-      const controlRoot = resolve(resolveRootControlNamespace());
+      const controlRoot = resolveRootControlNamespace(record.canonicalPath);
       const controlDirectory = join(controlRoot, record.rootId);
       await assertPrivateDirectory(controlRoot);
       await assertPrivateDirectory(controlDirectory);
@@ -644,7 +631,7 @@ export async function prepareArtifactWriterBootstrapAuthority(
       const identity = { dev: rootStat.dev, ino: rootStat.ino };
       const identityChangedMessage = `Storage root identity changed while preparing its Artifact writer bootstrap lock: ${canonicalPath}`;
       await assertRootPathIdentity(canonicalPath, identity, identityChangedMessage);
-      const controlRoot = await preparePrivateControlRoot();
+      const controlRoot = await prepareRootOwnershipDirectory(canonicalPath);
       const lockPath = await prepareArtifactWriterBootstrapLockPathForIdentity(
         controlRoot,
         identity,
@@ -808,31 +795,21 @@ async function acquireStateRootLock<K extends StorageRootKind>(
   access: StorageRootAccess,
 ): Promise<StateRootOwner<K> | StateRootReader<K> | undefined> {
   const capabilityRecord = requireCapability(capability, capability.kind);
-  const ownershipRoot = resolve(resolveRootOwnershipNamespace());
+  await assertRootIdentity(capabilityRecord);
+  const ownershipRoot = resolveRootOwnershipNamespace(capabilityRecord.canonicalPath);
   await ensureDurablePrivateDirectory(ownershipRoot);
   const lockPath = join(ownershipRoot, `${capabilityRecord.rootId}.lock`);
   const durableHandle = await tryAcquireStableRootLock(lockPath, access);
   if (!durableHandle) return undefined;
 
-  let compatibilityHandle: FileHandle | undefined;
   let controlDirectory: string;
   try {
     ({ controlDirectory } = await prepareStorageRootControlDirectory(capability));
-    compatibilityHandle = await tryAcquireStableRootLock(
-      join(controlDirectory, 'owner.lock'),
-      access,
+    await ensureDurablePrivateDirectory(
+      resolveRootHostDataDirectory(capabilityRecord.canonicalPath),
     );
-    if (!compatibilityHandle) {
-      releaseLock(durableHandle);
-      await durableHandle.close();
-      return undefined;
-    }
     await assertRootIdentity(capabilityRecord);
   } catch (error) {
-    if (compatibilityHandle) {
-      releaseLock(compatibilityHandle);
-      await compatibilityHandle.close().catch(() => undefined);
-    }
     releaseLock(durableHandle);
     await durableHandle.close().catch(() => undefined);
     throw error;
@@ -867,14 +844,8 @@ async function acquireStateRootLock<K extends StorageRootKind>(
       'Unable to close the storage root lock',
       async () => {
         await waitForOperations();
-        const errors: unknown[] = [];
-        releaseLock(compatibilityHandle);
-        await compatibilityHandle.close().catch((error: unknown) => errors.push(error));
         releaseLock(durableHandle);
-        await durableHandle.close().catch((error: unknown) => errors.push(error));
-        if (errors.length > 0) {
-          throw new AggregateError(errors, 'Unable to close every State Root owner lock');
-        }
+        await durableHandle.close();
       },
     );
     return closePromise;
@@ -927,6 +898,7 @@ function createStateRootLock<K extends StorageRootKind>(
     capability,
     lease: createLease(capabilityRecord, access, isActive, beginOperation),
     controlDirectory,
+    hostDataDirectory: resolveRootHostDataDirectory(capabilityRecord.canonicalPath),
     lockPath,
     get closed() {
       return !isActive();
@@ -998,7 +970,9 @@ async function prepareStorageRootControlDirectoryForRecord(
   record: CapabilityRecord,
 ): Promise<{ controlRoot: string; controlDirectory: string }> {
   await assertRootIdentity(record);
-  const controlRoot = await preparePrivateControlRoot();
+  await prepareRootOwnershipDirectory(record.canonicalPath);
+  const controlRoot = resolveRootControlNamespace(record.canonicalPath);
+  await ensurePrivateDirectory(controlRoot);
   const controlDirectory = join(controlRoot, record.rootId);
   await ensurePrivateDirectory(controlDirectory);
   await assertRootIdentity(record);
@@ -1008,31 +982,31 @@ async function prepareStorageRootControlDirectoryForRecord(
 async function prepareArtifactWriterLockAuthorityForRecord(
   record: CapabilityRecord,
 ): Promise<ArtifactWriterLockAuthority> {
-  const { controlRoot, controlDirectory } =
-    await prepareStorageRootControlDirectoryForRecord(record);
+  await assertRootIdentity(record);
+  const controlRoot = await prepareRootOwnershipDirectory(record.canonicalPath);
   const bootstrapLockPath = await prepareArtifactWriterBootstrapLockPathForIdentity(
     controlRoot,
     record.identity,
   );
   await assertRootIdentity(record);
-  return createArtifactWriterLockAuthority(record, bootstrapLockPath, controlDirectory);
+  return createArtifactWriterLockAuthority(record, bootstrapLockPath, controlRoot);
 }
 
 function createArtifactWriterLockAuthority(
   record: CapabilityRecord,
   bootstrapLockPath: string,
-  controlDirectory: string,
+  lockDirectory: string,
 ): ArtifactWriterLockAuthority {
   return Object.freeze({
     bootstrapLockPath,
-    controlDirectory,
+    lockDirectory,
     assertCurrentRoot: () => assertRootIdentity(record),
     [artifactWriterLockAuthorityBrand]: true as const,
   });
 }
 
-async function preparePrivateControlRoot(): Promise<string> {
-  const controlRoot = resolve(resolveRootControlNamespace());
+async function prepareRootOwnershipDirectory(rootPath: string): Promise<string> {
+  const controlRoot = resolveRootOwnershipNamespace(rootPath);
   await ensurePrivateDirectory(controlRoot);
   return controlRoot;
 }
@@ -1114,7 +1088,17 @@ async function ensureRootMarker(
   const markerPath = join(root, STORAGE_ROOT_MARKER_FILE);
   try {
     await lstat(markerPath);
-    return await readAndValidateRootMarker(root, kind);
+    try {
+      return await readAndValidateRootMarker(root, kind);
+    } catch (error) {
+      if (
+        error instanceof StorageRootAuthorityError &&
+        error.code === 'legacy_root_requires_migration'
+      ) {
+        return migrateLegacyRoot(root, kind, identity);
+      }
+      throw error;
+    }
   } catch (error) {
     if (!isNodeError(error, 'ENOENT')) throw error;
   }
@@ -1210,7 +1194,7 @@ async function withExclusiveRootMarker<T>(
   expectedKind: StorageRootKind,
   operation: (marker: RootMarker) => Promise<T>,
 ): Promise<T> {
-  const controlRoot = await preparePrivateControlRoot();
+  const controlRoot = await prepareRootOwnershipDirectory(root);
   const lockPath = await prepareArtifactWriterBootstrapLockPathForIdentity(controlRoot, identity);
   return withArtifactWriterBootstrapLock(lockPath, async () => {
     await assertRootPathIdentity(
@@ -1289,10 +1273,177 @@ function parseRootMarker(contents: string, markerPath: string): RootMarker {
   } catch (error) {
     throw invalidRootMarker(markerPath, error);
   }
+  if (
+    marker &&
+    typeof marker === 'object' &&
+    'schemaVersion' in marker &&
+    marker.schemaVersion === 1 &&
+    isRootMarker({ ...marker, schemaVersion: STORAGE_ROOT_MARKER_SCHEMA_VERSION })
+  ) {
+    throw new StorageRootAuthorityError(
+      'legacy_root_requires_migration',
+      `State Root requires migration before use: ${markerPath}`,
+    );
+  }
   if (!isRootMarker(marker)) {
     throw invalidRootMarker(markerPath);
   }
   return marker;
+}
+
+async function migrateLegacyRoot(
+  root: string,
+  kind: StorageRootKind,
+  identity: RootIdentity,
+): Promise<RootMarker> {
+  const authority = resolveRootOwnershipNamespace(root);
+  await ensureDurablePrivateDirectory(authority);
+  const encoded = await readBoundedMarkerFile({
+    path: join(root, STORAGE_ROOT_MARKER_FILE),
+    maxBytes: MAX_STORAGE_ROOT_MARKER_BYTES,
+    invalidFile: () => invalidRootMarker(join(root, STORAGE_ROOT_MARKER_FILE)),
+  });
+  const old = JSON.parse(encoded) as Omit<RootMarker, 'schemaVersion'> & { schemaVersion: number };
+  if (old.schemaVersion !== 1) return readAndValidateRootMarker(root, kind);
+  const marker = { ...old, schemaVersion: STORAGE_ROOT_MARKER_SCHEMA_VERSION };
+  if (!isRootMarker(marker) || marker.kind !== kind || !markerMatchesIdentity(marker, identity)) {
+    throw new StorageRootAuthorityError(
+      'root_identity_collision',
+      'Restore the State Root filesystem identity before migrating it',
+    );
+  }
+  const handles: FileHandle[] = [];
+  try {
+    const current = await tryAcquireStableRootLock(
+      join(authority, `${marker.rootId}.lock`),
+      'write',
+    );
+    if (!current)
+      throw new StorageRootAuthorityError(
+        'root_migration_busy',
+        'Stop the existing Runtime Host before migrating this State Root',
+      );
+    handles.push(current);
+    const latest = await readFile(join(root, STORAGE_ROOT_MARKER_FILE), 'utf8');
+    if (latest !== encoded) return readAndValidateRootMarker(root, kind);
+    const home = userInfo().homedir;
+    if (!isAbsolute(home)) throw new Error('Legacy account home must be absolute');
+    const cache =
+      process.platform === 'darwin'
+        ? join(home, 'Library', 'Caches', 'Maka')
+        : process.platform === 'win32'
+          ? join(home, 'AppData', 'Local', 'Maka')
+          : join(home, '.cache', 'maka');
+    const durable =
+      process.platform === 'darwin'
+        ? join(home, 'Library', 'Application Support', 'Maka')
+        : process.platform === 'win32'
+          ? join(home, 'AppData', 'Local', 'Maka')
+          : join(home, '.local', 'share', 'Maka');
+    const control = join(cache, 'runtime-hosts', marker.rootId);
+    const owners = join(durable, 'state-root-owners');
+    const bootstrapId = createHash('sha256')
+      .update(`${identity.dev.toString()}:${identity.ino.toString()}`)
+      .digest('hex');
+    for (const lockPath of [
+      join(owners, `${marker.rootId}.lock`),
+      join(control, 'owner.lock'),
+      join(cache, 'runtime-hosts', ARTIFACT_WRITER_BOOTSTRAP_DIRECTORY, `${bootstrapId}.lock`),
+      join(control, '.maka-artifact-writer.lock'),
+    ]) {
+      await ensureDurablePrivateDirectory(parse(lockPath).dir);
+      const handle = await tryAcquireStableRootLock(lockPath, 'write');
+      if (!handle)
+        throw new StorageRootAuthorityError(
+          'root_migration_busy',
+          'Stop the existing Runtime Host before migrating this State Root',
+        );
+      handles.push(handle);
+    }
+    await assertRootPathIdentity(root, identity, 'State Root moved during migration');
+    const deployment = join(durable, 'runtime-host-deployments', marker.rootId);
+    for (const [source, name] of [
+      [control, 'data'],
+      [deployment, 'deployment'],
+    ]) {
+      const temporary = join(authority, `migration-${name}`);
+      await rm(temporary, { recursive: true, force: true });
+      if (!(await lstatPathIfPresent(source))) continue;
+      await cp(source, temporary, {
+        recursive: true,
+        dereference: false,
+        filter: (path) =>
+          path !== join(control, 'owner.lock') &&
+          path !== join(control, '.maka-artifact-writer.lock'),
+      });
+      await syncMigratedDirectory(temporary);
+      await rm(join(authority, name), { recursive: true, force: true });
+      await rename(temporary, join(authority, name));
+    }
+    await syncDirectoryChain(authority, root);
+    if (await lstatPathIfPresent(join(deployment, 'runtime-host-deployment.json'))) {
+      const location = join(deployment, 'root-location.json');
+      await writeFile(
+        `${location}.tmp`,
+        JSON.stringify({ rootId: marker.rootId, rootPath: root }),
+        { mode: 0o600 },
+      );
+      const file = await open(`${location}.tmp`, 'r');
+      try {
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      await rename(`${location}.tmp`, location);
+      await syncDirectoryChain(deployment, durable);
+    }
+    await publishMarkerFile({
+      root,
+      markerFile: STORAGE_ROOT_MARKER_FILE,
+      contents: `${JSON.stringify(marker)}\n`,
+      maxBytes: MAX_STORAGE_ROOT_MARKER_BYTES,
+      publication: 'replace',
+      beforePublish: async () => {
+        await assertRootPathIdentity(root, identity, 'State Root moved during migration');
+        if ((await readFile(join(root, STORAGE_ROOT_MARKER_FILE), 'utf8')) !== encoded) {
+          throw new StorageRootAuthorityError(
+            'root_identity_changed',
+            'State Root marker changed during migration',
+          );
+        }
+      },
+      invalidFile: () => invalidRootMarker(join(root, STORAGE_ROOT_MARKER_FILE)),
+    });
+    return marker;
+  } finally {
+    for (const handle of handles.reverse()) {
+      releaseLock(handle);
+      await handle.close();
+    }
+  }
+}
+
+async function syncMigratedDirectory(path: string): Promise<void> {
+  await chmod(path, 0o700);
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) await syncMigratedDirectory(child);
+    else if (entry.isFile()) {
+      await chmod(child, ((await lstat(child)).mode & 0o700) | 0o600);
+      const file = await open(child, 'r');
+      try {
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+    } else {
+      throw new StorageRootAuthorityError(
+        'invalid_root',
+        `Legacy control data contains an unsupported filesystem entry: ${child}`,
+      );
+    }
+  }
+  await syncDirectoryChain(path, path);
 }
 
 function isRootMarker(value: unknown): value is RootMarker {

@@ -149,7 +149,7 @@ test('two Clients share exact retryable Session branch and revision authority', 
     );
   } finally {
     await terminateHost(host);
-    await rm(join(resolveRootControlNamespace(), capability.rootId), {
+    await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
       recursive: true,
       force: true,
     });

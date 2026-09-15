@@ -18,7 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -27,6 +27,7 @@ import {
   resolveRootOwnershipNamespace,
   resolveStorageRoot,
   tryAcquireStateRootOwner,
+  STORAGE_ROOT_MARKER_FILE,
 } from '@maka/storage/root-authority';
 import {
   RuntimeHostManagedDeploymentError,
@@ -37,6 +38,8 @@ import {
   decodeRuntimeHostManagedDeploymentConfig,
   readRuntimeHostManagedDeploymentAuthorityRecord,
   readRuntimeHostManagedDeploymentConfig,
+  resolveRuntimeHostManagedDeploymentAuthority,
+  resolveRuntimeHostManagedDeploymentAuthorityRoot,
   resolveRuntimeHostManagedDeploymentConfigPath,
   rollbackRuntimeHostManagedDeploymentTransition,
   runtimeHostManagedLaunchClaim,
@@ -72,11 +75,14 @@ async function fixture(t: test.TestContext): Promise<Fixture> {
   const capability = await resolveStorageRoot({ path: rootPath, kind: 'interactive' });
   t.after(() =>
     Promise.all([
-      rm(join(resolveRootControlNamespace(), capability.rootId), {
+      rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
         recursive: true,
         force: true,
       }),
-      rm(join(resolveRootOwnershipNamespace(), `${capability.rootId}.lock`), { force: true }),
+      rm(
+        join(resolveRootOwnershipNamespace(capability.canonicalPath), `${capability.rootId}.lock`),
+        { force: true },
+      ),
     ]),
   );
   const config = createConfig(
@@ -241,10 +247,7 @@ test('claims one canonical deployment while fencing State Root ownership', async
     await readRuntimeHostManagedDeploymentConfig(input.capability, input.authority),
     input.config,
   );
-  const path = resolveRuntimeHostManagedDeploymentConfigPath(
-    input.capability.rootId,
-    input.authority,
-  );
+  const path = resolveRuntimeHostManagedDeploymentConfigPath(input.capability.canonicalPath);
   if (process.platform !== 'win32') assert.equal((await lstat(path)).mode & 0o777, 0o600);
 
   await assert.rejects(
@@ -256,6 +259,29 @@ test('claims one canonical deployment while fencing State Root ownership', async
     (error: unknown) =>
       error instanceof RuntimeHostManagedDeploymentError && error.code === 'lifecycle_owner_exists',
   );
+});
+
+test('deployment lookup resumes a legacy cutover even after its locator was published', async (t) => {
+  const input = await fixture(t);
+  const legacy = join(resolveRuntimeHostManagedDeploymentAuthorityRoot(), input.capability.rootId);
+  t.after(() => rm(legacy, { recursive: true, force: true }));
+  await mkdir(legacy, { recursive: true, mode: 0o700 });
+  await writeFile(join(legacy, 'runtime-host-deployment.json'), JSON.stringify(input.config));
+  await writeFile(
+    join(legacy, 'root-location.json'),
+    JSON.stringify({
+      rootId: input.capability.rootId,
+      rootPath: input.capability.canonicalPath,
+    }),
+  );
+  const markerPath = join(input.capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+  await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
+  const resolved = await resolveRuntimeHostManagedDeploymentAuthority(input.capability.rootId, {
+    repairRootAfterRemount: true,
+  });
+  assert.deepEqual(resolved?.record, input.config);
+  assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 2);
 });
 
 test('deployment transitions fail closed and preserve exact commit or rollback authority', async (t) => {
@@ -372,6 +398,12 @@ test('launch acquisition atomically joins deployment authorization and State Roo
     input.capability,
     input.config,
     input.authority,
+  );
+  // Lookup loss cannot erase the root's managed launch policy.
+  await rm(join(input.authority.authorityRoot!, input.capability.rootId, 'root-location.json'));
+  assert.equal(
+    await resolveRuntimeHostManagedDeploymentAuthority(input.capability.rootId, input.authority),
+    undefined,
   );
   await assert.rejects(
     tryAcquireRuntimeHostLaunchOwner(
@@ -531,7 +563,7 @@ test('concurrent claims cannot adopt an unsynced authority directory', async (t)
           if (path === authorityBase) throw new Error('injected directory sync failure');
         },
       }),
-      { code: 'deployment_io_failed' },
+      { code: 'state_root_owned' },
     );
   } finally {
     release();

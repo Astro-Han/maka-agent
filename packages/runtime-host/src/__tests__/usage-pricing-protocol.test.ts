@@ -456,7 +456,7 @@ describe('Usage/Pricing protocol', () => {
     } finally {
       await stores.close().catch(() => undefined);
       await owner.close();
-      await rm(join(resolveRootControlNamespace(), capability.rootId), {
+      await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
         recursive: true,
         force: true,
       });
@@ -524,7 +524,7 @@ describe('Usage/Pricing protocol', () => {
     } finally {
       await stores.close().catch(() => undefined);
       await owner.close();
-      await rm(join(resolveRootControlNamespace(), capability.rootId), {
+      await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
         recursive: true,
         force: true,
       });

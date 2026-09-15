@@ -98,7 +98,11 @@ flowchart TD
 
 Root capability 先规范化真实路径，再验证根标记中的随机 `rootId` 与文件系统对象身份。别名不能产生另一个逻辑 owner；复制一个已初始化目录也不能自动获得原根身份。导入、remount 或 repair 通过各自的显式验证路径处理。Capability 和 lease 的真实性由进程内登记验证，不只依赖 TypeScript 类型。
 
-写入 authority 来自稳定文件上的 OS lock。持久的 account-local ownership namespace 按 `rootId` 仲裁，并保留兼容锁边界；registration 文件、PID、socket、health probe 和缓存目录都只是发现或观察信息。删除发现缓存不能合法地产生第二个 writer。
+写入 authority 来自 canonical 物理 root 内 `.maka-host` 中稳定文件上的 OS lock。同一 root 的所有 Client 共享一个 Host，独立物理 root 分别持有自己的所有权。`rootId` 仍是协议身份，不承担账户全局或分布式互斥；registration 文件、PID、socket、health probe 和缓存目录都只是发现或观察信息。删除发现缓存不能合法地产生第二个 writer。
+
+root 拥有完整的持久状态：`.maka-host/data` 保存插件包、composition、插件数据及密钥、访问凭据；`.maka-host/deployment/runtime-host-deployment.json` 是唯一的 managed deployment 事务记录；`.maka-host/runtime/<rootId>` 保存可丢弃的 registration、启动诊断和一次性凭据交付文件。Owner 与 Artifact 锁都在 `runtime` 外。短路径本地 socket 可放在系统临时目录。普通新 root 启动不依赖账户 home。物理放在一起不代表凭据和机器部署信息可以直接导出，备份仍须保留访问限制。
+
+Marker schema 2 是切换边界。打开 schema-1 root 使用时，先获取新 root 锁和旧 owner/Artifact 锁，复制并同步账户目录中的旧状态，最后发布 schema 2。旧 Host 正在使用时拒绝迁移；中断后从保留的旧文件重试暂存复制。切换完成后旧文件不再提供 authority，旧二进制拒绝 schema 2，正常运行不再持有兼容锁。升级时须保持 root 已记录的文件系统身份，并能访问旧账户目录；复制或重新挂载的 schema-1 root 须先用上一版本的显式恢复入口修复。切换后沿用 schema-2 的 import/remount/repair 路径。降级须恢复升级前的完整状态，不能只改 marker 版本号。
 
 Lease 关闭先拒绝新操作，等待已进入的操作结束，再释放 OS handle。Store facade 接收这个 owner/lease，业务代码不能通过直接打开另一份数据库绕过它。锁不意味着已证明任意外部子孙进程都随 Host 退出。
 
@@ -335,7 +339,7 @@ Goal、Scheduled Task 和 Daily Review 各自持久化业务意图，恢复时�
 
 Remote 目录浏览使用 Host 发布的 opaque root ID 与验证过的 path segments，并检查 realpath containment，不能通过 symlink 或 Client 本地 picker 扩大范围。
 
-安装 authority 与 writer authority 同样分开：account-local deployment owner 按 root identity 和 CAS revision 协调 Desktop、CLI、managed service 或 development 的安装归属；managed deployment 文档描述当前配置及 `active`/`transition`/`blocked` 恢复状态。Service artifacts 是该配置的投影，不另设一份互相竞争的部署日志。
+安装 authority 与 writer authority 同样分开：root 内的 managed deployment 文档描述当前配置及 `active`/`transition`/`blocked` 恢复状态，修改须持有 root writer lease 并验证 CAS revision。账户侧 `root-location.json` 只供按 `rootId` 发起的命令定位 root；定位信息丢失会导致查找失败，但不能消除 root 的 managed 启动限制。每次启动都在持有 owner lease 时读取 root 内记录。Service artifacts 是该配置的投影，不另设一份互相竞争的部署日志。
 
 更新需要验证包版本/integrity、准备目标、确认实际 target Ready，再提交安装状态。重试要识别已经成功的 successor，不能因旧进程信息再次终止新进程。普通 remote credential 不授予机器上的 operator 安装管理能力；SSH operator activation 是另一个显式边界。
 

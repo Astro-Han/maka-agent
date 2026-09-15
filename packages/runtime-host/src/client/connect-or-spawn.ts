@@ -437,7 +437,11 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
             input.signal,
           );
           electionSettled = true;
-          await retireCandidateStartupDiagnostic(capability.rootId, startupFailure);
+          await retireCandidateStartupDiagnostic(
+            capability.canonicalPath,
+            capability.rootId,
+            startupFailure,
+          );
           const selected = latestCandidate?.attempt;
           const spawnedProcess =
             selected?.pid === result.registration.pid && selected.exited
@@ -462,6 +466,7 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
         const selectedFailure = startupFailure;
         electionSettled = true;
         await selectCandidateStartupDiagnostic(
+          capability.canonicalPath,
           capability.rootId,
           selectedFailure.startupAttemptId,
         ).catch(() => undefined);
@@ -556,6 +561,7 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
                   if (!failure) return;
                   if (electionSettled) {
                     void clearCandidateStartupDiagnostic(
+                      capability.canonicalPath,
                       capability.rootId,
                       failure.startupAttemptId,
                     ).catch(() => undefined);
@@ -571,6 +577,7 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
                   }
                   if (obsolete) {
                     void clearCandidateStartupDiagnostic(
+                      capability.canonicalPath,
                       capability.rootId,
                       obsolete.startupAttemptId,
                     ).catch(() => undefined);
@@ -599,6 +606,7 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
       const selectedFailure = startupFailure;
       electionSettled = true;
       await selectCandidateStartupDiagnostic(
+        capability.canonicalPath,
         capability.rootId,
         selectedFailure.startupAttemptId,
       ).catch(() => undefined);
@@ -729,13 +737,14 @@ function createElectionDiagnostic(input: {
 }
 
 async function retireCandidateStartupDiagnostic(
+  rootPath: string,
   rootId: string,
   startupFailure: CandidateStartupFailureReport | undefined,
 ): Promise<void> {
   await Promise.all([
-    clearCandidateStartupDiagnostic(rootId),
+    clearCandidateStartupDiagnostic(rootPath, rootId),
     ...(startupFailure
-      ? [clearCandidateStartupDiagnostic(rootId, startupFailure.startupAttemptId)]
+      ? [clearCandidateStartupDiagnostic(rootPath, rootId, startupFailure.startupAttemptId)]
       : []),
   ]).catch(() => undefined);
 }

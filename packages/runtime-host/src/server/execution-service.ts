@@ -144,7 +144,9 @@ export async function startExecutionRuntimeHostService(
         console.error('[runtime-host] Peer Mesh stopped; Direct peer remains available:', error);
       });
     }
-    const accessAuthority = await openRuntimeHostAccessAuthority(owner.controlDirectory);
+    const accessAuthority = await openRuntimeHostAccessAuthority(owner.hostDataDirectory, {
+      deliveryDirectory: owner.controlDirectory,
+    });
     host = await RuntimeHostKernel.start({
       owner,
       lifecycleMode: 'service',
