@@ -57,8 +57,12 @@ test('collects canonical Runtime Host evidence without invoking mutating storage
         if (relativePath.endsWith('/root-authority.js')) {
           return {
             STORAGE_ROOT_MARKER_FILE: '.maka-storage-root.json',
+            STORAGE_ROOT_MARKER_SCHEMA_VERSION: 2,
             discoverMarkedStorageRoot: async () => ({ rootId: ROOT_ID }),
-            resolveRootControlNamespace: () => fixture.controlRoot,
+            resolveRootControlNamespace: (rootPath) => {
+              assert.equal(rootPath, fixture.root);
+              return fixture.controlRoot;
+            },
           };
         }
         if (relativePath.endsWith('/registration.js')) {
@@ -78,7 +82,11 @@ test('collects canonical Runtime Host evidence without invoking mutating storage
         if (relativePath.endsWith('/startup-diagnostic.js')) {
           return {
             RUNTIME_HOST_STARTUP_DIAGNOSTIC_FILE: 'startup-diagnostic.json',
-            readCandidateStartupDiagnostic: async () => startupDiagnostic,
+            readCandidateStartupDiagnostic: async (rootPath, rootId) => {
+              assert.equal(rootPath, fixture.root);
+              assert.equal(rootId, ROOT_ID);
+              return startupDiagnostic;
+            },
           };
         }
         throw new Error(`Unexpected installed module: ${relativePath}`);
@@ -119,7 +127,8 @@ test('collects canonical Runtime Host evidence without invoking mutating storage
         loadInstalled: async (_packageRoot, relativePath) => {
           assert.match(relativePath, /startup-diagnostic\.js$/u);
           return {
-            clearSelectedCandidateStartupDiagnostic: async (rootId, startupAttemptId) => {
+            clearSelectedCandidateStartupDiagnostic: async (rootPath, rootId, startupAttemptId) => {
+              assert.equal(rootPath, fixture.root);
               retired = { rootId, startupAttemptId };
               return true;
             },

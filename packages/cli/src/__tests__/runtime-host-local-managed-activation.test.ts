@@ -27,7 +27,7 @@ import test from 'node:test';
 import { resolveStorageRoot } from '@maka/storage/root-authority';
 import {
   claimRuntimeHostManagedDeployment,
-  resolveRuntimeHostManagedDeploymentConfigPath,
+  resolveRuntimeHostManagedDeploymentAuthorityRoot,
   resolveRuntimeHostNpmDeploymentLayout,
   type RuntimeHostManagedDeploymentConfig,
 } from '@maka/runtime-host/operator';
@@ -116,7 +116,7 @@ for (const legacy of [false, true]) {
         } catch {}
       }
       await rm(base, { recursive: true, force: true });
-      await rm(dirname(resolveRuntimeHostManagedDeploymentConfigPath(capability.rootId)), {
+      await rm(join(resolveRuntimeHostManagedDeploymentAuthorityRoot(), capability.rootId), {
         recursive: true,
         force: true,
       });

@@ -80,6 +80,7 @@ export class CandidateStartupDiagnosticError extends Error {
 }
 
 export function resolveCandidateStartupDiagnosticPath(
+  rootPath: string,
   rootId: string,
   startupAttemptId?: string,
 ): string {
@@ -88,17 +89,22 @@ export function resolveCandidateStartupDiagnosticPath(
   const filename = startupAttemptId
     ? `startup-diagnostic.${startupAttemptId}.json`
     : RUNTIME_HOST_STARTUP_DIAGNOSTIC_FILE;
-  return join(resolveRootControlNamespace(), rootId, filename);
+  return join(resolveRootControlNamespace(rootPath), rootId, filename);
 }
 
 export async function writeCandidateStartupDiagnostic(input: {
+  readonly rootPath: string;
   readonly rootId: string;
   readonly startupAttemptId: string;
   readonly failure: CandidateStartupFailure;
   readonly error: unknown;
   readonly logs?: readonly string[];
 }): Promise<void> {
-  const path = resolveCandidateStartupDiagnosticPath(input.rootId, input.startupAttemptId);
+  const path = resolveCandidateStartupDiagnosticPath(
+    input.rootPath,
+    input.rootId,
+    input.startupAttemptId,
+  );
   const document: CandidateStartupDiagnostic = {
     schemaVersion: STARTUP_DIAGNOSTIC_SCHEMA_VERSION,
     rootId: input.rootId,
@@ -143,16 +149,19 @@ export async function writeCandidateStartupDiagnostic(input: {
   } finally {
     if (!replaced) await unlink(temporaryPath).catch(() => undefined);
   }
-  await pruneCandidateStartupDiagnostics(input.rootId, input.startupAttemptId).catch(
-    () => undefined,
-  );
+  await pruneCandidateStartupDiagnostics(
+    input.rootPath,
+    input.rootId,
+    input.startupAttemptId,
+  ).catch(() => undefined);
 }
 
 export async function readCandidateStartupDiagnostic(
+  rootPath: string,
   rootId: string,
   startupAttemptId?: string,
 ): Promise<CandidateStartupDiagnostic | undefined> {
-  const path = resolveCandidateStartupDiagnosticPath(rootId, startupAttemptId);
+  const path = resolveCandidateStartupDiagnosticPath(rootPath, rootId, startupAttemptId);
   let contents: string;
   try {
     const diagnosticStat = await lstat(path);
@@ -189,12 +198,13 @@ export async function readCandidateStartupDiagnostic(
 }
 
 export async function selectCandidateStartupDiagnostic(
+  rootPath: string,
   rootId: string,
   startupAttemptId: string,
 ): Promise<void> {
-  const attemptPath = resolveCandidateStartupDiagnosticPath(rootId, startupAttemptId);
-  const selectedPath = resolveCandidateStartupDiagnosticPath(rootId);
-  await readCandidateStartupDiagnostic(rootId, startupAttemptId);
+  const attemptPath = resolveCandidateStartupDiagnosticPath(rootPath, rootId, startupAttemptId);
+  const selectedPath = resolveCandidateStartupDiagnosticPath(rootPath, rootId);
+  await readCandidateStartupDiagnostic(rootPath, rootId, startupAttemptId);
   try {
     await rename(attemptPath, selectedPath);
     await syncDirectory(dirname(selectedPath));
@@ -208,23 +218,25 @@ export async function selectCandidateStartupDiagnostic(
 }
 
 export async function clearCandidateStartupDiagnostic(
+  rootPath: string,
   rootId: string,
   startupAttemptId?: string,
 ): Promise<void> {
-  const path = resolveCandidateStartupDiagnosticPath(rootId, startupAttemptId);
+  const path = resolveCandidateStartupDiagnosticPath(rootPath, rootId, startupAttemptId);
   await unlink(path).catch((error: unknown) => {
     if (!isNodeError(error, 'ENOENT')) throw error;
   });
 }
 
 export async function clearSelectedCandidateStartupDiagnostic(
+  rootPath: string,
   rootId: string,
   expectedStartupAttemptId: string,
 ): Promise<boolean> {
   assertStartupAttemptId(expectedStartupAttemptId);
-  const diagnostic = await readCandidateStartupDiagnostic(rootId);
+  const diagnostic = await readCandidateStartupDiagnostic(rootPath, rootId);
   if (!diagnostic || diagnostic.startupAttemptId !== expectedStartupAttemptId) return false;
-  await clearCandidateStartupDiagnostic(rootId);
+  await clearCandidateStartupDiagnostic(rootPath, rootId);
   return true;
 }
 
@@ -319,10 +331,11 @@ function assertStartupAttemptId(startupAttemptId: string): void {
 }
 
 async function pruneCandidateStartupDiagnostics(
+  rootPath: string,
   rootId: string,
   retainedAttemptId: string,
 ): Promise<void> {
-  const controlDirectory = dirname(resolveCandidateStartupDiagnosticPath(rootId));
+  const controlDirectory = dirname(resolveCandidateStartupDiagnosticPath(rootPath, rootId));
   const entries = await readdir(controlDirectory, { withFileTypes: true });
   const attempts = await Promise.all(
     entries.flatMap((entry) => {

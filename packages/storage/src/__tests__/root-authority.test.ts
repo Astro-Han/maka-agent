@@ -144,17 +144,17 @@ describe('storage root authority', () => {
       const throughAlias = await prepareArtifactWriterBootstrapAuthority(alias);
       assert.equal(throughAlias.lockPath, direct.lockPath);
       assert.equal(throughAlias.canonicalPath, direct.canonicalPath);
-      assert.deepEqual(await readdir(root), []);
+      assert.deepEqual(await readdir(root), ['.maka-host']);
 
       await rename(root, movedRoot);
       await assert.rejects(() => direct.assertCurrentRoot());
       const moved = await prepareArtifactWriterBootstrapAuthority(movedRoot);
-      assert.equal(moved.lockPath, direct.lockPath);
+      assert.equal(moved.lockPath, direct.lockPath.replace(root, movedRoot));
 
       await mkdir(root);
       const replacement = await prepareArtifactWriterBootstrapAuthority(root);
       assert.notEqual(replacement.lockPath, direct.lockPath);
-      assert.deepEqual(await readdir(root), []);
+      assert.deepEqual(await readdir(root), ['.maka-host']);
 
       await Promise.all([
         rm(direct.lockPath, { force: true }),
@@ -756,10 +756,13 @@ describe('storage root authority', () => {
   }, async () => {
     await withRoots(async ({ base, root }) => {
       const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
-      const { controlDirectory } = await prepareStorageRootControlDirectory(capability);
+      await prepareStorageRootControlDirectory(capability);
       const foreignLock = join(base, 'foreign.lock');
       await writeFile(foreignLock, 'not an authority\n');
-      await symlink(foreignLock, join(controlDirectory, 'owner.lock'));
+      await symlink(
+        foreignLock,
+        join(resolveRootOwnershipNamespace(root), `${capability.rootId}.lock`),
+      );
 
       await assert.rejects(
         () => tryAcquireInteractiveRootOwner(capability),
@@ -772,8 +775,8 @@ describe('storage root authority', () => {
   test('rejects a directory at the owner lock path', async () => {
     await withRoots(async ({ root }) => {
       const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
-      const { controlDirectory } = await prepareStorageRootControlDirectory(capability);
-      await mkdir(join(controlDirectory, 'owner.lock'));
+      await prepareStorageRootControlDirectory(capability);
+      await mkdir(join(resolveRootOwnershipNamespace(root), `${capability.rootId}.lock`));
 
       await assert.rejects(
         () => tryAcquireInteractiveRootOwner(capability),
@@ -786,7 +789,7 @@ describe('storage root authority', () => {
   test('does not create a missing control directory while resolving an existing Host', async () => {
     await withRoots(async ({ root }) => {
       const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
-      const controlDirectory = join(resolveRootControlNamespace(), capability.rootId);
+      const controlDirectory = join(resolveRootControlNamespace(root), capability.rootId);
       await rm(controlDirectory, { recursive: true, force: true });
 
       await assert.rejects(
@@ -886,7 +889,15 @@ describe('storage root authority', () => {
     await withRoots(async ({ base, root }) => {
       const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
       await rename(root, join(base, 'old-root'));
+      await assert.rejects(tryAcquireInteractiveRootOwner(capability), {
+        code: 'root_identity_changed',
+      });
+      await assert.rejects(lstat(root), { code: 'ENOENT' });
       await mkdir(root);
+      await assert.rejects(tryAcquireInteractiveRootOwner(capability), {
+        code: 'root_identity_changed',
+      });
+      assert.deepEqual(await readdir(root), []);
       await assert.rejects(
         () => assertStorageRootCapability(capability, 'interactive'),
         (error: unknown) =>
@@ -926,7 +937,6 @@ async function withRoots(
   try {
     await run({ base, root });
   } finally {
-    await removeControlDirectoriesForRootsUnder(base);
     await rm(base, { recursive: true, force: true });
   }
 }
@@ -1161,37 +1171,4 @@ async function retryAcquire(
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return undefined;
-}
-
-async function removeControlDirectoriesForRootsUnder(base: string): Promise<void> {
-  const rootIds = new Set<string>();
-  await collectRootIds(base, rootIds);
-  await Promise.all(
-    [...rootIds].flatMap((rootId) => [
-      rm(join(resolveRootControlNamespace(), rootId), { recursive: true, force: true }),
-      rm(join(resolveRootOwnershipNamespace(), `${rootId}.lock`), { force: true }),
-    ]),
-  );
-}
-
-async function collectRootIds(directory: string, rootIds: Set<string>): Promise<void> {
-  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const path = join(directory, entry.name);
-    const markerPath = join(path, STORAGE_ROOT_MARKER_FILE);
-    const markerStat = await lstat(markerPath).catch(() => undefined);
-    const marker = markerStat?.isFile()
-      ? await readFile(markerPath, 'utf8').catch(() => undefined)
-      : undefined;
-    if (marker) {
-      try {
-        const rootId = (JSON.parse(marker) as { rootId?: unknown }).rootId;
-        if (typeof rootId === 'string' && /^[a-f0-9]{64}$/.test(rootId)) rootIds.add(rootId);
-      } catch {
-        // Invalid marker tests never create a control directory.
-      }
-    }
-    await collectRootIds(path, rootIds);
-  }
 }

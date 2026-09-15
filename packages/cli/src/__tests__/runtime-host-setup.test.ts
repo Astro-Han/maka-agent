@@ -39,6 +39,7 @@ import {
   decodeRuntimeHostSetupFrame,
   encodeRuntimeHostSetupFrame,
   resolveRuntimeHostManagedDeploymentConfigPath,
+  resolveRuntimeHostManagedDeploymentAuthorityRoot,
   runtimeHostManagedOperatorCommand,
   RUNTIME_HOST_SETUP_FRAME_PREFIX,
   type RuntimeHostManagedDeploymentConfig,
@@ -101,19 +102,19 @@ test('on-demand setup installs one exact deployment without a service backend', 
     await Promise.all([
       rm(base, { recursive: true, force: true }),
       rootId
-        ? rm(dirname(resolveRuntimeHostManagedDeploymentConfigPath(rootId)), {
+        ? rm(join(resolveRuntimeHostManagedDeploymentAuthorityRoot(), rootId), {
             recursive: true,
             force: true,
           })
         : Promise.resolve(),
       rootId
-        ? rm(join(resolveRootControlNamespace(), rootId), {
+        ? rm(join(resolveRootControlNamespace(stateRoot), rootId), {
             recursive: true,
             force: true,
           })
         : Promise.resolve(),
       rootId
-        ? rm(join(resolveRootOwnershipNamespace(), `${rootId}.lock`), {
+        ? rm(join(resolveRootOwnershipNamespace(stateRoot), `${rootId}.lock`), {
             force: true,
           })
         : Promise.resolve(),
@@ -214,7 +215,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
   if (complete.operator.kind !== 'node') assert.fail('Setup returned a legacy operator');
   assert.equal(complete.operator.nodePath, process.execPath);
   const persisted = JSON.parse(
-    await readFile(resolveRuntimeHostManagedDeploymentConfigPath(rootId), 'utf8'),
+    await readFile(resolveRuntimeHostManagedDeploymentConfigPath(stateRoot), 'utf8'),
   ) as {
     deploymentRoot: string;
     launch: { nodePath: string };
@@ -236,7 +237,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
   persisted.launch.nodePath =
     process.platform === 'win32' ? 'C:\\Program Files\\nodejs\\node.exe' : '/opt/maka/node';
   await writeFile(
-    resolveRuntimeHostManagedDeploymentConfigPath(rootId),
+    resolveRuntimeHostManagedDeploymentConfigPath(stateRoot),
     `${JSON.stringify(persisted)}\n`,
   );
   projectedOperatorDeploymentRoot = '/stale/operator/projection';
@@ -262,7 +263,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
     persisted.launch.nodePath,
   );
   assert.deepEqual(
-    JSON.parse(await readFile(resolveRuntimeHostManagedDeploymentConfigPath(rootId), 'utf8')),
+    JSON.parse(await readFile(resolveRuntimeHostManagedDeploymentConfigPath(stateRoot), 'utf8')),
     persisted,
   );
   assert.equal(projectedOperatorDeploymentRoot, persisted.deploymentRoot);
@@ -316,7 +317,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
       complete.deploymentId,
     );
     assert.deepEqual(
-      JSON.parse(await readFile(resolveRuntimeHostManagedDeploymentConfigPath(rootId), 'utf8')),
+      JSON.parse(await readFile(resolveRuntimeHostManagedDeploymentConfigPath(stateRoot), 'utf8')),
       persisted,
     );
   }
@@ -350,7 +351,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
   );
 
   const beforeBusyUpdate = await readFile(
-    resolveRuntimeHostManagedDeploymentConfigPath(rootId),
+    resolveRuntimeHostManagedDeploymentConfigPath(stateRoot),
     'utf8',
   );
   const busyOutputs: string[] = [];
@@ -370,7 +371,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
     1,
   );
   assert.equal(
-    await readFile(resolveRuntimeHostManagedDeploymentConfigPath(rootId), 'utf8'),
+    await readFile(resolveRuntimeHostManagedDeploymentConfigPath(stateRoot), 'utf8'),
     beforeBusyUpdate,
   );
   assert.ok(
@@ -398,7 +399,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
     0,
   );
   const replaced = JSON.parse(
-    await readFile(resolveRuntimeHostManagedDeploymentConfigPath(rootId), 'utf8'),
+    await readFile(resolveRuntimeHostManagedDeploymentConfigPath(stateRoot), 'utf8'),
   ) as RuntimeHostManagedDeploymentConfig;
   assert.equal(replaced.launch.package.version, '1.2.4');
   assert.equal(replaced.launch.package.integrity, replacementIntegrity);
@@ -440,10 +441,10 @@ test('fresh supervised setup discovers its provider before constructing a legacy
     await Promise.all([
       rm(base, { recursive: true, force: true }),
       rootId
-        ? rm(join(resolveRootControlNamespace(), rootId), { recursive: true, force: true })
+        ? rm(join(resolveRootControlNamespace(stateRoot), rootId), { recursive: true, force: true })
         : Promise.resolve(),
       rootId
-        ? rm(join(resolveRootOwnershipNamespace(), `${rootId}.lock`), { force: true })
+        ? rm(join(resolveRootOwnershipNamespace(stateRoot), `${rootId}.lock`), { force: true })
         : Promise.resolve(),
     ]);
   });
@@ -781,15 +782,15 @@ test('registry package identity avoids local content and recovers an interrupted
   const authorityServiceId = capability.rootId;
   t.after(() =>
     Promise.all([
-      rm(dirname(resolveRuntimeHostManagedDeploymentConfigPath(authorityServiceId)), {
+      rm(join(resolveRuntimeHostManagedDeploymentAuthorityRoot(), authorityServiceId), {
         recursive: true,
         force: true,
       }),
-      rm(join(resolveRootControlNamespace(), authorityServiceId), {
+      rm(join(resolveRootControlNamespace(authorityStateRoot), authorityServiceId), {
         recursive: true,
         force: true,
       }),
-      rm(join(resolveRootOwnershipNamespace(), `${authorityServiceId}.lock`), {
+      rm(join(resolveRootOwnershipNamespace(authorityStateRoot), `${authorityServiceId}.lock`), {
         force: true,
       }),
     ]),
