@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{ConnectionCount, Host, HostError, authority::Authority};
+use super::{ConnectionCount, Host, HostError, LifecycleMode, authority::Authority};
 use maka_protocol::{
     COMPATIBILITY_EPOCH, COMPOSITION_ID,
     handshake::{ClientHello, HostHandshake, Lifecycle, ProtocolRange, Replacement},
@@ -50,8 +50,9 @@ impl Host {
         if *retiring != super::retirement::Phase::Ready || self.draining.is_cancelled() {
             return Ok((draining(), None, None));
         }
+        let ephemeral = self.options.lifecycle_mode == LifecycleMode::Ephemeral;
         let generation_mismatch =
-            hello.generation.is_some() && hello.generation != self.options.generation;
+            ephemeral && hello.generation.is_some() && hello.generation != self.options.generation;
         let local_owner = matches!(authority, Authority::LocalOwner);
         let settled = self.accepted_connections.load(Ordering::SeqCst) == 0
             && self.requests.is_empty()
@@ -88,7 +89,7 @@ impl Host {
                     composition_id: COMPOSITION_ID.into(),
                     composition_revision: "3".into(),
                     state: Lifecycle::Ready,
-                    replacement: if settled {
+                    replacement: if ephemeral && settled {
                         Replacement::WaitForIdleExit
                     } else {
                         Replacement::BlockedByResidency

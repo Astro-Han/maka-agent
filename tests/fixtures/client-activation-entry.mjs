@@ -25,6 +25,7 @@ import { decodeRuntimeHostActivationFrame } from '../../packages/runtime-host/sr
 const { values } = parseArgs({
   options: {
     'activation-frame': { type: 'string' },
+    'lifecycle-mode': { type: 'string' },
     root: { type: 'string' },
   },
 });
@@ -38,14 +39,44 @@ const input = {
 };
 const connection = await connectExistingRuntimeHost(input);
 assert.equal(connection.kind, 'connected', JSON.stringify(connection));
+assert.equal(connection.registration.lifecycleMode, values['lifecycle-mode']);
 try {
   assert.equal(connection.connection.rootId, frame.rootId);
   assert.equal(connection.connection.hostEpoch, frame.hostEpoch);
   const diagnostics = await connection.connection.request('host.diagnostics.query', {});
   assert.equal(diagnostics.pid, frame.pid);
-  const stale = await connectExistingRuntimeHost({ ...input, generation: 'stale-deployment' });
-  assert.equal(stale.kind, 'upgrade_required');
-  assert.equal(stale.handshake.generation, input.generation, 'live handshake rejected stale code');
+  const stale = await connectExistingRuntimeHost({
+    ...input,
+    generation: 'stale-deployment',
+    ...(values['lifecycle-mode'] === 'service' ? { takeoverHostEpoch: frame.hostEpoch } : {}),
+  });
+  if (values['lifecycle-mode'] === 'service') {
+    assert.equal(stale.kind, 'connected', 'Desktop generation cannot take over a service');
+    try {
+      assert.equal(stale.connection.hostEpoch, frame.hostEpoch);
+    } finally {
+      await stale.connection.close();
+    }
+    await connection.connection.close();
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const incompatible = await connectExistingRuntimeHost({
+        ...input,
+        protocol: { min: 1, max: 1 },
+      });
+      assert.equal(incompatible.kind, 'incompatible');
+      assert.equal(incompatible.handshake.replacement, 'blocked_by_residency');
+      if (incompatible.handshake.activity?.connections === 0) break;
+      assert(Date.now() < deadline, 'previous service clients did not finish closing');
+    }
+  } else {
+    assert.equal(stale.kind, 'upgrade_required');
+    assert.equal(
+      stale.handshake.generation,
+      input.generation,
+      'live handshake rejected stale code',
+    );
+  }
 } finally {
   await connection.connection.close();
 }

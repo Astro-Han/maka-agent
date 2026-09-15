@@ -48,7 +48,7 @@ impl Host {
             "kind":"maka-runtime-host", "schemaVersion":1, "rootId":self.root_id(),
             "hostEpoch":self.epoch, "endpoint":endpoint, "protocolMin":0, "protocolMax":0,
             "compatibilityEpoch":COMPATIBILITY_EPOCH, "compositionId":COMPOSITION_ID,
-            "compositionRevision":"3", "lifecycleMode":"ephemeral", "state":"ready",
+            "compositionRevision":"3", "lifecycleMode":self.options.lifecycle_mode, "state":"ready",
             "pid":std::process::id(),
             "createdAt":time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339)?,
         });

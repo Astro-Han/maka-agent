@@ -70,6 +70,7 @@ pub(super) async fn run(
         owner,
         global_instructions()?,
         maka_runtime_host::server::HostOptions {
+            lifecycle_mode: maka_runtime_host::server::LifecycleMode::Service,
             skill_home: home_directory()?,
             project_directory_roots: deployment
                 .as_ref()

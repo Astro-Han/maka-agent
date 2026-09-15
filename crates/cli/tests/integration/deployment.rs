@@ -181,6 +181,10 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         );
         let registration = fixture.wait_for_registration();
         assert_eq!(
+            registration["lifecycleMode"],
+            if candidate { "ephemeral" } else { "service" }
+        );
+        assert_eq!(
             registration["generation"],
             format!("{}:1", installed["deploymentId"].as_str().unwrap())
         );
@@ -299,6 +303,10 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
             .arg("--activation-frame")
             .arg(String::from_utf8(activated.stdout).unwrap())
+            .args([
+                "--lifecycle-mode",
+                if candidate { "ephemeral" } else { "service" },
+            ])
             .arg("--root")
             .arg(&fixture.root)
             .output()

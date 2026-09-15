@@ -71,7 +71,17 @@ pub use operations::Operations as HostOperations;
 pub use projects::DirectoryRootSpec;
 pub use registration::Registration;
 
+/// Who owns process lifetime, independent of its deployment revision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleMode {
+    #[default]
+    Ephemeral,
+    Service,
+}
+
 pub struct HostOptions {
+    pub lifecycle_mode: LifecycleMode,
     pub project_directory_roots: Option<Vec<DirectoryRootSpec>>,
     /// Explicit user skill root; library embedders do not inspect ambient home.
     pub skill_home: Option<std::path::PathBuf>,
@@ -82,6 +92,7 @@ pub struct HostOptions {
 impl Default for HostOptions {
     fn default() -> Self {
         Self {
+            lifecycle_mode: LifecycleMode::Ephemeral,
             project_directory_roots: None,
             skill_home: None,
             generation: None,

@@ -46,6 +46,7 @@ pub(super) type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
 #[serde(rename_all = "camelCase")]
 struct Discovery {
     root_id: String,
+    generation: Option<String>,
     host_epoch: String,
     endpoint: PathBuf,
     pid: NonZeroU32,
@@ -76,6 +77,13 @@ impl HostClient {
         let root = root.to_owned();
         tokio::time::timeout(Duration::from_secs(5), async move {
             let discovery = tokio::task::spawn_blocking(move || read_discovery(&root)).await??;
+            // Desktop generations do not control a service's lifetime. Native
+            // operators still require the exact admitted deployment revision;
+            // the live Root/epoch handshake below binds this discovery record.
+            if generation.is_some_and(|expected| discovery.generation.as_deref() != Some(expected))
+            {
+                return Err("Host discovery belongs to another deployment revision".into());
+            }
             let stream = open_stream(&discovery.endpoint).await?;
             let (mut reader, mut writer) =
                 maka_transport::ndjson::split(stream, CancellationToken::new());

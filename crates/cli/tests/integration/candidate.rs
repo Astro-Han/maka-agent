@@ -75,6 +75,14 @@ fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle(
         let registration = fixture.wait_for_registration();
         assert_eq!(registration["pid"], fixture.child.as_ref().unwrap().id());
         assert_eq!(registration["rootId"], fixture.root_id);
+        assert_eq!(
+            registration["lifecycleMode"],
+            if matches!(end, End::Standalone) {
+                "service"
+            } else {
+                "ephemeral"
+            }
+        );
         if !matches!(end, End::Standalone) {
             assert_eq!(registration["generation"], "native-cli-test");
         }
