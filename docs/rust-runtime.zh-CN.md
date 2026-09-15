@@ -53,8 +53,13 @@ Windows MSVC 构建使用与官方 V8 静态库一致的静态 CRT。
 两份随仓库保存的 Deno TypeScript 须与 `deno_telemetry` 完全一致，升级依赖时须同步；
 构建直接转译它们，不再加载构建期 V8。
 
+`host connect --root-id <rootId> --framed` 激活该部署，通过 stdin/stdout 桥接客户端协议，
+诊断写入 stderr。Linux/macOS 的输入 EOF 半关闭连接并排空响应；Windows 管道 EOF 表示断连，
+客户端须先收完响应再关闭 stdin。WSL 传入 `--repair-root-after-remount`，显式确认重挂载后
+Linux inode 未变并保留 Root ID。不要用它接管复制的根或旧版数据。
+
 `host install --root <目录>` 固定当前可执行文件和按需策略；`--mode supervised` 选择持续运行。
-此后只有返回的 `executable` 可以启动该托管根。`host activate --root-id <rootId> --framed`
+只有返回的 `executable` 可以启动该托管根。`host activate --root-id <rootId> --framed`
 复用就绪 Host，或启动固定版本；supervised 模式会注册并启动账户级 systemd 服务、LaunchAgent
 或 Windows 计划任务。Linux 要求用户服务管理器已运行且启用 linger；macOS 要求 Aqua 登录，
 Windows 要求交互式用户会话。单独安装不会启动服务或修改账户策略。

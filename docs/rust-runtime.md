@@ -58,6 +58,13 @@ Windows MSVC builds use the static CRT required by the official V8 archive.
 The two vendored Deno TypeScript files must match `deno_telemetry` exactly;
 update them together when upgrading that dependency. They avoid a build-time V8.
 
+`host connect --root-id <rootId> --framed` activates that deployment and bridges the
+client protocol over stdin/stdout; diagnostics use stderr. Linux/macOS input EOF
+half-closes the connection and drains responses. Windows pipe EOF disconnects;
+clients must receive their responses before closing stdin. WSL passes
+`--repair-root-after-remount`: this explicitly confirms an unchanged Linux inode
+after remount, preserving Root ID. Do not use it to adopt copied or legacy roots.
+
 `host install --root <directory>` pins the current executable and on-demand policy;
 `--mode supervised` selects persistent serving. Only the returned `executable`
 may start that managed root. `host activate --root-id <rootId> --framed` reuses a ready

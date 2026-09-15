@@ -26,6 +26,7 @@ mod endpoint;
 mod host_client;
 mod serve;
 mod signals;
+mod stdio;
 #[cfg(windows)]
 mod windows;
 

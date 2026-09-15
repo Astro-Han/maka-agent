@@ -53,6 +53,8 @@ enum HostCommand {
     Install(crate::deployment::Install),
     /// Activate an installed Host and report its verified loopback endpoint.
     Activate(crate::deployment::Activate),
+    /// Connect an installed Host to stdin/stdout using the client wire protocol.
+    Connect(crate::deployment::Connect),
     /// Update a deployment to this executable at a safe boundary.
     Update(crate::deployment::Update),
     /// Finish an interrupted deployment update without choosing another target.
@@ -117,6 +119,7 @@ impl Cli {
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
             Command::Host(HostCommand::Install(args)) => args.run().await,
             Command::Host(HostCommand::Activate(args)) => args.run().await,
+            Command::Host(HostCommand::Connect(args)) => args.run().await,
             Command::Host(HostCommand::Update(args)) => args.run(false).await,
             Command::Host(HostCommand::Reconcile(args)) => args.run(true).await,
             Command::Host(HostCommand::Stop(args)) => {

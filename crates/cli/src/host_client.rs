@@ -37,9 +37,9 @@ use tokio::io::{ReadHalf, WriteHalf};
 use tokio_util::sync::CancellationToken;
 
 #[cfg(unix)]
-type Stream = tokio::net::UnixStream;
+pub(super) type Stream = tokio::net::UnixStream;
 #[cfg(windows)]
-type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
+pub(super) type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
 
 /// Discovery is only a hint. The live handshake must confirm both root and epoch.
 #[derive(Deserialize)]
@@ -72,22 +72,7 @@ impl HostClient {
         let root = root.to_owned();
         tokio::time::timeout(Duration::from_secs(5), async move {
             let discovery = tokio::task::spawn_blocking(move || read_discovery(&root)).await??;
-            #[cfg(unix)]
-            let stream = Stream::connect(&discovery.endpoint).await?;
-            #[cfg(windows)]
-            let stream = {
-                use tokio::net::windows::named_pipe::ClientOptions;
-                loop {
-                    match ClientOptions::new().open(&discovery.endpoint) {
-                        Ok(stream) => break stream,
-                        // An existing pipe instance may be between accepts.
-                        Err(error) if error.raw_os_error() == Some(231) => {
-                            tokio::time::sleep(Duration::from_millis(10)).await
-                        }
-                        Err(error) => return Err(error.into()),
-                    }
-                }
-            };
+            let stream = open_stream(&discovery.endpoint).await?;
             let (mut reader, mut writer) =
                 maka_transport::ndjson::split(stream, CancellationToken::new());
             writer
@@ -125,6 +110,16 @@ impl HostClient {
                 writer,
             })
         })
+        .await?
+    }
+
+    /// A fresh connection to this verified epoch, not a second discovery lookup.
+    /// The bridge must still check its own handshake before forwarding requests.
+    pub async fn open_bridge(&self) -> Result<Stream, HostError> {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            open_stream(&self.discovery.endpoint),
+        )
         .await?
     }
 
@@ -232,6 +227,25 @@ impl HostClient {
             }
         })
         .await?
+    }
+}
+
+async fn open_stream(endpoint: &Path) -> Result<Stream, HostError> {
+    #[cfg(unix)]
+    return Ok(Stream::connect(endpoint).await?);
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        loop {
+            match ClientOptions::new().open(endpoint) {
+                Ok(stream) => return Ok(stream),
+                // An existing pipe instance may be between accepts.
+                Err(error) if error.raw_os_error() == Some(231) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
 }
 

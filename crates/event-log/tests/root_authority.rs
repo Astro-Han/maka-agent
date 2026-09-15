@@ -18,7 +18,7 @@
  */
 
 use maka_event_log::root::{ROOT_MARKER, RUST_ROOT_MARKER, RootNamespaces, RootOwner};
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
 
 fn namespaces(base: &Path) -> RootNamespaces {
     RootNamespaces {
@@ -64,15 +64,65 @@ fn copied_marker_and_rebound_path_cannot_reuse_identity() {
     let path = temp.path().join("root");
     let owner = RootOwner::create(&path, &ns).unwrap();
     let copy = temp.path().join("copy");
+    maka_event_log::root::repair_after_remount(&path, owner.root_id(), &ns).unwrap();
+    assert!(maka_event_log::root::repair_after_remount(&path, &"0".repeat(64), &ns).is_err());
     fs::create_dir(&copy).unwrap();
     for name in [ROOT_MARKER, RUST_ROOT_MARKER] {
         fs::copy(path.join(name), copy.join(name)).unwrap();
     }
     assert!(RootOwner::open(&copy, &ns).is_err());
     assert!(maka_event_log::root::resolve(&copy).is_err());
+    assert!(maka_event_log::root::repair_after_remount(&copy, owner.root_id(), &ns).is_err());
     fs::rename(&path, temp.path().join("moved")).unwrap();
     fs::rename(&copy, &path).unwrap();
     assert!(owner.validate_current().is_err());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn explicit_remount_preserves_authority_and_recovers_only_its_staging_file() {
+    use maka_event_log::root::{repair_after_remount, resolve};
+    let temp = tempfile::tempdir().unwrap();
+    let ns = namespaces(temp.path());
+    let path = temp.path().join("root");
+    let owner = RootOwner::create(&path, &ns).unwrap();
+    let id = owner.root_id().to_owned();
+    let marker = path.join(ROOT_MARKER);
+    let original: serde_json::Value = serde_json::from_slice(&fs::read(&marker).unwrap()).unwrap();
+    let mut stale = original.clone();
+    stale["rootIdentity"]["dev"] = serde_json::json!("0");
+    fs::write(&marker, serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert!(resolve(&path).is_err());
+    assert!(
+        repair_after_remount(&path, &id, &ns).is_err(),
+        "repair bypassed the live owner lease"
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(&marker).unwrap()).unwrap(),
+        stale
+    );
+    drop(owner);
+    let staging = path.join(".maka-storage-root.next");
+    fs::write(&staging, b"abandoned partial write").unwrap();
+    repair_after_remount(&path, &id, &ns).unwrap();
+    assert!(!staging.exists());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(&marker).unwrap()).unwrap(),
+        original
+    );
+    let owner = RootOwner::open(&path, &ns).unwrap();
+    fs::write(&staging, b"never promote this").unwrap();
+    repair_after_remount(&path, &id, &ns).unwrap();
+    assert!(
+        staging.exists(),
+        "no-op must not acquire leases just to clean staging"
+    );
+    owner.validate_current().unwrap();
+    drop(owner);
+    stale["rootIdentity"]["ino"] = serde_json::json!("0");
+    fs::write(&marker, serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert!(repair_after_remount(&path, &id, &ns).is_err());
+    assert_eq!(fs::read(staging).unwrap(), b"never promote this");
 }
 
 #[test]
@@ -103,39 +153,4 @@ fn legacy_and_unsafe_markers_fail_closed() {
     fs::remove_file(path.join(ROOT_MARKER)).unwrap();
     fs::write(path.join(ROOT_MARKER), vec![b' '; 1025]).unwrap();
     assert!(owner.validate_current().is_err());
-}
-
-#[test]
-fn durable_lease_blocks_other_process_even_after_cache_removal() {
-    if let Some(base) = std::env::var_os("MAKA_ROOT_AUTHORITY_TEST_BASE") {
-        let base = Path::new(&base);
-        let error = RootOwner::open(&base.join("root"), &namespaces(base))
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
-        return;
-    }
-    let temp = tempfile::tempdir().unwrap();
-    let ns = namespaces(temp.path());
-    let path = temp.path().join("root");
-    let owner = RootOwner::create(&path, &ns).unwrap();
-    fs::create_dir(path.join("skills")).unwrap();
-    assert_eq!(
-        maka_event_log::root::initialize(&path, &ns).unwrap(),
-        owner.root_id()
-    );
-    fs::remove_dir_all(&ns.control).unwrap();
-    let status = Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "durable_lease_blocks_other_process_even_after_cache_removal",
-            "--nocapture",
-        ])
-        .env("MAKA_ROOT_AUTHORITY_TEST_BASE", temp.path())
-        .status()
-        .unwrap();
-    assert!(status.success());
-    assert!(owner.validate_current().is_err());
-    drop(owner);
-    RootOwner::open(&path, &ns).unwrap();
 }

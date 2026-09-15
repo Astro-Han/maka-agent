@@ -38,6 +38,7 @@ pub const ROOT_MARKER: &str = ".maka-storage-root.json";
 pub const RUST_ROOT_MARKER: &str = ".maka-rust-runtime.json";
 pub const ROOT_DATABASE: &str = "runtime-rust.sqlite";
 const PROTOTYPE: &[u8] = b"{\"schemaVersion\":1,\"runtime\":\"rust-prototype\"}\n";
+const REMOUNT_STAGING: &str = ".maka-storage-root.next";
 
 #[derive(Debug, Clone)]
 pub struct RootNamespaces {
@@ -66,7 +67,7 @@ impl RootNamespaces {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct Marker {
     schema_version: u8,
@@ -75,7 +76,7 @@ struct Marker {
     root_identity: Identity,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Identity {
     dev: String,
     ino: String,
@@ -115,6 +116,72 @@ pub fn resolve(path: &Path) -> io::Result<RootLocation> {
         canonical_path,
         root_id: marker.root_id,
     })
+}
+
+/// Explicitly confirm an unchanged Linux directory after its filesystem was
+/// remounted. Equal inode numbers alone do not establish identity across volumes.
+/// A matching root is a read-only no-op, including while its Host is running.
+pub fn repair_after_remount(
+    path: &Path,
+    expected_root_id: &str,
+    namespaces: &RootNamespaces,
+) -> io::Result<()> {
+    let canonical_path = path.canonicalize()?;
+    let identity = directory_identity(&canonical_path)?;
+    check_layout(&canonical_path)?;
+    let previous = read_marker(&canonical_path)?;
+    if previous.root_id != expected_root_id
+        || directory_identity(&canonical_path)? != identity
+        || canonical_path.canonicalize()? != canonical_path
+    {
+        return Err(io::Error::other("root changed before remount confirmation"));
+    }
+    if previous.root_identity == identity {
+        return Ok(());
+    }
+    if !cfg!(target_os = "linux") || previous.root_identity.ino != identity.ino {
+        return Err(io::Error::other("root is not an unchanged Linux remount"));
+    }
+    let mut next = previous.clone();
+    next.root_identity = identity;
+    // Use the same two ownership locks as normal Host startup, not executor.lock
+    // or FileLease: Linux's TS-compatible OFD locks are distinct from flock.
+    let owner = RootOwner::acquire(canonical_path, next, namespaces)?;
+    let validate = || {
+        owner.check_directory()?;
+        owner.validate_leases()?;
+        if read_marker(&owner.canonical_path)? != previous {
+            return Err(io::Error::other(
+                "root marker changed during remount confirmation",
+            ));
+        }
+        owner.check_directory()
+    };
+    validate()?;
+    let staging = owner.canonical_path.join(REMOUNT_STAGING);
+    match staging.symlink_metadata() {
+        Ok(metadata) if metadata.is_file() => fs::remove_file(&staging)?,
+        Ok(_) => return Err(io::Error::other("remount staging is not a regular file")),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&staging)?;
+    file.write_all(&serde_json::to_vec(&owner.marker)?)?;
+    file.sync_all()?;
+    lock::stable(&file, &staging)?;
+    validate()?;
+    fs::rename(&staging, owner.canonical_path.join(ROOT_MARKER))?;
+    // On an uncertain rename/fsync result, stop. The next call re-reads the
+    // official marker; it never promotes or trusts an abandoned staging file.
+    File::open(&owner.canonical_path)?.sync_all()?;
+    owner.validate_current()
 }
 
 fn inspect(path: &Path) -> io::Result<(PathBuf, Marker)> {
@@ -170,6 +237,16 @@ impl RootOwner {
     /// Open only a marked Rust prototype root, rejecting legacy layouts before database access.
     pub fn open(path: &Path, namespaces: &RootNamespaces) -> io::Result<Self> {
         let (canonical_path, marker) = inspect(path)?;
+        let owner = Self::acquire(canonical_path, marker, namespaces)?;
+        owner.validate_current()?;
+        Ok(owner)
+    }
+
+    fn acquire(
+        canonical_path: PathBuf,
+        marker: Marker,
+        namespaces: &RootNamespaces,
+    ) -> io::Result<Self> {
         lock::private_directory(&namespaces.ownership)?;
         let lock_path = namespaces
             .ownership
@@ -179,16 +256,14 @@ impl RootOwner {
         let control_directory = namespaces.control.join(&marker.root_id);
         lock::private_directory(&control_directory)?;
         let compatibility_lease = lock::acquire(&control_directory.join("owner.lock"))?;
-        let owner = Self {
+        Ok(Self {
             canonical_path,
             marker,
             control_directory,
             lock_path,
             durable_lease,
             compatibility_lease,
-        };
-        owner.validate_current()?;
-        Ok(owner)
+        })
     }
 
     pub fn canonical_path(&self) -> &Path {
@@ -215,6 +290,10 @@ impl RootOwner {
         if marker != self.marker {
             return Err(io::Error::other("root marker identity changed"));
         }
+        self.validate_leases()
+    }
+
+    fn validate_leases(&self) -> io::Result<()> {
         lock::stable(&self.durable_lease, &self.lock_path)?;
         lock::stable(
             &self.compatibility_lease,
@@ -306,6 +385,7 @@ fn check_layout(path: &Path) -> io::Result<()> {
             name.to_str(),
             Some(
                 ROOT_MARKER
+                    | REMOUNT_STAGING
                     | RUST_ROOT_MARKER
                     | ROOT_DATABASE
                     | "runtime-rust.sqlite-wal"

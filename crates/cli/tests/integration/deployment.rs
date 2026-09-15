@@ -242,9 +242,16 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert_eq!(observed["host"]["identity"]["pid"], registration["pid"]);
         assert_eq!(observed["host"]["activity"]["state"], "ready");
         assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
-        let retired = Command::new(env!("CARGO_BIN_EXE_maka"))
-            .args(["host", "retire", "--root"])
-            .arg(&fixture.root)
+        let retired = Command::new("node")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+            .args([
+                "--bridge",
+                env!("CARGO_BIN_EXE_maka"),
+                "--root-id",
+                &fixture.root_id,
+                "--host-epoch",
+                registration["hostEpoch"].as_str().unwrap(),
+            ])
             .output()
             .unwrap();
         assert!(

@@ -18,6 +18,7 @@
  */
 
 mod activation;
+mod connect;
 mod control;
 mod entry;
 mod logs;
@@ -28,6 +29,7 @@ mod store;
 mod update;
 mod updates;
 pub(super) use activation::Activate;
+pub(super) use connect::Connect;
 pub(super) use control::{Control, ControlAction};
 pub(super) use entry::ServiceRun;
 pub(super) use logs::Logs;
