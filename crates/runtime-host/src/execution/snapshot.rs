@@ -89,7 +89,7 @@ pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
                 request_fingerprint,
                 ..
             } => Some(request_fingerprint),
-            InvocationInput::Code { .. } => None,
+            InvocationInput::Code { .. } | InvocationInput::Handoff { .. } => None,
         },
     }
 }

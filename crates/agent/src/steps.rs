@@ -53,6 +53,13 @@ pub(super) async fn run(
                 std::num::NonZeroU16::new((max_steps - step) as u16)
                     .expect("validated step budget"),
                 cancellation,
+                |pause| async move {
+                    inner
+                        .log
+                        .check_handoff(&input.invocation, &pause)
+                        .await
+                        .is_ok()
+                },
             )
             .await
         {

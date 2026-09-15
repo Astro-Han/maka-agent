@@ -95,29 +95,39 @@ impl HandoffGate {
             .ok_or(crate::RunError::Busy)
     }
 
-    pub(crate) async fn boundary(
+    pub(crate) async fn boundary<F: std::future::Future<Output = bool>>(
         &self,
         remaining_steps: NonZeroU16,
         cancellation: &CancellationToken,
+        preflight: impl FnOnce(HandoffPause) -> F,
     ) -> Option<HandoffPause> {
         let mut changes = self.state.subscribe();
-        let mut ticket = None;
+        let ticket = match &*changes.borrow_and_update() {
+            State::Requested(ticket) => ticket.clone(),
+            _ => return None,
+        };
+        let pause = HandoffPause {
+            intent: ticket.as_ref().clone(),
+            remaining_steps,
+        };
+        if !preflight(pause.clone()).await || cancellation.is_cancelled() {
+            self.cancel(&ticket);
+            return None;
+        }
         self.state.send_if_modified(|state| {
             let State::Requested(intent) = state else {
                 return false;
             };
-            ticket = Some(intent.clone());
+            if !Arc::ptr_eq(intent, &ticket) {
+                return false;
+            }
             *state = State::Held {
-                pause: HandoffPause {
-                    intent: intent.as_ref().clone(),
-                    remaining_steps,
-                },
+                pause,
                 cancellation: cancellation.clone(),
                 ticket: intent.clone(),
             };
             true
         });
-        let ticket = ticket?;
         loop {
             let state = changes.borrow_and_update().clone();
             match state {
@@ -261,8 +271,21 @@ mod tests {
         let gate = HandoffGate::new(source, "run".into());
         let cancellation = CancellationToken::new();
         let reservation = gate.reserve(intent.clone()).unwrap();
+        let (result, held) = tokio::join!(
+            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
+                std::future::ready(false)
+            }),
+            reservation.ready(),
+        );
+        assert!(
+            result.is_none() && held.is_none(),
+            "failed preflight releases the same Run"
+        );
+        let reservation = gate.reserve(intent.clone()).unwrap();
         let (result, ()) = tokio::join!(
-            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation),
+            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
+                std::future::ready(true)
+            }),
             async {
                 let held = reservation.ready().await.unwrap();
                 cancellation.cancel();
@@ -274,7 +297,9 @@ mod tests {
         let cancellation = CancellationToken::new();
         let reservation = gate.reserve(intent.clone()).unwrap();
         let (result, stale) = tokio::join!(
-            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation),
+            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
+                std::future::ready(true)
+            }),
             async {
                 let held = reservation.ready().await.unwrap();
                 cancellation.cancel();
@@ -286,7 +311,9 @@ mod tests {
         let reservation = gate.reserve(intent).unwrap();
         drop(stale); // The same durable intent does not reuse a scheduling owner.
         let (result, pending) = tokio::join!(
-            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation),
+            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation, |_| {
+                std::future::ready(true)
+            }),
             async { reservation.ready().await.unwrap().commit().unwrap() },
         );
         assert!(result.is_some());

@@ -21,7 +21,7 @@
 
 use crate::{EventLog, StoreError, sequence_number};
 use maka_runtime::{
-    continuation::{MAX_ANCESTRY, RunBoundary},
+    continuation::{MAX_ANCESTRY, MAX_SOURCE_BYTES, MAX_SOURCE_EVENTS, RunBoundary},
     event::{Fact, InvocationInput, RuntimeEvent, StoredEvent},
 };
 use sqlx::{Connection, SqliteConnection};
@@ -68,7 +68,7 @@ impl EventLog {
             let rows: Vec<(i64, Option<String>)> = sqlx::query_as(
                 "SELECT sequence, CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
                  FROM runtime_events WHERE kind='invocation_opened'
-                 AND json_extract(event_json,'$.fact.input.kind')='continuation'
+                 AND json_extract(event_json,'$.fact.input.kind') IN ('continuation','handoff')
                  AND json_extract(event_json,'$.invocation.session_id')=?
                  AND json_extract(event_json,'$.fact.input.claim.source.invocation.run_id')=?
                  AND json_extract(event_json,'$.fact.input.claim.source.high_water')=? LIMIT 2"
@@ -77,10 +77,11 @@ impl EventLog {
             if rows.len() > 1 { return Err(invalid("ambiguous continuation claim")); }
             let result = rows.into_iter().next().map(|(sequence, json)| {
                 let event: RuntimeEvent = serde_json::from_str(&json.ok_or_else(|| invalid("claim opening exceeds capacity"))?)?;
-                let Fact::InvocationOpened { input: InvocationInput::Continuation { claim, .. }, .. } = &event.fact else {
+                let Fact::InvocationOpened { input, .. } = &event.fact else {
                     return Err(invalid("claim index has invalid opening"));
                 };
-                claim.validate(&event.invocation).map_err(invalid)?;
+                let claim = input.inherited_claim().ok_or_else(|| invalid("claim index has no claim"))?;
+                input.validate_inheritance(&event.invocation).map_err(invalid)?;
                 if claim.source != source { return Err(invalid("claimed source evidence changed")); }
                 Ok(StoredEvent { sequence: sequence_number(sequence)?, event })
             }).transpose()?;
@@ -95,13 +96,18 @@ pub(crate) async fn validate(
     event: &RuntimeEvent,
 ) -> Result<(), StoreError> {
     let Fact::InvocationOpened {
-        input: InvocationInput::Continuation { claim, .. },
+        input,
         configuration,
     } = &event.fact
     else {
         return Ok(());
     };
-    claim.validate(&event.invocation).map_err(invalid)?;
+    let Some(claim) = input.inherited_claim() else {
+        return Ok(());
+    };
+    input
+        .validate_inheritance(&event.invocation)
+        .map_err(invalid)?;
     let workspace = configuration
         .as_ref()
         .and_then(|c| c.workspace_identity.as_ref())
@@ -109,11 +115,13 @@ pub(crate) async fn validate(
     let reused: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE kind='invocation_opened'
          AND json_extract(event_json,'$.invocation.session_id')=?1
-         AND (json_extract(event_json,'$.invocation.turn_id')=?2 OR json_extract(event_json,'$.invocation.run_id')=?3))"
+         AND ((?4 AND json_extract(event_json,'$.invocation.turn_id')=?2) OR json_extract(event_json,'$.invocation.run_id')=?3))"
     ).bind(&event.invocation.session_id).bind(&event.invocation.turn_id).bind(&event.invocation.run_id)
-        .fetch_one(&mut *connection).await?;
+        .bind(matches!(input, InvocationInput::Continuation { .. })).fetch_one(&mut *connection).await?;
     if reused {
-        return Err(invalid("manual continuation reused a prior Turn or Run"));
+        return Err(invalid(
+            "continuation reused a reserved Turn or physical Run",
+        ));
     }
     crate::context::safety::require_safe(connection, &event.invocation.session_id, None).await?;
     ancestors(connection, &claim.source, &claim.base, workspace).await?;
@@ -155,8 +163,8 @@ pub(crate) async fn ancestors(
             &source.invocation.run_id,
             &id,
             through,
-            10_000,
-            8 * 1024 * 1024,
+            MAX_SOURCE_EVENTS,
+            MAX_SOURCE_BYTES,
         )
         .await?;
         if prefix.invocation != source.invocation
@@ -200,8 +208,11 @@ pub(crate) async fn ancestors(
                 .await?;
                 return Ok(result);
             }
-            InvocationInput::Continuation { claim: parent, .. } => {
-                parent.validate(&prefix.invocation).map_err(invalid)?;
+            InvocationInput::Continuation { claim: parent, .. }
+            | InvocationInput::Handoff { claim: parent, .. } => {
+                input
+                    .validate_inheritance(&prefix.invocation)
+                    .map_err(invalid)?;
                 if &parent.base != base {
                     return Err(invalid("continuation changed its inherited Session base"));
                 }

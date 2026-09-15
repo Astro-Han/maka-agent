@@ -70,9 +70,12 @@ pub fn resolve_model_purpose(
 ) -> Result<ModelPurpose, &'static str> {
     use crate::input::InvocationInput;
     match (opening, purpose) {
-        (InvocationInput::Message { .. } | InvocationInput::Continuation { .. }, purpose) => {
-            Ok(purpose.unwrap_or(ModelPurpose::Main))
-        }
+        (
+            InvocationInput::Message { .. }
+            | InvocationInput::Continuation { .. }
+            | InvocationInput::Handoff { .. },
+            purpose,
+        ) => Ok(purpose.unwrap_or(ModelPurpose::Main)),
         (InvocationInput::ContextCompact { .. }, None | Some(ModelPurpose::Summary)) => {
             Ok(ModelPurpose::Summary)
         }

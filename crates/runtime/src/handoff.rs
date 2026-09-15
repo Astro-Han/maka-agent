@@ -76,6 +76,21 @@ impl HandoffIntent {
 }
 
 impl HandoffPause {
+    pub fn validate_claim(
+        &self,
+        claim: &crate::continuation::ContinuationClaim,
+        target: &Invocation,
+    ) -> Result<(), &'static str> {
+        claim.validate_boundary(target)?;
+        self.validate(&claim.source.invocation)?;
+        if claim.id != self.intent.claim_id
+            || *target != self.intent.successor(&claim.source.invocation)
+        {
+            return Err("handoff must acquire its reserved successor in the same Turn");
+        }
+        Ok(())
+    }
+
     pub fn validate(&self, source: &Invocation) -> Result<(), &'static str> {
         self.intent.validate(source)?;
         if self.remaining_steps.get() > 256 {

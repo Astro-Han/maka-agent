@@ -56,11 +56,15 @@ pub(super) async fn source_fence(
         (CheckpointMode::Standalone, InvocationInput::ContextCompact { .. })
         | (
             CheckpointMode::PreTurn,
-            InvocationInput::Message { .. } | InvocationInput::Continuation { .. },
+            InvocationInput::Message { .. }
+            | InvocationInput::Continuation { .. }
+            | InvocationInput::Handoff { .. },
         ) => *opened,
         (
             CheckpointMode::MidTurn { anchor_event_id },
-            InvocationInput::Message { .. } | InvocationInput::Continuation { .. },
+            InvocationInput::Message { .. }
+            | InvocationInput::Continuation { .. }
+            | InvocationInput::Handoff { .. },
         ) => {
             if anchor_event_id != &event.id {
                 return Err(invalid(

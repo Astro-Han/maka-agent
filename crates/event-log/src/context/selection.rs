@@ -73,12 +73,15 @@ impl Selection {
             return Err(super::invalid("lineage root has no opening"));
         };
         let mut runs = vec![invocation];
-        let base = match input {
+        let base = match &input {
             InvocationInput::Message { .. } => {
                 super::evidence::high_water(connection, session, sequence as i64).await?
             }
-            InvocationInput::Continuation { claim, .. } => {
-                claim.validate(&event.invocation).map_err(super::invalid)?;
+            InvocationInput::Continuation { claim, .. }
+            | InvocationInput::Handoff { claim, .. } => {
+                input
+                    .validate_inheritance(&event.invocation)
+                    .map_err(super::invalid)?;
                 let workspace = configuration
                     .as_ref()
                     .and_then(|c| c.workspace_identity.as_ref())
@@ -116,7 +119,7 @@ impl Selection {
         let Fact::InvocationOpened { input, .. } = &opening.fact else {
             return Err(super::invalid("selection requires a canonical opening"));
         };
-        if matches!(input, InvocationInput::Continuation { .. }) {
+        if input.inherited_claim().is_some() {
             Self::resolve(
                 connection,
                 &LogScope::Lineage {

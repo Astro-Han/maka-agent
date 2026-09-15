@@ -167,7 +167,7 @@ impl InvocationView {
                         content,
                         self.max_text_bytes,
                     )?);
-                } else if !matches!(input, InvocationInput::Continuation { .. }) {
+                } else if input.inherited_claim().is_none() {
                     return Err(ProjectionError::Unsupported("Code invocation"));
                 }
                 self.state = State::Active {

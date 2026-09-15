@@ -78,7 +78,10 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
             CodeExecutor::new(1, CellLimits::default()).unwrap());
         let count = Arc::new(AtomicUsize::new(0));
         let effect = Arc::new(Effect { log: log.clone(), count: count.clone() });
-        let running = engine.start(input(&base, "first", effect), CancellationToken::new()).await.unwrap();
+        let mut run = input(&base, "first", effect);
+        run.configuration.workspace_identity = Some(maka_runtime::execution::WorkspaceIdentity::from_marker_id(
+            "ef751105-55b5-4d65-a364-646281586a17").unwrap());
+        let running = engine.start(run, CancellationToken::new()).await.unwrap();
         first.await.unwrap();
         let gate = running.handoff().unwrap().clone();
         let reservation = gate.reserve(intent("cancelled")).unwrap();

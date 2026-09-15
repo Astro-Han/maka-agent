@@ -21,7 +21,10 @@ use crate::{Inner, RunError, RunInput, model_attempt};
 use maka_model::prompt::{AssistantPart, Message};
 use maka_runtime::{
     context::ModelPurpose,
-    continuation::{ContinuationClaim, REPLAY_VERSION, ReplayEvidence, RunBoundary, SessionBase},
+    continuation::{
+        ContinuationClaim, MAX_SOURCE_BYTES, MAX_SOURCE_EVENTS, REPLAY_VERSION, ReplayEvidence,
+        RunBoundary, SessionBase,
+    },
     event::Fact,
     input::InvocationInput,
 };
@@ -64,8 +67,8 @@ pub(super) async fn inspect(
             &source.invocation.session_id,
             &source.invocation.run_id,
             None,
-            10_000,
-            8 * 1024 * 1024,
+            MAX_SOURCE_EVENTS,
+            MAX_SOURCE_BYTES,
         )
         .await?
         .ok_or_else(|| invalid("continuation source is missing"))?;
@@ -109,7 +112,9 @@ pub(super) async fn inspect(
                 digest: base.source_evidence.digest,
             }
         }
-        InvocationInput::Continuation { claim, .. } => claim.base.clone(),
+        InvocationInput::Continuation { claim, .. } | InvocationInput::Handoff { claim, .. } => {
+            claim.base.clone()
+        }
         _ => return Err(invalid("source is not a resumable model Run")),
     };
     let context = inner

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Durable manual continuation identity. The opening itself acquires the claim;
+//! Durable continuation identity. The opening itself acquires the claim;
 //! a query or an in-memory plan has no execution authority.
 
 use crate::{archive::valid_projection_digest, event::Invocation, interaction::entity_id};
@@ -60,9 +60,19 @@ pub struct ReplayEvidence {
 
 pub const REPLAY_VERSION: u32 = 1;
 pub const MAX_ANCESTRY: usize = 64;
+pub const MAX_SOURCE_EVENTS: usize = 10_000;
+pub const MAX_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 
 impl ContinuationClaim {
     pub fn validate(&self, target: &Invocation) -> Result<(), &'static str> {
+        self.validate_boundary(target)?;
+        if self.source.invocation.turn_id == target.turn_id {
+            return Err("manual continuation requires a fresh Turn");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_boundary(&self, target: &Invocation) -> Result<(), &'static str> {
         entity_id(&self.id)?;
         for invocation in [&self.source.invocation, target] {
             for id in [
@@ -76,13 +86,10 @@ impl ContinuationClaim {
         }
         let source = &self.source.invocation;
         if source.session_id != target.session_id
-            || source.turn_id == target.turn_id
             || source.run_id == target.run_id
             || source.invocation_id == target.invocation_id
         {
-            return Err(
-                "manual continuation requires fresh Turn, Run and Invocation in the same Session",
-            );
+            return Err("continuation requires fresh Run and Invocation in the same Session");
         }
         if self.source.high_water == 0
             || self.source.high_water > crate::configuration::validation::MAX_SAFE_INTEGER

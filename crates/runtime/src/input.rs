@@ -25,6 +25,10 @@ pub use references::{DirectoryReference, InlineReference, InlineReferenceKind, Q
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InvocationInput {
+    Handoff {
+        claim: Box<crate::continuation::ContinuationClaim>,
+        pause: Box<crate::handoff::HandoffPause>,
+    },
     Continuation {
         claim: Box<crate::continuation::ContinuationClaim>,
         request_fingerprint: String,
@@ -46,6 +50,26 @@ pub enum InvocationInput {
     Code {
         source: String,
     },
+}
+
+impl InvocationInput {
+    pub fn inherited_claim(&self) -> Option<&crate::continuation::ContinuationClaim> {
+        match self {
+            Self::Continuation { claim, .. } | Self::Handoff { claim, .. } => Some(claim),
+            _ => None,
+        }
+    }
+
+    pub fn validate_inheritance(
+        &self,
+        target: &crate::event::Invocation,
+    ) -> Result<(), &'static str> {
+        match self {
+            Self::Continuation { claim, .. } => claim.validate(target),
+            Self::Handoff { claim, pause } => pause.validate_claim(claim, target),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

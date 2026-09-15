@@ -17,25 +17,98 @@
  * under the License.
  */
 
-use crate::StoreError;
+use crate::{EventLog, StoreError};
 use maka_runtime::event::{Fact, InvocationInput, InvocationOutcome, RuntimeEvent};
-use sqlx::SqliteConnection;
+use sqlx::{Connection, SqliteConnection};
+
+impl EventLog {
+    /// Eligibility only. The source still owns execution until its seal commits.
+    pub async fn check_handoff(
+        &self,
+        invocation: &maka_runtime::event::Invocation,
+        pause: &maka_runtime::handoff::HandoffPause,
+    ) -> Result<(), StoreError> {
+        self.validate_root()?;
+        let event = RuntimeEvent::new(
+            invocation.clone(),
+            Fact::InvocationEnded {
+                outcome: InvocationOutcome::HandoffPaused {
+                    pause: pause.clone(),
+                },
+            },
+        );
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    let mut tx = connection.begin().await?;
+                    validate(&mut tx, &event).await?;
+                    tx.commit().await?;
+                    Ok(())
+                })
+            })
+            .await
+    }
+}
 
 pub(crate) async fn validate(
     tx: &mut SqliteConnection,
     event: &RuntimeEvent,
 ) -> Result<(), StoreError> {
-    if matches!(event.fact, Fact::InvocationOpened { .. }) {
-        let reserved: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM runtime_events pause
-             WHERE pause.kind='invocation_ended'
-             AND json_extract(pause.event_json,'$.invocation.session_id')=?1
-             AND json_extract(pause.event_json,'$.fact.outcome.kind')='handoff_paused'
-             AND NOT EXISTS(SELECT 1 FROM runtime_events successor WHERE successor.kind='invocation_opened'
-               AND json_extract(successor.event_json,'$.fact.input.kind')='handoff'
-               AND json_extract(successor.event_json,'$.fact.input.claim.source.invocation.invocation_id')=pause.invocation_id))",
-        ).bind(&event.invocation.session_id).fetch_one(&mut *tx).await?;
-        if reserved {
+    if let Fact::InvocationOpened {
+        input,
+        configuration,
+    } = &event.fact
+    {
+        let source = match input {
+            InvocationInput::Handoff { claim, .. } => {
+                Some(claim.source.invocation.invocation_id.as_str())
+            }
+            _ => None,
+        };
+        if reservation_conflict(
+            tx,
+            &event.invocation.run_id,
+            &event.invocation.invocation_id,
+            input.inherited_claim().map(|claim| claim.id.as_str()),
+            source,
+        )
+        .await?
+        {
+            return Err(invalid("opening would steal a reserved handoff identity"));
+        }
+        // Admission permits one physical owner per Session. A paused owner
+        // blocks the next opening, so only the latest opening can reserve it.
+        let reserved: Option<String> = sqlx::query_scalar(
+            "SELECT pause.invocation_id FROM runtime_events pause
+             WHERE pause.kind='invocation_ended' AND json_extract(pause.event_json,'$.fact.outcome.kind')='handoff_paused'
+             AND pause.invocation_id=(SELECT invocation_id FROM runtime_events WHERE kind='invocation_opened'
+               AND json_extract(event_json,'$.invocation.session_id')=?1 ORDER BY sequence DESC LIMIT 1)",
+        ).bind(&event.invocation.session_id).fetch_optional(&mut *tx).await?;
+        if let InvocationInput::Handoff { claim, pause } = input {
+            if reserved.as_deref() != Some(&claim.source.invocation.invocation_id) {
+                return Err(invalid(
+                    "handoff does not own the pending Session reservation",
+                ));
+            }
+            let source = &claim.source.invocation;
+            let (opening, terminal): (String, String) = sqlx::query_as(
+                "SELECT o.event_json, t.event_json FROM runtime_events o JOIN runtime_events t
+                 ON t.invocation_id=o.invocation_id AND t.kind='invocation_ended'
+                 WHERE o.invocation_id=? AND o.kind='invocation_opened'",
+            )
+            .bind(&source.invocation_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let opening: RuntimeEvent = serde_json::from_str(&opening)?;
+            let terminal: RuntimeEvent = serde_json::from_str(&terminal)?;
+            if !matches!(terminal.fact, Fact::InvocationEnded { outcome: InvocationOutcome::HandoffPaused { pause: sealed } } if sealed == **pause)
+                || !matches!(opening.fact, Fact::InvocationOpened { configuration: Some(ref frozen), .. } if Some(frozen) == configuration.as_ref())
+            {
+                return Err(invalid(
+                    "handoff changes its sealed intent, budget or admitted configuration",
+                ));
+            }
+        } else if reserved.is_some() {
             return Err(invalid(
                 "Session is reserved for its sealed handoff successor",
             ));
@@ -49,6 +122,12 @@ pub(crate) async fn validate(
         return Ok(());
     };
     pause.validate(&event.invocation).map_err(invalid)?;
+    let ended: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id=? AND kind='invocation_ended')",
+    ).bind(&event.invocation.invocation_id).fetch_one(&mut *tx).await?;
+    if ended {
+        return Err(invalid("handoff source is already sealed"));
+    }
     let opening: String = sqlx::query_scalar(
         "SELECT event_json FROM runtime_events WHERE invocation_id=? AND kind='invocation_opened'",
     )
@@ -56,14 +135,54 @@ pub(crate) async fn validate(
     .fetch_one(&mut *tx)
     .await?;
     let opening: RuntimeEvent = serde_json::from_str(&opening)?;
-    if !matches!(
-        &opening.fact,
+    if opening.invocation != event.invocation {
+        return Err(invalid("handoff source invocation changed"));
+    }
+    let Fact::InvocationOpened {
+        input,
+        configuration: Some(configuration),
+    } = &opening.fact
+    else {
+        return Err(invalid("handoff has no admitted configuration"));
+    };
+    let workspace = configuration
+        .workspace_identity
+        .as_ref()
+        .ok_or_else(|| invalid("handoff requires an observed workspace identity"))?;
+    crate::context::safety::require_safe(
+        tx,
+        &event.invocation.session_id,
+        Some(&event.invocation.invocation_id),
+    )
+    .await?;
+    if let Some(claim) = input.inherited_claim()
+        && crate::continuation::ancestors(tx, &claim.source, &claim.base, workspace)
+            .await?
+            .len()
+            >= maka_runtime::continuation::MAX_ANCESTRY
+    {
+        return Err(invalid(
+            "handoff would exceed the continuation lineage capacity",
+        ));
+    }
+    let root = match &opening.fact {
         Fact::InvocationOpened {
             input: InvocationInput::Message { .. } | InvocationInput::Continuation { .. },
             configuration: Some(_),
+        } => &event.invocation.run_id,
+        Fact::InvocationOpened {
+            input: InvocationInput::Handoff {
+                pause: previous, ..
+            },
+            configuration: Some(_),
+        } if pause.remaining_steps <= previous.remaining_steps => &previous.intent.root_run_id,
+        _ => {
+            return Err(invalid(
+                "handoff requires an admitted model Run with remaining budget",
+            ));
         }
-    ) || pause.intent.root_run_id != event.invocation.run_id
-    {
+    };
+    if &pause.intent.root_run_id != root {
         return Err(invalid(
             "handoff must preserve its admitted logical model Run",
         ));
@@ -72,18 +191,68 @@ pub(crate) async fn validate(
     // harmless; an interrupted request never proves a provider effect settled.
     crate::context::safety::settled_boundary(tx, &event.invocation.invocation_id, i64::MAX as u64)
         .await?;
+    crate::interactions::lifecycle::require_closed(tx, &event.invocation).await?;
+    // Use a stable upper bound in both preflight and append: time advancing
+    // while held must not consume the headroom a second time.
+    let mut envelope = event.clone();
+    envelope.recorded_at = std::time::UNIX_EPOCH;
+    let seal_bytes =
+        serde_json::to_vec(&envelope)?.len() + (u64::MAX.ilog10() + u32::MAX.ilog10()) as usize;
+    let source_bytes = maka_runtime::continuation::MAX_SOURCE_BYTES
+        .checked_sub(seal_bytes)
+        .ok_or(StoreError::PrefixTooLarge)?;
+    crate::run_prefix::read(
+        tx,
+        &event.invocation.session_id,
+        &event.invocation.run_id,
+        &event.invocation.invocation_id,
+        i64::MAX,
+        maka_runtime::continuation::MAX_SOURCE_EVENTS - 1,
+        source_bytes,
+    )
+    .await?;
     let occupied: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE kind='invocation_opened'
-         AND (invocation_id=?1 OR json_extract(event_json,'$.invocation.run_id')=?2))",
+         AND (invocation_id=?1 OR json_extract(event_json,'$.invocation.run_id')=?2
+           OR json_extract(event_json,'$.fact.input.claim.id')=?3))",
     )
     .bind(&pause.intent.successor_invocation_id)
     .bind(&pause.intent.successor_run_id)
+    .bind(&pause.intent.claim_id)
     .fetch_one(&mut *tx)
     .await?;
     if occupied {
         return Err(invalid("handoff successor identity already exists"));
     }
+    if reservation_conflict(
+        tx,
+        &pause.intent.successor_run_id,
+        &pause.intent.successor_invocation_id,
+        Some(&pause.intent.claim_id),
+        None,
+    )
+    .await?
+    {
+        return Err(invalid("handoff successor identity is already reserved"));
+    }
     Ok(())
+}
+
+async fn reservation_conflict(
+    tx: &mut SqliteConnection,
+    run: &str,
+    invocation: &str,
+    claim: Option<&str>,
+    source: Option<&str>,
+) -> Result<bool, StoreError> {
+    Ok(sqlx::query_scalar(
+        "WITH reservations AS NOT MATERIALIZED (SELECT event_json FROM runtime_events
+         WHERE kind='invocation_ended' AND json_extract(event_json,'$.fact.outcome.kind')='handoff_paused'
+         AND (?4 IS NULL OR invocation_id != ?4))
+         SELECT EXISTS(SELECT 1 FROM reservations WHERE json_extract(event_json,'$.fact.outcome.pause.intent.successor_run_id')=?1
+           UNION ALL SELECT 1 FROM reservations WHERE json_extract(event_json,'$.fact.outcome.pause.intent.successor_invocation_id')=?2
+           UNION ALL SELECT 1 FROM reservations WHERE json_extract(event_json,'$.fact.outcome.pause.intent.claim_id')=?3)",
+    ).bind(run).bind(invocation).bind(claim).bind(source).fetch_one(tx).await?)
 }
 
 fn invalid(message: &str) -> StoreError {

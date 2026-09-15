@@ -33,6 +33,10 @@ use maka_runtime::{
 mod fixtures;
 #[path = "continuation/handoff.rs"]
 mod handoff;
+#[path = "continuation/handoff_budget.rs"]
+mod handoff_budget;
+#[path = "continuation/handoff_claim.rs"]
+mod handoff_claim;
 use fixtures::*;
 
 #[tokio::test]

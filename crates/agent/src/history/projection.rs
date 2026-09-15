@@ -120,7 +120,7 @@ pub(super) fn build<'a>(
         }
         match &stored.event.fact {
             Fact::InvocationOpened { input, .. } => {
-                if matches!(input, InvocationInput::Continuation { .. }) {
+                if input.inherited_claim().is_some() {
                     continue;
                 }
                 let InvocationInput::Message { content, .. } = input else {

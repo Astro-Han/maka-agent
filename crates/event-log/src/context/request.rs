@@ -46,7 +46,7 @@ pub(super) async fn validate(
     // Legacy facts remain replayable. New explicit purposes must agree with the
     // canonical opening; automatic summaries can never use the legacy default.
     if purpose.is_none() {
-        let compact: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id=? AND kind='invocation_opened' AND json_extract(event_json,'$.fact.input.kind') IN ('context_compact','continuation'))")
+        let compact: bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id=? AND kind='invocation_opened' AND json_extract(event_json,'$.fact.input.kind') IN ('context_compact','continuation','handoff'))")
             .bind(&event.invocation.invocation_id).fetch_one(connection).await?;
         if compact {
             return Err(invalid(
@@ -79,16 +79,18 @@ pub(super) async fn validate(
     let high = if resolved == ModelPurpose::Summary {
         let mode = match input {
             InvocationInput::ContextCompact { .. } => CheckpointMode::Standalone,
-            InvocationInput::Message { .. } | InvocationInput::Continuation { .. }
+            InvocationInput::Message { .. }
+            | InvocationInput::Continuation { .. }
+            | InvocationInput::Handoff { .. }
                 if *source_high_water < opened =>
             {
                 CheckpointMode::PreTurn
             }
-            InvocationInput::Message { .. } | InvocationInput::Continuation { .. } => {
-                CheckpointMode::MidTurn {
-                    anchor_event_id: opening.id.clone(),
-                }
-            }
+            InvocationInput::Message { .. }
+            | InvocationInput::Continuation { .. }
+            | InvocationInput::Handoff { .. } => CheckpointMode::MidTurn {
+                anchor_event_id: opening.id.clone(),
+            },
             _ => return Err(invalid("invalid summary opening")),
         };
         boundary::summary_span(connection, event, i64::MAX as u64).await?;

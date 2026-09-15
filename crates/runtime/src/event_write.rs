@@ -53,24 +53,24 @@ impl ProjectionArtifactWrite {
 
 impl EventWrite {
     pub fn plain(event: RuntimeEvent) -> Result<Self, CommitError> {
+        if let Fact::InvocationOpened { input, .. } = &event.fact {
+            input
+                .validate_inheritance(&event.invocation)
+                .map_err(|reason| CommitError::Rejected(reason.into()))?;
+        }
         if let Fact::InvocationOpened {
             input:
                 crate::input::InvocationInput::Continuation {
-                    claim,
                     request_fingerprint,
                     ..
                 },
             ..
         } = &event.fact
+            && !crate::archive::valid_projection_digest(request_fingerprint)
         {
-            claim
-                .validate(&event.invocation)
-                .map_err(|reason| CommitError::Rejected(reason.into()))?;
-            if !crate::archive::valid_projection_digest(request_fingerprint) {
-                return Err(CommitError::Rejected(
-                    "invalid continuation request fingerprint".into(),
-                ));
-            }
+            return Err(CommitError::Rejected(
+                "invalid continuation request fingerprint".into(),
+            ));
         }
         if let Fact::InvocationOpened {
             input:
