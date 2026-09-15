@@ -56,8 +56,9 @@ export function createNativeRuntimeHostCandidateLaunchBarrier(
   return createRuntimeHostCandidateLaunchBarrierWithDependencies({
     retireTimeoutMs: 1000,
     launchCandidate: (input) => launchCandidate(executable, input),
-    async connect(input, launchCandidate) {
-      await initializeNativeRuntimeHost(executable, input.rootPath, input.signal);
+    connect(input, launchCandidate) {
+      // Startup initializes the root once. Every connection still verifies its
+      // identity through discovery; reconnecting needs no initializer process.
       return connectOrSpawnRuntimeHostWithDependencies(input, {
         launchCandidate,
         random: Math.random,

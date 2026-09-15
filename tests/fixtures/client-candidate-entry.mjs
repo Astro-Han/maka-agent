@@ -69,14 +69,19 @@ try {
     }),
     (error) => error.code === 'operation_conflict',
   );
-  const observer = await connectExistingRuntimeHost({
+  const observer = await barrier.connect({
     rootPath: values.root,
     protocol: { min: 0, max: 0 },
     compositionId: 'maka.interactive',
     generation: 'native-cli-test',
+    candidateEntrypoint: 'host',
+    closeOnLauncherExit: true,
+    electionDeadlineMs: 8_000,
   });
   assert.equal(observer.kind, 'connected');
   try {
+    assert.equal(observer.spawnedProcess, undefined, 'reconnect must reuse the current Host');
+    assert.equal(observer.registration.hostEpoch, result.registration.hostEpoch);
     const busyDiagnostics = await result.connection.request('host.diagnostics.query', {});
     assert.equal(busyDiagnostics.connections, 2);
     assert.equal(busyDiagnostics.upgradeBlockingActivity, true);
