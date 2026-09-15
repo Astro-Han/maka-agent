@@ -104,6 +104,10 @@ The root owns its complete persistent state. `.maka-host/state/data` contains pl
 
 `prepareRuntimeHostRoot` is the single format upgrade entry. Ordinary Storage resolution and deployment lookup do not migrate. Storage owns marker validation, physical identity, locks and atomic publication; the Host owns legacy layout interpretation, snapshot validation and completion. Explicit identity repair preserves both legacy and in-progress formats and grants no business capability.
 
+Early Desktop boot uses `resolveStorageRootIdentity` to obtain the path and identity before constructing management facilities; it does not require upgrade completion. `inspectRuntimeHostManagedDeployment` reads metadata for the observed format. During upgrade it reports the format without presenting the old record as an activatable deployment. An ordinary connection to a legacy managed root returns the existing operator-required result. WSL environment reuse may recover an already recorded lifecycle transaction, but cannot select or install a new version.
+
+The managed lifecycle's `prepareRuntimeHostRootForDeployment` owns upgrade admission: recover the old transaction with the installed source, prepare the target, retire the old Host, then invoke format migration. Migration accepts a settled source deployment and never chooses a recovery direction from `from` / `to`. Unavailable live activity remains unknown; source retirement still enforces the existing interruption policy.
+
 Upgrade runs under the original root owner's account. Before takeover, the installed source package owns v1 lifecycle operations, including status and retirement. The successor CLI can therefore inspect the old deployment and prepare a compatible target before upgrading. A compatible package already selected by an interrupted installer resumes its upgrade without selecting another registry target. Active work follows the existing interruption policy. The new root lock and legacy owner/Artifact locks exclude writers. Missing writable legacy lock directories are created only for initial admission. Source absence is recorded under these locks; unrelated root files remain intact and do not imply missing Host data. Once a source was recorded present, losing it before its snapshot completes cannot be interpreted as empty state.
 
 The release update compatibility epoch is 2. Older updaters must not perform this format change unattended; an explicit successor-CLI update uses the transaction above. Interrupted upgrades resume automatically through the existing startup and activation paths.
@@ -114,11 +118,12 @@ The imported deployment uses the existing `complete_to` transaction when its tar
 
 ```mermaid
 flowchart TD
-  A[Startup / managed update] --> B{Root identity and format}
+  A[Startup: read root identity and construct management] --> B{Root identity and format}
   B -->|Identity mismatch| C[Explicit identity repair]
   C --> B
   B -->|Current| H[Acquire owner and recover deployment]
-  B -->|Legacy| D[Prepare compatible package and retire old Host]
+  B -->|Legacy| L[If managed: lifecycle recovers old transaction]
+  L --> D[Prepare compatible package and retire old Host]
   D --> E[Acquire old and new locks; publish upgrade marker]
   B -->|Upgrading| F[Resume recorded transaction]
   E --> F

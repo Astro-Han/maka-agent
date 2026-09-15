@@ -23,7 +23,11 @@ import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { resolveStorageRoot, tryAcquireStateRootOwner } from '../root-authority.js';
+import {
+  resolveStorageRoot,
+  resolveStorageRootIdentity,
+  tryAcquireStateRootOwner,
+} from '../root-authority.js';
 
 test('fresh roots acquire and reopen without an account home', async (t) => {
   const root = await mkdtemp(join(os.tmpdir(), 'maka-root-no-home-'));
@@ -32,7 +36,10 @@ test('fresh roots acquire and reopen without an account home', async (t) => {
   });
   syncBuiltinESMExports();
   try {
+    const identity = await resolveStorageRootIdentity({ path: root, kind: 'interactive' });
     const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
+    assert.equal(identity.rootId, capability.rootId);
+    await assert.rejects(tryAcquireStateRootOwner(identity as typeof capability));
     const first = await tryAcquireStateRootOwner(capability);
     assert.ok(first);
     await writeFile(join(first.hostDataDirectory, 'settings.json'), '{"kept":true}');

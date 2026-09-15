@@ -34,7 +34,6 @@ import {
   encodeRuntimeHostSetupFrame,
   isSha512PackageIntegrity,
   resolveRuntimeHostManagedDeployment,
-  resolveRuntimeHostManagedDeploymentAuthority,
   runtimeHostManagedOperatorCommand,
   RUNTIME_HOST_SETUP_ERROR_CODE_MAX_BYTES,
   RUNTIME_HOST_SETUP_ERROR_MESSAGE_MAX_BYTES,
@@ -82,10 +81,9 @@ import {
   type RuntimeHostUpdateCandidate,
 } from './runtime-host-update-discovery.js';
 import {
-  inspectStorageRootFormat,
-  StorageRootAuthorityError,
   repairStorageRootAfterRemount,
   resolveStorageRoot,
+  resolveStorageRootIdentity,
 } from '@maka/storage/root-authority';
 import {
   createPlatformRuntimeHostServiceBackend,
@@ -320,16 +318,7 @@ async function resolveRuntimeHostSetupRootId(options: RuntimeHostSetupCliOptions
   if (options.repairRootAfterRemount) {
     await repairStorageRootAfterRemount({ path, kind: 'interactive' });
   }
-  try {
-    return (await inspectStorageRootFormat(path)).rootId;
-  } catch (error) {
-    if (
-      !(error instanceof StorageRootAuthorityError) ||
-      !['root_not_found', 'root_unmarked'].includes(error.code)
-    )
-      throw error;
-    return (await resolveStorageRoot({ path, kind: 'interactive' })).rootId;
-  }
+  return (await resolveStorageRootIdentity({ path, kind: 'interactive' })).rootId;
 }
 
 async function prepareSetupStorageRoot(
@@ -338,7 +327,12 @@ async function prepareSetupStorageRoot(
   path: string,
 ) {
   return prepareRuntimeHostRootForDeployment(path, {
-    resolveProvider: deps.resolveLifecycleProvider,
+    deps: {
+      resolveProvider: deps.resolveLifecycleProvider,
+      convergeOperator: deps.convergeOperator,
+      verifyOperator: deps.verifyOperator,
+    },
+    ...(options.expectedTarget ? { expectedTarget: options.expectedTarget } : {}),
     allowInterruptActiveTasks: options.allowInterruptActiveTasks === true,
     async prepareDeployment(current) {
       assertExpectedDeploymentGeneration(options.expectedTarget, current);
@@ -400,10 +394,18 @@ async function runRuntimeHostSetupLocked(
         'Environment discovery cannot replace a deployment',
       );
     }
-    const existing = await resolveRuntimeHostManagedDeploymentAuthority(rootId);
-    if (existing) {
-      const { config, capability } = await resolveRuntimeHostManagedDeployment(rootId);
-      assertCanonicalSetupTarget(options.expectedTarget, rootId, capability.canonicalPath);
+    const existing = await resolveRecoverableRuntimeHostManagedDeployment(
+      rootId,
+      {
+        resolveProvider: deps.resolveLifecycleProvider,
+        convergeOperator: deps.convergeOperator,
+        verifyOperator: deps.verifyOperator,
+      },
+      { ...(options.expectedTarget ? { expectedTarget: options.expectedTarget } : {}) },
+    );
+    if (existing.kind === 'active') {
+      const config = existing.config;
+      assertCanonicalSetupTarget(options.expectedTarget, rootId, config.root.path);
       assertExpectedDeploymentGeneration(options.expectedTarget, config);
       // The binding comes from canonical authority. The installed operator validates
       // its own projection when connected; discovery must not rewrite an older launcher.
@@ -413,7 +415,7 @@ async function runRuntimeHostSetupLocked(
         serviceId: rootId,
         deploymentId: config.deploymentId,
         rootId,
-        rootPath: capability.canonicalPath,
+        rootPath: config.root.path,
         operator: runtimeHostManagedOperatorCommand(
           config,
           process.platform === 'win32' ? 'win32' : 'posix',

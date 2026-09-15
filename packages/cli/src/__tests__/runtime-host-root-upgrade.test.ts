@@ -35,6 +35,7 @@ import {
   resolveRuntimeHostManagedDeploymentAuthorityRoot,
   resolveRuntimeHostNpmDeploymentLayout,
   type RuntimeHostManagedDeploymentConfig,
+  decodeRuntimeHostSetupFrame,
 } from '@maka/runtime-host/operator';
 import { resolveManagedRuntimeHostUpdateSelection } from '../runtime-host-update-discovery.js';
 import {
@@ -43,8 +44,9 @@ import {
   type RuntimeHostUpdateFrame,
 } from '../runtime-host-update-command.js';
 import { resolveRecoverableRuntimeHostManagedDeployment } from '../runtime-host-lifecycle-transaction.js';
+import { runRuntimeHostSetupCli } from '../runtime-host-setup-command.js';
 
-for (const failure of ['activation', 'locator']) {
+for (const failure of ['activation', 'locator', 'source_transition']) {
   test(`successor CLI selects before takeover and resumes after ${failure} failure`, async (t) => {
     const base = await mkdtemp(join(os.tmpdir(), 'maka-successor-upgrade-'));
     const home = join(base, 'home');
@@ -147,7 +149,7 @@ for (const failure of ['activation', 'locator']) {
     await writeFile(sourceLayout.cliPath, '');
     const sourcePrelude = `
     import assert from 'node:assert/strict';
-    import { readFile, appendFile } from 'node:fs/promises';
+    import { readFile, appendFile, writeFile } from 'node:fs/promises';
     async function observe(kind) {
       assert.equal(JSON.parse(await readFile(${JSON.stringify(markerPath)}, 'utf8')).schemaVersion, 1);
       await appendFile(${JSON.stringify(eventsFile)}, JSON.stringify(kind) + '\\n');
@@ -163,7 +165,15 @@ for (const failure of ['activation', 'locator']) {
       join(dirname(sourceLayout.cliPath), 'runtime-host-lifecycle-transaction.js'),
       `${sourcePrelude}
     export async function resolveRecoverableRuntimeHostManagedDeployment() {
-      await observe('read'); return {kind: 'active', config: JSON.parse(await readFile(${JSON.stringify(legacyRecord)}, 'utf8'))};
+      await observe('read');
+      let config = JSON.parse(await readFile(${JSON.stringify(legacyRecord)}, 'utf8'));
+      if (config.state === 'transition') {
+        assert.equal(config.recovery, 'restore_from');
+        config = config.from;
+        await writeFile(${JSON.stringify(legacyRecord)}, JSON.stringify(config));
+        await observe('recovered');
+      }
+      return {kind: 'active', config};
     }
     export async function retireRuntimeHostLifecycleOwner(input) {
       await observe('retire');
@@ -212,6 +222,40 @@ for (const failure of ['activation', 'locator']) {
       return child;
     });
     syncBuiltinESMExports();
+    const setupOptions = {
+      json: true,
+      lifecycle: 'on_demand' as const,
+      clientDataRoot: join(base, 'client'),
+      defaultRootPath: root.canonicalPath,
+      sourcePackageRoot: targetLayout.packageRoot,
+      version: target.version,
+      sourcePackageIntegrity: target.integrity,
+      principalId: 'desktop:test',
+      preset: 'desktop-client' as const,
+    };
+    const discovery: string[] = [];
+    assert.equal(
+      await runRuntimeHostSetupCli(
+        { ...setupOptions, reuseExistingEnvironment: true },
+        {
+          prepareDeployment: async () =>
+            assert.fail('discovery cannot select or stage a successor'),
+          writeOutput: (value) => discovery.push(value),
+        },
+      ),
+      0,
+      discovery.join(''),
+    );
+    assert.ok(
+      discovery
+        .map(decodeRuntimeHostSetupFrame)
+        .some(
+          (frame) =>
+            frame?.kind === 'existing_environment' &&
+            frame.version === current.launch.package.version,
+        ),
+    );
+    assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 1);
     const selection = await resolveManagedRuntimeHostUpdateSelection({
       clientDataRoot: join(base, 'client'),
       defaultRootPath: root.canonicalPath,
@@ -298,7 +342,64 @@ for (const failure of ['activation', 'locator']) {
       });
       syncBuiltinESMExports();
     }
-    assert.equal(await update(true), 1);
+    if (failure === 'source_transition') {
+      await writeFile(
+        legacyRecord,
+        JSON.stringify({
+          schemaVersion: 1,
+          state: 'transition',
+          transactionId: randomUUID(),
+          operation: 'update',
+          recovery: 'restore_from',
+          root: current.root,
+          from: current,
+          to: { ...current, configRevision: 2 },
+        }),
+      );
+      const packageHandle = {
+        version: target.version,
+        root: current.deploymentRoot,
+        cliPath: targetLayout.cliPath,
+        activate: async () => {},
+        cleanup: async () => {},
+        rollback: async () => {
+          rollbacks++;
+        },
+      };
+      const output: string[] = [];
+      let activationAttempted = false;
+      assert.equal(
+        await runRuntimeHostSetupCli(
+          { ...setupOptions, updateExisting: true, allowInterruptActiveTasks: true },
+          {
+            prepareDeployment: async () => {
+              assert.equal(JSON.parse(await readFile(legacyRecord, 'utf8')).state, 'active');
+              assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 1);
+              return packageHandle;
+            },
+            openDeployment: async () => packageHandle,
+            withRegistryPackage: async (_candidate, use) => use(targetLayout.packageRoot),
+            activateDesired: async () => {
+              activationAttempted = true;
+              throw new Error('injected activation failure');
+            },
+            activateManaged: async () => {
+              activationAttempted = true;
+              throw new Error('injected activation failure');
+            },
+            prunePackages: async () => {},
+            writeOutput: (value) => output.push(value),
+          },
+        ),
+        1,
+      );
+      const failureFrame = output
+        .map(decodeRuntimeHostSetupFrame)
+        .find((frame) => frame?.kind === 'error');
+      assert.ok(failureFrame?.kind === 'error', output.join(''));
+      assert.equal(activationAttempted, true, failureFrame.error.message);
+      assert.match(await readFile(eventsFile, 'utf8'), /"recovered"/);
+    } else assert.equal(await update(true), 1);
     assert.equal(
       JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion,
       2,
