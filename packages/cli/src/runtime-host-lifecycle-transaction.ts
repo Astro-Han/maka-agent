@@ -18,10 +18,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { withOperatorRetirementCancellation } from './runtime-host-operator-retirement.js';
 import { isDeepStrictEqual } from 'node:util';
 import {
   resolveExistingStorageRoot,
+  inspectStorageRootFormat,
   tryAcquireStateRootOwner,
   type StateRootOwner,
 } from '@maka/storage/root-authority';
@@ -41,6 +44,9 @@ import {
   readRuntimeHostManagedDeploymentAuthorityRecord,
   resolveRuntimeHostManagedDeploymentAuthority,
   prepareRuntimeHostManagedRoot,
+  prepareRuntimeHostRoot,
+  readLegacyRuntimeHostManagedDeployment,
+  type RuntimeHostRootUpgradeOptions,
   resolveRuntimeHostNpmDeploymentLayout,
   runtimeHostManagedOperatorModulePath,
   rollbackRuntimeHostManagedDeploymentTransition,
@@ -119,6 +125,103 @@ export type RuntimeHostLifecycleReplacement =
 export type RuntimeHostRecoverableDeployment =
   | { readonly kind: 'active'; readonly config: RuntimeHostManagedDeploymentConfig }
   | { readonly kind: 'absent' };
+
+/** The installed source interprets its own format; no old capability escapes this boundary. */
+export async function resolveLegacyRuntimeHostPackage(rootId: string) {
+  const record = await readLegacyRuntimeHostManagedDeployment(rootId);
+  if (!record) return undefined;
+  const config = record.state === 'active' ? record : (record.from ?? record.to);
+  if (!config) throw new Error('Legacy deployment has no source package');
+  const layout = resolveRuntimeHostNpmDeploymentLayout(
+    config.deploymentRoot,
+    config.launch.package.integrity,
+  );
+  const authority = await import(
+    pathToFileURL(
+      join(layout.packageRoot, 'node_modules', '@maka', 'storage', 'dist', 'root-authority.js'),
+    ).href
+  );
+  if (authority.STORAGE_ROOT_MARKER_SCHEMA_VERSION === 1)
+    return { config, packageRoot: layout.packageRoot };
+  // A compatible package already selected by a previous installer resumes its
+  // interrupted format upgrade here. This never selects a new registry target.
+  await prepareRuntimeHostRoot(config.root.path);
+  return undefined;
+}
+
+export async function prepareRuntimeHostRootForDeployment(
+  path: string,
+  options: {
+    readonly prepareDeployment: NonNullable<RuntimeHostRootUpgradeOptions['prepareDeployment']>;
+    readonly resolveProvider: RuntimeHostLifecycleTransactionDeps['resolveProvider'];
+    readonly allowInterruptActiveTasks?: boolean;
+    readonly expectedOwner?: { readonly hostEpoch: string; readonly pid: number };
+    readonly validateRetiredState?: () => Promise<void>;
+  },
+) {
+  let restorePrevious: (() => Promise<void>) | undefined;
+  try {
+    return await prepareRuntimeHostRoot(path, {
+      prepareDeployment: options.prepareDeployment,
+      async retireDeployment(current) {
+        const layout = resolveRuntimeHostNpmDeploymentLayout(
+          current.deploymentRoot,
+          current.launch.package.integrity,
+        );
+        const source: typeof import('./runtime-host-lifecycle-transaction.js') = await import(
+          pathToFileURL(join(layout.packageRoot, 'dist', 'runtime-host-lifecycle-transaction.js'))
+            .href
+        );
+        const provider =
+          current.lifecycle.mode === 'supervised' ? options.resolveProvider(current) : undefined;
+        const retirement = await source.retireRuntimeHostLifecycleOwner({
+          rootPath: current.root.path,
+          rootId: current.root.id,
+          allowInterruptActiveTasks: options.allowInterruptActiveTasks ?? false,
+          ...(options.expectedOwner ? { expectedOwner: options.expectedOwner } : {}),
+          ...(provider ? { supervisor: provider.supervisor } : {}),
+        });
+        if (retirement.kind === 'active_tasks')
+          throw new RuntimeHostLifecycleTransactionError(
+            'active_tasks',
+            'Runtime Host upgrade is waiting for active work to finish',
+          );
+        if (provider) restorePrevious = () => provider.supervisor.activate();
+        await retirement.owner.close();
+        await options.validateRetiredState?.();
+      },
+    });
+  } catch (error) {
+    // Publication errors can arrive after the format fence became durable.
+    let format: Awaited<ReturnType<typeof inspectStorageRootFormat>>['format'];
+    try {
+      format = (await inspectStorageRootFormat(path)).format;
+    } catch (inspectionError) {
+      throw new RuntimeHostLifecycleTransactionError(
+        'recovery_failed',
+        'Keep the prepared package until root upgrade state can be read',
+        { cause: new AggregateError([error, inspectionError]) },
+      );
+    }
+    if (format !== 'legacy')
+      throw new RuntimeHostLifecycleTransactionError(
+        'recovery_failed',
+        'Root upgrade must resume with its prepared package',
+        { cause: error },
+      );
+    if (restorePrevious) {
+      try {
+        await restorePrevious();
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'Root upgrade failed and its source supervisor could not restart',
+        );
+      }
+    }
+    throw error;
+  }
+}
 
 /**
  * Applies a transition after retirement and restores availability only when the fenced authority
@@ -220,6 +323,13 @@ export async function resolveRecoverableRuntimeHostManagedDeployment(
     readonly ensureAvailable?: boolean;
   } = {},
 ): Promise<RuntimeHostRecoverableDeployment> {
+  const legacy = await resolveLegacyRuntimeHostPackage(rootId);
+  if (legacy) {
+    const source: typeof import('./runtime-host-lifecycle-transaction.js') = await import(
+      pathToFileURL(join(legacy.packageRoot, 'dist', 'runtime-host-lifecycle-transaction.js')).href
+    );
+    return source.resolveRecoverableRuntimeHostManagedDeployment(rootId, deps, options);
+  }
   await prepareRuntimeHostManagedRoot(rootId);
   const resolved = await resolveRuntimeHostManagedDeploymentAuthority(rootId);
   if (!resolved) return { kind: 'absent' };
@@ -563,6 +673,48 @@ export async function replaceRuntimeHostLifecycle(input: {
   const currentProvider = supervisedProvider(current ?? null, input.deps);
   if (desired.lifecycle.mode === 'supervised') {
     await input.deps.resolveProvider(desired).supervisor.preflight();
+  }
+  const legacy = await readLegacyRuntimeHostManagedDeployment(desired.root.id);
+  if (legacy) {
+    try {
+      await prepareRuntimeHostRootForDeployment(desired.root.path, {
+        async prepareDeployment(observed) {
+          if (!current || !isDeepStrictEqual(observed, current))
+            throw new RuntimeHostLifecycleTransactionError(
+              'owner_changed',
+              'Legacy deployment changed before format upgrade',
+            );
+          return desired;
+        },
+        resolveProvider: input.deps.resolveProvider,
+        ...(input.expectedOwner ? { expectedOwner: input.expectedOwner } : {}),
+        ...(input.allowInterruptActiveTasks === undefined
+          ? {}
+          : { allowInterruptActiveTasks: input.allowInterruptActiveTasks }),
+        ...(input.validateRetiredState ? { validateRetiredState: input.validateRetiredState } : {}),
+      });
+    } catch (error) {
+      if (error instanceof RuntimeHostLifecycleTransactionError && error.code === 'active_tasks')
+        return { kind: 'active_tasks' };
+      throw error;
+    }
+    try {
+      const recovered = await resolveRecoverableRuntimeHostManagedDeployment(
+        desired.root.id,
+        input.deps,
+      );
+      if (recovered.kind !== 'active' || !isDeepStrictEqual(recovered.config, desired))
+        throw new Error('Format upgrade did not recover the selected deployment');
+      // Data has crossed the format fence. Failure here retains the compatible target.
+      if (input.activateDesired) await input.activateDesired();
+      return { kind: 'replaced', config: recovered.config };
+    } catch (error) {
+      throw new RuntimeHostLifecycleTransactionError(
+        'recovery_failed',
+        'The compatible deployment remains selected for upgrade recovery',
+        { cause: error },
+      );
+    }
   }
   const retirement = await retireRuntimeHostLifecycleOwner({
     rootPath: desired.root.path,

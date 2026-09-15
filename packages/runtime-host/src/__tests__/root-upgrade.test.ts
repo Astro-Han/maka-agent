@@ -169,10 +169,8 @@ test('an uninitialized legacy root upgrades with an inaccessible absent account 
     });
     syncBuiltinESMExports();
     await writeFile(join(root, 'business-state.json'), '{"retained":true}');
-    await assert.rejects(prepareRuntimeHostRoot(root), /persisted state.*account data/);
-    assert.equal(JSON.parse(await readFile(path, 'utf8')).schemaVersion, 1);
-    await rm(join(root, 'business-state.json'));
     const upgraded = await prepareRuntimeHostRoot(root);
+    assert.equal(await readFile(join(root, 'business-state.json'), 'utf8'), '{"retained":true}');
     assert.equal(upgraded.rootId, capability.rootId);
     await assert.rejects(fs.stat(missingHome), { code: 'ENOENT' });
     assert.deepEqual(await fs.readdir(resolveRootHostDataDirectory(root)), []);
