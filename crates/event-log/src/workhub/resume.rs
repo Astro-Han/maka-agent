@@ -87,7 +87,7 @@ pub(super) async fn validate(
         return Ok(());
     }
     let origin = validate_record(event)?;
-    actions::require_coordinator(tx, &origin.coordinator).await?;
+    actions::require_coordinator(tx, &origin.coordinator, None).await?;
     let stopped: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM workhub_stops WHERE action_id = ?1
          OR (delegation_action_id = ?2 AND (resolution_json IS NULL

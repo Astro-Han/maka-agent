@@ -43,7 +43,7 @@ impl EventLog {
                    ON terminal.invocation_id = opening.invocation_id AND terminal.kind = 'invocation_ended'
                  WHERE opening.kind = 'invocation_opened'
                    AND json_extract(opening.event_json, '$.invocation.session_id') = ?
-                   AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
+                   AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
                    AND json_extract(terminal.event_json, '$.fact.outcome.kind') IN ('failed', 'cancelled')
                  ORDER BY opening.sequence DESC LIMIT 1"
             ).bind(session).fetch_optional(connection).await?)

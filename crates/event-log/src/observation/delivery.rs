@@ -30,6 +30,7 @@ pub struct StoreStreamEvent {
     pub sequence: u64,
     pub id: String,
     pub invocation: Invocation,
+    pub root_run_id: String,
     pub recorded_at: std::time::SystemTime,
     pub fact: StreamFact,
 }
@@ -221,6 +222,7 @@ impl EventLog {
 // CASE evaluates only the selected arm: accepted model output, tool input/output,
 // and provider options are never included in the selected delivery value.
 const STREAM_EVENTS: &str = "
+WITH events AS MATERIALIZED (
 SELECT json_object(
     'sequence', sequence, 'id', event_id,
     'recorded_at', json_extract(event_json, '$.recorded_at'),
@@ -256,7 +258,7 @@ SELECT json_object(
         ELSE json_object('kind', 'part_finished',
                 'step_id', json_extract(event_json, '$.fact.step_id'),
                 'part_id', json_extract(event_json, '$.fact.event.data.id'))
-    END))
+    END)) AS projected, invocation_id AS owner, sequence
 FROM runtime_events
 WHERE sequence > ?2 AND sequence <= ?3
 AND json_extract(event_json, '$.invocation.session_id') = ?1
@@ -271,11 +273,23 @@ AND (kind NOT IN ('model_observed', 'model_completed', 'model_interrupted') OR
              AND opening.kind = 'invocation_opened'
              WHERE request.kind = 'model_requested' AND request.invocation_id = runtime_events.invocation_id
              AND request.operation_id = json_extract(runtime_events.event_json, '$.fact.step_id')
-             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
+             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'))
 AND (kind IN ('invocation_opened', 'message_steered', 'invocation_ended', 'model_completed', 'model_interrupted',
              'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated')
      OR (kind = 'model_observed'
          AND json_extract(event_json, '$.fact.event.kind') IN
              ('part_started', 'part_delta', 'part_finished')))
-ORDER BY sequence LIMIT ?4";
+ORDER BY sequence LIMIT ?4
+), roots AS MATERIALIZED (
+ SELECT opening.invocation_id,
+   CASE WHEN json_extract(opening.event_json,'$.fact.input.kind')='handoff'
+     THEN json_extract(opening.event_json,'$.fact.input.pause.intent.root_run_id')
+     ELSE json_extract(opening.event_json,'$.invocation.run_id') END AS run_id
+ FROM runtime_events opening
+ JOIN (SELECT DISTINCT owner FROM events) owners ON owners.owner=opening.invocation_id
+ WHERE opening.kind='invocation_opened'
+)
+SELECT json_set(events.projected, '$.root_run_id', roots.run_id)
+FROM events LEFT JOIN roots ON roots.invocation_id=events.owner
+ORDER BY events.sequence";

@@ -147,7 +147,7 @@ pub(super) async fn pending_step(
          WHERE invocation_id = ?1 AND sequence <= ?2 AND kind = 'model_requested'
            AND EXISTS(SELECT 1 FROM runtime_events opening
                WHERE opening.invocation_id = request.invocation_id AND opening.kind = 'invocation_opened'
-               AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation'))
+               AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff'))
            AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'
            AND NOT EXISTS(SELECT 1 FROM runtime_events AS boundary
                WHERE boundary.invocation_id = request.invocation_id

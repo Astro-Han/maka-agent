@@ -19,10 +19,7 @@
 
 use super::{CorrectionIntent, CorrectionRequest, StoreError, assignment, invalid};
 use crate::message_resolution::{MessageExecution, owner};
-use maka_runtime::{
-    event::{Fact, Invocation, RuntimeEvent},
-    input::InvocationInput,
-};
+use maka_runtime::event::Invocation;
 use sqlx::SqliteConnection;
 
 pub(super) async fn apply(
@@ -42,31 +39,12 @@ pub(super) async fn apply(
             "WorkHub action already belongs to another operation",
         ));
     }
-    super::super::actions::require_coordinator(tx, &request.source).await?;
-    let source: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-         FROM runtime_events WHERE event_id = ? AND kind = 'invocation_opened'",
+    let content = super::super::actions::require_coordinator(
+        tx,
+        &request.source,
+        Some(&request.source_message_event_id),
     )
-    .bind(&request.source_message_event_id)
-    .fetch_optional(&mut *tx)
     .await?;
-    let source: RuntimeEvent = serde_json::from_str(
-        &source
-            .ok_or_else(|| invalid("WorkHub correction source is missing"))?
-            .ok_or(StoreError::PrefixTooLarge)?,
-    )?;
-    if source.invocation != request.source {
-        return Err(invalid(
-            "WorkHub correction cannot borrow another user decision",
-        ));
-    }
-    let Fact::InvocationOpened {
-        input: InvocationInput::Message { content, .. },
-        ..
-    } = source.fact
-    else {
-        return Err(invalid("WorkHub correction requires a user message"));
-    };
     // The target Message envelope has the same fixed labels as Delegation::message.
     if content.text_bytes()
         + request.delegation_text.len()

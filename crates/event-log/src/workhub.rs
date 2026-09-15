@@ -64,29 +64,8 @@ async fn deliver(
     if control {
         return Err(invalid("WorkHub action already belongs to a stop"));
     }
-    let json: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-         FROM runtime_events WHERE event_id = ? AND kind = 'invocation_opened'",
-    )
-    .bind(&delegation.source_message_event_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let source: RuntimeEvent = serde_json::from_str(
-        &json
-            .ok_or_else(|| invalid("WorkHub source message is missing"))?
-            .ok_or(StoreError::PrefixTooLarge)?,
-    )?;
-    if source.invocation != *coordinator {
-        return Err(invalid(
-            "WorkHub action cannot borrow another Turn's user authority",
-        ));
-    }
-    let InvocationInput::Message { content, .. } = (match source.fact {
-        Fact::InvocationOpened { input, .. } => input,
-        _ => return Err(invalid("invalid WorkHub source opening")),
-    }) else {
-        return Err(invalid("WorkHub action requires a user message"));
-    };
+    let content =
+        source_message(tx, coordinator, Some(&delegation.source_message_event_id)).await?;
     let occupied: bool = sqlx::query_scalar(
         "SELECT EXISTS(
          SELECT 1 FROM runtime_events WHERE invocation_id = ?1
@@ -227,6 +206,57 @@ async fn deliver(
     )
     .await?;
     Ok(())
+}
+
+/// User authority follows the authenticated logical root, while action effects
+/// belong to the physical coordinator. Durable correction delivery may outlive it.
+pub(crate) async fn source_message(
+    tx: &mut SqliteConnection,
+    coordinator: &Invocation,
+    expected_event_id: Option<&str>,
+) -> Result<maka_runtime::input::MessageInput, StoreError> {
+    if coordinator.session_id != maka_runtime::workhub::COORDINATION_SESSION_ID {
+        return Err(invalid("WorkHub source is not its coordinator"));
+    }
+    let rows: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT CASE WHEN length(CAST(root.event_json AS BLOB)) <= 1048576 THEN root.event_json END
+         FROM runtime_events current JOIN runtime_events root
+           ON root.kind = 'invocation_opened'
+           AND json_extract(root.event_json, '$.invocation.session_id') = ?2
+           AND json_extract(root.event_json, '$.invocation.turn_id') = ?3
+           AND json_extract(root.event_json, '$.invocation.run_id') = CASE
+             WHEN json_extract(current.event_json, '$.fact.input.kind') = 'handoff'
+             THEN json_extract(current.event_json, '$.fact.input.pause.intent.root_run_id')
+             ELSE ?4 END
+         WHERE current.kind = 'invocation_opened' AND current.invocation_id = ?1
+           AND json_extract(current.event_json, '$.invocation.session_id') = ?2
+           AND json_extract(current.event_json, '$.invocation.turn_id') = ?3
+           AND json_extract(current.event_json, '$.invocation.run_id') = ?4 LIMIT 2",
+    )
+    .bind(&coordinator.invocation_id)
+    .bind(&coordinator.session_id)
+    .bind(&coordinator.turn_id)
+    .bind(&coordinator.run_id)
+    .fetch_all(tx)
+    .await?;
+    let [json] = rows.as_slice() else {
+        return Err(invalid("WorkHub source has no unique logical root"));
+    };
+    let source: RuntimeEvent =
+        serde_json::from_str(json.as_deref().ok_or(StoreError::PrefixTooLarge)?)?;
+    if expected_event_id.is_some_and(|expected| expected != source.id) {
+        return Err(invalid(
+            "WorkHub action cannot borrow another user decision",
+        ));
+    }
+    let Fact::InvocationOpened {
+        input: InvocationInput::Message { content, .. },
+        ..
+    } = source.fact
+    else {
+        return Err(invalid("WorkHub action requires a user message"));
+    };
+    Ok(content)
 }
 
 fn invalid(reason: &str) -> StoreError {

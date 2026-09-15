@@ -153,7 +153,7 @@ async fn admit(
             "The selecting Run is no longer active",
         ));
     }
-    let InvocationInput::Message { content, .. } = &source.input else {
+    let InvocationInput::Message { content, .. } = source.root_input() else {
         return Err(failure(
             Code::OperationConflict,
             "WorkHub action requires a user message",
@@ -185,7 +185,7 @@ async fn admit(
         delivery,
         action_id: input.action_id,
         request_fingerprint: fingerprint,
-        source_message_event_id: source.opening_event_id,
+        source_message_event_id: source.root_opening_event_id().to_owned(),
         target: owner.unwrap_or_else(|| Invocation {
             session_id: target.id().to_owned(),
             turn_id: Uuid::new_v4().to_string(),

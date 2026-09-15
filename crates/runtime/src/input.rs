@@ -53,6 +53,23 @@ pub enum InvocationInput {
 }
 
 impl InvocationInput {
+    pub fn request_fingerprint(&self) -> Option<&str> {
+        match self {
+            Self::Message {
+                request_fingerprint,
+                ..
+            } => request_fingerprint.as_deref(),
+            Self::Continuation {
+                request_fingerprint,
+                ..
+            }
+            | Self::ContextCompact {
+                request_fingerprint,
+            } => Some(request_fingerprint),
+            Self::Handoff { .. } | Self::Code { .. } => None,
+        }
+    }
+
     pub fn inherited_claim(&self) -> Option<&crate::continuation::ContinuationClaim> {
         match self {
             Self::Continuation { claim, .. } | Self::Handoff { claim, .. } => Some(claim),

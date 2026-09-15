@@ -80,6 +80,19 @@ enum Disposition {
     CreateNew,
 }
 
+/// Project one assignment using its caller-authenticated original user message.
+/// A physical handoff opening does not itself contain that message.
+pub fn delegated(
+    stored: &maka_runtime::event::StoredEvent,
+    source: &maka_runtime::input::MessageInput,
+) -> Result<Option<Row>, ProjectionError> {
+    let maka_runtime::event::Fact::WorkhubDelegated { delegation } = &stored.event.fact else {
+        return Err(ProjectionError::Invalid("not a WorkHub delegation"));
+    };
+    let sequence = watermark(stored.sequence)? - 255;
+    Ok(assigned(&stored.event, delegation, source)?.map(|message| Row { sequence, message }))
+}
+
 pub(crate) fn assigned(
     event: &maka_runtime::event::RuntimeEvent,
     delegation: &maka_runtime::workhub::Delegation,

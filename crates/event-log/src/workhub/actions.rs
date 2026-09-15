@@ -87,30 +87,15 @@ pub(crate) async fn read(
 pub(super) async fn require_coordinator(
     tx: &mut SqliteConnection,
     coordinator: &Invocation,
-) -> Result<(), StoreError> {
-    let source: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-         FROM runtime_events o WHERE o.kind = 'invocation_opened' AND o.invocation_id = ?
-         AND NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id = o.invocation_id AND t.kind = 'invocation_ended')"
-    ).bind(&coordinator.invocation_id).fetch_optional(tx).await?;
-    let source: RuntimeEvent = serde_json::from_str(
-        &source
-            .ok_or_else(|| super::invalid("WorkHub source is no longer active"))?
-            .ok_or(StoreError::PrefixTooLarge)?,
-    )?;
-    if source.invocation != *coordinator
-        || coordinator.session_id != maka_runtime::workhub::COORDINATION_SESSION_ID
-        || !matches!(
-            source.fact,
-            Fact::InvocationOpened {
-                input: maka_runtime::input::InvocationInput::Message { .. },
-                ..
-            }
-        )
-    {
-        return Err(super::invalid(
-            "WorkHub source is not its authorized message",
-        ));
+    source_event_id: Option<&str>,
+) -> Result<maka_runtime::input::MessageInput, StoreError> {
+    let live: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM runtime_events o
+         WHERE o.kind = 'invocation_opened' AND o.invocation_id = ?
+         AND NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id = o.invocation_id AND t.kind = 'invocation_ended'))"
+    ).bind(&coordinator.invocation_id).fetch_one(&mut *tx).await?;
+    if !live {
+        return Err(super::invalid("WorkHub source is no longer active"));
     }
-    Ok(())
+    super::source_message(tx, coordinator, source_event_id).await
 }

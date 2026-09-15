@@ -161,6 +161,34 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
             target.id
         );
         assert_eq!(target.invocation.turn_id, root.invocation.turn_id);
+        let logical = log
+            .turn_boundary("session", &root.invocation.turn_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            logical.invocation, target.invocation,
+            "control owns the physical tip"
+        );
+        assert_eq!(
+            logical.root_invocation(),
+            &root.invocation,
+            "client identity is stable across handoffs"
+        );
+        assert_eq!(logical.root_opening_event_id(), root.id);
+        assert!(matches!(
+            logical.root_input(),
+            InvocationInput::Message { .. }
+        ));
+        let physical = log
+            .run_boundary("session", &source.invocation.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            physical.invocation, source.invocation,
+            "exact Run reads never jump to a successor"
+        );
         let mut view = InvocationView::new(1024).unwrap();
         assert!(
             view.push(&StoredEvent {
@@ -177,6 +205,16 @@ async fn handoff_claim_preserves_turn_and_frozen_ancestry_without_releasing_rese
     let last = claim(&log, "manual", &source, base).await;
     let manual = opening("manual-turn", Some(last));
     append(&log, &manual).await;
+    let fresh = log
+        .turn_boundary("session", &manual.invocation.turn_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        fresh.root_invocation(),
+        &manual.invocation,
+        "manual resume starts a fresh logical Turn"
+    );
     let Fact::InvocationOpened {
         input: InvocationInput::Continuation { claim, .. },
         ..

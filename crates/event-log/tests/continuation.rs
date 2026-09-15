@@ -37,6 +37,8 @@ mod handoff;
 mod handoff_budget;
 #[path = "continuation/handoff_claim.rs"]
 mod handoff_claim;
+#[path = "continuation/handoff_consumers.rs"]
+mod handoff_consumers;
 use fixtures::*;
 
 #[tokio::test]

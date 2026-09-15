@@ -29,12 +29,25 @@ pub(crate) struct RecordedTurn {
 }
 
 pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
-    let invocation = boundary.invocation;
+    let invocation = boundary.root_invocation().clone();
     let live = LiveTurn {
-        root_execution_kind: matches!(boundary.input, InvocationInput::ContextCompact { .. })
-            .then_some(RootExecutionKind::ContextCompact),
+        root_execution_kind: matches!(
+            boundary.root_input(),
+            InvocationInput::ContextCompact { .. }
+        )
+        .then_some(RootExecutionKind::ContextCompact),
         ..LiveTurn::default()
     };
+    let skill_invocation = match boundary.root_input() {
+        InvocationInput::Message {
+            skill_invocation, ..
+        } => skill_invocation.as_deref().cloned().unwrap_or_default(),
+        _ => Default::default(),
+    };
+    let fingerprint = boundary
+        .root_input()
+        .request_fingerprint()
+        .map(str::to_owned);
     let state = match boundary.state {
         InvocationState::Admitted => TurnState::Admitted(live),
         InvocationState::Running => TurnState::Running(live),
@@ -63,12 +76,6 @@ pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
             },
         },
     };
-    let skill_invocation = match &boundary.input {
-        InvocationInput::Message {
-            skill_invocation, ..
-        } => skill_invocation.as_deref().cloned().unwrap_or_default(),
-        _ => Default::default(),
-    };
     RecordedTurn {
         skill_invocation,
         snapshot: TurnSnapshot {
@@ -77,20 +84,7 @@ pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
             run_id: invocation.run_id,
             state,
         },
-        fingerprint: match boundary.input {
-            InvocationInput::Message {
-                request_fingerprint,
-                ..
-            } => request_fingerprint,
-            InvocationInput::ContextCompact {
-                request_fingerprint,
-            }
-            | InvocationInput::Continuation {
-                request_fingerprint,
-                ..
-            } => Some(request_fingerprint),
-            InvocationInput::Code { .. } | InvocationInput::Handoff { .. } => None,
-        },
+        fingerprint,
     }
 }
 

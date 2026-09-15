@@ -81,7 +81,7 @@ impl Executions {
         match self.engine.check_continuation(&run, &self.shutdown).await {
             Ok(()) => Ok(TurnResumePlan::Ready {
                 session_id: input.session_id,
-                source_run_id: source.invocation.run_id,
+                source_run_id: input.source_run_id.unwrap_or(source.invocation.run_id),
                 source_turn_id: source.invocation.turn_id,
                 source_runtime_event_high_water: source.high_water,
             }),
@@ -112,10 +112,27 @@ impl Executions {
                 .await
                 .map_err(internal)?
             {
-                if !matches!(&boundary.input, InvocationInput::Continuation { claim, .. }
-                if claim.source.invocation.run_id == input.source_run_id
-                    && claim.source.high_water == input.source_runtime_event_high_water)
-                {
+                let same_request = match boundary.root_input() {
+                    InvocationInput::Continuation { claim, .. }
+                        if claim.source.high_water == input.source_runtime_event_high_water =>
+                    {
+                        if claim.source.invocation.run_id == input.source_run_id {
+                            true
+                        } else {
+                            // Resolve the recorded source, never today's Session tip.
+                            self.log
+                                .run_boundary(&input.session_id, &claim.source.invocation.run_id)
+                                .await
+                                .map_err(internal)?
+                                .is_some_and(|source| {
+                                    source.invocation == claim.source.invocation
+                                        && source.root_invocation().run_id == input.source_run_id
+                                })
+                        }
+                    }
+                    _ => false,
+                };
+                if !same_request {
                     return Err(failure(
                         Code::OperationConflict,
                         "Turn identity belongs to another request",
@@ -263,7 +280,32 @@ impl Executions {
     async fn resume_source(&self, input: &TurnResumeQueryInput) -> Result<Selection> {
         use TurnResumeParkReason as Reason;
         let run_id = match &input.source_run_id {
-            Some(id) => id.clone(),
+            Some(id) => {
+                let Some(source) = self
+                    .log
+                    .run_boundary(&input.session_id, id)
+                    .await
+                    .map_err(internal)?
+                else {
+                    return Ok(Selection::Parked(Reason::ResumeCandidateMissing));
+                };
+                if source.root_invocation() == &source.invocation {
+                    // The public root denotes the whole logical Turn. Claims still
+                    // bind the exact physical terminal, including its high-water.
+                    let tip = self
+                        .log
+                        .turn_boundary(&input.session_id, &source.invocation.turn_id)
+                        .await
+                        .map_err(internal)?
+                        .ok_or_else(|| failure(Code::InternalFailure, "Resume Turn disappeared"))?;
+                    if tip.root_invocation() != &source.invocation {
+                        return Ok(Selection::Parked(Reason::SafetyCheckFailed));
+                    }
+                    tip.invocation.run_id
+                } else {
+                    id.clone()
+                }
+            }
             None => match self
                 .log
                 .latest_continuation_candidate(&input.session_id)
@@ -316,7 +358,9 @@ impl Executions {
         if !matches!(
             prefix.events.first().map(|e| &e.event.fact),
             Some(Fact::InvocationOpened {
-                input: InvocationInput::Message { .. } | InvocationInput::Continuation { .. },
+                input: InvocationInput::Message { .. }
+                    | InvocationInput::Continuation { .. }
+                    | InvocationInput::Handoff { .. },
                 ..
             })
         ) {

@@ -89,7 +89,13 @@ pub(super) async fn claim(
     base: SessionBase,
 ) -> ContinuationClaim {
     let prefix = log
-        .run_prefix("session", &source.invocation.run_id, None, 100, 65536)
+        .run_prefix(
+            &source.invocation.session_id,
+            &source.invocation.run_id,
+            None,
+            100,
+            65536,
+        )
         .await
         .unwrap()
         .unwrap();

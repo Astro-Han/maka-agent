@@ -74,7 +74,7 @@ impl EventLog {
                     }
                     let latest = crate::turns::read(&mut tx, &session, Some(&owner.turn_id)).await?
                         .ok_or_else(|| StoreError::InvalidTransition("message owner has no Turn".into()))?;
-                    MessageResolution::Owned { message_id, invocation: latest.invocation }
+                    MessageResolution::Owned { message_id, invocation: latest.root_invocation().clone() }
                 } else if crate::message_queue::cancelled(&mut tx, &session, &message_id).await? {
                     MessageResolution::Cancelled { message_id }
                 } else {

@@ -189,12 +189,11 @@ pub(super) async fn require_available(
         let live: Option<bool> = sqlx::query_scalar(
             "SELECT NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id = o.invocation_id
                 AND t.kind = 'invocation_ended') FROM runtime_events o WHERE o.invocation_id = ?
-             AND o.kind = 'invocation_opened' AND json_extract(o.event_json, '$.fact.input.kind') IN ('message', 'continuation')
+             AND o.kind = 'invocation_opened' AND json_extract(o.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND json_extract(o.event_json, '$.invocation.session_id') = ?"
         ).bind(&owner.invocation_id).bind(session).fetch_optional(&mut *tx).await?;
-        let live = live.ok_or_else(|| {
-            super::invalid("WorkHub steering requires a message or continuation owner")
-        })?;
+        let live =
+            live.ok_or_else(|| super::invalid("WorkHub steering requires an inline model owner"))?;
         live.then_some(owner)
     } else {
         None

@@ -22,7 +22,7 @@ SELECT MAX(ending.sequence) FROM runtime_events ending
 JOIN runtime_events opening ON opening.invocation_id = ending.invocation_id AND opening.kind = 'invocation_opened'
 WHERE json_extract(ending.event_json, '$.invocation.session_id') = ?1
 AND ending.kind = 'invocation_ended'
-AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')";
+AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')";
 
 pub(super) const ROWS: &str = "
 SELECT row.sequence, row.turn_id,

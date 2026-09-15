@@ -127,7 +127,7 @@ impl EventLog {
              AND opening.kind = 'invocation_opened'
              WHERE request.kind = 'model_requested' AND request.invocation_id = runtime_events.invocation_id
              AND request.operation_id = runtime_events.operation_id
-             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
+             AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'))
                    AND kind IN ('invocation_opened', 'message_steered', 'model_completed',
                                 'model_interrupted', 'invocation_ended',
@@ -174,6 +174,17 @@ impl EventLog {
                         .await?;
                         let mut view = InvocationView::new(MAX_TEXT_BYTES)?;
                         for fact in facts {
+                            if let Fact::WorkhubDelegated { delegation } = &fact.event.fact {
+                                let source = crate::workhub::source_message(
+                                    &mut tx,
+                                    &fact.event.invocation,
+                                    Some(&delegation.source_message_event_id),
+                                ).await?;
+                                if let Some(row) = maka_presentation::workhub::delegated(&fact, &source)? {
+                                    persist(&mut tx, &session, row).await?;
+                                }
+                                continue;
+                            }
                             let resolved = if let Fact::ToolSettled {
                                 outcome: ToolOutcome::Succeeded { raw, .. },
                                 ..

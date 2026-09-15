@@ -87,7 +87,7 @@ impl Delivery {
             }
             let pending = &self.pending.as_ref().expect("pending fence").snapshot;
             if pending.root_turn.as_ref().is_some_and(|root| {
-                root.run_id == stored.invocation.run_id
+                root.run_id == stored.root_run_id
                     && self
                         .snapshot
                         .root_turn
@@ -125,7 +125,7 @@ impl Delivery {
                     subscription_id: self.id.clone(),
                     sequence: self.sequence,
                     session_id: self.session_id.clone(),
-                    run_id: stored.invocation.run_id.clone(),
+                    run_id: stored.root_run_id.clone(),
                     event,
                 };
                 let value = serde_json::to_value(frame)?;
@@ -213,6 +213,7 @@ mod tests {
 
     fn event(run: &str, sequence: u64, fact: StreamFact) -> StoreStreamEvent {
         StoreStreamEvent {
+            root_run_id: run.into(),
             sequence,
             id: format!("event-{sequence}"),
             invocation: Invocation {

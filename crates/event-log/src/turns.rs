@@ -22,12 +22,34 @@ use maka_runtime::event::{Fact, Invocation, InvocationOutcome, RuntimeEvent};
 use maka_runtime::input::InvocationInput;
 use sqlx::Connection;
 
+mod root;
+
 /// A bounded projection of canonical boundaries, never a model-history prefix.
 pub struct TurnBoundary {
     pub opening_event_id: String,
     pub invocation: Invocation,
     pub input: InvocationInput,
     pub state: InvocationState,
+    root: Option<root::Origin>,
+}
+
+impl TurnBoundary {
+    /// Stable client identity. Execution and cleanup still use `invocation`.
+    pub fn root_invocation(&self) -> &Invocation {
+        self.root
+            .as_ref()
+            .map_or(&self.invocation, |root| &root.invocation)
+    }
+
+    pub fn root_input(&self) -> &InvocationInput {
+        self.root.as_ref().map_or(&self.input, |root| &root.input)
+    }
+
+    pub fn root_opening_event_id(&self) -> &str {
+        self.root
+            .as_ref()
+            .map_or(&self.opening_event_id, |root| &root.event_id)
+    }
 }
 pub enum InvocationState {
     Admitted,
@@ -68,7 +90,7 @@ impl EventLog {
             .await
     }
 
-    /// At most two event bodies are decoded, irrespective of streamed history.
+    /// Only opening, logical root and terminal bodies are decoded, irrespective of streamed history.
     /// Reading control/status must remain possible after context budgets fill.
     pub async fn turn_boundary(
         &self,
@@ -150,6 +172,7 @@ pub(crate) async fn project(
             "invalid stored invocation opening".into(),
         ));
     };
+    let root = root::read(connection, &opening.invocation, &input).await?;
     let terminal: Option<String> = sqlx::query_scalar(
             "SELECT event_json FROM runtime_events WHERE invocation_id = ? AND kind = 'invocation_ended'",
         ).bind(&opening.invocation.invocation_id).fetch_optional(&mut *connection).await?;
@@ -189,6 +212,7 @@ pub(crate) async fn project(
         }
     };
     Ok(TurnBoundary {
+        root,
         opening_event_id: opening.id,
         invocation: opening.invocation,
         input,

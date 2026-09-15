@@ -195,7 +195,7 @@ impl Executions {
             .active
             .lock()
             .unwrap()
-            .get(&input.run_id)
+            .get(&invocation.run_id)
             .map(|run| run.cancellation.clone());
         if let Some(cancellation) = cancellation {
             self.interactions.stop_run(&invocation).await?;

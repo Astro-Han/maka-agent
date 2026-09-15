@@ -93,34 +93,12 @@ async fn correction(
         .ok_or_else(|| {
             StoreError::InvalidTransition("WorkHub replaced delegation is missing".into())
         })?;
-    let json: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
-         FROM runtime_events WHERE event_id = ? AND kind = 'invocation_opened'",
+    let content = crate::workhub::source_message(
+        tx,
+        &intent.request.source,
+        Some(&intent.request.source_message_event_id),
     )
-    .bind(&intent.request.source_message_event_id)
-    .fetch_optional(tx)
     .await?;
-    let source: maka_runtime::event::RuntimeEvent = serde_json::from_str(
-        &json
-            .ok_or_else(|| {
-                StoreError::InvalidTransition("WorkHub correction source is missing".into())
-            })?
-            .ok_or(StoreError::PrefixTooLarge)?,
-    )?;
-    if source.invocation != intent.request.source {
-        return Err(StoreError::InvalidTransition(
-            "WorkHub correction source changed".into(),
-        ));
-    }
-    let maka_runtime::event::Fact::InvocationOpened {
-        input: maka_runtime::input::InvocationInput::Message { content, .. },
-        ..
-    } = source.fact
-    else {
-        return Err(StoreError::InvalidTransition(
-            "WorkHub correction requires a user message".into(),
-        ));
-    };
     Ok(maka_presentation::workhub::correction(
         sequence_number(sequence)?,
         event,

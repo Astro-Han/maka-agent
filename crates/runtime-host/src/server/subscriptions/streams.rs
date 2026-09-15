@@ -29,7 +29,8 @@ use std::collections::BTreeMap;
 pub(super) const MAX_DELTA_BYTES: usize = 8 * 1024;
 
 struct ActiveStream {
-    invocation: Invocation,
+    turn_id: String,
+    run_id: String,
     message_id: String,
     kind: AssistantStreamKind,
     offset: u64,
@@ -47,7 +48,8 @@ impl Streams {
                 streams.0.insert(
                     (seed.step_id, seed.part_id),
                     ActiveStream {
-                        invocation: invocation.clone(),
+                        turn_id: invocation.turn_id.clone(),
+                        run_id: invocation.run_id.clone(),
                         message_id: seed.message_id,
                         kind: kind(seed.text_kind),
                         offset: seed.offset,
@@ -63,7 +65,7 @@ impl Streams {
             .values()
             .map(|stream| SessionAssistantStreamIdentity {
                 kind: stream.kind,
-                turn_id: stream.invocation.turn_id.clone(),
+                turn_id: stream.turn_id.clone(),
                 message_id: stream.message_id.clone(),
             })
             .collect()
@@ -86,7 +88,8 @@ impl Streams {
                 let previous = self.0.insert(
                     (step_id.clone(), id.clone()),
                     ActiveStream {
-                        invocation: event.invocation.clone(),
+                        turn_id: event.invocation.turn_id.clone(),
+                        run_id: event.root_run_id.clone(),
                         message_id: event.id.clone(),
                         kind: kind(*text_kind),
                         offset: 0,
@@ -178,8 +181,8 @@ impl ActiveStream {
         self.offset += text.encode_utf16().count() as u64;
         SessionAssistantDelta {
             kind: self.kind,
-            turn_id: self.invocation.turn_id.clone(),
-            run_id: self.invocation.run_id.clone(),
+            turn_id: self.turn_id.clone(),
+            run_id: self.run_id.clone(),
             message_id: self.message_id.clone(),
             start_offset,
             text,
@@ -209,6 +212,11 @@ mod tests {
             run_id: "run".into(),
             invocation_id: "invocation".into(),
         };
+        let root = Invocation {
+            run_id: "root".into(),
+            invocation_id: "original-invocation".into(),
+            ..invocation.clone()
+        };
         for failed in [false, true] {
             let seeds = [
                 ("text", TextKind::Text),
@@ -224,13 +232,36 @@ mod tests {
                 offset: 5,
             })
             .collect();
-            let mut streams = Streams::bootstrap(Some(&invocation), seeds);
             let event = |fact| StoreStreamEvent {
+                root_run_id: root.run_id.clone(),
                 sequence: 10,
                 id: "boundary".into(),
                 invocation: invocation.clone(),
                 recorded_at: std::time::SystemTime::UNIX_EPOCH,
                 fact,
+            };
+            let mut streams = if failed {
+                Streams::bootstrap(Some(&root), seeds)
+            } else {
+                let mut streams = Streams::default();
+                for seed in seeds {
+                    let mut start = event(StreamFact::PartStarted {
+                        step_id: seed.step_id.clone(),
+                        part_id: seed.part_id.clone(),
+                        text_kind: seed.text_kind,
+                    });
+                    start.id = seed.message_id;
+                    streams.observe(&start).unwrap();
+                    let deltas = streams
+                        .observe(&event(StreamFact::PartDelta {
+                            step_id: seed.step_id,
+                            part_id: seed.part_id,
+                            text: "12345".into(),
+                        }))
+                        .unwrap();
+                    assert_eq!(deltas[0].run_id, root.run_id);
+                }
+                streams
             };
             assert!(
                 streams
@@ -255,6 +286,10 @@ mod tests {
                 .unwrap();
             assert_eq!(deltas.len(), if failed { 4 } else { 3 });
             for delta in &deltas {
+                assert_eq!(
+                    delta.run_id, root.run_id,
+                    "fresh and reconnected streams keep the logical identity"
+                );
                 assert!(delta.complete.is_some());
                 assert!(delta.text.is_empty());
                 assert_eq!(

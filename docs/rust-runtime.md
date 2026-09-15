@@ -68,7 +68,8 @@ Do not run untrusted code or point test instances at existing user data.
   Routing and discovery share typed provider contracts. Tool JSON, schemas and
   provider extensions remain open-ended.
 - A State Root has one writer and execution authority. Session, Turn, Run and
-  invocation identities remain distinct.
+  invocation identities remain distinct. Cooperative continuation preserves the
+  public Run identity; claims and cleanup still address exact physical Runs.
 - Host diagnostics and retirement share active-work accounting, including pending
   OAuth authorization. Retirement targets an exact Host epoch and retains authority
   through response flush and resource cleanup. Cooperative step handoff is not yet

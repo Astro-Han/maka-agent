@@ -176,7 +176,7 @@ async fn lineage(
         let successors: Vec<Option<String>> = sqlx::query_scalar(
             "SELECT CASE WHEN length(CAST(event_json AS BLOB)) <= 1048576 THEN event_json END
              FROM runtime_events WHERE kind = 'invocation_opened'
-             AND json_extract(event_json, '$.fact.input.kind') = 'continuation'
+             AND json_extract(event_json, '$.fact.input.kind') IN ('continuation', 'handoff')
              AND json_extract(event_json, '$.invocation.session_id') = ?
              AND json_extract(event_json, '$.fact.input.claim.source.invocation.run_id') = ?
              LIMIT 2",
@@ -193,14 +193,15 @@ async fn lineage(
         };
         let successor: RuntimeEvent =
             serde_json::from_str(&successor.ok_or(StoreError::PrefixTooLarge)?)?;
-        let Fact::InvocationOpened {
-            input: InvocationInput::Continuation { claim, .. },
-            ..
-        } = &successor.fact
-        else {
+        let Fact::InvocationOpened { input, .. } = &successor.fact else {
             return Err(invalid("Message owner continuation index changed"));
         };
-        claim.validate(&successor.invocation).map_err(invalid)?;
+        input
+            .validate_inheritance(&successor.invocation)
+            .map_err(invalid)?;
+        let claim = input
+            .inherited_claim()
+            .ok_or_else(|| invalid("Message successor has no inherited boundary"))?;
         if claim.source.invocation != current {
             return Err(invalid(
                 "Message owner continuation belongs to another source",

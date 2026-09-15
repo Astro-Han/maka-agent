@@ -19,10 +19,7 @@
 
 use super::{StopIntent, StopRecord, StopRequest, StopResolution, invalid, subject};
 use crate::{StoreError, message_resolution::MessageExecution, turns::InvocationState};
-use maka_runtime::{
-    event::{Fact, RuntimeEvent},
-    session_event::{SessionEvent, SessionFact},
-};
+use maka_runtime::session_event::{SessionEvent, SessionFact};
 use sqlx::SqliteConnection;
 
 pub(super) async fn apply(
@@ -37,28 +34,7 @@ pub(super) async fn apply(
             "WorkHub action already belongs to another operation",
         ));
     }
-    let source: Option<String> = sqlx::query_scalar(
-        "SELECT event_json FROM runtime_events o WHERE o.kind = 'invocation_opened'
-         AND o.invocation_id = ? AND NOT EXISTS(SELECT 1 FROM runtime_events t
-           WHERE t.invocation_id = o.invocation_id AND t.kind = 'invocation_ended')",
-    )
-    .bind(&request.source.invocation_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let source: RuntimeEvent = serde_json::from_str(
-        &source.ok_or_else(|| invalid("WorkHub source is no longer active"))?,
-    )?;
-    if source.invocation != request.source
-        || !matches!(
-            source.fact,
-            Fact::InvocationOpened {
-                input: maka_runtime::input::InvocationInput::Message { .. },
-                ..
-            }
-        )
-    {
-        return Err(invalid("WorkHub stop source is not its authorized message"));
-    }
+    let content = super::super::actions::require_coordinator(tx, &request.source, None).await?;
     let target: Option<(bool, Option<String>)> = sqlx::query_as(
         "SELECT archived, CASE
             WHEN json_type(configuration, '$.name') = 'text'
@@ -121,13 +97,6 @@ pub(super) async fn apply(
                 "WorkHub delegation has no recoverable Message owner",
             ));
         }
-    };
-    let Fact::InvocationOpened {
-        input: maka_runtime::input::InvocationInput::Message { content, .. },
-        ..
-    } = source.fact
-    else {
-        unreachable!()
     };
     let mut sequence = super::super::control::append(
         tx,

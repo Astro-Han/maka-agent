@@ -84,7 +84,10 @@ impl Delivery {
         prepared: Option<PreparedTranscript>,
     ) -> Result<(Self, SubscriptionOpenResult), HostError> {
         let streams = Streams::bootstrap(
-            observation.root_turn.as_ref().map(|turn| &turn.invocation),
+            observation
+                .root_turn
+                .as_ref()
+                .map(|turn| turn.root_invocation()),
             observation.active_streams,
         );
         let cursor = observation.through_sequence;

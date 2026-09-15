@@ -61,7 +61,7 @@ Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要�
 - 模型消息、内容块与工具结果在 provider 投影中保持类型化；路由与发现共享类型化契约。
   工具 JSON、schema 和厂商扩展保留开放结构。
 - 每个 State Root 只有一个写入与执行 authority；Session、Turn、Run、invocation
-  身份保持独立。
+  身份保持独立。协作续接保留对外 Run 身份；恢复凭证与清理仍绑定精确物理 Run。
 - Host 诊断与退出共用活动工作统计，包含等待授权的 OAuth 登录。退出绑定精确 Host epoch，
   回复发送与资源清理完成前不释放 authority。尚未公布协作步骤交接能力；旧协议字段
   `nodeVersion` 如实返回 `not applicable (Rust)`。

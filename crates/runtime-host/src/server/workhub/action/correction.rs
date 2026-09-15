@@ -75,7 +75,7 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
                 return Err(failure(Code::HostDraining, "Host is draining"));
             }
             let source = host.executions.workhub_source(&input.turn_id).await?;
-            let InvocationInput::Message { content, .. } = &source.input else {
+            let InvocationInput::Message { content, .. } = source.root_input() else {
                 return Err(failure(
                     Code::OperationConflict,
                     "WorkHub correction requires a user message",
@@ -112,8 +112,8 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
             let request = CorrectionRequest {
                 action_id: input.action_id.clone(),
                 request_fingerprint: fingerprint(&input, &target)?,
-                source: source.invocation,
-                source_message_event_id: source.opening_event_id,
+                source: source.invocation.clone(),
+                source_message_event_id: source.root_opening_event_id().to_owned(),
                 replaces_action_id: replaces_action_id.clone(),
                 target,
                 delegation_text: input

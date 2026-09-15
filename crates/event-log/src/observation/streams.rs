@@ -73,7 +73,7 @@ pub(super) async fn read(
              AND opening.kind = 'invocation_opened'
              WHERE request.kind = 'model_requested' AND request.invocation_id = s.invocation_id
              AND request.operation_id = json_extract(s.event_json, '$.fact.step_id')
-                     AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
+                     AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main')
          AND json_extract(s.event_json, '$.fact.event.kind') = 'part_started'
          AND NOT EXISTS (
