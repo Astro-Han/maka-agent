@@ -21,6 +21,7 @@
 
 #[path = "root_lock.rs"]
 mod lock;
+pub use lock::{FileLease, private_directory};
 
 #[cfg(windows)]
 pub mod windows;

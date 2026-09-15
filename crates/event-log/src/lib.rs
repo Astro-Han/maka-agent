@@ -53,7 +53,6 @@ pub mod transcript;
 pub mod turns;
 pub mod workhub;
 
-use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -189,17 +188,13 @@ impl EventLog {
         // byte-range locks on the database. Never unlink it while in use.
         let mut lock_path = path.as_os_str().to_os_string();
         lock_path.push(".writer.lock");
-        let lease = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(lock_path)?;
-        match lease.try_lock() {
-            Ok(()) => {}
-            Err(std::fs::TryLockError::WouldBlock) => return Err(StoreError::WriterBusy),
-            Err(std::fs::TryLockError::Error(error)) => return Err(StoreError::Io(error)),
-        }
+        let lease = match root::FileLease::acquire(Path::new(&lock_path)) {
+            Ok(lease) => Arc::new(lease),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Err(StoreError::WriterBusy);
+            }
+            Err(error) => return Err(StoreError::Io(error)),
+        };
         let connection = OwnedConnection::open(
             SqliteConnectOptions::new()
                 .filename(path)

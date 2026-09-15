@@ -27,6 +27,30 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// A stable, exclusively locked file. Never unlink it as part of cleanup.
+/// Uses native whole-file locks; State Root's TS-compatible leases are separate.
+pub struct FileLease {
+    file: File,
+    path: PathBuf,
+}
+
+impl FileLease {
+    pub fn acquire(path: &Path) -> io::Result<Self> {
+        let file = open_regular(path, true)?;
+        file.try_lock().map_err(io::Error::from)?;
+        let lease = Self {
+            file,
+            path: path.to_owned(),
+        };
+        lease.validate()?;
+        Ok(lease)
+    }
+
+    pub fn validate(&self) -> io::Result<()> {
+        stable(&self.file, &self.path)
+    }
+}
+
 #[cfg(unix)]
 pub(super) fn identity(metadata: &Metadata) -> io::Result<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
@@ -108,7 +132,7 @@ pub(super) fn acquire(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-pub(super) fn private_directory(path: &Path) -> io::Result<()> {
+pub fn private_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};

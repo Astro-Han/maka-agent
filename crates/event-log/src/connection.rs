@@ -177,14 +177,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("owner.sqlite");
         let lock = directory.path().join("writer.lock");
-        let lease = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock)
-            .unwrap();
-        lease.try_lock().unwrap();
+        let lease = Arc::new(crate::root::FileLease::acquire(&lock).unwrap());
         let contender = OpenOptions::new()
             .read(true)
             .write(true)
@@ -273,8 +266,7 @@ mod tests {
     async fn shutdown_is_idempotent_while_handles_remain_alive() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("writer.lock");
-        let lease = File::create(&path).unwrap();
-        lease.try_lock().unwrap();
+        let lease = Arc::new(crate::root::FileLease::acquire(&path).unwrap());
         let contender = File::open(&path).unwrap();
         let owner = Arc::new(
             OwnedConnection::open(
@@ -286,6 +278,16 @@ mod tests {
             .unwrap(),
         );
         let retained = owner.clone();
+        // Replacing the pathname must prevent the old worker from accepting new work.
+        std::fs::rename(&path, directory.path().join("displaced.lock")).unwrap();
+        let replacement = crate::root::FileLease::acquire(&path).unwrap();
+        assert!(matches!(
+            retained
+                .run::<()>(|_| Box::pin(async { panic!("replaced lease must reject work") }))
+                .await,
+            Err(StoreError::Io(_))
+        ));
+        drop(replacement);
         let (first, second) = tokio::join!(owner.shutdown(), retained.shutdown());
         first.unwrap();
         second.unwrap();

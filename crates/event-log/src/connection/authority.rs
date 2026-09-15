@@ -17,14 +17,17 @@
  * under the License.
  */
 
-use std::{fs::File, sync::Arc};
+use std::sync::Arc;
 
-use crate::{StoreError, root::RootOwner};
+use crate::{
+    StoreError,
+    root::{FileLease, RootOwner},
+};
 
 /// Authority retained until the database worker has actually closed.
 pub enum ConnectionAuthority {
     Writer {
-        lease: File,
+        lease: Arc<FileLease>,
         root: Option<Arc<RootOwner>>,
     },
     Root(Arc<RootOwner>),
@@ -33,7 +36,10 @@ pub enum ConnectionAuthority {
 impl ConnectionAuthority {
     pub(super) fn validate(&self) -> Result<(), StoreError> {
         let root = match self {
-            Self::Writer { root, .. } => root.as_ref(),
+            Self::Writer { root, lease } => {
+                lease.validate()?;
+                root.as_ref()
+            }
             Self::Root(root) => Some(root),
         };
         if let Some(root) = root {
