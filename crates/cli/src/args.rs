@@ -93,6 +93,25 @@ struct Log {
 }
 
 impl Cli {
+    pub(super) async fn run_service(self) -> Result<(), HostError> {
+        match self.command {
+            Command::Host(HostCommand::Serve {
+                root,
+                websocket: None,
+            }) => {
+                #[cfg(windows)]
+                crate::windows::own_process_tree()?;
+                serve::run(&root.root, None, true).await
+            }
+            Command::Host(HostCommand::Serve { .. }) => {
+                Err("service listener belongs to deployment configuration".into())
+            }
+            // The installed artifact also remains a usable captured-stdio
+            // operator for SSH/WSL; the interactive console command is maka.
+            command => Self { command }.run().await,
+        }
+    }
+
     pub(super) fn error_exit_code(&self) -> i32 {
         if matches!(self.command, Command::Host(HostCommand::Candidate(_))) {
             70
@@ -114,7 +133,7 @@ impl Cli {
                 Ok(())
             }
             Command::Host(HostCommand::Serve { root, websocket }) => {
-                serve::run(&root.root, websocket).await
+                serve::run(&root.root, websocket, false).await
             }
             Command::Host(HostCommand::Status(root)) => {
                 let mut client = crate::host_client::HostClient::connect(&root.root, None).await?;

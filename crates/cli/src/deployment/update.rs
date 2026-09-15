@@ -80,7 +80,7 @@ impl Update {
         let target = if reconcile {
             pending
         } else {
-            let source = std::env::current_exe()?.canonicalize()?;
+            let source = package::source(current.mode)?;
             let (executable, sha256) = if source == current.executable {
                 (source, current.sha256.clone())
             } else {

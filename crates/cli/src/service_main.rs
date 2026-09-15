@@ -17,29 +17,7 @@
  * under the License.
  */
 
-use clap::Parser;
-mod args;
-mod candidate;
-mod code;
-mod deployment;
-mod endpoint;
-mod host_client;
-mod serve;
-mod signals;
-#[cfg(windows)]
-mod windows;
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
-#[tokio::main]
-async fn main() {
-    let cli = args::Cli::parse();
-    let error_exit = cli.error_exit_code();
-    let result = if env!("CARGO_BIN_NAME") == "maka-service" {
-        cli.run_service().await
-    } else {
-        cli.run().await
-    };
-    if let Err(error) = result {
-        eprintln!("{error}");
-        std::process::exit(error_exit);
-    }
-}
+// Same Host implementation and admission gate, with a windowless PE entry.
+include!("main.rs");

@@ -59,6 +59,9 @@ async function stageReleaseManifests({ packager, arch }) {
   ));
   mkdirSync(nativeStage, { recursive: true });
   copyFileSync(binary, join(nativeStage, basename(binary)));
+  if (packager.platform.nodeName === 'win32') {
+    copyFileSync(join(dirname(binary), 'maka-service.exe'), join(nativeStage, 'maka-service.exe'));
+  }
   const stage = await packager.info.tempDirManager.createTempDir({
     prefix: 'maka-release-manifests',
   });

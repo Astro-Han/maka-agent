@@ -24,16 +24,22 @@ use tokio_util::sync::CancellationToken;
 pub(super) async fn run(
     path: &Path,
     websocket: Option<std::net::SocketAddr>,
+    require_managed: bool,
 ) -> Result<(), maka_runtime_host::server::HostError> {
     use maka_event_log::root::{ROOT_MARKER, RootNamespaces, RootOwner};
     use maka_runtime_host::server::{Host, websocket::WebSocketListener};
     let namespaces = RootNamespaces::for_current_account()?;
     let owner = if path.join(ROOT_MARKER).exists() {
         RootOwner::open(path, &namespaces)?
-    } else {
+    } else if !require_managed {
         RootOwner::create(path, &namespaces)?
+    } else {
+        return Err("service State Root must already be installed".into());
     };
     let deployment = crate::deployment::admit(&owner, crate::deployment::Mode::Supervised).await?;
+    if require_managed && deployment.is_none() {
+        return Err("service State Root must have a supervised deployment".into());
+    }
     let websocket = match deployment
         .as_ref()
         .map(|deployment| deployment.websocket)

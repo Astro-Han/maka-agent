@@ -32,6 +32,24 @@ pub(super) fn path(directory: &Path, digest: &str) -> PathBuf {
         .join(format!("maka-{digest}{suffix}"))
 }
 
+pub(super) fn source(mode: super::Mode) -> Result<PathBuf, HostError> {
+    let current = std::env::current_exe()?.canonicalize()?;
+    #[cfg(windows)]
+    if mode == super::Mode::Supervised && env!("CARGO_BIN_NAME") != "maka-service" {
+        let service = current
+            .parent()
+            .ok_or("executable directory is missing")?
+            .join("maka-service.exe");
+        if !service.is_file() {
+            return Err("Windows services require the sibling maka-service.exe artifact".into());
+        }
+        return Ok(service);
+    }
+    #[cfg(not(windows))]
+    let _ = mode;
+    Ok(current)
+}
+
 pub(super) fn stage(directory: &Path, source: &Path) -> Result<(PathBuf, String), HostError> {
     let packages = directory.join("packages");
     maka_event_log::root::private_directory(&packages)?;

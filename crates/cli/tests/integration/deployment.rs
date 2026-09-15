@@ -190,6 +190,22 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             assert_eq!(decode_activation(&activated.stdout)["kind"], "error");
             continue;
         }
+        #[cfg(windows)]
+        if requires_containment() {
+            // Cargo's own Job forbids independent children. Refusal must not
+            // report Ready for a Host that will disappear with the launcher.
+            assert!(!activated.status.success(), "{activated:?}");
+            let error = decode_activation(&activated.stdout);
+            assert_eq!(error["kind"], "error");
+            assert!(
+                error["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("(os error 5)")
+            );
+            drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
+            continue;
+        }
         assert!(activated.status.success(), "{activated:?}");
         assert!(
             started.elapsed() < Duration::from_secs(15),
@@ -227,4 +243,41 @@ fn decode_activation(bytes: &[u8]) -> Value {
         .strip_prefix("MAKA_RUNTIME_HOST_ACTIVATION_V1 ")
         .unwrap();
     serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded).unwrap()).unwrap()
+}
+
+#[cfg(windows)]
+fn requires_containment() -> bool {
+    use windows_sys::Win32::System::{
+        JobObjects::{
+            IsProcessInJob, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            QueryInformationJobObject,
+        },
+        Threading::GetCurrentProcess,
+    };
+    let mut member = 0;
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    // SAFETY: queries only this test's enclosing Job; never changes its policy.
+    unsafe {
+        assert_ne!(
+            IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut member),
+            0
+        );
+        if member == 0 {
+            return false;
+        }
+        assert_ne!(
+            QueryInformationJobObject(
+                std::ptr::null_mut(),
+                JobObjectExtendedLimitInformation,
+                (&raw mut limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
+                std::ptr::null_mut(),
+            ),
+            0
+        );
+    }
+    limits.BasicLimitInformation.LimitFlags
+        & (JOB_OBJECT_LIMIT_BREAKAWAY_OK | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK)
+        == 0
 }

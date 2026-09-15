@@ -53,13 +53,15 @@ Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要�
 此后只有返回的 `executable` 可以启动该托管根。`host activate --root-id <rootId> --framed`
 复用就绪 Host，或启动固定的按需版本；supervised 模式要求服务已运行。安装尚不注册 OS 服务或自动更新。
 部署权威保存在 State Root 之外的账户级 SQLite 中，启动时先校验再执行数据库迁移。
+Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host 的无窗口入口，须与 `maka.exe` 一起分发。
+按需激活要求启动环境允许脱离 Windows Job；应直接运行已构建的程序，不要通过 `cargo run` 激活。
 
 更新按需部署时，用新二进制运行
 `host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`。
 活跃客户端或不可交接任务会推迟切换；随后用相同身份参数运行 `host reconcile` 完成已记录的更新。
 目标一旦提交，即使启动失败也不自动回退。Supervised 更新和无人值守版本选择尚未接通。
 
-唯一二进制还提供 Desktop 启动用的 `host candidate`、从 stdin 读取 JavaScript cell 的
+`maka` 命令还提供 Desktop 启动用的 `host candidate`、从 stdin 读取 JavaScript cell 的
 `code --log <file>`，以及查看已提交执行事实的 `inspect --log <file>`。
 
 **没有 OS 沙箱。** 代码与工具使用当前用户的系统权限。不要执行不可信代码，也不要让测试

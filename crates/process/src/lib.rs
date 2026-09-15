@@ -20,6 +20,7 @@
 //! Trusted native process primitives and foreground execution, not a sandbox.
 //! Durable background/PTY resource ownership belongs to the runtime.
 
+pub mod detached;
 mod output;
 pub mod system;
 pub use output::{Captured as PipeResult, Outcome as ProcessOutcome, Termination};

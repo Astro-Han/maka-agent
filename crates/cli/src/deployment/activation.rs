@@ -22,18 +22,15 @@ use crate::host_client::{HostClient, LiveHost};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Args;
 use maka_event_log::root::{self, FileLease, RootNamespaces, RootOwner};
+use maka_process::detached::{self, Child};
 use maka_runtime_host::server::HostError;
 use serde::Serialize;
 use std::{
     io::Write,
     num::{NonZeroU16, NonZeroU32},
-    process::Stdio,
     time::Duration,
 };
-use tokio::{
-    io::AsyncWriteExt,
-    process::{Child, Command},
-};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 #[derive(Args)]
@@ -173,39 +170,28 @@ pub(super) async fn connect_or_launch(
                             return Err("State Root changed before launch".into());
                         }
                         drop(owner);
-                        let mut command = Command::new(&deployment.executable);
-                        command
-                            .args(["host", "candidate", "--root"])
-                            .arg(&deployment.root_path)
-                            .args([
-                                "--expected-root-id",
-                                &deployment.root_id,
-                                "--startup-attempt-id",
-                                &Uuid::new_v4().to_string(),
-                                "--owner-stdin",
-                                "--initial-connection-timeout-ms",
-                                "30000",
-                            ])
-                            .stdin(Stdio::piped())
-                            .stdout(Stdio::null())
-                            // No inherited SSH capture pipes may outlive the operator.
-                            .stderr(Stdio::null());
-                        #[cfg(unix)]
-                        {
-                            // The SSH operator may exit while its released Host continues.
-                            // SAFETY: setsid is async-signal-safe and touches no Rust state.
-                            unsafe {
-                                command.pre_exec(|| {
-                                    if libc::setsid() == -1 {
-                                        return Err(std::io::Error::last_os_error());
-                                    }
-                                    Ok(())
-                                });
-                            }
-                        }
-                        #[cfg(windows)]
-                        command.creation_flags(0x00000008 | 0x00000200); // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-                        child = Some(command.spawn()?);
+                        child = Some(
+                            detached::spawn(
+                                &deployment.executable,
+                                &[
+                                    "host",
+                                    "candidate",
+                                    "--root",
+                                    deployment
+                                        .root_path
+                                        .to_str()
+                                        .ok_or("State Root must be UTF-8")?,
+                                    "--expected-root-id",
+                                    &deployment.root_id,
+                                    "--startup-attempt-id",
+                                    &Uuid::new_v4().to_string(),
+                                    "--owner-stdin",
+                                    "--initial-connection-timeout-ms",
+                                    "30000",
+                                ],
+                            )
+                            .await?,
+                        );
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(error) => return Err(error.into()),

@@ -152,7 +152,7 @@ impl Install {
         let stage_lease = lease.clone();
         let (executable, sha256) = tokio::task::spawn_blocking(move || {
             stage_lease.validate()?;
-            let package = package::stage(&stage_directory, &std::env::current_exe()?)?;
+            let package = package::stage(&stage_directory, &package::source(self.mode)?)?;
             stage_lease.validate()?;
             Ok::<_, HostError>(package)
         })

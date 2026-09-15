@@ -3942,6 +3942,7 @@ dependencies = [
  "libc",
  "maka-event-log",
  "maka-js-runtime",
+ "maka-process",
  "maka-protocol",
  "maka-runtime",
  "maka-runtime-host",
@@ -3954,6 +3955,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

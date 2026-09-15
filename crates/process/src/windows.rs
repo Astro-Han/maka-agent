@@ -41,6 +41,7 @@ use windows_sys::Win32::{
     System::Threading::{GetExitCodeProcess, WaitForSingleObject},
 };
 
+pub(crate) mod attributes;
 pub(crate) mod job;
 pub(crate) mod pipe;
 mod spawn;
@@ -90,19 +91,26 @@ pub(crate) async fn run(
 
 pub(crate) async fn wait_process(process: &OwnedHandle) -> io::Result<ExitStatus> {
     loop {
-        // SAFETY: the owned handle pins the exact process throughout this wait.
-        match unsafe { WaitForSingleObject(process.as_raw_handle(), 0) } {
-            WAIT_OBJECT_0 => {
-                let mut code = 0;
-                // SAFETY: signalled process and valid output pointer.
-                unsafe {
-                    checked(GetExitCodeProcess(process.as_raw_handle(), &mut code))?;
-                }
-                return Ok(ExitStatus::from_raw(code));
-            }
-            WAIT_TIMEOUT => tokio::time::sleep(Duration::from_millis(10)).await,
-            _ => return Err(io::Error::last_os_error()),
+        if let Some(status) = try_wait_process(process)? {
+            return Ok(status);
         }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+pub(crate) fn try_wait_process(process: &OwnedHandle) -> io::Result<Option<ExitStatus>> {
+    // SAFETY: the owned handle pins the exact process throughout this wait.
+    match unsafe { WaitForSingleObject(process.as_raw_handle(), 0) } {
+        WAIT_OBJECT_0 => {
+            let mut code = 0;
+            // SAFETY: signalled process and valid output pointer.
+            unsafe {
+                checked(GetExitCodeProcess(process.as_raw_handle(), &mut code))?;
+            }
+            Ok(Some(ExitStatus::from_raw(code)))
+        }
+        WAIT_TIMEOUT => Ok(None),
+        _ => Err(io::Error::last_os_error()),
     }
 }
 

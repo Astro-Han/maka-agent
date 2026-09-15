@@ -60,6 +60,10 @@ Host or starts the pinned on-demand executable; supervised mode requires a runni
 service. Installation does not yet register OS services or automate updates.
 Deployment authority lives in account-level
 SQLite, outside the State Root; startup checks it before database migrations.
+On Windows, supervised installations use the sibling `maka-service.exe`, a
+windowless entry to the same Host. Distribute it alongside `maka.exe`.
+On-demand activation requires permission to leave the launcher's Windows Job;
+run the built executable directly, not through `cargo run`.
 
 For an on-demand code update, run the new binary with
 `host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`.
@@ -68,7 +72,7 @@ same identity arguments finishes the recorded update. A committed target is neve
 automatically rolled back, even if startup fails. Supervised updates and unattended
 release selection are not yet connected.
 
-The single binary also provides `host candidate` for Desktop-owned startup,
+The `maka` command also provides `host candidate` for Desktop-owned startup,
 `code --log <file>` for a JavaScript cell read from stdin, and
 `inspect --log <file>` for committed execution facts.
 
