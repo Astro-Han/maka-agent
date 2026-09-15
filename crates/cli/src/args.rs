@@ -49,6 +49,8 @@ enum Command {
 enum HostCommand {
     /// Initialize an empty native State Root, or verify its existing identity.
     Init(Root),
+    /// Install this native executable as the root's managed Host.
+    Install(crate::deployment::Install),
     /// Query the existing Host without opening its State Root for writing.
     Status(Root),
     /// Retire the exact current Host, preserving work at safe step boundaries.
@@ -96,6 +98,7 @@ impl Cli {
     pub(super) async fn run(self) -> Result<(), HostError> {
         match self.command {
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
+            Command::Host(HostCommand::Install(args)) => args.run().await,
             Command::Host(HostCommand::Init(args)) => {
                 let root_id = initialize(&args.root, &RootNamespaces::for_current_account()?)?;
                 println!("{}", serde_json::json!({"rootId": root_id}));

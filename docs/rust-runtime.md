@@ -53,6 +53,12 @@ Use `target/debug/maka` if the binary is not on PATH. Local transport is a Unix
 socket on Linux/macOS or a private named pipe on Windows. An optional
 `--websocket 127.0.0.1:0` listener requires authentication; TLS is not implemented.
 
+`host install --root <directory>` pins the current executable and on-demand policy;
+`--mode supervised` selects persistent serving. Only the returned `executable`
+may start that managed root. Installation does not yet register an OS service or
+provide automatic activation/updates. Deployment authority lives in account-level
+SQLite, outside the State Root; startup checks it before database migrations.
+
 The single binary also provides `host candidate` for Desktop-owned startup,
 `code --log <file>` for a JavaScript cell read from stdin, and
 `inspect --log <file>` for committed execution facts.

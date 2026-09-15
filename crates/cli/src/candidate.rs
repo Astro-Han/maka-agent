@@ -59,6 +59,17 @@ impl Candidate {
         if root.root_id() != self.expected_root_id {
             return Err("candidate State Root identity mismatch".into());
         }
+        let deployment = crate::deployment::admit(&root, crate::deployment::Mode::OnDemand).await?;
+        let websocket = match &deployment {
+            Some(deployment) => Some(
+                maka_runtime_host::server::websocket::WebSocketListener::bind(
+                    deployment.websocket,
+                    Vec::new(),
+                )
+                .await?,
+            ),
+            None => None,
+        };
         let cancel = CancellationToken::new();
         let _cancel_on_exit = cancel.clone().drop_guard();
         if self.owner_stdin {
@@ -70,14 +81,23 @@ impl Candidate {
             super::serve::global_instructions()?,
             HostOptions {
                 skill_home: super::serve::home_directory()?,
-                generation: self.generation,
+                generation: deployment
+                    .as_ref()
+                    .map(|deployment| deployment.generation())
+                    .or(self.generation),
                 handshake_timeout: Duration::from_millis(self.handshake_timeout_ms),
                 ..HostOptions::default()
             },
         )
         .await?;
         let endpoint = LocalEndpoint::bind()?;
-        let registration = host.publish_registration(&endpoint.path)?;
+        let registration = host.publish_registration(
+            &endpoint.path,
+            websocket
+                .as_ref()
+                .map(|listener| listener.local_addr())
+                .transpose()?,
+        )?;
         let idle_host = host.clone();
         let idle_cancel = cancel.clone();
         let expiry = tokio::spawn(async move {
@@ -89,7 +109,15 @@ impl Candidate {
                 .await;
             idle_cancel.cancel();
         });
-        let result = endpoint.listener.serve(host, cancel).await;
+        let result = match websocket {
+            Some(websocket) => {
+                endpoint
+                    .listener
+                    .serve_with_websocket(websocket, host, cancel)
+                    .await
+            }
+            None => endpoint.listener.serve(host, cancel).await,
+        };
         expiry.abort();
         let _ = expiry.await;
         drop(signals);

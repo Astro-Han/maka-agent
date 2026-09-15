@@ -27,21 +27,29 @@ pub(super) async fn run(
 ) -> Result<(), maka_runtime_host::server::HostError> {
     use maka_event_log::root::{ROOT_MARKER, RootNamespaces, RootOwner};
     use maka_runtime_host::server::{Host, websocket::WebSocketListener};
-    let websocket = match websocket {
-        Some(address) => Some(WebSocketListener::bind(address, Vec::new()).await?),
-        None => None,
-    };
     let namespaces = RootNamespaces::for_current_account()?;
     let owner = if path.join(ROOT_MARKER).exists() {
         RootOwner::open(path, &namespaces)?
     } else {
         RootOwner::create(path, &namespaces)?
     };
+    let deployment = crate::deployment::admit(&owner, crate::deployment::Mode::Supervised).await?;
+    let websocket = match deployment
+        .as_ref()
+        .map(|deployment| deployment.websocket)
+        .or(websocket)
+    {
+        Some(address) => Some(WebSocketListener::bind(address, Vec::new()).await?),
+        None => None,
+    };
     let host = Host::open_with_options(
         owner,
         global_instructions()?,
         maka_runtime_host::server::HostOptions {
             skill_home: home_directory()?,
+            generation: deployment
+                .as_ref()
+                .map(|deployment| deployment.generation()),
             ..Default::default()
         },
     )
@@ -49,7 +57,13 @@ pub(super) async fn run(
     let endpoint = super::endpoint::LocalEndpoint::bind()?;
     let cancellation = CancellationToken::new();
     let _signals = super::signals::watch(cancellation.clone())?;
-    let registration = host.publish_registration(&endpoint.path)?;
+    let registration = host.publish_registration(
+        &endpoint.path,
+        websocket
+            .as_ref()
+            .map(|listener| listener.local_addr())
+            .transpose()?,
+    )?;
     let mut ready = json!({"kind":"ready","rootId":host.root_id(),"socketPath":endpoint.path});
     if let Some(listener) = &websocket {
         ready["websocketUrl"] = format!("ws://{}/runtime-host", listener.local_addr()?).into();

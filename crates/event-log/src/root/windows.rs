@@ -24,7 +24,7 @@ mod filesystem;
 mod security;
 
 pub use account::account_home;
-pub(crate) use filesystem::publish_file;
+pub use filesystem::publish_file;
 pub use filesystem::{
     FileIdentity, create_private_file, file_identity, open_nofollow, private_directory,
 };

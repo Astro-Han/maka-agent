@@ -49,6 +49,10 @@ maka host retire --root /absolute/path/to/new-root
 二进制未加入 PATH 时使用 `target/debug/maka`。Linux/macOS 使用 Unix socket，
 Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要认证，尚不支持 TLS。
 
+`host install --root <目录>` 固定当前可执行文件和按需策略；`--mode supervised` 选择持续运行。
+此后只有返回的 `executable` 可以启动该托管根。安装尚不注册 OS 服务，也不提供自动激活或更新。
+部署权威保存在 State Root 之外的账户级 SQLite 中，启动时先校验再执行数据库迁移。
+
 唯一二进制还提供 Desktop 启动用的 `host candidate`、从 stdin 读取 JavaScript cell 的
 `code --log <file>`，以及查看已提交执行事实的 `inspect --log <file>`。
 

@@ -37,6 +37,7 @@ impl Host {
     pub fn publish_registration(
         self: &Arc<Self>,
         endpoint: &Path,
+        websocket: Option<std::net::SocketAddr>,
     ) -> Result<Registration, HostError> {
         self.root.validate_current()?;
         let endpoint = endpoint.to_str().ok_or("endpoint is not UTF-8")?;
@@ -53,6 +54,9 @@ impl Host {
         });
         if let Some(generation) = &self.options.generation {
             value["generation"] = generation.clone().into();
+        }
+        if let Some(address) = websocket {
+            value["websocketEndpoints"] = json!([format!("ws://{address}/runtime-host")]);
         }
         let path = self.control_directory().join("registration.json");
         let mut temporary = tempfile::NamedTempFile::new_in(self.control_directory())?;

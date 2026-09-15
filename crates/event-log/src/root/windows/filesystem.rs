@@ -71,7 +71,7 @@ pub struct FileIdentity {
 
 /// Windows has no portable directory fsync. Publish a previously flushed marker
 /// with a write-through rename; omitting REPLACE_EXISTING preserves no-clobber.
-pub(crate) fn publish_file(source: &Path, target: &Path) -> io::Result<()> {
+pub fn publish_file(source: &Path, target: &Path) -> io::Result<()> {
     let source = wide(source.as_os_str())?;
     let target = wide(target.as_os_str())?;
     // SAFETY: both paths are NUL-terminated and live for the synchronous call.

@@ -17,6 +17,8 @@
  * under the License.
  */
 
-mod candidate;
-mod code_command;
-mod deployment;
+CREATE TABLE deployment (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    configuration TEXT NOT NULL CHECK (json_valid(configuration) AND length(CAST(configuration AS BLOB)) <= 65536)
+) STRICT;
+PRAGMA user_version = 1;

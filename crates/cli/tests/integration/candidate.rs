@@ -31,16 +31,7 @@ use std::{
 fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle() {
     let directory = tempfile::tempdir().unwrap();
     let namespaces = RootNamespaces::for_current_account().unwrap();
-    let root = directory.path().join("root");
-    let owner = RootOwner::create(&root, &namespaces).unwrap();
-    let mut fixture = CandidateFixture {
-        child: None,
-        root,
-        root_id: owner.root_id().to_owned(),
-        registration: owner.control_directory().join("registration.json"),
-        lock: owner.lock_path().to_owned(),
-    };
-    drop(owner);
+    let mut fixture = CandidateFixture::new(directory.path().join("root"));
 
     enum End {
         OwnerLoss,
@@ -213,16 +204,28 @@ fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle(
 }
 
 /// Reap the exact test child before removing its fresh root's account-level lease files.
-struct CandidateFixture {
-    child: Option<Child>,
-    root: PathBuf,
-    root_id: String,
-    registration: PathBuf,
+pub(super) struct CandidateFixture {
+    pub child: Option<Child>,
+    pub root: PathBuf,
+    pub root_id: String,
+    pub registration: PathBuf,
     lock: PathBuf,
 }
 
 impl CandidateFixture {
-    fn wait_for_registration(&mut self) -> Value {
+    pub fn new(root: PathBuf) -> Self {
+        let owner =
+            RootOwner::create(&root, &RootNamespaces::for_current_account().unwrap()).unwrap();
+        Self {
+            child: None,
+            root,
+            root_id: owner.root_id().to_owned(),
+            registration: owner.control_directory().join("registration.json"),
+            lock: owner.lock_path().to_owned(),
+        }
+    }
+
+    pub fn wait_for_registration(&mut self) -> Value {
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             if let Ok(bytes) = fs::read(&self.registration) {
@@ -240,7 +243,7 @@ impl CandidateFixture {
         }
     }
 
-    fn wait_for_exit(&mut self) -> std::process::ExitStatus {
+    pub fn wait_for_exit(&mut self) -> std::process::ExitStatus {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             if let Some(status) = self.child.as_mut().unwrap().try_wait().unwrap() {
@@ -280,6 +283,21 @@ impl Drop for CandidateFixture {
             std::thread::sleep(Duration::from_millis(20));
         }
         let _ = fs::remove_file(&self.registration);
+        let deployment = namespaces
+            .ownership
+            .parent()
+            .unwrap()
+            .join("deployments")
+            .join(&self.root_id);
+        if deployment.is_dir() {
+            // Only this fixture's freshly generated root; all owned children are reaped.
+            if let Ok(lease) =
+                maka_event_log::root::FileLease::acquire(&deployment.join("executor.lock"))
+            {
+                drop(lease);
+                let _ = fs::remove_dir_all(deployment);
+            }
+        }
         let _ = fs::remove_file(control.join("owner.lock"));
         let _ = fs::remove_dir(control);
         let _ = fs::remove_file(&self.lock);

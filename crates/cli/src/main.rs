@@ -21,6 +21,7 @@ use clap::Parser;
 mod args;
 mod candidate;
 mod code;
+mod deployment;
 mod endpoint;
 mod host_client;
 mod serve;
