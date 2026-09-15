@@ -30,6 +30,7 @@ use std::{fs::File, path::Path, sync::Arc};
 const DATABASE: &str = "deployment.sqlite";
 const APPLICATION_ID: i64 = 0x4d414b44;
 static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/deployment");
+// user_version describes the stable Active reader, not the SQLx migration count.
 
 pub(super) enum Installation {
     Missing,
@@ -83,19 +84,7 @@ pub(super) async fn install(
     owner: RootOwner,
     deployment: Deployment,
 ) -> Result<Deployment, HostError> {
-    let path = directory.join(DATABASE);
-    let file = private_file(&path)?;
-    file.sync_all()?;
-    #[cfg(unix)]
-    File::open(directory)?.sync_all()?;
-    let connection = OwnedConnection::open(
-        SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(false),
-        ConnectionAuthority::Writer { lease, root: None },
-        |connection| Box::pin(initialize(connection)),
-    )
-    .await?;
+    let connection = open_writer(directory, lease, None).await?;
     let result = connection
         .run(move |connection| {
             Box::pin(async move {
@@ -115,8 +104,27 @@ pub(super) async fn install(
     let closed = connection.close().await;
     let deployment = result?;
     closed?;
-    drop(file);
     Ok(deployment)
+}
+
+pub(super) async fn open_writer(
+    directory: &Path,
+    lease: Arc<FileLease>,
+    root: Option<Arc<RootOwner>>,
+) -> Result<OwnedConnection, HostError> {
+    let path = directory.join(DATABASE);
+    let file = private_file(&path)?;
+    file.sync_all()?;
+    #[cfg(unix)]
+    File::open(directory)?.sync_all()?;
+    Ok(OwnedConnection::open(
+        SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(false),
+        ConnectionAuthority::Writer { lease, root },
+        |connection| Box::pin(initialize(connection)),
+    )
+    .await?)
 }
 
 fn private_file(path: &Path) -> Result<File, HostError> {

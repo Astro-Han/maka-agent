@@ -53,6 +53,10 @@ enum HostCommand {
     Install(crate::deployment::Install),
     /// Activate an installed Host and report its verified loopback endpoint.
     Activate(crate::deployment::Activate),
+    /// Update an on-demand deployment to this executable at a safe boundary.
+    Update(crate::deployment::Update),
+    /// Finish an interrupted deployment update without choosing another target.
+    Reconcile(crate::deployment::Update),
     /// Query the existing Host without opening its State Root for writing.
     Status(Root),
     /// Retire the exact current Host, preserving work at safe step boundaries.
@@ -102,6 +106,8 @@ impl Cli {
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
             Command::Host(HostCommand::Install(args)) => args.run().await,
             Command::Host(HostCommand::Activate(args)) => args.run().await,
+            Command::Host(HostCommand::Update(args)) => args.run(false).await,
+            Command::Host(HostCommand::Reconcile(args)) => args.run(true).await,
             Command::Host(HostCommand::Init(args)) => {
                 let root_id = initialize(&args.root, &RootNamespaces::for_current_account()?)?;
                 println!("{}", serde_json::json!({"rootId": root_id}));

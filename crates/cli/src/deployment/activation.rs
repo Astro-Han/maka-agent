@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Deployment, Mode, directory, store};
+use super::{Deployment, Mode, RootId, directory, store};
 use crate::host_client::{HostClient, LiveHost};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Args;
@@ -28,7 +28,6 @@ use std::{
     io::Write,
     num::{NonZeroU16, NonZeroU32},
     process::Stdio,
-    str::FromStr,
     time::Duration,
 };
 use tokio::{
@@ -36,24 +35,6 @@ use tokio::{
     process::{Child, Command},
 };
 use uuid::Uuid;
-
-#[derive(Clone)]
-struct RootId(String);
-
-impl FromStr for RootId {
-    type Err = &'static str;
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if value.len() == 64
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            Ok(Self(value.into()))
-        } else {
-            Err("root ID must contain 64 lowercase hexadecimal characters")
-        }
-    }
-}
 
 #[derive(Args)]
 pub(crate) struct Activate {
@@ -163,7 +144,9 @@ impl Activate {
     }
 }
 
-async fn connect_or_launch(deployment: &Deployment) -> Result<(HostClient, LiveHost), HostError> {
+pub(super) async fn connect_or_launch(
+    deployment: &Deployment,
+) -> Result<(HostClient, LiveHost), HostError> {
     let mut child: Option<Child> = None;
     let result = tokio::time::timeout(Duration::from_secs(30), async {
         loop {

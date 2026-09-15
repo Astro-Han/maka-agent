@@ -61,6 +61,13 @@ service. Installation does not yet register OS services or automate updates.
 Deployment authority lives in account-level
 SQLite, outside the State Root; startup checks it before database migrations.
 
+For an on-demand code update, run the new binary with
+`host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`.
+Active clients or non-cooperative work defer the switch; `host reconcile` with the
+same identity arguments finishes the recorded update. A committed target is never
+automatically rolled back, even if startup fails. Supervised updates and unattended
+release selection are not yet connected.
+
 The single binary also provides `host candidate` for Desktop-owned startup,
 `code --log <file>` for a JavaScript cell read from stdin, and
 `inspect --log <file>` for committed execution facts.

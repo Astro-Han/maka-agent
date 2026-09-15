@@ -53,7 +53,9 @@ struct Discovery {
     websocket_endpoints: Vec<String>,
 }
 
+#[derive(serde::Serialize)]
 pub(super) struct LiveHost {
+    #[serde(rename = "hostEpoch")]
     pub epoch: String,
     pub pid: NonZeroU32,
     pub port: NonZeroU16,

@@ -20,7 +20,10 @@
 mod activation;
 mod package;
 mod store;
+mod update;
+mod updates;
 pub(super) use activation::Activate;
+pub(super) use update::Update;
 
 use clap::{Args, ValueEnum};
 use maka_event_log::root::{self, FileLease, RootLocation, RootNamespaces, RootOwner};
@@ -29,9 +32,28 @@ use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 use uuid::Uuid;
+
+#[derive(Clone)]
+struct RootId(String);
+
+impl FromStr for RootId {
+    type Err = &'static str;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            Ok(Self(value.into()))
+        } else {
+            Err("root ID must contain 64 lowercase hexadecimal characters")
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
