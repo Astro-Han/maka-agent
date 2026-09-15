@@ -181,40 +181,58 @@ describe('storage root authority', () => {
     });
   });
 
-  test('explicitly repairs a stale root identity without changing its root id', async () => {
-    await withRoots(async ({ root }) => {
-      const initialized = await resolveStorageRoot({ path: root, kind: 'interactive' });
-      const markerPath = join(root, STORAGE_ROOT_MARKER_FILE);
-      const marker = JSON.parse(await readFile(markerPath, 'utf8')) as {
-        rootIdentity: { dev: string; ino: string };
-      };
-      marker.rootIdentity.dev = (BigInt(marker.rootIdentity.dev) + 1n).toString();
-      await writeFile(markerPath, `${JSON.stringify(marker)}\n`);
+  for (const format of ['legacy', 'upgrading', 'current']) {
+    test(`explicitly repairs identity while preserving the ${format} format boundary`, async () => {
+      await withRoots(async ({ root }) => {
+        const initialized = await resolveStorageRoot({ path: root, kind: 'interactive' });
+        const markerPath = join(root, STORAGE_ROOT_MARKER_FILE);
+        const marker = JSON.parse(await readFile(markerPath, 'utf8')) as {
+          schemaVersion: number;
+          upgrade?: { id: string; payload: unknown };
+          rootIdentity: { dev: string; ino: string };
+        };
+        if (format === 'legacy') marker.schemaVersion = 1;
+        if (format === 'upgrading')
+          marker.upgrade = {
+            id: '00000000-0000-4000-8000-000000000001',
+            payload: { immutableSource: '/old/data' },
+          };
+        marker.rootIdentity.dev = (BigInt(marker.rootIdentity.dev) + 1n).toString();
+        await writeFile(markerPath, `${JSON.stringify(marker)}\n`);
 
-      const candidate = await prepareStorageRootIdentityRepair({
-        path: root,
-        kind: 'interactive',
-      });
-      assert.ok(candidate);
-      const repaired = await repairStorageRootIdentity(candidate);
-      const rootStat = await lstat(root, { bigint: true });
-      const repairedMarker = JSON.parse(await readFile(markerPath, 'utf8')) as {
-        rootId: string;
-        rootIdentity: { dev: string; ino: string };
-      };
+        const candidate = await prepareStorageRootIdentityRepair({
+          path: root,
+          kind: 'interactive',
+        });
+        assert.ok(candidate);
+        await repairStorageRootIdentity(candidate);
+        const rootStat = await lstat(root, { bigint: true });
+        const repairedMarker = JSON.parse(await readFile(markerPath, 'utf8')) as {
+          schemaVersion: number;
+          upgrade?: unknown;
+          rootId: string;
+          rootIdentity: { dev: string; ino: string };
+        };
 
-      assert.equal(repaired.rootId, initialized.rootId);
-      assert.equal(repairedMarker.rootId, initialized.rootId);
-      assert.deepEqual(repairedMarker.rootIdentity, {
-        dev: rootStat.dev.toString(),
-        ino: rootStat.ino.toString(),
+        assert.equal(repairedMarker.rootId, initialized.rootId);
+        assert.equal(repairedMarker.schemaVersion, marker.schemaVersion);
+        assert.deepEqual(repairedMarker.upgrade, marker.upgrade);
+        assert.deepEqual(repairedMarker.rootIdentity, {
+          dev: rootStat.dev.toString(),
+          ino: rootStat.ino.toString(),
+        });
+        if (format !== 'current') {
+          await assert.rejects(resolveStorageRoot({ path: root, kind: 'interactive' }), {
+            code: 'legacy_root_requires_migration',
+          });
+        } else
+          assert.equal(
+            (await resolveStorageRoot({ path: root, kind: 'interactive' })).rootId,
+            initialized.rootId,
+          );
       });
-      assert.equal(
-        (await resolveStorageRoot({ path: root, kind: 'interactive' })).rootId,
-        initialized.rootId,
-      );
     });
-  });
+  }
 
   test('repairs a remounted device but refuses a different directory inode', async () => {
     await withRoots(async ({ base, root }) => {

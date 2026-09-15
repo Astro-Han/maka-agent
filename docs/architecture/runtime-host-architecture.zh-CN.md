@@ -100,9 +100,32 @@ Root capability 先规范化真实路径，再验证根标记中的随机 `rootI
 
 写入 authority 来自 canonical 物理 root 内 `.maka-host` 中稳定文件上的 OS lock。同一 root 的所有 Client 共享一个 Host，独立物理 root 分别持有自己的所有权。`rootId` 仍是协议身份，不承担账户全局或分布式互斥；registration 文件、PID、socket、health probe 和缓存目录都只是发现或观察信息。删除发现缓存不能合法地产生第二个 writer。
 
-root 拥有完整的持久状态：`.maka-host/data` 保存插件包、composition、插件数据及密钥、访问凭据；`.maka-host/deployment/runtime-host-deployment.json` 是唯一的 managed deployment 事务记录；`.maka-host/runtime/<rootId>` 保存可丢弃的 registration、启动诊断和一次性凭据交付文件。Owner 与 Artifact 锁都在 `runtime` 外。短路径本地 socket 可放在系统临时目录。普通新 root 启动不依赖账户 home。物理放在一起不代表凭据和机器部署信息可以直接导出，备份仍须保留访问限制。
+root 拥有完整的持久状态：`.maka-host/state/data` 保存插件包、composition、插件数据及密钥、访问凭据；`.maka-host/state/deployment/runtime-host-deployment.json` 是唯一的 managed deployment 事务记录；`.maka-host/runtime/<rootId>` 保存可丢弃的 registration、启动诊断和一次性凭据交付文件。Owner 与 Artifact 锁都在 `runtime` 外。短路径本地 socket 可放在系统临时目录。普通新 root 启动不依赖账户 home。物理放在一起不代表凭据和机器部署信息可以直接导出，备份仍须保留访问限制。
 
-Marker schema 2 是切换边界。打开 schema-1 root 使用时，先获取新 root 锁和旧 owner/Artifact 锁，复制并同步账户目录中的旧状态，最后发布 schema 2。旧 Host 正在使用时拒绝迁移；中断后从保留的旧文件重试暂存复制。切换完成后旧文件不再提供 authority，旧二进制拒绝 schema 2，正常运行不再持有兼容锁。升级时须保持 root 已记录的文件系统身份，并能访问旧账户目录；复制或重新挂载的 schema-1 root 须先用上一版本的显式恢复入口修复。切换后沿用 schema-2 的 import/remount/repair 路径。降级须恢复升级前的完整状态，不能只改 marker 版本号。
+`prepareRuntimeHostRoot` 是唯一的格式升级入口，普通 Storage 解析和 deployment 查找不迁移。Storage 负责 marker 校验、物理身份、锁和原子发布；Host 负责解释旧布局、验证完整快照并完成升级。显式身份修复保留旧格式或升级中状态，不发放业务 capability。
+
+升级使用原 root 所有者的账户。托管更新先准备能读目标格式的程序，再通过已安装旧包自己的生命周期实现退休旧 Host；活跃任务沿用已有的中断策略。新 root 锁与旧 owner/Artifact 锁共同排除写入者。仅首次接管时创建可写的旧锁目录，封住同时启动的旧程序；只有 marker、从未完成初始化的 root 不要求不可访问的账户 home 可用。已有业务数据却缺失旧账户数据的 root，在接管前拒绝升级并保留原状。
+
+第一次原子发布将 schema 1 改为带 `upgrade` 记录的 schema 2，绑定事务 ID 和来源计划。旧程序和新业务读取者都不能打开这个状态。Host 复制完整 `state` 容器，验证数据与部署，通过 Storage 的跨平台原语同步文件，最后写入绑定事务的完成凭据，再原子发布整个容器。第二次 marker 发布移除 `upgrade`。中断后复用已完成快照，即使旧缓存已经消失；未完成暂存只能从记录的来源重试，不把源丢失解释成空数据。恢复不重新发现账户 home。旧文件保留，但完成后不再提供 authority，正常运行不持兼容锁。
+
+目标包改变时，导入的 deployment 使用现有 `complete_to` 事务。正常托管激活会自动完成该事务，并直接调用 root 记录选定的精确程序，因此稳定 operator 启动器尚未更新也能恢复。新 Host 启动失败不能退回不兼容数据格式的旧程序。降级须恢复升级前的完整状态，不能只改 marker 版本号。
+
+```mermaid
+flowchart TD
+  A[启动或托管更新] --> B{root 身份与格式}
+  B -->|身份不匹配| C[显式身份修复]
+  C --> B
+  B -->|当前格式| H[获取 owner 并恢复部署]
+  B -->|旧格式| D[准备兼容程序并退休旧 Host]
+  D --> E[获取新旧锁并发布接管 marker]
+  B -->|升级中| F[继续已记录的事务]
+  E --> F
+  F --> G[验证、同步并发布完整快照]
+  G --> I[发布当前格式 marker]
+  I --> H
+  H --> J[恢复组合并发布 ready]
+  J --> K[排空工作、关闭资源、释放 owner]
+```
 
 Lease 关闭先拒绝新操作，等待已进入的操作结束，再释放 OS handle。Store facade 接收这个 owner/lease，业务代码不能通过直接打开另一份数据库绕过它。锁不意味着已证明任意外部子孙进程都随 Host 退出。
 

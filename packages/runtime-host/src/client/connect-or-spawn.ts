@@ -20,10 +20,10 @@
 import { randomUUID } from 'node:crypto';
 import {
   prepareStorageRootControlDirectory,
-  resolveStorageRoot,
   StorageRootAuthorityError,
 } from '@maka/storage/root-authority';
 import { readStateRootCompositionBinding } from '@maka/storage/state-root-composition';
+import { prepareRuntimeHostRoot } from '../root-upgrade.js';
 import { performance } from 'node:perf_hooks';
 import {
   requireClientInstanceId,
@@ -361,7 +361,7 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
       : decodeRuntimeHostManagedLaunchClaim(input.managedLaunchClaim);
   input.signal?.throwIfAborted();
   const clientInstanceId = requireClientInstanceId(input.clientInstanceId ?? randomUUID());
-  const capability = await resolveStorageRoot({ path: input.rootPath, kind: 'interactive' });
+  const capability = await prepareRuntimeHostRoot(input.rootPath);
   const composition = await readStateRootCompositionBinding(capability.canonicalPath);
   if (composition && composition.compositionId !== input.compositionId) {
     return {
@@ -487,6 +487,12 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
             dependencies.managedDeploymentAuthority,
           );
         } catch (error) {
+          if (
+            error instanceof RuntimeHostManagedDeploymentError &&
+            error.code === 'deployment_transition_in_progress'
+          ) {
+            return { kind: 'failed', reason: 'managed_root_requires_operator' };
+          }
           if (
             error instanceof RuntimeHostManagedDeploymentError &&
             error.code === 'invalid_config'

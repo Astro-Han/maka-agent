@@ -40,6 +40,7 @@ import {
   decodeRuntimeHostManagedDeploymentConfig,
   readRuntimeHostManagedDeploymentAuthorityRecord,
   resolveRuntimeHostManagedDeploymentAuthority,
+  prepareRuntimeHostManagedRoot,
   resolveRuntimeHostNpmDeploymentLayout,
   runtimeHostManagedOperatorModulePath,
   rollbackRuntimeHostManagedDeploymentTransition,
@@ -219,6 +220,7 @@ export async function resolveRecoverableRuntimeHostManagedDeployment(
     readonly ensureAvailable?: boolean;
   } = {},
 ): Promise<RuntimeHostRecoverableDeployment> {
+  await prepareRuntimeHostManagedRoot(rootId);
   const resolved = await resolveRuntimeHostManagedDeploymentAuthority(rootId);
   if (!resolved) return { kind: 'absent' };
   assertRecoveryTarget(options.expectedTarget, rootId, resolved.record);
