@@ -69,6 +69,10 @@ Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host �
 
 更新部署时，用新二进制运行
 `host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`。
+同一次更新可设置 `--mode`、`--websocket`，以及可重复的
+`--project-root-json '{"label":"Projects","path":"/absolute/path"}'`。
+`--no-project-roots` 不发布目录；`--default-project-roots` 恢复账户默认目录。省略的配置保留不变。
+代码和配置共用一个目标及 revision；`reconcile` 不重新选择配置。
 活跃客户端或不可交接任务会推迟切换；随后用相同身份参数运行 `host reconcile` 完成已记录的更新。
 目标一旦提交，即使启动失败也不自动回退。Supervised 激活仅在持有 Root 时替换服务定义。
 无人值守版本选择和不中断监听的交接尚未接通。

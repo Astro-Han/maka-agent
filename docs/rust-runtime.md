@@ -82,6 +82,11 @@ run the built executable directly, not through `cargo run`.
 
 For a code update, run the new binary with
 `host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`.
+The same update can set `--mode`, `--websocket`, and repeatable
+`--project-root-json '{"label":"Projects","path":"/absolute/path"}'` declarations.
+`--no-project-roots` publishes none; `--default-project-roots` restores the account
+default. Omitted settings are preserved. Code and configuration share one target
+and revision; `reconcile` never selects different settings.
 Active clients or non-cooperative work defer the switch; `host reconcile` with the
 same identity arguments finishes the recorded update. A committed target is never
 automatically rolled back, even if startup fails. Supervised activation replaces

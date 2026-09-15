@@ -29,6 +29,7 @@ const { values } = parseArgs({
     bridge: { type: 'string' },
     'root-id': { type: 'string' },
     'host-epoch': { type: 'string' },
+    'project-roots': { type: 'string' },
   },
 });
 const children = [];
@@ -85,6 +86,12 @@ try {
       (await connection.request('host.diagnostics.query', {})).hostEpoch,
       values['host-epoch'],
     );
+    if (values['project-roots'] !== undefined) {
+      assert.deepEqual(
+        await connection.request('project.catalog.query', { kind: 'directory_roots' }),
+        { kind: 'directory_roots', roots: JSON.parse(values['project-roots']) },
+      );
+    }
   } finally {
     await connection.close();
   }

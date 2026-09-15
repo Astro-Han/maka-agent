@@ -18,6 +18,7 @@
  */
 
 mod activation;
+mod configuration;
 mod connect;
 mod control;
 mod entry;
@@ -34,11 +35,11 @@ pub(super) use control::{Control, ControlAction};
 pub(super) use entry::ServiceRun;
 pub(super) use logs::Logs;
 pub(super) use query::Status;
-pub(super) use update::Update;
+pub(super) use update::{Expected, Update};
 
 use clap::{Args, ValueEnum};
 use maka_event_log::root::{self, FileLease, RootLocation, RootNamespaces, RootOwner};
-use maka_runtime_host::server::HostError;
+use maka_runtime_host::server::{DirectoryRootSpec, HostError};
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
@@ -81,6 +82,8 @@ pub(super) struct Install {
     mode: Mode,
     #[arg(long, default_value = "127.0.0.1:0")]
     websocket: SocketAddr,
+    #[command(flatten)]
+    directories: configuration::Directories,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +112,8 @@ pub(super) struct Deployment {
     sha256: String,
     pub mode: Mode,
     pub websocket: SocketAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_directory_roots: Option<Vec<DirectoryRootSpec>>,
     // Active remains readable by previously installed executables. Older readers
     // reject the explicit tombstone through deny_unknown_fields.
     #[serde(default, skip_serializing_if = "Admission::is_active")]
@@ -146,6 +151,7 @@ impl Deployment {
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             || self.executable != package::path(directory, &self.sha256)
             || self.websocket.ip() != std::net::Ipv4Addr::LOCALHOST
+            || serde_json::to_vec(self)?.len() > 65_536
         {
             return Err("deployment does not match its native root or package".into());
         }
@@ -169,6 +175,7 @@ impl Install {
         if self.websocket.ip() != std::net::Ipv4Addr::LOCALHOST {
             return Err("managed Host listener must use 127.0.0.1".into());
         }
+        let project_directory_roots = self.directories.resolve(None).await?;
         let root_path = self.root.root;
         let (root, directory, lease) = tokio::task::spawn_blocking(move || {
             root::initialize(&root_path, &RootNamespaces::for_current_account()?)?;
@@ -185,7 +192,10 @@ impl Install {
             && existing.admission.is_active()
         {
             existing.validate(&root, &directory)?;
-            if existing.mode != self.mode || existing.websocket != self.websocket {
+            if existing.mode != self.mode
+                || existing.websocket != self.websocket
+                || existing.project_directory_roots != project_directory_roots
+            {
                 return Err("deployment configuration changes require an update".into());
             }
             if existing.executable == std::env::current_exe()?.canonicalize()? {
@@ -212,8 +222,10 @@ impl Install {
             sha256,
             mode: self.mode,
             websocket: self.websocket,
+            project_directory_roots,
             admission: Admission::Active,
         };
+        requested.validate(&root, &directory)?;
         let deployment = if let store::Installation::Installed(existing) = existing {
             existing.validate(&root, &directory)?;
             if existing.admission == Admission::Revoked {

@@ -371,6 +371,110 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert_eq!(ready["deploymentId"], reinstalled["deploymentId"]);
         assert!(!control("stop").output().unwrap().status.success());
         assert_eq!(decode_activation(&activate.output().unwrap().stdout), ready);
+
+        let update = |revision: &str| {
+            // These are same-code configuration changes. Use the installed
+            // operator without repeatedly copying and hashing the debug binary.
+            let mut command = Command::new(reinstalled["executable"].as_str().unwrap());
+            command.args([
+                "host",
+                "update",
+                "--root-id",
+                &fixture.root_id,
+                "--expected-deployment-id",
+                reinstalled["deploymentId"].as_str().unwrap(),
+                "--expected-revision",
+                revision,
+            ]);
+            command
+        };
+        let projects = temporary.path().join("published projects");
+        std::fs::create_dir(&projects).unwrap();
+        let mut configure = update("1");
+        configure.args([
+            "--project-root-json",
+            &serde_json::json!({
+                "label": " Projects ", "path": projects,
+            })
+            .to_string(),
+        ]);
+        let changed = configure.output().unwrap();
+        assert!(changed.status.success(), "{changed:?}");
+        let changed: Value = serde_json::from_slice(&changed.stdout).unwrap();
+        assert_eq!(changed["kind"], "ready");
+        assert_eq!(changed["deployment"]["configRevision"], 2);
+        assert_eq!(changed["deployment"]["sha256"], reinstalled["sha256"]);
+        assert_eq!(
+            changed["deployment"]["projectDirectoryRoots"],
+            serde_json::json!([
+                {"label": "Projects", "path": projects.canonicalize().unwrap()}
+            ])
+        );
+        let repeated = configure.output().unwrap();
+        assert!(repeated.status.success(), "{repeated:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&repeated.stdout).unwrap()["deployment"],
+            changed["deployment"]
+        );
+        assert!(
+            !update("1")
+                .arg("--no-project-roots")
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        assert_eq!(query("status")["deployment"], changed["deployment"]);
+
+        let bridge = |host: &Value, roots: &str| {
+            let output = Command::new("node")
+                .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+                .args([
+                    "--bridge",
+                    env!("CARGO_BIN_EXE_maka"),
+                    "--root-id",
+                    &fixture.root_id,
+                    "--host-epoch",
+                    host["hostEpoch"].as_str().unwrap(),
+                    "--project-roots",
+                    roots,
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        // Debug-build hashing can exceed the on-demand idle grace. Rebind to
+        // the current activation instead of treating an old epoch as permanent.
+        let current = activate.output().unwrap();
+        assert!(current.status.success(), "{current:?}");
+        bridge(
+            &decode_activation(&current.stdout),
+            r#"[{"id":"root-1","label":"Projects"}]"#,
+        );
+        // A missing old directory must not prevent replacing its configuration.
+        std::fs::remove_dir(&projects).unwrap();
+        let cleared = update("2").arg("--no-project-roots").output().unwrap();
+        assert!(cleared.status.success(), "{cleared:?}");
+        let cleared: Value = serde_json::from_slice(&cleared.stdout).unwrap();
+        assert_eq!(cleared["deployment"]["configRevision"], 3);
+        assert_eq!(
+            cleared["deployment"]["projectDirectoryRoots"],
+            serde_json::json!([])
+        );
+        bridge(&cleared["host"], "[]");
+        let defaults = update("3").arg("--default-project-roots").output().unwrap();
+        assert!(defaults.status.success(), "{defaults:?}");
+        let defaults: Value = serde_json::from_slice(&defaults.stdout).unwrap();
+        assert_eq!(defaults["deployment"]["configRevision"], 4);
+        assert!(
+            defaults["deployment"]
+                .get("projectDirectoryRoots")
+                .is_none()
+        );
         fixture.retire_registered();
     }
 }

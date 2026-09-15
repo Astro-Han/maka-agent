@@ -71,6 +71,9 @@ pub(super) async fn run(
         global_instructions()?,
         maka_runtime_host::server::HostOptions {
             skill_home: home_directory()?,
+            project_directory_roots: deployment
+                .as_ref()
+                .and_then(|deployment| deployment.project_directory_roots.clone()),
             generation: deployment
                 .as_ref()
                 .map(|deployment| deployment.generation()),

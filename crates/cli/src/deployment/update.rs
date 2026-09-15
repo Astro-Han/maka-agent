@@ -17,24 +17,46 @@
  * under the License.
  */
 
-use super::{Deployment, RootId, activation, directory, package, store, updates};
+use super::{
+    Deployment, Mode, RootId, activation, configuration, directory, package, store, updates,
+};
 use crate::host_client::{HostClient, LiveHost};
 use clap::Args;
 use maka_event_log::root::{self, FileLease, RootNamespaces, RootOwner};
 use maka_protocol::host::RetirementResult;
 use maka_runtime_host::server::HostError;
 use serde::Serialize;
-use std::{sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use uuid::Uuid;
 
 #[derive(Args)]
 pub(crate) struct Update {
+    #[command(flatten)]
+    expected: Expected,
+    #[command(flatten)]
+    settings: Settings,
+}
+
+#[derive(Args)]
+pub(crate) struct Expected {
     #[arg(long)]
     root_id: RootId,
     #[arg(long)]
     expected_deployment_id: Uuid,
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..=9_007_199_254_740_991))]
     expected_revision: u64,
+}
+
+#[derive(Args)]
+struct Settings {
+    /// Change the launch policy together with this executable.
+    #[arg(long, value_enum)]
+    mode: Option<Mode>,
+    /// Replace the loopback listener address.
+    #[arg(long)]
+    websocket: Option<SocketAddr>,
+    #[command(flatten)]
+    directories: configuration::Directories,
 }
 
 #[derive(Serialize)]
@@ -51,7 +73,17 @@ enum Outcome {
 }
 
 impl Update {
-    pub async fn run(self, reconcile: bool) -> Result<(), HostError> {
+    pub async fn run(self) -> Result<(), HostError> {
+        self.expected.run(Some(self.settings)).await
+    }
+}
+
+impl Expected {
+    pub async fn reconcile(self) -> Result<(), HostError> {
+        self.run(None).await
+    }
+
+    async fn run(self, settings: Option<Settings>) -> Result<(), HostError> {
         let directory = directory(&self.root_id.0)?;
         if !directory.is_dir() {
             return Err("Host deployment is not installed".into());
@@ -75,10 +107,18 @@ impl Update {
         {
             return Err("deployment revision changed".into());
         }
-        let target = if reconcile {
-            pending
-        } else {
-            let source = package::source(current.mode)?;
+        let target = if let Some(settings) = settings {
+            let mut target = current.clone();
+            target.mode = settings.mode.unwrap_or(current.mode);
+            target.websocket = settings.websocket.unwrap_or(current.websocket);
+            target.project_directory_roots = settings
+                .directories
+                .resolve(current.project_directory_roots.clone())
+                .await?;
+            target.validate(&root, &directory)?;
+            // Code and configuration are one target. The calling distribution
+            // understands every field it writes, unlike an arbitrary older pin.
+            let source = package::source(target.mode)?;
             let (executable, sha256) = if source == current.executable {
                 (source, current.sha256.clone())
             } else {
@@ -92,7 +132,9 @@ impl Update {
                 })
                 .await??
             };
-            if sha256 == current.sha256 {
+            target.executable = executable;
+            target.sha256 = sha256;
+            if target == current {
                 if pending.is_some() {
                     return Err("another update is pending; reconcile it first".into());
                 }
@@ -101,15 +143,14 @@ impl Update {
                 if current.config_revision != self.expected_revision {
                     return Err("deployment changed before package staging".into());
                 }
-                let mut target = current.clone();
                 target.config_revision += 1;
-                target.executable = executable;
-                target.sha256 = sha256;
                 target.validate(&root, &directory)?;
                 updates::prepare(&directory, lease.clone(), current.clone(), target.clone())
                     .await?;
                 Some(target)
             }
+        } else {
+            pending
         };
         let deployment = if let Some(target) = target {
             target.validate(&root, &directory)?;
@@ -124,6 +165,13 @@ impl Update {
                 );
                 return Ok(());
             };
+            let owner = Arc::new(owner);
+            if current.mode == Mode::Supervised && target.mode == Mode::OnDemand {
+                // Remove the old login/restart trigger while Root is held.
+                // If removal or COMMIT fails, pending remains and Active can
+                // still be reactivated; there is no second cleanup authority.
+                super::service::remove(current.clone(), lease.clone(), owner.clone()).await?;
+            }
             updates::commit(&directory, lease.clone(), owner, current, target.clone()).await?;
             target
         } else {

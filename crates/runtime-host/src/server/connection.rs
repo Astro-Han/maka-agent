@@ -94,7 +94,8 @@ impl Host {
             timeout(Duration::from_secs(2), writer.close_after_flush()).await??;
             return Ok(());
         }
-        self.accepted_connection.store(true, Ordering::SeqCst);
+        self.accepted_connection_revision
+            .fetch_add(1, Ordering::SeqCst);
         let outbound = Outbound::default();
         let delivery = outbound.run(writer, &closed);
         let connection = async {

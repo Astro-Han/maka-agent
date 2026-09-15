@@ -52,7 +52,7 @@ pub mod websocket;
 mod workhub;
 
 use std::error::Error;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -95,7 +95,7 @@ pub struct Host {
     retirement: Arc<Mutex<retirement::Phase>>,
     accepted_connections: AtomicUsize,
     started: std::time::Instant,
-    accepted_connection: AtomicBool,
+    accepted_connection_revision: AtomicU64,
     executions: Arc<crate::execution::Executions>,
     shells: Arc<crate::shell::ShellResources>,
     controllers: crate::controllers::Controllers,
@@ -218,7 +218,7 @@ impl Host {
             retirement: interactions.retirement.clone(),
             accepted_connections: AtomicUsize::new(0),
             started: std::time::Instant::now(),
-            accepted_connection: AtomicBool::new(false),
+            accepted_connection_revision: AtomicU64::new(0),
             shells: executions.shells.clone(),
             controllers: executions.controllers.clone(),
             executions,
@@ -275,9 +275,17 @@ impl Host {
     pub async fn wait_until_idle(&self, initial_timeout: Duration, idle_grace: Duration) {
         let initial = tokio::time::Instant::now() + initial_timeout;
         let mut idle_since = None;
+        let mut observed = 0;
         loop {
             let now = tokio::time::Instant::now();
-            if !self.accepted_connection.load(Ordering::SeqCst) {
+            let revision = self.accepted_connection_revision.load(Ordering::SeqCst);
+            if revision != observed {
+                // A complete activation/probe can occur between two polls.
+                // Its absence from the live count must not erase that activity.
+                idle_since = None;
+                observed = revision;
+            }
+            if revision == 0 {
                 if now >= initial {
                     return;
                 }

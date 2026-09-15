@@ -25,9 +25,25 @@ use std::{
     sync::Arc,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DirectoryRootSpec {
     pub label: String,
     pub path: PathBuf,
+}
+
+impl DirectoryRootSpec {
+    /// Validate the published directory set and capture canonical paths once.
+    pub fn normalize(specs: Vec<Self>) -> Result<Vec<Self>> {
+        Ok(Directories::open(Some(specs))?
+            .0
+            .into_iter()
+            .map(|root| Self {
+                label: root.label,
+                path: root.directory.path().to_owned(),
+            })
+            .collect())
+    }
 }
 
 pub(in crate::server) struct Directories(Vec<Root>);

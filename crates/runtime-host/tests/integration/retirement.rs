@@ -70,6 +70,39 @@ async fn receive(frames: &mut mpsc::UnboundedReceiver<Value>) -> Value {
         .unwrap()
 }
 
+async fn short_connections_reset_idle_expiry(host: &std::sync::Arc<Host>) {
+    let connect = || async {
+        let (requests, reader) = mpsc::unbounded_channel();
+        let (frames, mut responses) = mpsc::unbounded_channel();
+        requests.send(hello()).unwrap();
+        drop(requests);
+        host.clone()
+            .local_owner_connection(
+                Reader(reader),
+                Writer {
+                    frames,
+                    gate: None,
+                    fail: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(receive(&mut responses).await["kind"], "accepted");
+    };
+    connect().await;
+    let expiry = host.wait_until_idle(Duration::from_secs(10), Duration::from_millis(50));
+    tokio::pin!(expiry);
+    assert!(futures_util::poll!(&mut expiry).is_pending());
+    // This future is deliberately not spawned: the complete second connection
+    // occurs between its polls, irrespective of scheduler speed. Sleeping only
+    // ages the old deadline and its 100ms timer; it does not guess connection state.
+    connect().await;
+    tokio::time::sleep(Duration::from_millis(110)).await;
+    assert!(futures_util::poll!(&mut expiry).is_pending());
+    tokio::time::sleep(Duration::from_millis(110)).await;
+    assert!(futures_util::poll!(&mut expiry).is_ready());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_abandoned() {
     for fail in [false, true] {
@@ -103,6 +136,9 @@ async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_aba
         .await
         .expect("unused Host retained the root");
         let host = Host::open(owner).await.unwrap();
+        if !fail {
+            short_connections_reset_idle_expiry(&host).await;
+        }
         #[cfg(unix)]
         let endpoint = directory.path().join("h.sock");
         #[cfg(windows)]

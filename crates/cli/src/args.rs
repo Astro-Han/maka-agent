@@ -55,10 +55,10 @@ enum HostCommand {
     Activate(crate::deployment::Activate),
     /// Connect an installed Host to stdin/stdout using the client wire protocol.
     Connect(crate::deployment::Connect),
-    /// Update a deployment to this executable at a safe boundary.
+    /// Update code and optional deployment configuration at a safe boundary.
     Update(crate::deployment::Update),
     /// Finish an interrupted deployment update without choosing another target.
-    Reconcile(crate::deployment::Update),
+    Reconcile(crate::deployment::Expected),
     /// Stop a deployment without changing its configuration or pending update.
     Stop(crate::deployment::Control),
     /// Restart the current deployment without applying a pending update.
@@ -120,8 +120,8 @@ impl Cli {
             Command::Host(HostCommand::Install(args)) => args.run().await,
             Command::Host(HostCommand::Activate(args)) => args.run().await,
             Command::Host(HostCommand::Connect(args)) => args.run().await,
-            Command::Host(HostCommand::Update(args)) => args.run(false).await,
-            Command::Host(HostCommand::Reconcile(args)) => args.run(true).await,
+            Command::Host(HostCommand::Update(args)) => args.run().await,
+            Command::Host(HostCommand::Reconcile(args)) => args.reconcile().await,
             Command::Host(HostCommand::Stop(args)) => {
                 args.run(crate::deployment::ControlAction::Stop).await
             }

@@ -81,12 +81,14 @@ impl Candidate {
             super::serve::global_instructions()?,
             HostOptions {
                 skill_home: super::serve::home_directory()?,
+                project_directory_roots: deployment
+                    .as_ref()
+                    .and_then(|deployment| deployment.project_directory_roots.clone()),
                 generation: deployment
                     .as_ref()
                     .map(|deployment| deployment.generation())
                     .or(self.generation),
                 handshake_timeout: Duration::from_millis(self.handshake_timeout_ms),
-                ..HostOptions::default()
             },
         )
         .await?;

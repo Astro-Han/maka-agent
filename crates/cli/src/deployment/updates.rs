@@ -70,7 +70,7 @@ pub(super) async fn prepare(
 pub(super) async fn commit(
     directory: &Path,
     lease: Arc<FileLease>,
-    owner: RootOwner,
+    owner: Arc<RootOwner>,
     expected: Deployment,
     target: Deployment,
 ) -> Result<(), HostError> {
@@ -80,7 +80,7 @@ pub(super) async fn commit(
     }
     // Keep both authorities in the worker through actual database close, including
     // a dropped caller, a failed COMMIT or a queued transaction rollback.
-    let connection = store::open_writer(directory, lease, Some(Arc::new(owner))).await?;
+    let connection = store::open_writer(directory, lease, Some(owner)).await?;
     let result = connection
         .run(move |connection| {
             Box::pin(async move {
@@ -111,11 +111,18 @@ pub(super) fn validate_target(current: &Deployment, target: &Deployment) -> Resu
     let mut expected = target.clone();
     expected.executable = current.executable.clone();
     expected.sha256 = current.sha256.clone();
+    expected.mode = current.mode;
+    expected.websocket = current.websocket;
+    expected.project_directory_roots = current.project_directory_roots.clone();
     expected.config_revision = current.config_revision;
     if &expected != current
         || current.config_revision >= 9_007_199_254_740_991
         || target.config_revision != current.config_revision + 1
-        || target.sha256 == current.sha256
+        || (target.sha256 == current.sha256
+            && target.mode == current.mode
+            && target.websocket == current.websocket
+            && target.project_directory_roots == current.project_directory_roots)
+        || serde_json::to_vec(target)?.len() > 65_536
     {
         return Err(conflict());
     }
@@ -171,6 +178,7 @@ mod tests {
             sha256: "a".repeat(64),
             mode: Mode::OnDemand,
             websocket: "127.0.0.1:0".parse().unwrap(),
+            project_directory_roots: None,
             admission: super::super::Admission::Active,
         };
         store::install(&directory, lease.clone(), owner, current.clone())
@@ -178,8 +186,9 @@ mod tests {
             .unwrap();
         let mut target = current.clone();
         target.config_revision += 1;
-        target.sha256 = "b".repeat(64);
-        target.executable = package::path(&directory, &target.sha256);
+        // A configuration-only target has the same executable, but still
+        // requires the exact pending receipt and writer-held atomic cut.
+        target.project_directory_roots = Some(Vec::new());
         prepare(&directory, lease.clone(), current.clone(), target.clone())
             .await
             .unwrap();
@@ -216,7 +225,7 @@ mod tests {
             commit(
                 &directory,
                 lease.clone(),
-                owner,
+                Arc::new(owner),
                 current.clone(),
                 target.clone()
             )
@@ -244,9 +253,15 @@ mod tests {
             .await
             .unwrap();
         writer.close().await.unwrap();
-        commit(&directory, lease.clone(), owner, current, target.clone())
-            .await
-            .unwrap();
+        commit(
+            &directory,
+            lease.clone(),
+            Arc::new(owner),
+            current,
+            target.clone(),
+        )
+        .await
+        .unwrap();
         // Uninstall cancels pending intent atomically, but retains a tombstone.
         // Only explicit reinstallation can grant a fresh deployment identity.
         let mut pending = target.clone();
