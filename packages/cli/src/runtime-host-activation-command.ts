@@ -27,18 +27,41 @@ import {
 import {
   RUNTIME_HOST_ACTIVATION_ERROR_MESSAGE_MAX_BYTES,
   encodeRuntimeHostActivationFrame,
+  prepareRuntimeHostManagedRoot,
 } from '@maka/runtime-host/operator';
 import { reconcileRuntimeHostUpdateOnActivation } from './runtime-host-update-reconciliation.js';
+import { resolveRecoverableRuntimeHostManagedDeployment } from './runtime-host-lifecycle-transaction.js';
+import {
+  convergeRuntimeHostManagedOperator,
+  verifyRuntimeHostManagedOperator,
+  resolveRuntimeHostManagedControlRoot,
+} from './runtime-host-managed-deployment.js';
+import { resolveRuntimeHostLifecycleProvider } from './runtime-host-service-management-command.js';
+import { withRuntimeHostManagedServiceDeploymentLock } from './runtime-host-service-manager.js';
 
 export interface RuntimeHostManagedActivationCliOptions {
   readonly rootId: string;
   readonly repairRootAfterRemount?: true;
 }
 
-export function activateRuntimeHostManagedDeploymentWithReconciliation(
+export async function activateRuntimeHostManagedDeploymentWithReconciliation(
   input: ActivateRuntimeHostManagedDeploymentInput,
   options: { readonly deploymentLockHeld?: boolean } = {},
 ) {
+  const recover = async () => {
+    await prepareRuntimeHostManagedRoot(input.rootId, input.authority);
+    await resolveRecoverableRuntimeHostManagedDeployment(input.rootId, {
+      convergeOperator: convergeRuntimeHostManagedOperator,
+      verifyOperator: verifyRuntimeHostManagedOperator,
+      resolveProvider: resolveRuntimeHostLifecycleProvider,
+    });
+  };
+  if (options.deploymentLockHeld) await recover();
+  else
+    await withRuntimeHostManagedServiceDeploymentLock(
+      resolveRuntimeHostManagedControlRoot(input.rootId),
+      recover,
+    );
   return activateRuntimeHostManagedDeployment(input, {
     reconcileActivation: (config) => reconcileRuntimeHostUpdateOnActivation(config, options),
   });

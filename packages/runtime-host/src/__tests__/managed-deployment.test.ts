@@ -261,7 +261,7 @@ test('claims one canonical deployment while fencing State Root ownership', async
   );
 });
 
-test('deployment lookup resumes a legacy cutover even after its locator was published', async (t) => {
+test('deployment lookup cannot change a legacy root even after its locator was published', async (t) => {
   const input = await fixture(t);
   const legacy = join(resolveRuntimeHostManagedDeploymentAuthorityRoot(), input.capability.rootId);
   t.after(() => rm(legacy, { recursive: true, force: true }));
@@ -277,11 +277,32 @@ test('deployment lookup resumes a legacy cutover even after its locator was publ
   const markerPath = join(input.capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
   const marker = JSON.parse(await readFile(markerPath, 'utf8'));
   await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
-  const resolved = await resolveRuntimeHostManagedDeploymentAuthority(input.capability.rootId, {
+  await assert.rejects(resolveRuntimeHostManagedDeploymentAuthority(input.capability.rootId), {
+    code: 'legacy_root_requires_migration',
+  });
+  assert.deepEqual(JSON.parse(await readFile(markerPath, 'utf8')), { ...marker, schemaVersion: 1 });
+  assert.equal(
+    await readFile(join(legacy, 'runtime-host-deployment.json'), 'utf8'),
+    JSON.stringify(input.config),
+  );
+});
+
+test('managed lookup repairs a known remount without depending on a resolver error code', async (t) => {
+  const input = await fixture(t);
+  await claimRuntimeHostManagedDeployment(input.capability, input.config, input.authority);
+  const path = join(input.capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+  const marker = JSON.parse(await readFile(path, 'utf8'));
+  marker.rootIdentity.dev = (BigInt(marker.rootIdentity.dev) + 1n).toString();
+  await writeFile(path, JSON.stringify(marker));
+  await assert.rejects(
+    resolveRuntimeHostManagedDeploymentAuthority(input.capability.rootId, input.authority),
+    { code: 'root_identity_changed' },
+  );
+  const repaired = await resolveRuntimeHostManagedDeploymentAuthority(input.capability.rootId, {
+    ...input.authority,
     repairRootAfterRemount: true,
   });
-  assert.deepEqual(resolved?.record, input.config);
-  assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 2);
+  assert.deepEqual(repaired?.record, input.config);
 });
 
 test('deployment transitions fail closed and preserve exact commit or rollback authority', async (t) => {

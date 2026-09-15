@@ -20,10 +20,11 @@
 import {
   prepareStorageRootIdentityRepair,
   repairStorageRootIdentity,
-  resolveStorageRoot,
   StorageRootAuthorityError,
   type StorageRootCapability,
 } from '@maka/storage/root-authority';
+
+import { prepareRuntimeHostRoot } from '@maka/runtime-host/operator';
 
 export interface DesktopStorageRootRecovery {
   confirmRepair(): Promise<boolean>;
@@ -34,7 +35,7 @@ export async function resolveDesktopStorageRoot(
   recovery: DesktopStorageRootRecovery,
 ): Promise<StorageRootCapability<'interactive'> | undefined> {
   try {
-    return await resolveStorageRoot({ path, kind: 'interactive' });
+    return await prepareRuntimeHostRoot(path);
   } catch (error) {
     if (
       !(error instanceof StorageRootAuthorityError) ||
@@ -48,7 +49,8 @@ export async function resolveDesktopStorageRoot(
     path,
     kind: 'interactive',
   });
-  if (!candidate) return resolveStorageRoot({ path, kind: 'interactive' });
+  if (!candidate) return prepareRuntimeHostRoot(path);
   if (!(await recovery.confirmRepair())) return undefined;
-  return repairStorageRootIdentity(candidate);
+  await repairStorageRootIdentity(candidate);
+  return prepareRuntimeHostRoot(path);
 }

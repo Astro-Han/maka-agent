@@ -25,11 +25,9 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   type StateRootOwner,
   type StorageRootCapability,
-  StorageRootAuthorityError,
   assertStorageRootLease,
   repairStorageRootAfterRemount,
   resolveExistingStorageRoot,
-  resolveStorageRoot,
   resolveRootOwnershipNamespace,
   tryAcquireStateRootOwner,
 } from '@maka/storage/root-authority';
@@ -487,6 +485,7 @@ export function resolveRuntimeHostManagedDeploymentAuthorityRoot(
 export function resolveRuntimeHostManagedDeploymentConfigPath(rootPath: string): string {
   return join(
     resolveRootOwnershipNamespace(rootPath),
+    'state',
     'deployment',
     RUNTIME_HOST_MANAGED_DEPLOYMENT_CONFIG_FILE,
   );
@@ -573,16 +572,10 @@ export async function resolveRuntimeHostManagedDeployment(
   return { capability, config: record };
 }
 
-export async function resolveRuntimeHostManagedDeploymentAuthority(
+export async function locateRuntimeHostManagedRoot(
   rootId: string,
   options: RuntimeHostManagedDeploymentAuthorityOptions = {},
-): Promise<
-  | {
-      readonly capability: StorageRootCapability<'interactive'>;
-      readonly record: RuntimeHostManagedDeploymentAuthorityRecord;
-    }
-  | undefined
-> {
+): Promise<{ rootPath: string; legacy: boolean } | undefined> {
   requireRootId(rootId);
   const locationPath = resolveManagedRootLocationPath(rootId, options);
   let value = await readBoundedJson(locationPath);
@@ -609,36 +602,35 @@ export async function resolveRuntimeHostManagedDeploymentAuthority(
       'The Runtime Host managed deployment record has an invalid Root identity',
     );
   }
-  let capability: StorageRootCapability<'interactive'>;
-  try {
-    capability = await resolveExistingStorageRoot({
-      path: initial.root.path,
-      kind: 'interactive',
-      expectedRootId: rootId,
-    });
-    // Legacy records only locate an upgrade; they cannot restore a lost v2 index.
-    if (legacyLocation) return undefined;
-  } catch (error) {
-    if (!(error instanceof StorageRootAuthorityError)) throw error;
-    if (error.code === 'legacy_root_requires_migration') {
-      await resolveStorageRoot({ path: initial.root.path, kind: 'interactive' });
-    } else if (
-      error.code === 'root_identity_collision' &&
-      options.repairRootAfterRemount &&
-      !legacyLocation
-    ) {
-      await repairStorageRootAfterRemount({
-        path: initial.root.path,
-        kind: 'interactive',
-        expectedRootId: rootId,
-      });
-    } else throw error;
-    capability = await resolveExistingStorageRoot({
+  return { rootPath: initial.root.path, legacy: legacyLocation };
+}
+
+export async function resolveRuntimeHostManagedDeploymentAuthority(
+  rootId: string,
+  options: RuntimeHostManagedDeploymentAuthorityOptions = {},
+): Promise<
+  | {
+      readonly capability: StorageRootCapability<'interactive'>;
+      readonly record: RuntimeHostManagedDeploymentAuthorityRecord;
+    }
+  | undefined
+> {
+  const location = await locateRuntimeHostManagedRoot(rootId, options);
+  if (!location) return undefined;
+  const initial = { root: { path: location.rootPath } };
+  if (options.repairRootAfterRemount) {
+    await repairStorageRootAfterRemount({
       path: initial.root.path,
       kind: 'interactive',
       expectedRootId: rootId,
     });
   }
+  const capability = await resolveExistingStorageRoot({
+    path: initial.root.path,
+    kind: 'interactive',
+    expectedRootId: rootId,
+  });
+  if (location.legacy) return undefined;
   const record = await readRuntimeHostManagedDeploymentAuthorityRecord(capability, options);
   if (!record) return undefined;
   return { capability, record };

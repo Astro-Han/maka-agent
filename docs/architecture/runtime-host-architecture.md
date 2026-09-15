@@ -100,9 +100,32 @@ Root capability acquisition canonicalizes the real path, then validates the root
 
 Write authority comes from an OS lock on a stable file inside the canonical physical root's `.maka-host` directory. All Clients of that root share one Host; independent physical roots have independent ownership. `rootId` remains protocol identity, not an account-wide or distributed mutex. Registration files, PIDs, sockets, health probes, and cache directories are discovery or observation data. Removing discovery caches cannot legitimately create a second writer.
 
-The root owns its complete persistent state. `.maka-host/data` contains plugin packages, composition, plugin state/secrets and access credentials. `.maka-host/deployment/runtime-host-deployment.json` is the sole managed deployment transaction record. `.maka-host/runtime/<rootId>` contains disposable registration, startup diagnostics and one-time credential deliveries. Owner and Artifact locks remain outside `runtime`. Short local socket paths can live in the system temporary directory. Ordinary fresh-root startup does not require an account home directory. Co-location does not make credentials or machine-specific deployment artifacts safe to export; backups must preserve their access restrictions.
+The root owns its complete persistent state. `.maka-host/state/data` contains plugin packages, composition, plugin state/secrets and access credentials. `.maka-host/state/deployment/runtime-host-deployment.json` is the sole managed deployment transaction record. `.maka-host/runtime/<rootId>` contains disposable registration, startup diagnostics and one-time credential deliveries. Owner and Artifact locks remain outside `runtime`. Short local socket paths can live in the system temporary directory. Ordinary fresh-root startup does not require an account home directory. Co-location does not make credentials or machine-specific deployment artifacts safe to export; backups must preserve their access restrictions.
 
-Marker schema 2 is the cutover boundary. Opening a schema-1 root for use acquires the new root lock and the legacy owner/Artifact locks, copies and syncs the old account-local state, and publishes schema 2 last. A busy old Host blocks migration. Interrupted staging is retried from the retained legacy files; those files are no longer read as authority after cutover. Old binaries reject schema 2, and steady-state ownership uses no compatibility lock. Upgrade while the root retains its recorded filesystem identity and while the legacy account directories are accessible. A copied or remounted schema-1 root must first be repaired using the previous version's explicit recovery path. After cutover, the existing schema-2 import/remount/repair paths apply. Downgrading requires restoring the complete pre-upgrade state, not editing the marker version.
+`prepareRuntimeHostRoot` is the single format upgrade entry. Ordinary Storage resolution and deployment lookup do not migrate. Storage owns marker validation, physical identity, locks and atomic publication; the Host owns legacy layout interpretation, snapshot validation and completion. Explicit identity repair preserves both legacy and in-progress formats and grants no business capability.
+
+Upgrade runs under the original root owner's account. Before takeover, a managed update prepares a package that can read the target format and retires the old Host through that installed package's lifecycle implementation. Active work follows the existing interruption policy. The new root lock and legacy owner/Artifact locks exclude writers. Missing writable legacy lock directories are created only for initial admission; an inaccessible account home is not required for a marker-only, never-initialized root. A populated root with missing legacy data is rejected before takeover.
+
+The first atomic marker publication changes schema 1 to schema 2 with an `upgrade` record binding a transaction ID and source plan. Both old binaries and new business readers reject this state. The Host copies the complete `state` container, validates its data and deployment, synchronizes files through Storage's cross-platform primitives, writes a completion receipt bound to that transaction, then atomically publishes the container. The second marker publication removes `upgrade`. A completed snapshot is reused after interruption even if the old cache has disappeared; incomplete staging is retried only from its recorded source and never silently replaced with empty data. Recovery does not rediscover the account home. Legacy files are retained but have no authority after completion; steady-state ownership holds no compatibility locks.
+
+The imported deployment uses the existing `complete_to` transaction when its target package changes. Normal managed activation resumes that transaction and invokes the exact package selected by the root record, even before the stable operator launcher has been updated. A failed new Host startup cannot roll back the data format to an incompatible binary. Downgrading requires restoring the complete pre-upgrade state, not editing the marker version.
+
+```mermaid
+flowchart TD
+  A[Startup / managed update] --> B{Root identity and format}
+  B -->|Identity mismatch| C[Explicit identity repair]
+  C --> B
+  B -->|Current| H[Acquire owner and recover deployment]
+  B -->|Legacy| D[Prepare compatible package and retire old Host]
+  D --> E[Acquire old and new locks; publish upgrade marker]
+  B -->|Upgrading| F[Resume recorded transaction]
+  E --> F
+  F --> G[Validate, sync and publish complete snapshot]
+  G --> I[Publish current-format marker]
+  I --> H
+  H --> J[Recover composition; publish ready]
+  J --> K[Drain work, close resources, release owner]
+```
 
 Closing a lease rejects new operations, waits for admitted operations, then releases the OS handles. Store facades receive that owner/lease; business code cannot bypass it by opening another database connection. The lock does not prove that every external descendant process exits with the Host.
 
