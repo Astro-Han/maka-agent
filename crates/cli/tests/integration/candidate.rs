@@ -254,6 +254,20 @@ impl CandidateFixture {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+
+    pub fn retire_registered(&self) {
+        if let Ok(bytes) = fs::read(&self.registration)
+            && let Ok(record) = serde_json::from_slice::<Value>(&bytes)
+            && let Some(epoch) = record["hostEpoch"].as_str()
+        {
+            // This fixture owns a fresh, random root; the CLI rechecks the live epoch.
+            let _ = Command::new(env!("CARGO_BIN_EXE_maka"))
+                .args(["host", "retire", "--root"])
+                .arg(&self.root)
+                .args(["--expected-host-epoch", epoch])
+                .output();
+        }
+    }
 }
 
 impl Drop for CandidateFixture {
@@ -262,6 +276,7 @@ impl Drop for CandidateFixture {
             let _ = child.kill();
             let _ = child.wait();
         }
+        self.retire_registered();
         let control = self.registration.parent().unwrap();
         let namespaces = RootNamespaces {
             ownership: self.lock.parent().unwrap().to_owned(),

@@ -18,13 +18,15 @@
  */
 
 use super::candidate::CandidateFixture;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use maka_event_log::root::{RootNamespaces, RootOwner};
 use serde_json::Value;
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
+    path::Path,
     process::{Command, Stdio},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[test]
@@ -150,6 +152,20 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             serde_json::from_slice::<Value>(&repeated.stdout).unwrap(),
             installed
         );
+        let mut activate = Command::new(executable);
+        activate.args([
+            "host",
+            "activate",
+            "--framed",
+            "--root-id",
+            &fixture.root_id,
+        ]);
+        let connected = activate.output().unwrap();
+        assert!(connected.status.success(), "{connected:?}");
+        let connected = decode_activation(&connected.stdout);
+        assert_eq!(connected["hostEpoch"], registration["hostEpoch"]);
+        assert_eq!(connected["pid"], registration["pid"]);
+        assert_eq!(connected["endpoint"]["port"], address.port());
         assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
         let retired = Command::new(env!("CARGO_BIN_EXE_maka"))
             .args(["host", "retire", "--root"])
@@ -163,5 +179,52 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         );
         assert!(fixture.wait_for_exit().success());
         drop(RootOwner::open(&fixture.root, &namespaces).unwrap());
+
+        let started = Instant::now();
+        let activated = activate.output().unwrap();
+        if !candidate {
+            assert!(
+                !activated.status.success(),
+                "must not bypass service ownership"
+            );
+            assert_eq!(decode_activation(&activated.stdout)["kind"], "error");
+            continue;
+        }
+        assert!(activated.status.success(), "{activated:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "inherited capture pipes kept activation alive"
+        );
+        let frame = decode_activation(&activated.stdout);
+        assert_ne!(frame["hostEpoch"], registration["hostEpoch"]);
+        assert_eq!(frame["deploymentId"], installed["deploymentId"]);
+        // The operator has exited; a relay still has time to establish its client.
+        std::thread::sleep(Duration::from_millis(1100));
+        let client = Command::new("node")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+            .arg("--activation-frame")
+            .arg(String::from_utf8(activated.stdout).unwrap())
+            .arg("--root")
+            .arg(&fixture.root)
+            .output()
+            .unwrap();
+        assert!(
+            client.status.success(),
+            "{}",
+            String::from_utf8_lossy(&client.stderr)
+        );
+        let reused = activate.output().unwrap();
+        assert!(reused.status.success(), "{reused:?}");
+        assert_eq!(decode_activation(&reused.stdout), frame);
+        fixture.retire_registered();
     }
+}
+
+fn decode_activation(bytes: &[u8]) -> Value {
+    let line = std::str::from_utf8(bytes).unwrap();
+    let encoded = line
+        .trim()
+        .strip_prefix("MAKA_RUNTIME_HOST_ACTIVATION_V1 ")
+        .unwrap();
+    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded).unwrap()).unwrap()
 }

@@ -55,8 +55,10 @@ socket on Linux/macOS or a private named pipe on Windows. An optional
 
 `host install --root <directory>` pins the current executable and on-demand policy;
 `--mode supervised` selects persistent serving. Only the returned `executable`
-may start that managed root. Installation does not yet register an OS service or
-provide automatic activation/updates. Deployment authority lives in account-level
+may start that managed root. `host activate --root-id <rootId> --framed` reuses a ready
+Host or starts the pinned on-demand executable; supervised mode requires a running
+service. Installation does not yet register OS services or automate updates.
+Deployment authority lives in account-level
 SQLite, outside the State Root; startup checks it before database migrations.
 
 The single binary also provides `host candidate` for Desktop-owned startup,

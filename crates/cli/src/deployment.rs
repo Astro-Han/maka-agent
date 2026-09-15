@@ -17,8 +17,10 @@
  * under the License.
  */
 
+mod activation;
 mod package;
 mod store;
+pub(super) use activation::Activate;
 
 use clap::{Args, ValueEnum};
 use maka_event_log::root::{self, FileLease, RootLocation, RootNamespaces, RootOwner};
@@ -77,7 +79,7 @@ impl Deployment {
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             || self.executable != package::path(directory, &self.sha256)
-            || !self.websocket.ip().is_loopback()
+            || self.websocket.ip() != std::net::Ipv4Addr::LOCALHOST
         {
             return Err("deployment does not match its native root or package".into());
         }
@@ -98,8 +100,8 @@ pub(super) fn directory(root_id: &str) -> Result<PathBuf, HostError> {
 
 impl Install {
     pub async fn run(self) -> Result<(), HostError> {
-        if !self.websocket.ip().is_loopback() {
-            return Err("managed Host listener must be loopback".into());
+        if self.websocket.ip() != std::net::Ipv4Addr::LOCALHOST {
+            return Err("managed Host listener must use 127.0.0.1".into());
         }
         let root_path = self.root.root;
         let (root, directory, lease) = tokio::task::spawn_blocking(move || {

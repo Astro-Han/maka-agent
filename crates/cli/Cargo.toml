@@ -29,6 +29,7 @@ name = "maka"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22"
 clap.workspace = true
 maka-runtime-host.workspace = true
 maka-runtime.workspace = true
@@ -40,7 +41,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["process"] }
 tokio-util.workspace = true
 uuid.workspace = true
 tempfile.workspace = true

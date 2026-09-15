@@ -100,11 +100,16 @@ impl Candidate {
         )?;
         let idle_host = host.clone();
         let idle_cancel = cancel.clone();
+        let idle_grace = if deployment.is_some() {
+            30_000
+        } else {
+            self.idle_grace_ms
+        };
         let expiry = tokio::spawn(async move {
             idle_host
                 .wait_until_idle(
                     Duration::from_millis(self.initial_connection_timeout_ms),
-                    Duration::from_millis(self.idle_grace_ms),
+                    Duration::from_millis(idle_grace),
                 )
                 .await;
             idle_cancel.cancel();

@@ -20,7 +20,7 @@
 use maka_event_log::root::{self, RootNamespaces};
 use maka_protocol::{
     COMPATIBILITY_EPOCH, COMPOSITION_ID, Operation, Outcome, Request,
-    handshake::{HostHandshake, Lifecycle, decode_host_handshake},
+    handshake::{ClientHello, HostHandshake, Lifecycle, decode_host_handshake},
     host::{RetirementInput, RetirementResult, decode_retirement_result},
 };
 use maka_runtime_host::server::{HostError, HostOperations};
@@ -29,7 +29,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     io::Read,
-    num::NonZeroU32,
+    num::{NonZeroU16, NonZeroU32},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -49,6 +49,14 @@ struct Discovery {
     host_epoch: String,
     endpoint: PathBuf,
     pid: NonZeroU32,
+    #[serde(default)]
+    websocket_endpoints: Vec<String>,
+}
+
+pub(super) struct LiveHost {
+    pub epoch: String,
+    pub pid: NonZeroU32,
+    pub port: NonZeroU16,
 }
 
 pub(super) struct HostClient {
@@ -58,7 +66,7 @@ pub(super) struct HostClient {
 }
 
 impl HostClient {
-    pub async fn connect(root: &Path) -> Result<Self, HostError> {
+    pub async fn connect(root: &Path, generation: Option<&str>) -> Result<Self, HostError> {
         let root = root.to_owned();
         tokio::time::timeout(Duration::from_secs(5), async move {
             let discovery = tokio::task::spawn_blocking(move || read_discovery(&root)).await??;
@@ -71,31 +79,51 @@ impl HostClient {
                     match ClientOptions::new().open(&discovery.endpoint) {
                         Ok(stream) => break stream,
                         // An existing pipe instance may be between accepts.
-                        Err(error) if error.raw_os_error() == Some(231) =>
-                            tokio::time::sleep(Duration::from_millis(10)).await,
+                        Err(error) if error.raw_os_error() == Some(231) => {
+                            tokio::time::sleep(Duration::from_millis(10)).await
+                        }
                         Err(error) => return Err(error.into()),
                     }
                 }
             };
-            let (mut reader, mut writer) = maka_transport::ndjson::split(stream, CancellationToken::new());
-            writer.write(&json!({
-                "kind":"hello", "clientInstanceId":format!("maka-operator-{}", uuid::Uuid::new_v4()),
-                "surface":"cli", "activitySnapshotVersion":2,
-                "protocolMin":0, "protocolMax":0, "compatibilityEpoch":COMPATIBILITY_EPOCH,
-                "compositionId":COMPOSITION_ID,
-            })).await?;
+            let (mut reader, mut writer) =
+                maka_transport::ndjson::split(stream, CancellationToken::new());
+            writer
+                .write(&ClientHello {
+                    client_instance_id: format!("maka-operator-{}", uuid::Uuid::new_v4()),
+                    activity_snapshot_version: Some(2),
+                    protocol_min: 0,
+                    protocol_max: 0,
+                    compatibility_epoch: COMPATIBILITY_EPOCH,
+                    composition_id: COMPOSITION_ID.into(),
+                    generation: generation.map(str::to_owned),
+                    takeover: None,
+                })
+                .await?;
             let hello = reader.read().await?.ok_or("Host closed before handshake")?;
             match decode_host_handshake(&hello)? {
                 HostHandshake::Accepted {
-                    root_id, host_epoch, composition_id, selected_protocol,
-                    compatibility_epoch, state: Lifecycle::Ready, ..
-                } if root_id == discovery.root_id && host_epoch == discovery.host_epoch
-                    && composition_id == COMPOSITION_ID && selected_protocol == 0
+                    root_id,
+                    host_epoch,
+                    composition_id,
+                    selected_protocol,
+                    compatibility_epoch,
+                    state: Lifecycle::Ready,
+                    ..
+                } if root_id == discovery.root_id
+                    && host_epoch == discovery.host_epoch
+                    && composition_id == COMPOSITION_ID
+                    && selected_protocol == 0
                     && compatibility_epoch == COMPATIBILITY_EPOCH => {}
                 _ => return Err("Host discovery is stale, incompatible or not ready".into()),
             }
-            Ok(Self { discovery, reader, writer })
-        }).await?
+            Ok(Self {
+                discovery,
+                reader,
+                writer,
+            })
+        })
+        .await?
     }
 
     pub async fn status(&mut self) -> Result<Value, HostError> {
@@ -104,6 +132,44 @@ impl HostClient {
             return Err("Host epoch changed during status query".into());
         }
         Ok(result)
+    }
+
+    pub async fn live_host(&mut self, configured_port: u16) -> Result<LiveHost, HostError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Identity {
+            host_epoch: String,
+            pid: NonZeroU32,
+            protocol_version: u64,
+            compatibility_epoch: u64,
+        }
+        let result = self
+            .request(Operation::HostDiagnosticsQuery, json!({}))
+            .await?;
+        let identity: Identity = serde_json::from_value(result)?;
+        if identity.host_epoch != self.discovery.host_epoch
+            || identity.pid != self.discovery.pid
+            || identity.protocol_version != 0
+            || identity.compatibility_epoch != COMPATIBILITY_EPOCH
+        {
+            return Err("live Host diagnostics disagree with discovery".into());
+        }
+        let [endpoint] = self.discovery.websocket_endpoints.as_slice() else {
+            return Err("managed Host must publish exactly one WebSocket endpoint".into());
+        };
+        let port: NonZeroU16 = endpoint
+            .strip_prefix("ws://127.0.0.1:")
+            .and_then(|value| value.strip_suffix("/runtime-host"))
+            .ok_or("managed Host published an invalid WebSocket endpoint")?
+            .parse()?;
+        if configured_port != 0 && configured_port != port.get() {
+            return Err("managed Host listener differs from deployment configuration".into());
+        }
+        Ok(LiveHost {
+            epoch: identity.host_epoch,
+            pid: identity.pid,
+            port,
+        })
     }
 
     pub async fn retire(

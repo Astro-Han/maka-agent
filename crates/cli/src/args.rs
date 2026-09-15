@@ -51,6 +51,8 @@ enum HostCommand {
     Init(Root),
     /// Install this native executable as the root's managed Host.
     Install(crate::deployment::Install),
+    /// Activate an installed Host and report its verified loopback endpoint.
+    Activate(crate::deployment::Activate),
     /// Query the existing Host without opening its State Root for writing.
     Status(Root),
     /// Retire the exact current Host, preserving work at safe step boundaries.
@@ -99,6 +101,7 @@ impl Cli {
         match self.command {
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
             Command::Host(HostCommand::Install(args)) => args.run().await,
+            Command::Host(HostCommand::Activate(args)) => args.run().await,
             Command::Host(HostCommand::Init(args)) => {
                 let root_id = initialize(&args.root, &RootNamespaces::for_current_account()?)?;
                 println!("{}", serde_json::json!({"rootId": root_id}));
@@ -108,7 +111,7 @@ impl Cli {
                 serve::run(&root.root, websocket).await
             }
             Command::Host(HostCommand::Status(root)) => {
-                let mut client = crate::host_client::HostClient::connect(&root.root).await?;
+                let mut client = crate::host_client::HostClient::connect(&root.root, None).await?;
                 let status = client.status().await?;
                 drop(client);
                 println!("{}", serde_json::to_string(&status)?);
@@ -119,7 +122,7 @@ impl Cli {
                 expected_host_epoch,
                 allow_interrupt_active_tasks,
             }) => {
-                let mut client = crate::host_client::HostClient::connect(&root.root).await?;
+                let mut client = crate::host_client::HostClient::connect(&root.root, None).await?;
                 let result = client
                     .retire(expected_host_epoch.as_deref(), allow_interrupt_active_tasks)
                     .await?;

@@ -3937,6 +3937,7 @@ dependencies = [
 name = "maka-cli"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "libc",
  "maka-event-log",

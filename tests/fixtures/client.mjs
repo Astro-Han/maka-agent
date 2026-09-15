@@ -35,6 +35,7 @@ const entries = [
   ['--onboarding-workspace', 'client-onboarding-entry.mjs'],
   ['--project-workspace', 'client-project-entry.mjs'],
   ['--native-candidate', 'client-candidate-entry.mjs'],
+  ['--activation-frame', 'client-activation-entry.mjs'],
   ['--system-prompt-workspace', 'client-system-prompt-entry.mjs'],
   ['--model-overrides-workspace', 'client-model-overrides-entry.mjs'],
   ['--runtime-policy-workspace', 'client-runtime-policy-entry.mjs'],
