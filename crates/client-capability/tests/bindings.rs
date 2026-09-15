@@ -52,6 +52,115 @@ fn attach(
 }
 
 #[test]
+fn restart_restores_identity_ceiling_without_discovery_or_call_pinning() {
+    for initiating in [false, true] {
+        let mut old = Registry::default();
+        let owner = identity("desktop");
+        let (connection, _, _out) = attach(&mut old, owner.clone());
+        old.replace(connection, manifest("old", &["session", "turn", "call"]))
+            .unwrap();
+        let (prepared, _) = old
+            .prepare_bindings("s", initiating.then_some(connection), BindingMode::Strict)
+            .unwrap();
+        let composition =
+            serde_json::from_value(serde_json::to_value(prepared.composition()).unwrap()).unwrap();
+        drop(old);
+
+        let mut registry = Registry::default();
+        assert!(matches!(
+            registry.restore_bindings("s", &composition),
+            Err(BindingError::Lost)
+        ));
+        let (other, _, _other_out) = attach(&mut registry, identity("another-desktop"));
+        registry
+            .replace(other, manifest("other", &["session", "turn", "call"]))
+            .unwrap();
+        assert!(matches!(
+            registry.restore_bindings("s", &composition),
+            Err(BindingError::Lost)
+        ));
+        let (connection, _, _out) = attach(&mut registry, owner);
+        registry
+            .replace(
+                connection,
+                manifest("current", &["session", "turn", "call"]),
+            )
+            .unwrap();
+        let (prepared, _) = registry.restore_bindings("s", &composition).unwrap();
+        registry
+            .replace(
+                connection,
+                manifest("replaced", &["session", "turn", "call"]),
+            )
+            .unwrap();
+        assert!(!registry.commit_restored_bindings(prepared).unwrap());
+        let (prepared, restored) = registry.restore_bindings("s", &composition).unwrap();
+        assert!(registry.commit_restored_bindings(prepared).unwrap());
+        assert_eq!(restored.offers().len(), 3);
+        let call = restored
+            .offers()
+            .iter()
+            .find(|o| o.offer().offer_id == "call")
+            .unwrap();
+        if initiating {
+            assert_eq!(call.resolve(&registry).unwrap().connection_id(), connection);
+        } else {
+            assert!(matches!(
+                call.resolve(&registry),
+                Err(BindingError::Ambiguous)
+            ));
+        }
+        registry.detach(connection);
+        if initiating {
+            assert!(matches!(call.resolve(&registry), Err(BindingError::Lost)));
+        } else {
+            assert_eq!(call.resolve(&registry).unwrap().connection_id(), other);
+        }
+        assert!(
+            restored
+                .offers()
+                .iter()
+                .filter(|o| o.offer().affinity != maka_runtime::capability::Affinity::Call)
+                .all(|o| matches!(o.resolve(&registry), Err(BindingError::Lost)))
+        );
+    }
+
+    // A lost owner is absent from this Run's tools but remains an authentication
+    // boundary, even if it reconnects before or after restoration.
+    let mut old = Registry::default();
+    let owner = identity("lost");
+    let (connection, _, _out) = attach(&mut old, owner.clone());
+    old.replace(connection, manifest("old", &["session"]))
+        .unwrap();
+    old.bind_session("s", Some(connection), BindingMode::Strict)
+        .unwrap();
+    old.detach(connection);
+    let (prepared, _) = old
+        .prepare_bindings("s", None, BindingMode::Degrade)
+        .unwrap();
+    let proof = prepared.composition();
+    assert_eq!(proof.session_bindings.len(), 1);
+    assert!(proof.offers.is_empty());
+    drop(old);
+    let mut registry = Registry::default();
+    let (prepared, restored) = registry.restore_bindings("s", &proof).unwrap();
+    assert!(registry.commit_restored_bindings(prepared).unwrap());
+    let mut changed = owner.clone();
+    changed.credential_bound_client_instance_id = Some("lost".into());
+    let (endpoint, _out) = Endpoint::channel(32);
+    assert!(registry.attach(Uuid::new_v4(), changed, endpoint).is_err());
+    let (connection, _, _out) = attach(&mut registry, owner);
+    registry
+        .replace(connection, manifest("new", &["session"]))
+        .unwrap();
+    assert!(restored.offers().is_empty());
+    assert_eq!(registry.snapshot("s").unwrap().offers().len(), 1);
+    let (prepared, restored) = registry.restore_bindings("s", &proof).unwrap();
+    assert!(registry.commit_restored_bindings(prepared).unwrap());
+    assert!(restored.offers().is_empty());
+}
+
+#[test]
 fn session_loss_restore_retirement_and_run_pins_are_distinct() {
     let mut registry = Registry::default();
     let owner = identity("desktop");
@@ -251,7 +360,7 @@ fn required_tools_commit_only_one_session_owner_and_failed_selection_leaves_no_b
     registry
         .replace(second, offers("complete", "session", &["control", "tasks"]))
         .unwrap();
-    let snapshot = registry
+    let (snapshot, _) = registry
         .bind_required_tools("fresh", second, &required)
         .unwrap();
     assert_eq!(snapshot.offers().len(), 2);

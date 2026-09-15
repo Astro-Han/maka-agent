@@ -123,20 +123,29 @@ impl Capabilities {
         required: &[&str],
         cwd: String,
         interactions: Arc<dyn maka_tools::ClientInteractions>,
-    ) -> Result<Vec<ToolRegistration>, BindingError> {
-        let snapshot = self
+    ) -> Result<
+        (
+            Vec<ToolRegistration>,
+            maka_runtime::capability::ClientComposition,
+        ),
+        BindingError,
+    > {
+        let (snapshot, composition) = self
             .registry
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .bind_required_tools(session_id, connection_id, required)?;
-        Ok(ClientTools::new(
-            snapshot,
-            self.registry.clone(),
-            self.broker.clone(),
-            cwd,
-            interactions,
-        )
-        .registrations())
+        Ok((
+            ClientTools::new(
+                snapshot,
+                self.registry.clone(),
+                self.broker.clone(),
+                cwd,
+                interactions,
+            )
+            .registrations(),
+            composition,
+        ))
     }
 
     pub(super) fn begin_drain(&self) {

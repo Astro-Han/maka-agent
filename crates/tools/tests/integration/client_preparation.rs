@@ -149,6 +149,7 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
     let configuration = InvocationConfiguration {
         workspace_identity: None,
         system_prompt: None,
+        tool_composition: None,
         cwd: directory.path().to_str().unwrap().into(),
         permission_mode: if cut == Cut::Explore {
             PermissionMode::Explore

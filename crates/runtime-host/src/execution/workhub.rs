@@ -183,7 +183,7 @@ impl Executions {
         let content = input.content();
         self.validate_message_content(COORDINATION_SESSION_ID, &content, root_id)
             .await?;
-        let tools = profile::tools(self, &session.configuration, connection_id)?;
+        let (tools, composition) = profile::tools(self, &session.configuration, connection_id)?;
         let provider = provider::resolve(
             &self.configuration,
             &self.oauth,
@@ -197,6 +197,7 @@ impl Executions {
             .await
             .map_err(internal)?;
         configuration.system_prompt = Some(profile::prompt());
+        configuration.tool_composition = Some(composition);
         let run = RunInput {
             invocation: Invocation {
                 session_id: COORDINATION_SESSION_ID.into(),

@@ -30,6 +30,7 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
         Fact::InvocationOpened {
             configuration: Some(InvocationConfiguration {
                 system_prompt: None,
+                tool_composition: None,
                 cwd: ".".into(),
                 workspace_identity: Some(
                     WorkspaceIdentity::from_marker_id("ef751105-55b5-4d65-a364-646281586a17")

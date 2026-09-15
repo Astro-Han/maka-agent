@@ -77,6 +77,65 @@ fn prepare(catalog: &Catalog<'_>, text: &str, ids: &[String]) -> Value {
 }
 
 #[test]
+fn execution_fingerprint_covers_frozen_content_and_resolution_inputs() {
+    let mut discovery = DiscoverySnapshot {
+        inventory: vec![skill("review", "Review", "old instructions")],
+        rejected: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let mut preferences = Preferences::Available(BTreeMap::new());
+    let mut host = HostCapabilities {
+        tools: ["Read".into(), "Shell".into()].into(),
+        capabilities: ["network".into(), "files".into()].into(),
+    };
+    let digest =
+        |discovery: &DiscoverySnapshot, preferences: &Preferences, host: &HostCapabilities| {
+            Catalog {
+                discovery,
+                preferences,
+                host,
+            }
+            .fingerprint()
+            .unwrap()
+        };
+    let original = digest(&discovery, &preferences, &host);
+    host.tools = ["Shell".into(), "Read".into()].into();
+    host.capabilities = ["files".into(), "network".into()].into();
+    assert_eq!(digest(&discovery, &preferences, &host), original);
+    assert_ne!(
+        digest(&discovery, &Preferences::Unavailable, &host),
+        original
+    );
+
+    // Discovery computes this digest over the complete SKILL.md bytes.
+    discovery.inventory[0].document.body = "new instructions".into();
+    discovery.inventory[0].content_sha256 =
+        maka_runtime::artifact::content_digest(b"new SKILL.md bytes");
+    let content = digest(&discovery, &preferences, &host);
+    assert_ne!(
+        content, original,
+        "unchanged tool schemas cannot hide changed instructions"
+    );
+    discovery.inventory[0].location.path = "/moved/review".into();
+    let moved = digest(&discovery, &preferences, &host);
+    assert_ne!(
+        moved, content,
+        "relative references depend on the discovered path"
+    );
+    preferences = Preferences::Available(BTreeMap::from([(
+        "project:maka:review".into(),
+        Preference {
+            enabled: false,
+            pinned: false,
+        },
+    )]));
+    let disabled = digest(&discovery, &preferences, &host);
+    assert_ne!(disabled, moved);
+    host.capabilities.remove("network");
+    assert_ne!(digest(&discovery, &preferences, &host), disabled);
+}
+
+#[test]
 fn explicit_preparation_and_receipt_wire_match_current_source() {
     let mut discovery = DiscoverySnapshot {
         inventory: vec![

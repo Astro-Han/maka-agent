@@ -61,6 +61,19 @@ async fn original_client_resumes_selected_lineage_streams_and_reopens_exact_admi
             1
         );
         let facts = serde_json::to_value(&prefix.events).unwrap();
+        for stored in &prefix.events {
+            if let Fact::InvocationOpened {
+                configuration: Some(configuration),
+                ..
+            } = &stored.event.fact
+            {
+                let composition = configuration
+                    .tool_composition
+                    .as_ref()
+                    .expect("Message and manual resume must freeze admitted Host handlers");
+                assert!(composition.skills_digest.is_some());
+            }
+        }
         if let Some(original) = &original {
             assert_eq!(&facts, original);
         } else {

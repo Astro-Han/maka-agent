@@ -117,6 +117,7 @@ pub(super) async fn run(path: &Path) -> Result<(), maka_runtime_host::server::Ho
         Fact::InvocationOpened {
             configuration: Some(InvocationConfiguration {
                 system_prompt: None,
+                tool_composition: None,
                 workspace_identity: None,
                 cwd: std::env::current_dir()?
                     .into_os_string()

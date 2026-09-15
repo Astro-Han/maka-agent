@@ -3958,7 +3958,6 @@ dependencies = [
  "maka-event-log",
  "maka-protocol",
  "maka-runtime",
- "ryu-js",
  "serde",
  "serde_json",
  "sha2 0.10.9",

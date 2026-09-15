@@ -74,6 +74,7 @@ impl SessionConfiguration {
     ) -> maka_runtime::execution::InvocationConfiguration {
         maka_runtime::execution::InvocationConfiguration {
             system_prompt: None,
+            tool_composition: None,
             cwd: self.workspace.host_cwd.clone(),
             workspace_identity: Some(workspace_identity),
             permission_mode: self.permission_mode,

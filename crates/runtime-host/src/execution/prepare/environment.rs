@@ -32,6 +32,7 @@ pub(crate) struct Environment {
     pub tools: maka_tools::ToolCatalog,
     pub skills: Arc<super::super::skills::FrozenSkills>,
     pub prompt: SystemPrompt,
+    pub composition: maka_runtime::execution::ToolComposition,
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
 }
 
@@ -99,13 +100,14 @@ impl Executions {
         let mut prompt = prompt.map_err(internal)?;
         let native = self.native_tools(&session.workspace.host_cwd, session.tool_profile);
         let mode = session.permission_mode;
-        let (directory, tools, skills) = tokio::task::spawn_blocking(move || {
+        let (directory, tools, skills, skills_digest) = tokio::task::spawn_blocking(move || {
             let directory = maka_fs_tools::workspace::directory::PublishedDirectory::open(
                 std::path::Path::new(&native.cwd),
             )
             .map_err(internal)?;
             let (tools, skills) = tools::catalog(native, mode, additional, skills)?;
-            Ok::<_, maka_protocol::OperationError>((directory, tools, skills))
+            let skills_digest = skills.catalog().fingerprint().map_err(internal)?;
+            Ok::<_, maka_protocol::OperationError>((directory, tools, skills, skills_digest))
         })
         .await
         .map_err(internal)??;
@@ -117,6 +119,10 @@ impl Executions {
             prompt.text.push_str(&fragment);
         }
         Ok(Environment {
+            composition: maka_runtime::execution::ToolComposition {
+                clients: bindings.composition(),
+                skills_digest: Some(skills_digest),
+            },
             digest: record.configuration_digest,
             bindings: Some(bindings),
             session,

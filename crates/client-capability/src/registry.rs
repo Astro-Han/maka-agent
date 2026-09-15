@@ -27,7 +27,9 @@ use uuid::Uuid;
 
 mod bindings;
 mod publication;
-pub use bindings::{BindingError, BindingMode, PreparedBindings, Snapshot, SnapshotOffer};
+pub use bindings::{
+    BindingError, BindingMode, PreparedBindings, RestoredBindings, Snapshot, SnapshotOffer,
+};
 pub use publication::Registration;
 use publication::Residency;
 

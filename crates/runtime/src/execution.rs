@@ -95,6 +95,8 @@ impl SystemPrompt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InvocationConfiguration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_composition: Option<ToolComposition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<SystemPrompt>,
     pub cwd: String,
     /// Captured from the workspace marker, never reconstructed from a later path.
@@ -107,6 +109,15 @@ pub struct InvocationConfiguration {
     /// None means there was no Session-owned model binding (e.g. local Code).
     pub model: Option<ModelBinding>,
     pub thinking_level: Option<ThinkingLevel>,
+}
+
+/// Admission evidence for Host-owned handlers whose behavior is not in schema.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolComposition {
+    pub clients: crate::capability::ClientComposition,
+    /// None for fixed profiles without Skill / SkillSearch handlers.
+    pub skills_digest: Option<String>,
 }
 
 /// User-selected workspace locator, before Host path resolution.

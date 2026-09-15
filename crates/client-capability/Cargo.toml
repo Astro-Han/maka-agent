@@ -29,7 +29,6 @@ maka-runtime.workspace = true
 maka-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ryu-js = "1.0.3"
 sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

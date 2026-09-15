@@ -19,6 +19,8 @@
 
 mod selection;
 pub use selection::PreparedBindings;
+mod restoration;
+pub use restoration::RestoredBindings;
 mod snapshot;
 pub use snapshot::{Snapshot, SnapshotOffer};
 
@@ -38,6 +40,8 @@ pub enum BindingMode {
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum BindingError {
+    #[error("Frozen Client Capability composition no longer matches provider authority")]
+    InvalidComposition,
     #[error("Session-bound Client Capability provider is unavailable")]
     Lost,
     #[error("Client Capability provider selection is ambiguous")]

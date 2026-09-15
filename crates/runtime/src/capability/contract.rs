@@ -17,14 +17,14 @@
  * under the License.
  */
 
-use maka_runtime::capability::Offer;
-use serde::Serialize;
+use super::Offer;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// Stable semantic offer identity, distinct from provider and registration IDs.
 /// These host-owned IDs survive restarts; UI consumers also recognize the suffix.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ContractId(String);
 
@@ -33,7 +33,7 @@ impl ContractId {
         &self.0
     }
 
-    pub(crate) fn of(offer: &Offer) -> Self {
+    pub fn of(offer: &Offer) -> Self {
         let mut tools: Vec<_> = offer.tools.iter().collect();
         tools.sort_by(|a, b| (&a.server_id, &a.name).cmp(&(&b.server_id, &b.name)));
         let value = serde_json::json!({
@@ -93,12 +93,11 @@ fn write_canonical(value: &Value, output: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maka_protocol::capability::decode_replace_input;
     use serde_json::json;
 
     #[test]
     fn identity_tracks_execution_contract_but_not_display_or_json_spelling() {
-        let mut offer = decode_replace_input(&json!({
+        let mut offer = serde_json::from_value::<super::super::Manifest>(json!({
             "registrationId":"r","offers":[{"offerId":"desktop_browser",
                 "version":"1","affinity":"session","hostPathAccess":"none","label":"Browser",
                 "tools":[
@@ -137,7 +136,7 @@ mod tests {
             },
             {
                 let mut v = offer.clone();
-                v.host_path_access = maka_runtime::capability::HostPathAccess::Cwd;
+                v.host_path_access = crate::capability::HostPathAccess::Cwd;
                 v
             },
         ] {

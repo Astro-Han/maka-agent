@@ -25,6 +25,7 @@ pub fn configuration(tool_mode: ToolMode) -> InvocationConfiguration {
     InvocationConfiguration {
         workspace_identity: None,
         system_prompt: None,
+        tool_composition: None,
         cwd: std::env::current_dir()
             .expect("test working directory")
             .into_os_string()

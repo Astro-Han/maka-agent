@@ -110,6 +110,7 @@ impl Executions {
         .await?;
         let mut configuration = session.invocation_configuration().await.map_err(internal)?;
         configuration.system_prompt = Some(environment.prompt);
+        configuration.tool_composition = Some(environment.composition);
         let (tools, skills) = (environment.tools, environment.skills);
         let max_steps = usize::try_from(input.max_steps.unwrap_or(64)).map_err(internal)?;
         let invocation = Invocation {

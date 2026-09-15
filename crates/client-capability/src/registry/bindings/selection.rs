@@ -36,6 +36,26 @@ pub struct PreparedBindings {
     snapshot: super::Snapshot,
 }
 
+impl PreparedBindings {
+    pub fn composition(&self) -> maka_runtime::capability::ClientComposition {
+        composition(&self.selected, &self.snapshot)
+    }
+}
+
+fn composition(
+    selected: &SessionBindings,
+    snapshot: &super::Snapshot,
+) -> maka_runtime::capability::ClientComposition {
+    maka_runtime::capability::ClientComposition {
+        session_bindings: selected
+            .session
+            .iter()
+            .map(|(contract, binding)| (contract.clone(), (*binding.provider().identity).clone()))
+            .collect(),
+        offers: snapshot.composition(),
+    }
+}
+
 impl Registry {
     pub fn prepare_bindings(
         &self,
@@ -88,7 +108,7 @@ impl Registry {
         session_id: &str,
         initiating: Uuid,
         required: &[&str],
-    ) -> Result<super::Snapshot, BindingError> {
+    ) -> Result<(super::Snapshot, maka_runtime::capability::ClientComposition), BindingError> {
         let next = self.select_bindings(
             self.sessions.get(session_id),
             Some(initiating),
@@ -123,10 +143,16 @@ impl Registry {
         if selected.is_none() || !missing.is_empty() {
             return Err(BindingError::RequiredProvider);
         }
-        let snapshot = self.snapshot_bindings(Some(&next))?;
+        let mut snapshot = self.snapshot_bindings(Some(&next))?;
+        snapshot.offers.retain(|entry| {
+            entry.offer().tools.iter().any(|tool| {
+                required.contains(&crate::proxy_tool_name(&tool.server_id, &tool.name).as_str())
+            })
+        });
+        let composition = composition(&next, &snapshot);
         self.sessions.insert(session_id.into(), next);
         self.prune_sessions();
-        Ok(snapshot)
+        Ok((snapshot, composition))
     }
 
     /// Select all bindings atomically. A failed strict selection changes no

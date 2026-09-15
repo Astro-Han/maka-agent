@@ -241,6 +241,29 @@ async fn original_client_workhub_answer_scopes_read_and_desktop_calls_without_re
     let log = fixture.log().await;
     let before = log.prefix(256, 512 * 1024).await.unwrap();
     use maka_runtime::event::Fact;
+    let composition = before
+        .events
+        .iter()
+        .find_map(|row| match &row.event.fact {
+            Fact::InvocationOpened {
+                configuration: Some(configuration),
+                ..
+            } => configuration.tool_composition.as_ref(),
+            _ => None,
+        })
+        .expect("WorkHub must retain its admitted Desktop owner");
+    assert!(
+        composition.skills_digest.is_none(),
+        "WorkHub has no Skills handlers"
+    );
+    assert!(!composition.clients.offers.is_empty());
+    assert!(composition.clients.offers.iter().all(|offer| matches!(
+        offer,
+        maka_runtime::capability::ClientOffer::Pinned {
+            affinity: maka_runtime::capability::PinnedAffinity::Session,
+            ..
+        }
+    )));
     assert_eq!(
         before
             .events

@@ -26,9 +26,31 @@ use std::{collections::HashSet, sync::Arc};
 
 #[derive(Clone)]
 pub struct Snapshot {
-    offers: Vec<SnapshotOffer>,
+    pub(super) offers: Vec<SnapshotOffer>,
 }
 impl Snapshot {
+    pub(super) fn composition(&self) -> Vec<maka_runtime::capability::ClientOffer> {
+        use maka_runtime::capability::{ClientOffer, PinnedAffinity};
+        self.offers
+            .iter()
+            .map(|entry| match &entry.source {
+                Source::Pinned(registration) => ClientOffer::Pinned {
+                    contract: entry.contract.clone(),
+                    affinity: match entry.offer().affinity {
+                        Affinity::Session => PinnedAffinity::Session,
+                        Affinity::Turn => PinnedAffinity::Turn,
+                        Affinity::Call => unreachable!("Call offers are not pinned"),
+                    },
+                    identity: (**registration.identity()).clone(),
+                },
+                Source::Call { offer, selector } => ClientOffer::Call {
+                    offer: offer.clone(),
+                    selector: selector.as_ref().map(|p| (*p.identity).clone()),
+                },
+            })
+            .collect()
+    }
+
     pub fn offers(&self) -> &[SnapshotOffer] {
         &self.offers
     }
@@ -57,11 +79,11 @@ impl Snapshot {
 
 #[derive(Clone)]
 pub struct SnapshotOffer {
-    contract: ContractId,
-    source: Source,
+    pub(super) contract: ContractId,
+    pub(super) source: Source,
 }
 #[derive(Clone)]
-enum Source {
+pub(super) enum Source {
     Pinned(Arc<Registration>),
     Call {
         offer: Offer,

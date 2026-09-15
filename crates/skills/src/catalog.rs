@@ -21,7 +21,7 @@ use crate::{DiscoveredSkill, DiscoverySnapshot, Issue, IssueCode, Severity, fiel
 use maka_runtime::skills::SkillFailureReason;
 pub use maka_runtime::skills::SkillPreference as Preference;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,
 };
 
@@ -54,6 +54,50 @@ pub struct LoadedInstructions<'a> {
 }
 
 impl Catalog<'_> {
+    /// Fingerprint the frozen inputs used by Skill and SkillSearch. Rejected
+    /// files and discovery diagnostics are UI facts, not executable catalog input.
+    pub fn fingerprint(&self) -> Result<String, serde_json::Error> {
+        let inventory: Vec<_> = self
+            .discovery
+            .inventory
+            .iter()
+            .map(|skill| {
+                let location = &skill.location;
+                (
+                    &location.reference,
+                    &location.id,
+                    &location.path,
+                    &location.discovery_root,
+                    &location.scope,
+                    &location.source,
+                    location.precedence,
+                    &skill.content_sha256,
+                    &skill.document.manifest,
+                    &skill.shadowed_by,
+                )
+            })
+            .collect();
+        let preferences = match self.preferences {
+            Preferences::Available(values) => Some(
+                values
+                    .iter()
+                    .map(|(id, preference)| (id, preference.enabled, preference.pinned))
+                    .collect::<Vec<_>>(),
+            ),
+            Preferences::Unavailable => None,
+        };
+        let tools: BTreeSet<_> = self.host.tools.iter().collect();
+        let capabilities: BTreeSet<_> = self.host.capabilities.iter().collect();
+        serde_json::to_vec(&(
+            "maka.skills.execution.v1",
+            inventory,
+            preferences,
+            tools,
+            capabilities,
+        ))
+        .map(|bytes| maka_runtime::artifact::content_digest(&bytes))
+    }
+
     pub fn available(&self) -> impl Iterator<Item = &DiscoveredSkill> {
         self.discovery.inventory.iter().filter(|skill| {
             skill.shadowed_by.is_none() && self.enabled(skill) && self.compatible(skill)

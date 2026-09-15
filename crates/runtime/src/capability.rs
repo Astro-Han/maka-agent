@@ -17,11 +17,17 @@
  * under the License.
  */
 
+mod contract;
 pub mod form;
 pub mod form_decode;
 pub(crate) mod form_result_decode;
 mod form_validation;
 pub mod json;
+pub use contract::ContractId;
+mod composition;
+pub use composition::{ClientComposition, ClientOffer, PinnedAffinity};
+mod identity;
+pub use identity::{Identity, PrincipalKind};
 mod result;
 pub use form::{
     FormField, FormFieldSpec, FormFormat, FormInput, FormOption, FormRequester, FormResult,
@@ -31,10 +37,10 @@ mod frame;
 pub use frame::{AdmissionEvidence, ClientFrame, HostFrame};
 pub use result::{CallResult, ContentBlock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub registration_id: String,
@@ -43,7 +49,7 @@ pub struct Manifest {
     pub services: Option<Vec<ServiceOffer>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Offer {
     pub offer_id: String,
@@ -56,14 +62,14 @@ pub struct Offer {
     pub tools: Vec<ToolDescriptor>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceOffer {
     pub service_id: String,
     pub version: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Affinity {
     Call,
@@ -71,14 +77,14 @@ pub enum Affinity {
     Session,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HostPathAccess {
     None,
     Cwd,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDescriptor {
     pub server_id: String,
@@ -92,7 +98,7 @@ pub struct ToolDescriptor {
     pub activity_kind: Option<ToolActivityKind>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolAnnotations {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,7 +113,7 @@ pub struct ToolAnnotations {
     pub open_world_hint: Option<bool>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolActivityKind {
     Computer,

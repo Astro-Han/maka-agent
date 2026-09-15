@@ -52,7 +52,10 @@ impl Executions {
         };
         let mut configuration = session.observed_configuration(workspace);
         let (tools, system_prompt) = match mode {
-            Mode::Prepared(environment) => (environment.tools, environment.prompt),
+            Mode::Prepared(environment) => {
+                configuration.tool_composition = Some(environment.composition);
+                (environment.tools, environment.prompt)
+            }
             Mode::Observe(connection) => {
                 let mut system_prompt = prompt::resolve(
                     self.configuration
