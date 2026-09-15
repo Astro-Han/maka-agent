@@ -21,7 +21,6 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { pathToFileURL } from 'node:url';
 import { truncateUtf8 } from '@maka/core/diagnostic-log';
 import { generalizedErrorMessage } from '@maka/core/redaction';
 import {
@@ -35,8 +34,6 @@ import {
   encodeRuntimeHostSetupFrame,
   isSha512PackageIntegrity,
   resolveRuntimeHostManagedDeployment,
-  resolveRuntimeHostNpmDeploymentLayout,
-  prepareRuntimeHostRoot,
   resolveRuntimeHostManagedDeploymentAuthority,
   runtimeHostManagedOperatorCommand,
   RUNTIME_HOST_SETUP_ERROR_CODE_MAX_BYTES,
@@ -117,6 +114,7 @@ import { expandWildcardListenAddresses } from './runtime-host-peer-management-co
 import {
   canDiscardRuntimeHostLifecycleDesiredArtifacts,
   replaceRuntimeHostLifecycle,
+  prepareRuntimeHostRootForDeployment,
   resolveRecoverableRuntimeHostManagedDeployment,
   RUNTIME_HOST_READY_TIMEOUT_MS,
   RuntimeHostLifecycleTransactionError,
@@ -339,83 +337,39 @@ async function prepareSetupStorageRoot(
   deps: RuntimeHostSetupDeps,
   path: string,
 ) {
-  let restorePrevious: (() => Promise<void>) | undefined;
-  try {
-    return await prepareRuntimeHostRoot(path, {
-      async retireDeployment(current) {
-        // The source package owns its old format and protocol. Reuse its normal
-        // retirement boundary rather than giving new code an old-format lease.
-        const layout = resolveRuntimeHostNpmDeploymentLayout(
-          current.deploymentRoot,
-          current.launch.package.integrity,
-        );
-        const source: typeof import('./runtime-host-lifecycle-transaction.js') = await import(
-          pathToFileURL(join(layout.packageRoot, 'dist', 'runtime-host-lifecycle-transaction.js'))
-            .href
-        );
-        const retirement = await source.retireRuntimeHostLifecycleOwner({
-          rootPath: current.root.path,
-          rootId: current.root.id,
-          allowInterruptActiveTasks: options.allowInterruptActiveTasks === true,
-          ...(current.lifecycle.mode === 'supervised'
-            ? { supervisor: deps.resolveLifecycleProvider(current).supervisor }
-            : {}),
+  return prepareRuntimeHostRootForDeployment(path, {
+    resolveProvider: deps.resolveLifecycleProvider,
+    allowInterruptActiveTasks: options.allowInterruptActiveTasks === true,
+    async prepareDeployment(current) {
+      assertExpectedDeploymentGeneration(options.expectedTarget, current);
+      if (!options.updateExisting) return current;
+      const resolvedPackage = await resolveRuntimeHostSetupPackage(options, deps);
+      return resolvedPackage.use(async (packageRoot) => {
+        await deps.prepareDeployment({
+          serviceId: current.root.id,
+          clientDataRoot: options.clientDataRoot,
+          sourcePackageRoot: packageRoot,
+          version: resolvedPackage.candidate.version,
+          packageIntegrity: resolvedPackage.candidate.integrity,
+          deploymentRoot: current.deploymentRoot,
         });
-        if (retirement.kind === 'active_tasks')
-          throw new RuntimeHostSetupError(
-            'active_tasks',
-            'Runtime Host upgrade is waiting for active work to finish',
-          );
-        if (current.lifecycle.mode === 'supervised') {
-          restorePrevious = () => deps.resolveLifecycleProvider(current).supervisor.activate();
-        }
-        await retirement.owner.close();
-      },
-      async prepareDeployment(current) {
-        assertExpectedDeploymentGeneration(options.expectedTarget, current);
-        if (!options.updateExisting) return current;
-        const resolvedPackage = await resolveRuntimeHostSetupPackage(options, deps);
-        return resolvedPackage.use(async (packageRoot) => {
-          await deps.prepareDeployment({
-            serviceId: current.root.id,
-            clientDataRoot: options.clientDataRoot,
-            sourcePackageRoot: packageRoot,
-            version: resolvedPackage.candidate.version,
-            packageIntegrity: resolvedPackage.candidate.integrity,
-            deploymentRoot: current.deploymentRoot,
-          });
-          // Keep the package across interruption: the upgrading marker will bind
-          // it, and the existing deployment transaction completes its projections.
-          return {
-            ...current,
-            configRevision: current.configRevision + 1,
-            launch: {
-              ...current.launch,
-              package: {
-                kind: 'npm_registry' as const,
-                version: resolvedPackage.candidate.version,
-                integrity: resolvedPackage.candidate.integrity,
-              },
+        // Keep the package across interruption: the upgrading marker will bind
+        // it, and the existing deployment transaction completes its projections.
+        return {
+          ...current,
+          configRevision: current.configRevision + 1,
+          launch: {
+            ...current.launch,
+            package: {
+              kind: 'npm_registry' as const,
+              version: resolvedPackage.candidate.version,
+              integrity: resolvedPackage.candidate.integrity,
             },
-          };
-        });
-      },
-    });
-  } catch (error) {
-    // A failed publication is not proof that the old format is still active.
-    // Restore its supervisor only after re-reading the durable root state.
-    if (restorePrevious && (await inspectStorageRootFormat(path)).format === 'legacy') {
-      try {
-        await restorePrevious();
-      } catch (restoreError) {
-        throw new AggregateError(
-          [error, restoreError],
-          'Root upgrade failed and its source supervisor could not restart',
-        );
-      }
-    }
-    throw error;
-  }
+          },
+        };
+      });
+    },
+  });
 }
 
 async function readOptionalLegacyServiceConfig(

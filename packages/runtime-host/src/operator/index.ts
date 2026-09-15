@@ -168,6 +168,7 @@ export {
   readRuntimeHostManagedDeploymentConfig,
   resolveRuntimeHostManagedDeployment,
   resolveRuntimeHostManagedDeploymentAuthority,
+  readLegacyRuntimeHostManagedDeployment,
   resolveRuntimeHostManagedDeploymentAuthorityRoot,
   resolveRuntimeHostManagedDeploymentConfigPath,
   rollbackRuntimeHostManagedDeploymentTransition,

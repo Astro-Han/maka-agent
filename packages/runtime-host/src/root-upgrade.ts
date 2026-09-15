@@ -96,14 +96,6 @@ export async function prepareRuntimeHostRoot(
       for (const lock of plan.locks) await lockIfParentPresent(session, lock);
     } else {
       plan = await inspectLegacySources(session);
-      if (!plan.data) {
-        const entries = await readdir(session.canonicalPath);
-        if (
-          entries.some((entry) => entry !== '.maka-host' && entry !== '.maka-storage-root.json')
-        ) {
-          throw new Error('Legacy root has persisted state but its account data is unavailable');
-        }
-      }
       const rootStat = await stat(session.canonicalPath);
       if (
         process.platform !== 'win32' &&
