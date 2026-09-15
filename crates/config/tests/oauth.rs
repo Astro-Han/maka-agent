@@ -115,7 +115,37 @@ async fn refresh_cas_preserves_generation_across_races_logout_aba_and_reopen() {
             .unwrap()
             .is_none()
     );
-    let expected = relogged.basis().clone();
+    let replacement = fixture
+        .store
+        .set_credential(
+            SetCredentialInput {
+                locator: relogged.basis().locator.clone(),
+                expected: Some(CredentialIdentityBasis {
+                    credential_id: relogged.basis().credential_id.clone(),
+                    revision: relogged.basis().revision,
+                }),
+                expected_connection: Some(fixture.target.clone()),
+                secret: "old-grant".into(),
+            },
+            14,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        replacement,
+        CredentialMutationResult::Committed { .. }
+    ));
+    assert!(
+        relogged.current_generation().await.unwrap().is_none(),
+        "client Copilot enrollment also replaces, rather than refreshes, authority"
+    );
+    let replacement = fixture.snapshot().await;
+    assert_ne!(
+        replacement.basis().credential_id,
+        relogged.basis().credential_id
+    );
+    let expected = replacement.basis().clone();
+    drop(replacement);
     drop((original, current, relogged));
     let Fixture {
         temp,

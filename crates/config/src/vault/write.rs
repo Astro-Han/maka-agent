@@ -23,6 +23,21 @@ use maka_runtime::configuration::{CredentialLocator, CredentialState};
 use sqlx::SqliteConnection;
 use uuid::Uuid;
 
+/// New enrollment is a new authority even when the token bytes are identical.
+/// The caller's transaction rolls back both deletion and insertion on failure.
+pub(crate) async fn replace_secret(
+    tx: &mut SqliteConnection,
+    locator: &CredentialLocator,
+    secret: &str,
+    now: u64,
+) -> Result<()> {
+    sqlx::query("DELETE FROM credentials WHERE locator = ?")
+        .bind(serde_json::to_string(locator)?)
+        .execute(&mut *tx)
+        .await?;
+    write_secret(tx, locator, secret, now).await
+}
+
 pub(crate) async fn write_secret(
     tx: &mut SqliteConnection,
     locator: &CredentialLocator,

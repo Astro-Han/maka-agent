@@ -113,6 +113,37 @@ async fn login_rollback_unknown_commit_and_stale_tickets_never_publish_partial_s
     else {
         panic!("configured")
     };
+    sqlx::query("CREATE TRIGGER fail_relogin BEFORE INSERT ON oauth_login_receipts BEGIN SELECT RAISE(ABORT, 'injected replacement failure'); END")
+        .execute(&mut sql).await.unwrap();
+    assert!(
+        prepare(&store, existing("failed-relogin", id))
+            .await
+            .complete("different-account".into(), 4)
+            .await
+            .is_err()
+    );
+    let restored: (String, i64, String) =
+        sqlx::query_as("SELECT credential_id, revision, secret FROM credentials WHERE locator = ?")
+            .bind(serde_json::to_string(&locator).unwrap())
+            .fetch_one(&mut sql)
+            .await
+            .unwrap();
+    assert_eq!(
+        restored,
+        (credential_id.clone(), revision as i64, "grant".into()),
+        "failed enrollment must restore the old generation and grant"
+    );
+    assert!(
+        store
+            .oauth_login_receipt("failed-relogin".into())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    sqlx::query("DROP TRIGGER fail_relogin")
+        .execute(&mut sql)
+        .await
+        .unwrap();
     assert!(matches!(
         store
             .delete_credential(DeleteCredentialInput {

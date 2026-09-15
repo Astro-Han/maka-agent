@@ -75,7 +75,7 @@ impl PreparedLogin {
                         catalog::advance(tx, catalog.revision, catalog.default_target.as_ref())
                             .await?;
                     }
-                    vault::write_secret(tx, &locator, &secret, now).await?;
+                    vault::replace_secret(tx, &locator, &secret, now).await?;
                     vault::advance(tx).await?;
                     let saved = LoginReceipt {
                         target: input.target,

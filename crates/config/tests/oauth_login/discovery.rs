@@ -160,12 +160,7 @@ async fn discovery_tracks_authenticated_generation_without_losing_edits_or_accep
             "cannot move an observation backwards"
         );
         let old = observation.oauth_credential().unwrap();
-        store
-            .delete_credential(DeleteCredentialInput {
-                expected: old.basis().clone(),
-            })
-            .await
-            .unwrap();
+        // Direct re-login must rotate identity without requiring an earlier logout.
         let ticket = prepare(
             &store,
             existing(&format!("relogin-{}", provider.as_str()), &id),
@@ -177,6 +172,13 @@ async fn discovery_tracks_authenticated_generation_without_losing_edits_or_accep
         ));
         let new = fetch(&store, &id).await.oauth_credential().unwrap();
         assert_ne!(old.basis().credential_id, new.basis().credential_id);
+        assert!(old.current_generation().await.unwrap().is_none());
+        assert!(
+            old.commit_refresh("stale-login-refresh".into(), 7)
+                .await
+                .unwrap()
+                .is_none()
+        );
         assert!(verification.accept_oauth(new.clone()).is_err());
         assert!(matches!(verification.complete(verified()).await.unwrap(),
             ConnectionTestRunResult::Superseded { changed }

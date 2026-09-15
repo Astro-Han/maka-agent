@@ -32,9 +32,18 @@ pub(super) struct Binding {
 
 impl Binding {
     pub fn auth(self: &Arc<Self>) -> Result<ProviderAuth, OperationError> {
+        let basis = self.snapshot.basis();
         Ok(ProviderAuth::Bound {
-            identity: serde_json::to_string(self.snapshot.basis())
-                .map_err(|_| unavailable("Invalid OAuth credential identity"))?,
+            // Refresh advances the secret revision, not the login generation.
+            // Enrollment always mints a new ID; the resolver still validates its
+            // real current basis and cannot revive a revoked generation.
+            identity: serde_json::to_string(&(
+                "maka.oauth.execution.v1",
+                self.provider,
+                &basis.locator,
+                &basis.credential_id,
+            ))
+            .map_err(|_| unavailable("Invalid OAuth credential identity"))?,
             resolver: self.clone(),
         })
     }

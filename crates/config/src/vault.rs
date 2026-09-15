@@ -21,7 +21,7 @@ use maka_runtime::configuration::*;
 use sqlx::SqliteConnection;
 mod headers;
 mod write;
-pub(crate) use write::write_secret;
+pub(crate) use write::{replace_secret, write_secret};
 
 use crate::{ConfigError, ConfigurationStore, Result, TransactionMode, catalog};
 
@@ -83,7 +83,17 @@ impl ConfigurationStore {
                 if expected != actual {
                     return Ok(CredentialMutationResult::CredentialStale { expected, actual });
                 }
-                write_secret(tx, &input.locator, &input.secret, now).await?;
+                if matches!(
+                    input.locator,
+                    CredentialLocator::Connection {
+                        kind: ConnectionCredentialKind::OauthToken,
+                        ..
+                    }
+                ) {
+                    replace_secret(tx, &input.locator, &input.secret, now).await?;
+                } else {
+                    write_secret(tx, &input.locator, &input.secret, now).await?;
+                }
                 invalidate_test(tx, &input.locator).await?;
                 Ok(CredentialMutationResult::Committed {
                     vault_revision: advance(tx).await?,
