@@ -141,10 +141,14 @@ function launchCandidate(executable: string, input: Parameters<Launch>[0]): Retu
         async settle(timeoutMs) {
           child.stdin.end();
           const result = await within(exited, timeoutMs);
-          if (result) return result.code === 0 && result.signal === null;
-          child.kill('SIGKILL');
-          await within(exited, timeoutMs);
-          return false;
+          // Recovery may start committed work before discovery becomes visible.
+          // EOF requests drain; a deadline cannot authorize killing its effects.
+          if (result === undefined) {
+            // The barrier must retain this attempt and keep the current owner
+            // running until the candidate can no longer become a late winner.
+            throw new Error('Native Runtime Host candidate has not finished draining');
+          }
+          return result.code === 0 && result.signal === null;
         },
       };
     }),

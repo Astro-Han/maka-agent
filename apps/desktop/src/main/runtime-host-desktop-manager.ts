@@ -1613,8 +1613,8 @@ function isSessionGuestProfile(
 }
 
 async function waitForProcessExit(pid: number): Promise<void> {
-  // The Host owns a 10-second graceful-shutdown deadline. Keep a separate
-  // observation margin so Desktop cannot race the Host's final process.exit.
+  // Bound Desktop's observation, not Host cleanup. Timeout is not permission
+  // to kill the process or treat its writer authority as released.
   const deadline = Date.now() + 12_000;
   while (isProcessAlive(pid)) {
     if (Date.now() >= deadline) throw new Error('Runtime Host did not exit before retirement');
