@@ -44,7 +44,7 @@ import { isDeepResearchSession } from '@maka/core/deep-research';
 import { Button, ButtonGroup, ChatMessageList, EmptyState, HStack, Spinner, Text } from '@astryxdesign/core';
 import { useChatLayoutContext } from '@astryxdesign/core/Chat';
 import { useLayer } from '@astryxdesign/core/Layer';
-import { materializeChat } from './materialize.js';
+import { finalAssistantReplyText, materializeChat } from './materialize.js';
 import { selectTailTransientMessages } from './transient-placement.js';
 import { useTranscriptProjection } from './use-transcript-projection.js';
 import type { LiveTurnProjection } from './live-turn-projection.js';
@@ -439,7 +439,7 @@ export function ChatView(props: {
       .map((turn) => ({
         turnId: turn.turnId,
         label: turn.user?.text ?? '',
-        reply: turn.assistant?.text ?? '',
+        reply: finalAssistantReplyText(turn),
       }));
     const previous = promptRailTurnsRef.current;
     if (
