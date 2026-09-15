@@ -23,16 +23,20 @@ import { useEffect, useReducer, useState, type CSSProperties, type ReactNode } f
 import type { ComponentProps } from 'react';
 import type { ProjectRecord } from '@maka/core/project';
 import type { SessionSummary, StoredMessage } from '@maka/core/session';
+import type { SessionEvent } from '@maka/core/events';
 import {
   ChatSurfaceLayout,
   ChatView,
+  applyLiveTurnBufferEvent,
+  reconcileLiveTurnBuffer,
+  settleLiveTurnBufferStep,
   Composer,
   createTranscriptViewportNavigation,
   deriveTitlebarProjectName,
   TitlebarSessionIdentity,
   ToastProvider,
 } from '@maka/ui';
-import type { ChatModelChoice, SessionViewMode, TurnViewModel } from '@maka/ui';
+import type { ChatModelChoice, SessionViewMode, TurnViewModel, LiveTurnBuffer } from '@maka/ui';
 import { SessionRail, type SessionRailStoryProps } from '../../../packages/ui/stories/session-rail-harness.js';
 import { AppShellTopbarActions } from '../src/renderer/app-shell-chrome-actions';
 import { SettingsOverlay } from '../src/renderer/app-shell-overlays';
@@ -3714,53 +3718,102 @@ export const ContextCompactionFailed: Story = {
 const processDisclosureMessages: StoredMessage[] = [
   { type: 'user', id: 'process-ask', turnId: 'process-turn', ts: NOW - 213_000, text: '修复刷新页面后登录状态丢失的问题。' },
   { type: 'turn_state', id: 'process-running', turnId: 'process-turn', ts: NOW - 213_000, status: 'running' },
-  { type: 'assistant', id: 'process-check', turnId: 'process-turn', ts: NOW - 200_000, text: '我先检查登录状态的存储和恢复逻辑。', thinking: { text: '检查初始化时机与会话恢复顺序。' }, modelId: 'claude-sonnet-4-5' },
   { type: 'tool_call', id: 'process-read', turnId: 'process-turn', ts: NOW - 190_000, toolName: 'Read', activityKind: 'read', stepId: 'process-check', args: { path: 'src/auth-store.ts' } },
   { type: 'tool_result', id: 'process-read-result', turnId: 'process-turn', ts: NOW - 185_000, toolUseId: 'process-read', isError: false, content: { kind: 'text', text: 'export function restoreSession() { return storage.getItem("session"); }' } },
-  { type: 'assistant', id: 'process-fix', turnId: 'process-turn', ts: NOW - 170_000, text: '恢复时机有问题，接下来补上初始化。', modelId: 'claude-sonnet-4-5' },
+  { type: 'assistant', id: 'process-check', turnId: 'process-turn', ts: NOW - 184_000, text: '我先检查登录状态的存储和恢复逻辑。', thinking: { text: '检查初始化时机与会话恢复顺序。' }, modelId: 'claude-sonnet-4-5' },
   { type: 'tool_call', id: 'process-edit', turnId: 'process-turn', ts: NOW - 160_000, toolName: 'Edit', activityKind: 'edit', stepId: 'process-fix', args: { path: 'src/auth-store.ts', old_string: 'const session = null;', new_string: 'const session = restoreSession();' } },
   { type: 'tool_result', id: 'process-edit-result', turnId: 'process-turn', ts: NOW - 150_000, toolUseId: 'process-edit', isError: false, content: { kind: 'text', text: 'Updated src/auth-store.ts' } },
-  { type: 'assistant', id: 'process-verify', turnId: 'process-turn', ts: NOW - 100_000, text: '初始化已补齐，现在运行登录状态的回归测试。', modelId: 'claude-sonnet-4-5' },
+  { type: 'assistant', id: 'process-fix', turnId: 'process-turn', ts: NOW - 149_000, text: '恢复时机有问题，接下来补上初始化。', modelId: 'claude-sonnet-4-5' },
   { type: 'tool_call', id: 'process-test', turnId: 'process-turn', ts: NOW - 90_000, toolName: 'Bash', activityKind: 'command', stepId: 'process-verify', args: { command: 'npm test -- auth-store.test.ts' } },
   { type: 'tool_result', id: 'process-test-result', turnId: 'process-turn', ts: NOW - 5_000, toolUseId: 'process-test', isError: false, content: { kind: 'text', text: 'Tests passed: 4' } },
+  { type: 'assistant', id: 'process-verify', turnId: 'process-turn', ts: NOW - 4_000, text: '初始化已补齐，现在运行登录状态的回归测试。', modelId: 'claude-sonnet-4-5' },
   { type: 'assistant', id: 'process-answer', turnId: 'process-turn', ts: NOW, text: '已修复登录状态恢复。\n\n刷新页面后会恢复已有会话；相关测试通过。', modelId: 'claude-sonnet-4-5' },
   { type: 'turn_state', id: 'process-completed', turnId: 'process-turn', ts: NOW, status: 'completed' },
 ];
 
+// The review controls schedule real stream events and durable ledger receipts.
+// Text arrives live before tools; its assistant row lands after tool results.
+const processPlaybackFrames: Array<{ events: SessionEvent[]; messages: StoredMessage[] }> = [];
+for (const reply of processDisclosureMessages) {
+  if (reply.type !== 'assistant') continue;
+  const call = processDisclosureMessages.find((message) => message.type === 'tool_call' && message.stepId === reply.id);
+  const result = call && processDisclosureMessages.find((message) => message.type === 'tool_result' && message.toolUseId === call.id);
+  const textEvent = { turnId: reply.turnId!, messageId: reply.id, ts: reply.ts };
+  if (call?.type === 'tool_call' && result?.type === 'tool_result') {
+    processPlaybackFrames.push({
+      events: [
+        ...(reply.thinking ? [{ ...textEvent, type: 'thinking_delta' as const, id: `${reply.id}-thinking`, text: reply.thinking.text }] : []),
+        { ...textEvent, type: 'text_delta', id: `${reply.id}-delta`, text: reply.text },
+        { type: 'tool_start', id: `${call.id}-start`, turnId: reply.turnId!, ts: call.ts, stepId: reply.id, toolUseId: call.id, toolName: call.toolName, args: call.args, activityKind: call.activityKind },
+      ], messages: [call],
+    }, {
+      events: [result,
+        ...(reply.thinking ? [{ ...textEvent, type: 'thinking_complete' as const, id: `${reply.id}-thinking-done`, text: reply.thinking.text }] : []),
+        { ...textEvent, type: 'text_complete', id: `${reply.id}-text-done`, text: reply.text },
+      ], messages: [result, reply],
+    });
+  } else {
+    const split = reply.text.indexOf('\n\n');
+    processPlaybackFrames.push(
+      { events: [{ ...textEvent, type: 'text_delta', id: `${reply.id}-delta-1`, text: reply.text.slice(0, split) }], messages: [] },
+      { events: [
+        { ...textEvent, type: 'text_delta', id: `${reply.id}-delta-2`, text: reply.text.slice(split) },
+        { ...textEvent, type: 'text_complete', id: `${reply.id}-text-done`, text: reply.text },
+      ], messages: [reply] },
+    );
+  }
+}
+processPlaybackFrames.push({
+  events: [{ type: 'complete', id: 'process-terminal', turnId: 'process-turn', ts: NOW, stopReason: 'end_turn' }],
+  messages: [processDisclosureMessages.at(-1)!],
+});
+
+type ProcessPlayback = { index: number; startedAt: number; messages: StoredMessage[]; liveTurns: LiveTurnBuffer | undefined };
+function advanceProcessPlayback(previous: ProcessPlayback): ProcessPlayback {
+  const index = previous.index + 1;
+  const frame = processPlaybackFrames[index];
+  if (!frame) return previous;
+  const ts = previous.startedAt + index * 1000;
+  let liveTurns = previous.liveTurns;
+  for (const event of frame.events) liveTurns = applyLiveTurnBufferEvent(liveTurns, { ...event, ts }, 'zh-CN');
+  const messages = [...previous.messages, ...frame.messages.map((message) => ({ ...message, ts }))];
+  return { ...previous, index, messages, liveTurns: liveTurns ? reconcileLiveTurnBuffer(liveTurns, messages) : undefined };
+}
+function startProcessPlayback(): ProcessPlayback {
+  const startedAt = Date.now();
+  return advanceProcessPlayback({ index: -1, startedAt, liveTurns: undefined,
+    messages: processDisclosureMessages.slice(0, 2).map((message) => ({ ...message, ts: startedAt })),
+  });
+}
 function ProcessReplyLifecycle() {
-  const [startedAt, setStartedAt] = useState(() => Date.now());
-  const [count, setCount] = useState(4);
+  const [playback, dispatch] = useReducer((state: ProcessPlayback, action: { type: 'advance' } | { type: 'replay' } | { type: 'settled'; messageId?: string }): ProcessPlayback => {
+    if (action.type === 'replay') return startProcessPlayback();
+    if (action.type === 'advance') return advanceProcessPlayback(state);
+    if (!action.messageId || !state.liveTurns) return state;
+    const liveTurns = settleLiveTurnBufferStep(state.liveTurns, action.messageId);
+    return liveTurns === state.liveTurns ? state : { ...state, liveTurns: liveTurns ? reconcileLiveTurnBuffer(liveTurns, state.messages) : undefined };
+  }, undefined, startProcessPlayback);
   const [playing, setPlaying] = useState(false);
-  const [epoch, setEpoch] = useState(0);
-  const completed = count === processDisclosureMessages.length;
+  const completed = playback.index === processPlaybackFrames.length - 1;
   useEffect(() => {
     if (!playing || completed) return;
-    const timer = window.setTimeout(() => setCount((value) => value + 1), 1000);
+    const timer = window.setTimeout(() => dispatch({ type: 'advance' }), 1000);
     return () => window.clearTimeout(timer);
-  }, [count, playing, completed]);
-  const messages = processDisclosureMessages.slice(0, count).map((message, index) => ({
-    ...message,
-    ts: startedAt + Math.max(0, index - 3) * 1000,
-  }));
+  }, [playback.index, playing, completed]);
   return <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-    {/* Review controls advance fixture events; the chat frame and disclosure
-        state below are entirely owned by production components. */}
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 8, flexShrink: 0 }}>
-      <span>演示控制 · 每秒推进一条事件</span>
+      <span>演示控制 · 每秒推进一组真实事件</span>
       <Button size="sm" label={completed ? '重新播放' : playing ? '暂停' : '播放完整过程'} onClick={() => {
-        if (completed) {
-          setStartedAt(Date.now());
-          setCount(4);
-          setEpoch((value) => value + 1);
-        }
+        if (completed) dispatch({ type: 'replay' });
         setPlaying(completed || !playing);
       }} />
     </div>
-    <ComposedShell key={epoch} motionEnabled sidebarCollapsed frameHeight="calc(100vh - 48px)"
+    <ComposedShell key={playback.startedAt} motionEnabled sidebarCollapsed frameHeight="calc(100vh - 48px)"
       session={{ name: '工作过程与最终回答', status: completed ? 'active' : 'running', streaming: !completed }}
-      chat={{ messages, scrollBehavior: 'auto',
+      chat={{ messages: playback.messages, scrollBehavior: 'auto',
         activeTurn: completed ? undefined : { turnId: 'process-turn' },
-        liveTurns: completed ? [] : [{ turnId: 'process-turn', startedAt, steps: [] }],
+        liveTurns: playback.liveTurns,
+        onStreamingSettled: (messageId) => dispatch({ type: 'settled', messageId }),
       }} />
   </div>;
 }
@@ -3779,12 +3832,18 @@ export const ProcessReplyLifecycleComplete: Story = {
     const answer = await canvas.findByText('已修复登录状态恢复。', {}, { timeout: 12_000 });
     await expect(process.open).toBe(true);
     await expect(process.contains(answer)).toBe(false);
+    const answerBubble = answer.closest('.maka-chat-message-bubble-assistant')!;
+    await expect(answerBubble).toHaveAttribute('data-live-streaming', 'true');
     await waitFor(() => expect(process.open).toBe(false), { timeout: 3000 });
     await waitFor(() => expect(process.getBoundingClientRect().height).toBeLessThanOrEqual(process.querySelector('summary')!.getBoundingClientRect().height + 1));
     await expect(canvasElement.querySelector('.maka-processing-sequence')).toBe(process);
-    await expect(answer.isConnected).toBe(true);
-    await expect(answer).toBeVisible();
-    await expect(answer.getBoundingClientRect().top).toBeGreaterThanOrEqual(process.getBoundingClientRect().bottom);
+    // Streaming Markdown can replace its temporary text spans. The answer
+    // surface itself must survive the live-to-durable handoff and folding.
+    const finalAnswer = canvas.getByText('已修复登录状态恢复。');
+    await expect(finalAnswer.closest('.maka-chat-message-bubble-assistant')).toBe(answerBubble);
+    await expect(answerBubble).not.toHaveAttribute('data-live-streaming');
+    await expect(finalAnswer).toBeVisible();
+    await expect(finalAnswer.getBoundingClientRect().top).toBeGreaterThanOrEqual(process.getBoundingClientRect().bottom);
     await expect(await canvas.findByText('我先检查登录状态的存储和恢复逻辑。')).not.toBeVisible();
     // The completed scene is the landing state; reviewers can replay it.
     await expect(canvas.getByRole('button', { name: '重新播放' })).toBeVisible();
