@@ -69,6 +69,11 @@ Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host �
 停止和重启保留待更新目标。卸载先撤销启动资格，再注销服务；Root 数据、代码包及部署撤销记录均保留。
 若 `cleanup.kind` 为 `pending`，重试相同卸载命令；显式安装会在旧服务清理完成后授予新的部署身份。
 
+`host status --root-id <rootId>` 分别读取部署、待更新目标、OS 服务及活体 Host，不启动或修复它们；
+Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返回最多 48 KiB 的托管诊断尾部，
+`byteTruncated` 标明省略的字节。Linux 选择最近 200 条 journal 记录；macOS/Windows 读取 stderr。
+这些是诊断信息，不是执行历史；按需 Host 不捕获 stderr。
+
 `maka` 命令还提供 Desktop 启动用的 `host candidate`、从 stdin 读取 JavaScript cell 的
 `code --log <file>`，以及查看已提交执行事实的 `inspect --log <file>`。
 

@@ -29,7 +29,8 @@ use windows::{
             },
             TaskScheduler::{
                 IRegisteredTask, ITaskFolder, ITaskService, TASK_CREATE_OR_UPDATE,
-                TASK_LOGON_INTERACTIVE_TOKEN, TASK_STATE_DISABLED, TaskScheduler,
+                TASK_LOGON_INTERACTIVE_TOKEN, TASK_STATE_DISABLED, TASK_STATE_QUEUED,
+                TASK_STATE_READY, TASK_STATE_RUNNING, TaskScheduler,
             },
             Variant::VARIANT,
         },
@@ -168,6 +169,37 @@ impl Service {
             self.folder.DeleteTask(&BSTR::from(&self.name), 0)?;
         }
         Ok(())
+    }
+
+    pub fn observe(&self) -> Result<super::Observation, HostError> {
+        use super::{Observation, State};
+        let Some(task) = self.task()? else {
+            return Ok(Observation::Missing);
+        };
+        // SAFETY: observation stays on this object's COM apartment thread.
+        unsafe {
+            let last_result = if task.LastRunTime()? > 0.0 {
+                Some(i64::from(task.LastTaskResult()?))
+            } else {
+                None
+            };
+            let state = match task.State()? {
+                TASK_STATE_RUNNING => State::Running,
+                TASK_STATE_QUEUED => State::Starting,
+                // LastTaskResult also contains successful scheduler statuses
+                // such as user termination; it is not a process exit code.
+                TASK_STATE_READY | TASK_STATE_DISABLED => State::Stopped,
+                _ => return Err("unrecognized scheduled task state".into()),
+            };
+            Ok(Observation::Present {
+                state,
+                enabled: Some(task.Enabled()?.as_bool()),
+                // Task engine PID is not the Host PID; only the live handshake
+                // and diagnostics identify the actual execution owner.
+                pid: None,
+                last_result,
+            })
+        }
     }
 
     fn task(&self) -> Result<Option<IRegisteredTask>, HostError> {

@@ -107,7 +107,7 @@ pub(super) async fn commit(
     Ok(())
 }
 
-fn validate_target(current: &Deployment, target: &Deployment) -> Result<(), StoreError> {
+pub(super) fn validate_target(current: &Deployment, target: &Deployment) -> Result<(), StoreError> {
     let mut expected = target.clone();
     expected.executable = current.executable.clone();
     expected.sha256 = current.sha256.clone();

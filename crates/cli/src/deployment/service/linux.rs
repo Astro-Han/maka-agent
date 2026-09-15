@@ -128,6 +128,44 @@ impl Service {
         checked(command("systemctl", &["--user", "start", &self.unit])?)?;
         Ok(())
     }
+
+    pub fn observe(&self) -> Result<super::Observation, HostError> {
+        use super::{Observation, State};
+        let output = checked(command(
+            "systemctl",
+            &[
+                "--user",
+                "show",
+                "--property=LoadState,ActiveState,UnitFileState,MainPID,ExecMainStatus",
+                &self.unit,
+            ],
+        )?)?;
+        let fields: std::collections::BTreeMap<_, _> = output
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .collect();
+        let field = |key| fields.get(key).copied().ok_or("incomplete systemd status");
+        if field("LoadState")? == "not-found" {
+            return Ok(Observation::Missing);
+        }
+        let state = match field("ActiveState")? {
+            "active" | "reloading" => State::Running,
+            "activating" => State::Starting,
+            "deactivating" => State::Stopping,
+            "inactive" => State::Stopped,
+            "failed" => State::Failed,
+            _ => return Err("unrecognized systemd activity state".into()),
+        };
+        Ok(Observation::Present {
+            state,
+            enabled: Some(matches!(
+                field("UnitFileState")?,
+                "enabled" | "enabled-runtime"
+            )),
+            pid: std::num::NonZeroU32::new(field("MainPID")?.parse()?),
+            last_result: Some(field("ExecMainStatus")?.parse()?),
+        })
+    }
 }
 
 fn quote(value: &str) -> String {

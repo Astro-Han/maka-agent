@@ -37,6 +37,76 @@ use windows_sys::Win32::System::{
 // the Host exits, terminating descendants without killing the Host during Drop.
 static OWNER: OnceLock<io::Result<OwnedHandle>> = OnceLock::new();
 
+// SetStdHandle borrows the file handle. Retain it until process exit, including
+// final error reporting and Tokio's shutdown of accepted blocking work.
+static SERVICE_STDERR: OnceLock<io::Result<std::fs::File>> = OnceLock::new();
+
+pub(super) fn service_stderr(directory: &std::path::Path) -> io::Result<()> {
+    SERVICE_STDERR
+        .get_or_init(|| open_service_stderr(directory))
+        .as_ref()
+        .map(|_| ())
+        .map_err(|error| io::Error::new(error.kind(), error.to_string()))
+}
+
+fn open_service_stderr(directory: &std::path::Path) -> io::Result<std::fs::File> {
+    use maka_event_log::root::windows::{
+        PrivateSecurity, file_identity, open_nofollow, validate_private,
+    };
+    use std::os::windows::{ffi::OsStrExt, fs::MetadataExt};
+    use windows_sys::Win32::{
+        Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE},
+        Storage::FileSystem::{
+            CreateFileW, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT,
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            OPEN_ALWAYS,
+        },
+        System::Console::{STD_ERROR_HANDLE, SetStdHandle},
+    };
+
+    let parent = open_nofollow(directory, false)?;
+    validate_private(&parent)?;
+    if !parent.metadata()?.is_dir() {
+        return Err(io::Error::other("service deployment is not a directory"));
+    }
+    let path = directory.join("host.stderr.log");
+    let name: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let security = PrivateSecurity::current_account()?;
+    // SAFETY: name and private descriptor live through the call. Append-only
+    // writes preserve concurrent startup diagnostics without following reparse points.
+    let handle = unsafe {
+        CreateFileW(
+            name.as_ptr(),
+            GENERIC_READ | FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            &security.attributes(),
+            OPEN_ALWAYS,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+            ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: CreateFileW returned one owned file handle.
+    let file = unsafe { std::fs::File::from_raw_handle(handle) };
+    let metadata = file.metadata()?;
+    if !metadata.is_file()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || file_identity(&file)?.links != 1
+    {
+        return Err(io::Error::other(
+            "service log is not a regular, singly linked file",
+        ));
+    }
+    validate_private(&file)?;
+    // SAFETY: SERVICE_STDERR owns the returned file until the process exits.
+    if unsafe { SetStdHandle(STD_ERROR_HANDLE, file.as_raw_handle()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(file)
+}
+
 pub(super) fn own_process_tree() -> io::Result<()> {
     OWNER
         .get_or_init(create)

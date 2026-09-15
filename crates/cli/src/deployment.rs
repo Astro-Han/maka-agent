@@ -19,13 +19,19 @@
 
 mod activation;
 mod control;
+mod entry;
+mod logs;
 mod package;
+mod query;
 mod service;
 mod store;
 mod update;
 mod updates;
 pub(super) use activation::Activate;
 pub(super) use control::{Control, ControlAction};
+pub(super) use entry::ServiceRun;
+pub(super) use logs::Logs;
+pub(super) use query::Status;
 pub(super) use update::Update;
 
 use clap::{Args, ValueEnum};
@@ -120,8 +126,16 @@ impl Deployment {
     }
 
     fn validate(&self, root: &RootLocation, directory: &Path) -> Result<(), HostError> {
-        if self.root_id != root.root_id()
-            || self.root_path != root.canonical_path()
+        self.validate_record(directory)?;
+        if self.root_id != root.root_id() || self.root_path != root.canonical_path() {
+            return Err("deployment does not match its native root".into());
+        }
+        Ok(())
+    }
+
+    fn validate_record(&self, directory: &Path) -> Result<(), HostError> {
+        if self.root_id.parse::<RootId>().is_err()
+            || !self.root_path.is_absolute()
             || !(1..=9_007_199_254_740_991).contains(&self.config_revision)
             || self.sha256.len() != 64
             || !self

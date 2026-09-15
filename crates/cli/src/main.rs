@@ -33,11 +33,7 @@ mod windows;
 async fn main() -> std::process::ExitCode {
     let cli = args::Cli::parse();
     let error_exit = cli.error_exit_code();
-    let result = if env!("CARGO_BIN_NAME") == "maka-service" {
-        cli.run_service().await
-    } else {
-        cli.run().await
-    };
+    let result = cli.run().await;
     if let Err(error) = result {
         eprintln!("{error}");
         // Let Tokio wait for accepted blocking work to finish before the OS

@@ -84,6 +84,13 @@ the service; it retains Root data, packages and a deployment tombstone. Retry th
 same uninstall if `cleanup.kind` is `pending`. Explicit installation grants a new
 deployment identity after the old service has been removed.
 
+`host status --root-id <rootId>` reads the deployment, pending update, OS service
+and live Host independently; it never starts or repairs them. An unavailable Host
+is not proof that its process stopped. `host logs --root-id <rootId>` returns up to
+48 KiB of supervised diagnostics, with `byteTruncated` marking omitted bytes.
+Linux selects the latest 200 journal entries; macOS/Windows read stderr. These are
+diagnostics, not execution history. On-demand stderr is not captured.
+
 The `maka` command also provides `host candidate` for Desktop-owned startup,
 `code --log <file>` for a JavaScript cell read from stdin, and
 `inspect --log <file>` for committed execution facts.

@@ -35,6 +35,16 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
     let namespaces = RootNamespaces::for_current_account().unwrap();
     for mode in ["on-demand", "supervised"] {
         let mut fixture = CandidateFixture::new(temporary.path().join(mode));
+        let query_id = fixture.root_id.clone();
+        let query = |action: &str| {
+            let output = Command::new(env!("CARGO_BIN_EXE_maka"))
+                .args(["host", action, "--root-id", &query_id])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        };
+        assert_eq!(query("status")["kind"], "not_installed");
         let mut install = Command::new(env!("CARGO_BIN_EXE_maka"));
         install
             .args(["host", "install", "--root"])
@@ -63,23 +73,50 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         let executable = installed["executable"].as_str().unwrap();
         assert_eq!(installed["rootId"], fixture.root_id);
         assert_eq!(installed["configRevision"], 1);
+        let owner = RootOwner::open(&fixture.root, &namespaces).unwrap();
+        let observed = query("status");
+        assert_eq!(observed["deployment"], installed);
+        assert_eq!(observed["host"]["kind"], "unavailable");
+        assert!(observed["pendingUpdate"].is_null());
+        if mode == "on-demand" {
+            assert_eq!(observed["supervisor"]["kind"], "on_demand");
+            assert_eq!(query("logs")["kind"], "not_captured");
+        }
+        #[cfg(any(target_os = "macos", windows))]
+        if mode == "supervised" {
+            let path = directory.join("host.stderr.log");
+            #[cfg(windows)]
+            let mut file = maka_event_log::root::windows::create_private_file(&path).unwrap();
+            #[cfg(target_os = "macos")]
+            let mut file = {
+                use std::os::unix::fs::OpenOptionsExt;
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&path)
+                    .unwrap()
+            };
+            let contents = "old diagnostics\n".repeat(8192) + "latest failure\n";
+            file.write_all(contents.as_bytes()).unwrap();
+            drop(file);
+            let log = query("logs");
+            assert_eq!(log["source"]["kind"], "stderr");
+            assert_eq!(log["byteTruncated"], true);
+            assert_eq!(log["text"], contents[contents.len() - 48 * 1024..]);
+            assert_eq!(std::fs::read_to_string(path).unwrap(), contents);
+        }
+        assert!(!fixture.root.join("runtime-rust.sqlite").exists());
+        drop(owner);
 
         let launch_root = fixture.root.clone();
         let launch_root_id = fixture.root_id.clone();
         let command = |executable: &str, candidate: bool| {
             let mut command = Command::new(executable);
-            command
-                .args([
-                    "host",
-                    if candidate {
-                        "candidate"
-                    } else {
-                        "service-run"
-                    },
-                    "--root",
-                ])
-                .arg(&launch_root);
             if candidate {
+                command
+                    .args(["host", "candidate", "--root"])
+                    .arg(&launch_root);
                 command.args([
                     "--expected-root-id",
                     &launch_root_id,
@@ -89,6 +126,8 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
                     "--initial-connection-timeout-ms",
                     "300000",
                 ]);
+            } else {
+                command.args(["host", "service-run", "--root-id", &launch_root_id]);
             }
             command
         };
@@ -105,6 +144,28 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             !wrong_mode.status.success(),
             "launch mode bypassed deployment policy"
         );
+        #[cfg(windows)]
+        if !candidate {
+            let log = directory.join("host.stderr.log");
+            let before = std::fs::read(&log).unwrap();
+            let marker = fixture.root.join(maka_event_log::root::ROOT_MARKER);
+            let backup = fixture.root.join("marker.backup");
+            std::fs::rename(&marker, &backup).unwrap();
+            let failed = command(executable, false).output();
+            std::fs::rename(&backup, &marker).unwrap();
+            let failed = failed.unwrap();
+            assert!(!failed.status.success());
+            let after = std::fs::read(log).unwrap();
+            assert!(
+                after.starts_with(&before),
+                "startup overwrote previous diagnostics"
+            );
+            assert!(
+                String::from_utf8_lossy(&after[before.len()..])
+                    .contains("service State Root must already be installed"),
+                "early failure was lost before main reported it"
+            );
+        }
         assert!(
             !fixture.root.join("runtime-rust.sqlite").exists(),
             "admission must precede migrations"
@@ -172,6 +233,14 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert_eq!(connected["hostEpoch"], registration["hostEpoch"]);
         assert_eq!(connected["pid"], registration["pid"]);
         assert_eq!(connected["endpoint"]["port"], address.port());
+        let observed = query("status");
+        assert_eq!(observed["host"]["kind"], "connected");
+        assert_eq!(
+            observed["host"]["identity"]["hostEpoch"],
+            registration["hostEpoch"]
+        );
+        assert_eq!(observed["host"]["identity"]["pid"], registration["pid"]);
+        assert_eq!(observed["host"]["activity"]["state"], "ready");
         assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
         let retired = Command::new(env!("CARGO_BIN_EXE_maka"))
             .args(["host", "retire", "--root"])
@@ -269,6 +338,9 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         assert_eq!(uninstalled["deployment"]["admission"], "revoked");
         assert_eq!(uninstalled["deployment"]["configRevision"], 2);
         assert_eq!(uninstalled["cleanup"]["kind"], "complete");
+        let observed = query("status");
+        assert_eq!(observed["deployment"], uninstalled["deployment"]);
+        assert_eq!(observed["host"]["kind"], "not_admitted");
         let repeated = control("uninstall").output().unwrap();
         assert!(repeated.status.success(), "{repeated:?}");
         assert_eq!(

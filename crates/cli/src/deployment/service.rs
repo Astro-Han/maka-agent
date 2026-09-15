@@ -22,6 +22,10 @@ use maka_event_log::root::{FileLease, RootOwner};
 use maka_runtime_host::server::HostError;
 use std::sync::Arc;
 
+mod status;
+use status::State;
+pub(super) use status::{Observation, observe};
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
@@ -109,14 +113,16 @@ fn arguments(deployment: &Deployment) -> Result<[&str; 5], HostError> {
         .executable
         .to_str()
         .ok_or("service executable must be UTF-8")?;
-    let root = deployment
-        .root_path
-        .to_str()
-        .ok_or("service root must be UTF-8")?;
-    if executable.chars().chain(root.chars()).any(char::is_control) {
+    if executable.chars().any(char::is_control) {
         return Err("service paths cannot contain control characters".into());
     }
-    Ok([executable, "host", "service-run", "--root", root])
+    Ok([
+        executable,
+        "host",
+        "service-run",
+        "--root-id",
+        &deployment.root_id,
+    ])
 }
 
 fn label(deployment: &Deployment) -> String {

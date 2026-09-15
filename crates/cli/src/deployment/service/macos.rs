@@ -33,6 +33,7 @@ pub(super) struct Service {
 
 struct Instance {
     pid: Option<libc::pid_t>,
+    last_result: i64,
 }
 
 impl Service {
@@ -81,12 +82,17 @@ impl Service {
         Ok(())
     }
 
-    pub fn stop(&self) -> Result<(), HostError> {
+    fn require_domain(&self) -> Result<(), HostError> {
         if self.in_user_domain(&["managername"])?.trim() != "Aqua"
             || self.in_user_domain(&["manageruid"])?.trim() != self.uid
         {
             return Err("the account GUI launchd domain is unavailable".into());
         }
+        Ok(())
+    }
+
+    pub fn stop(&self) -> Result<(), HostError> {
+        self.require_domain()?;
         // Unlike print's diagnostic format, list's three columns are documented.
         if let Some(instance) = self.instance()? {
             // Root is held, so even a racing automatic launch cannot execute work.
@@ -131,7 +137,10 @@ impl Service {
                             .ok_or("invalid launchd service PID")?,
                     ),
                 };
-                return Ok(Some(Instance { pid }));
+                return Ok(Some(Instance {
+                    pid,
+                    last_result: columns[1].parse()?,
+                }));
             }
         }
         Ok(None)
@@ -141,6 +150,38 @@ impl Service {
         // No -k: an implicitly launched instance must never be killed.
         checked(command("/bin/launchctl", &["kickstart", &self.target])?)?;
         Ok(())
+    }
+
+    pub fn observe(&self) -> Result<super::Observation, HostError> {
+        use super::{Observation, State};
+        self.require_domain()?;
+        if let Some(instance) = self.instance()? {
+            return Ok(Observation::Present {
+                state: if instance.pid.is_some() {
+                    State::Running
+                } else if instance.last_result == 0 {
+                    State::Stopped
+                } else {
+                    State::Failed
+                },
+                enabled: None,
+                pid: instance
+                    .pid
+                    .and_then(|pid| std::num::NonZeroU32::new(pid as u32)),
+                last_result: Some(instance.last_result),
+            });
+        }
+        match self.path.symlink_metadata() {
+            Ok(metadata) if metadata.is_file() => Ok(Observation::Present {
+                state: State::Stopped,
+                enabled: None,
+                pid: None,
+                last_result: None,
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Observation::Missing),
+            Err(error) => Err(error.into()),
+            Ok(_) => Err("service definition is not a regular file".into()),
+        }
     }
 }
 

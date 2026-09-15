@@ -63,8 +63,10 @@ enum HostCommand {
     Restart(crate::deployment::Control),
     /// Revoke startup and unregister its service, retaining State Root data.
     Uninstall(crate::deployment::Control),
-    /// Query the existing Host without opening its State Root for writing.
-    Status(Root),
+    /// Observe a Host or managed deployment without starting or changing it.
+    Status(crate::deployment::Status),
+    /// Read a bounded tail of supervised Host diagnostics without starting it.
+    Logs(crate::deployment::Logs),
     /// Retire the exact current Host, preserving work at safe step boundaries.
     Retire {
         #[command(flatten)]
@@ -79,7 +81,7 @@ enum HostCommand {
     Candidate(candidate::Candidate),
     /// Run only the currently admitted supervised deployment.
     #[command(hide = true)]
-    ServiceRun(Root),
+    ServiceRun(crate::deployment::ServiceRun),
     /// Serve a native State Root over a private local endpoint.
     Serve {
         #[command(flatten)]
@@ -102,25 +104,6 @@ struct Log {
 }
 
 impl Cli {
-    pub(super) async fn run_service(self) -> Result<(), HostError> {
-        match self.command {
-            Command::Host(HostCommand::Serve {
-                root,
-                websocket: None,
-            }) => {
-                #[cfg(windows)]
-                crate::windows::own_process_tree()?;
-                serve::run(&root.root, None, true).await
-            }
-            Command::Host(HostCommand::Serve { .. }) => {
-                Err("service listener belongs to deployment configuration".into())
-            }
-            // The installed artifact also remains a usable captured-stdio
-            // operator for SSH/WSL; the interactive console command is maka.
-            command => Self { command }.run().await,
-        }
-    }
-
     pub(super) fn error_exit_code(&self) -> u8 {
         if matches!(self.command, Command::Host(HostCommand::Candidate(_))) {
             70
@@ -151,20 +134,13 @@ impl Cli {
                 Ok(())
             }
             Command::Host(HostCommand::Serve { root, websocket }) => {
-                serve::run(&root.root, websocket, false).await
-            }
-            Command::Host(HostCommand::ServiceRun(root)) => {
                 #[cfg(windows)]
                 crate::windows::own_process_tree()?;
-                serve::run(&root.root, None, true).await
+                serve::run(&root.root, websocket, None).await
             }
-            Command::Host(HostCommand::Status(root)) => {
-                let mut client = crate::host_client::HostClient::connect(&root.root, None).await?;
-                let status = client.status().await?;
-                drop(client);
-                println!("{}", serde_json::to_string(&status)?);
-                Ok(())
-            }
+            Command::Host(HostCommand::ServiceRun(args)) => args.run().await,
+            Command::Host(HostCommand::Status(args)) => args.run().await,
+            Command::Host(HostCommand::Logs(args)) => args.run().await,
             Command::Host(HostCommand::Retire {
                 root,
                 expected_host_epoch,

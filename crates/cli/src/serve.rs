@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 pub(super) async fn run(
     path: &Path,
     websocket: Option<std::net::SocketAddr>,
-    require_managed: bool,
+    expected_root: Option<&str>,
 ) -> Result<(), maka_runtime_host::server::HostError> {
     use maka_event_log::root::{ROOT_MARKER, RootNamespaces, RootOwner};
     use maka_runtime_host::server::{Host, websocket::WebSocketListener};
@@ -35,7 +35,7 @@ pub(super) async fn run(
             match RootOwner::open(path, &namespaces) {
                 Ok(owner) => break owner,
                 Err(error)
-                    if require_managed
+                    if expected_root.is_some()
                         && error.kind() == std::io::ErrorKind::WouldBlock
                         && tokio::time::Instant::now() < deadline =>
                 {
@@ -46,13 +46,16 @@ pub(super) async fn run(
                 Err(error) => return Err(error.into()),
             }
         }
-    } else if !require_managed {
+    } else if expected_root.is_none() {
         RootOwner::create(path, &namespaces)?
     } else {
         return Err("service State Root must already be installed".into());
     };
+    if expected_root.is_some_and(|expected| expected != owner.root_id()) {
+        return Err("service State Root identity changed".into());
+    }
     let deployment = crate::deployment::admit(&owner, crate::deployment::Mode::Supervised).await?;
-    if require_managed && deployment.is_none() {
+    if expected_root.is_some() && deployment.is_none() {
         return Err("service State Root must have a supervised deployment".into());
     }
     let websocket = match deployment
