@@ -143,20 +143,20 @@ export function runtimeHostSshOperatorRemoteCommand(
     const deploymentRoot = quotePosix(posix.dirname(operatorPath));
     return `if [ ! -e ${artifact} ]; then [ ! -e ${deploymentRoot} ] && exit 0; exit 1; fi; ${execute}`;
   }
-  if (operator.kind !== 'node') throw new Error('Windows Runtime Host operator must use Node');
+  const operatorPath = operator.kind === 'node' ? operator.modulePath : operator.executablePath;
   const payload = Buffer.from(
     JSON.stringify({
       ...invocation,
       environment,
-      modulePath: operator.modulePath,
-      deploymentRoot: win32.dirname(operator.modulePath),
+      operatorPath,
+      deploymentRoot: win32.dirname(operatorPath),
       missingOperatorIsSuccess: options.missingOperatorIsSuccess === true,
     }),
     'utf8',
   ).toString('base64');
   const script = [
     `$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${payload}'))|ConvertFrom-Json`,
-    `if($p.missingOperatorIsSuccess -and -not (Test-Path -LiteralPath $p.modulePath -PathType Leaf)){if(-not (Test-Path -LiteralPath $p.deploymentRoot)){exit 0}else{exit 1}}`,
+    `if($p.missingOperatorIsSuccess -and -not (Test-Path -LiteralPath $p.operatorPath -PathType Leaf)){if(-not (Test-Path -LiteralPath $p.deploymentRoot)){exit 0}else{exit 1}}`,
     `foreach($e in $p.environment.psobject.Properties){[Environment]::SetEnvironmentVariable($e.Name,[string]$e.Value,'Process')}`,
     `$code=1`,
     `try{& ([string]$p.executable) @($p.args|ForEach-Object {[string]$_});$code=if($null -eq $LASTEXITCODE){1}else{$LASTEXITCODE}}catch{$code=1}`,

@@ -36,6 +36,7 @@ import {
   encodeRuntimeHostActivationFrame,
 } from '../operator/activation-frame.js';
 import { RUNTIME_HOST_PROTOCOL_VERSION } from '../protocol/index.js';
+import { decodeRuntimeHostOperatorCommand } from '../operator/operator-command.js';
 
 const ROOT_ID = 'a'.repeat(64);
 const execFileAsync = promisify(execFile);
@@ -114,6 +115,43 @@ test('POSIX operator commands apply environment before exec', async (t) => {
 
   const { stdout } = await execFileAsync('/bin/sh', ['-c', command]);
   assert.equal(stdout, "value with ' quotes");
+  const native = decodeRuntimeHostOperatorCommand({
+    kind: 'native',
+    platform: 'posix',
+    executablePath: '/bin/echo',
+  });
+  const nativeResult = await execFileAsync('/bin/sh', [
+    '-c',
+    runtimeHostSshOperatorRemoteCommand(native, ['activate', "literal ' $HOME ; value"]),
+  ]);
+  assert.equal(nativeResult.stdout, "host activate literal ' $HOME ; value\n");
+  const windows = runtimeHostSshOperatorRemoteCommand(
+    {
+      kind: 'native',
+      platform: 'win32',
+      executablePath: String.raw`C:\Program Files\Maka\maka.exe`,
+    },
+    ['activate', '--root-id', ROOT_ID],
+  );
+  const script = Buffer.from(windows.split(' ').at(-1)!, 'base64').toString('utf16le');
+  const payload = JSON.parse(
+    Buffer.from(script.match(/FromBase64String\('([^']+)'\)/u)![1], 'base64').toString('utf8'),
+  );
+  assert.equal(payload.executable, String.raw`C:\Program Files\Maka\maka.exe`);
+  assert.deepEqual(payload.args, ['host', 'activate', '--root-id', ROOT_ID]);
+  assert.throws(() =>
+    decodeRuntimeHostOperatorCommand({
+      kind: 'native',
+      platform: 'posix',
+      executablePath: 'maka',
+    }),
+  );
+  assert.throws(() =>
+    decodeRuntimeHostOperatorCommand({
+      ...native,
+      nodePath: '/usr/bin/node',
+    }),
+  );
   assert.equal(
     runtimeHostSshOperatorRemoteCommand(
       { kind: 'legacy_posix_executable', executablePath: '/opt/maka/operator' },

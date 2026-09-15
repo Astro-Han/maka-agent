@@ -54,8 +54,8 @@ const environmentBindingFields = {
   operator: z.unknown().transform((value, context) => {
     try {
       const command = decodeRuntimeHostOperatorCommand(value);
-      if (command.kind !== 'node') {
-        throw new Error('Runtime Host setup operator must be a Node command');
+      if (command.kind === 'legacy_posix_executable') {
+        throw new Error('Runtime Host setup operator must declare its target platform');
       }
       return command;
     } catch (error) {

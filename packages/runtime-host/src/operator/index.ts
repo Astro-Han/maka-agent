@@ -98,6 +98,7 @@ export {
 } from './setup-frame.js';
 export {
   createRuntimeHostOperatorCommand,
+  createRuntimeHostNativeOperatorCommand,
   createRuntimeHostLegacyPosixOperatorCommand,
   decodeRuntimeHostOperatorCommand,
   decodeRuntimeHostPosixOperatorCommand,
@@ -109,6 +110,7 @@ export {
   type RuntimeHostPosixOperatorCommand,
   type RuntimeHostLegacyPosixOperatorCommand,
   type RuntimeHostNodeOperatorCommand,
+  type RuntimeHostNativeOperatorCommand,
 } from './operator-command.js';
 export {
   RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV,

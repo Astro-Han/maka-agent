@@ -66,7 +66,7 @@ test('WSL management invokes the stable operator directly with the exact deploym
   });
   const result = await runDesktopRuntimeHostWslManagement({
     distribution: 'Ubuntu',
-    operator: OPERATOR,
+    operator: { kind: 'native', platform: 'posix', executablePath: '/opt/Maka Host/maka' },
     action: 'configure',
     expectedTarget: {
       serviceId: 'a'.repeat(64),
@@ -102,8 +102,8 @@ test('WSL management invokes the stable operator directly with the exact deploym
     '--distribution',
     'Ubuntu',
     '--exec',
-    '/usr/bin/node',
-    '/home/operator/.local/share/maka/operator.mjs',
+    '/opt/Maka Host/maka',
+    'host',
     'configure',
   ]);
   assert.ok(launch?.args.includes('--expected-deployment-id'));
@@ -145,7 +145,7 @@ test('WSL setup forwards the development archive and its exact evidence', async 
           version: '0.2.0-development',
           serviceId: 'b'.repeat(64),
           deploymentId: '00000000-0000-4000-8000-000000000001',
-          operator: { ...OPERATOR, modulePath: '/tmp/maka/operator.mjs' },
+          operator: { kind: 'native', platform: 'posix', executablePath: '/tmp/maka/maka' },
           rootPath: '/tmp/maka/root',
           rootId: 'a'.repeat(64),
           endpoint: 'ws://127.0.0.1:7443/runtime-host',
@@ -160,7 +160,7 @@ test('WSL setup forwards the development archive and its exact evidence', async 
   };
   const integrity = `sha512-${createHash('sha512').update('archive evidence').digest('base64')}`;
 
-  await runDesktopRuntimeHostWslSetup({
+  const installed = await runDesktopRuntimeHostWslSetup({
     distribution: 'Ubuntu',
     setupPackage: {
       kind: 'development_archive',
@@ -170,6 +170,9 @@ test('WSL setup forwards the development archive and its exact evidence', async 
     principalId: 'desktop-owner:pairing',
   }, () => undefined, undefined, { processFactory, wslExecutable: 'wsl.exe' });
 
+  assert.deepEqual(installed.operator, {
+    kind: 'native', platform: 'posix', executablePath: '/tmp/maka/maka',
+  });
   assert.deepEqual(launches[0], [
     '--distribution',
     'Ubuntu',

@@ -33,6 +33,15 @@ export interface RuntimeHostNodeOperatorCommand<
   readonly modulePath: string;
 }
 
+/** The native Maka CLI owns the complete host operator command tree. */
+export interface RuntimeHostNativeOperatorCommand<
+  Platform extends RuntimeHostOperatorPlatform = RuntimeHostOperatorPlatform,
+> {
+  readonly kind: 'native';
+  readonly platform: Platform;
+  readonly executablePath: string;
+}
+
 /** Compatibility route for managed deployments created before the Node operator shipped. */
 export interface RuntimeHostLegacyPosixOperatorCommand {
   readonly kind: 'legacy_posix_executable';
@@ -41,10 +50,12 @@ export interface RuntimeHostLegacyPosixOperatorCommand {
 
 export type RuntimeHostOperatorCommand =
   | RuntimeHostNodeOperatorCommand
+  | RuntimeHostNativeOperatorCommand
   | RuntimeHostLegacyPosixOperatorCommand;
 
 export type RuntimeHostPosixOperatorCommand =
   | RuntimeHostNodeOperatorCommand<'posix'>
+  | RuntimeHostNativeOperatorCommand<'posix'>
   | RuntimeHostLegacyPosixOperatorCommand;
 
 export function createRuntimeHostOperatorCommand<
@@ -68,6 +79,23 @@ export function createRuntimeHostLegacyPosixOperatorCommand(
   return Object.freeze({
     kind: 'legacy_posix_executable',
     executablePath: requireAbsolutePath(executablePath, 'posix', 'legacy operator executable'),
+  });
+}
+
+export function createRuntimeHostNativeOperatorCommand<
+  Platform extends RuntimeHostOperatorPlatform,
+>(input: {
+  readonly platform: Platform;
+  readonly executablePath: string;
+}): RuntimeHostNativeOperatorCommand<Platform> {
+  return Object.freeze({
+    kind: 'native',
+    platform: input.platform,
+    executablePath: requireAbsolutePath(
+      input.executablePath,
+      input.platform,
+      'operator executable',
+    ),
   });
 }
 
@@ -109,6 +137,19 @@ export function decodeRuntimeHostOperatorCommand(value: unknown): RuntimeHostOpe
     );
   }
   const keys = Object.keys(record).sort();
+  if (record.kind === 'native') {
+    const expected = ['executablePath', 'kind', 'platform'];
+    if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+      throw new Error('Runtime Host operator command has unexpected fields');
+    }
+    if (record.platform !== 'posix' && record.platform !== 'win32') {
+      throw new Error('Runtime Host operator platform is invalid');
+    }
+    return createRuntimeHostNativeOperatorCommand({
+      platform: record.platform,
+      executablePath: requireString(record.executablePath, 'Runtime Host operator executable'),
+    });
+  }
   const expected = ['kind', 'modulePath', 'nodePath', 'platform'];
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
     throw new Error('Runtime Host operator command has unexpected fields');
@@ -132,6 +173,12 @@ export function decodeRuntimeHostPosixOperatorCommand(
   if (command.platform !== 'posix') {
     throw new Error('Runtime Host operator must target POSIX');
   }
+  if (command.kind === 'native') {
+    return createRuntimeHostNativeOperatorCommand({
+      platform: 'posix',
+      executablePath: command.executablePath,
+    });
+  }
   return createRuntimeHostOperatorCommand({
     platform: 'posix',
     nodePath: command.nodePath,
@@ -146,6 +193,9 @@ export function runtimeHostOperatorInvocation(
   const normalized = decodeRuntimeHostOperatorCommand(command);
   if (normalized.kind === 'legacy_posix_executable') {
     return { executable: normalized.executablePath, args };
+  }
+  if (normalized.kind === 'native') {
+    return { executable: normalized.executablePath, args: ['host', ...args] };
   }
   return {
     executable: normalized.nodePath,

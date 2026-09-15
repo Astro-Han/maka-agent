@@ -22,6 +22,7 @@ import type { IpcMain } from 'electron';
 import {
   parseRuntimeHostSetupEndpoint,
   type RuntimeHostNodeOperatorCommand,
+  type RuntimeHostNativeOperatorCommand,
   type RuntimeHostOperatorCommand,
   type RuntimeHostSetupPhase,
 } from '@maka/runtime-host/operator';
@@ -77,7 +78,7 @@ export function createDesktopRuntimeHostOnboarding(input: {
     readonly rootPath: string;
     readonly serviceId: string;
     readonly deploymentId: string;
-    readonly operator: RuntimeHostNodeOperatorCommand<'posix'>;
+    readonly operator: RuntimeHostNodeOperatorCommand<'posix'> | RuntimeHostNativeOperatorCommand<'posix'>;
   }>;
   readonly listWslDistributions: () => Promise<readonly string[]>;
   readonly send: (snapshot: DesktopRuntimeHostOnboardingSnapshot) => void;

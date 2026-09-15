@@ -32,10 +32,10 @@ import {
   RUNTIME_HOST_SERVICE_MANAGEMENT_FRAME_PREFIX,
   RUNTIME_HOST_SETUP_FRAME_PREFIX,
   RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV,
-  createRuntimeHostOperatorCommand,
   decodeRuntimeHostPosixOperatorCommand,
   runtimeHostOperatorInvocation,
   type RuntimeHostNodeOperatorCommand,
+  type RuntimeHostNativeOperatorCommand,
   type RuntimeHostPosixOperatorCommand,
   type RuntimeHostSetupFrame,
   type RuntimeHostSetupPhase,
@@ -50,7 +50,7 @@ const WSL_SETUP_STDERR_MAX_BYTES = 8 * 1024;
 
 type RuntimeHostSetupCompleteFrame = Extract<RuntimeHostSetupFrame, { kind: 'complete' | 'existing_environment' }>;
 type RuntimeHostWslSetupCompleteFrame = Omit<RuntimeHostSetupCompleteFrame, 'operator'> & {
-  readonly operator: RuntimeHostNodeOperatorCommand<'posix'>;
+  readonly operator: RuntimeHostNodeOperatorCommand<'posix'> | RuntimeHostNativeOperatorCommand<'posix'>;
 };
 type RuntimeHostManagementTerminalFrame = Exclude<
   RuntimeHostServiceManagementFrame,
@@ -202,11 +202,10 @@ export async function runDesktopRuntimeHostWslSetup(
       }
       return {
         ...frame,
-        operator: createRuntimeHostOperatorCommand({
+        operator: {
+          ...frame.operator,
           platform: 'posix',
-          nodePath: frame.operator.nodePath,
-          modulePath: frame.operator.modulePath,
-        }),
+        },
       };
     },
     onResult: () => onComplete?.(),
