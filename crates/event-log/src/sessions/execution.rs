@@ -87,6 +87,7 @@ pub(super) async fn read(
                     "completed" | "context_compact_finished" => Ok(TerminalStatus::Completed),
                     "failed" => Ok(TerminalStatus::Failed),
                     "cancelled" => Ok(TerminalStatus::Cancelled),
+                    "handoff_paused" => Ok(TerminalStatus::Paused),
                     _ => Err(invalid("unknown stored invocation outcome")),
                 }?,
             })

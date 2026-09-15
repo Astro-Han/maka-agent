@@ -38,12 +38,17 @@ pub enum TerminalStatus {
     Completed,
     Failed,
     Cancelled,
+    /// Physical termination only; the logical Turn awaits its sealed successor.
+    Paused,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InvocationOutcome {
     Completed,
+    HandoffPaused {
+        pause: crate::handoff::HandoffPause,
+    },
     ContextCompactFinished {
         outcome: crate::context::CompactOutcome,
     },
@@ -62,6 +67,7 @@ impl InvocationOutcome {
             Self::Completed | Self::ContextCompactFinished { .. } => TerminalStatus::Completed,
             Self::Failed { .. } => TerminalStatus::Failed,
             Self::Cancelled { .. } => TerminalStatus::Cancelled,
+            Self::HandoffPaused { .. } => TerminalStatus::Paused,
         }
     }
 }

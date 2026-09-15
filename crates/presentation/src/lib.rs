@@ -256,8 +256,11 @@ impl InvocationView {
                     }
                     Fact::InvocationEnded { outcome } => {
                         if let Some(unfinished) = step.take() {
-                            if matches!(outcome, maka_runtime::event::InvocationOutcome::Completed)
-                            {
+                            if matches!(
+                                outcome,
+                                maka_runtime::event::InvocationOutcome::Completed
+                                    | maka_runtime::event::InvocationOutcome::HandoffPaused { .. }
+                            ) {
                                 return Err(ProjectionError::Invalid(
                                     "completion with unfinished model",
                                 ));
@@ -269,14 +272,14 @@ impl InvocationView {
                                 maka_runtime::event::InvocationOutcome::Failed { .. }
                             )));
                         }
-                        messages.push(Message {
-                            id: event.id.clone(),
-                            turn_id: invocation.turn_id.clone(),
-                            ts,
-                            content: Content::TurnState {
-                                state: TurnState::from_outcome(outcome, ts),
-                            },
-                        });
+                        if let Some(state) = TurnState::from_outcome(outcome, ts) {
+                            messages.push(Message {
+                                id: event.id.clone(),
+                                turn_id: invocation.turn_id.clone(),
+                                ts,
+                                content: Content::TurnState { state },
+                            });
+                        }
                         self.state = State::Ended;
                     }
                     Fact::ToolDispatched { .. }

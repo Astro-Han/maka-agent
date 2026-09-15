@@ -39,7 +39,7 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
-pub(super) struct Effect {
+pub(crate) struct Effect {
     pub log: Arc<EventLog>,
     pub count: Arc<AtomicUsize>,
 }
@@ -72,7 +72,7 @@ impl ToolExecutor for Effect {
     }
 }
 
-pub(super) fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
+pub(crate) fn input(base: &str, suffix: &str, effect: Arc<Effect>) -> RunInput {
     RunInput {
         main_output_limit: None,
         context: None,
@@ -132,7 +132,7 @@ fn source(
         submitted_intent: None,
     }
 }
-pub(super) async fn admit_root(log: &EventLog, input: &mut RunInput) {
+pub(crate) async fn admit_root(log: &EventLog, input: &mut RunInput) {
     log.create_session("session", "create", &json!({}), 1)
         .await
         .unwrap();
@@ -162,7 +162,7 @@ pub(super) async fn admit_root(log: &EventLog, input: &mut RunInput) {
     .await
     .unwrap();
 }
-pub(super) async fn enqueue(log: &EventLog, invocation: Invocation) {
+pub(crate) async fn enqueue(log: &EventLog, invocation: Invocation) {
     log.admit_message(
         maka_event_log::message_admissions::PendingMessageAdmission {
             steering_invocation: None,
@@ -178,4 +178,17 @@ pub(super) async fn enqueue(log: &EventLog, invocation: Invocation) {
     )
     .await
     .unwrap();
+}
+
+pub(crate) async fn respond(socket: &mut tokio::net::TcpStream, tool: bool) {
+    use tokio::io::AsyncWriteExt;
+    let delta = if tool {
+        json!({"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"echo","arguments":"{\"value\":42}"}}]})
+    } else {
+        json!({"content":"done"})
+    };
+    let first = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":delta,"finish_reason":null}]});
+    let last = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":if tool {"tool_calls"} else {"stop"}}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}});
+    let body = format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n");
+    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
 }

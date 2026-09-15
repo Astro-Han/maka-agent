@@ -31,6 +31,8 @@ use maka_runtime::{
 
 #[path = "continuation/fixtures.rs"]
 mod fixtures;
+#[path = "continuation/handoff.rs"]
+mod handoff;
 use fixtures::*;
 
 #[tokio::test]

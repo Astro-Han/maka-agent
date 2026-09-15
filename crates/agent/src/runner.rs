@@ -31,6 +31,7 @@ pub async fn run(
     input: RunInput,
     cancellation_owner: crate::RunCancellation,
     admitted: tokio::sync::oneshot::Sender<()>,
+    handoff: Option<crate::HandoffGate>,
 ) -> Result<Invocation, RunError> {
     let cancellation = cancellation_owner.token().clone();
     if cancellation.is_cancelled() {
@@ -106,9 +107,10 @@ pub async fn run(
                 *max_steps,
                 &cancellation,
                 continuation_base,
+                handoff.as_ref().expect("model Runs own a handoff gate"),
             )
             .await
-            .map(|()| (InvocationOutcome::Completed, None)),
+            .map(|outcome| (outcome, None)),
             RunWork::ContextCompact => compact::run(
                 &inner,
                 &input,
@@ -126,7 +128,9 @@ pub async fn run(
         }
     }
     .await;
-    let result = if result.is_ok() && cancellation.is_cancelled() {
+    let result = if matches!(&result, Ok((outcome, _)) if !matches!(outcome, InvocationOutcome::HandoffPaused { .. }))
+        && cancellation.is_cancelled()
+    {
         Err(RunError::Cancelled)
     } else {
         result
@@ -172,7 +176,14 @@ pub async fn run(
             return Err(error.into());
         }
     } else {
+        let pause = match &outcome {
+            InvocationOutcome::HandoffPaused { pause } => Some(pause.clone()),
+            _ => None,
+        };
         append(&inner, &input.invocation, Fact::InvocationEnded { outcome }).await?;
+        if let Some(pause) = pause {
+            handoff.as_ref().expect("model Run handoff").sealed(&pause);
+        }
     }
     result?;
     Ok(input.invocation)

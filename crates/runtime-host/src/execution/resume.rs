@@ -305,6 +305,14 @@ impl Executions {
         {
             return Ok(Selection::Parked(Reason::SafetyCheckFailed));
         }
+        if matches!(
+            prefix.events.last().map(|event| &event.event.fact),
+            Some(Fact::InvocationEnded {
+                outcome: maka_runtime::event::InvocationOutcome::HandoffPaused { .. }
+            })
+        ) {
+            return Ok(Selection::Parked(Reason::SafetyCheckFailed));
+        }
         if !matches!(
             prefix.events.first().map(|e| &e.event.fact),
             Some(Fact::InvocationOpened {

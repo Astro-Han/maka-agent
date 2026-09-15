@@ -152,6 +152,7 @@ impl EventLog {
         }
         crate::tool_calls::validate(transaction, event).await?;
         crate::continuation::validate(transaction, event).await?;
+        crate::handoff::validate(transaction, event).await?;
         crate::steering::validate_append(transaction, event).await?;
         crate::message_identity::validate(transaction, event).await?;
         crate::message_admissions::consume(transaction, event).await?;

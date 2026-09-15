@@ -20,6 +20,8 @@
 mod auto_context;
 mod compact;
 mod continuation;
+mod handoff;
+pub use handoff::{HandoffGate, HandoffReservation, HeldHandoff, PendingSeal};
 mod history;
 mod model_attempt;
 pub use history::project as project_model_history;
@@ -250,9 +252,12 @@ impl Engine {
         {
             return Err(RunError::Busy);
         }
+        let handoff = (!matches!(input.work, RunWork::ContextCompact))
+            .then(|| HandoffGate::new(input.invocation.clone(), input.invocation.run_id.clone()));
         let admission = Admission {
             inner: self.0.clone(),
             session_id,
+            handoff: handoff.clone(),
         };
         let cancellation = cancellation.child_token();
         let cancel_on_drop = cancellation.clone().drop_guard();
@@ -267,9 +272,10 @@ impl Engine {
         });
         let worker_cancellation = cancellation.clone();
         let (admitted, ready) = tokio::sync::oneshot::channel();
+        let worker_handoff = handoff.clone();
         let worker = self.0.workers.spawn(async move {
             let _admission = admission;
-            runner::run(inner, input, worker_cancellation, admitted).await
+            runner::run(inner, input, worker_cancellation, admitted, worker_handoff).await
         });
         if ready.await.is_err() {
             return match worker.await {
@@ -285,6 +291,7 @@ impl Engine {
             invocation,
             tool_names,
             cancellation,
+            handoff,
             worker,
         ))
     }
@@ -293,10 +300,14 @@ impl Engine {
 struct Admission {
     inner: Arc<Inner>,
     session_id: String,
+    handoff: Option<HandoffGate>,
 }
 
 impl Drop for Admission {
     fn drop(&mut self) {
+        if let Some(handoff) = &self.handoff {
+            handoff.close();
+        }
         self.inner.active.lock().unwrap().remove(&self.session_id);
     }
 }

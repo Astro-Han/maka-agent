@@ -27,28 +27,15 @@ use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_model::ModelExecutor;
 use maka_runtime::event::{Fact, TerminalStatus};
 use serde_json::{Value, json};
-use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
-#[path = "support/agent_loop.rs"]
-mod fixture;
-use fixture::{Effect, input};
+use crate::support::agent_loop as fixture;
+use fixture::{Effect, input, respond};
 
 use crate::support::http;
 use http::read_request;
-async fn respond(socket: &mut TcpStream, tool: bool) {
-    let delta = if tool {
-        json!({"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"echo","arguments":"{\"value\":42}"}}]})
-    } else {
-        json!({"content":"done"})
-    };
-    let first = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":delta,"finish_reason":null}]});
-    let last = json!({"id":"reply","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{},"finish_reason":if tool {"tool_calls"} else {"stop"}}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}});
-    let body = format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n");
-    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn loop_commits_before_effects_replays_history_after_reopen_and_rejects_duplicate_admission()

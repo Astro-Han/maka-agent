@@ -27,6 +27,7 @@ mod context_overflow;
 mod context_stop;
 mod dynamic_tools;
 mod frozen_projection;
+mod handoff;
 mod image_projection;
 mod lifetime;
 mod model_interruption;
@@ -36,6 +37,7 @@ mod startup_recovery;
 mod startup_recovery_limits;
 
 mod support {
+    pub(crate) mod agent_loop;
     pub(crate) mod code_mode;
     pub(crate) mod code_mode_lifetime;
     pub(crate) mod context;

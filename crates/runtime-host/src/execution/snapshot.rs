@@ -43,6 +43,7 @@ pub(crate) fn project(boundary: TurnBoundary) -> RecordedTurn {
             event_id: terminal_event_id,
             outcome,
         } => match outcome {
+            InvocationOutcome::HandoffPaused { .. } => TurnState::Running(live),
             InvocationOutcome::Completed => TurnState::Completed {
                 terminal_event_id,
                 context_compaction_outcome: None,

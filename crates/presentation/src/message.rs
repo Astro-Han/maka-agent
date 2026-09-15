@@ -257,8 +257,9 @@ pub enum TurnState {
     },
 }
 impl TurnState {
-    pub(crate) fn from_outcome(outcome: &InvocationOutcome, timestamp: u64) -> Self {
-        match outcome {
+    pub(crate) fn from_outcome(outcome: &InvocationOutcome, timestamp: u64) -> Option<Self> {
+        Some(match outcome {
+            InvocationOutcome::HandoffPaused { .. } => return None,
             InvocationOutcome::Completed | InvocationOutcome::ContextCompactFinished { .. } => {
                 Self::Completed
             }
@@ -276,6 +277,6 @@ impl TurnState {
                 abort_source: source.clone(),
                 aborted_at: timestamp,
             },
-        }
+        })
     }
 }

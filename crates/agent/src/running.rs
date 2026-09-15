@@ -29,6 +29,7 @@ pub struct RunningInvocation {
     invocation: Invocation,
     tool_names: Arc<HashSet<String>>,
     cancellation: RunCancellation,
+    handoff: Option<crate::HandoffGate>,
     worker: JoinHandle<Result<Invocation, RunError>>,
 }
 
@@ -37,12 +38,14 @@ impl RunningInvocation {
         invocation: Invocation,
         tool_names: Arc<HashSet<String>>,
         cancellation: RunCancellation,
+        handoff: Option<crate::HandoffGate>,
         worker: JoinHandle<Result<Invocation, RunError>>,
     ) -> Self {
         Self {
             invocation,
             tool_names,
             cancellation,
+            handoff,
             worker,
         }
     }
@@ -63,6 +66,10 @@ impl RunningInvocation {
 
     pub fn cancellation(&self) -> RunCancellation {
         self.cancellation.clone()
+    }
+
+    pub fn handoff(&self) -> Option<&crate::HandoffGate> {
+        self.handoff.as_ref()
     }
 
     pub async fn wait(mut self) -> Result<Invocation, RunError> {

@@ -147,7 +147,7 @@ pub(crate) async fn active_boundary(
     execution_boundary(connection, invocation, through, false).await
 }
 
-pub(crate) async fn prune_boundary(
+pub(crate) async fn settled_boundary(
     connection: &mut SqliteConnection,
     invocation: &str,
     through: u64,

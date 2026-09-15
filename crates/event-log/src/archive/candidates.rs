@@ -48,7 +48,7 @@ impl EventLog {
                     AND json_extract(event_json,'$.invocation.session_id')=? AND NOT EXISTS(SELECT 1 FROM runtime_events t WHERE t.invocation_id=o.invocation_id AND t.kind='invocation_ended'))")
                     .bind(id).bind(&session).fetch_one(&mut *tx).await?;
                 if !live { return Err(StoreError::InvalidTransition("prune source invocation is not live".into())); }
-                safety::prune_boundary(&mut tx, id, i64::MAX as u64).await?;
+                safety::settled_boundary(&mut tx, id, i64::MAX as u64).await?;
             }
             safety::require_safe(&mut tx, &session, current.as_deref()).await?;
             let mut output = PruneCandidates { candidates: Vec::new(), next: None };

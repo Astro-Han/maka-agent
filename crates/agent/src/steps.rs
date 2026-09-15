@@ -31,7 +31,8 @@ pub(super) async fn run(
     max_steps: usize,
     cancellation: &CancellationToken,
     continuation_base: Option<u64>,
-) -> Result<(), RunError> {
+    handoff: &crate::HandoffGate,
+) -> Result<maka_runtime::event::InvocationOutcome, RunError> {
     let lane = maka_model::ResponsesLane::default();
     let tools = RunTools::new(
         inner.log.clone(),
@@ -47,6 +48,19 @@ pub(super) async fn run(
             return Err(RunError::Cancelled);
         }
         inner.log.commit_pending_steering(&input.invocation).await?;
+        if let Some(pause) = handoff
+            .boundary(
+                std::num::NonZeroU16::new((max_steps - step) as u16)
+                    .expect("validated step budget"),
+                cancellation,
+            )
+            .await
+        {
+            return Ok(maka_runtime::event::InvocationOutcome::HandoffPaused { pause });
+        }
+        if cancellation.is_cancelled() {
+            return Err(RunError::Cancelled);
+        }
         let mut source = inner
             .log
             .read_model_context(
@@ -133,7 +147,7 @@ pub(super) async fn run(
             .filter(|call| !call.provider_executed)
             .collect();
         if local_calls.is_empty() {
-            return Ok(());
+            return Ok(maka_runtime::event::InvocationOutcome::Completed);
         }
         let mut step_tools = request_tools.into_step(&step_id);
         for call in &local_calls {

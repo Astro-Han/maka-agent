@@ -87,7 +87,10 @@ fn events(outcome: InvocationOutcome) -> Vec<StoredEvent> {
             },
         },
     ];
-    if outcome == InvocationOutcome::Completed {
+    if matches!(
+        outcome,
+        InvocationOutcome::Completed | InvocationOutcome::HandoffPaused { .. }
+    ) {
         facts.extend([
             Fact::ModelObserved {
                 step_id: "step".into(),
@@ -158,6 +161,19 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time_and_original_decode
             class: "provider".into(),
             message: Some("factual failure".into()),
         },
+        InvocationOutcome::HandoffPaused {
+            pause: maka_runtime::handoff::HandoffPause {
+                intent: maka_runtime::handoff::HandoffIntent {
+                    handoff_id: "handoff".into(),
+                    host_epoch: "host".into(),
+                    root_run_id: "run".into(),
+                    successor_run_id: "successor-run".into(),
+                    successor_invocation_id: "successor-invocation".into(),
+                    claim_id: "claim".into(),
+                },
+                remaining_steps: std::num::NonZeroU16::new(2).unwrap(),
+            },
+        },
     ] {
         let events = events(outcome.clone());
         let mut view = InvocationView::new(1024).unwrap();
@@ -208,7 +224,10 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time_and_original_decode
             rows.iter()
                 .filter(|row| matches!(row.message.content, Content::TokenUsage { .. }))
                 .count(),
-            usize::from(outcome == InvocationOutcome::Completed),
+            usize::from(matches!(
+                outcome,
+                InvocationOutcome::Completed | InvocationOutcome::HandoffPaused { .. }
+            )),
             "no fabricated usage after interruption"
         );
         assert!(
@@ -219,15 +238,25 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time_and_original_decode
             rows.last().unwrap().sequence <= watermark(events.last().unwrap().sequence).unwrap()
         );
         let terminal = serde_json::to_value(&rows.last().unwrap().message).unwrap();
-        assert_eq!(terminal["id"], events.last().unwrap().event.id);
         let expected = match outcome {
             InvocationOutcome::Completed | InvocationOutcome::ContextCompactFinished { .. } => {
-                "completed"
+                Some("completed")
             }
-            InvocationOutcome::Cancelled { .. } => "aborted",
-            InvocationOutcome::Failed { .. } => "failed",
+            InvocationOutcome::Cancelled { .. } => Some("aborted"),
+            InvocationOutcome::Failed { .. } => Some("failed"),
+            InvocationOutcome::HandoffPaused { .. } => None,
         };
-        assert_eq!(terminal["status"], expected);
+        if let Some(expected) = expected {
+            assert_eq!(terminal["id"], events.last().unwrap().event.id);
+            assert_eq!(terminal["status"], expected);
+        } else {
+            assert!(
+                !rows
+                    .iter()
+                    .any(|row| matches!(row.message.content, Content::TurnState { .. })),
+                "physical pause must not publish a logical Turn terminal"
+            );
+        }
         messages.extend(rows.into_iter().map(|row| row.message));
     }
     // A closed part is not a successful request. Only provider-finalized

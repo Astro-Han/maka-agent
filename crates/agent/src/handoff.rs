@@ -1,0 +1,300 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use maka_runtime::handoff::{HandoffIntent, HandoffPause};
+use std::{num::NonZeroU16, sync::Arc};
+use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
+
+#[derive(Clone, Debug)]
+enum State {
+    Running,
+    Requested(Arc<HandoffIntent>),
+    Held {
+        pause: HandoffPause,
+        cancellation: CancellationToken,
+        ticket: Arc<HandoffIntent>,
+    },
+    Committed(HandoffPause),
+    Sealed(HandoffPause),
+    Closed,
+}
+
+/// Scheduling only. No gate state grants durable continuation authority.
+#[derive(Clone)]
+pub struct HandoffGate {
+    state: watch::Sender<State>,
+    source: Arc<maka_runtime::event::Invocation>,
+    root_run_id: String,
+}
+
+/// Dropping preparation releases the same Run, without a terminal fact.
+pub struct HandoffReservation {
+    gate: HandoffGate,
+    ticket: Arc<HandoffIntent>,
+}
+
+/// Only a currently held, fully settled step can request a durable seal.
+pub struct HeldHandoff {
+    reservation: HandoffReservation,
+    pause: HandoffPause,
+}
+
+pub struct PendingSeal {
+    gate: HandoffGate,
+    pause: HandoffPause,
+}
+
+impl HandoffGate {
+    pub(crate) fn new(source: maka_runtime::event::Invocation, root_run_id: String) -> Self {
+        Self {
+            state: watch::channel(State::Running).0,
+            source: Arc::new(source),
+            root_run_id,
+        }
+    }
+
+    pub fn reserve(&self, intent: HandoffIntent) -> Result<HandoffReservation, crate::RunError> {
+        intent
+            .validate(&self.source)
+            .map_err(|e| crate::RunError::InvalidInput(e.into()))?;
+        if intent.root_run_id != self.root_run_id {
+            return Err(crate::RunError::InvalidInput(
+                "handoff changes the logical Run".into(),
+            ));
+        }
+        let ticket = Arc::new(intent);
+        self.state
+            .send_if_modified(|state| {
+                if !matches!(state, State::Running) {
+                    return false;
+                }
+                *state = State::Requested(ticket.clone());
+                true
+            })
+            .then(|| HandoffReservation {
+                gate: self.clone(),
+                ticket,
+            })
+            .ok_or(crate::RunError::Busy)
+    }
+
+    pub(crate) async fn boundary(
+        &self,
+        remaining_steps: NonZeroU16,
+        cancellation: &CancellationToken,
+    ) -> Option<HandoffPause> {
+        let mut changes = self.state.subscribe();
+        let mut ticket = None;
+        self.state.send_if_modified(|state| {
+            let State::Requested(intent) = state else {
+                return false;
+            };
+            ticket = Some(intent.clone());
+            *state = State::Held {
+                pause: HandoffPause {
+                    intent: intent.as_ref().clone(),
+                    remaining_steps,
+                },
+                cancellation: cancellation.clone(),
+                ticket: intent.clone(),
+            };
+            true
+        });
+        let ticket = ticket?;
+        loop {
+            let state = changes.borrow_and_update().clone();
+            match state {
+                State::Committed(pause) if pause.intent == *ticket => return Some(pause),
+                State::Held {
+                    ticket: current, ..
+                } if Arc::ptr_eq(&current, &ticket) => {}
+                _ => return None,
+            }
+            tokio::select! {
+                _ = changes.changed() => {},
+                _ = cancellation.cancelled() => self.cancel(&ticket),
+            }
+        }
+    }
+
+    fn cancel(&self, ticket: &Arc<HandoffIntent>) {
+        self.state.send_if_modified(|state| {
+            let matches = match state {
+                State::Requested(current)
+                | State::Held {
+                    ticket: current, ..
+                } => Arc::ptr_eq(current, ticket),
+                _ => false,
+            };
+            if matches {
+                *state = State::Running;
+            }
+            matches
+        });
+    }
+
+    /// Called only after the canonical pause append is acknowledged.
+    pub(crate) fn sealed(&self, pause: &HandoffPause) {
+        self.state.send_if_modified(|state| {
+            if !matches!(state, State::Committed(expected) if expected == pause) {
+                return false;
+            }
+            *state = State::Sealed(pause.clone());
+            true
+        });
+    }
+
+    pub(crate) fn close(&self) {
+        self.state.send_if_modified(|state| {
+            if matches!(state, State::Sealed(_) | State::Closed) {
+                return false;
+            }
+            *state = State::Closed;
+            true
+        });
+    }
+}
+
+impl HandoffReservation {
+    pub async fn ready(self) -> Option<HeldHandoff> {
+        let mut changes = self.gate.state.subscribe();
+        loop {
+            let state = changes.borrow_and_update().clone();
+            match state {
+                State::Held { pause, ticket, .. } if Arc::ptr_eq(&ticket, &self.ticket) => {
+                    return Some(HeldHandoff {
+                        reservation: self,
+                        pause,
+                    });
+                }
+                State::Requested(ticket) if Arc::ptr_eq(&ticket, &self.ticket) => {}
+                _ => return None,
+            }
+            changes.changed().await.ok()?;
+        }
+    }
+}
+
+impl Drop for HandoffReservation {
+    fn drop(&mut self) {
+        self.gate.cancel(&self.ticket);
+    }
+}
+
+impl HeldHandoff {
+    pub fn preview(&self) -> &HandoffPause {
+        &self.pause
+    }
+
+    /// Irreversible scheduling decision, not yet a durable receipt.
+    pub fn commit(self) -> Option<PendingSeal> {
+        let gate = &self.reservation.gate;
+        gate.state
+            .send_if_modified(|state| {
+            if !matches!(state, State::Held { ticket, cancellation, .. } if Arc::ptr_eq(ticket, &self.reservation.ticket) && !cancellation.is_cancelled()) {
+                    return false;
+                }
+                *state = State::Committed(self.pause.clone());
+                true
+            })
+            .then(|| PendingSeal {
+                gate: gate.clone(),
+                pause: self.pause.clone(),
+            })
+    }
+}
+
+impl PendingSeal {
+    /// None means the worker exited without confirming the requested seal.
+    /// The owner must reconcile canonical facts, never resume the old worker.
+    pub async fn wait(self) -> Option<HandoffPause> {
+        let mut changes = self.gate.state.subscribe();
+        loop {
+            let state = changes.borrow_and_update().clone();
+            match state {
+                State::Sealed(pause) if pause == self.pause => return Some(pause),
+                State::Committed(pause) if pause == self.pause => {}
+                _ => return None,
+            }
+            changes.changed().await.ok()?;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cancellation_prevents_commit_and_worker_exit_never_forges_a_seal() {
+        let source = maka_runtime::event::Invocation {
+            session_id: "session".into(),
+            turn_id: "turn".into(),
+            run_id: "run".into(),
+            invocation_id: "invocation".into(),
+        };
+        let intent = HandoffIntent {
+            handoff_id: "handoff".into(),
+            host_epoch: "host".into(),
+            root_run_id: source.run_id.clone(),
+            successor_run_id: "successor-run".into(),
+            successor_invocation_id: "successor-invocation".into(),
+            claim_id: "claim".into(),
+        };
+        let gate = HandoffGate::new(source, "run".into());
+        let cancellation = CancellationToken::new();
+        let reservation = gate.reserve(intent.clone()).unwrap();
+        let (result, ()) = tokio::join!(
+            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation),
+            async {
+                let held = reservation.ready().await.unwrap();
+                cancellation.cancel();
+                assert!(held.commit().is_none());
+            },
+        );
+        assert!(result.is_none());
+
+        let cancellation = CancellationToken::new();
+        let reservation = gate.reserve(intent.clone()).unwrap();
+        let (result, stale) = tokio::join!(
+            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation),
+            async {
+                let held = reservation.ready().await.unwrap();
+                cancellation.cancel();
+                held
+            },
+        );
+        assert!(result.is_none());
+        let cancellation = CancellationToken::new();
+        let reservation = gate.reserve(intent).unwrap();
+        drop(stale); // The same durable intent does not reuse a scheduling owner.
+        let (result, pending) = tokio::join!(
+            gate.boundary(NonZeroU16::new(2).unwrap(), &cancellation),
+            async { reservation.ready().await.unwrap().commit().unwrap() },
+        );
+        assert!(result.is_some());
+        gate.close();
+        assert!(
+            pending.wait().await.is_none(),
+            "commit is not an acknowledged append"
+        );
+        assert!(gate.reserve(result.unwrap().intent).is_err());
+    }
+}

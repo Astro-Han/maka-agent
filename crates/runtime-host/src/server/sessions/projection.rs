@@ -36,7 +36,11 @@ pub(crate) fn project(mut record: SessionRecord<SessionConfiguration>) -> Sessio
     };
     let mut running_turn_ids = Vec::new();
     let (status, recorded_at) = match execution.state {
-        SessionExecutionState::Live { recorded_at } => {
+        SessionExecutionState::Live { recorded_at }
+        | SessionExecutionState::Ended {
+            status: TerminalStatus::Paused,
+            recorded_at,
+        } => {
             running_turn_ids.push(execution.turn_id);
             (SessionStatus::Running, recorded_at)
         }
