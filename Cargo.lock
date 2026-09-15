@@ -3938,10 +3938,13 @@ name = "maka-cli"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "libc",
  "maka-event-log",
  "maka-js-runtime",
+ "maka-protocol",
  "maka-runtime",
  "maka-runtime-host",
+ "maka-transport",
  "serde",
  "serde_json",
  "tempfile",

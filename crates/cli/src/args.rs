@@ -49,6 +49,18 @@ enum Command {
 enum HostCommand {
     /// Initialize an empty native State Root, or verify its existing identity.
     Init(Root),
+    /// Query the existing Host without opening its State Root for writing.
+    Status(Root),
+    /// Retire the exact current Host, preserving work at safe step boundaries.
+    Retire {
+        #[command(flatten)]
+        root: Root,
+        #[arg(long)]
+        expected_host_epoch: Option<String>,
+        /// Permit interrupting other clients and non-cooperative resources.
+        #[arg(long)]
+        allow_interrupt_active_tasks: bool,
+    },
     /// Run a discoverable ephemeral Host under its launcher.
     Candidate(candidate::Candidate),
     /// Serve a native State Root over a private local endpoint.
@@ -91,6 +103,26 @@ impl Cli {
             }
             Command::Host(HostCommand::Serve { root, websocket }) => {
                 serve::run(&root.root, websocket).await
+            }
+            Command::Host(HostCommand::Status(root)) => {
+                let mut client = crate::host_client::HostClient::connect(&root.root).await?;
+                let status = client.status().await?;
+                drop(client);
+                println!("{}", serde_json::to_string(&status)?);
+                Ok(())
+            }
+            Command::Host(HostCommand::Retire {
+                root,
+                expected_host_epoch,
+                allow_interrupt_active_tasks,
+            }) => {
+                let mut client = crate::host_client::HostClient::connect(&root.root).await?;
+                let result = client
+                    .retire(expected_host_epoch.as_deref(), allow_interrupt_active_tasks)
+                    .await?;
+                drop(client);
+                println!("{}", serde_json::to_string(&result)?);
+                Ok(())
             }
             Command::Code(args) => code::run(&args.log).await,
             Command::Inspect(args) => {

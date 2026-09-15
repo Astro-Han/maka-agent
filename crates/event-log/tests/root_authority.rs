@@ -33,6 +33,11 @@ fn identity_and_lease_survive_reopen_and_symlink_alias() {
     let temp = tempfile::tempdir().unwrap();
     let ns = namespaces(temp.path());
     let path = temp.path().join("root");
+    assert!(maka_event_log::root::resolve(&path).is_err());
+    assert!(
+        !path.exists(),
+        "read-only resolution must not create a root"
+    );
     let owner = RootOwner::create(&path, &ns).unwrap();
     let id = owner.root_id().to_owned();
     assert_eq!(id.len(), 64);
@@ -43,6 +48,9 @@ fn identity_and_lease_survive_reopen_and_symlink_alias() {
     assert_eq!(marker["rootId"], id);
     let alias = temp.path().join("alias");
     std::os::unix::fs::symlink(&path, &alias).unwrap();
+    let location = maka_event_log::root::resolve(&alias).unwrap();
+    assert_eq!(location.root_id(), id);
+    assert_eq!(location.canonical_path(), owner.canonical_path());
     assert!(RootOwner::open(&alias, &ns).is_err());
     owner.validate_current().unwrap();
     drop(owner);
@@ -61,6 +69,7 @@ fn copied_marker_and_rebound_path_cannot_reuse_identity() {
         fs::copy(path.join(name), copy.join(name)).unwrap();
     }
     assert!(RootOwner::open(&copy, &ns).is_err());
+    assert!(maka_event_log::root::resolve(&copy).is_err());
     fs::rename(&path, temp.path().join("moved")).unwrap();
     fs::rename(&copy, &path).unwrap();
     assert!(owner.validate_current().is_err());

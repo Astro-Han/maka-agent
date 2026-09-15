@@ -49,12 +49,13 @@ pub(super) async fn run(
     let endpoint = super::endpoint::LocalEndpoint::bind()?;
     let cancellation = CancellationToken::new();
     let _signals = super::signals::watch(cancellation.clone())?;
+    let registration = host.publish_registration(&endpoint.path)?;
     let mut ready = json!({"kind":"ready","rootId":host.root_id(),"socketPath":endpoint.path});
     if let Some(listener) = &websocket {
         ready["websocketUrl"] = format!("ws://{}/runtime-host", listener.local_addr()?).into();
     }
     println!("{ready}");
-    match websocket {
+    let result = match websocket {
         Some(websocket) => {
             endpoint
                 .listener
@@ -62,7 +63,8 @@ pub(super) async fn run(
                 .await
         }
         None => endpoint.listener.serve(host, cancellation).await,
-    }
+    };
+    result.and(registration.remove())
 }
 
 pub(super) fn global_instructions()

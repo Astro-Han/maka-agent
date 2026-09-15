@@ -25,7 +25,8 @@ use maka_protocol::OperationErrorCode;
 use maka_protocol::{Operation, OperationRegistry, Result};
 use serde_json::Value;
 
-pub(super) struct Operations;
+/// Wire contracts supported by this Host build, shared with native operators.
+pub struct Operations;
 
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {

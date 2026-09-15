@@ -45,6 +45,8 @@ execution:
 ```sh
 maka host init --root /absolute/path/to/new-root
 maka host serve --root /absolute/path/to/new-root
+maka host status --root /absolute/path/to/new-root
+maka host retire --root /absolute/path/to/new-root
 ```
 
 Use `target/debug/maka` if the binary is not on PATH. Local transport is a Unix

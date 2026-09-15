@@ -142,7 +142,8 @@ pub struct Request {
     pub input: Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, thiserror::Error)]
+#[error("{code:?}: {message}")]
 pub struct OperationError {
     pub code: OperationErrorCode,
     pub message: String,

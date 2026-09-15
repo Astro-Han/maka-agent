@@ -42,6 +42,8 @@ TypeScript State Root。独立运行时使用新目录：
 ```sh
 maka host init --root /absolute/path/to/new-root
 maka host serve --root /absolute/path/to/new-root
+maka host status --root /absolute/path/to/new-root
+maka host retire --root /absolute/path/to/new-root
 ```
 
 二进制未加入 PATH 时使用 `target/debug/maka`。Linux/macOS 使用 Unix socket，

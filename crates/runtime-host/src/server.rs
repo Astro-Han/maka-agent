@@ -67,6 +67,7 @@ use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
 pub type HostError = Box<dyn Error + Send + Sync>;
+pub use operations::Operations as HostOperations;
 pub use projects::DirectoryRootSpec;
 pub use registration::Registration;
 

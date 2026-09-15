@@ -33,6 +33,8 @@ clap.workspace = true
 maka-runtime-host.workspace = true
 maka-runtime.workspace = true
 maka-event-log.workspace = true
+maka-protocol.workspace = true
+maka-transport.workspace = true
 maka-js-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -43,3 +45,6 @@ tempfile.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

@@ -90,18 +90,52 @@ pub struct RootOwner {
     compatibility_lease: File,
 }
 
+/// A verified location, not a writer lease. Every mutation still needs RootOwner.
+#[derive(Debug, Clone)]
+pub struct RootLocation {
+    canonical_path: PathBuf,
+    root_id: String,
+}
+
+impl RootLocation {
+    pub fn canonical_path(&self) -> &Path {
+        &self.canonical_path
+    }
+
+    pub fn root_id(&self) -> &str {
+        &self.root_id
+    }
+}
+
+/// Inspect only an existing native root. Never initialize, repair or acquire it.
+pub fn resolve(path: &Path) -> io::Result<RootLocation> {
+    let (canonical_path, marker) = inspect(path)?;
+    Ok(RootLocation {
+        canonical_path,
+        root_id: marker.root_id,
+    })
+}
+
+fn inspect(path: &Path) -> io::Result<(PathBuf, Marker)> {
+    let canonical_path = path.canonicalize()?;
+    let identity = directory_identity(&canonical_path)?;
+    check_layout(&canonical_path)?;
+    let marker = read_marker(&canonical_path)?;
+    if marker.root_identity != identity
+        || directory_identity(&canonical_path)? != identity
+        || canonical_path.canonicalize()? != canonical_path
+    {
+        return Err(io::Error::other("root identity collision"));
+    }
+    Ok((canonical_path, marker))
+}
+
 /// Verify an existing native root without taking its writer lease, or initialize an empty one.
 pub fn initialize(path: &Path, namespaces: &RootNamespaces) -> io::Result<String> {
     if !path.join(ROOT_MARKER).exists() {
         return Ok(RootOwner::create(path, namespaces)?.root_id().to_owned());
     }
-    let path = path.canonicalize()?;
-    check_layout(&path)?;
-    let marker = read_marker(&path)?;
-    if marker.root_identity != directory_identity(&path)? {
-        return Err(io::Error::other("root identity collision"));
-    }
-    Ok(marker.root_id)
+    Ok(resolve(path)?.root_id)
 }
 
 impl RootOwner {
@@ -134,13 +168,7 @@ impl RootOwner {
 
     /// Open only a marked Rust prototype root, rejecting legacy layouts before database access.
     pub fn open(path: &Path, namespaces: &RootNamespaces) -> io::Result<Self> {
-        let canonical_path = path.canonicalize()?;
-        let identity = directory_identity(&canonical_path)?;
-        check_layout(&canonical_path)?;
-        let marker = read_marker(&canonical_path)?;
-        if marker.root_identity != identity {
-            return Err(io::Error::other("root identity collision"));
-        }
+        let (canonical_path, marker) = inspect(path)?;
         lock::private_directory(&namespaces.ownership)?;
         let lock_path = namespaces
             .ownership

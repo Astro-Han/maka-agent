@@ -42,9 +42,23 @@ fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle(
     };
     drop(owner);
 
-    for release in [false, true] {
-        fixture.child = Some(
-            Command::new(env!("CARGO_BIN_EXE_maka"))
+    enum End {
+        OwnerLoss,
+        ReleasedIdle,
+        Retirement,
+        Standalone,
+    }
+    for end in [
+        End::OwnerLoss,
+        End::ReleasedIdle,
+        End::Retirement,
+        End::Standalone,
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_maka"));
+        if matches!(end, End::Standalone) {
+            command.args(["host", "serve", "--root"]).arg(&fixture.root);
+        } else {
+            command
                 .args(["host", "candidate", "--root"])
                 .arg(&fixture.root)
                 .args([
@@ -57,7 +71,10 @@ fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle(
                     "--idle-grace-ms",
                     "1000",
                     "--owner-stdin",
-                ])
+                ]);
+        }
+        fixture.child = Some(
+            command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::inherit())
@@ -67,7 +84,9 @@ fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle(
         let registration = fixture.wait_for_registration();
         assert_eq!(registration["pid"], fixture.child.as_ref().unwrap().id());
         assert_eq!(registration["rootId"], fixture.root_id);
-        assert_eq!(registration["generation"], "native-cli-test");
+        if !matches!(end, End::Standalone) {
+            assert_eq!(registration["generation"], "native-cli-test");
+        }
         assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
 
         // Initialization verifies identity without competing for an active writer lease.
@@ -87,7 +106,7 @@ fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle(
         );
 
         let mut stdin = fixture.child.as_mut().unwrap().stdin.take().unwrap();
-        if release {
+        if matches!(end, End::ReleasedIdle) {
             stdin
                 .write_all(b"{\"kind\":\"runtime-host-launch-owner-release\"}\n")
                 .unwrap();
@@ -112,7 +131,55 @@ fn candidate_preserves_root_authority_and_drains_on_owner_loss_or_released_idle(
             String::from_utf8_lossy(&probe.stderr)
         );
 
-        if !release {
+        let status = Command::new(env!("CARGO_BIN_EXE_maka"))
+            .args(["host", "status", "--root"])
+            .arg(&fixture.root)
+            .output()
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+        assert_eq!(status["hostEpoch"], registration["hostEpoch"]);
+        assert_eq!(status["state"], "ready");
+        if matches!(end, End::Retirement | End::Standalone) {
+            let stale = Command::new(env!("CARGO_BIN_EXE_maka"))
+                .args(["host", "retire", "--root"])
+                .arg(&fixture.root)
+                .args(["--expected-host-epoch", "stale"])
+                .output()
+                .unwrap();
+            assert!(!stale.status.success());
+            assert!(
+                fixture
+                    .child
+                    .as_mut()
+                    .unwrap()
+                    .try_wait()
+                    .unwrap()
+                    .is_none()
+            );
+            let retired = Command::new(env!("CARGO_BIN_EXE_maka"))
+                .args(["host", "retire", "--root"])
+                .arg(&fixture.root)
+                .args([
+                    "--expected-host-epoch",
+                    registration["hostEpoch"].as_str().unwrap(),
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                retired.status.success(),
+                "{}",
+                String::from_utf8_lossy(&retired.stderr)
+            );
+            let receipt: Value = serde_json::from_slice(&retired.stdout).unwrap();
+            assert_eq!(receipt["kind"], "prepared", "{receipt}");
+            assert_eq!(receipt["pid"], registration["pid"]);
+        }
+        if matches!(end, End::OwnerLoss) {
             drop(fixture.child.as_mut().unwrap().stdin.take());
         }
         let status = fixture.wait_for_exit();

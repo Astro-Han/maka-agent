@@ -22,6 +22,7 @@ mod args;
 mod candidate;
 mod code;
 mod endpoint;
+mod host_client;
 mod serve;
 mod signals;
 
