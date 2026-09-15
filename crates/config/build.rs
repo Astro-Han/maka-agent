@@ -30,12 +30,13 @@ fn main() {
         println!("cargo:rerun-if-changed={source}");
     }
     println!("cargo:rerun-if-env-changed=MAKA_JS_DEPS");
-    if let Some(dependencies) = std::env::var_os("MAKA_JS_DEPS") {
+    let dependencies = std::env::var_os("MAKA_JS_DEPS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| "../..".into());
+    for source in ["package-lock.json", "node_modules/.package-lock.json"] {
         println!(
             "cargo:rerun-if-changed={}",
-            std::path::PathBuf::from(dependencies)
-                .join("package-lock.json")
-                .display()
+            dependencies.join(source).display()
         );
     }
     let status = std::process::Command::new("node")

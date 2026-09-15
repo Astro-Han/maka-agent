@@ -20,6 +20,7 @@
 import { createRequire } from 'node:module';
 import { resolve, join, basename } from 'node:path';
 import { writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -28,10 +29,17 @@ const require = createRequire(join(dependencyRoot, 'package.json'));
 const { build, transform } = require('esbuild');
 const output = process.argv[2];
 if (!output) throw new Error('Cargo output directory is required');
+const locked = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+const entry = resolve(root, 'crates/js-runtime/trusted/adapter.js');
+for (const name of ['@ai-sdk/openai', '@ai-sdk/anthropic', '@ai-sdk/openai-compatible']) {
+  if (
+    require(`${name}/package.json`).version !== locked.packages[`node_modules/${name}`]?.version
+  ) {
+    throw new Error(`Provider SDK does not match repository lockfile: ${name}`);
+  }
+}
 await build({
-  entryPoints: [
-    fileURLToPath(new URL('../../crates/js-runtime/trusted/adapter.js', import.meta.url)),
-  ],
+  entryPoints: [entry],
   outfile: resolve(output, 'providers.js'),
   bundle: true,
   platform: 'browser',
@@ -39,6 +47,18 @@ await build({
   globalName: 'MakaProvider',
   target: 'es2024',
   nodePaths: [join(dependencyRoot, 'node_modules')],
+  plugins: [
+    {
+      name: 'locked-provider-dependencies',
+      setup(build) {
+        build.onResolve({ filter: /^@ai-sdk\/(openai|anthropic|openai-compatible)$/ }, (args) => {
+          if (args.importer !== entry) return;
+          // Keep import conditions and transitive resolution, but start from the checked install.
+          return build.resolve(args.path, { resolveDir: dependencyRoot, kind: args.kind });
+        });
+      },
+    },
+  ],
   legalComments: 'eof',
 });
 // Transpile Deno's embedded TypeScript at build time; no compiler or npm
