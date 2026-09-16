@@ -101,8 +101,8 @@ export const RUNTIME_HOST_REGISTRATION_SCHEMA_VERSION = 1 as const;
 export const RUNTIME_HOST_PROTOCOL_VERSION = 0 as const;
 // Increment when the same protocol version no longer guarantees safe Client-Host
 // interoperability. Mismatches are rejected before domain commands are admitted.
-export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 157 as const;
-// 157: Session transcript reads return the whole transcript under a byte budget.
+export const RUNTIME_HOST_COMPATIBILITY_EPOCH = 158 as const;
+// 158: Session transcript reads return the whole transcript under a byte budget.
 // The windowed read — its turn-range operation, cursors and gap rows — is gone,
 // so a peer older than this epoch asks for a window this Host no longer answers.
 // 154: External Session import results distinguish committed Sessions from typed source limits.
