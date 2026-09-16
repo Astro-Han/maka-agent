@@ -70,6 +70,15 @@ Linux inode 未变并保留 Root ID。不要用它接管复制的根或旧版数
 Windows 要求交互式用户会话。单独安装不会启动服务或修改账户策略。
 `host setup --root <目录>` 合并安装与激活；可选 `--principal <id>` 同时返回短期 Desktop
 配对凭据，须将该 JSON 视为秘密。重复 setup 复用相同代码及配置，变更仍须使用 `host update`。
+
+`host fetch --target <目标> --version <精确版本> --cache <目录>` 从 npm 预备
+`@maka-agent/cli-<目标>`，不安装或启动 Host。目标支持 `darwin-arm64`、`darwin-x64`、
+`linux-arm64-gnu`、`linux-x64-gnu`、`win32-x64`。下载验证 SHA-512、包身份及二进制头；
+缓存命中可离线使用，仍重新校验文件摘要。遵循 CLI 代理环境变量。本地包可改用
+`--archive <文件.tgz> --integrity sha512-<base64>`，不访问 npm。
+返回的 JSON 包含 Windows 两个入口路径。这只是制品预备；Desktop 自动下载/引导及原生 npm 发布尚未启用。
+现阶段原生包使用独立 npm channel `rust-preview`，不使用 `latest`。
+
 Desktop 复用原生托管 Host，需要时激活固定版本；自身版本变化和退出不控制托管 Host 的寿命。
 暂停本地启动后，会等待已发出的激活收尾，再交接 Root。
 Desktop 可管理本机原生部署及已有的 SSH／WSL 原生 operator 配置。远程生命周期命令使用
@@ -168,6 +177,12 @@ Runtime core 不依赖 V8 或 SQLite；持久 schema 由 SQLx migration 管理�
 Client Capability 注册与反向调用所有权位于 `client-capability`，Host 负责组合执行。
 
 ## 开发验证
+
+`node scripts/rust/pack-cli.mjs --target <目标> --version <精确版本>
+--binary <目标平台maka> --validator <本机maka> --notices <已审阅许可证文档>
+--output <目录>` 打包预构建原生程序，并用本机 CLI 校验实际 npm 归档。
+不执行跨平台程序或安装脚本，不发布，也不覆盖已有输出。许可证文档须覆盖 Rust、V8
+及嵌入 JavaScript；旧 Node CLI 文档不足以代替。Linux 发布构建仍须明确并验证 glibc 基线。
 
 ```sh
 cargo fmt --all --check

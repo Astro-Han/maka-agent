@@ -23,6 +23,7 @@ mod args;
 mod candidate;
 mod code;
 mod deployment;
+mod distribution;
 mod endpoint;
 mod host_client;
 mod serve;

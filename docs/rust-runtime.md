@@ -83,6 +83,17 @@ start a service or change account policy.
 `--principal <id>` also returns a short-lived Desktop pairing credential. Protect
 this JSON as a secret. Repeating setup reuses matching code and configuration;
 changes still require `host update`.
+
+`host fetch --target <target> --version <exact-version> --cache <directory>` prepares
+`@maka-agent/cli-<target>` from npm without installing or starting a Host. Targets:
+`darwin-arm64`, `darwin-x64`, `linux-arm64-gnu`, `linux-x64-gnu`, `win32-x64`.
+It verifies SHA-512, package identity and binary headers; validated cache hits work
+offline and recheck file hashes. CLI proxy environment variables apply. Local
+packages use `--archive <file.tgz> --integrity sha512-<base64>` instead of npm.
+The returned JSON identifies both Windows executables. This is preparation only;
+Desktop automatic download/onboarding and native npm publication are not yet enabled.
+Native preview packages use the separate `rust-preview` npm channel, never `latest`.
+
 Desktop reuses managed native Hosts and activates pinned code when needed;
 its own generation and exit do not govern their lifetime. Pausing local launches
 waits for outstanding activations before handing off the Root.
@@ -219,6 +230,14 @@ schema changes. Client Capability registration and reverse-call ownership live i
 `client-capability`; the host composes them with execution.
 
 ## Development
+
+`node scripts/rust/pack-cli.mjs --target <target> --version <exact-version>
+--binary <target-maka> --validator <local-maka> --notices <reviewed-notices>
+--output <directory>` packs prebuilt native code and verifies the resulting npm
+archive using the local CLI. It never executes foreign-target code, runs install
+scripts, publishes, or overwrites an existing output. Notices must cover Rust,
+V8 and embedded JavaScript; legacy Node CLI notices alone are insufficient.
+Linux release builds still need an established and verified glibc baseline.
 
 ```sh
 cargo fmt --all --check

@@ -38,6 +38,10 @@ test = false
 [dependencies]
 base64 = "0.22"
 clap.workspace = true
+flate2 = "1"
+reqwest.workspace = true
+semver = "1"
+tar = { version = "0.4.46", default-features = false }
 maka-runtime-host.workspace = true
 maka-runtime.workspace = true
 maka-event-log.workspace = true

@@ -3939,6 +3939,7 @@ version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
+ "flate2",
  "libc",
  "maka-event-log",
  "maka-js-runtime",
@@ -3947,10 +3948,13 @@ dependencies = [
  "maka-runtime",
  "maka-runtime-host",
  "maka-transport",
+ "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
+ "tar",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -6402,6 +6406,16 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+]
 
 [[package]]
 name = "tempfile"

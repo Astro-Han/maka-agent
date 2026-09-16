@@ -47,6 +47,8 @@ enum Command {
 
 #[derive(Subcommand)]
 enum HostCommand {
+    /// Download and verify an exact native CLI package without installing or starting it.
+    Fetch(crate::distribution::Fetch),
     /// Prepare one-time remote Desktop pairing or revoke a credential.
     #[command(subcommand)]
     Access(crate::access::Access),
@@ -124,6 +126,7 @@ impl Cli {
 
     pub(super) async fn run(self) -> Result<(), HostError> {
         match self.command {
+            Command::Host(HostCommand::Fetch(args)) => args.run().await,
             Command::Host(HostCommand::Access(args)) => args.run().await,
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
             Command::Host(HostCommand::Install(args)) => args.run().await,

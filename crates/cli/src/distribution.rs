@@ -1,0 +1,508 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+mod archive;
+mod target;
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use clap::Args;
+use maka_event_log::root::private_directory;
+use maka_runtime_host::server::HostError;
+use reqwest::{Client, Url};
+use semver::Version;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha512};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
+use target::Target;
+use tempfile::NamedTempFile;
+use tokio::io::AsyncWriteExt;
+
+const REGISTRY: &str = "https://registry.npmjs.org/";
+const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_METADATA_BYTES: usize = 1024 * 1024;
+
+#[derive(Args)]
+pub(super) struct Fetch {
+    /// Target OS and architecture, not the machine performing the download.
+    #[arg(long, value_enum)]
+    target: Target,
+    /// Exact npm release version; tags and version ranges are not accepted.
+    #[arg(long)]
+    version: Version,
+    /// Private, disposable artifact cache. This is not a State Root.
+    #[arg(long)]
+    cache: PathBuf,
+    /// Import a local package through the same validation path (no registry access).
+    #[arg(long, requires = "integrity")]
+    archive: Option<PathBuf>,
+    /// Expected sha512-<base64> of the local package, supplied by its trusted source.
+    #[arg(long, requires = "archive")]
+    integrity: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RegistryPackage {
+    name: String,
+    version: String,
+    dist: Distribution,
+}
+
+#[derive(Deserialize)]
+struct Distribution {
+    tarball: Url,
+    integrity: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Artifact {
+    target: Target,
+    version: String,
+    directory: PathBuf,
+    executable: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service_executable: Option<PathBuf>,
+    integrity: String,
+}
+
+impl Fetch {
+    pub async fn run(self) -> Result<(), HostError> {
+        // Honor the CLI environment's HTTP(S)/ALL_PROXY and NO_PROXY. No npm,
+        // lifecycle scripts, registry credentials, or running Host are involved.
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(120))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
+        let artifact = tokio::time::timeout(
+            Duration::from_secs(180),
+            self.resolve(client, Url::parse(REGISTRY)?),
+        )
+        .await
+        .map_err(|_| "native package download timed out")??;
+        println!("{}", serde_json::to_string(&artifact)?);
+        Ok(())
+    }
+
+    async fn resolve(self, client: Client, registry: Url) -> Result<Artifact, HostError> {
+        let target = self.target;
+        let version = self.version.to_string();
+        if let Some(integrity) = &self.integrity {
+            decode_integrity(integrity)?;
+        }
+        let name = target.package_name();
+        let cache = self.cache;
+        let entry = format!("{}@{version}", target.slug());
+        let (cache, destination, existing) = tokio::task::spawn_blocking({
+            let version = version.clone();
+            move || -> Result<_, HostError> {
+                private_directory(&cache)?;
+                let cache = cache.canonicalize()?;
+                let destination = cache.join(entry);
+                let existing = archive::cached(&destination, target, &version)?;
+                Ok((cache, destination, existing))
+            }
+        })
+        .await??;
+        if let Some(integrity) = existing {
+            if self
+                .integrity
+                .as_ref()
+                .is_some_and(|expected| *expected != integrity)
+            {
+                return Err(
+                    "cached package differs from the requested local archive integrity".into(),
+                );
+            }
+            return Ok(artifact(destination, target, version, integrity));
+        }
+
+        if let Some(source) = self.archive {
+            let integrity = self.integrity.ok_or("local archive requires integrity")?;
+            return tokio::task::spawn_blocking(move || {
+                use std::io::{Read, Write};
+                let mut source = regular_file(&source, MAX_ARCHIVE_BYTES)?;
+                let mut temporary = NamedTempFile::new_in(&cache)?;
+                let mut hash = Sha512::new();
+                let mut buffer = [0; 64 * 1024];
+                let mut size = 0_u64;
+                loop {
+                    let read = source.read(&mut buffer)?;
+                    if read == 0 {
+                        break;
+                    }
+                    size += read as u64;
+                    if size > MAX_ARCHIVE_BYTES {
+                        return Err("local archive exceeds the size limit".into());
+                    }
+                    hash.update(&buffer[..read]);
+                    temporary.write_all(&buffer[..read])?;
+                }
+                if hash.finalize().as_slice() != decode_integrity(&integrity)? {
+                    return Err("native package archive integrity mismatch".into());
+                }
+                archive::publish(
+                    temporary,
+                    &cache,
+                    &destination,
+                    target,
+                    &version,
+                    &integrity,
+                )?;
+                Ok(artifact(destination, target, version, integrity))
+            })
+            .await?;
+        }
+
+        let url = registry.join(&format!("{name}/{version}"))?;
+        let mut response = client.get(url).send().await?.error_for_status()?;
+        if !response.status().is_success() {
+            return Err("native package registry redirect is not allowed".into());
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_METADATA_BYTES {
+                return Err("native package metadata exceeds the size limit".into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let package: RegistryPackage = serde_json::from_slice(&bytes)?;
+        if package.name != name || package.version != version {
+            return Err("registry returned a different native package or version".into());
+        }
+        let integrity = package.dist.integrity;
+        let expected = decode_integrity(&integrity)?;
+        // The trusted registry cannot turn this command into an arbitrary URL
+        // downloader, nor forward proxy credentials through redirects.
+        if package.dist.tarball.origin() != registry.origin()
+            || !package.dist.tarball.username().is_empty()
+            || package.dist.tarball.password().is_some()
+            || package.dist.tarball.fragment().is_some()
+        {
+            return Err("native package tarball must belong to the npm registry origin".into());
+        }
+        let mut response = client
+            .get(package.dist.tarball)
+            .send()
+            .await?
+            .error_for_status()?;
+        if !response.status().is_success()
+            || response
+                .content_length()
+                .is_some_and(|size| size > MAX_ARCHIVE_BYTES)
+        {
+            return Err("native package archive redirect or size is not allowed".into());
+        }
+        let temporary = NamedTempFile::new_in(&cache)?;
+        let mut output = tokio::fs::File::from_std(temporary.reopen()?);
+        let mut hash = Sha512::new();
+        let mut size = 0_u64;
+        while let Some(chunk) = response.chunk().await? {
+            size += chunk.len() as u64;
+            if size > MAX_ARCHIVE_BYTES {
+                return Err("native package archive exceeds the size limit".into());
+            }
+            hash.update(&chunk);
+            output.write_all(&chunk).await?;
+        }
+        output.flush().await?;
+        drop(output);
+        if hash.finalize().as_slice() != expected {
+            return Err("native package archive integrity mismatch".into());
+        }
+        tokio::task::spawn_blocking({
+            let version = version.clone();
+            let integrity = integrity.clone();
+            let destination = destination.clone();
+            move || {
+                archive::publish(
+                    temporary,
+                    &cache,
+                    &destination,
+                    target,
+                    &version,
+                    &integrity,
+                )
+            }
+        })
+        .await??;
+        Ok(artifact(destination, target, version, integrity))
+    }
+}
+
+fn decode_integrity(value: &str) -> Result<[u8; 64], HostError> {
+    let encoded = value
+        .strip_prefix("sha512-")
+        .ok_or("native package requires SHA-512 integrity")?;
+    let bytes: [u8; 64] = STANDARD
+        .decode(encoded)?
+        .try_into()
+        .map_err(|_| "invalid native package SHA-512 integrity")?;
+    if STANDARD.encode(bytes) != encoded {
+        return Err("noncanonical native package integrity".into());
+    }
+    Ok(bytes)
+}
+
+fn artifact(directory: PathBuf, target: Target, version: String, integrity: String) -> Artifact {
+    Artifact {
+        target,
+        version,
+        executable: directory.join(target.executable()),
+        service_executable: target.service_executable().map(|name| directory.join(name)),
+        directory,
+        integrity,
+    }
+}
+
+fn regular_file(path: &Path, limit: u64) -> Result<std::fs::File, HostError> {
+    let metadata = path.symlink_metadata()?;
+    if !metadata.is_file() || metadata.len() > limit {
+        return Err("native package cache contains a non-file or oversized entry".into());
+    }
+    Ok(std::fs::File::open(path)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::{Compression, write::GzEncoder};
+    use std::io::Write;
+    use tokio::{io::AsyncReadExt, net::TcpListener};
+
+    fn package(target: Target, extra: Option<&str>) -> Vec<u8> {
+        let manifest = serde_json::json!({
+            "name": target.package_name(), "version": "1.2.3",
+            "os": [target.os()], "cpu": [target.cpu()],
+            "libc": if target.os() == "linux" { vec!["glibc"] } else { vec![] },
+        });
+        let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
+        let mut append = |name: &str, bytes: &[u8]| {
+            let mut header = tar::Header::new_ustar();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar.append_data(&mut header, format!("package/{name}"), bytes)
+                .unwrap();
+        };
+        append("package.json", &serde_json::to_vec(&manifest).unwrap());
+        for name in ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt"] {
+            append(name, b"test license");
+        }
+        let mut binary = [0; 256];
+        match target {
+            Target::DarwinArm64 | Target::DarwinX64 => {
+                binary[..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]);
+                let cpu: u32 = if target.cpu() == "arm64" {
+                    0x0100_000c
+                } else {
+                    0x0100_0007
+                };
+                binary[4..8].copy_from_slice(&cpu.to_le_bytes());
+                binary[12..16].copy_from_slice(&2_u32.to_le_bytes());
+            }
+            Target::LinuxArm64Gnu | Target::LinuxX64Gnu => {
+                binary[..6].copy_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1]);
+                binary[16..18].copy_from_slice(&3_u16.to_le_bytes());
+                let machine: u16 = if target.cpu() == "arm64" { 183 } else { 62 };
+                binary[18..20].copy_from_slice(&machine.to_le_bytes());
+            }
+            Target::Win32X64 => {
+                binary[..2].copy_from_slice(b"MZ");
+                binary[60..64].copy_from_slice(&64_u32.to_le_bytes());
+                binary[64..68].copy_from_slice(b"PE\0\0");
+                binary[68..70].copy_from_slice(&0x8664_u16.to_le_bytes());
+                binary[88..90].copy_from_slice(&0x20b_u16.to_le_bytes());
+                binary[156..158].copy_from_slice(&3_u16.to_le_bytes());
+            }
+        }
+        append(target.executable(), &binary);
+        if let Some(service) = target.service_executable() {
+            binary[156..158].copy_from_slice(&2_u16.to_le_bytes());
+            append(service, &binary);
+        }
+        if let Some(name) = extra {
+            append(name, b"not an executable");
+        }
+        tar.into_inner().unwrap().finish().unwrap()
+    }
+
+    async fn registry(target: Target, bytes: Vec<u8>, integrity: String) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let tarball = origin.join("native.tgz").unwrap();
+        tokio::spawn(async move {
+            let metadata = serde_json::to_vec(&serde_json::json!({
+                "name": target.package_name(), "version": "1.2.3",
+                "dist": { "tarball": tarball, "integrity": integrity },
+            }))
+            .unwrap();
+            for body in [metadata, bytes] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await.unwrap());
+                    assert!(request.len() < 8192);
+                }
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len(),
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                socket.write_all(&body).await.unwrap();
+            }
+        });
+        origin
+    }
+
+    fn request(target: Target, cache: &Path) -> Fetch {
+        Fetch {
+            target,
+            version: Version::parse("1.2.3").unwrap(),
+            cache: cache.join("cache"),
+            archive: None,
+            integrity: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn verifies_all_targets_and_reuses_cache_offline_without_trusting_modified_files() {
+        for target in [
+            Target::DarwinArm64,
+            Target::DarwinX64,
+            Target::LinuxArm64Gnu,
+            Target::LinuxX64Gnu,
+            Target::Win32X64,
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let bytes = package(target, None);
+            let integrity = format!("sha512-{}", STANDARD.encode(Sha512::digest(&bytes)));
+            let registry = registry(target, bytes, integrity.clone()).await;
+            let client = Client::builder().no_proxy().build().unwrap();
+            let artifact = request(target, root.path())
+                .resolve(client.clone(), registry)
+                .await
+                .unwrap();
+            assert_eq!(artifact.integrity, integrity);
+            assert!(artifact.executable.is_file());
+            assert_eq!(
+                artifact.service_executable.is_some(),
+                target == Target::Win32X64
+            );
+            let offline = Url::parse("http://127.0.0.1:1/").unwrap();
+            let reused = request(target, root.path())
+                .resolve(client.clone(), offline.clone())
+                .await
+                .unwrap();
+            assert_eq!(artifact.directory, reused.directory);
+            // Same-user tampering must not silently execute through a cache hit.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(
+                    &artifact.executable,
+                    std::fs::Permissions::from_mode(0o600),
+                )
+                .unwrap();
+            }
+            std::fs::write(&artifact.executable, b"changed").unwrap();
+            let result = request(target, root.path()).resolve(client, offline).await;
+            assert!(
+                result
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("cache integrity mismatch")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_bad_integrity_and_archive_members_without_publishing_a_cache_entry() {
+        let target = Target::LinuxX64Gnu;
+        for (extra, bad_hash) in [
+            (None, true),
+            (Some("bin/maka"), false),
+            (Some("bin/extra"), false),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let bytes = package(target, extra);
+            let digest = if bad_hash {
+                [0; 64]
+            } else {
+                Sha512::digest(&bytes).into()
+            };
+            let origin =
+                registry(target, bytes, format!("sha512-{}", STANDARD.encode(digest))).await;
+            let client = Client::builder().no_proxy().build().unwrap();
+            assert!(
+                request(target, root.path())
+                    .resolve(client, origin)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read_dir(root.path().join("cache"))
+                    .unwrap()
+                    .count(),
+                0
+            );
+        }
+        // Links and traversal must be rejected before creating their targets.
+        for (name, kind) in [
+            ("package/bin/maka", tar::EntryType::Symlink),
+            ("../escaped", tar::EntryType::Regular),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let mut temporary = NamedTempFile::new_in(root.path()).unwrap();
+            let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
+            let mut header = tar::Header::new_ustar();
+            header.as_mut_bytes()[..name.len()].copy_from_slice(name.as_bytes());
+            header.set_size(0);
+            header.set_entry_type(kind);
+            header.set_cksum();
+            tar.append(&header, &[][..]).unwrap();
+            temporary
+                .write_all(&tar.into_inner().unwrap().finish().unwrap())
+                .unwrap();
+            let destination = root.path().join("published");
+            assert!(
+                archive::publish(
+                    temporary,
+                    root.path(),
+                    &destination,
+                    target,
+                    "1.2.3",
+                    "unused"
+                )
+                .is_err()
+            );
+            assert!(!destination.exists());
+            assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        }
+    }
+}
