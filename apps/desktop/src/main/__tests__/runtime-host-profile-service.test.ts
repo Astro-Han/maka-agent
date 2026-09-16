@@ -358,7 +358,9 @@ test("reuses the existing WSL profile when the same managed Host is added again"
     enable: async (target) => {
       enabled.push(target.profile.id);
       const binding = await service.resolveManagedService(target.profile.id);
-      assert.equal(binding?.deployment.deploymentId, '11111111-1111-4111-8111-111111111111');
+      if (target.profile.kind === 'environment' && target.profile.operator.kind === 'native') {
+        assert.equal(binding, undefined);
+      } else assert.equal(binding?.deployment.deploymentId, '11111111-1111-4111-8111-111111111111');
     },
     disable: async () => undefined,
     setDefault: () => undefined,
@@ -372,7 +374,7 @@ test("reuses the existing WSL profile when the same managed Host is added again"
     },
   };
 
-  const result = await service.addManagedEnvironmentAndEnable({
+  const result = await service.addEnvironmentAndEnable({
     profile: { ...existing, id: "replacement", name: "Replacement", operator: OPERATOR },
     managedService,
   });
@@ -388,6 +390,12 @@ test("reuses the existing WSL profile when the same managed Host is added again"
     ),
     { profile: upgraded, ...managedService, state: "active" },
   );
+  const native = { ...existing, id: 'native-ubuntu', rootId: 'd'.repeat(64),
+    operator: { kind: 'native' as const, platform: 'posix' as const, executablePath: '/native/package/bin/maka' } };
+  assert.equal((await service.addEnvironmentAndEnable({ profile: native })).profileId, native.id);
+  assert.deepEqual((await catalog.read()).profiles, [upgraded, native]);
+  assert.deepEqual(enabled, [existing.id, native.id]);
+  assert.equal(await service.resolveManagedService(native.id), undefined);
 });
 
 test("rolls back a new WSL profile when its managed binding cannot be saved", async () => {
@@ -410,7 +418,7 @@ test("rolls back a new WSL profile when its managed binding cannot be saved", as
   });
 
   await assert.rejects(
-    service.addManagedEnvironmentAndEnable({
+    service.addEnvironmentAndEnable({
       profile: {
         id: "ubuntu",
         name: "Ubuntu",

@@ -70,15 +70,22 @@ Linux inode 未变并保留 Root ID。不要用它接管复制的根或旧版数
 Windows 要求交互式用户会话。单独安装不会启动服务或修改账户策略。
 `host setup --root <目录>` 合并安装与激活；可选 `--principal <id>` 同时返回短期 Desktop
 配对凭据，须将该 JSON 视为秘密。交互式启动器使用 `--framed` 并隐藏
-`__MAKA_NATIVE_HOST_SETUP__` 回执行。重复 setup 复用相同代码及配置，变更仍须使用 `host update`。
+`__MAKA_NATIVE_HOST_SETUP__` 回执行。重复 setup 保留已有代码和未显式指定的配置，变更仍须使用
+`host update`。install/setup 省略 `--root` 时使用账户的原生 `runtime-host-rust` 目录，与旧 TS 状态分离。
 
 `host fetch --target <目标> --version <精确版本> --cache <目录>` 从 npm 预备
 `@maka-agent/cli-<目标>`，不安装或启动 Host。目标支持 `darwin-arm64`、`darwin-x64`、
 `linux-arm64-gnu`、`linux-x64-gnu`、`win32-x64`。下载验证 SHA-512、包身份及二进制头；
 缓存命中可离线使用，仍重新校验文件摘要。遵循 CLI 代理环境变量。本地包可改用
 `--archive <文件.tgz> --integrity sha512-<base64>`，不访问 npm。
-返回的 JSON 包含 Windows 两个入口路径。这只是制品预备；Desktop 自动下载/引导及原生 npm 发布尚未启用。
+返回的 JSON 包含 Windows 两个入口路径。`--directory <已验证包目录> --receipt-sha256 <摘要>`
+根据原验证器的回执导入传输后的包。默认缓存为账户的 `native-cli` 目录，已保存配置会引用其中的可执行文件。
 现阶段原生包使用独立 npm channel `rust-preview`，不使用 `latest`。
+
+Desktop SSH／WSL 引导在本机下载并验证与 Desktop 版本一致的完整包，再传输、清理上传暂存目录并设置原生 Host。
+目标无需 Node/npm/Rust。原生 npm 包尚未发布；开发构建可设置 `MAKA_NATIVE_CLI_VERSION` 和
+`MAKA_NATIVE_CLI_PACKAGES`（由 `host fetch` 填充的缓存目录），正式打包的 Desktop 忽略这些覆盖。
+已有配置的启动无需访问 npm。
 
 Desktop 复用原生托管 Host，需要时激活固定版本；自身版本变化和退出不控制托管 Host 的寿命。
 暂停本地启动后，会等待已发出的激活收尾，再交接 Root。

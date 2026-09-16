@@ -229,7 +229,9 @@ import {
   runDesktopRuntimeHostWslManagement,
   runDesktopRuntimeHostWslSetup,
   resolveDesktopRuntimeHostWslTarget,
+  runNativeRuntimeHostWslSetup,
 } from './runtime-host-wsl-controller.js';
+import { resolveNativeRuntimeHostPackage } from './native-runtime-host-setup.js';
 import {
   createRuntimeHostSetupPackageResolver,
 } from "./runtime-host-setup-package.js";
@@ -754,6 +756,14 @@ const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
   ipcMain,
   clientInstanceId: runtimeHostClientInstanceId,
   profiles: runtimeHostProfileService,
+  ...(!isE2e ? { nativeSetup: {
+    resolvePackage: (identity: import('./runtime-host-target.js').RuntimeHostTargetIdentity, signal?: AbortSignal) =>
+      resolveNativeRuntimeHostPackage({ executable: nativeHostExecutable, cache: join(userDataDir, 'native-cli'),
+        version: (!app.isPackaged && process.env.MAKA_NATIVE_CLI_VERSION) || app.getVersion(), identity, signal,
+        sourceCache: app.isPackaged ? undefined : process.env.MAKA_NATIVE_CLI_PACKAGES }),
+    ssh: runtimeHostSshTerminal.runNativeSetup,
+    wsl: runNativeRuntimeHostWslSetup,
+  } } : {}),
   runSetup: runtimeHostSshTerminal.runSetup,
   runWslSetup: runDesktopRuntimeHostWslSetup,
   resolveWslTargetIdentity: resolveDesktopRuntimeHostWslTarget,

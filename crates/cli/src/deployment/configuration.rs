@@ -34,6 +34,10 @@ pub(super) struct Directories {
 }
 
 impl Directories {
+    pub(super) fn is_specified(&self) -> bool {
+        self.default_project_roots || self.no_project_roots || !self.roots.is_empty()
+    }
+
     pub async fn resolve(
         self,
         current: Option<Vec<DirectoryRootSpec>>,

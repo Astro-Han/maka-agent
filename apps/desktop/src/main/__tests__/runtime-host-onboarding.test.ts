@@ -34,6 +34,48 @@ const OPERATOR = {
   modulePath: '/home/operator/.local/share/maka/operator.mjs',
 };
 
+test('native SSH and WSL onboarding save persistent operators without legacy service authority', async () => {
+  for (const kind of ['ssh', 'wsl'] as const) {
+    const operator = { kind: 'native' as const, platform: 'posix' as const,
+      executablePath: '/home/operator/.local/share/Maka/native-cli/package/bin/maka' };
+    let saved: unknown;
+    const receipt = {
+      deployment: { deploymentId: '00000000-0000-4000-8000-000000000001', configRevision: 1,
+        rootId: 'a'.repeat(64), rootPath: '/home/operator/native-root', executable: '/host/maka',
+        sha256: 'b'.repeat(64), mode: 'on_demand' as const, websocket: '127.0.0.1:0' },
+      host: { hostEpoch: 'epoch', pid: 123, port: 4567 },
+      ...(kind === 'ssh' ? { pairing: { rootId: 'a'.repeat(64), credentialId: 'credential', credential: 'pairing-secret' } } : {}),
+    };
+    const install = async (_input: unknown, commit: () => void) => { commit(); return { receipt, operator }; };
+    const harness = createHarness({
+      nativeSetup: {
+        resolvePackage: async (identity) => ({
+          artifact: { target: identity.platform === 'linux' ? 'linux-x64-gnu' : 'darwin-x64',
+            version: '0.2.0', directory: '/verified/package', executable: '/verified/package/bin/maka',
+            integrity: 'sha512-' + 'A'.repeat(86) + '==' }, receiptSha256: 'c'.repeat(64),
+        }),
+        ssh: kind === 'ssh' ? install : async () => assert.fail('wrong transport'),
+        wsl: kind === 'wsl' ? install : async () => assert.fail('wrong transport'),
+      },
+      resolveSetupPackage: () => assert.fail('native onboarding must not resolve a Node package'),
+      profiles: {
+        addAndEnableVerified: async (input) => { saved = input; return { profileId: input.profile.id }; },
+        addEnvironmentAndEnable: async (input) => { saved = input; return { profileId: input.profile.id }; },
+      },
+    });
+    try {
+      const result = await harness.invoke('runtime-host-onboarding:start', kind === 'ssh'
+        ? { kind, destination: 'operator@example.com' } : { kind, distribution: 'Ubuntu' });
+      assert.equal((result as { kind: string }).kind, 'complete');
+      assert.ok(saved && typeof saved === 'object');
+      assert.equal(Object.hasOwn(saved, 'managedService'), false);
+      assert.match(JSON.stringify(saved), /native-cli\/package\/bin\/maka/u);
+      assert.equal(Object.hasOwn(saved, 'credential'), kind === 'ssh');
+      assert.doesNotMatch(JSON.stringify(harness.events), /pairing-secret|\/verified\/package/u);
+    } finally { await harness.onboarding.close(); }
+  }
+});
+
 test('persists a verified on-demand SSH profile without endpoint or credential projection', async () => {
   let setupInput: unknown;
   let saved:
@@ -108,13 +150,13 @@ test('onboards WSL as a credential-free environment profile', async () => {
   let saved:
     | {
         readonly profile: EnvironmentRuntimeHostProfile;
-        readonly managedService: DesktopRuntimeHostManagedWslServiceTarget;
+        readonly managedService?: DesktopRuntimeHostManagedWslServiceTarget;
       }
     | undefined;
   const peerTargets: string[] = [];
   const harness = createHarness({
     profiles: {
-      addManagedEnvironmentAndEnable: async (input) => {
+      addEnvironmentAndEnable: async (input) => {
         saved = input;
         return {
           profileId: input.profile.id,
@@ -324,7 +366,7 @@ function createHarness(overrides: HarnessOverrides = {}) {
   const onboarding = createDesktopRuntimeHostOnboarding({
     clientInstanceId: 'stable-client',
     profiles: {
-      addManagedEnvironmentAndEnable: async () => assert.fail('profile must not be saved'),
+      addEnvironmentAndEnable: async () => assert.fail('profile must not be saved'),
       addAndEnableVerified: async () => assert.fail('profile must not be saved'),
       ...profiles,
     },

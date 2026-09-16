@@ -180,6 +180,17 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
                 .unwrap(),
         );
         let registration = fixture.wait_for_registration();
+        // Onboarding is attachment, not an implicit code/configuration update.
+        // In particular, omitted options must preserve a supervised deployment.
+        let attached = Command::new(env!("CARGO_BIN_EXE_maka"))
+            .args(["host", "setup", "--root"])
+            .arg(&fixture.root)
+            .output()
+            .unwrap();
+        assert!(attached.status.success(), "{attached:?}");
+        let attached: Value = serde_json::from_slice(&attached.stdout).unwrap();
+        assert_eq!(attached["deployment"], installed);
+        assert_eq!(attached["host"]["hostEpoch"], registration["hostEpoch"]);
         assert_eq!(
             registration["lifecycleMode"],
             if candidate { "ephemeral" } else { "service" }

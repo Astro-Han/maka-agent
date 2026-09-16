@@ -43,12 +43,49 @@ import {
   type RuntimeHostServiceManagementFrame,
 } from '@maka/runtime-host/operator';
 import { createRuntimeHostFramedOutputFilter } from './runtime-host-framed-output.js';
+import { installNativeRuntimeHost, quoteNativePosix, type NativeSetupInput, type NativeSetupResult, type NativeSetupCommand } from './native-runtime-host-installer.js';
 import type { DesktopRuntimeHostSetupPackage } from './runtime-host-setup-package.js';
 import { decodeRuntimeHostTarget, posixRuntimeHostTargetProbe, type RuntimeHostTargetIdentity } from './runtime-host-target.js';
 
 const WSL_SETUP_TIMEOUT_MS = 10 * 60_000;
 const WSL_SETUP_OUTPUT_MAX_BYTES = 64 * 1024;
 const WSL_SETUP_STDERR_MAX_BYTES = 8 * 1024;
+
+export async function runNativeRuntimeHostWslSetup(
+  input: NativeSetupInput & { readonly distribution: string },
+  onCommit: () => void,
+  overrides: { readonly processFactory?: RuntimeHostWslProcessFactory; readonly wslExecutable?: string } = {},
+): Promise<NativeSetupResult> {
+  const distribution = normalizeRuntimeHostWslDistribution(input.distribution);
+  const factory = overrides.processFactory ?? spawnWsl;
+  const executable = overrides.wslExecutable ?? resolveSystemRuntimeHostWslExecutable();
+  const execute = <T>(command: NativeSetupCommand<T>): Promise<T> => {
+    command.signal?.throwIfAborted();
+    const deadline = AbortSignal.timeout(command.timeoutMs);
+    const child = factory(executable, ['--distribution', distribution, '--exec', '/bin/sh', '-c', command.command]);
+    return runWslFramedProcess({
+      child, signal: command.signal ? AbortSignal.any([command.signal, deadline]) : deadline,
+      prefix: command.prefix, decode: command.decode, label: 'Native WSL setup', onFrame: (result) => result,
+    });
+  };
+  return installNativeRuntimeHost({
+    platform: 'posix', execute,
+    async upload(source, destination, signal) {
+      const prefix = '__MAKA_NATIVE_HOST_UPLOAD__';
+      await execute({
+        command: `maka_source=$(wslpath -a -u ${quoteNativePosix(source)}) || exit 1; ` +
+          `cp -R -- "$maka_source" ${quoteNativePosix(destination)} || exit 1; ` +
+          `chmod -R u+rwX,go-rwx ${quoteNativePosix(destination)} || exit 1; ` +
+          `chmod u+x ${quoteNativePosix(destination + '/bin/maka')} || exit 1; printf '%s\\n' '${prefix}ok'`,
+        prefix, signal, timeoutMs: 120_000,
+        decode: (line) => {
+          if (line.slice(prefix.length).trim() !== 'ok') throw new Error('Native WSL copy did not complete');
+          return true;
+        },
+      });
+    },
+  }, input, onCommit);
+}
 
 export async function resolveDesktopRuntimeHostWslTarget(
   input: { readonly distribution: string; readonly signal?: AbortSignal },

@@ -22,7 +22,7 @@ mod target;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clap::Args;
-use maka_event_log::root::private_directory;
+use maka_event_log::root::{RootNamespaces, private_directory};
 use maka_runtime_host::server::HostError;
 use reqwest::{Client, Url};
 use semver::Version;
@@ -48,15 +48,24 @@ pub(super) struct Fetch {
     /// Exact npm release version; tags and version ranges are not accepted.
     #[arg(long)]
     version: Version,
-    /// Private, disposable artifact cache. This is not a State Root.
+    /// Private artifact cache (defaults to this account's Maka native-cli directory).
     #[arg(long)]
-    cache: PathBuf,
+    cache: Option<PathBuf>,
     /// Import a local package through the same validation path (no registry access).
-    #[arg(long, requires = "integrity")]
+    #[arg(long, requires = "integrity", conflicts_with = "directory")]
     archive: Option<PathBuf>,
     /// Expected sha512-<base64> of the local package, supplied by its trusted source.
     #[arg(long, requires = "archive")]
     integrity: Option<String>,
+    /// Import a previously verified directory delivered over a trusted transport.
+    #[arg(long, requires = "receipt_sha256", conflicts_with = "archive")]
+    directory: Option<PathBuf>,
+    /// SHA-256 of receipt.json, obtained from the verifying downloader, not the upload.
+    #[arg(long, requires = "directory", value_parser = receipt_digest)]
+    receipt_sha256: Option<String>,
+    /// Reserve the result line for interactive launchers.
+    #[arg(long)]
+    framed: bool,
 }
 
 #[derive(Deserialize)]
@@ -86,6 +95,7 @@ struct Artifact {
 
 impl Fetch {
     pub async fn run(self) -> Result<(), HostError> {
+        let framed = self.framed;
         // Honor the CLI environment's HTTP(S)/ALL_PROXY and NO_PROXY. No npm,
         // lifecycle scripts, registry credentials, or running Host are involved.
         let client = Client::builder()
@@ -99,7 +109,12 @@ impl Fetch {
         )
         .await
         .map_err(|_| "native package download timed out")??;
-        println!("{}", serde_json::to_string(&artifact)?);
+        let prefix = if framed {
+            "__MAKA_NATIVE_HOST_ARTIFACT__"
+        } else {
+            ""
+        };
+        println!("{prefix}{}", serde_json::to_string(&artifact)?);
         Ok(())
     }
 
@@ -110,19 +125,50 @@ impl Fetch {
             decode_integrity(integrity)?;
         }
         let name = target.package_name();
-        let cache = self.cache;
+        let cache = match self.cache {
+            Some(cache) => cache,
+            None => RootNamespaces::for_current_account()?
+                .ownership
+                .parent()
+                .ok_or("missing account data directory")?
+                .join("native-cli"),
+        };
         let entry = format!("{}@{version}", target.slug());
+        let importing_directory = self.directory.is_some();
         let (cache, destination, existing) = tokio::task::spawn_blocking({
             let version = version.clone();
             move || -> Result<_, HostError> {
                 private_directory(&cache)?;
                 let cache = cache.canonicalize()?;
                 let destination = cache.join(entry);
-                let existing = archive::cached(&destination, target, &version)?;
+                let existing = if importing_directory {
+                    None
+                } else {
+                    archive::cached(&destination, target, &version)?
+                };
                 Ok((cache, destination, existing))
             }
         })
         .await??;
+        // An explicit directory import must authenticate its receipt even on a
+        // cache hit; otherwise another package with the same version could win.
+        if let Some(source) = self.directory {
+            let receipt_sha256 = self
+                .receipt_sha256
+                .ok_or("directory import requires a receipt digest")?;
+            return tokio::task::spawn_blocking(move || {
+                let integrity = archive::import_directory(
+                    &source,
+                    &receipt_sha256,
+                    &cache,
+                    &destination,
+                    target,
+                    &version,
+                )?;
+                Ok(artifact(destination, target, version, integrity))
+            })
+            .await?;
+        }
         if let Some(integrity) = existing {
             if self
                 .integrity
@@ -246,6 +292,18 @@ impl Fetch {
         })
         .await??;
         Ok(artifact(destination, target, version, integrity))
+    }
+}
+
+fn receipt_digest(value: &str) -> Result<String, &'static str> {
+    if value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        Ok(value.into())
+    } else {
+        Err("receipt digest must contain 64 lowercase hexadecimal characters")
     }
 }
 
@@ -383,9 +441,12 @@ mod tests {
         Fetch {
             target,
             version: Version::parse("1.2.3").unwrap(),
-            cache: cache.join("cache"),
+            cache: Some(cache.join("cache")),
             archive: None,
             integrity: None,
+            directory: None,
+            receipt_sha256: None,
+            framed: false,
         }
     }
 
@@ -419,6 +480,37 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(artifact.directory, reused.directory);
+            let receipt = std::fs::read(artifact.directory.join("receipt.json")).unwrap();
+            let receipt_sha256 = format!("{:x}", sha2::Sha256::digest(&receipt));
+            let transferred = |cache: &str, digest: String| Fetch {
+                directory: Some(artifact.directory.clone()),
+                receipt_sha256: Some(digest),
+                ..request(target, &root.path().join(cache))
+            };
+            let copied = transferred("transferred", receipt_sha256.clone())
+                .resolve(client.clone(), offline.clone())
+                .await
+                .unwrap();
+            assert_ne!(copied.directory, artifact.directory);
+            assert_eq!(
+                std::fs::read(copied.directory.join("receipt.json")).unwrap(),
+                receipt
+            );
+            assert_eq!(
+                transferred("transferred", receipt_sha256.clone())
+                    .resolve(client.clone(), offline.clone())
+                    .await
+                    .unwrap()
+                    .directory,
+                copied.directory
+            );
+            assert!(
+                transferred("transferred", "0".repeat(64))
+                    .resolve(client.clone(), offline.clone())
+                    .await
+                    .is_err(),
+                "cache hit must authenticate the supplied receipt"
+            );
             // Same-user tampering must not silently execute through a cache hit.
             #[cfg(unix)]
             {
@@ -430,6 +522,18 @@ mod tests {
                 .unwrap();
             }
             std::fs::write(&artifact.executable, b"changed").unwrap();
+            assert!(
+                transferred("corrupted", receipt_sha256)
+                    .resolve(client.clone(), offline.clone())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read_dir(root.path().join("corrupted/cache"))
+                    .unwrap()
+                    .count(),
+                0
+            );
             let result = request(target, root.path()).resolve(client, offline).await;
             assert!(
                 result

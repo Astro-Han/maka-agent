@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Deployment, Install, activation};
+use super::{Deployment, ExistingDeployment, Install, activation};
 use crate::{access, host_client::LiveHost};
 use clap::Args;
 use maka_runtime_host::server::HostError;
@@ -48,7 +48,7 @@ struct Receipt {
 impl Setup {
     pub async fn run(self) -> Result<(), HostError> {
         let pairing_input = self.principal.map(access::pairing_input).transpose()?;
-        let (deployment, lease) = self.installation.install().await?;
+        let (deployment, lease) = self.installation.install(ExistingDeployment::Reuse).await?;
         // Keep the same executor lease through activation and credential delivery.
         // A failed response does not undo an installation or grant reinstall rights.
         let (mut client, host) = activation::connect_or_launch(&deployment, lease.clone()).await?;

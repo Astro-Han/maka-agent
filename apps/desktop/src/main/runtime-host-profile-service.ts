@@ -101,9 +101,9 @@ export interface DesktopRuntimeHostProfileService {
   addAndEnable(
     input: DesktopRuntimeHostProfileAddInput,
   ): Promise<DesktopRuntimeHostProfileAddResult>;
-  addManagedEnvironmentAndEnable(input: {
+  addEnvironmentAndEnable(input: {
     readonly profile: EnvironmentRuntimeHostProfile;
-    readonly managedService: DesktopRuntimeHostManagedWslServiceTarget;
+    readonly managedService?: DesktopRuntimeHostManagedWslServiceTarget;
   }): Promise<{ readonly profileId: string }>;
   addAndEnableVerified(
     input: {
@@ -809,8 +809,11 @@ export function createDesktopRuntimeHostProfileService(input: {
           : { kind: "connected", snapshot: await snapshot() };
       });
     },
-    addManagedEnvironmentAndEnable(value) {
+    addEnvironmentAndEnable(value) {
       const requestedProfile = decodeEnvironmentRuntimeHostProfile(value.profile);
+      if (!value.managedService && requestedProfile.operator.kind !== 'native') {
+        throw new Error('Legacy environment profiles require their managed service binding');
+      }
       return mutateProfiles(async () => {
         const currentDocument = await catalog.read();
         const existing = currentDocument.profiles.find(
@@ -831,7 +834,7 @@ export function createDesktopRuntimeHostProfileService(input: {
           throw new Error("Runtime Host profile creation did not persist");
         }
         try {
-          await managedServices.save(profile, value.managedService);
+          if (value.managedService) await managedServices.save(profile, value.managedService);
         } catch (failure) {
           if (existing) {
             try {

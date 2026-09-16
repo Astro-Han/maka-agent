@@ -42,6 +42,8 @@ import type {
   DesktopRuntimeHostSetupPackage,
 } from './runtime-host-setup-package.js';
 import { requireProjectDirectoryRoots } from '../shared/runtime-host-project-directory-policy.js';
+import type { NativeRuntimeHostPackage } from './native-runtime-host-setup.js';
+import type { NativeSetupInput, NativeSetupResult } from './native-runtime-host-installer.js';
 
 type OnboardingState = DesktopRuntimeHostOnboardingSnapshot extends infer Snapshot
   ? Snapshot extends DesktopRuntimeHostOnboardingSnapshot
@@ -50,11 +52,17 @@ type OnboardingState = DesktopRuntimeHostOnboardingSnapshot extends infer Snapsh
   : never;
 
 export function createDesktopRuntimeHostOnboarding(input: {
+  /** Production uses native packages; the legacy route remains for TS fixtures. */
+  readonly nativeSetup?: {
+    resolvePackage(identity: RuntimeHostTargetIdentity, signal?: AbortSignal): Promise<NativeRuntimeHostPackage>;
+    ssh(input: NativeSetupInput & { readonly destination: string; readonly sshPort?: number }, onCommit: () => void): Promise<NativeSetupResult>;
+    wsl(input: NativeSetupInput & { readonly distribution: string }, onCommit: () => void): Promise<NativeSetupResult>;
+  };
   readonly ipcMain: Pick<IpcMain, 'handle' | 'removeHandler'>;
   readonly clientInstanceId: string;
   readonly profiles: Pick<
     DesktopRuntimeHostProfileService,
-    'addManagedEnvironmentAndEnable' | 'addAndEnableVerified'
+    'addEnvironmentAndEnable' | 'addAndEnableVerified'
   >;
   readonly runSetup: (
     input: DesktopRuntimeHostSshSetupInput,
@@ -141,6 +149,7 @@ export function createDesktopRuntimeHostOnboarding(input: {
     signal: AbortSignal,
   ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
     try {
+      if (input.nativeSetup) return await runNative(request, signal, input.nativeSetup);
       if (request.kind === 'wsl') {
         publish({ kind: 'running', phase: 'connecting_wsl' });
         const target = await input.resolveWslTargetIdentity({ distribution: request.distribution, signal });
@@ -247,6 +256,52 @@ export function createDesktopRuntimeHostOnboarding(input: {
     }
   };
 
+  const runNative = async (
+    request: DesktopRuntimeHostOnboardingInput,
+    signal: AbortSignal,
+    native: NonNullable<typeof input.nativeSetup>,
+  ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
+    publish({ kind: 'running', phase: request.kind === 'wsl' ? 'connecting_wsl' : 'connecting_ssh' });
+    const identity = request.kind === 'wsl'
+      ? await input.resolveWslTargetIdentity({ distribution: request.distribution, signal })
+      : await input.resolveSshTargetIdentity({ destination: request.destination, sshPort: request.sshPort, signal });
+    publish({ kind: 'running', phase: 'preparing_cli' });
+    const pkg = await native.resolvePackage(identity, signal);
+    signal.throwIfAborted();
+    publish({ kind: 'running', phase: 'installing_service' });
+    const setup = { package: pkg, projectDirectoryRoots: request.projectDirectoryRoots, signal };
+    const commit = () => {
+      if (active) active.cancellable = false;
+      publish({ kind: 'running', phase: 'connecting_host' });
+    };
+    if (request.kind === 'wsl') {
+      const complete = await native.wsl({ ...setup, distribution: request.distribution }, commit);
+      if (complete.operator.platform !== 'posix') throw new Error('WSL setup did not return a Linux operator');
+      const result = await input.profiles.addEnvironmentAndEnable({
+        profile: {
+          id: `environment-${randomUUID()}`, name: request.name?.trim() || request.distribution,
+          kind: 'environment', provider: { kind: 'wsl', distribution: request.distribution },
+          rootId: complete.receipt.deployment.rootId,
+          operator: { ...complete.operator, platform: 'posix' },
+        },
+      });
+      return publish({ kind: 'complete', profileId: result.profileId });
+    }
+    const complete = await native.ssh({ ...setup, destination: request.destination,
+      sshPort: request.sshPort, principalId: `desktop:${input.clientInstanceId}` }, commit);
+    if (!complete.receipt.pairing) throw new Error('SSH setup did not return a pairing credential');
+    const result = await input.profiles.addAndEnableVerified({
+      profile: {
+        id: `remote-${randomUUID()}`, name: request.name?.trim() || request.destination,
+        kind: 'remote', rootId: complete.receipt.deployment.rootId,
+        transport: { kind: 'ssh', destination: request.destination, sshPort: request.sshPort,
+          activation: { kind: 'ssh_operator', operator: complete.operator } },
+      },
+      credential: complete.receipt.pairing.credential,
+    });
+    return publish({ kind: 'complete', profileId: result.profileId });
+  };
+
   const resolveSshTargetIdentity = async (
     request: Extract<DesktopRuntimeHostOnboardingInput, { readonly kind: 'ssh' }>,
     signal: AbortSignal,
@@ -299,7 +354,7 @@ export function createDesktopRuntimeHostOnboarding(input: {
       rootId: complete.rootId,
       operator: complete.operator,
     };
-    const connected = await input.profiles.addManagedEnvironmentAndEnable({
+    const connected = await input.profiles.addEnvironmentAndEnable({
       profile,
       managedService: {
         deployment: {

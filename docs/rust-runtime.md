@@ -82,8 +82,9 @@ start a service or change account policy.
 `host setup --root <directory>` combines installation and activation; optional
 `--principal <id>` also returns a short-lived Desktop pairing credential. Protect
 this JSON as a secret. Interactive launchers use `--framed` and hide the reserved
-`__MAKA_NATIVE_HOST_SETUP__` result line. Repeating setup reuses matching code and configuration;
-changes still require `host update`.
+`__MAKA_NATIVE_HOST_SETUP__` result line. Repeating setup preserves the existing code and
+unspecified configuration; changes still require `host update`. Without `--root`, install/setup
+use the account's native `runtime-host-rust` directory, separate from legacy TS state.
 
 `host fetch --target <target> --version <exact-version> --cache <directory>` prepares
 `@maka-agent/cli-<target>` from npm without installing or starting a Host. Targets:
@@ -91,9 +92,16 @@ changes still require `host update`.
 It verifies SHA-512, package identity and binary headers; validated cache hits work
 offline and recheck file hashes. CLI proxy environment variables apply. Local
 packages use `--archive <file.tgz> --integrity sha512-<base64>` instead of npm.
-The returned JSON identifies both Windows executables. This is preparation only;
-Desktop automatic download/onboarding and native npm publication are not yet enabled.
+The returned JSON identifies both Windows executables. `--directory <verified-package>
+--receipt-sha256 <digest>` imports a transferred package against its original verifier's receipt.
+The default cache is the account's `native-cli` directory; saved profiles reference its executables.
 Native preview packages use the separate `rust-preview` npm channel, never `latest`.
+
+Desktop SSH/WSL onboarding downloads and verifies the exact Desktop version locally, transfers
+the complete package, removes the upload staging directory, and sets up the native Host.
+The target needs no Node/npm/Rust. Native npm releases are not published yet; development builds
+can set `MAKA_NATIVE_CLI_VERSION` and `MAKA_NATIVE_CLI_PACKAGES` (a `host fetch` cache directory).
+These overrides are ignored in packaged Desktop. Existing profiles start offline.
 
 Desktop reuses managed native Hosts and activates pinned code when needed;
 its own generation and exit do not govern their lifetime. Pausing local launches

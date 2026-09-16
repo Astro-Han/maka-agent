@@ -78,12 +78,15 @@ pub(super) enum Mode {
 
 #[derive(Args)]
 pub(super) struct Install {
-    #[command(flatten)]
-    root: crate::args::Root,
-    #[arg(long, value_enum, default_value = "on-demand")]
-    mode: Mode,
-    #[arg(long, default_value = "127.0.0.1:0")]
-    websocket: SocketAddr,
+    /// Native State Root (defaults to this account's Maka runtime-host-rust directory).
+    #[arg(long, value_name = "DIRECTORY")]
+    root: Option<PathBuf>,
+    /// Launch policy for a new installation (defaults to on-demand).
+    #[arg(long, value_enum)]
+    mode: Option<Mode>,
+    /// Loopback listener for a new installation (defaults to 127.0.0.1:0).
+    #[arg(long)]
+    websocket: Option<SocketAddr>,
     #[command(flatten)]
     directories: configuration::Directories,
 }
@@ -172,19 +175,39 @@ pub(super) fn directory(root_id: &str) -> Result<PathBuf, HostError> {
         .join(root_id))
 }
 
+enum ExistingDeployment {
+    RequireMatching,
+    Reuse,
+}
+
 impl Install {
     pub async fn run(self) -> Result<(), HostError> {
-        let (deployment, _lease) = self.install().await?;
+        let (deployment, _lease) = self.install(ExistingDeployment::RequireMatching).await?;
         println!("{}", serde_json::to_string(&deployment)?);
         Ok(())
     }
 
-    async fn install(self) -> Result<(Deployment, Arc<FileLease>), HostError> {
-        if self.websocket.ip() != std::net::Ipv4Addr::LOCALHOST {
+    async fn install(
+        self,
+        existing_policy: ExistingDeployment,
+    ) -> Result<(Deployment, Arc<FileLease>), HostError> {
+        let mode = self.mode.unwrap_or(Mode::OnDemand);
+        let websocket = self
+            .websocket
+            .unwrap_or_else(|| SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0)));
+        if websocket.ip() != std::net::Ipv4Addr::LOCALHOST {
             return Err("managed Host listener must use 127.0.0.1".into());
         }
+        let directories_specified = self.directories.is_specified();
         let project_directory_roots = self.directories.resolve(None).await?;
-        let root_path = self.root.root;
+        let root_path = match self.root {
+            Some(root) => root,
+            None => RootNamespaces::for_current_account()?
+                .ownership
+                .parent()
+                .ok_or("missing account data directory")?
+                .join("runtime-host-rust"),
+        };
         let (root, directory, lease) = tokio::task::spawn_blocking(move || {
             root::initialize(&root_path, &RootNamespaces::for_current_account()?)?;
             let root = root::resolve(&root_path)?;
@@ -200,8 +223,23 @@ impl Install {
             && existing.admission.is_active()
         {
             existing.validate(&root, &directory)?;
-            if existing.mode != self.mode
-                || existing.websocket != self.websocket
+            if matches!(existing_policy, ExistingDeployment::Reuse) {
+                if self.mode.is_some_and(|mode| mode != existing.mode)
+                    || self
+                        .websocket
+                        .is_some_and(|websocket| websocket != existing.websocket)
+                    || (directories_specified
+                        && project_directory_roots != existing.project_directory_roots)
+                {
+                    return Err("deployment configuration changes require an update".into());
+                }
+                // Setup attaches to existing authority; only update selects new
+                // code. Activation still validates the installed package and Host.
+                lease.validate()?;
+                return Ok((existing.clone(), lease));
+            }
+            if existing.mode != mode
+                || existing.websocket != websocket
                 || existing.project_directory_roots != project_directory_roots
             {
                 return Err("deployment configuration changes require an update".into());
@@ -215,7 +253,7 @@ impl Install {
         let stage_lease = lease.clone();
         let (executable, sha256) = tokio::task::spawn_blocking(move || {
             stage_lease.validate()?;
-            let package = package::stage(&stage_directory, &package::source(self.mode)?)?;
+            let package = package::stage(&stage_directory, &package::source(mode)?)?;
             stage_lease.validate()?;
             Ok::<_, HostError>(package)
         })
@@ -227,8 +265,8 @@ impl Install {
             root_path: root.canonical_path().into(),
             executable,
             sha256,
-            mode: self.mode,
-            websocket: self.websocket,
+            mode,
+            websocket,
             project_directory_roots,
             admission: Admission::Active,
         };

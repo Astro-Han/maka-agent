@@ -230,7 +230,125 @@ pub(super) fn publish(
         File::open(package.join("bin"))?.sync_all()?;
         File::open(&package)?.sync_all()?;
     }
-    match fs::rename(&package, destination) {
+    commit(&package, cache, destination, target, version, integrity)
+}
+
+/// A receipt digest supplied by the original verifier binds the complete file
+/// set. The archive's integrity string alone cannot authenticate unpacked bytes.
+pub(super) fn import_directory(
+    source: &Path,
+    receipt_sha256: &str,
+    cache: &Path,
+    destination: &Path,
+    target: Target,
+    version: &str,
+) -> Result<String, HostError> {
+    let mut bytes = Vec::new();
+    regular_file(&source.join("receipt.json"), 16 * 1024)?
+        .take(16 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 16 * 1024 || format!("{:x}", Sha256::digest(&bytes)) != receipt_sha256 {
+        return Err("transferred native package receipt digest mismatch".into());
+    }
+    let receipt: Receipt = serde_json::from_slice(&bytes)?;
+    decode_integrity(&receipt.integrity)?;
+    if receipt.target != target
+        || receipt.version != version
+        || receipt.files.len() > 8
+        || required(target).any(|name| !receipt.files.contains_key(name))
+        || receipt.files.keys().any(|name| !allowed(target, name))
+    {
+        return Err("transferred native package identity or file set changed".into());
+    }
+    if let Some(existing) = cached(destination, target, version)? {
+        let mut existing_bytes = Vec::new();
+        regular_file(&destination.join("receipt.json"), 16 * 1024)?
+            .take(16 * 1024 + 1)
+            .read_to_end(&mut existing_bytes)?;
+        if existing != receipt.integrity || existing_bytes != bytes {
+            return Err("cached package differs from the transferred native package".into());
+        }
+        return Ok(existing);
+    }
+    let stage = tempfile::Builder::new()
+        .prefix(".native-")
+        .tempdir_in(cache)?;
+    let package = stage.path().join("package");
+    private_directory(&package)?;
+    private_directory(&package.join("bin"))?;
+    let mut total = 0_u64;
+    for (name, expected) in &receipt.files {
+        let executable =
+            name == target.executable() || Some(name.as_str()) == target.service_executable();
+        let limit = if executable {
+            MAX_FILE_BYTES
+        } else {
+            MAX_TEXT_BYTES
+        };
+        if expected.size == 0 || expected.size > limit {
+            return Err("transferred native package member exceeds its size limit".into());
+        }
+        total += expected.size;
+        if total > MAX_EXPANDED_BYTES {
+            return Err("transferred native package exceeds its size limit".into());
+        }
+        let mut input = regular_file(&source.join(name), limit)?.take(expected.size + 1);
+        let path = package.join(name);
+        let mut output = File::create_new(&path)?;
+        std::io::copy(&mut input, &mut output)?;
+        if digest(File::open(&path)?)? != *expected {
+            return Err("transferred native package member digest mismatch".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            output.set_permissions(fs::Permissions::from_mode(if executable {
+                0o500
+            } else {
+                0o400
+            }))?;
+        }
+        output.sync_all()?;
+    }
+    validate_package(&package, target, version)?;
+    let mut file = File::create_new(package.join("receipt.json"))?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    drop(file);
+    #[cfg(unix)]
+    {
+        File::open(package.join("bin"))?.sync_all()?;
+        File::open(&package)?.sync_all()?;
+    }
+    commit(
+        &package,
+        cache,
+        destination,
+        target,
+        version,
+        &receipt.integrity,
+    )?;
+    // Includes the simultaneous publisher path; compare the authenticated
+    // receipt, not just an archive identifier copied from it.
+    let mut published = Vec::new();
+    regular_file(&destination.join("receipt.json"), 16 * 1024)?
+        .take(16 * 1024 + 1)
+        .read_to_end(&mut published)?;
+    if published != bytes {
+        return Err("another native package was published at this version".into());
+    }
+    Ok(receipt.integrity)
+}
+
+fn commit(
+    package: &Path,
+    _cache: &Path,
+    destination: &Path,
+    target: Target,
+    version: &str,
+    integrity: &str,
+) -> Result<(), HostError> {
+    match fs::rename(package, destination) {
         Ok(()) => {}
         Err(error) => {
             // A simultaneous download may have published first. Never replace
@@ -242,7 +360,7 @@ pub(super) fn publish(
         }
     }
     #[cfg(unix)]
-    File::open(cache)?.sync_all()?;
+    File::open(_cache)?.sync_all()?;
     Ok(())
 }
 

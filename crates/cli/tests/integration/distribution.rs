@@ -98,6 +98,43 @@ fn npm_package_round_trips_native_code_offline_and_never_overwrites_a_release() 
     )
     .unwrap();
     assert_eq!(manifest["publishConfig"]["tag"], "rust-preview");
+    // Bootstrap from transferred bytes, then remove that source. The retained
+    // operator must still have its complete package, including Windows service code.
+    use sha2::Digest;
+    let receipt =
+        std::fs::read(Path::new(artifact["directory"].as_str().unwrap()).join("receipt.json"))
+            .unwrap();
+    let retained = Command::new(artifact["executable"].as_str().unwrap())
+        .args([
+            "host",
+            "fetch",
+            "--target",
+            target,
+            "--version",
+            "0.0.0-test",
+            "--directory",
+            artifact["directory"].as_str().unwrap(),
+            "--receipt-sha256",
+            &format!("{:x}", sha2::Sha256::digest(receipt)),
+            "--framed",
+            "--cache",
+        ])
+        .arg(temporary.path().join("retained"))
+        .output()
+        .unwrap();
+    assert!(
+        retained.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retained.stderr)
+    );
+    let retained = String::from_utf8(retained.stdout).unwrap();
+    let artifact: serde_json::Value = serde_json::from_str(
+        retained
+            .strip_prefix("__MAKA_NATIVE_HOST_ARTIFACT__")
+            .unwrap(),
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&cache).unwrap();
     let imported = artifact["executable"].as_str().unwrap();
     let help = Command::new(imported)
         .args(["host", "setup", "--help"])
