@@ -125,6 +125,10 @@ export function promptRailSession(now: number): SessionHeader {
  * A plain multi-prompt conversation: no tools, no thinking, no usage rows.
  * The transcript perf suite measures against this, so every turn is just a
  * prompt and a reply long enough to push the transcript past the scrollport.
+ *
+ * Reply length has to vary the way a real transcript's does. A uniform reply
+ * lets the virtualizer estimate every unmounted row correctly, which is the one
+ * case where mounting a row above the reader cannot move them.
  */
 export function promptRailMessages(now: number): StoredMessage[] {
   const messages: StoredMessage[] = [];
@@ -143,11 +147,21 @@ export function promptRailMessages(now: number): StoredMessage[] {
       id: `msg-prompt-rail-assistant-${index}`,
       turnId,
       ts: ts + 1_000,
-      text: `第 ${index} 段回答。`.repeat(40),
+      text: promptRailReply(index),
       modelId: 'glm-5.1',
     });
   }
   return messages;
+}
+
+function promptRailReply(index: number): string {
+  const prose = `第 ${index} 段回答。`.repeat(4 + ((index * 7) % 60));
+  if (index % 5 !== 0) return prose;
+  const code = Array.from(
+    { length: 6 + ((index * 3) % 40) },
+    (_, line) => `  const step${line} = await pipeline.run(${index}, ${line});`,
+  ).join('\n');
+  return `${prose}\n\n\`\`\`ts\n${code}\n\`\`\`\n\n收尾说明。`;
 }
 export function partialHistorySession(now: number): SessionHeader {
   return header({

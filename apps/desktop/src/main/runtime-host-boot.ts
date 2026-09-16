@@ -126,6 +126,7 @@ import {
   resolveE2eFixture,
   seedE2eFixture,
 } from "./e2e-fixture.js";
+import { PARTIAL_HISTORY_TRANSCRIPT_BYTES } from "./e2e-fixture/seed-helpers.js";
 import { createKeepSystemAwakeController } from "./keep-system-awake.js";
 import { isDarkAppearance } from "./theme-source.js";
 import {
@@ -1261,6 +1262,9 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
     },
     emitSessionsChanged,
     cacheTranscript: (scope, snapshot) => sessionLocal.cacheTranscript(scope, snapshot),
+    ...(e2eFixture?.scenario === "chat-partial-history"
+      ? { transcriptHistoryBytes: PARTIAL_HISTORY_TRANSCRIPT_BYTES }
+      : {}),
     completeDesktopInteractionTurn,
     createSessionCopyCleanup: ({ removeSession, resumeSessionCopy }) =>
       createSessionCopyCleanupAuthority({

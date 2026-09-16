@@ -665,8 +665,8 @@ export const test = base.extend<E2eTestFixtures>({
       showWindow: true,
     }, use);
   },
-  // A transcript larger than the bounded Desktop range. Clicking an unloaded
-  // prompt exercises the real load-around path and its partial-history UI.
+  // A transcript larger than the Desktop history budget, so earlier Turns load
+  // only through the load-earlier control.
   partialHistoryWindow: async ({}, use) => {
     await withE2eWindow({
       seed: false,
