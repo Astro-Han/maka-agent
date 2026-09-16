@@ -131,8 +131,8 @@ jobs:
 
   publish:
     needs: build
-    if: inputs.publish
-    environment: npm-publication
+    if: inputs.publish && github.ref == 'refs/heads/feat/runtime-host-rust'
+    environment: rust-preview-publication
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
