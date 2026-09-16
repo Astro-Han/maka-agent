@@ -190,11 +190,19 @@ Client Capability 注册与反向调用所有权位于 `client-capability`，Hos
 
 ## 开发验证
 
+`node scripts/rust/release-cli.mjs --source <源码.tar.gz> --keys <KEYS>
+--target <目标> --validator <本机maka> --notices <已审阅许可证文档>
+--output <目录>` 校验源码归档及相邻的校验和、签名文件，安装锁定的 npm 依赖并应用仓库补丁，
+再编译、打包原生 CLI。Cargo workspace 版本必须匹配源码版本，npm 使用同一版本。
+包内 `makaSource` 记录源码归档名与 SHA-512，用于溯源，不是签名构建证明。
+仅本地未签名候选可省略 `--keys`。命令不发布 npm，通道仍为 `rust-preview`。
+可用 `CARGO_TARGET_DIR` 保留构建缓存；`MAKA_JS_DEPS` 固定为解包源码自身的安装目录。
+
 `node scripts/rust/pack-cli.mjs --target <目标> --version <精确版本>
 --binary <目标平台maka> --validator <本机maka> --notices <已审阅许可证文档>
 --output <目录>` 打包预构建原生程序，并用本机 CLI 校验实际 npm 归档。
 不执行跨平台程序或安装脚本，不发布，也不覆盖已有输出。许可证文档须覆盖 Rust、V8
-及嵌入 JavaScript；旧 Node CLI 文档不足以代替。
+及嵌入 JavaScript；旧 Node CLI 文档不足以代替。此底层打包器本身不证明源码来源。
 
 Rust 许可证检查沿用 [OpenDAL 的 cargo-deny 做法](https://github.com/apache/opendal/blob/main/scripts/dependencies.py)：
 `deny.toml` 定义五个发布目标、许可证白名单和限定版本的 MPL 例外。

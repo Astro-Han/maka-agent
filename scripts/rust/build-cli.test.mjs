@@ -90,6 +90,19 @@ test('release builders and Desktop consumers agree on the target and artifact pa
     '--target-dir',
     join(root, 'target'),
   ]);
+  const sourceRoot = join(root, 'extracted-source');
+  const sourceEnv = { MAKA_JS_DEPS: sourceRoot };
+  assert.equal(
+    await buildCli({
+      release: true,
+      target: 'aarch64-apple-darwin',
+      repositoryRoot: sourceRoot,
+      env: sourceEnv,
+    }),
+    join(sourceRoot, 'target/aarch64-apple-darwin/release/maka'),
+  );
+  assert.equal(invocation.options.cwd, sourceRoot);
+  assert.equal(invocation.options.env, sourceEnv);
   exitCode = 1;
   await assert.rejects(buildCli({ release: true }), /Maka build failed: 1/u);
 });

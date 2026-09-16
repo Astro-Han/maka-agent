@@ -245,12 +245,24 @@ schema changes. Client Capability registration and reverse-call ownership live i
 
 ## Development
 
+`node scripts/rust/release-cli.mjs --source <source.tar.gz> --keys <KEYS>
+--target <target> --validator <local-maka> --notices <reviewed-notices>
+--output <directory>` verifies the source archive and its adjacent checksum/signature,
+installs locked npm dependencies with the repository patches, then builds and packs
+the native CLI. The Cargo workspace version must match the source version; npm uses
+that same version. `makaSource` in the package manifest records the source archive
+name and SHA-512. This is traceability, not a signed build attestation.
+Omit `--keys` only for unsigned local candidates. No command publishes to npm;
+the channel remains `rust-preview`. `CARGO_TARGET_DIR` may retain build caches,
+but `MAKA_JS_DEPS` is fixed to the extracted source's own install.
+
 `node scripts/rust/pack-cli.mjs --target <target> --version <exact-version>
 --binary <target-maka> --validator <local-maka> --notices <reviewed-notices>
 --output <directory>` packs prebuilt native code and verifies the resulting npm
 archive using the local CLI. It never executes foreign-target code, runs install
 scripts, publishes, or overwrites an existing output. Notices must cover Rust,
 V8 and embedded JavaScript; legacy Node CLI notices alone are insufficient.
+This lower-level packer alone does not establish source provenance.
 
 Rust license checks follow [OpenDAL's cargo-deny approach](https://github.com/apache/opendal/blob/main/scripts/dependencies.py):
 `deny.toml` defines the five distribution targets, permitted licenses and version-specific MPL exceptions.

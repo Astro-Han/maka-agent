@@ -29,7 +29,7 @@ import { npmSpawnOptions } from '../npm-spawn.mjs';
 
 const run = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const targets = {
+export const nativeCliTargets = {
   'darwin-arm64': { os: 'darwin', cpu: 'arm64' },
   'darwin-x64': { os: 'darwin', cpu: 'x64' },
   'linux-arm64-gnu': { os: 'linux', cpu: 'arm64', libc: ['glibc'] },
@@ -38,8 +38,17 @@ const targets = {
 };
 
 /** Pack prebuilt native bytes; never publish, execute the target, or run npm scripts. */
-export async function packNativeCli({ target, version, binary, notices, validator, output }) {
-  const platform = targets[target];
+export async function packNativeCli({
+  target,
+  version,
+  binary,
+  notices,
+  validator,
+  output,
+  repositoryRoot = root,
+  source,
+}) {
+  const platform = Object.hasOwn(nativeCliTargets, target) ? nativeCliTargets[target] : undefined;
   if (!platform) throw new Error('Unsupported native CLI target');
   if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$/u.test(version)) {
     throw new Error('An exact npm release version is required');
@@ -63,7 +72,7 @@ export async function packNativeCli({ target, version, binary, notices, validato
       await chmod(join(directory, 'bin', 'maka-service.exe'), 0o755);
     }
     for (const name of ['LICENSE', 'NOTICE']) {
-      await copyRegular(join(root, name), join(directory, name), 16 * 1024 * 1024);
+      await copyRegular(join(repositoryRoot, name), join(directory, name), 16 * 1024 * 1024);
     }
     // Release owners supply the reviewed Rust/V8/embedded-JS notice closure.
     // The old Node CLI notice file alone is not sufficient for this binary.
@@ -82,6 +91,7 @@ export async function packNativeCli({ target, version, binary, notices, validato
           description: `Maka native CLI for ${target}`,
           license: 'Apache-2.0',
           repository: { type: 'git', url: 'https://github.com/apache/maka.git' },
+          ...(source ? { makaSource: source } : {}),
           os: [platform.os],
           cpu: [platform.cpu],
           ...(platform.libc ? { libc: platform.libc } : {}),

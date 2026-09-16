@@ -116,7 +116,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apply-patch"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.20",
 ]
@@ -3913,7 +3913,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "maka-agent"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "fastrand",
@@ -3935,7 +3935,7 @@ dependencies = [
 
 [[package]]
 name = "maka-cli"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -3965,7 +3965,7 @@ dependencies = [
 
 [[package]]
 name = "maka-client-capability"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "maka-event-log",
@@ -3985,7 +3985,7 @@ dependencies = [
 
 [[package]]
 name = "maka-config"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "libc",
  "maka-event-log",
@@ -4003,7 +4003,7 @@ dependencies = [
 
 [[package]]
 name = "maka-event-log"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "libc",
@@ -4024,7 +4024,7 @@ dependencies = [
 
 [[package]]
 name = "maka-fs-tools"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "apply-patch",
  "cap-fs-ext",
@@ -4051,7 +4051,7 @@ dependencies = [
 
 [[package]]
 name = "maka-js-runtime"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "deno_core",
  "deno_crypto",
@@ -4078,7 +4078,7 @@ dependencies = [
 
 [[package]]
 name = "maka-model"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4100,7 +4100,7 @@ dependencies = [
 
 [[package]]
 name = "maka-network"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "maka-runtime",
@@ -4114,7 +4114,7 @@ dependencies = [
 
 [[package]]
 name = "maka-presentation"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "maka-runtime",
  "serde",
@@ -4124,7 +4124,7 @@ dependencies = [
 
 [[package]]
 name = "maka-process"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "dunce",
  "libc",
@@ -4141,7 +4141,7 @@ dependencies = [
 
 [[package]]
 name = "maka-protocol"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "maka-presentation",
@@ -4155,7 +4155,7 @@ dependencies = [
 
 [[package]]
 name = "maka-runtime"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "regress",
@@ -4172,7 +4172,7 @@ dependencies = [
 
 [[package]]
 name = "maka-runtime-host"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -4215,7 +4215,7 @@ dependencies = [
 
 [[package]]
 name = "maka-skills"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
@@ -4230,7 +4230,7 @@ dependencies = [
 
 [[package]]
 name = "maka-tools"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "jsonschema",
  "maka-client-capability",
@@ -4250,7 +4250,7 @@ dependencies = [
 
 [[package]]
 name = "maka-transport"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "maka-protocol",

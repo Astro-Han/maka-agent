@@ -22,7 +22,7 @@ members = ["crates/skills", "crates/apply-patch", "crates/cli", "crates/runtime"
 resolver = "3"
 
 [workspace.package]
-version = "0.0.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.98"
 license = "Apache-2.0"

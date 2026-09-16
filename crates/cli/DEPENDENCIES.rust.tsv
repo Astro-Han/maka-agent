@@ -12,7 +12,7 @@ allocator-api2@0.2.21		X								X
 ambient-authority@0.0.2		X	X							X					
 anstyle@1.0.14		X								X					
 anyhow@1.0.104		X								X					
-apply-patch@0.0.0		X													
+apply-patch@0.2.0		X													
 arc-swap@1.9.2		X								X					
 argon2@0.6.0		X								X					
 arraydeque@0.5.1		X								X					
@@ -326,23 +326,23 @@ litemap@0.8.3													X
 lock_api@0.4.14		X								X					
 log@0.4.34		X								X					
 lru-slab@0.1.2		X								X					X
-maka-agent@0.0.0		X													
-maka-cli@0.0.0		X													
-maka-client-capability@0.0.0		X													
-maka-config@0.0.0		X													
-maka-event-log@0.0.0		X													
-maka-fs-tools@0.0.0		X													
-maka-js-runtime@0.0.0		X													
-maka-model@0.0.0		X													
-maka-network@0.0.0		X													
-maka-presentation@0.0.0		X													
-maka-process@0.0.0		X													
-maka-protocol@0.0.0		X													
-maka-runtime@0.0.0		X													
-maka-runtime-host@0.0.0		X													
-maka-skills@0.0.0		X													
-maka-tools@0.0.0		X													
-maka-transport@0.0.0		X													
+maka-agent@0.2.0		X													
+maka-cli@0.2.0		X													
+maka-client-capability@0.2.0		X													
+maka-config@0.2.0		X													
+maka-event-log@0.2.0		X													
+maka-fs-tools@0.2.0		X													
+maka-js-runtime@0.2.0		X													
+maka-model@0.2.0		X													
+maka-network@0.2.0		X													
+maka-presentation@0.2.0		X													
+maka-process@0.2.0		X													
+maka-protocol@0.2.0		X													
+maka-runtime@0.2.0		X													
+maka-runtime-host@0.2.0		X													
+maka-skills@0.2.0		X													
+maka-tools@0.2.0		X													
+maka-transport@0.2.0		X													
 maybe-owned@0.3.4		X								X					
 memchr@2.8.3										X				X	
 memmap2@0.9.11		X								X					
