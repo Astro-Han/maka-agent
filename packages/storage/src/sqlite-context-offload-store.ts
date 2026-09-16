@@ -47,6 +47,7 @@ import {
   syncFile,
 } from './stable-storage.js';
 import { runWithContextValueMutation } from './context-value-mutation-gate.js';
+import { assertPositiveSafeInteger } from './positive-safe-integer.js';
 
 const MAX_MEDIA_TYPE_CODE_POINTS = 256;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -1411,12 +1412,6 @@ function assertBoundedText(value: string, maxCodePoints: number, label: string):
 function assertNonNegativeSafeInteger(value: number, label: string): void {
   if (!isNonNegativeSafeInteger(value)) {
     throw new Error(`${label} must be a non-negative safe integer`);
-  }
-}
-
-function assertPositiveSafeInteger(value: number, label: string): void {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${label} must be a positive safe integer`);
   }
 }
 

@@ -38,6 +38,7 @@ import type {
   ExternalSessionSummary,
 } from '@maka/core/external-session';
 import { externalSessionCatalogQueryHash } from './offset-external-session-catalog.js';
+import { assertPositiveSafeInteger } from './positive-safe-integer.js';
 
 export const CODEX_SESSION_ADAPTER_ID = 'codex';
 export const CODEX_ROLLOUT_MAX_BYTES = 2 * 1024 * 1024 * 1024;
@@ -801,12 +802,6 @@ function assertCodexRecordSize(actualBytes: number, maxBytes: number, line: numb
       maxBytes,
       `Codex rollout record at line ${line} exceeds ${maxBytes} bytes`,
     );
-  }
-}
-
-function assertPositiveSafeInteger(value: number, label: string): void {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${label} must be a positive safe integer`);
   }
 }
 
