@@ -194,7 +194,15 @@ Client Capability 注册与反向调用所有权位于 `client-capability`，Hos
 --binary <目标平台maka> --validator <本机maka> --notices <已审阅许可证文档>
 --output <目录>` 打包预构建原生程序，并用本机 CLI 校验实际 npm 归档。
 不执行跨平台程序或安装脚本，不发布，也不覆盖已有输出。许可证文档须覆盖 Rust、V8
-及嵌入 JavaScript；旧 Node CLI 文档不足以代替。Linux 发布构建仍须明确并验证 glibc 基线。
+及嵌入 JavaScript；旧 Node CLI 文档不足以代替。
+
+Rust 许可证检查沿用 [OpenDAL 的 cargo-deny 做法](https://github.com/apache/opendal/blob/main/scripts/dependencies.py)：
+`deny.toml` 定义五个发布目标、许可证白名单和限定版本的 MPL 例外。
+安装 cargo-deny 0.20.2 后运行 `node scripts/rust/dependencies.mjs check`；
+依赖变更后将 `check` 换为 `generate`，审阅
+[`DEPENDENCIES.rust.tsv`](../crates/cli/DEPENDENCIES.rust.tsv)。
+清单包含构建依赖，排除仅用于测试的依赖；许可证策略检查也覆盖测试。
+清单不是二进制许可证文本包；原生发布仍须收齐 Rust、内嵌原生库和 JS 的上游原文。
 
 ```sh
 cargo fmt --all --check

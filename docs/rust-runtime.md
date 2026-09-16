@@ -251,7 +251,15 @@ schema changes. Client Capability registration and reverse-call ownership live i
 archive using the local CLI. It never executes foreign-target code, runs install
 scripts, publishes, or overwrites an existing output. Notices must cover Rust,
 V8 and embedded JavaScript; legacy Node CLI notices alone are insufficient.
-Linux release builds still need an established and verified glibc baseline.
+
+Rust license checks follow [OpenDAL's cargo-deny approach](https://github.com/apache/opendal/blob/main/scripts/dependencies.py):
+`deny.toml` defines the five distribution targets, permitted licenses and version-specific MPL exceptions.
+With cargo-deny 0.20.2 installed, run `node scripts/rust/dependencies.mjs check`;
+after dependency changes, run the same command with `generate` and review
+[`DEPENDENCIES.rust.tsv`](../crates/cli/DEPENDENCIES.rust.tsv).
+The inventory includes build dependencies but excludes dev-only dependencies;
+the policy check also covers tests. It is not a binary license-text bundle.
+Native publication still requires complete upstream texts for Rust, bundled native libraries and JS.
 
 ```sh
 cargo fmt --all --check

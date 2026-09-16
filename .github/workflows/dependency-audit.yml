@@ -27,6 +27,12 @@ on:
       - .github/workflows/dependency-audit.yml
       - scripts/audit-shipped-dependencies.mjs
       - scripts/third-party-closure.mjs
+      - scripts/rust/dependencies.mjs
+      - deny.toml
+      - Cargo.toml
+      - Cargo.lock
+      - 'crates/**/Cargo.toml'
+      - crates/cli/DEPENDENCIES.rust.tsv
       - package.json
       - package-lock.json
       - 'apps/*/package.json'
@@ -37,6 +43,12 @@ on:
       - .github/workflows/dependency-audit.yml
       - scripts/audit-shipped-dependencies.mjs
       - scripts/third-party-closure.mjs
+      - scripts/rust/dependencies.mjs
+      - deny.toml
+      - Cargo.toml
+      - Cargo.lock
+      - 'crates/**/Cargo.toml'
+      - crates/cli/DEPENDENCIES.rust.tsv
       - package.json
       - package-lock.json
       - 'apps/*/package.json'
@@ -50,6 +62,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  rust-licenses:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Update stable Rust for dependency resolution
+        run: rustup update stable --no-self-update
+      - uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Check Rust licenses and dependency inventory
+        run: node scripts/rust/dependencies.mjs check
+
   audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 45

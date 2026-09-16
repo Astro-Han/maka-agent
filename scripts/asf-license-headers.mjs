@@ -195,6 +195,7 @@ export const exclusionRules = [
     justification:
       'Third-party license and notice texts redistributed with the product. An ASF header on any of them would assert ASF provenance over content ASF does not own. The upstream texts additionally have to stay byte-identical to what their projects published, and the aggregated notices are generator output that a hand-written header would not survive.',
     matches: isOneOf(
+      'crates/cli/DEPENDENCIES.rust.tsv',
       'apps/desktop/resources/licenses/cargo/THIRD_PARTY_NOTICES.txt',
       'apps/desktop/resources/licenses/npm/THIRD_PARTY_NOTICES.txt',
       'apps/desktop/resources/licenses/renderer/ALLOGO_LICENSE.txt',
