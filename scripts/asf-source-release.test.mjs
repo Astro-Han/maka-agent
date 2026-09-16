@@ -232,7 +232,30 @@ describe('ASF source release verification', () => {
     }
   });
 
-  test('rejects lock links without a candidate-owned workspace target', async () => {
+  test('binds workspace links to candidate-owned manifests using archive paths', async () => {
+    const owned = createFixtureCandidate({
+      'packages/runtime/package.json': JSON.stringify({
+        license: 'Apache-2.0',
+        name: '@maka/runtime',
+        version: '1.0.0',
+      }),
+      'package-lock.json': JSON.stringify({
+        lockfileVersion: 3,
+        name: 'maka',
+        version: '0.1.12',
+        packages: {
+          '': { name: 'maka', version: '0.1.12' },
+          'packages/runtime': { name: '@maka/runtime', version: '1.0.0' },
+          'node_modules/@maka/runtime': { link: true, resolved: 'packages/runtime' },
+        },
+      }),
+    });
+    try {
+      await assert.doesNotReject(() => verifySourceCandidate({ archivePath: owned.archivePath }));
+    } finally {
+      owned.cleanup();
+    }
+
     const fixture = createFixtureCandidate({
       'tools/runtime/package-lock.json': `${JSON.stringify({
         lockfileVersion: 3,

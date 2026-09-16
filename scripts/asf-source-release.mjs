@@ -36,7 +36,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const defaultRepoRoot = resolve(import.meta.dirname, '..');
@@ -619,7 +619,7 @@ function validateNodePackageInputs(candidateRoot, identity, entries) {
     }
     const dependencyNames = declaredPackageDependencies(manifest, entry);
     if (dependencyNames.length > 0) {
-      const directory = dirname(entry);
+      const directory = posix.dirname(entry);
       const lockEntry = [
         `${directory}/npm-shrinkwrap.json`,
         `${directory}/package-lock.json`,
@@ -653,7 +653,11 @@ function validateNodePackageInputs(candidateRoot, identity, entries) {
       if (!lockPath) continue;
       if (dependency?.link === true) {
         const name = lockPath.slice(lockPath.lastIndexOf('node_modules/') + 13);
-        const targetManifestEntry = join(dirname(entry), dependency.resolved ?? '', 'package.json');
+        const targetManifestEntry = posix.join(
+          posix.dirname(entry),
+          dependency.resolved ?? '',
+          'package.json',
+        );
         const targetManifest = manifests.get(targetManifestEntry);
         const targetLockPath = dependency.resolved;
         const targetLock = targetLockPath ? lock.packages[targetLockPath] : undefined;
@@ -669,7 +673,7 @@ function validateNodePackageInputs(candidateRoot, identity, entries) {
         continue;
       }
       if (!lockPath.includes('node_modules/')) {
-        const manifestEntry = join(dirname(entry), lockPath, 'package.json');
+        const manifestEntry = posix.join(posix.dirname(entry), lockPath, 'package.json');
         const manifest = manifests.get(manifestEntry);
         if (!manifest || manifest.name !== dependency.name) {
           throw new Error(`Cannot safely classify workspace package ${lockPath} in ${entry}`);
