@@ -34,9 +34,26 @@ export function rustTarget(platform = process.platform, arch = process.arch) {
 }
 
 export async function buildCli({ release = false, target } = {}) {
-  const args = ['build', '--locked', '-p', 'maka-cli', '--target-dir', join(root, 'target')];
+  const triple = target ?? rustTarget();
+  const linuxRelease = release && triple.includes('-linux-');
+  if (linuxRelease && !/^(x86_64|aarch64)-unknown-linux-gnu$/u.test(triple)) {
+    throw new Error('Linux releases require an x86_64 or aarch64 GNU target');
+  }
+  // Zig is only used with an explicit target, including native Linux builds.
+  // Cargo writes the output under the Rust triple, without the glibc suffix.
+  const outputTarget = linuxRelease ? triple : target;
+  // Desktop dev launches the fixed repository target/debug path.
+  const targetDirectory = resolve(root, (release && process.env.CARGO_TARGET_DIR) || 'target');
+  const args = [
+    linuxRelease ? 'zigbuild' : 'build',
+    '--locked',
+    '-p',
+    'maka-cli',
+    '--target-dir',
+    targetDirectory,
+  ];
   if (release) args.push('--release');
-  if (target) args.push('--target', target);
+  if (outputTarget) args.push('--target', linuxRelease ? `${triple}.2.28` : outputTarget);
   await new Promise((resolveBuild, reject) => {
     const child = spawn('cargo', args, { cwd: root, stdio: 'inherit', windowsHide: true });
     child.once('error', reject);
@@ -45,11 +62,10 @@ export async function buildCli({ release = false, target } = {}) {
       else reject(new Error(`Maka build failed: ${signal ?? code}`));
     });
   });
-  const windows = target ? target.includes('-windows-') : process.platform === 'win32';
+  const windows = triple.includes('-windows-');
   return join(
-    root,
-    'target',
-    ...(target ? [target] : []),
+    targetDirectory,
+    ...(outputTarget ? [outputTarget] : []),
     release ? 'release' : 'debug',
     windows ? 'maka.exe' : 'maka',
   );

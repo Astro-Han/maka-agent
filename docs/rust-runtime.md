@@ -97,6 +97,11 @@ The returned JSON identifies both Windows executables. `--directory <verified-pa
 The default cache is the account's `native-cli` directory; saved profiles reference its executables.
 Native preview packages use the separate `rust-preview` npm channel, never `latest`.
 
+Linux releases target glibc 2.28 or newer. `node scripts/rust/build-cli.mjs --release`
+uses `cargo zigbuild` with an explicit `x86_64-unknown-linux-gnu.2.28` or
+`aarch64-unknown-linux-gnu.2.28` target; install cargo-zigbuild and Zig on the build machine.
+Development builds still use ordinary Cargo. SSH/WSL onboarding rejects older glibc before downloading.
+
 Desktop SSH/WSL onboarding downloads and verifies the exact Desktop version locally, transfers
 the complete package, removes the upload staging directory, and sets up the native Host.
 The target needs no Node/npm/Rust. Native npm releases are not published yet; development builds

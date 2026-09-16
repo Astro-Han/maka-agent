@@ -82,6 +82,10 @@ Windows 要求交互式用户会话。单独安装不会启动服务或修改账
 根据原验证器的回执导入传输后的包。默认缓存为账户的 `native-cli` 目录，已保存配置会引用其中的可执行文件。
 现阶段原生包使用独立 npm channel `rust-preview`，不使用 `latest`。
 
+Linux 发布支持 glibc 2.28 及以上。`node scripts/rust/build-cli.mjs --release` 使用
+`cargo zigbuild`，显式指定 `x86_64-unknown-linux-gnu.2.28` 或 `aarch64-unknown-linux-gnu.2.28`；
+构建机器须安装 cargo-zigbuild 和 Zig。开发构建仍使用普通 Cargo，SSH／WSL 引导在下载前拒绝旧版 glibc。
+
 Desktop SSH／WSL 引导在本机下载并验证与 Desktop 版本一致的完整包，再传输、清理上传暂存目录并设置原生 Host。
 目标无需 Node/npm/Rust。原生 npm 包尚未发布；开发构建可设置 `MAKA_NATIVE_CLI_VERSION` 和
 `MAKA_NATIVE_CLI_PACKAGES`（由 `host fetch` 填充的缓存目录），正式打包的 Desktop 忽略这些覆盖。

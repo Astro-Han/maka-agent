@@ -78,10 +78,10 @@ test('detects the peer target through the bounded SSH preflight', async () => {
   assert.ok(suffix);
   const marker = `__MAKA_RUNTIME_HOST_TARGET_${suffix}`;
   assert.doesNotMatch(command, /\bnode\b/u);
-  harness.pty.emitData(`${marker}Linux:x86_64:glibc 2.39\r\n`);
+  harness.pty.emitData(`${marker}Linux:x86_64:glibc 2.28\r\n`);
   harness.pty.exit(0);
 
-  assert.deepEqual(await detection, { platform: 'linux', architecture: 'x64', glibcVersion: '2.39' });
+  assert.deepEqual(await detection, { platform: 'linux', architecture: 'x64', glibcVersion: '2.28' });
   assert.doesNotMatch(JSON.stringify(harness.events), /MAKA_RUNTIME_HOST_TARGET/u);
   await harness.terminal.close();
 });
@@ -89,6 +89,8 @@ test('detects the peer target through the bounded SSH preflight', async () => {
 test('rejects unsupported SSH targets without crashing the output listener or retrying another OS', async () => {
   for (const [value, expected] of [
     ['Linux:x86_64:unknown', /requires GNU libc/u],
+    ['Linux:x86_64:glibc 2.27', /requires glibc 2.28/u],
+    ['Linux:x86_64:glibc 2.9', /requires glibc 2.28/u],
     ['Linux:riscv64:glibc 2.39', /Unsupported.*architecture/u],
     ['Linux:x86_64:glibc 2.39:extra', /Invalid.*result/u],
   ] as const) {

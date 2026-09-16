@@ -54,6 +54,10 @@ export function decodeRuntimeHostTarget(value: string): RuntimeHostTargetIdentit
   if (os === 'Linux') {
     const version = /^glibc ([0-9]+\.[0-9]+)$/u.exec(libc)?.[1];
     if (!version) throw new Error('Native Linux Runtime Host requires GNU libc; target libc could not be verified');
+    const [major, minor] = version.split('.').map(Number);
+    if (major! < 2 || (major === 2 && minor! < 28)) {
+      throw new Error(`Native Linux Runtime Host requires glibc 2.28 or newer; found ${version}`);
+    }
     return { platform: 'linux', architecture, glibcVersion: version };
   }
   if ((os === 'Darwin' || os === 'Windows') && libc === '') {

@@ -147,6 +147,18 @@ jobs:
       - name: Update stable Rust for Desktop native artifacts
         run: rustup update stable --no-self-update
 
+      - name: Install the Linux baseline linker
+        if: matrix.platform == 'linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Install cargo-zigbuild
+        if: matrix.platform == 'linux'
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2
+        with:
+          tool: cargo-zigbuild@0.23.4
+
       - name: Write App Store Connect API key
         if: matrix.platform == 'macos'
         env:
