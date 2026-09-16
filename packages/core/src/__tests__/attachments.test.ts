@@ -137,7 +137,8 @@ describe('resolveAttachmentMimeType (content-first precedence)', () => {
 
   test('keeps a non-image document claim so real document kinds still resolve', () => {
     const docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    assert.equal(resolveAttachmentMimeType(Buffer.from('PK'), docx, 'notes.docx'), docx);
-    assert.equal(resolveAttachmentMimeType(Buffer.from('PK'), undefined, 'notes.docx'), docx);
+    const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+    assert.equal(resolveAttachmentMimeType(zipHeader, docx, 'notes.docx'), docx);
+    assert.equal(resolveAttachmentMimeType(zipHeader, undefined, 'notes.docx'), docx);
   });
 });
