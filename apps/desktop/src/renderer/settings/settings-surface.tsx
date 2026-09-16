@@ -69,6 +69,7 @@ import { ExternalAgentsSettingsPage } from '../features/external-agent-settings/
 import { SubagentSettingsPage } from './subagent-settings-page';
 import { safeLocalStorageSet } from '../browser-storage';
 import { ProjectsSettingsPage } from './projects-settings-page';
+import { NativeRuntimeHostManagementDialog } from './native-runtime-host-management-dialog.js';
 import { AboutSettingsPage } from './about-settings-page';
 import { AppearanceSettingsPage } from './appearance-settings-page';
 import { BotChatSettingsPage } from './bot-chat-settings-page';
@@ -294,6 +295,7 @@ function SettingsSurfaceContent(
   const [clientSettings, setClientSettings] = useState(
     initialClientSettings ?? defaultSettings,
   );
+  const [showNativeManagement, setShowNativeManagement] = useState(false);
   const [runtimeHostSettings, setRuntimeHostSettings] = useState<
     SettingsResourceState<RuntimeHostAppSettings>
   >(() => createSettingsResourceState(
@@ -1043,6 +1045,7 @@ function SettingsSurfaceContent(
                             archivedTasks={props.archivedTasks}
                             onTaskImported={props.onTaskImported}
                             onRemoteHostAdded={props.onRemoteHostAdded}
+                            onManageNativeHost={() => setShowNativeManagement(true)}
                             openProviderCatalog={providerCatalogRequested}
                             initialConnectionSlug={props.initialConnectionSlug}
                             initialCreateProviderType={createProviderRequest}
@@ -1064,11 +1067,14 @@ function SettingsSurfaceContent(
           </section>
         )}
       />
+      {showNativeManagement ? <NativeRuntimeHostManagementDialog
+        onClose={() => setShowNativeManagement(false)} /> : null}
     </div>
   );
 }
 
 function SettingsPageBody(props: {
+  onManageNativeHost(): void;
   section: SettingsSection;
   isLocalRuntimeHost: boolean;
   settings: AppSettings;
@@ -1181,6 +1187,7 @@ function SettingsPageBody(props: {
     case 'projects':
       return (
         <ProjectsSettingsPage
+          onManageNativeHost={props.onManageNativeHost}
           settings={props.settings}
           runtimeHostStatus={props.runtimeHostTargetStatus}
           runtimeHostTargetVerified={props.runtimeHostTargetVerified}

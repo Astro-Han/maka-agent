@@ -186,6 +186,85 @@ test('quiesces Local reconnect while a managed service changes', async () => {
   await owner.close();
 });
 
+test('native management rejects stale retirement and retains stop intent until confirmed start', async () => {
+  const deployment = {
+    deploymentId: 'f7672ac5-42f0-4456-8a46-0e36f6d6137b', configRevision: 2,
+    rootId: 'test-host', rootPath: '/test/root', executable: '/test/maka', sha256: 'a'.repeat(64),
+    mode: 'on_demand' as const, websocket: '127.0.0.1:0',
+  };
+  const first = candidateHarness({
+    ownership: 'managed', managedDeployment: deployment, disconnectOnPrepare: true,
+  });
+  const second = candidateHarness({ ownership: 'managed', hostEpoch: 'started-host' });
+  let starts = 0;
+  let pauses = 0;
+  let resumes = 0;
+  const owner = await startRuntimeHostDesktopManager({
+    candidateLaunchBarrier: {
+      pause() { pauses++; }, resume() { resumes++; }, async retireExcept() {},
+    },
+  } as unknown as DesktopRuntimeHostCandidateStartInput, {
+    startCandidate: async () => ready(++starts === 1 ? first.candidate : second.candidate),
+    waitForHostExit: async () => {},
+  });
+  try {
+    await assert.rejects(owner.runNativeLocalHostChange(async (scope) => {
+      await scope.retire({ ...deployment, configRevision: 1 });
+    }), /no longer matches/);
+    assert.equal(first.prepareRetirementCalls, 0);
+    assert.equal(resumes, 1);
+    await owner.runNativeLocalHostChange(async (scope) => {
+      assert.equal(await scope.retire(deployment), true);
+      scope.hold();
+    });
+    assert.equal(first.prepareRetirementCalls, 1);
+    await assert.rejects(owner.runNativeLocalHostChange(async (scope) => {
+      scope.hold();
+      throw new Error('activation receipt lost');
+    }), /receipt lost/);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(starts, 1);
+    assert.equal(pauses, 2); // Failed start reused the retained suspension.
+    assert.equal(resumes, 1);
+    await owner.runNativeLocalHostChange(async (scope) => {
+      scope.hold();
+      scope.resumeOnSuccess();
+    });
+    await owner.waitUntilReady('local', 'test-host-epoch');
+    assert.equal(starts, 2);
+    assert.equal(resumes, 2);
+  } finally {
+    await owner.close();
+  }
+});
+
+test('native retirement refusal releases a new pause, but ambiguous retirement retains it', async () => {
+  let uncertain = false;
+  const first = candidateHarness({
+    activeTasks: true,
+    onPrepare() { if (uncertain) throw new Error('retirement reply lost'); },
+  });
+  let resumes = 0;
+  const owner = await startRuntimeHostDesktopManager({
+    candidateLaunchBarrier: {
+      pause() {}, resume() { resumes++; }, async retireExcept() {},
+    },
+  } as unknown as DesktopRuntimeHostCandidateStartInput, {
+    startCandidate: async () => ready(first.candidate),
+  });
+  try {
+    await owner.runNativeLocalHostChange(async (scope) => assert.equal(await scope.retire(null), false));
+    assert.equal(resumes, 1);
+    uncertain = true;
+    await assert.rejects(owner.runNativeLocalHostChange(async (scope) => {
+      await scope.retire(null);
+    }), /reply lost/);
+    assert.equal(resumes, 1);
+  } finally {
+    await owner.close();
+  }
+});
+
 test('waits through a reconnect gap before quiescing Host retirement', async () => {
   const first = candidateHarness();
   const replacement = candidateHarness({ disconnectOnPrepare: true });
@@ -1878,7 +1957,8 @@ function candidateHarness(
     activeTasks?: boolean | 'always';
     upgradeBlockingActivity?: boolean;
     diagnosticsError?: Error;
-    ownership?: 'owned_ephemeral' | 'supervised' | 'external';
+    ownership?: 'owned_ephemeral' | 'managed' | 'supervised' | 'external';
+    managedDeployment?: DesktopRuntimeHostCandidate['managedDeployment'];
     ownedProcess?: RuntimeHostSpawnedProcess;
     hostId?: string;
     hostEpoch?: string;
@@ -1903,6 +1983,7 @@ function candidateHarness(
   const candidate = {
     closed,
     hostOwnership: options.ownership ?? 'owned_ephemeral',
+    managedDeployment: options.managedDeployment,
     hostPid: 42,
     ...(options.ownedProcess ? { ownedProcess: options.ownedProcess } : {}),
     client: {

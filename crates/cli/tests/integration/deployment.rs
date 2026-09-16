@@ -513,6 +513,24 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
                 .get("projectDirectoryRoots")
                 .is_none()
         );
+        let management = Command::new("node")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
+            .args([
+                "--native-managed",
+                env!("CARGO_BIN_EXE_maka"),
+                "--management",
+                "--root-id",
+                &fixture.root_id,
+            ])
+            .arg("--root")
+            .arg(&fixture.root)
+            .output()
+            .unwrap();
+        assert!(
+            management.status.success(),
+            "{}",
+            String::from_utf8_lossy(&management.stderr)
+        );
         fixture.retire_registered();
     }
 }

@@ -24,7 +24,7 @@ const identity = z.string().min(1).max(128);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const path = z.string().min(1).max(32_768);
 const message = z.string().max(8192);
-const deployment = z.object({
+export const nativeRuntimeHostDeploymentSchema = z.object({
   deploymentId: z.string().uuid(),
   configRevision: count.positive(),
   rootId: digest,
@@ -39,6 +39,12 @@ const deployment = z.object({
     path,
   }).strict()).max(8).optional(),
   admission: z.literal('revoked').optional(),
+}).strict();
+const deployment = nativeRuntimeHostDeploymentSchema;
+export const nativeRuntimeHostIdentitySchema = z.object({
+  hostEpoch: identity,
+  pid: count.positive(),
+  port: count.min(1).max(65_535),
 }).strict();
 
 const unavailable = z.object({ kind: z.literal('unavailable'), message }).strict();
@@ -66,11 +72,7 @@ const status = z.discriminatedUnion('kind', [
       unavailable,
       z.object({
         kind: z.literal('connected'),
-        identity: z.object({
-          hostEpoch: identity,
-          pid: count.positive(),
-          port: count.min(1).max(65_535),
-        }).strict(),
+        identity: nativeRuntimeHostIdentitySchema,
         activity: z.object({
           state: z.enum(['starting', 'containing', 'recovering', 'ready', 'draining']),
           connections: count,

@@ -247,6 +247,7 @@ export type DesktopRuntimeHostCandidateStartResult =
   | Exclude<ConnectOrSpawnRuntimeHostResult, { kind: "connected" }>;
 
 export interface DesktopRuntimeHostCandidate {
+  readonly managedDeployment?: ConnectOrSpawnRuntimeHostResult['managedDeployment'];
   submitLocalMessage(input: TurnMessageSubmitInput): Promise<TurnMessageSubmitResult>;
   readonly botIncoming: BotIncomingMainService;
   readonly client: DesktopRuntimeHostClient;
@@ -259,6 +260,7 @@ export interface DesktopRuntimeHostCandidate {
 }
 
 class DesktopRuntimeHostCandidateImpl implements DesktopRuntimeHostCandidate {
+  readonly managedDeployment: ConnectOrSpawnRuntimeHostResult['managedDeployment'];
   readonly botIncoming: BotIncomingMainService;
   readonly client: DesktopRuntimeHostClient;
   readonly closed: Promise<void>;
@@ -279,6 +281,7 @@ class DesktopRuntimeHostCandidateImpl implements DesktopRuntimeHostCandidate {
   #closeTask: Promise<void> | undefined;
 
   constructor(input: {
+    managedDeployment?: ConnectOrSpawnRuntimeHostResult['managedDeployment'];
     client: DesktopRuntimeHostClient;
     observer: RuntimeHostSessionObserver;
     ipc: ScopedIpcMain;
@@ -296,6 +299,7 @@ class DesktopRuntimeHostCandidateImpl implements DesktopRuntimeHostCandidate {
     stopSession: (sessionId: string) => Promise<void>;
   }) {
     this.#client = input.client;
+    this.managedDeployment = input.managedDeployment;
     this.client = input.client;
     this.#observer = input.observer;
     this.#ipc = input.ipc;
@@ -405,6 +409,8 @@ export async function startDesktopRuntimeHostCandidate(
         'owner',
         connection.registration.pid,
         connection.spawnedProcess,
+        undefined,
+        connection.managedDeployment,
       ),
     };
   } catch (error) {
@@ -544,6 +550,7 @@ export async function createDesktopRuntimeHostCandidate(
   resolveCollaborationConnectionTarget?: () =>
     | DesktopCollaborationConnectionTarget
     | Promise<DesktopCollaborationConnectionTarget>,
+  managedDeployment?: ConnectOrSpawnRuntimeHostResult['managedDeployment'],
 ): Promise<DesktopRuntimeHostCandidate> {
   const target: DesktopRuntimeHostTargetPolicy = {
     kind: targetKind,
@@ -950,6 +957,7 @@ export async function createDesktopRuntimeHostCandidate(
         })
       : noGuestBotService();
     return new DesktopRuntimeHostCandidateImpl({
+      managedDeployment,
       client,
       observer: sessionObserver,
       ipc,

@@ -1680,6 +1680,9 @@ const makaBridge = {
     },
   },
   runtimeHostManagement: {
+    runNative(request) {
+      return ipcRenderer.invoke('runtime-host-management:native', request);
+    },
     run(
       profileId: string,
       action: DesktopRuntimeHostManagementAction,

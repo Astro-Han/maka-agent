@@ -92,6 +92,7 @@ function createRemoteHostDraft() {
 
 export function RuntimeHostProfilesSection(props: {
   readonly onRemoteHostAdded: (profileId: string) => void;
+  readonly onManageNativeHost: () => void;
 }) {
   const locale = useUiLocale();
   const copy = getSettingsProjectsCopy(locale).runtimeHost;
@@ -115,7 +116,16 @@ export function RuntimeHostProfilesSection(props: {
   const [showOnboarding, setShowOnboarding] = useState<'ssh' | 'wsl'>();
   const [showJoinSharedSession, setShowJoinSharedSession] = useState(false);
   const [managedTarget, setManagedTarget] = useState<RuntimeHostManagementTarget>();
+  const [nativeManagementAvailable, setNativeManagementAvailable] = useState<boolean>();
   const [localAccess, setLocalAccess] = useState<DesktopLocalRuntimeHostRemoteAccessSnapshot>();
+  useEffect(() => {
+    void window.maka.runtimeHostManagement.runNative({ action: 'status' }).then((value) => {
+      if (mountedRef.current) setNativeManagementAvailable(value !== null);
+    }, () => {
+      // The native dialog remains the repair entry when inspection fails.
+      if (mountedRef.current) setNativeManagementAvailable(true);
+    });
+  }, [mountedRef]);
   const [connectionCodeDialog, setConnectionCodeDialog] = useState<
     | { readonly mode: 'import' }
     | {
@@ -405,7 +415,11 @@ export function RuntimeHostProfilesSection(props: {
             />
           </HStack>}
         />
-        <SettingsRow
+        {nativeManagementAvailable ? <SettingsRow
+          label={locale === 'zh-CN' ? '本机 Host' : 'Local Host'}
+          end={<Button variant="secondary" size="sm" label={copy.manage}
+            isDisabled={switching} onClick={props.onManageNativeHost} />}
+        /> : nativeManagementAvailable === false ? <SettingsRow
           label={copy.thisComputerRemoteAccess}
           description={
             localAccessEnabling
@@ -489,6 +503,7 @@ export function RuntimeHostProfilesSection(props: {
             </HStack>
           )}
         />
+        : null}
         <SettingsRow
           label={copy.peerMesh}
           description={copy.peerMeshHelp}

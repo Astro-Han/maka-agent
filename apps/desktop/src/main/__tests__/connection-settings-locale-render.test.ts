@@ -199,7 +199,7 @@ for (const copy of localeCases) {
           subscribeChanges: () => () => {},
         },
         localRuntimeHostRemoteAccess: { getSnapshot: async () => ({ state: 'off' }) },
-        runtimeHostManagement: { subscribeProgress: () => () => {} },
+        runtimeHostManagement: { subscribeProgress: () => () => {}, runNative: async () => null },
       },
     });
     await harness.render(copy.locale, createElement(components.RuntimeHostProfilesSection, {

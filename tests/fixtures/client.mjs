@@ -63,7 +63,8 @@ await withSourceBundle(fileURLToPath(new URL(entry, import.meta.url)), (bundle, 
           : process.argv.includes('--large-output-workspace')
             ? 120000
             : process.argv.includes('--bash-workspace') ||
-                process.argv.includes('--onboarding-workspace')
+                process.argv.includes('--onboarding-workspace') ||
+                (process.argv.includes('--native-managed') && process.argv.includes('--management'))
               ? 45000
               : 15000,
   });

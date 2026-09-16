@@ -241,6 +241,7 @@ import { createDesktopRuntimeHostLocalOperator } from './runtime-host-local-oper
 import { createDesktopLocalRuntimeHostRemoteAccess } from './runtime-host-local-remote-access.js';
 import { createDesktopRuntimeHostOnboarding } from "./runtime-host-onboarding.js";
 import { createDesktopRuntimeHostManagement } from "./runtime-host-management.js";
+import { createNativeRuntimeHostManagement } from './native-runtime-host-management.js';
 import { createDesktopRuntimeHostLocalManagement } from './runtime-host-local-management.js';
 import { createDesktopRuntimeHostPeerMeshManagement } from './runtime-host-peer-mesh-management.js';
 import { registerExternalAgentSetupIpc } from "./external-agent-setup-ipc-main.js";
@@ -760,6 +761,18 @@ const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
   send: (snapshot) =>
     mainWindowController.send("runtime-host-onboarding:changed", snapshot),
 });
+const nativeRuntimeHostManagement = isE2e ? undefined : createNativeRuntimeHostManagement({
+  executable: nativeHostExecutable,
+  rootId: startupLocalStorageRoot.rootId,
+  rootPath: startupLocalStorageRoot.canonicalPath,
+  change: (run) => {
+    if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');
+    return runtimeHostManager.runNativeLocalHostChange(run);
+  },
+});
+ipcMain.handle('runtime-host-management:native', (_event, request: unknown) =>
+  nativeRuntimeHostManagement?.run(request) ?? null);
+
 const localRuntimeHostManagement = createDesktopRuntimeHostLocalManagement({
   remoteAccess: localRuntimeHostRemoteAccess,
   operator: localRuntimeHostOperator,
@@ -2185,6 +2198,7 @@ function closeRuntimeHostDesktop(): Promise<void> {
 }
 
 async function disposeRuntimeHostDesktop(): Promise<void> {
+  ipcMain.removeHandler('runtime-host-management:native');
   sessionLocal.close();
   powerMonitor.off("resume", wakePeerRecoveryAfterResume);
   clientSettingsWatcher.stop();

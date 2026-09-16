@@ -64,6 +64,7 @@ import { RuntimeHostReconnectingIpcMain } from './runtime-host-reconnecting-ipc-
 import { RuntimeHostSessionObservationRegistry } from './runtime-host-session-observation-registry.js';
 import { TerminalCloseIntents } from './terminal-close-intents.js';
 import { canRepairManagedRuntimeHostStartup } from './runtime-host-startup-recovery.js';
+import type { NativeRuntimeHostChangeScope } from './native-runtime-host-management.js';
 
 export interface RuntimeHostDesktopManager {
   current(profileId?: string): RuntimeHostDesktopTargetSnapshot | undefined;
@@ -108,6 +109,7 @@ export interface RuntimeHostDesktopManager {
     signal?: AbortSignal,
   ): Promise<void>;
   runManagedLocalHostChange<T>(change: () => Promise<T>): Promise<T>;
+  runNativeLocalHostChange<T>(change: (scope: NativeRuntimeHostChangeScope) => Promise<T>): Promise<T>;
   setDefaultProfile(profileId: string): void;
   retireOwnedLocalHost(mode: RuntimeHostRetirementMode): Promise<DesktopLocalHostRetirement>;
   prepareOwnedLocalHostQuit(mode: RuntimeHostRetirementMode): Promise<'ready' | 'active_tasks'>;
@@ -310,6 +312,7 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
   #defaultProfileId: string = LOCAL_RUNTIME_HOST_PROFILE.id;
   #localHostRetirement: Extract<PreparedLocalHostRetirement, { kind: 'retired' }> | undefined;
   #localHostRetirementTask: DesktopLocalHostRetirementTask | undefined;
+  #nativeLocalSuspension: { resume(): void } | undefined;
   #closed = false;
   #closeTask: Promise<void> | undefined;
 
@@ -758,6 +761,65 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
         return await change();
       } finally {
         suspension.resume();
+      }
+    });
+  }
+
+  runNativeLocalHostChange<T>(change: (scope: NativeRuntimeHostChangeScope) => Promise<T>): Promise<T> {
+    return this.#mutateTarget(LOCAL_RUNTIME_HOST_PROFILE.id, async () => {
+      const lifecycle = this.#requireLifecycle(this.#requireTarget(LOCAL_RUNTIME_HOST_PROFILE.id));
+      const alreadyPaused = this.#nativeLocalSuspension !== undefined;
+      if (!this.#nativeLocalSuspension) {
+        const suspension = await lifecycle.suspend();
+        try {
+          this.#baseInput.candidateLaunchBarrier?.pause();
+        } catch (error) {
+          suspension.resume();
+          throw error;
+        }
+        this.#nativeLocalSuspension = { resume: () => {
+          this.#baseInput.candidateLaunchBarrier?.resume();
+          suspension.resume();
+        } };
+      }
+      let keepPaused = alreadyPaused;
+      let resumeOnSuccess = false;
+      let succeeded = false;
+      try {
+        // Finish pre-existing launches before a management command can acquire Root.
+        await this.#baseInput.candidateLaunchBarrier?.retireExcept(lifecycle.current?.hostPid ?? -1);
+        const result = await change({
+          hold: () => { keepPaused = true; },
+          resumeOnSuccess: () => { resumeOnSuccess = true; },
+          retire: async (deployment) => {
+            const current = lifecycle.current;
+            if (!current) return true; // Native RootOwner still proves exclusivity.
+            if (deployment
+              ? current.hostOwnership !== 'managed' || current.client.hostId !== deployment.rootId ||
+                current.managedDeployment?.deploymentId !== deployment.deploymentId ||
+                current.managedDeployment.configRevision !== deployment.configRevision
+              : current.hostOwnership !== 'owned_ephemeral') {
+              throw new Error('Connected native Host no longer matches the management target');
+            }
+            keepPaused = true; // RPC failure may follow a successful retirement.
+            const retirement = await current.client.prepareHostRetirement('refuse_active_work');
+            if (retirement.kind === 'active_tasks') {
+              keepPaused = alreadyPaused;
+              return false;
+            }
+            await this.waitForHostExit(retirement.pid);
+            await current.close();
+            return true;
+          },
+        });
+        succeeded = true;
+        return result;
+      } finally {
+        if ((!keepPaused || (succeeded && resumeOnSuccess)) && !this.#closed) {
+          const suspension = this.#nativeLocalSuspension;
+          this.#nativeLocalSuspension = undefined;
+          suspension?.resume();
+        }
       }
     });
   }
