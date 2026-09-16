@@ -1080,9 +1080,7 @@ export function createMakaCuBackend(opts: MakaCuBackendOptions): MakaCuBackend {
     );
   }
 
-  // -------------------------------------------------------------------------
   // Sessions (§3) and snapshots (§4.1).
-  // -------------------------------------------------------------------------
 
   async function ensureSession(sessionId: string, signal: AbortSignal): Promise<void> {
     if (begunSessions.has(sessionId)) return;
@@ -1278,9 +1276,7 @@ export function createMakaCuBackend(opts: MakaCuBackendOptions): MakaCuBackend {
     );
   }
 
-  // -------------------------------------------------------------------------
   // Images (§8) and observation shaping (§5).
-  // -------------------------------------------------------------------------
 
   async function readFrame(image: MakaCuImage): Promise<CuScreenshot | CaptureFailure> {
     let bytes: Buffer;
@@ -1563,9 +1559,7 @@ export function createMakaCuBackend(opts: MakaCuBackendOptions): MakaCuBackend {
     return observation;
   }
 
-  // -------------------------------------------------------------------------
   // Observe (§5).
-  // -------------------------------------------------------------------------
 
   async function listWindows(sessionId: string, signal: AbortSignal): Promise<MakaCuWindow[]> {
     const envelope = await service.call('window.list', { session: sessionId }, signal);
@@ -1696,9 +1690,7 @@ export function createMakaCuBackend(opts: MakaCuBackendOptions): MakaCuBackend {
     }
   }
 
-  // -------------------------------------------------------------------------
   // Dispatch (§6).
-  // -------------------------------------------------------------------------
 
   function dispatchOutcome(method: string, result: MakaCuDispatchResult): CuDispatchOutcome {
     // §6.5: `verified` is not a wire field. One bit, one producer.

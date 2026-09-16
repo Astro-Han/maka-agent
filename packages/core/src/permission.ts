@@ -19,9 +19,7 @@
 
 /** Legacy permission payloads and shared tool-category compatibility types. */
 
-// ============================================================================
 // Mode + Tool categories
-// ============================================================================
 
 export const PERMISSION_MODES = ['explore', 'ask', 'bypass'] as const;
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
@@ -104,9 +102,7 @@ export function isToolCategory(value: unknown): value is ToolCategory {
 /** Legacy category-policy value retained for agent tool-availability records. */
 export type PolicyDecision = 'allow' | 'prompt' | 'block';
 
-// ============================================================================
 // Tool execution environment facts
-// ============================================================================
 
 export type ToolExecutionIsolation = 'none' | 'worktree' | 'container' | 'remote';
 export type ToolExecutionWriteBack = 'direct' | 'diff_review';
@@ -121,9 +117,7 @@ export interface ToolExecutionFacts {
   secrets: ToolExecutionSecrets;
 }
 
-// ============================================================================
 // Tool name → category mapping (Claude SDK canonical names)
-// ============================================================================
 
 export const BUILTIN_TOOL_CATEGORY: Record<string, ToolCategory> = {
   // read
@@ -144,9 +138,7 @@ export const BUILTIN_TOOL_CATEGORY: Record<string, ToolCategory> = {
   WriteStdin: 'shell_unsafe',
 };
 
-// ============================================================================
 // Shell command categorization
-// ============================================================================
 
 // There is no SAFE_SHELL_PREFIXES allowlist: a shell command cannot be proven
 // safe from its string. Any prefix that accepts arguments can hide execution
@@ -422,9 +414,7 @@ export function permissionReasonForCategory(c: ToolCategory): PermissionRequest[
   }
 }
 
-// ============================================================================
 // Request / Response shapes
-// ============================================================================
 
 export interface PermissionRequest {
   kind: 'tool_permission';

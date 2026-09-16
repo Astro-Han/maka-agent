@@ -220,9 +220,7 @@ export function isTurnStatus(value: unknown): value is TurnStatus {
   return typeof value === 'string' && (TURN_STATUSES as readonly string[]).includes(value);
 }
 
-// ============================================================================
 // Header (JSONL line 1)
-// ============================================================================
 
 export const SESSION_TOOL_PROFILES = [
   'headless-coding-v1',
@@ -760,9 +758,7 @@ export interface SessionChangedEvent {
   ts: number;
 }
 
-// ============================================================================
 // Stored messages (JSONL line 2+, append-only)
-// ============================================================================
 
 export type StoredMessage =
   | UserMessage

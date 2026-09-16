@@ -154,9 +154,7 @@ function straddlesToolPair(spans: readonly ToolPairSpan[], cut: number): boolean
   return false;
 }
 
-// ============================================================================
 // Orchestration: engine + checkpoint protocol + injected summarizer → decision
-// ============================================================================
 
 export type HistoryCompactionSummarizer = (input: {
   coveredRuntimeEvents: readonly RuntimeEvent[];

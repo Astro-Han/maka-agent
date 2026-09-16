@@ -77,9 +77,7 @@ export const TOOL_ACTIVITY_KINDS = [
 export type ToolActivityKind = (typeof TOOL_ACTIVITY_KINDS)[number];
 type TerminalToolResultStatus = Exclude<ShellRunTerminalStatus, 'orphaned'>;
 
-// ============================================================================
 // Storage refs (shared by attachments, image tool results, etc.)
-// ============================================================================
 
 export type StorageRef =
   | SessionContextRef
@@ -550,9 +548,7 @@ function attachmentRefsEqual(left: AttachmentRef, right: AttachmentRef): boolean
   }
 }
 
-// ============================================================================
 // Event union
-// ============================================================================
 
 interface BaseEvent {
   /** Event uuid — used for dedup on reconnect/replay. */
@@ -1336,9 +1332,7 @@ export interface ContextCompactionStartedEvent extends BaseEvent {
   type: 'context_compaction_started';
 }
 
-// ============================================================================
 // UI → Backend commands
-// ============================================================================
 
 /**
  * SessionCommand: commands that target a specific session.

@@ -124,9 +124,7 @@ export function admitProviderReasoningReplayItems(
   );
 }
 
-// ============================================================================
 // Effective model-history sizing
-// ============================================================================
 
 /**
  * Size of a `function_response`'s EFFECTIVE value — the durable projection
@@ -513,9 +511,7 @@ export interface RuntimeEventModelReplayPlan {
   hasProviderNativeSemantics: boolean;
 }
 
-// ============================================================================
 // Projection
-// ============================================================================
 
 export interface BuildRuntimeEventModelReplayPlanOptions {
   includeSystemEvents?: boolean;

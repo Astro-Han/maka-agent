@@ -44,9 +44,8 @@ export interface RuntimeEventMapContext {
   readonly branch?: string;
   readonly now?: () => number;
 }
-// ============================================================================
+
 // SessionEvent → RuntimeEvent mapping (placeholder, Phase 4)
-// ============================================================================
 
 /** The `CompleteEvent.stopReason` literal union, re-declared for portability. */
 export type CompleteStopReason = CompleteEvent['stopReason'];

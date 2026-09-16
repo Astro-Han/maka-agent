@@ -138,9 +138,6 @@ export function restoreMcpServerSecret(
   return restored.mcpServers[serverId] ?? config;
 }
 
-// ---------------------------------------------------------------------------
-// stdio
-
 function redactStdio(server: McpStdioServerConfig): McpServerConfig {
   const locations = listMcpSecretLocations(server);
   const next: McpStdioServerConfig = { ...server };
@@ -254,9 +251,6 @@ function restoreArg(arg: string, index: number, priorArg: string | undefined): s
   }
   return arg;
 }
-
-// ---------------------------------------------------------------------------
-// remote
 
 function redactRemote(server: McpRemoteServerConfig): McpServerConfig {
   const locations = listMcpSecretLocations(server);
@@ -411,8 +405,6 @@ function normalizeUrl(value: string): string {
   parsed.search = buildSearch([...parsed.searchParams.entries()]);
   return parsed.toString();
 }
-
-// ---------------------------------------------------------------------------
 
 function sameKeySet(a: Record<string, string>, b: Record<string, string>): boolean {
   const aKeys = Object.keys(a).sort();

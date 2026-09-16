@@ -265,10 +265,6 @@ export class CommandCodeCliLanguageModel implements LanguageModelV4 {
 
 const DEFAULT_WORKING_DIR = 'maka';
 
-// ---------------------------------------------------------------------------
-// Request
-// ---------------------------------------------------------------------------
-
 export function buildCommandCodeCliRequest(
   options: LanguageModelV4CallOptions,
   config: Pick<CommandCodeCliLanguageModelConfig, 'modelId' | 'workingDir' | 'now' | 'threadId'>,
@@ -584,10 +580,6 @@ function resolveLocalRef(
   return isRecord(current) ? current : undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Response
-// ---------------------------------------------------------------------------
-
 /** Splits SSE text into the JSON payload of each `data:` line, dropping comments and `[DONE]`. */
 /** One SSE line's event payload, or undefined when the line carries none. */
 export function parseCommandCodeCliEventLine(line: string): unknown | undefined {
@@ -865,10 +857,6 @@ function streamErrorToApiCallError(
     data: detail,
   });
 }
-
-// ---------------------------------------------------------------------------
-// Small helpers
-// ---------------------------------------------------------------------------
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

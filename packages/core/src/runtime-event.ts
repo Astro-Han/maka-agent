@@ -103,9 +103,7 @@ import {
   type DurableToolResultProjection,
 } from './durable-tool-result-projection.js';
 
-// ============================================================================
 // Role / Author / Status
-// ============================================================================
 
 /**
  * Conversation role the event plays in model history. Maps 1:1 with the
@@ -177,9 +175,7 @@ export function isTerminalRuntimeEventStatus(value: unknown): boolean {
   );
 }
 
-// ============================================================================
 // Content (model-facing payload)
-// ============================================================================
 
 export interface RuntimeEventTextContent extends MessageContent {
   kind: 'text';
@@ -404,9 +400,7 @@ export const RUNTIME_EVENT_CONTENT_KINDS = [
 ] as const;
 export type RuntimeEventContentKind = (typeof RUNTIME_EVENT_CONTENT_KINDS)[number];
 
-// ============================================================================
 // Actions (control / side-effect intent)
-// ============================================================================
 
 /**
  * Token usage carried as a runtime action rather than a content payload.
@@ -594,9 +588,7 @@ export interface RuntimeEventActions {
   managedMutationTerminal?: RuntimeEventManagedMutationTerminalV1;
 }
 
-// ============================================================================
 // Refs (links to projections / ledgers)
-// ============================================================================
 
 /**
  * Links back to the projection/ledger rows written from (or correlated
@@ -644,9 +636,7 @@ export type ToolRecoveryMode =
   | 'outcome_unknown'
   | 'never_auto_retry';
 
-// ============================================================================
 // RuntimeEvent
-// ============================================================================
 
 /**
  * The canonical runtime fact.
@@ -1571,9 +1561,7 @@ function isRuntimeEventRefs(value: unknown): value is RuntimeEventRefs {
   );
 }
 
-// ============================================================================
 // Pure helpers
-// ============================================================================
 
 /**
  * True if the event marks the end of its invocation — either by asserting

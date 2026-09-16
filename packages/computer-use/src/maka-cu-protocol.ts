@@ -83,10 +83,8 @@ export interface MakaCuDomainError {
   detail?: Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
 // §7.1 domain code → Maka error code. Mechanical, no inference, no message
 // matching. A code absent from this table is version skew, not a default.
-// ---------------------------------------------------------------------------
 const DOMAIN_ERROR_CODES = {
   snapshot_unknown: 'stale_frame',
   snapshot_expired: 'stale_frame',
@@ -154,9 +152,7 @@ export const MAKA_CU_DOMAIN_ERROR_CODES = Object.keys(
   DOMAIN_ERROR_CODES,
 ) as readonly MakaCuDomainErrorCode[];
 
-// ---------------------------------------------------------------------------
 // §6.3/§6.5 declared dispatch fields.
-// ---------------------------------------------------------------------------
 export const MAKA_CU_DISPATCH_OUTCOMES = ['ok', 'refused', 'failed', 'unknown'] as const;
 export type MakaCuDispatchOutcome = (typeof MAKA_CU_DISPATCH_OUTCOMES)[number];
 
@@ -236,13 +232,11 @@ export interface MakaCuSettle {
   reason: string;
 }
 
-// ---------------------------------------------------------------------------
 // §6.4 keys. The wire carries a named key or one printable character plus a
 // closed set of modifiers; Maka's callers hold xdotool-flavoured strings like
 // `cmd+a`. The host owns the translation because Maka's runtime owns every
 // model-facing word (§13), and because an executor that accepts free-form
 // strings is an executor doing the loose parsing this protocol deletes.
-// ---------------------------------------------------------------------------
 export const MAKA_CU_KEY_MODIFIERS = ['command', 'shift', 'option', 'control', 'fn'] as const;
 export type MakaCuKeyModifier = (typeof MAKA_CU_KEY_MODIFIERS)[number];
 
@@ -384,9 +378,7 @@ export interface MakaCuDispatchResult {
   postObservationError?: { code: MakaCuDomainErrorCode; message: string };
 }
 
-// ---------------------------------------------------------------------------
 // §5 observation.
-// ---------------------------------------------------------------------------
 export interface MakaCuElement {
   token: string;
   /** Stable across matched revisions of the same window. */
@@ -552,11 +544,9 @@ export interface MakaCuSnapshot {
   menu?: MakaCuMenu;
 }
 
-// ---------------------------------------------------------------------------
 // Parsing. Every reader below refuses rather than defaults: a missing declared
 // field is a protocol violation, and the host that papers over one is the host
 // that cannot tell a broken executor from a working one.
-// ---------------------------------------------------------------------------
 
 export class MakaCuProtocolViolation extends Error {
   constructor(

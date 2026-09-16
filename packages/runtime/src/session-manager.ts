@@ -517,9 +517,7 @@ export interface AgentOutputResult {
   };
 }
 
-// ============================================================================
 // SessionStore contract (matches the storage package surface)
-// ============================================================================
 
 // StoredMessage rows remain a projection/cache surface for existing public
 // shapes. RuntimeEventStore is the semantic conversation ledger.
@@ -688,9 +686,7 @@ export interface StrictRecoveryStores {
   agentRunStore: StrictRecoveryAgentRunStore;
 }
 
-// ============================================================================
 // BackendRegistry — factory dispatch by the session header's durable backend
-// ============================================================================
 
 export interface BackendFactoryContext {
   sessionId: string;
@@ -807,10 +803,6 @@ export class BackendRegistry {
     return this.registrations.has(kind);
   }
 }
-
-// ============================================================================
-// SessionManager
-// ============================================================================
 
 export interface RuntimeHostedAgentGraphExecutionCapability {
   readAgentGraphIntentClaim(
@@ -952,9 +944,7 @@ export class SessionManager {
     this.runtimeKernel = deps.runtimeKernel ?? new RuntimeKernel({ ...deps });
   }
 
-  // --------------------------------------------------------------------------
   // Session lifecycle
-  // --------------------------------------------------------------------------
 
   async createSession(
     input: CreateSessionInput,
@@ -2240,9 +2230,7 @@ export class SessionManager {
     if (shellRunClose) await this.deps.shellRuns?.commitSessionClose(shellRunClose);
   }
 
-  // --------------------------------------------------------------------------
   // Send / stream — Phase 1 vertical heart
-  // --------------------------------------------------------------------------
 
   /**
    * Send a user message and stream back normalized events. The caller
@@ -4318,10 +4306,6 @@ export class SessionManager {
     await this.runtimeKernel.respondToUserQuestion?.(sessionId, response);
   }
 
-  // --------------------------------------------------------------------------
-  // Internal helpers
-  // --------------------------------------------------------------------------
-
   private async findRunByTurnId(
     sessionId: string,
     turnId: string,
@@ -5121,10 +5105,6 @@ function isMissingRunError(error: unknown): boolean {
     (error instanceof Error && /unknown run|run does not exist|missing run/i.test(error.message))
   );
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 export function headerToSummary(h: SessionHeader): SessionSummary {
   const summary: SessionSummary = {

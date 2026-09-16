@@ -280,10 +280,6 @@ function sleepForProviderRetry(delayMs: number, signal: AbortSignal): Promise<vo
   });
 }
 
-// ============================================================================
-// Implementation
-// ============================================================================
-
 export class AiSdkBackend implements AgentBackend {
   readonly kind: BackendKind = 'ai-sdk';
   readonly sessionId: string;
@@ -522,17 +518,9 @@ export class AiSdkBackend implements AgentBackend {
     });
   }
 
-  // --------------------------------------------------------------------------
-  // manual history compaction
-  // --------------------------------------------------------------------------
-
   async compactHistory(input: BackendCompactHistoryInput): Promise<BackendCompactHistoryResult> {
     return this.compaction.compactHistory(input);
   }
-
-  // --------------------------------------------------------------------------
-  // send()
-  // --------------------------------------------------------------------------
 
   async prepareRunComposition(input: { runId: string; turnId: string }): Promise<void> {
     if (!this.input.beforeRunProviderDispatch) {

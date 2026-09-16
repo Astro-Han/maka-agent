@@ -838,10 +838,6 @@ export class AiSdkTurn {
       .catch(() => false);
   }
 
-  // --------------------------------------------------------------------------
-  // manual history compaction
-  // --------------------------------------------------------------------------
-
   private async *runWithinScope(input: BackendSendInput): AsyncIterable<SessionEvent> {
     const turnId = input.turnId;
     const maxSteps = input.maxSteps === null ? undefined : (input.maxSteps ?? this.deps.maxSteps);

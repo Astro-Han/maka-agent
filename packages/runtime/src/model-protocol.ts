@@ -39,17 +39,13 @@
 import type { CacheMissInputSource } from '@maka/core/usage-stats/types';
 import type { ModelFailureKind } from '@maka/core/model-failure';
 
-// ---------------------------------------------------------------------------
 // JSON value contract
-// ---------------------------------------------------------------------------
 
 export type JSONValue = null | string | number | boolean | JSONObject | JSONArray;
 export type JSONObject = { [key: string]: JSONValue | undefined };
 export type JSONArray = JSONValue[];
 
-// ---------------------------------------------------------------------------
 // Provider options contract
-// ---------------------------------------------------------------------------
 
 /**
  * Provider-specific option bag, keyed by provider name. Mirrors the AI SDK
@@ -68,9 +64,7 @@ export type ProviderOptions = Record<string, JSONObject>;
  */
 export type ProviderReference = Record<string, string> & { type?: never };
 
-// ---------------------------------------------------------------------------
 // File / data content contract
-// ---------------------------------------------------------------------------
 
 export type DataContent = string | Uint8Array | ArrayBuffer | Buffer;
 
@@ -92,9 +86,7 @@ export interface FileDataText {
 }
 export type FileData = FileDataData | FileDataUrl | FileDataReference | FileDataText;
 
-// ---------------------------------------------------------------------------
 // Content part contract
-// ---------------------------------------------------------------------------
 
 export interface TextPart {
   type: 'text';
@@ -161,9 +153,7 @@ export type ToolApprovalResponse = {
   providerExecuted?: boolean;
 };
 
-// ---------------------------------------------------------------------------
 // Tool result output contract
-// ---------------------------------------------------------------------------
 
 /** One part of a `content`-shaped tool result output. */
 export type ToolResultContentPart =
@@ -212,9 +202,7 @@ export interface ToolResultPart {
   providerOptions?: ProviderOptions;
 }
 
-// ---------------------------------------------------------------------------
 // Message contract
-// ---------------------------------------------------------------------------
 
 export type AssistantContent =
   | string
@@ -264,9 +252,7 @@ export type ModelMessage =
   | AssistantModelMessage
   | ToolModelMessage;
 
-// ---------------------------------------------------------------------------
 // Completion / usage / finish-reason contract
-// ---------------------------------------------------------------------------
 
 /**
  * Raw provider usage fields the AI SDK surfaces, mirrored here so the
@@ -320,9 +306,7 @@ export function rawFinishReasonString(reason: unknown): string | undefined {
  */
 export type ModelFinishReason = string;
 
-// ---------------------------------------------------------------------------
 // Failure contract
-// ---------------------------------------------------------------------------
 
 /**
  * Stable failure categories consumed by Runtime policy. Provider-specific
@@ -342,9 +326,7 @@ export interface ModelFailure {
   code?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Stream-event / stream-result contract
-// ---------------------------------------------------------------------------
 
 /**
  * Maka-owned discriminated stream event. `ModelAdapter` translates each raw
