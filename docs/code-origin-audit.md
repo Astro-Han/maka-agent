@@ -255,6 +255,7 @@ rejected even if a path is listed here.
 - `crates/network/tests/fixtures/ca.pem`: generated loopback TLS test certificate; provenance is recorded in the adjacent `README.md`.
 - `crates/network/tests/fixtures/localhost.pem`: generated loopback TLS test certificate; provenance is recorded in the adjacent `README.md`.
 - `crates/network/tests/fixtures/localhost.key`: public test-only TLS key generated for Maka, not a deployment credential; provenance is recorded in the adjacent `README.md`.
+- `patches/@xterm+xterm+6.0.0.patch`: dependency source patch with literal terminal control characters in upstream context; attribution and the MIT license are in root `LICENSE`.
 - `packages/core/src/__tests__/foreign-session.test.ts`: Apache-licensed source fixture containing a literal NUL, bidi override, and zero-width character to verify imported-session sanitization.
 - `packages/runtime-host/src/protocol/artifact.ts`: Apache-licensed protocol source containing literal C0 and DEL characters in the control-character rejection expression.
 - `packages/storage/src/__tests__/foreign-session-store.test.ts`: Apache-licensed storage fixture containing literal bidi and bell characters to verify durable imported-title sanitization.
