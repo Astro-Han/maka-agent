@@ -26,7 +26,10 @@ import { isAbsolute, join } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { parse as parseYaml } from 'yaml';
-import { resolveDesktopBuilderConfig } from '../apps/desktop/electron-builder.config.mjs';
+import {
+  resolveDesktopBuilderConfig,
+  stageReleaseManifests,
+} from '../apps/desktop/electron-builder.config.mjs';
 import { writeDesktopReleaseInput } from './desktop-nightly-fixture.mjs';
 import { desktopReleaseTargets } from './desktop-release-targets.mjs';
 import { verifyDesktopUpdateArtifacts } from './desktop-update-contract.mjs';
@@ -354,19 +357,26 @@ test('Desktop packaging derives the Runtime Host setup package from product mani
   const checkedRootManifest = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8'));
   assert.deepEqual(desktopBuilderConfig.extraMetadata, {
     runtimeHostSetupPackage: `maka-agent@${checkedRootManifest.version}`,
+    nativeRuntimeHostVersion: checkedRootManifest.nativeRuntimeHostVersion,
     makaUpdateChannel: 'release',
   });
+  assert.equal(
+    resolveDesktopBuilderConfig({ MAKA_NATIVE_CLI_VERSION: '0.2.0-rust-preview.42' }).extraMetadata
+      .nativeRuntimeHostVersion,
+    '0.2.0-rust-preview.42',
+  );
+  assert.throws(() => resolveDesktopBuilderConfig({ MAKA_NATIVE_CLI_VERSION: 'rust-preview' }));
   assert.deepEqual(desktopBuilderConfig.publish, [
     { provider: 'github', owner: 'apache', repo: 'maka' },
   ]);
 });
 
-test('Desktop stages release manifests before electron-builder builds the archive', async (t) => {
+test('Desktop staged release manifests omit development-only exports', async (t) => {
   const stage = await mkdtemp(join(tmpdir(), 'maka-desktop-release-manifests-'));
   t.after(() => rm(stage, { recursive: true, force: true }));
   const files = [{ filter: [...desktopBuilderConfig.files] }];
 
-  await desktopBuilderConfig.beforePack({
+  await stageReleaseManifests({
     packager: {
       config: { files },
       info: { tempDirManager: { createTempDir: async () => stage } },

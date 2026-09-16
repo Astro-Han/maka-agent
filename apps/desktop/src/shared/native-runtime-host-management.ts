@@ -26,6 +26,13 @@ import {
 } from './native-runtime-host-deployment.js';
 
 const expected = deployment.pick({ deploymentId: true, configRevision: true });
+const policy = z.enum(['manual', 'rust_preview']);
+export const nativeRuntimeHostUpdatePolicySchema = z.object({
+  revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  policy,
+  nextCheckMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  lastError: z.string().max(8192).nullable(),
+}).strict();
 const settings = deployment.pick({
   mode: true,
   websocket: true,
@@ -44,6 +51,10 @@ export const nativeRuntimeHostManagementRequestSchema = z.discriminatedUnion('ac
   z.object({ action: z.literal('restart'), expected }).strict(),
   z.object({ action: z.literal('uninstall'), expected }).strict(),
   z.object({ action: z.literal('update'), expected, settings }).strict(),
+  z.object({ action: z.literal('upgrade'), expected }).strict(),
+  z.object({ action: z.literal('update_policy') }).strict(),
+  z.object({ action: z.literal('set_update_policy'), expected,
+    expectedPolicyRevision: nativeRuntimeHostUpdatePolicySchema.shape.revision, policy }).strict(),
   z.object({ action: z.literal('reconcile'), expected }).strict(),
 ]);
 
@@ -84,4 +95,6 @@ export interface NativeRuntimeHostManagementResult {
   readonly status: NativeRuntimeHostDeploymentStatus;
   readonly outcome?: NativeRuntimeHostMutation | { readonly kind: 'active_tasks' };
   readonly logs?: NativeRuntimeHostLogs;
+  readonly updatePolicy?: z.infer<typeof nativeRuntimeHostUpdatePolicySchema>;
+  readonly schedulingError?: string;
 }

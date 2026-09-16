@@ -34,6 +34,22 @@ import {
 import type { RuntimeHostTargetIdentity } from './runtime-host-target.js';
 
 const run = promisify(execFile);
+
+/** The application version and the native package version have independent release channels. */
+export async function nativeRuntimeHostVersion(input: {
+  isPackaged: boolean;
+  appPath: string;
+  environment: NodeJS.ProcessEnv;
+}): Promise<string> {
+  const override = input.isPackaged ? undefined : input.environment.MAKA_NATIVE_CLI_VERSION;
+  const manifest: unknown = override === undefined
+    ? JSON.parse(await readFile(join(input.appPath, ...(input.isPackaged ? [] : ['..', '..']), 'package.json'), 'utf8'))
+    : { nativeRuntimeHostVersion: override };
+  const version = z.object({ nativeRuntimeHostVersion: z.string() }).parse(manifest).nativeRuntimeHostVersion;
+  if (!isProductReleaseVersion(version)) throw new Error('Native CLI requires an exact package version');
+  return version;
+}
+
 export const NATIVE_ARTIFACT_PREFIX = '__MAKA_NATIVE_HOST_ARTIFACT__';
 export const NATIVE_SETUP_PREFIX = '__MAKA_NATIVE_HOST_SETUP__';
 const path = z

@@ -55,11 +55,12 @@ pub(crate) async fn observe(deployment: Deployment) -> Observation {
     if deployment.mode == super::super::Mode::OnDemand {
         return Observation::OnDemand;
     }
-    let result =
-        tokio::task::spawn_blocking(move || platform::Service::new(&deployment)?.observe())
-            .await
-            .map_err(HostError::from)
-            .and_then(|result| result);
+    let result = tokio::task::spawn_blocking(move || {
+        platform::Service::new(&deployment, super::Role::Host)?.observe()
+    })
+    .await
+    .map_err(HostError::from)
+    .and_then(|result| result);
     match result {
         Ok(observed) => observed,
         Err(error) => Observation::Unavailable {

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Deployment, HostError, arguments, checked, command, label, publish, xml};
+use super::{Deployment, HostError, Role, arguments, checked, command, label, publish, xml};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -37,21 +37,31 @@ struct Instance {
 }
 
 impl Service {
-    pub fn new(deployment: &Deployment) -> Result<Self, HostError> {
+    pub fn new(deployment: &Deployment, role: Role) -> Result<Self, HostError> {
         let uid = unsafe { libc::geteuid() }.to_string();
-        let label = label(deployment);
+        let label = label(deployment, role);
         let home = crate::serve::home_directory()?.ok_or("missing account home")?;
         let path = home
             .join("Library/LaunchAgents")
             .join(format!("{label}.plist"));
-        let args = arguments(deployment)?
+        let args = arguments(deployment, role)?
             .map(|arg| format!("<string>{}</string>", xml(arg)))
             .join("");
-        let log = super::super::directory(&deployment.root_id)?.join("host.stderr.log");
+        let log = super::super::directory(&deployment.root_id)?.join(if role == Role::Host {
+            "host.stderr.log"
+        } else {
+            "update.stderr.log"
+        });
         let log = xml(log.to_str().ok_or("service log path must be UTF-8")?);
-        let definition = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array>{args}</array><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>ThrottleInterval</key><integer>2</integer><key>ExitTimeOut</key><integer>45</integer><key>Umask</key><integer>63</integer><key>StandardErrorPath</key><string>{log}</string></dict></plist>\n"
-        );
+        let definition = if role == Role::Updater {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array>{args}</array><key>StartInterval</key><integer>600</integer><key>RunAtLoad</key><true/><key>Umask</key><integer>63</integer><key>StandardErrorPath</key><string>{log}</string></dict></plist>\n"
+            )
+        } else {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict><key>Label</key><string>{label}</string><key>ProgramArguments</key><array>{args}</array><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>ThrottleInterval</key><integer>2</integer><key>ExitTimeOut</key><integer>45</integer><key>Umask</key><integer>63</integer><key>StandardErrorPath</key><string>{log}</string></dict></plist>\n"
+            )
+        };
         Ok(Self {
             target: format!("gui/{uid}/{label}"),
             uid,

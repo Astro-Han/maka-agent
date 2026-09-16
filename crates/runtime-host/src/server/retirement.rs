@@ -90,7 +90,9 @@ impl Host {
                     "Handoff connection is no longer attached",
                 ));
             }
-            let activity = self.activity_except(handoff_connection);
+            let activity = self
+                .activity_except(handoff_connection)
+                .allowing_idle_connections(input.allow_idle_connections == Some(true));
             if input.allow_interrupt_active_tasks || !activity.blocks_retirement(1) {
                 *phase = Phase::Retiring;
                 self.draining.cancel();
@@ -106,13 +108,19 @@ impl Host {
             }
         };
         drop(admission);
-        self.cooperate(preparation, handoff_connection).await
+        self.cooperate(
+            preparation,
+            handoff_connection,
+            input.allow_idle_connections == Some(true),
+        )
+        .await
     }
 
     async fn cooperate(
         &self,
         mut preparation: Preparation<'_>,
         handoff_connection: Option<uuid::Uuid>,
+        allow_idle_connections: bool,
     ) -> Result<RetirementResult, OperationError> {
         let handoff_id = uuid::Uuid::new_v4().to_string();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -123,6 +131,7 @@ impl Host {
             if self.draining.is_cancelled()
                 || self
                     .activity_except(handoff_connection)
+                    .allowing_idle_connections(allow_idle_connections)
                     .blocks_cooperation(1)
             {
                 return Ok(RetirementResult::ActiveTasks);
@@ -166,6 +175,7 @@ impl Host {
                     if self.draining.is_cancelled()
                         || self
                             .activity_except(handoff_connection)
+                            .allowing_idle_connections(allow_idle_connections)
                             .blocks_cooperation(1)
                     {
                         return Ok(RetirementResult::ActiveTasks);

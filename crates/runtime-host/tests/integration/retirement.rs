@@ -201,8 +201,13 @@ async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_aba
             receive(&mut responses).await["result"]["kind"],
             "active_tasks"
         );
-        drop(unrelated);
-        unrelated_task.await.unwrap().unwrap();
+        let idle_client = if fail {
+            Some((unrelated, unrelated_task))
+        } else {
+            drop(unrelated);
+            unrelated_task.await.unwrap().unwrap();
+            None
+        };
         input["handoffConnectionId"] = uuid::Uuid::new_v4().to_string().into();
         requests
             .send(json!({"requestId":"stale", "operation":"host.upgrade.prepare", "input":input}))
@@ -212,6 +217,12 @@ async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_aba
             "operation_conflict"
         );
         input["handoffConnectionId"] = desktop_identity["connectionId"].clone();
+        if fail {
+            // Scheduled updates may reconnect idle clients without pretending
+            // they own those clients' handoff IDs or permission to interrupt work.
+            input.as_object_mut().unwrap().remove("handoffConnectionId");
+            input["allowIdleConnections"] = true.into();
+        }
         requests
             .send(
                 json!({"requestId":"retire", "operation":"host.upgrade.prepare",
@@ -255,6 +266,10 @@ async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_aba
         assert_eq!(connection.await.unwrap().is_err(), fail);
         drop(desktop);
         desktop_task.await.unwrap().unwrap();
+        if let Some((client, task)) = idle_client {
+            drop(client);
+            task.await.unwrap().unwrap();
+        }
         drop(host);
         tokio::time::timeout(Duration::from_secs(5), server)
             .await

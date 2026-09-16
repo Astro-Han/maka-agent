@@ -17,18 +17,19 @@
  * under the License.
  */
 
-use super::{Deployment, HostError, arguments, checked, command, label, publish};
+use super::{Deployment, HostError, Role, arguments, checked, command, label, publish};
 use std::path::PathBuf;
 
 pub(super) struct Service {
     unit: String,
     path: PathBuf,
     definition: String,
+    role: Role,
 }
 
 impl Service {
-    pub fn new(deployment: &Deployment) -> Result<Self, HostError> {
-        let unit = format!("{}.service", label(deployment));
+    pub fn new(deployment: &Deployment, role: Role) -> Result<Self, HostError> {
+        let unit = format!("{}.service", label(deployment, role));
         let home = crate::serve::home_directory()?.ok_or("missing account home")?;
         let config = std::env::var_os("XDG_CONFIG_HOME")
             .filter(|path| !path.is_empty())
@@ -37,18 +38,45 @@ impl Service {
         if !config.is_absolute() {
             return Err("XDG_CONFIG_HOME must be absolute".into());
         }
-        let executable = arguments(deployment)?.map(quote).join(" ");
-        let definition = format!(
-            "[Unit]\nDescription=Maka Host\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart=:{executable}\nRestart=on-failure\nRestartSec=2\nKillMode=mixed\nTimeoutStopSec=45\nUMask=0077\n\n[Install]\nWantedBy=default.target\n"
-        );
+        let executable = arguments(deployment, role)?.map(quote).join(" ");
+        let definition = if role == Role::Updater {
+            format!(
+                "[Unit]\nDescription=Maka native update\n\n[Service]\nType=oneshot\nExecStart=:{executable}\nTimeoutStartSec=600\nTimeoutStopSec=45\nUMask=0077\n"
+            )
+        } else {
+            format!(
+                "[Unit]\nDescription=Maka Host\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n[Service]\nType=simple\nExecStart=:{executable}\nRestart=on-failure\nRestartSec=2\nKillMode=mixed\nTimeoutStopSec=45\nUMask=0077\n\n[Install]\nWantedBy=default.target\n"
+            )
+        };
         Ok(Self {
             path: config.join("systemd/user").join(&unit),
             unit,
             definition,
+            role,
         })
     }
 
     pub fn prepare(&self) -> Result<(), HostError> {
+        if self.role == Role::Updater {
+            self.stop()?;
+            publish(&self.path, &self.definition)?;
+            let timer = self.path.with_extension("timer");
+            publish(
+                &timer,
+                "[Unit]\nDescription=Maka native update schedule\n\n[Timer]\nOnStartupSec=2min\nOnUnitInactiveSec=10min\n\n[Install]\nWantedBy=timers.target\n",
+            )?;
+            checked(command("systemctl", &["--user", "daemon-reload"])?)?;
+            checked(command(
+                "systemctl",
+                &[
+                    "--user",
+                    "enable",
+                    "--now",
+                    &self.unit.replace(".service", ".timer"),
+                ],
+            )?)?;
+            return Ok(());
+        }
         // An SSH logout must not destroy a persistent user service.
         let uid = unsafe { libc::geteuid() }.to_string();
         if checked(command(
@@ -92,6 +120,25 @@ impl Service {
     }
 
     pub fn remove(&self) -> Result<(), HostError> {
+        if self.role == Role::Updater {
+            let timer = self.path.with_extension("timer");
+            match timer.symlink_metadata() {
+                Ok(metadata) if metadata.is_file() => {
+                    checked(command(
+                        "systemctl",
+                        &[
+                            "--user",
+                            "disable",
+                            "--now",
+                            &self.unit.replace(".service", ".timer"),
+                        ],
+                    )?)?;
+                    std::fs::remove_file(timer)?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                _ => return Err("update timer is not a regular file".into()),
+            }
+        }
         let fragment = checked(command(
             "systemctl",
             &[
@@ -108,7 +155,9 @@ impl Service {
         self.stop()?;
         match self.path.symlink_metadata() {
             Ok(metadata) if metadata.is_file() => {
-                checked(command("systemctl", &["--user", "disable", &self.unit])?)?;
+                if self.role == Role::Host {
+                    checked(command("systemctl", &["--user", "disable", &self.unit])?)?;
+                }
                 std::fs::remove_file(&self.path)?;
                 std::fs::File::open(self.path.parent().ok_or("service path has no parent")?)?
                     .sync_all()?;

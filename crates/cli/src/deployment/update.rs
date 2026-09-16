@@ -45,6 +45,9 @@ pub(crate) struct Expected {
     expected_deployment_id: Uuid,
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..=9_007_199_254_740_991))]
     expected_revision: u64,
+    /// Guard a scheduled update against a concurrently changed policy.
+    #[arg(long, hide = true)]
+    expected_policy_revision: Option<u64>,
 }
 
 #[derive(Args)]
@@ -59,9 +62,17 @@ struct Settings {
     directories: configuration::Directories,
 }
 
+pub(super) enum Action {
+    Update,
+    Reconcile,
+}
+
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Outcome {
+    Applied {
+        deployment: Deployment,
+    },
     Ready {
         deployment: Deployment,
         host: LiveHost,
@@ -79,6 +90,35 @@ impl Update {
 }
 
 impl Expected {
+    pub(super) fn from_deployment(deployment: &Deployment, policy_revision: u64) -> Self {
+        Self {
+            root_id: RootId(deployment.root_id.clone()),
+            expected_deployment_id: deployment.deployment_id,
+            expected_revision: deployment.config_revision,
+            expected_policy_revision: Some(policy_revision),
+        }
+    }
+
+    pub(super) fn arguments(&self, action: Action) -> Vec<String> {
+        let mut args = vec![
+            "host".into(),
+            match action {
+                Action::Update => "update",
+                Action::Reconcile => "reconcile",
+            }
+            .into(),
+            "--root-id".into(),
+            self.root_id.0.clone(),
+            "--expected-deployment-id".into(),
+            self.expected_deployment_id.to_string(),
+            "--expected-revision".into(),
+            self.expected_revision.to_string(),
+        ];
+        if let Some(revision) = self.expected_policy_revision {
+            args.extend(["--expected-policy-revision".into(), revision.to_string()]);
+        }
+        args
+    }
     pub async fn reconcile(self) -> Result<(), HostError> {
         self.run(None).await
     }
@@ -89,6 +129,9 @@ impl Expected {
             return Err("Host deployment is not installed".into());
         }
         let lease = Arc::new(FileLease::acquire(&directory.join("executor.lock"))?);
+        if let Some(revision) = self.expected_policy_revision {
+            super::policy::require_revision(&directory, revision).await?;
+        }
         // Do not create a deployment database through update/reconcile.
         let store::Installation::Installed(current) = store::read(&directory).await? else {
             return Err("Host deployment is absent or incomplete".into());
@@ -154,7 +197,8 @@ impl Expected {
         };
         let deployment = if let Some(target) = target {
             target.validate(&root, &directory)?;
-            let Some(owner) = retire(&current).await? else {
+            let Some(owner) = retire(&current, self.expected_policy_revision.is_some()).await?
+            else {
                 lease.validate()?;
                 println!(
                     "{}",
@@ -177,6 +221,16 @@ impl Expected {
         } else {
             current
         };
+        if self.expected_policy_revision.is_some() && deployment.mode == Mode::OnDemand {
+            // A scheduled updater must not parent an on-demand Host: systemd
+            // would reap it with the updater's cgroup. Attached clients reconnect
+            // through their ordinary launcher; a sleeping Host stays asleep.
+            println!(
+                "{}",
+                serde_json::to_string(&Outcome::Applied { deployment })?
+            );
+            return Ok(());
+        }
         // The executor is already held. Calling the public activate command here
         // would acquire it twice. A Ready failure never restores older code.
         let (client, host) = activation::connect_or_launch(&deployment, lease.clone()).await?;
@@ -191,7 +245,10 @@ impl Expected {
 }
 
 /// A prepared receipt is not proof of release: only acquiring RootOwner is.
-pub(super) async fn retire(deployment: &Deployment) -> Result<Option<RootOwner>, HostError> {
+pub(super) async fn retire(
+    deployment: &Deployment,
+    allow_idle_connections: bool,
+) -> Result<Option<RootOwner>, HostError> {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             match RootOwner::open(
@@ -212,7 +269,10 @@ pub(super) async fn retire(deployment: &Deployment) -> Result<Option<RootOwner>,
             if let Ok(mut client) =
                 HostClient::connect(&deployment.root_path, Some(&deployment.generation())).await
             {
-                match client.retire(None, false, None).await? {
+                match client
+                    .retire(None, false, None, allow_idle_connections)
+                    .await?
+                {
                     RetirementResult::ActiveTasks => return Ok(None),
                     RetirementResult::Prepared { .. } => {}
                 }

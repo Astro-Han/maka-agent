@@ -1,0 +1,159 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Native CLI preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish all three verified packages to rust-preview
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-cli-preview
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.source.outputs.version }}
+      build_id: ${{ steps.source.outputs.build_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - id: source
+        name: Freeze one source archive for every platform
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import { createSourceCandidate } from './scripts/asf-source-release.mjs';
+          const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          await createSourceCandidate({ revision: process.env.GITHUB_SHA, version });
+          appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + version + '\n' +
+            'build_id=' + process.env.GITHUB_RUN_ID + '.' + process.env.GITHUB_RUN_ATTEMPT + '\n');
+          JS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-preview-source
+          path: release/asf/*
+          if-no-files-found: error
+
+  build:
+    needs: source
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+          - runner: ubuntu-24.04
+            target: linux-x64-gnu
+          - runner: windows-2025
+            target: win32-x64
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      NATIVE_TARGET: ${{ matrix.target }}
+      SOURCE_VERSION: ${{ needs.source.outputs.version }}
+      BUILD_ID: ${{ needs.source.outputs.build_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Update Rust
+        run: rustup update stable --no-self-update
+      - name: Select the checked-in npm toolchain
+        shell: bash
+        run: npm install --global --ignore-scripts --no-audit --no-fund "$(node -p 'require("./package.json").packageManager')"
+      - name: Install the Linux baseline linker
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: Install cargo-zigbuild
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2
+        with:
+          tool: cargo-zigbuild@0.23.4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-preview-source
+          path: source
+      - name: Build verified source and exercise the native executables
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFile } from 'node:fs/promises';
+          import { basename } from 'node:path';
+          import { releaseNativeCli } from './scripts/rust/release-cli.mjs';
+          const target = process.env.NATIVE_TARGET;
+          const receipt = await releaseNativeCli({
+            source: 'source/apache-maka-' + process.env.SOURCE_VERSION + '-incubating-src.tar.gz',
+            target, buildId: process.env.BUILD_ID, output: 'native-preview',
+          });
+          await writeFile('native-preview/' + target + '.json',
+            JSON.stringify({ ...receipt, archive: basename(receipt.archive) }) + '\n');
+          JS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-preview-${{ matrix.target }}
+          path: native-preview/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: inputs.publish
+    environment: npm-publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Select the checked-in npm toolchain
+        run: npm install --global --ignore-scripts --no-audit --no-fund "$(node -p 'require("./package.json").packageManager')"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: native-preview-*
+          merge-multiple: true
+          path: native-preview
+      - name: Publish the complete source-bound platform set
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/rust/publish-cli.mjs native-preview --publish --provenance

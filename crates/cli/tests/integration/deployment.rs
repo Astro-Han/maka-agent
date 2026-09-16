@@ -73,6 +73,49 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         let executable = installed["executable"].as_str().unwrap();
         assert_eq!(installed["rootId"], fixture.root_id);
         assert_eq!(installed["configRevision"], 1);
+        // A fresh installation is offline/manual. A stale policy request and a
+        // scheduled executor must not create intent, start Host, or access npm.
+        assert_eq!(query("update-policy")["policy"], "manual");
+        assert_eq!(query("update-policy")["revision"], 0);
+        let automatic = Command::new(executable)
+            .args(["host", "auto-update", "--root-id", &fixture.root_id])
+            .output()
+            .unwrap();
+        assert!(automatic.status.success(), "{automatic:?}");
+        let guarded = Command::new(executable)
+            .args([
+                "host",
+                "update",
+                "--root-id",
+                &fixture.root_id,
+                "--expected-deployment-id",
+                installed["deploymentId"].as_str().unwrap(),
+                "--expected-revision",
+                "1",
+                "--expected-policy-revision",
+                "0",
+            ])
+            .output()
+            .unwrap();
+        assert!(!guarded.status.success());
+        assert!(String::from_utf8_lossy(&guarded.stderr).contains("policy changed"));
+        let stale = Command::new(executable)
+            .args([
+                "host",
+                "update-policy",
+                "--root-id",
+                &fixture.root_id,
+                "--policy",
+                "rust-preview",
+                "--expected-policy-revision",
+                "99",
+                "--expected-deployment-id",
+                installed["deploymentId"].as_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(!stale.status.success());
+        assert!(String::from_utf8_lossy(&stale.stderr).contains("policy changed"));
         let owner = RootOwner::open(&fixture.root, &namespaces).unwrap();
         let observed = query("status");
         assert_eq!(observed["deployment"], installed);

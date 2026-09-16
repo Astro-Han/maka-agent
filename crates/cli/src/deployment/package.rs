@@ -36,10 +36,7 @@ pub(super) fn source(mode: super::Mode) -> Result<PathBuf, HostError> {
     let current = std::env::current_exe()?.canonicalize()?;
     #[cfg(windows)]
     if mode == super::Mode::Supervised && env!("CARGO_BIN_NAME") != "maka-service" {
-        let service = current
-            .parent()
-            .ok_or("executable directory is missing")?
-            .join("maka-service.exe");
+        let service = service_companion(&current)?;
         if !service.is_file() {
             return Err("Windows services require the sibling maka-service.exe artifact".into());
         }
@@ -51,6 +48,60 @@ pub(super) fn source(mode: super::Mode) -> Result<PathBuf, HostError> {
 }
 
 pub(super) fn stage(directory: &Path, source: &Path) -> Result<(PathBuf, String), HostError> {
+    let staged = stage_one(directory, source)?;
+    #[cfg(windows)]
+    {
+        // Keep the GUI companion paired with this exact console binary, not
+        // whichever Desktop version happens to configure it later. Both names
+        // link immutable content-addressed code; no second mutable manifest.
+        let companion = service_companion(source)?;
+        if companion != source && companion.is_file() {
+            crate::distribution::validate_windows_service(&companion)?;
+            let (service, digest) = stage_one(directory, &companion)?;
+            let alias = staged.0.with_extension("service.exe");
+            match std::fs::hard_link(service, &alias) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if stage_one(directory, &alias)?.1 != digest {
+                        return Err("installed Windows service companion differs".into());
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    Ok(staged)
+}
+
+#[cfg(windows)]
+fn service_companion(executable: &Path) -> Result<PathBuf, HostError> {
+    let parent = executable
+        .parent()
+        .ok_or("executable directory is missing")?;
+    if executable
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.starts_with("maka-") && name.len() == "maka-".len() + 64 + ".exe".len()
+        })
+    {
+        Ok(executable.with_extension("service.exe"))
+    } else {
+        Ok(parent.join("maka-service.exe"))
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn windowless(executable: &Path) -> Result<PathBuf, HostError> {
+    if crate::distribution::validate_windows_service(executable).is_ok() {
+        return Ok(executable.into());
+    }
+    let companion = service_companion(executable)?;
+    crate::distribution::validate_windows_service(&companion)?;
+    Ok(companion)
+}
+
+fn stage_one(directory: &Path, source: &Path) -> Result<(PathBuf, String), HostError> {
     let packages = directory.join("packages");
     maka_event_log::root::private_directory(&packages)?;
     let mut source = File::open(source)?;

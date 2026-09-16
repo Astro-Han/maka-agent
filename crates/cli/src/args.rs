@@ -64,6 +64,12 @@ enum HostCommand {
     Connect(crate::deployment::Connect),
     /// Update code and optional deployment configuration at a safe boundary.
     Update(crate::deployment::Update),
+    /// Download a verified native release and update at a safe boundary.
+    Upgrade(crate::deployment::Upgrade),
+    /// Observe or configure unattended native preview updates.
+    UpdatePolicy(crate::deployment::UpdatePolicy),
+    #[command(hide = true)]
+    AutoUpdate(crate::deployment::AutoUpdate),
     /// Finish an interrupted deployment update without choosing another target.
     Reconcile(crate::deployment::Expected),
     /// Stop a deployment without changing its configuration or pending update.
@@ -134,6 +140,9 @@ impl Cli {
             Command::Host(HostCommand::Activate(args)) => args.run().await,
             Command::Host(HostCommand::Connect(args)) => args.run().await,
             Command::Host(HostCommand::Update(args)) => args.run().await,
+            Command::Host(HostCommand::Upgrade(args)) => args.run().await,
+            Command::Host(HostCommand::UpdatePolicy(args)) => args.run().await,
+            Command::Host(HostCommand::AutoUpdate(args)) => args.run().await,
             Command::Host(HostCommand::Reconcile(args)) => args.reconcile().await,
             Command::Host(HostCommand::Stop(args)) => {
                 args.run(crate::deployment::ControlAction::Stop).await
@@ -169,6 +178,7 @@ impl Cli {
                         expected_host_epoch.as_deref(),
                         allow_interrupt_active_tasks,
                         handoff_connection_id,
+                        false,
                     )
                     .await?;
                 drop(client);

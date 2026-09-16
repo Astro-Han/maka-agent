@@ -54,6 +54,10 @@ export function NativeRuntimeHostManagementDialog(props: {
     save: zh ? '应用配置与当前版本' : 'Apply settings and current version',
     reconcile: zh ? '继续待处理更新' : 'Continue pending update',
     logs: zh ? '日志' : 'Logs',
+    updatePolicy: zh ? '自动更新设置' : 'Automatic updates',
+    manualUpdates: zh ? '关闭自动更新' : 'Disable automatic updates',
+    previewUpdates: zh ? '自动跟随 rust-preview' : 'Follow rust-preview automatically',
+    policySaved: zh ? '策略已保存，但系统调度配置失败：' : 'Policy saved, but scheduling failed: ',
     mode: zh ? '运行方式' : 'Launch policy',
     onDemand: zh ? '按需启动' : 'On demand',
     supervised: zh ? '后台常驻' : 'Account service',
@@ -129,6 +133,8 @@ export function NativeRuntimeHostManagementDialog(props: {
         content={<LayoutContent padding={4}>
           <div className="settingsRuntimeHostManagement">
             {error ? <Banner status="error" title={error} /> : null}
+            {result?.schedulingError ? <Banner status="warning" title={copy.policySaved + result.schedulingError} /> : null}
+            {result?.updatePolicy?.lastError ? <Banner status="warning" title={result.updatePolicy.lastError} /> : null}
             {result?.outcome?.kind === 'active_tasks' ? <Banner status="warning" title={copy.busy} /> : null}
             {status?.kind === 'not_installed' ? <p>{copy.notInstalled}</p> : null}
             {status?.kind === 'incomplete' ? <Banner status="error" title={copy.incomplete} /> : null}
@@ -156,7 +162,13 @@ export function NativeRuntimeHostManagementDialog(props: {
                 {button(copy.start, { action: 'start' })}
                 {button(copy.stop, { action: 'stop', expected })}
                 {button(copy.restart, { action: 'restart', expected })}
-                {button(copy.update, { action: 'update', expected, settings: {} })}
+                {button(copy.update, { action: 'upgrade', expected })}
+                {button(copy.updatePolicy, { action: 'update_policy' })}
+                {result?.updatePolicy ? <>
+                  <p>{result.updatePolicy.policy === 'manual' ? (zh ? '当前：手动更新' : 'Current: manual updates') : 'rust-preview'}</p>
+                  {button(copy.manualUpdates, { action: 'set_update_policy', expected, expectedPolicyRevision: result.updatePolicy.revision, policy: 'manual' })}
+                  {button(copy.previewUpdates, { action: 'set_update_policy', expected, expectedPolicyRevision: result.updatePolicy.revision, policy: 'rust_preview' })}
+                </> : null}
                 <Button variant="secondary" size="sm" label={copy.edit} isDisabled={busy}
                   onClick={() => setEdit({ expected, settings: {
                     mode: deployment.mode, websocket: deployment.websocket,

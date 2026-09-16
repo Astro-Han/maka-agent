@@ -25,6 +25,100 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { previewVersion, releaseNativeCli } from './release-cli.mjs';
+import { withSourceModule } from '../../tests/support/source.mjs';
+import { previewTargets, readPreviewRelease } from './publish-cli.mjs';
+
+test('publication rejects incomplete, mixed-source, or modified platform sets before writing npm', async () => {
+  const stage = await mkdtemp(join(tmpdir(), 'maka-publication-'));
+  try {
+    const version = '0.2.0-rust-preview.1';
+    const source = {
+      archive: 'apache-maka-0.2.0-incubating-src.tar.gz',
+      version: '0.2.0',
+      sha512: 'a'.repeat(128),
+    };
+    await mkdir(join(stage, 'package'));
+    async function pack(target, origin = source) {
+      const name = '@maka-agent/cli-' + target;
+      const archive = 'maka-agent-cli-' + target + '-' + version + '.tgz';
+      await writeFile(
+        join(stage, 'package/package.json'),
+        JSON.stringify({
+          name,
+          version,
+          makaSource: origin,
+          publishConfig: { tag: 'rust-preview' },
+        }),
+      );
+      execFileSync('tar', ['-czf', join(stage, archive), '-C', stage, 'package']);
+      const integrity =
+        'sha512-' +
+        createHash('sha512')
+          .update(await readFile(join(stage, archive)))
+          .digest('base64');
+      await writeFile(
+        join(stage, target + '.json'),
+        JSON.stringify({ name, version, target, archive, integrity }),
+      );
+    }
+    await pack(previewTargets[0]);
+    await assert.rejects(readPreviewRelease(stage), /ENOENT/);
+    for (const target of previewTargets.slice(1)) await pack(target);
+    assert.equal((await readPreviewRelease(stage)).length, 3);
+    await pack(previewTargets[2], { ...source, sha512: 'b'.repeat(128) });
+    await assert.rejects(readPreviewRelease(stage), /same source archive/);
+    await pack(previewTargets[2]);
+    await writeFile(
+      join(stage, 'maka-agent-cli-' + previewTargets[0] + '-' + version + '.tgz'),
+      'changed',
+    );
+    await assert.rejects(readPreviewRelease(stage), /integrity differs/);
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
+});
+
+test('Desktop uses its frozen native package version and isolates development overrides', async () => {
+  const stage = await mkdtemp(join(tmpdir(), 'maka-native-version-'));
+  try {
+    const appPath = join(stage, 'apps', 'desktop');
+    await mkdir(appPath, { recursive: true });
+    await writeFile(
+      join(stage, 'package.json'),
+      JSON.stringify({ nativeRuntimeHostVersion: '0.2.0-rust-preview.1' }),
+    );
+    await writeFile(
+      join(appPath, 'package.json'),
+      JSON.stringify({ version: '0.2.0', nativeRuntimeHostVersion: '0.2.0-rust-preview.2' }),
+    );
+    await withSourceModule(
+      'apps/desktop/src/main/native-runtime-host-setup.ts',
+      async ({ nativeRuntimeHostVersion }) => {
+        const input = { appPath, environment: {}, isPackaged: false };
+        assert.equal(await nativeRuntimeHostVersion(input), '0.2.0-rust-preview.1');
+        const environment = { MAKA_NATIVE_CLI_VERSION: '0.2.0-rust-preview.3' };
+        assert.equal(
+          await nativeRuntimeHostVersion({ ...input, environment }),
+          environment.MAKA_NATIVE_CLI_VERSION,
+        );
+        assert.equal(
+          await nativeRuntimeHostVersion({ ...input, environment, isPackaged: true }),
+          '0.2.0-rust-preview.2',
+        );
+        await assert.rejects(
+          nativeRuntimeHostVersion({
+            ...input,
+            environment: { MAKA_NATIVE_CLI_VERSION: 'rust-preview' },
+          }),
+        );
+        await writeFile(join(appPath, 'package.json'), JSON.stringify({ version: '0.2.0' }));
+        await assert.rejects(nativeRuntimeHostVersion({ ...input, isPackaged: true }));
+      },
+    );
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
+});
 
 test('preview builds have distinct package versions without changing the source version', () => {
   assert.equal(previewVersion('0.2.0', '20260916.1'), '0.2.0-rust-preview.20260916.1');

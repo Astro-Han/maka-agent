@@ -92,7 +92,7 @@ impl Control {
         if action != ControlAction::Uninstall {
             current.require_active()?;
         }
-        let Some(owner) = update::retire(&current).await? else {
+        let Some(owner) = update::retire(&current, false).await? else {
             println!(
                 "{}",
                 serde_json::to_string(&Outcome::ActiveTasks {
@@ -117,7 +117,15 @@ impl Control {
             };
             // Once revoked, startup remains denied even if OS cleanup fails.
             // Retain Root data, packages and the tombstone for explicit recovery.
-            let cleanup = match service::remove(deployment.clone(), lease.clone(), owner).await {
+            let cleanup = match async {
+                service::remove(deployment.clone(), lease.clone(), owner).await?;
+                if super::policy::read(&directory).await?.revision != 0 {
+                    service::schedule(deployment.clone(), false, lease.clone()).await?;
+                }
+                Ok::<_, HostError>(())
+            }
+            .await
+            {
                 Ok(()) => Cleanup::Complete,
                 Err(error) => Cleanup::Pending {
                     message: error.to_string().chars().take(2048).collect(),

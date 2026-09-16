@@ -29,6 +29,7 @@ import {
 } from '../../scripts/desktop-nightly.mjs';
 import { workspaceReleaseManifest } from '../../scripts/release-cli-file-policy.mjs';
 import { resolveProductManifestIdentity } from '../../scripts/product-release-identity.mjs';
+import { parseProductReleaseVersion } from '../../scripts/release-version.mjs';
 
 function readManifest(relativePath) {
   return JSON.parse(readFileSync(new URL(relativePath, import.meta.url), 'utf8'));
@@ -48,7 +49,7 @@ function resolvePackageFile(packageName, relativePath) {
   return join(dirname(require.resolve(`${packageName}/package.json`)), relativePath);
 }
 
-async function stageReleaseManifests({ packager, arch }) {
+async function stageNativeAndManifests({ packager, arch }) {
   const target = rustTarget(packager.platform.nodeName, Arch[arch]);
   const binary = await buildCli({
     release: true,
@@ -62,6 +63,10 @@ async function stageReleaseManifests({ packager, arch }) {
   if (packager.platform.nodeName === 'win32') {
     copyFileSync(join(dirname(binary), 'maka-service.exe'), join(nativeStage, 'maka-service.exe'));
   }
+  await stageReleaseManifests({ packager });
+}
+
+export async function stageReleaseManifests({ packager }) {
   const stage = await packager.info.tempDirManager.createTempDir({
     prefix: 'maka-release-manifests',
   });
@@ -77,6 +82,7 @@ async function stageReleaseManifests({ packager, arch }) {
 }
 
 const rootManifest = readManifest('../../package.json');
+const nativeRuntimeHostVersion = parseProductReleaseVersion(rootManifest.nativeRuntimeHostVersion).version;
 const { runtimeHostSetupPackage } = resolveProductManifestIdentity({
   rootManifest,
   desktopManifest: readManifest('./package.json'),
@@ -88,8 +94,8 @@ const baseDesktopBuilderConfig = {
   productName: 'Maka',
   artifactName: 'Maka-${version}-mac-${arch}.${ext}',
   asar: true,
-  beforePack: stageReleaseManifests,
-  extraMetadata: { runtimeHostSetupPackage, makaUpdateChannel: 'release' },
+  beforePack: stageNativeAndManifests,
+  extraMetadata: { runtimeHostSetupPackage, nativeRuntimeHostVersion, makaUpdateChannel: 'release' },
   directories: {
     output: 'release',
   },
@@ -343,13 +349,17 @@ const baseDesktopBuilderConfig = {
 };
 
 export function resolveDesktopBuilderConfig(environment = process.env) {
+  const nativeVersion = parseProductReleaseVersion(environment.MAKA_NATIVE_CLI_VERSION ?? nativeRuntimeHostVersion).version;
+  const base = { ...baseDesktopBuilderConfig, extraMetadata: {
+    ...baseDesktopBuilderConfig.extraMetadata, nativeRuntimeHostVersion: nativeVersion,
+  } };
   const nightlyVersion = environment.MAKA_DESKTOP_NIGHTLY_VERSION?.trim();
-  if (!nightlyVersion) return baseDesktopBuilderConfig;
+  if (!nightlyVersion) return base;
   const version = resolveDesktopBuildVersion(rootManifest.version, environment);
   return {
-    ...baseDesktopBuilderConfig,
+    ...base,
     extraMetadata: {
-      ...baseDesktopBuilderConfig.extraMetadata,
+      ...base.extraMetadata,
       version,
       runtimeHostSetupPackage: resolveRuntimeHostSetupPackage(rootManifest.version, environment),
       makaUpdateChannel: 'nightly',

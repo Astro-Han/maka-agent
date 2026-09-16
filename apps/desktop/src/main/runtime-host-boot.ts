@@ -230,8 +230,9 @@ import {
   runDesktopRuntimeHostWslSetup,
   resolveDesktopRuntimeHostWslTarget,
   runNativeRuntimeHostWslSetup,
+  prepareNativeRuntimeHostWslPackage,
 } from './runtime-host-wsl-controller.js';
-import { resolveNativeRuntimeHostPackage } from './native-runtime-host-setup.js';
+import { nativeRuntimeHostVersion, resolveNativeRuntimeHostPackage } from './native-runtime-host-setup.js';
 import {
   createRuntimeHostSetupPackageResolver,
 } from "./runtime-host-setup-package.js";
@@ -752,15 +753,18 @@ const guestSessionMountService = createDesktopGuestSessionMountService({
     await runtimeHostManager.unmountGuest(mountId);
   },
 });
+const resolveNativePackage = async (identity: import('./runtime-host-target.js').RuntimeHostTargetIdentity, signal?: AbortSignal) =>
+  resolveNativeRuntimeHostPackage({
+    executable: nativeHostExecutable, cache: join(userDataDir, 'native-cli'),
+    version: await nativeRuntimeHostVersion({ isPackaged: app.isPackaged, appPath: app.getAppPath(), environment: process.env }),
+    identity, signal, sourceCache: app.isPackaged ? undefined : process.env.MAKA_NATIVE_CLI_PACKAGES,
+  });
 const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
   ipcMain,
   clientInstanceId: runtimeHostClientInstanceId,
   profiles: runtimeHostProfileService,
   ...(!isE2e ? { nativeSetup: {
-    resolvePackage: (identity: import('./runtime-host-target.js').RuntimeHostTargetIdentity, signal?: AbortSignal) =>
-      resolveNativeRuntimeHostPackage({ executable: nativeHostExecutable, cache: join(userDataDir, 'native-cli'),
-        version: (!app.isPackaged && process.env.MAKA_NATIVE_CLI_VERSION) || app.getVersion(), identity, signal,
-        sourceCache: app.isPackaged ? undefined : process.env.MAKA_NATIVE_CLI_PACKAGES }),
+    resolvePackage: resolveNativePackage,
     ssh: runtimeHostSshTerminal.runNativeSetup,
     wsl: runNativeRuntimeHostWslSetup,
   } } : {}),
@@ -776,6 +780,7 @@ const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
 });
 const nativeRuntimeHostManagement = isE2e ? undefined : createNativeRuntimeHostManagement({
   operator: { kind: 'local', executable: nativeHostExecutable },
+  prepareUpdate: async () => ({ kind: 'local', executable: nativeHostExecutable }),
   rootId: startupLocalStorageRoot.rootId,
   rootPath: startupLocalStorageRoot.canonicalPath,
   change: (run) => {
@@ -805,6 +810,26 @@ ipcMain.handle('runtime-host-management:native', async (_event, request: unknown
   }
   return createNativeRuntimeHostManagement({
     operator,
+    prepareUpdate: async () => {
+      if (operator.kind === 'ssh') {
+        const target = { destination: operator.destination, sshPort: operator.sshPort };
+        const identity = await runtimeHostSshTerminal.resolveTargetIdentity(target);
+        const prepared = await runtimeHostSshTerminal.prepareNativePackage({
+          ...target, package: await resolveNativePackage(identity),
+        });
+        return { ...operator, operator: prepared };
+      }
+      if (operator.kind === 'wsl') {
+        const target = { distribution: operator.distribution };
+        const identity = await resolveDesktopRuntimeHostWslTarget(target);
+        const prepared = await prepareNativeRuntimeHostWslPackage({
+          ...target, package: await resolveNativePackage(identity),
+        });
+        if (prepared.platform !== 'posix') throw new Error('WSL requires a POSIX native operator');
+        return { ...operator, operator: { ...prepared, platform: 'posix' } };
+      }
+      return operator;
+    },
     rootId: profile.rootId,
     change: (run) => {
       if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');

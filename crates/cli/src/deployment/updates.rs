@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Deployment, store};
+use super::{Deployment, query, store};
 use maka_event_log::{
     StoreError,
     root::{FileLease, RootOwner},
@@ -31,14 +31,13 @@ pub(super) async fn read(
     directory: &Path,
     lease: Arc<FileLease>,
 ) -> Result<(Deployment, Option<Deployment>), HostError> {
-    let connection = store::open_writer(directory, lease, None).await?;
-    let result = connection
-        .run(|connection| Box::pin(load(connection)))
-        .await;
-    let closed = connection.close().await;
-    let state = result?;
-    closed?;
-    Ok(state)
+    lease.validate()?;
+    let store::Installation::Installed(active) = store::read(directory).await? else {
+        return Err("Host deployment is absent or incomplete".into());
+    };
+    let pending = query::pending(directory, &active).await?;
+    lease.validate()?;
+    Ok((active, pending))
 }
 
 pub(super) async fn prepare(
@@ -48,9 +47,13 @@ pub(super) async fn prepare(
     target: Deployment,
 ) -> Result<(), HostError> {
     validate_target(&expected, &target)?;
-    let connection = store::open_writer(directory, lease, None).await?;
+    let connection = store::open_update_writer(directory, lease).await?;
     let result = connection.run(move |connection| Box::pin(async move {
         let mut transaction = connection.begin().await?;
+        // Never strand the old executor on a newer schema without a durable
+        // pointer to the executable which can recover it. SQLite migrations
+        // use nested savepoints inside this same transaction.
+        store::migrate(&mut transaction).await?;
         let (active, pending) = load(&mut transaction).await?;
         if active != expected || pending.as_ref().is_some_and(|pending| pending != &target) {
             return Err(conflict());
@@ -154,7 +157,7 @@ fn conflict() -> StoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deployment::{Mode, package};
+    use crate::deployment::{Mode, package, policy};
     use maka_event_log::root::{self, RootNamespaces};
 
     #[tokio::test]
@@ -186,9 +189,62 @@ mod tests {
             .unwrap();
         let mut target = current.clone();
         target.config_revision += 1;
+        target.project_directory_roots = Some(Vec::new());
+        let writer = store::open_writer(&directory, lease.clone(), None)
+            .await
+            .unwrap();
+        writer.run(|connection| Box::pin(async move {
+            // Model the published predecessor and a failure after migration.
+            sqlx::raw_sql("DROP TABLE deployment_update_policy; DELETE FROM _sqlx_migrations WHERE version = 3; CREATE TRIGGER reject_prepare BEFORE INSERT ON deployment_update BEGIN SELECT RAISE(ABORT, 'prepare failed'); END;")
+                .execute(connection).await?;
+            Ok(())
+        })).await.unwrap();
+        writer.close().await.unwrap();
+        assert!(
+            prepare(&directory, lease.clone(), current.clone(), target.clone())
+                .await
+                .is_err()
+        );
+        let writer = store::open_update_writer(&directory, lease.clone())
+            .await
+            .unwrap();
+        writer.run(|connection| Box::pin(async move {
+            let migrated: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _sqlx_migrations WHERE version = 3)")
+                .fetch_one(&mut *connection).await?;
+            let table: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'deployment_update_policy')")
+                .fetch_one(&mut *connection).await?;
+            assert!(!migrated && !table, "failed preparation must also roll back migrations");
+            sqlx::query("DROP TRIGGER reject_prepare").execute(connection).await?;
+            Ok(())
+        })).await.unwrap();
+        writer.close().await.unwrap();
+        assert_eq!(
+            read(&directory, lease.clone()).await.unwrap(),
+            (current.clone(), None)
+        );
+        prepare(&directory, lease.clone(), current.clone(), target.clone())
+            .await
+            .unwrap();
+        let manual = policy::read(&directory).await.unwrap();
+        assert_eq!(manual.policy, policy::Policy::Manual);
+        let automatic = policy::Record {
+            policy: policy::Policy::RustPreview,
+            revision: 1,
+            ..manual.clone()
+        };
+        policy::write(&directory, lease.clone(), &current, &manual, &automatic)
+            .await
+            .unwrap();
+        assert_eq!(policy::read(&directory).await.unwrap(), automatic);
+        assert!(
+            policy::write(&directory, lease.clone(), &current, &manual, &automatic)
+                .await
+                .is_err()
+        );
+        assert!(policy::require_revision(&directory, 0).await.is_err());
+        policy::require_revision(&directory, 1).await.unwrap();
         // A configuration-only target has the same executable, but still
         // requires the exact pending receipt and writer-held atomic cut.
-        target.project_directory_roots = Some(Vec::new());
         prepare(&directory, lease.clone(), current.clone(), target.clone())
             .await
             .unwrap();
@@ -283,6 +339,11 @@ mod tests {
         .unwrap();
         assert_eq!(revoked.config_revision, 3);
         assert!(revoked.require_active().is_err());
+        assert_eq!(
+            policy::read(&directory).await.unwrap().policy,
+            policy::Policy::Manual
+        );
+        assert!(policy::require_revision(&directory, 1).await.is_err());
         assert_eq!(
             read(&directory, lease.clone()).await.unwrap(),
             (revoked.clone(), None)

@@ -36,6 +36,17 @@ pub(super) enum Target {
 }
 
 impl Target {
+    pub fn current() -> Result<Self, HostError> {
+        match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("macos", "aarch64") => Ok(Self::DarwinArm64),
+            ("macos", "x86_64") => Ok(Self::DarwinX64),
+            ("linux", "aarch64") => Ok(Self::LinuxArm64Gnu),
+            ("linux", "x86_64") => Ok(Self::LinuxX64Gnu),
+            ("windows", "x86_64") => Ok(Self::Win32X64),
+            _ => Err("native CLI distribution is unavailable for this platform".into()),
+        }
+    }
+
     pub fn slug(self) -> &'static str {
         match self {
             Self::DarwinArm64 => "darwin-arm64",

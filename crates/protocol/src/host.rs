@@ -32,6 +32,9 @@ pub struct RetirementInput {
     pub allow_interrupt_active_tasks: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_cooperative_handoff: Option<bool>,
+    /// Permit idle clients to reconnect, without interrupting owned work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_idle_connections: Option<bool>,
     /// A trusted operator may coordinate retirement with this still-connected client.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handoff_connection_id: Option<String>,
@@ -48,7 +51,11 @@ pub fn decode_retirement_input(value: &Value) -> Result<RetirementInput> {
     codec::shaped(
         codec::record(value, "Host retirement")?,
         &["expectedHostEpoch", "allowInterruptActiveTasks"],
-        &["allowCooperativeHandoff", "handoffConnectionId"],
+        &[
+            "allowCooperativeHandoff",
+            "handoffConnectionId",
+            "allowIdleConnections",
+        ],
     )?;
     let boolean = |value: &Value| {
         value
@@ -58,6 +65,7 @@ pub fn decode_retirement_input(value: &Value) -> Result<RetirementInput> {
     Ok(RetirementInput {
         expected_host_epoch: codec::string(&value["expectedHostEpoch"], "Host epoch", 128)?,
         allow_interrupt_active_tasks: boolean(&value["allowInterruptActiveTasks"])?,
+        allow_idle_connections: value.get("allowIdleConnections").map(boolean).transpose()?,
         allow_cooperative_handoff: value
             .get("allowCooperativeHandoff")
             .map(boolean)

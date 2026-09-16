@@ -29,13 +29,14 @@ import {
   nativeRuntimeHostLogsSchema,
   nativeRuntimeHostManagementRequestSchema,
   nativeRuntimeHostMutationSchema,
+  nativeRuntimeHostUpdatePolicySchema,
   type NativeRuntimeHostExpected,
   type NativeRuntimeHostManagementRequest,
   type NativeRuntimeHostManagementResult,
   type NativeRuntimeHostMutation,
   type NativeRuntimeHostSettings,
 } from '../shared/native-runtime-host-management.js';
-import { runNativeRuntimeHostCommand, type NativeRuntimeHostOperator } from './native-runtime-host-command.js';
+import { nativeOperatorAt, runNativeRuntimeHostCommand, type NativeRuntimeHostOperator } from './native-runtime-host-command.js';
 
 export interface NativeRuntimeHostChangeScope {
   /** Retain the pause for stop/uninstall, including an unconfirmed outcome. */
@@ -50,6 +51,7 @@ export function createNativeRuntimeHostManagement(input: {
   readonly operator: NativeRuntimeHostOperator;
   readonly rootId: string;
   readonly rootPath?: string;
+  readonly prepareUpdate?: () => Promise<NativeRuntimeHostOperator>;
   readonly change: <T>(run: (scope: NativeRuntimeHostChangeScope) => Promise<T>) => Promise<T>;
 }) {
   const execute = (args: string[], readOnly = false) => runNativeRuntimeHostCommand(input.operator, args, readOnly);
@@ -92,8 +94,13 @@ export function createNativeRuntimeHostManagement(input: {
     action: 'stop' | 'restart' | 'uninstall' | 'update' | 'reconcile',
     current: NativeRuntimeHostDeployment,
     settings?: NativeRuntimeHostSettings,
+    operator?: NativeRuntimeHostOperator,
   ) => {
-    const raw = await execute([
+    if (!operator) {
+      const latest = await requireCurrent(current);
+      operator = nativeOperatorAt(input.operator, (latest.pendingUpdate ?? latest.deployment).executable);
+    }
+    const raw = await runNativeRuntimeHostCommand(operator, [
       ...rooted(action),
       '--expected-deployment-id', current.deploymentId,
       '--expected-revision', String(current.configRevision),
@@ -104,8 +111,9 @@ export function createNativeRuntimeHostManagement(input: {
     return result;
   };
   const change = async (
-    request: Exclude<NativeRuntimeHostManagementRequest, { action: 'status' | 'logs' }>,
+    request: Exclude<NativeRuntimeHostManagementRequest, { action: 'status' | 'logs' | 'update_policy' | 'set_update_policy' }>,
     scope: NativeRuntimeHostChangeScope,
+    updateOperator?: NativeRuntimeHostOperator,
   ): Promise<NativeRuntimeHostMutation | { kind: 'active_tasks' }> => {
     if (request.action === 'start' || request.action === 'install') {
       let status = await read();
@@ -143,12 +151,14 @@ export function createNativeRuntimeHostManagement(input: {
     const observed = await requireCurrent(request.expected);
     const current = observed.deployment;
     const hostEpoch = observed.host.kind === 'connected' ? observed.host.identity.hostEpoch : undefined;
-    if (request.action === 'update' || request.action === 'reconcile') {
+    if (request.action === 'update' || request.action === 'upgrade' || request.action === 'reconcile') {
       // Stage under native authority while the old Host is still serving.
       scope.resumeOnSettled();
       scope.hold();
-      const staged = await mutate(request.action, current,
-        request.action === 'update' ? request.settings : undefined);
+      const staged = await mutate(request.action === 'upgrade' ? 'update' : request.action, current,
+        request.action === 'update' ? request.settings : undefined,
+        request.action === 'upgrade' ? updateOperator : request.action === 'reconcile' && observed.pendingUpdate
+          ? nativeOperatorAt(input.operator, observed.pendingUpdate.executable) : undefined);
       if (staged.kind === 'ready') {
         return staged;
       }
@@ -156,7 +166,7 @@ export function createNativeRuntimeHostManagement(input: {
         throw new Error('Native Host did not confirm a pending update');
       }
       if (!await retire(scope, current, hostEpoch)) return staged;
-      return mutate('reconcile', current);
+      return mutate('reconcile', current, undefined, nativeOperatorAt(input.operator, staged.target.executable));
     }
 
     if (request.action === 'restart') scope.resumeOnSettled();
@@ -172,8 +182,29 @@ export function createNativeRuntimeHostManagement(input: {
         const logs = nativeRuntimeHostLogsSchema.parse(JSON.parse(await execute(rooted('logs'), true)));
         return { status: await read(), logs };
       }
+      if (request.action === 'update_policy' || request.action === 'set_update_policy') {
+        const observed = request.action === 'set_update_policy' ? await requireCurrent(request.expected) : await read();
+        if (observed.kind !== 'installed') throw new Error('Native Host is not installed');
+        const operator = nativeOperatorAt(input.operator, (observed.pendingUpdate ?? observed.deployment).executable);
+        const args = rooted('update-policy');
+        if (request.action === 'set_update_policy') args.push('--policy', request.policy === 'manual' ? 'manual' : 'rust-preview',
+          '--expected-deployment-id', observed.deployment.deploymentId,
+          '--expected-policy-revision', String(request.expectedPolicyRevision));
+        const value: unknown = JSON.parse(await runNativeRuntimeHostCommand(operator, args, request.action === 'update_policy'));
+        if (request.action === 'update_policy') return { status: await read(), updatePolicy: nativeRuntimeHostUpdatePolicySchema.parse(value) };
+        const saved = z.object({ policy: nativeRuntimeHostUpdatePolicySchema, schedulingError: z.string().nullable() }).strict().parse(value);
+        return { status: await read(), updatePolicy: saved.policy, ...(saved.schedulingError ? { schedulingError: saved.schedulingError } : {}) };
+      }
+      // This runs before change() suspends reconnect or retires launchers.
+      // An offline registry must not delay ordinary Host activation.
+      let updateOperator: NativeRuntimeHostOperator | undefined;
+      if (request.action === 'upgrade') {
+        await requireCurrent(request.expected);
+        if (!input.prepareUpdate) throw new Error('Native package updates are unavailable');
+        updateOperator = await input.prepareUpdate();
+      }
       return input.change(async (scope) => {
-        const outcome = await change(request, scope);
+        const outcome = await change(request, scope, updateOperator);
         return { status: await read(), outcome };
       });
     },

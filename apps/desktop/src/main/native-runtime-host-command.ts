@@ -34,6 +34,15 @@ export type NativeRuntimeHostOperator =
   | { readonly kind: 'wsl'; readonly distribution: string;
       readonly operator: RuntimeHostNativeOperatorCommand<'posix'> };
 
+/** The path comes from an authenticated deployment receipt, never renderer input. */
+export function nativeOperatorAt(target: NativeRuntimeHostOperator, executable: string): NativeRuntimeHostOperator {
+  switch (target.kind) {
+    case 'local': return { ...target, executable };
+    case 'ssh': return { ...target, operator: { ...target.operator, executablePath: executable } };
+    case 'wsl': return { ...target, operator: { ...target.operator, executablePath: executable } };
+  }
+}
+
 /** Keep draining after an observation timeout; a lost response is not rollback. */
 export function runNativeRuntimeHostCommand(
   target: NativeRuntimeHostOperator,

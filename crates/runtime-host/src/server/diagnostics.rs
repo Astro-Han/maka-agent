@@ -37,6 +37,13 @@ impl Activity {
         self.connections > 1 || self.commands > own_commands || self.resident_count() != 0
     }
 
+    pub(super) fn allowing_idle_connections(mut self, allow: bool) -> Self {
+        if allow {
+            self.connections = 0;
+        }
+        self
+    }
+
     pub(super) fn resident_count(&self) -> usize {
         self.executions + self.shells + self.oauth
     }

@@ -102,9 +102,11 @@ uses `cargo zigbuild` with an explicit `x86_64-unknown-linux-gnu.2.28` or
 `aarch64-unknown-linux-gnu.2.28` target; install cargo-zigbuild and Zig on the build machine.
 Development builds still use ordinary Cargo. SSH/WSL onboarding rejects older glibc before downloading.
 
-Desktop SSH/WSL onboarding downloads and verifies the exact Desktop version locally, transfers
-the complete package, removes the upload staging directory, and sets up the native Host.
-The target needs no Node/npm/Rust. Native npm releases are not published yet; development builds
+Desktop SSH/WSL onboarding downloads and verifies its `nativeRuntimeHostVersion` pin locally,
+transfers the complete package, removes upload staging, and sets up the native Host.
+The pin is an exact npm version, independent of the Desktop version; packaging can select it
+with `MAKA_NATIVE_CLI_VERSION`. Published previews cover macOS arm64, Linux x64 and Windows x64.
+The target needs no Node/npm/Rust. Development builds
 can set `MAKA_NATIVE_CLI_VERSION` and `MAKA_NATIVE_CLI_PACKAGES` (a `host fetch` cache directory).
 These overrides are ignored in packaged Desktop. Existing profiles start offline.
 
@@ -137,7 +139,18 @@ same identity arguments finishes the recorded update. A committed target is neve
 automatically rolled back, even if startup fails. Supervised activation replaces
 the service definition only while holding the Root. Upgrades target recoverable
 restarts, not uninterrupted sockets or PTYs; no separate control daemon is planned.
-Unattended release selection is not yet connected.
+
+`host upgrade` takes the same identity arguments, downloads `rust-preview` (or an exact
+`--version`) before handoff, and delegates the update to that package. Desktop also prepares
+downloads and SSH/WSL transfers before pausing connections.
+`host update-policy --root-id <rootId>` reads the automatic-update policy. To change it, add
+`--policy rust-preview|manual --expected-policy-revision <revision> --expected-deployment-id <id>`.
+The default is manual. Automatic updates use an independent OS timer/task, not a resident daemon;
+checks succeed at hourly intervals, with ten-minute retries for failures or busy work.
+Idle clients reconnect after a switch; running work, PTYs and OAuth defer it.
+On-demand Hosts remain asleep until a client activates them. Disabling the policy fences queued
+updates; uninstall also removes the task. `lastError` reports attempt failures and
+`schedulingError` reports a saved policy whose OS task needs repair by repeating the request.
 
 `host stop`, `host restart` and `host uninstall` take the same identity arguments.
 Stop and restart preserve pending updates. Uninstall revokes startup before removing
@@ -255,8 +268,12 @@ Use the same identifier for all platforms of one build and a new identifier for 
 publication; CI may use `<run-id>.<attempt>`. Identifiers follow SemVer prerelease rules.
 `makaSource` records the source archive name, source version and SHA-512.
 This is traceability, not a signed build attestation.
-Omit `--keys` only for unsigned local candidates. No command publishes to npm;
-the channel remains `rust-preview`. `CARGO_TARGET_DIR` may retain build caches,
+Omit `--keys` only for unsigned local candidates. Native builds validate `--version` and V8 execution;
+`--validator` is only required for cross-target packaging. Notices default to the source's Rust inventory.
+The `Native CLI preview` workflow builds all three platforms from one frozen source archive.
+`node scripts/rust/publish-cli.mjs <artifact-directory>` validates their common provenance;
+`--publish` publishes the complete verified set to `rust-preview` (CI supplies npm provenance).
+`CARGO_TARGET_DIR` may retain build caches,
 but `MAKA_JS_DEPS` is fixed to the extracted source's own install.
 
 `node scripts/rust/pack-cli.mjs --target <target> --version <exact-version>
@@ -326,7 +343,7 @@ so WorkHub's “Needs you” view agrees with candidate discovery and clears aft
 Skill mutations, update previews and their transaction recovery remain incomplete.
 Session branching, removal, import/export and recap, along with additional runtime
 policy settings, also remain incomplete.
-Orchestration, some capability services, managed upgrades and other protocol domains also remain incomplete. Full Desktop
-acceptance and release packaging across Linux, macOS and Windows are still
-required. Plugin implementation follows Agent Graph; OS sandboxing is deferred. Memory is excluded pending a
+Orchestration, some capability services and other protocol domains remain incomplete;
+native deployment and updates do not imply full product compatibility.
+Plugin implementation follows Agent Graph; OS sandboxing is deferred. Memory is excluded pending a
 separate redesign; its existing implementation is not ported. Content redaction is omitted.

@@ -112,6 +112,22 @@ pub(super) async fn open_writer(
     lease: Arc<FileLease>,
     root: Option<Arc<RootOwner>>,
 ) -> Result<OwnedConnection, HostError> {
+    open(directory, lease, root, true).await
+}
+
+pub(super) async fn open_update_writer(
+    directory: &Path,
+    lease: Arc<FileLease>,
+) -> Result<OwnedConnection, HostError> {
+    open(directory, lease, None, false).await
+}
+
+async fn open(
+    directory: &Path,
+    lease: Arc<FileLease>,
+    root: Option<Arc<RootOwner>>,
+    migrate_on_open: bool,
+) -> Result<OwnedConnection, HostError> {
     let path = directory.join(DATABASE);
     let file = private_file(&path)?;
     file.sync_all()?;
@@ -122,7 +138,16 @@ pub(super) async fn open_writer(
             .filename(&path)
             .create_if_missing(false),
         ConnectionAuthority::Writer { lease, root },
-        |connection| Box::pin(initialize(connection)),
+        if migrate_on_open {
+            |connection| {
+                Box::pin(async move {
+                    initialize(connection).await?;
+                    migrate(connection).await
+                })
+            }
+        } else {
+            |connection| Box::pin(initialize(connection))
+        },
     )
     .await?)
 }
@@ -185,6 +210,11 @@ pub(super) async fn change(
                 sqlx::query("DELETE FROM deployment_update WHERE singleton = 1")
                     .execute(&mut *transaction)
                     .await?;
+                // A revoked or replaced deployment cannot inherit an automatic
+                // update grant. Retain the row so cleanup retries know a
+                // scheduler may still exist.
+                sqlx::query("UPDATE deployment_update_policy SET configuration = json_set(configuration, '$.policy', 'manual', '$.nextCheckMs', 0, '$.lastError', NULL) WHERE singleton = 1")
+                    .execute(&mut *transaction).await?;
                 transaction.commit().await?;
                 Ok(target)
             })
@@ -267,6 +297,10 @@ async fn initialize(connection: &mut SqliteConnection) -> Result<(), StoreError>
     )
     .execute(&mut *connection)
     .await?;
+    Ok(())
+}
+
+pub(super) async fn migrate(connection: &mut SqliteConnection) -> Result<(), StoreError> {
     MIGRATIONS.run_direct(None, connection, false).await?;
     Ok(())
 }

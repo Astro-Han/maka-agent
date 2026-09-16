@@ -62,11 +62,10 @@ export interface NativeSetupResult {
 }
 
 /** Transfer and verify code before starting any State Root mutation. */
-export async function installNativeRuntimeHost(
+export async function prepareNativeRuntimeHost(
   transport: NativeSetupTransport,
-  input: NativeSetupInput,
-  onCommit: () => void,
-): Promise<NativeSetupResult> {
+  input: Pick<NativeSetupInput, 'package' | 'signal'>,
+): Promise<RuntimeHostNativeOperatorCommand> {
   input.signal?.throwIfAborted();
   const paths = transport.platform === 'win32' ? win32 : posix;
   const name = `maka-native-${randomUUID().replaceAll('-', '')}`;
@@ -141,7 +140,15 @@ export async function installNativeRuntimeHost(
     });
   }
   input.signal?.throwIfAborted();
-  const operator = nativeArtifactOperator(artifact);
+  return nativeArtifactOperator(artifact);
+}
+
+export async function installNativeRuntimeHost(
+  transport: NativeSetupTransport,
+  input: NativeSetupInput,
+  onCommit: () => void,
+): Promise<NativeSetupResult> {
+  const operator = await prepareNativeRuntimeHost(transport, input);
   // After this point cancellation cannot promise to undo installation. Finish
   // reading its bounded receipt, then let the existing pairing journal take over.
   onCommit();

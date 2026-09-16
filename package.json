@@ -1,6 +1,7 @@
 {
   "name": "maka",
   "version": "0.2.0",
+  "nativeRuntimeHostVersion": "0.2.0-rust-preview.20260916.2",
   "license": "Apache-2.0",
   "private": true,
   "engines": {

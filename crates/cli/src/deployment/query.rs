@@ -151,7 +151,10 @@ async fn observe_host(deployment: &Deployment) -> HostObservation {
     })
 }
 
-async fn pending(directory: &Path, current: &Deployment) -> Result<Option<Deployment>, HostError> {
+pub(super) async fn pending(
+    directory: &Path,
+    current: &Deployment,
+) -> Result<Option<Deployment>, HostError> {
     // Earlier installed operators have only the Active table. Observation must
     // not run migrations or create a pending table on their behalf.
     let mut connection = SqliteConnection::connect_with(

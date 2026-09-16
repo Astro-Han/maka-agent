@@ -83,11 +83,11 @@ struct Distribution {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Artifact {
+pub(crate) struct Artifact {
     target: Target,
     version: String,
     directory: PathBuf,
-    executable: PathBuf,
+    pub(crate) executable: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     service_executable: Option<PathBuf>,
     integrity: String,
@@ -98,11 +98,7 @@ impl Fetch {
         let framed = self.framed;
         // Honor the CLI environment's HTTP(S)/ALL_PROXY and NO_PROXY. No npm,
         // lifecycle scripts, registry credentials, or running Host are involved.
-        let client = Client::builder()
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(120))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+        let client = client()?;
         let artifact = tokio::time::timeout(
             Duration::from_secs(180),
             self.resolve(client, Url::parse(REGISTRY)?),
@@ -293,6 +289,69 @@ impl Fetch {
         .await??;
         Ok(artifact(destination, target, version, integrity))
     }
+}
+
+fn client() -> Result<Client, HostError> {
+    Ok(Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(120))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?)
+}
+
+#[cfg(windows)]
+pub(crate) fn validate_windows_service(path: &Path) -> Result<(), HostError> {
+    Target::Win32X64.validate_binary(&mut regular_file(path, MAX_ARCHIVE_BYTES)?, true)
+}
+
+/// Resolve the preview channel once; subsequent retries use this exact version.
+pub(crate) async fn preview_version() -> Result<Version, HostError> {
+    #[derive(Deserialize)]
+    struct Tags {
+        #[serde(rename = "rust-preview")]
+        preview: String,
+    }
+    let name = Target::current()?.package_name().replace('/', "%2f");
+    let mut response = client()?
+        .get(format!("{REGISTRY}-/package/{name}/dist-tags"))
+        .send()
+        .await?
+        .error_for_status()?;
+    if !response.status().is_success() {
+        return Err("native package registry redirect is not allowed".into());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if bytes.len().saturating_add(chunk.len()) > MAX_METADATA_BYTES {
+            return Err("native package metadata exceeds the size limit".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let tags: Tags = serde_json::from_slice(&bytes)?;
+    let version = Version::parse(&tags.preview)?;
+    if !version.pre.as_str().starts_with("rust-preview.") || !version.build.is_empty() {
+        return Err("rust-preview points outside the native preview channel".into());
+    }
+    Ok(version)
+}
+
+pub(crate) async fn fetch(version: Version) -> Result<Artifact, HostError> {
+    let fetch = Fetch {
+        target: Target::current()?,
+        version,
+        cache: None,
+        archive: None,
+        integrity: None,
+        directory: None,
+        receipt_sha256: None,
+        framed: false,
+    };
+    tokio::time::timeout(
+        Duration::from_secs(180),
+        fetch.resolve(client()?, Url::parse(REGISTRY)?),
+    )
+    .await
+    .map_err(|_| "native package download timed out")?
 }
 
 fn receipt_digest(value: &str) -> Result<String, &'static str> {

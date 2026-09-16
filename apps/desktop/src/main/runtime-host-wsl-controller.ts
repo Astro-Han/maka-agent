@@ -43,7 +43,7 @@ import {
   type RuntimeHostServiceManagementFrame,
 } from '@maka/runtime-host/operator';
 import { createRuntimeHostFramedOutputFilter } from './runtime-host-framed-output.js';
-import { installNativeRuntimeHost, quoteNativePosix, type NativeSetupInput, type NativeSetupResult, type NativeSetupCommand } from './native-runtime-host-installer.js';
+import { installNativeRuntimeHost, prepareNativeRuntimeHost, quoteNativePosix, type NativeSetupTransport, type NativeSetupInput, type NativeSetupResult, type NativeSetupCommand } from './native-runtime-host-installer.js';
 import type { DesktopRuntimeHostSetupPackage } from './runtime-host-setup-package.js';
 import { decodeRuntimeHostTarget, posixRuntimeHostTargetProbe, type RuntimeHostTargetIdentity } from './runtime-host-target.js';
 
@@ -56,7 +56,20 @@ export async function runNativeRuntimeHostWslSetup(
   onCommit: () => void,
   overrides: { readonly processFactory?: RuntimeHostWslProcessFactory; readonly wslExecutable?: string } = {},
 ): Promise<NativeSetupResult> {
-  const distribution = normalizeRuntimeHostWslDistribution(input.distribution);
+  return installNativeRuntimeHost(nativeWslTransport(input.distribution, overrides), input, onCommit);
+}
+
+export async function prepareNativeRuntimeHostWslPackage(
+  input: NativeSetupInput & { readonly distribution: string },
+): Promise<RuntimeHostNativeOperatorCommand> {
+  return prepareNativeRuntimeHost(nativeWslTransport(input.distribution), input);
+}
+
+function nativeWslTransport(
+  name: string,
+  overrides: { readonly processFactory?: RuntimeHostWslProcessFactory; readonly wslExecutable?: string } = {},
+): NativeSetupTransport {
+  const distribution = normalizeRuntimeHostWslDistribution(name);
   const factory = overrides.processFactory ?? spawnWsl;
   const executable = overrides.wslExecutable ?? resolveSystemRuntimeHostWslExecutable();
   const execute = <T>(command: NativeSetupCommand<T>): Promise<T> => {
@@ -68,7 +81,7 @@ export async function runNativeRuntimeHostWslSetup(
       prefix: command.prefix, decode: command.decode, label: 'Native WSL setup', onFrame: (result) => result,
     });
   };
-  return installNativeRuntimeHost({
+  return {
     platform: 'posix', execute,
     async upload(source, destination, signal) {
       const prefix = '__MAKA_NATIVE_HOST_UPLOAD__';
@@ -84,7 +97,7 @@ export async function runNativeRuntimeHostWslSetup(
         },
       });
     },
-  }, input, onCommit);
+  };
 }
 
 export async function resolveDesktopRuntimeHostWslTarget(

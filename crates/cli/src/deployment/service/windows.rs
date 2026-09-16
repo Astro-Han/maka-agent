@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Deployment, HostError, arguments, label, xml};
+use super::{Deployment, HostError, Role, arguments, label, xml};
 use std::time::{Duration, Instant};
 use windows::{
     Win32::{
@@ -49,7 +49,7 @@ pub(super) struct Service {
 }
 
 impl Service {
-    pub fn new(deployment: &Deployment) -> Result<Self, HostError> {
+    pub fn new(deployment: &Deployment, role: Role) -> Result<Self, HostError> {
         let apartment = Apartment::open()?;
         // SAFETY: initialization and every interface stay on this blocking worker.
         let (scheduler, folder, user) = unsafe {
@@ -67,21 +67,40 @@ impl Service {
             };
             (scheduler, folder, user)
         };
-        let name = label(deployment);
-        let args = arguments(deployment)?;
-        let executable = xml(args[0]);
+        let name = label(deployment, role);
+        let args = arguments(deployment, role)?;
+        let executable = if role == Role::Updater {
+            let windowless = super::super::package::windowless(&deployment.executable)?;
+            xml(windowless
+                .to_str()
+                .ok_or("service executable must be UTF-8")?)
+        } else {
+            xml(args[0])
+        };
         let args = xml(&args[1..]
             .iter()
             .map(|arg| quote(arg))
             .collect::<Vec<_>>()
             .join(" "));
         let principal = xml(&user);
+        let trigger = if role == Role::Updater {
+            "<CalendarTrigger><Repetition><Interval>PT10M</Interval><Duration>P1D</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>2000-01-01T00:00:00</StartBoundary><Enabled>true</Enabled><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>".to_owned()
+        } else {
+            format!(
+                "<LogonTrigger><Enabled>true</Enabled><UserId>{principal}</UserId></LogonTrigger>"
+            )
+        };
+        let lifetime = if role == Role::Updater {
+            "<ExecutionTimeLimit>PT10M</ExecutionTimeLimit>"
+        } else {
+            "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>5</Count></RestartOnFailure>"
+        };
         let definition = format!(
             concat!(
                 "<?xml version=\"1.0\" encoding=\"UTF-16\"?>",
                 "<Task version=\"1.4\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">",
                 "<RegistrationInfo><Description>{name}</Description></RegistrationInfo>",
-                "<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{principal}</UserId></LogonTrigger></Triggers>",
+                "<Triggers>{trigger}</Triggers>",
                 "<Principals><Principal id=\"Maka\"><UserId>{principal}</UserId><LogonType>InteractiveToken</LogonType>",
                 "<RunLevel>LeastPrivilege</RunLevel></Principal></Principals>",
                 "<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
@@ -90,11 +109,13 @@ impl Service {
                 "<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>",
                 "<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>",
                 "<AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled>",
-                "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>5</Count></RestartOnFailure></Settings>",
+                "{lifetime}</Settings>",
                 "<Actions Context=\"Maka\"><Exec><Command>{executable}</Command><Arguments>{args}</Arguments></Exec></Actions></Task>"
             ),
             name = name,
             principal = principal,
+            trigger = trigger,
+            lifetime = lifetime,
             executable = executable,
             args = args
         );

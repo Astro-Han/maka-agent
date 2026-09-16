@@ -22,6 +22,12 @@ use maka_event_log::root::{FileLease, RootOwner};
 use maka_runtime_host::server::HostError;
 use std::sync::Arc;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Host,
+    Updater,
+}
+
 mod status;
 use status::State;
 pub(super) use status::{Observation, observe};
@@ -52,7 +58,7 @@ pub(super) async fn start(
         if owner.root_id() != deployment.root_id {
             return Err("State Root changed before service activation".into());
         }
-        let service = platform::Service::new(&deployment)?;
+        let service = platform::Service::new(&deployment, Role::Host)?;
         // Root is held: an OS restart cannot begin user work during replacement.
         service.prepare()?;
         owner.validate_current()?;
@@ -95,7 +101,7 @@ async fn change(
         if owner.root_id() != deployment.root_id || owner.canonical_path() != deployment.root_path {
             return Err("State Root changed before service control".into());
         }
-        let service = platform::Service::new(&deployment)?;
+        let service = platform::Service::new(&deployment, Role::Host)?;
         if remove {
             service.remove()?;
         } else {
@@ -108,7 +114,7 @@ async fn change(
     .await?
 }
 
-fn arguments(deployment: &Deployment) -> Result<[&str; 5], HostError> {
+fn arguments(deployment: &Deployment, role: Role) -> Result<[&str; 5], HostError> {
     let executable = deployment
         .executable
         .to_str()
@@ -119,14 +125,37 @@ fn arguments(deployment: &Deployment) -> Result<[&str; 5], HostError> {
     Ok([
         executable,
         "host",
-        "service-run",
+        match role {
+            Role::Host => "service-run",
+            Role::Updater => "auto-update",
+        },
         "--root-id",
         &deployment.root_id,
     ])
 }
 
-fn label(deployment: &Deployment) -> String {
-    format!("org.apache.maka.host.{}", deployment.root_id)
+fn label(deployment: &Deployment, role: Role) -> String {
+    let suffix = if role == Role::Updater { ".update" } else { "" };
+    format!("org.apache.maka.host.{}{suffix}", deployment.root_id)
+}
+
+pub(super) async fn schedule(
+    deployment: Deployment,
+    enabled: bool,
+    lease: Arc<FileLease>,
+) -> Result<(), HostError> {
+    tokio::task::spawn_blocking(move || {
+        lease.validate()?;
+        let service = platform::Service::new(&deployment, Role::Updater)?;
+        if enabled {
+            service.prepare()?
+        } else {
+            service.remove()?
+        }
+        lease.validate()?;
+        Ok::<_, HostError>(())
+    })
+    .await?
 }
 
 #[cfg(any(target_os = "macos", windows))]

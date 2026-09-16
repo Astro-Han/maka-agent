@@ -63,6 +63,7 @@ import {
   type RuntimeHostPeerMeshManagementFrame,
   type RuntimeHostOperatorCapability,
   type RuntimeHostOperatorCommand,
+  type RuntimeHostNativeOperatorCommand,
   type RuntimeHostOperatorPlatform,
   type RuntimeHostServiceManagementAction,
   type RuntimeHostServiceManagementFrame,
@@ -75,7 +76,7 @@ import type {
   DesktopRuntimeHostSshTerminalSnapshot,
 } from '../preload/bridge-contract.js';
 import { createRuntimeHostFramedOutputFilter } from './runtime-host-framed-output.js';
-import { installNativeRuntimeHost, type NativeSetupInput, type NativeSetupResult, type NativeSetupCommand } from './native-runtime-host-installer.js';
+import { installNativeRuntimeHost, prepareNativeRuntimeHost, type NativeSetupTransport, type NativeSetupInput, type NativeSetupResult, type NativeSetupCommand } from './native-runtime-host-installer.js';
 import {
   decodeRuntimeHostTarget,
   posixRuntimeHostTargetProbe,
@@ -283,6 +284,7 @@ export function createDesktopRuntimeHostSshTerminal(input: {
     onComplete?: (frame: RuntimeHostSetupCompleteFrame) => void,
   ): Promise<RuntimeHostSetupCompleteFrame>;
   runNativeSetup(input: NativeSetupInput & DesktopRuntimeHostSshTargetInput, onCommit: () => void): Promise<NativeSetupResult>;
+  prepareNativePackage(input: NativeSetupInput & DesktopRuntimeHostSshTargetInput): Promise<RuntimeHostNativeOperatorCommand>;
   runServiceManagement(
     input: DesktopRuntimeHostSshManagementInput,
   ): Promise<Exclude<RuntimeHostServiceManagementFrame, { kind: 'progress' }>>;
@@ -623,6 +625,54 @@ export function createDesktopRuntimeHostSshTerminal(input: {
     return frame;
   };
 
+  function nativeTransport(setupInput: NativeSetupInput & DesktopRuntimeHostSshTargetInput): NativeSetupTransport {
+      if (closed) throw new Error('Runtime Host SSH terminal is closed');
+      const destination = normalizeRuntimeHostSshDestination(setupInput.destination);
+      const port = setupInput.sshPort === undefined ? undefined : requireSetupPort(setupInput.sshPort);
+      return {
+        platform: setupInput.package.artifact.target === 'win32-x64' ? 'win32' : 'posix',
+        async execute<T>(command: NativeSetupCommand<T>): Promise<T> {
+          command.signal?.throwIfAborted();
+          let result: T | undefined;
+          let failure: Error | undefined;
+          const filter = createRuntimeHostFramedOutputFilter({
+            prefix: command.prefix, pendingMaxBytes: 64 * 1024, decode: command.decode,
+            label: 'Native SSH setup',
+            onFrame: (frame) => {
+              if (result !== undefined) throw new Error('Native SSH setup returned multiple results');
+              result = frame;
+            },
+            onError: (error) => { failure = error; },
+          });
+          const { process, terminal } = startTerminalProcess('ssh',
+            sshRemoteCommandArgs(destination, port, command.command), filter.push, true);
+          const wait = await waitForTerminalProcess(process, {
+            signal: command.signal, timeoutMs: command.timeoutMs, stopGraceMs: input.processStopGraceMs,
+            onAbort: () => dismissPresentation(terminal),
+          }, input.terminateProcessTree);
+          filter.finish();
+          if (failure) throw failure;
+          if (result === undefined) throw new Error(wait.timedOut
+            ? 'Native SSH setup timed out; its outcome is unknown'
+            : `Native SSH setup exited with code ${String(wait.exit.code)} without a result`);
+          completePresentation(terminal);
+          return result;
+        },
+        async upload(source, target, signal) {
+          signal?.throwIfAborted();
+          const { process, terminal } = startTerminalProcess('scp', [
+            '-r', '-o', 'BatchMode=no', '-o', 'ConnectTimeout=15', '-o', 'ControlMaster=no',
+            '-o', 'ControlPath=none', '-o', 'ClearAllForwardings=yes',
+            ...(port === undefined ? [] : ['-P', String(port)]), source, `${destination}:${target.replaceAll('\\', '/')}`,
+          ], undefined, true);
+          const wait = await waitForTerminalProcess(process, { signal, timeoutMs: SETUP_TIMEOUT_MS,
+            stopGraceMs: input.processStopGraceMs, onAbort: () => dismissPresentation(terminal) }, input.terminateProcessTree);
+          if (wait.timedOut || wait.exit.code !== 0) throw new Error('Native CLI upload did not complete');
+          completePresentation(terminal);
+        },
+      };
+  }
+
   return {
     activateSshOperator: async (activationInput) => {
       if (activationInput.interaction !== 'terminal') {
@@ -725,53 +775,8 @@ export function createDesktopRuntimeHostSshTerminal(input: {
         throw new Error('Remote Runtime Host target detection returned no result');
       return windows.identity;
     },
-    runNativeSetup: async (setupInput, onCommit) => {
-      if (closed) throw new Error('Runtime Host SSH terminal is closed');
-      const destination = normalizeRuntimeHostSshDestination(setupInput.destination);
-      const port = setupInput.sshPort === undefined ? undefined : requireSetupPort(setupInput.sshPort);
-      return installNativeRuntimeHost({
-        platform: setupInput.package.artifact.target === 'win32-x64' ? 'win32' : 'posix',
-        async execute<T>(command: NativeSetupCommand<T>): Promise<T> {
-          command.signal?.throwIfAborted();
-          let result: T | undefined;
-          let failure: Error | undefined;
-          const filter = createRuntimeHostFramedOutputFilter({
-            prefix: command.prefix, pendingMaxBytes: 64 * 1024, decode: command.decode,
-            label: 'Native SSH setup',
-            onFrame: (frame) => {
-              if (result !== undefined) throw new Error('Native SSH setup returned multiple results');
-              result = frame;
-            },
-            onError: (error) => { failure = error; },
-          });
-          const { process, terminal } = startTerminalProcess('ssh',
-            sshRemoteCommandArgs(destination, port, command.command), filter.push, true);
-          const wait = await waitForTerminalProcess(process, {
-            signal: command.signal, timeoutMs: command.timeoutMs, stopGraceMs: input.processStopGraceMs,
-            onAbort: () => dismissPresentation(terminal),
-          }, input.terminateProcessTree);
-          filter.finish();
-          if (failure) throw failure;
-          if (result === undefined) throw new Error(wait.timedOut
-            ? 'Native SSH setup timed out; its outcome is unknown'
-            : `Native SSH setup exited with code ${String(wait.exit.code)} without a result`);
-          completePresentation(terminal);
-          return result;
-        },
-        async upload(source, target, signal) {
-          signal?.throwIfAborted();
-          const { process, terminal } = startTerminalProcess('scp', [
-            '-r', '-o', 'BatchMode=no', '-o', 'ConnectTimeout=15', '-o', 'ControlMaster=no',
-            '-o', 'ControlPath=none', '-o', 'ClearAllForwardings=yes',
-            ...(port === undefined ? [] : ['-P', String(port)]), source, `${destination}:${target.replaceAll('\\', '/')}`,
-          ], undefined, true);
-          const wait = await waitForTerminalProcess(process, { signal, timeoutMs: SETUP_TIMEOUT_MS,
-            stopGraceMs: input.processStopGraceMs, onAbort: () => dismissPresentation(terminal) }, input.terminateProcessTree);
-          if (wait.timedOut || wait.exit.code !== 0) throw new Error('Native CLI upload did not complete');
-          completePresentation(terminal);
-        },
-      }, setupInput, onCommit);
-    },
+    runNativeSetup: (setupInput, onCommit) => installNativeRuntimeHost(nativeTransport(setupInput), setupInput, onCommit),
+    prepareNativePackage: (setupInput) => prepareNativeRuntimeHost(nativeTransport(setupInput), setupInput),
     runSetup: async (setupInput, onProgress, onComplete) => {
       if (closed) throw new Error('Runtime Host SSH terminal is closed');
       setupInput.signal?.throwIfAborted();

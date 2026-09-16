@@ -86,8 +86,10 @@ Linux 发布支持 glibc 2.28 及以上。`node scripts/rust/build-cli.mjs --rel
 `cargo zigbuild`，显式指定 `x86_64-unknown-linux-gnu.2.28` 或 `aarch64-unknown-linux-gnu.2.28`；
 构建机器须安装 cargo-zigbuild 和 Zig。开发构建仍使用普通 Cargo，SSH／WSL 引导在下载前拒绝旧版 glibc。
 
-Desktop SSH／WSL 引导在本机下载并验证与 Desktop 版本一致的完整包，再传输、清理上传暂存目录并设置原生 Host。
-目标无需 Node/npm/Rust。原生 npm 包尚未发布；开发构建可设置 `MAKA_NATIVE_CLI_VERSION` 和
+Desktop SSH／WSL 引导在本机下载并验证 `nativeRuntimeHostVersion` 固定的完整包，再传输、清理暂存目录并设置原生 Host。
+该字段是独立于 Desktop 版本的精确 npm 版本，打包时可通过 `MAKA_NATIVE_CLI_VERSION` 指定。
+已发布的 preview 覆盖 macOS arm64、Linux x64、Windows x64。
+目标无需 Node/npm/Rust。开发构建可设置 `MAKA_NATIVE_CLI_VERSION` 和
 `MAKA_NATIVE_CLI_PACKAGES`（由 `host fetch` 填充的缓存目录），正式打包的 Desktop 忽略这些覆盖。
 已有配置的启动无需访问 npm。
 
@@ -110,7 +112,15 @@ Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host �
 活跃客户端或不可交接任务会推迟切换；随后用相同身份参数运行 `host reconcile` 完成已记录的更新。
 目标一旦提交，即使启动失败也不自动回退。Supervised 激活仅在持有 Root 时替换服务定义。
 升级以可恢复的短暂重启为目标，不保证 socket 或 PTY 连续存活，不计划增加独立控制进程。
-无人值守版本选择尚未接通。
+
+`host upgrade` 使用相同身份参数，先下载 `rust-preview`（或 `--version` 指定的精确版本），再委派该版本完成更新。
+Desktop 同样先完成下载和 SSH／WSL 传输，再暂停连接。
+`host update-policy --root-id <rootId>` 查询自动更新策略；修改时附加
+`--policy rust-preview|manual --expected-policy-revision <revision> --expected-deployment-id <id>`。
+默认手动更新。自动更新使用独立 OS 定时任务，不增加常驻进程；成功后每小时检查，失败或工作繁忙时每十分钟重试。
+空闲客户端在切换后重连，执行中的任务、PTY 和 OAuth 会推迟切换；按需 Host 不被更新任务唤醒。
+关闭策略会阻止已排队的自动更新，卸载同时删除定时任务。`lastError` 报告尝试失败；
+`schedulingError` 表示策略已保存但 OS 任务未就绪，可重复同一请求修复。
 
 `host stop`、`host restart`、`host uninstall` 使用相同的身份参数。
 停止和重启保留待更新目标。卸载先撤销启动资格，再注销服务；Root 数据、代码包及部署撤销记录均保留。
@@ -198,7 +208,11 @@ Client Capability 注册与反向调用所有权位于 `client-capability`，Hos
 同一构建的全部平台使用相同标识，每次发布使用新标识；CI 可使用 `<run-id>.<attempt>`。
 标识遵循 SemVer 预发布规则。包内 `makaSource` 记录源码归档名、源码版本与 SHA-512，
 用于溯源，不是签名构建证明。
-仅本地未签名候选可省略 `--keys`。命令不发布 npm，通道仍为 `rust-preview`。
+仅本地未签名候选可省略 `--keys`。本机构建会验证版本和 V8 执行；仅跨平台打包必须指定 `--validator`，
+许可证清单默认取自源码中的 Rust 依赖清单。
+`Native CLI preview` workflow 用同一份冻结源码构建三个平台。
+`node scripts/rust/publish-cli.mjs <产物目录>` 校验三者的共同来源；
+附加 `--publish` 才会发布完整产物集到 `rust-preview`，CI 提供 npm provenance。
 可用 `CARGO_TARGET_DIR` 保留构建缓存；`MAKA_JS_DEPS` 固定为解包源码自身的安装目录。
 
 `node scripts/rust/pack-cli.mjs --target <目标> --version <精确版本>
@@ -254,6 +268,5 @@ WorkHub 已支持受限对话、候选发现、交互式目标选择、向已有
 
 Skills 变更、更新预览及其事务恢复仍未完成。
 会话分支、删除、导入导出、回顾及其它 runtime policy 设置也未完成。
-编排、部分 capability 服务、受管升级及其它协议域也未完成。
-完整 Desktop 验收和 Linux、macOS、Windows 发布打包仍待完成。
+编排、部分 capability 服务及其它协议域仍未完成；原生部署和更新能力不代表完整产品兼容。
 插件实现排在 Agent Graph 之后；OS 沙箱暂缓。Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。

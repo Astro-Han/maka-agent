@@ -21,7 +21,7 @@ import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 import { controlledProcessEnvironment, verifySourceCandidate } from '../asf-source-release.mjs';
@@ -57,11 +57,11 @@ export async function releaseNativeCli({
   buildId,
 }) {
   const platform = Object.hasOwn(nativeCliTargets, target) ? nativeCliTargets[target] : undefined;
-  if (!platform || !source || !notices || !validator || !output || !buildId) {
-    throw new Error(
-      'source, supported target, notices, validator, output, and build-id are required',
-    );
+  if (!platform || !source || !output || !buildId) {
+    throw new Error('source, supported target, output, and build-id are required');
   }
+  const native = platform.os === process.platform && platform.cpu === process.arch;
+  if (!native && !validator) throw new Error('Cross-target packaging requires a local validator');
   const stage = await mkdtemp(join(tmpdir(), 'maka-native-source-'));
   try {
     // Snapshot before validation so later changes to the input cannot change the build.
@@ -122,12 +122,27 @@ export async function releaseNativeCli({
       repositoryRoot,
       env,
     });
+    if (native) {
+      const executables = [
+        binary,
+        ...(platform.os === 'win32' ? [join(dirname(binary), 'maka-service.exe')] : []),
+      ];
+      for (const [index, executable] of executables.entries()) {
+        const { stdout } = await run(executable, ['--version'], {
+          timeout: 15_000,
+          windowsHide: true,
+        });
+        if (stdout.trim() !== 'maka ' + candidate.version)
+          throw new Error('Built CLI reports another source version');
+        await verifyCode(executable, join(stage, 'smoke-' + index + '.sqlite'));
+      }
+    }
     return await packNativeCli({
       target,
       version,
       binary,
-      notices,
-      validator,
+      notices: notices ?? join(repositoryRoot, 'crates/cli/DEPENDENCIES.rust.tsv'),
+      validator: validator ?? binary,
       output,
       repositoryRoot,
       source: { archive: basename(source), version: candidate.version, sha512: candidate.digest },
@@ -135,6 +150,20 @@ export async function releaseNativeCli({
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
+}
+
+async function verifyCode(executable, log) {
+  const stdout = await new Promise((resolveOutput, reject) => {
+    const child = execFile(
+      executable,
+      ['code', '--log', log],
+      { encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024, windowsHide: true },
+      (error, stdout) => (error ? reject(error) : resolveOutput(stdout)),
+    );
+    child.stdin.end('if (6 * 7 !== 42) throw new Error("V8 smoke failed");');
+    child.stdin.on('error', reject);
+  });
+  if (JSON.parse(stdout).output?.ok !== true) throw new Error('Built CLI failed its real V8 smoke');
 }
 
 async function execute(command, args, options) {

@@ -24,6 +24,7 @@ mod control;
 mod entry;
 mod logs;
 mod package;
+mod policy;
 mod query;
 mod service;
 mod setup;
@@ -35,6 +36,10 @@ pub(super) use connect::Connect;
 pub(super) use control::{Control, ControlAction};
 pub(super) use entry::ServiceRun;
 pub(super) use logs::Logs;
+pub(super) use policy::{
+    Configure as UpdatePolicy,
+    worker::{Reconcile as AutoUpdate, Upgrade},
+};
 pub(super) use query::Status;
 pub(super) use setup::Setup;
 pub(super) use update::{Expected, Update};
