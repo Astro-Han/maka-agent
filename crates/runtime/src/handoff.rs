@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::num::NonZeroU16;
 
 mod execution;
-pub use execution::{HandoffExecution, HandoffTools};
+pub use execution::{CompactionBudget, HandoffExecution, HandoffTools};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

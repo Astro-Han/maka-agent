@@ -168,14 +168,14 @@ export async function verifyResume(connection, workspace, reopened) {
     observers.push(attached);
     assert.equal(attached.subscription.activeAssistantStreams.length, 1);
     const partial = await attached.subscription.loadTranscript(decodeStoredMessage);
-    assert(
-      partial.some(
-        (row) => row.type === 'assistant' && row.turnId === input.turnId && row.text === 'RESU',
-      ),
-      `resume overlay: ${JSON.stringify(partial)}`,
-    );
+    assert(!partial.some((row) => row.type === 'assistant' && row.turnId === input.turnId));
+    const prefix = await attached.waitFor((frame) => frame.kind === 'subscription.session_delta');
+    assert.equal(prefix.delta.startOffset, 0);
+    assert.equal(prefix.delta.text, 'RESU');
     resumed.release();
-    const suffix = await attached.waitFor((frame) => frame.kind === 'subscription.session_delta');
+    const suffix = await attached.waitFor(
+      (frame) => frame.kind === 'subscription.session_delta' && frame.delta.startOffset === 4,
+    );
     assert.equal(suffix.delta.startOffset, 4);
     assert.equal(suffix.delta.text, 'MED_OK');
     const finished = await terminal(input.turnId);

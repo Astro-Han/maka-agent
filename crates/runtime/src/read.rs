@@ -29,7 +29,7 @@ use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use std::num::NonZeroUsize;
 
 pub const MAX_PAGE_CHARS: usize = 7_500;
-pub const DESCRIPTION: &str = "Read a file or a Maka resource using path. Returns one bounded page; offset is a zero-based starting line and limit is a positive line count. A large limit cannot bypass the response-size cap. If next is non-null, pass that object to Read to continue the requested range. partialLine means a line spans pages. Continuations reject changed content; restart with the original path.";
+pub const DESCRIPTION: &str = "Read a file or a Maka resource using path. PNG, JPEG, GIF and WebP files return images. Text returns one bounded page; offset is a zero-based starting line and limit is a positive line count. A large limit cannot bypass the response-size cap. If next is non-null, pass that object to Read to continue the requested range. partialLine means a line spans pages. Continuations reject changed content; restart with the original path.";
 const PREFIX: &str = "maka://read/";
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 

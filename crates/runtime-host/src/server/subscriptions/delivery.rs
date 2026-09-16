@@ -33,6 +33,8 @@ struct Pending {
 }
 
 pub(super) struct Delivery {
+    pub(super) ready: bool,
+    resources: std::collections::BTreeSet<String>,
     pub(super) version: Option<maka_event_log::observation::ObservationVersion>,
     epoch: String,
     id: String,
@@ -52,29 +54,16 @@ impl Delivery {
     pub fn resource_changed(
         &mut self,
         change: &maka_event_log::shell_runs::ShellChange,
-    ) -> Result<Option<Value>, HostError> {
+    ) -> Result<(), HostError> {
         if change.session_id != self.session_id {
-            return Ok(None);
+            return Ok(());
         }
-        let frame = ResourceObservationFrame::DomainChanged {
-            host_epoch: self.epoch.clone(),
-            subscription_id: self.id.clone(),
-            sequence: self.sequence,
-            session_id: self.session_id.clone(),
-            domain: ResourceDomain::RuntimeResource,
-            resources: vec![ResourceChange {
-                source_session_id: change.session_id.clone(),
-                resource_ref: format!(
-                    "{}{}",
-                    maka_presentation::shell::RESOURCE_REF_PREFIX,
-                    change.id
-                ),
-            }],
-        };
-        let value = serde_json::to_value(frame)?;
-        decode_resource_observation_frame(&value)?;
-        self.sequence += 1;
-        Ok(Some(value))
+        self.resources.insert(change.id.clone());
+        if self.resources.len() > 64 {
+            return Err("subscription resource backlog exceeded".into());
+        }
+        self.version = None;
+        Ok(())
     }
 
     pub fn open(
@@ -83,6 +72,11 @@ impl Delivery {
         observation: SessionObservation<SessionConfiguration>,
         prepared: Option<PreparedTranscript>,
     ) -> Result<(Self, SubscriptionOpenResult), HostError> {
+        let replay_from = observation
+            .active_streams
+            .iter()
+            .map(|seed| seed.start_sequence)
+            .min();
         let streams = Streams::bootstrap(
             observation
                 .root_turn
@@ -116,14 +110,16 @@ impl Delivery {
         );
         Ok((
             Self {
+                ready: false,
+                resources: Default::default(),
                 epoch: epoch.into(),
                 id: id.into(),
                 session_id: snapshot.session.session_id.clone(),
                 sequence: 1,
-                cursor,
+                cursor: replay_from.map_or(cursor, |sequence| sequence - 1),
                 snapshot,
                 version: None,
-                streams,
+                streams: Streams::default(),
                 pending: None,
                 transcript,
             },
@@ -174,6 +170,27 @@ impl Delivery {
                 self.sequence += 1;
             }
             pending = transcript.is_pending();
+        }
+        if !self.resources.is_empty() {
+            let resources = std::mem::take(&mut self.resources)
+                .into_iter()
+                .map(|id| ResourceChange {
+                    source_session_id: self.session_id.clone(),
+                    resource_ref: format!("{}{id}", maka_presentation::shell::RESOURCE_REF_PREFIX),
+                })
+                .collect();
+            let frame = ResourceObservationFrame::DomainChanged {
+                host_epoch: self.epoch.clone(),
+                subscription_id: self.id.clone(),
+                sequence: self.sequence,
+                session_id: self.session_id.clone(),
+                domain: ResourceDomain::RuntimeResource,
+                resources,
+            };
+            let value = serde_json::to_value(frame)?;
+            decode_resource_observation_frame(&value)?;
+            self.sequence += 1;
+            frames.push(value);
         }
         Ok((frames, continuing || pending))
     }

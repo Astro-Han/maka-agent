@@ -212,11 +212,9 @@ export interface DesktopRuntimeHostSession {
   readonly activeAssistantStreams: readonly SessionAssistantStreamIdentity[];
   readonly transcriptBootstrap: SessionTranscriptBootstrap;
   readonly events: AsyncIterable<SubscriptionFrame>;
+  /** Frames are held by the Host until this resolves. */
+  ready(): Promise<void>;
   loadTranscript(): Promise<StoredMessage[]>;
-  loadTranscriptOverlay(
-    maxMessageBytes?: number,
-    accountAssemblyBytes?: (deltaBytes: number) => void,
-  ): Promise<StoredMessage[]>;
   decodeTranscriptPage(
     page: SessionTranscriptPage,
     maxMessageBytes?: number,
@@ -1857,6 +1855,10 @@ class DesktopSessionHandle implements DesktopRuntimeHostSession {
     this.events = subscription;
   }
 
+  ready(): Promise<void> {
+    return this.subscription.ready();
+  }
+
   loadTranscript(): Promise<StoredMessage[]> {
     this.#transcriptTask ??= this.subscription.loadTranscript(decodeStoredMessage);
     return this.#transcriptTask;
@@ -1864,17 +1866,6 @@ class DesktopSessionHandle implements DesktopRuntimeHostSession {
 
   subscribePtyData(listener: Parameters<RuntimeHostSessionSubscription['subscribePtyData']>[0]): () => void {
     return this.subscription.subscribePtyData(listener);
-  }
-
-  loadTranscriptOverlay(
-    maxMessageBytes?: number,
-    accountAssemblyBytes?: (deltaBytes: number) => void,
-  ): Promise<StoredMessage[]> {
-    return this.subscription.loadTranscriptOverlay(
-      decodeStoredMessage,
-      maxMessageBytes,
-      accountAssemblyBytes,
-    );
   }
 
   decodeTranscriptPage(

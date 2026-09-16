@@ -24,7 +24,12 @@ import {
   RuntimeHostSessionProjector,
 } from '../../packages/runtime-host/src/adapter/session-projector.ts';
 
-export async function watchSession(connection, sessionId, transcript = { kind: 'none' }) {
+export async function watchSession(
+  connection,
+  sessionId,
+  transcript = { kind: 'none' },
+  ready = true,
+) {
   const subscription = await connection.openSessionSubscription(
     {
       sessionId,
@@ -33,16 +38,13 @@ export async function watchSession(connection, sessionId, transcript = { kind: '
     3000,
   );
   const frames = [];
-  // A cold stream must work through the actual Desktop projector, not only
-  // concatenate into the right text. Mid-stream attachments require transcript
-  // seeding and retain their separate overlay/bootstrap assertions below callers.
-  const projector =
-    subscription.activeAssistantStreams.length === 0
-      ? new RuntimeHostSessionProjector(
-          subscription.snapshot,
-          createRuntimeHostSessionProjectionSeed([], subscription.snapshot),
-        )
-      : undefined;
+  // Reconnected streams replay their committed prefix from offset zero.
+  const projector = new RuntimeHostSessionProjector(
+    subscription.snapshot,
+    createRuntimeHostSessionProjectionSeed([], subscription.snapshot),
+    Date.now,
+    subscription.activeAssistantStreams,
+  );
   let failure;
   const task = (async () => {
     try {
@@ -54,6 +56,7 @@ export async function watchSession(connection, sessionId, transcript = { kind: '
       failure = error;
     }
   })();
+  if (ready) await subscription.ready();
   return {
     subscription,
     frames,

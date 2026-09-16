@@ -52,10 +52,6 @@ fn cursor(v: &Value) -> Result<Option<String>> {
     )?;
     Ok(Some(s.to_owned()))
 }
-pub(super) fn source(v: &Value) -> Result<SessionTranscriptPageSource> {
-    serde_json::from_value(v.clone())
-        .map_err(|_| ProtocolError::invalid("Invalid transcript source"))
-}
 fn direction(v: &Value) -> Result<SessionTranscriptPageDirection> {
     serde_json::from_value(v.clone())
         .map_err(|_| ProtocolError::invalid("Invalid transcript direction"))
@@ -66,7 +62,6 @@ pub fn decode_session_transcript_page_input(v: &Value) -> Result<SessionTranscri
         record(v, "transcript page input")?,
         &[
             "subscriptionId",
-            "source",
             "direction",
             "throughSequence",
             "cursor",
@@ -87,7 +82,6 @@ pub fn decode_session_transcript_page_input(v: &Value) -> Result<SessionTranscri
     )?;
     Ok(SessionTranscriptPageInput {
         subscription_id: string(&v["subscriptionId"], "subscriptionId", 128)?,
-        source: source(&v["source"])?,
         direction: direction(&v["direction"])?,
         through_sequence: nullable_count(&v["throughSequence"])?,
         cursor,
@@ -109,7 +103,6 @@ pub fn decode_session_transcript_page(v: &Value) -> Result<SessionTranscriptPage
         &[
             "kind",
             "sessionId",
-            "source",
             "direction",
             "throughSequence",
             "rawBytes",
@@ -127,7 +120,6 @@ pub fn decode_session_transcript_page(v: &Value) -> Result<SessionTranscriptPage
             .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b)),
         "Invalid sessionId",
     )?;
-    let source = source(&v["source"])?;
     let direction = direction(&v["direction"])?;
     let through_sequence = nullable_count(&v["throughSequence"])?;
     let entries = v["fragments"]
@@ -137,7 +129,7 @@ pub fn decode_session_transcript_page(v: &Value) -> Result<SessionTranscriptPage
     let mut fragments = Vec::with_capacity(entries.len());
     let mut bytes = 0;
     for entry in entries {
-        let (fragment, size) = decode_fragment(entry, source, through_sequence)?;
+        let (fragment, size) = decode_fragment(entry, through_sequence)?;
         if let Some(previous) = fragments.last().map(SessionTranscriptFragment::identity) {
             ensure(
                 match direction {
@@ -167,14 +159,12 @@ pub fn decode_session_transcript_page(v: &Value) -> Result<SessionTranscriptPage
         .flatten()
     {
         ensure(
-            source == SessionTranscriptPageSource::Durable
-                && through_sequence.is_some_and(|w| boundary <= w),
+            through_sequence.is_some_and(|w| boundary <= w),
             "Invalid transcript range boundary",
         )?;
     }
     Ok(SessionTranscriptPage {
         session_id,
-        source,
         direction,
         through_sequence,
         raw_bytes,
@@ -190,8 +180,7 @@ pub fn assert_page_for_input(
     page: &SessionTranscriptPage,
 ) -> Result<()> {
     ensure(
-        page.source == input.source
-            && page.direction == input.direction
+        page.direction == input.direction
             && page.through_sequence == input.through_sequence
             && page.raw_bytes <= input.max_bytes,
         "Transcript page does not match request",
@@ -199,43 +188,19 @@ pub fn assert_page_for_input(
 }
 
 pub fn decode_session_transcript_bootstrap(v: &Value) -> Result<SessionTranscriptBootstrap> {
-    exact(
-        record(v, "transcript bootstrap")?,
-        &[
-            "throughSequence",
-            "overlayMessageCount",
-            "durable",
-            "overlay",
-        ],
-    )?;
-    let result = SessionTranscriptBootstrap {
-        through_sequence: nullable_count(&v["throughSequence"])?,
-        overlay_message_count: count(&v["overlayMessageCount"], "overlayMessageCount")?,
-        durable: decode_session_transcript_page(&v["durable"])?,
-        overlay: decode_session_transcript_page(&v["overlay"])?,
-    };
+    exact(record(v, "transcript bootstrap")?, &["durable"])?;
+    let durable = decode_session_transcript_page(&v["durable"])?;
     ensure(
-        result.overlay_message_count <= SESSION_TRANSCRIPT_OVERLAY_MAX_MESSAGES,
-        "Overlay exceeds message limit",
+        durable.direction == SessionTranscriptPageDirection::Older,
+        "Invalid transcript bootstrap direction",
     )?;
     ensure(
-        result.durable.source == SessionTranscriptPageSource::Durable
-            && result.overlay.source == SessionTranscriptPageSource::Overlay
-            && result.durable.direction == SessionTranscriptPageDirection::Older
-            && result.overlay.direction == SessionTranscriptPageDirection::Older
-            && result.durable.through_sequence == result.through_sequence
-            && result.overlay.through_sequence == result.through_sequence,
-        "Invalid transcript bootstrap correlation",
-    )?;
-    ensure(
-        result.durable.raw_bytes + result.overlay.raw_bytes
-            <= SESSION_TRANSCRIPT_BOOTSTRAP_MAX_BYTES,
+        durable.raw_bytes <= SESSION_TRANSCRIPT_BOOTSTRAP_MAX_BYTES,
         "Bootstrap exceeds byte limit",
     )?;
-    Ok(result)
+    Ok(SessionTranscriptBootstrap { durable })
 }
 
-/// Checks the enclosing subscription identity and requested combined tail budget.
 /// Individual pages must already have passed their wire decoder.
 pub fn validate_bootstrap_for_input(
     bootstrap: &SessionTranscriptBootstrap,
@@ -245,36 +210,7 @@ pub fn validate_bootstrap_for_input(
     ensure(
         (2..=SESSION_TRANSCRIPT_BOOTSTRAP_MAX_BYTES).contains(&max_bytes)
             && bootstrap.durable.session_id == session_id
-            && bootstrap.overlay.session_id == session_id
-            && bootstrap
-                .durable
-                .raw_bytes
-                .checked_add(bootstrap.overlay.raw_bytes)
-                .is_some_and(|bytes| bytes <= max_bytes),
+            && bootstrap.durable.raw_bytes <= max_bytes,
         "Bootstrap does not match subscription request",
-    )
-}
-
-pub fn decode_session_transcript_overlay_release_input(
-    v: &Value,
-) -> Result<SessionTranscriptOverlayReleaseInput> {
-    exact(record(v, "overlay release")?, &["subscriptionId"])?;
-    Ok(SessionTranscriptOverlayReleaseInput {
-        subscription_id: string(&v["subscriptionId"], "subscriptionId", 128)?,
-    })
-}
-pub fn decode_session_transcript_overlay_release_result(
-    v: &Value,
-) -> Result<SessionTranscriptOverlayReleaseResult> {
-    decode_session_transcript_overlay_release_input(v)
-}
-
-pub fn assert_overlay_release_for_input(
-    input: &SessionTranscriptOverlayReleaseInput,
-    output: &SessionTranscriptOverlayReleaseResult,
-) -> Result<()> {
-    ensure(
-        input.subscription_id == output.subscription_id,
-        "Transcript overlay release identity changed",
     )
 }

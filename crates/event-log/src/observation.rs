@@ -28,7 +28,6 @@ mod delivery;
 mod streams;
 pub use delivery::{StoreStreamEvent, StreamEventPage, StreamFact, ToolSettlement};
 pub use streams::AssistantStreamSeed;
-pub(crate) use streams::register_function;
 
 /// Metadata, latest root Turn and catch-up cursor from the same SQL snapshot.
 pub struct SessionObservation<T> {

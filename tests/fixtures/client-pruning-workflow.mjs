@@ -40,7 +40,6 @@ async function rows(connection, sessionId) {
       entries.push(...decoded.messages);
       if (decoded.nextCursor === null) break;
       page = await subscription.loadTranscriptPage({
-        source: 'durable',
         direction: 'older',
         throughSequence: page.throughSequence,
         cursor: decoded.nextCursor,

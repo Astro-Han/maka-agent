@@ -199,15 +199,23 @@ export async function verifyTurns(connection, sessionId, fixture, connectSibling
   await observer.waitFor(
     (frame) => frame.kind === 'subscription.session_delta' && frame.delta.turnId === second.turnId,
   );
-  const attached = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
+  const attached = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 }, false);
   assert.equal(attached.subscription.snapshot.rootTurn.turnId, second.turnId);
   assert.equal(attached.subscription.snapshot.rootTurn.status, 'running');
   assert.equal(attached.subscription.activeAssistantStreams.length, 1);
   fixture.continuePartial();
-  const suffix = await attached.waitFor((frame) => frame.kind === 'subscription.session_delta');
+  await observer.waitFor(
+    (frame) =>
+      frame.kind === 'subscription.session_delta' && frame.delta.text.endsWith(' 🐈 suffix'),
+  );
+  await connection.status(3000);
+  assert.deepEqual(attached.frames, [], 'Host holds stream frames until the client is ready');
+  await attached.subscription.ready();
+  const suffix = await attached.waitFor(
+    (frame) =>
+      frame.kind === 'subscription.session_delta' && frame.delta.text.endsWith(' 🐈 suffix'),
+  );
   assert.equal(suffix.delta.messageId, attached.subscription.activeAssistantStreams[0].messageId);
-  assert.equal(suffix.delta.startOffset, 'incomplete😀 fixture'.length);
-  assert.equal(suffix.delta.text, ' 🐈 suffix');
   await activeTail(connection, attached, connectSibling);
   await attached.close();
   const sibling = await connectSibling();

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-//! Epoch 141 transcript wire validation; contains no history or projection state.
+//! Transcript wire validation; contains no history or projection state.
 mod codec;
 mod fragment;
 mod types;
@@ -29,6 +29,5 @@ pub const SESSION_TRANSCRIPT_PAGE_MAX_BYTES: u64 = 512 * 1024;
 pub const SESSION_TRANSCRIPT_PAGE_MAX_MESSAGES: usize = 256;
 pub const SESSION_TRANSCRIPT_RANGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 pub const SESSION_TRANSCRIPT_RANGE_MAX_MESSAGES: usize = 256;
-pub const SESSION_TRANSCRIPT_OVERLAY_MAX_MESSAGES: u64 = 4096;
 pub const SESSION_TRANSCRIPT_PAGE_RESULT_MAX_BYTES: usize = 744 * 1024;
 pub const SESSION_TRANSCRIPT_CURSOR_MAX_BYTES: usize = 1024;

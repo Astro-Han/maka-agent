@@ -69,7 +69,7 @@ impl Delivery {
                     events.next();
                 }
             }
-            // Token observations only extend the live overlay. Wake the durable
+            // Token observations extend the live stream. Wake the durable
             // transcript reader when a boundary can publish immutable rows.
             if matches!(
                 stored.fact,
@@ -245,6 +245,8 @@ mod tests {
     #[test]
     fn run_start_precedes_its_deltas_without_overtaking_old_tail_or_terminal_text() {
         let mut delivery = Delivery {
+            ready: true,
+            resources: Default::default(),
             version: None,
             epoch: "epoch".into(),
             id: "sub".into(),

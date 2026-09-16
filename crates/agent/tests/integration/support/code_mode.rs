@@ -55,22 +55,28 @@ impl ToolExecutor for Effects {
         let together = self.together.clone();
         Box::pin(async move {
             let prefix = log.prefix(100, 128 * 1024).await.unwrap();
-            let dispatches: Vec<_> = prefix
-                .events
-                .iter()
-                .filter_map(|event| match &event.event.fact {
+            let dispatches: Vec<_> =
+                prefix
+                    .events
+                    .iter()
+                    .filter_map(|event| {
+                        match &event.event.fact {
                     Fact::ToolDispatched {
                         operation_id,
                         name: actual,
                         ..
-                    } if actual == &name => Some((operation_id, &event.event.invocation)),
+                    } if actual == &name && !prefix.events.iter().any(|settled| matches!(
+                        &settled.event.fact, Fact::ToolSettled { operation_id: settled_id, .. }
+                        if settled_id == operation_id
+                    )) => Some((operation_id, &event.event.invocation)),
                     _ => None,
-                })
-                .collect();
+                }
+                    })
+                    .collect();
             assert_eq!(
                 dispatches.len(),
                 1,
-                "effect must have exactly one committed T1"
+                "effect must have exactly one unsettled committed T1"
             );
             assert_eq!(dispatches[0].1.invocation_id, "invocation-first");
             assert!(!prefix.events.iter().any(|event| matches!(

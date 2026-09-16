@@ -21,53 +21,30 @@ use serde::{Deserialize, Serialize, ser::SerializeStruct};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum SessionTranscriptPageSource {
-    Durable,
-    Overlay,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum SessionTranscriptPageDirection {
     Older,
     Newer,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "lowercase",
-    rename_all_fields = "camelCase"
-)]
-pub enum SessionTranscriptFragment {
-    Durable {
-        sequence: u64,
-        byte_offset: u64,
-        total_bytes: u64,
-        payload_digest: Option<String>,
-        data: String,
-    },
-    Overlay {
-        message_index: u64,
-        byte_offset: u64,
-        total_bytes: u64,
-        data: String,
-    },
+#[serde(rename_all = "camelCase")]
+pub struct SessionTranscriptFragment {
+    pub sequence: u64,
+    pub byte_offset: u64,
+    pub total_bytes: u64,
+    pub payload_digest: Option<String>,
+    pub data: String,
 }
 
 impl SessionTranscriptFragment {
     pub fn identity(&self) -> u64 {
-        match self {
-            Self::Durable { sequence, .. } => *sequence,
-            Self::Overlay { message_index, .. } => *message_index,
-        }
+        self.sequence
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionTranscriptPage {
     pub session_id: String,
-    pub source: SessionTranscriptPageSource,
     pub direction: SessionTranscriptPageDirection,
     pub through_sequence: Option<u64>,
     pub raw_bytes: u64,
@@ -79,10 +56,9 @@ pub struct SessionTranscriptPage {
 
 impl Serialize for SessionTranscriptPage {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SessionTranscriptPage", 10)?;
+        let mut s = serializer.serialize_struct("SessionTranscriptPage", 9)?;
         s.serialize_field("kind", "page")?;
         s.serialize_field("sessionId", &self.session_id)?;
-        s.serialize_field("source", &self.source)?;
         s.serialize_field("direction", &self.direction)?;
         s.serialize_field("throughSequence", &self.through_sequence)?;
         s.serialize_field("rawBytes", &self.raw_bytes)?;
@@ -98,7 +74,6 @@ impl Serialize for SessionTranscriptPage {
 #[serde(rename_all = "camelCase")]
 pub struct SessionTranscriptPageInput {
     pub subscription_id: String,
-    pub source: SessionTranscriptPageSource,
     pub direction: SessionTranscriptPageDirection,
     pub through_sequence: Option<u64>,
     pub cursor: Option<String>,
@@ -109,15 +84,5 @@ pub struct SessionTranscriptPageInput {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTranscriptBootstrap {
-    pub through_sequence: Option<u64>,
-    pub overlay_message_count: u64,
     pub durable: SessionTranscriptPage,
-    pub overlay: SessionTranscriptPage,
 }
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionTranscriptOverlayReleaseInput {
-    pub subscription_id: String,
-}
-pub type SessionTranscriptOverlayReleaseResult = SessionTranscriptOverlayReleaseInput;

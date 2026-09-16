@@ -117,8 +117,8 @@ export async function verifyWorkspace(connection, sessionId, workspace) {
     const after = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
     try {
       assert.equal(
-        after.subscription.transcriptBootstrap.throughSequence,
-        observer.subscription.transcriptBootstrap.throughSequence,
+        after.subscription.transcriptBootstrap.durable.throughSequence,
+        observer.subscription.transcriptBootstrap.durable.throughSequence,
         'relocation and no-op do not append runtime events',
       );
       assert.deepEqual(

@@ -27,9 +27,7 @@ use super::{Host, HostError};
 use crate::session::SessionConfiguration;
 use delivery::Delivery;
 use maka_protocol::subscription::*;
-use maka_protocol::transcript::{
-    decode_session_transcript_overlay_release_input, decode_session_transcript_page_input,
-};
+use maka_protocol::transcript::decode_session_transcript_page_input;
 use maka_protocol::{Operation, OperationError, OperationErrorCode as Code, Outcome};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
@@ -52,7 +50,9 @@ impl Subscriptions {
         host: &Host,
         outbound: &super::outbound::Outbound,
     ) -> Result<Option<Value>, HostError> {
-        self.pty.poll(host, outbound)
+        self.pty.poll(host, outbound, |id| {
+            self.owned.get(id).is_some_and(|delivery| delivery.ready)
+        })
     }
     pub fn is_empty(&self) -> bool {
         self.owned.is_empty()
@@ -62,12 +62,11 @@ impl Subscriptions {
         &mut self,
         host: &Host,
         change: &maka_event_log::shell_runs::ShellChange,
-    ) -> Result<Vec<Value>, HostError> {
+    ) -> Result<(), HostError> {
         self.pty.refresh(host, change);
         self.owned
             .values_mut()
-            .filter_map(|delivery| delivery.resource_changed(change).transpose())
-            .collect()
+            .try_for_each(|delivery| delivery.resource_changed(change))
     }
 
     pub fn new(registry: Registry) -> Self {
@@ -120,7 +119,6 @@ impl Subscriptions {
                 let subscription_id = Uuid::new_v4().to_string();
                 let id = subscription_id.clone();
                 let policy = input.transcript.clone();
-                let budget = host.transcript_budget.clone();
                 let prepared = async {
                     let observation = log
                         .observe_session::<SessionConfiguration>(&session_id)
@@ -130,8 +128,7 @@ impl Subscriptions {
                             code: Code::NotFound,
                             message: "Session was not found".into(),
                         })?;
-                    let transcript =
-                        transcript::prepare(&log, &observation, id, &policy, budget).await?;
+                    let transcript = transcript::prepare(&log, &observation, id, &policy).await?;
                     Ok::<_, OperationError>((observation, transcript))
                 }
                 .await;
@@ -200,17 +197,15 @@ impl Subscriptions {
                     Err(error) => Ok(Outcome::failure(transcript::operation_error(error))),
                 }
             }
-            Operation::SessionTranscriptOverlayRelease => {
-                let input = decode_session_transcript_overlay_release_input(&input)?;
+            Operation::SubscriptionReady => {
+                let input = decode_subscription_close_input(&input)?;
                 let Some(delivery) = self.owned.get_mut(&input.subscription_id) else {
                     return Ok(failure(
                         Code::NotFound,
                         "Session subscription was not found",
                     ));
                 };
-                if let Some(access) = &mut delivery.transcript {
-                    access.state.release_overlay();
-                }
+                delivery.ready = true;
                 Ok(Outcome::success(serde_json::to_value(input)?))
             }
             _ => unreachable!("subscription operation dispatch"),
@@ -232,7 +227,7 @@ impl Subscriptions {
             .map(|delivery| delivery.session_id().to_owned())
             .collect::<Vec<_>>();
         let versions = host.log.observation_versions(&sessions).await?;
-        for delivery in self.owned.values_mut() {
+        for delivery in self.owned.values_mut().filter(|delivery| delivery.ready) {
             let version = *versions
                 .get(delivery.session_id())
                 .ok_or("observed Session disappeared")?;
@@ -280,8 +275,8 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol
         Operation::SessionTranscriptPage => {
             decode_session_transcript_page_input(value)?;
         }
-        Operation::SessionTranscriptOverlayRelease => {
-            decode_session_transcript_overlay_release_input(value)?;
+        Operation::SubscriptionReady => {
+            decode_subscription_close_input(value)?;
         }
         _ => unreachable!("subscription operation decoder"),
     }
@@ -290,7 +285,7 @@ pub(super) fn decode_input(operation: Operation, value: &Value) -> maka_protocol
 
 pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
     match operation {
-        Operation::SessionTranscriptPage | Operation::SessionTranscriptOverlayRelease => Some(&[
+        Operation::SessionTranscriptPage => Some(&[
             Code::HostNotReady,
             Code::HostDraining,
             Code::OperationUnavailable,
@@ -310,7 +305,9 @@ pub(super) fn errors(operation: Operation) -> Option<&'static [Code]> {
             Code::PersistenceFailed,
             Code::InternalFailure,
         ]),
-        Operation::SubscriptionClose | Operation::SubscriptionPtyInterestSet => Some(&[
+        Operation::SubscriptionClose
+        | Operation::SubscriptionReady
+        | Operation::SubscriptionPtyInterestSet => Some(&[
             Code::HostNotReady,
             Code::HostDraining,
             Code::OperationUnavailable,

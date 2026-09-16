@@ -24,8 +24,6 @@ use maka_runtime::event::{
     EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent,
 };
 use maka_runtime_host::transcript::Transcript;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
 
 #[tokio::test]
 async fn oversized_turn_uses_null_boundary_without_losing_rows() {
@@ -75,17 +73,9 @@ async fn oversized_turn_uses_null_boundary_without_losing_rows() {
     }
     while !log.prepare_transcript("session", fence, 32).await.unwrap() {}
     let through = Some(watermark(fence).unwrap());
-    let state = Transcript::new(
-        "sub".into(),
-        "session".into(),
-        through,
-        vec![],
-        Arc::new(Semaphore::new(1024)),
-    )
-    .unwrap();
+    let state = Transcript::new("sub".into(), "session".into(), through).unwrap();
     let mut request = SessionTranscriptPageInput {
         subscription_id: "sub".into(),
-        source: SessionTranscriptPageSource::Durable,
         direction: SessionTranscriptPageDirection::Older,
         through_sequence: through,
         cursor: None,
@@ -111,18 +101,10 @@ async fn empty_fresh_tail_is_truthful_and_budgeted() {
     let log = EventLog::open(&dir.path().join("log.sqlite"))
         .await
         .unwrap();
-    let state = Transcript::new(
-        "sub".into(),
-        "session".into(),
-        None,
-        vec![],
-        Arc::new(Semaphore::new(1024)),
-    )
-    .unwrap();
+    let state = Transcript::new("sub".into(), "session".into(), None).unwrap();
     let bootstrap = state.bootstrap(&log, 2).await.unwrap();
-    assert_eq!(bootstrap.through_sequence, None);
-    assert_eq!(bootstrap.overlay_message_count, 0);
-    assert_eq!(bootstrap.durable.raw_bytes + bootstrap.overlay.raw_bytes, 0);
+    assert_eq!(bootstrap.durable.through_sequence, None);
+    assert_eq!(bootstrap.durable.raw_bytes, 0);
     assert!(bootstrap.durable.fragments.is_empty());
     assert!(bootstrap.durable.next_cursor.is_none());
     assert!(state.bootstrap(&log, 1).await.is_err());

@@ -19,7 +19,6 @@
 
 use super::{cursor::Position, *};
 use SessionTranscriptPageDirection::{Newer, Older};
-use SessionTranscriptPageSource::{Durable, Overlay};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use maka_event_log::transcript::{TranscriptDirection, TranscriptRead, TranscriptRowHeader};
 
@@ -30,7 +29,6 @@ pub(super) async fn read(
 ) -> Result<SessionTranscriptPage> {
     let mut result = SessionTranscriptPage {
         session_id: state.session_id.clone(),
-        source: input.source,
         direction: input.direction,
         through_sequence: input.through_sequence,
         raw_bytes: 0,
@@ -48,7 +46,7 @@ pub(super) async fn read(
         }
         return Ok(result);
     };
-    if input.source == Durable && position.boundary.is_none() {
+    if position.boundary.is_none() {
         let bounds = log
             .transcript_turn_bounds(
                 &state.session_id,
@@ -84,30 +82,15 @@ pub(super) async fn read(
             position.offset,
             input.max_bytes - result.raw_bytes,
         )?;
-        let bytes = match input.source {
-            Durable => {
-                log.transcript_fragment(&state.session_id, row.sequence, offset, length)
-                    .await?
-            }
-            Overlay => state.overlay.as_ref().unwrap().rows[row.sequence as usize]
-                [offset as usize..(offset + length) as usize]
-                .to_vec(),
-        };
-        let data = STANDARD.encode(bytes);
-        result.fragments.push(match input.source {
-            Durable => SessionTranscriptFragment::Durable {
-                sequence: row.sequence,
-                byte_offset: offset,
-                total_bytes: row.total_bytes,
-                payload_digest: Some(row.digest),
-                data,
-            },
-            Overlay => SessionTranscriptFragment::Overlay {
-                message_index: row.sequence,
-                byte_offset: offset,
-                total_bytes: row.total_bytes,
-                data,
-            },
+        let bytes = log
+            .transcript_fragment(&state.session_id, row.sequence, offset, length)
+            .await?;
+        result.fragments.push(SessionTranscriptFragment {
+            sequence: row.sequence,
+            byte_offset: offset,
+            total_bytes: row.total_bytes,
+            payload_digest: Some(row.digest),
+            data: STANDARD.encode(bytes),
         });
         result.raw_bytes += length;
         if let Some(offset) = continuation {
@@ -148,51 +131,32 @@ async fn header(
     input: &SessionTranscriptPageInput,
     position: u64,
 ) -> Result<Option<TranscriptRowHeader>> {
-    match input.source {
-        Durable => {
-            let Some(through) = input.through_sequence else {
-                return Ok(None);
-            };
-            let rows = log
-                .transcript_headers(
-                    &state.session_id,
-                    &TranscriptRead {
-                        through,
-                        position,
-                        direction: if input.direction == Older {
-                            TranscriptDirection::Older
-                        } else {
-                            TranscriptDirection::Newer
-                        },
-                        limit: 1,
-                    },
-                )
-                .await?;
-            Ok(rows.into_iter().next())
-        }
-        Overlay => Ok(state
-            .overlay
-            .as_ref()
-            .unwrap()
-            .rows
-            .get(position as usize)
-            .map(|bytes| TranscriptRowHeader {
-                sequence: position,
-                turn_id: String::new(),
-                total_bytes: bytes.len() as u64,
-                digest: String::new(),
-            })),
-    }
+    let Some(through) = input.through_sequence else {
+        return Ok(None);
+    };
+    let rows = log
+        .transcript_headers(
+            &state.session_id,
+            &TranscriptRead {
+                through,
+                position,
+                direction: if input.direction == Older {
+                    TranscriptDirection::Older
+                } else {
+                    TranscriptDirection::Newer
+                },
+                limit: 1,
+            },
+        )
+        .await?;
+    Ok(rows.into_iter().next())
 }
 
 fn start(state: &Transcript, input: &SessionTranscriptPageInput) -> Result<Option<Position>> {
     if let Some(token) = &input.cursor {
         return state.cursor.decode(input, token).map(Some);
     }
-    let last = match input.source {
-        Durable => input.through_sequence,
-        Overlay => (state.overlay.as_ref().unwrap().rows.len() as u64).checked_sub(1),
-    };
+    let last = input.through_sequence;
     let Some(last) = last else {
         return Ok(None);
     };

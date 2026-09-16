@@ -30,6 +30,7 @@ pub(super) async fn source_fence(
     selection: &Selection,
     opening: Option<&(i64, RuntimeEvent)>,
     mode: &CheckpointMode,
+    through: u64,
 ) -> Result<u64, StoreError> {
     let session = selection
         .session
@@ -71,10 +72,9 @@ pub(super) async fn source_fence(
                     "mid-turn anchor is not the exact canonical opening",
                 ));
             }
-            sqlx::query_scalar::<_, Option<i64>>(
-                "SELECT MIN(sequence) FROM runtime_events WHERE invocation_id = ? AND kind = 'model_requested'
-                 AND json_extract(event_json, '$.fact.purpose') = 'summary'",
-            ).bind(&event.invocation.invocation_id).fetch_one(&mut *connection).await?.unwrap_or(i64::MAX)
+            summary_start(connection, &event.invocation.invocation_id, through)
+                .await?
+                .unwrap_or(through) as i64
         }
         _ => return Err(invalid("checkpoint mode does not match its opening")),
     };
@@ -98,13 +98,7 @@ pub(super) async fn summary_span(
     event: &RuntimeEvent,
     through: u64,
 ) -> Result<(), StoreError> {
-    let first: Option<i64> = sqlx::query_scalar(
-        "SELECT MIN(sequence) FROM runtime_events WHERE invocation_id = ? AND kind = 'model_requested'
-         AND (json_extract(event_json, '$.fact.purpose') = 'summary'
-           OR (json_extract(event_json, '$.fact.purpose') IS NULL AND EXISTS(SELECT 1 FROM runtime_events o
-             WHERE o.invocation_id = runtime_events.invocation_id AND o.kind = 'invocation_opened'
-             AND json_extract(o.event_json, '$.fact.input.kind') = 'context_compact')))",
-    ).bind(&event.invocation.invocation_id).fetch_one(&mut *connection).await?;
+    let first = summary_start(connection, &event.invocation.invocation_id, through).await?;
     let Some(first) = first else {
         return Ok(());
     };
@@ -114,11 +108,45 @@ pub(super) async fn summary_span(
            OR (kind = 'model_requested' AND COALESCE(json_extract(event_json, '$.fact.purpose'),
              (SELECT CASE json_extract(o.event_json, '$.fact.input.kind') WHEN 'context_compact' THEN 'summary' ELSE 'main' END
                FROM runtime_events o WHERE o.invocation_id = runtime_events.invocation_id AND o.kind = 'invocation_opened')) != 'summary')))",
-    ).bind(&event.invocation.invocation_id).bind(first).bind(through as i64).fetch_one(connection).await?;
+    ).bind(&event.invocation.invocation_id).bind(first as i64).bind(through as i64).fetch_one(connection).await?;
     if work {
         return Err(invalid(
             "message, main or tool work interleaved with summary repairs",
         ));
     }
     Ok(())
+}
+
+/// Repairs share one source until a checkpoint commits. Only a subsequent
+/// accepted main step permits another attempt. `through` excludes the checkpoint
+/// being validated, so later rounds cannot alter a historical proof.
+pub(super) async fn summary_start(
+    connection: &mut SqliteConnection,
+    invocation: &str,
+    through: u64,
+) -> Result<Option<u64>, StoreError> {
+    let (first, renewed): (Option<i64>, bool) = sqlx::query_as(
+        "WITH boundary AS (
+           SELECT COALESCE(MAX(sequence), 0) AS cut FROM runtime_events
+           WHERE invocation_id = ?1 AND kind = 'context_checkpoint_recorded' AND sequence < ?2)
+         SELECT (SELECT MIN(s.sequence) FROM runtime_events s
+           WHERE s.invocation_id = ?1 AND s.kind = 'model_requested' AND s.sequence > cut AND s.sequence < ?2
+           AND (json_extract(s.event_json, '$.fact.purpose') = 'summary'
+             OR (json_extract(s.event_json, '$.fact.purpose') IS NULL AND EXISTS (
+               SELECT 1 FROM runtime_events o WHERE o.invocation_id = ?1 AND o.kind = 'invocation_opened'
+               AND json_extract(o.event_json, '$.fact.input.kind') = 'context_compact')))),
+           cut = 0 OR EXISTS (SELECT 1 FROM runtime_events completed
+             JOIN runtime_events request ON request.invocation_id = completed.invocation_id
+               AND request.operation_id = completed.operation_id AND request.kind = 'model_requested'
+             JOIN runtime_events opening ON opening.invocation_id = completed.invocation_id AND opening.kind = 'invocation_opened'
+             WHERE completed.invocation_id = ?1 AND completed.kind = 'model_completed'
+               AND completed.sequence > cut AND completed.sequence < ?2
+               AND json_extract(opening.event_json, '$.fact.input.kind') != 'context_compact'
+               AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main')
+         FROM boundary",
+    ).bind(invocation).bind(through as i64).fetch_one(connection).await?;
+    if !renewed {
+        return Err(invalid("compaction requires a newly accepted main step"));
+    }
+    first.map(crate::sequence_number).transpose()
 }

@@ -69,6 +69,19 @@ pub fn string(value: &Value, label: &str, max_length: usize) -> Result<String> {
         .ok_or_else(|| ProtocolError::invalid(format!("Invalid {label}")))
 }
 
+/// Provider correlation IDs are opaque, not paths or Host entity IDs.
+pub(crate) fn opaque_identity(text: &str) -> Result<()> {
+    let whitespace = |c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}';
+    if text.is_empty()
+        || text.encode_utf16().count() > 256
+        || text.trim_matches(whitespace) != text
+        || text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+    {
+        return Err(ProtocolError::invalid("Invalid opaque identity"));
+    }
+    Ok(())
+}
+
 /// Accept JSON 1.0 and 1e0 as well as 1, exactly as Number.isSafeInteger does.
 pub fn count(value: &Value, label: &str) -> Result<u64> {
     value

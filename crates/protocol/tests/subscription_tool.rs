@@ -92,10 +92,10 @@ fn live_subset_rejects_durable_fields_and_unimplemented_optional_features() {
 fn ids_obey_distinct_entity_and_utf16_rules_and_names_use_utf8_bytes() {
     for (key, invalid) in [
         ("id", "".into()),
-        ("toolUseId", "💬".repeat(65)),
+        ("toolUseId", "💬".repeat(129)),
         ("turnId", "turn:1".into()),
         ("operationId", "step:call".into()),
-        ("stepId", "💬".into()),
+        ("stepId", " trailing ".into()),
         ("toolName", "💬".repeat(65)),
     ] {
         let mut event = start();
@@ -104,7 +104,8 @@ fn ids_obey_distinct_entity_and_utf16_rules_and_names_use_utf8_bytes() {
     }
     let mut event = start();
     event["id"] = json!("💬".repeat(64));
-    event["toolUseId"] = json!("💬".repeat(64));
+    event["toolUseId"] = json!("💬".repeat(128));
+    event["stepId"] = json!("provider:opaque/id");
     event["toolName"] = json!("💬".repeat(64));
     assert!(decode_session_tool_event(&event).is_ok());
     event["stepId"] = Value::Null;

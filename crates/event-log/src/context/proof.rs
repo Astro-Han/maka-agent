@@ -80,6 +80,7 @@ pub(super) async fn validate(
         &selection,
         Some(&(opened as i64, opening.clone())),
         &checkpoint.mode,
+        sequence,
     )
     .await?
         != checkpoint.covered_through
@@ -115,10 +116,10 @@ pub(super) async fn validate(
     else {
         return Err(invalid("missing summary request"));
     };
-    let first_summary: i64 = sqlx::query_scalar(
-        "SELECT MIN(sequence) FROM runtime_events WHERE invocation_id=? AND kind='model_requested'
-         AND (json_extract(event_json,'$.fact.purpose')='summary' OR (? AND json_extract(event_json,'$.fact.purpose') IS NULL))",
-    ).bind(&event.invocation.invocation_id).bind(matches!(input,maka_runtime::event::InvocationInput::ContextCompact { .. })).fetch_one(&mut *connection).await?;
+    let first_summary =
+        boundary::summary_start(connection, &event.invocation.invocation_id, sequence)
+            .await?
+            .ok_or_else(|| invalid("missing summary attempt"))?;
     crate::archive::validate_summary(
         connection,
         &super::SourceEvidence {
@@ -127,7 +128,7 @@ pub(super) async fn validate(
             digest: source_digest.clone(),
         },
         effective_source_digest.as_deref(),
-        first_summary as u64,
+        first_summary,
     )
     .await?;
     if resolve_model_purpose(input, *purpose).map_err(invalid)? != ModelPurpose::Summary
@@ -152,7 +153,7 @@ pub(super) async fn validate(
         ));
     }
     let changed_route: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND kind = 'model_requested' AND sequence < ?2
+        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND kind = 'model_requested' AND sequence >= ?10 AND sequence < ?2
          AND (json_extract(event_json, '$.fact.purpose') = 'summary' OR (?3 AND json_extract(event_json, '$.fact.purpose') IS NULL))
          AND (json_extract(event_json, '$.fact.model_id') != ?4 OR json_extract(event_json, '$.fact.route_identity') != ?5
            OR json_extract(event_json, '$.fact.source_high_water') != ?6 OR json_extract(event_json, '$.fact.source_digest') != ?7
@@ -161,7 +162,7 @@ pub(super) async fn validate(
     ).bind(&event.invocation.invocation_id).bind(sequence as i64)
         .bind(matches!(input, maka_runtime::event::InvocationInput::ContextCompact { .. }))
         .bind(model_id).bind(route_identity).bind(checkpoint.covered_through as i64).bind(&checkpoint.source_digest)
-        .bind(&checkpoint.previous_checkpoint_id).bind(effective_source_digest).fetch_one(&mut *connection).await?;
+        .bind(&checkpoint.previous_checkpoint_id).bind(effective_source_digest).bind(first_summary as i64).fetch_one(&mut *connection).await?;
     if changed_route {
         return Err(invalid("summary request route changed"));
     }

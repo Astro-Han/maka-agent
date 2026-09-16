@@ -91,8 +91,8 @@ export async function verifyMetadata(connection, initial, connectSibling) {
     );
     const after = await watchSession(sibling, initial.id, { kind: 'tail', maxBytes: 2 });
     assert.equal(
-      after.subscription.transcriptBootstrap.throughSequence,
-      remote.subscription.transcriptBootstrap.throughSequence,
+      after.subscription.transcriptBootstrap.durable.throughSequence,
+      remote.subscription.transcriptBootstrap.durable.throughSequence,
       'metadata notification cannot rely on advancing the runtime log',
     );
     await after.close();
@@ -149,7 +149,6 @@ async function durableVisible(connection, sessionId) {
       messages.push(...decoded.messages);
       if (decoded.nextCursor === null) break;
       page = await subscription.loadTranscriptPage({
-        source: 'durable',
         direction: 'older',
         throughSequence: page.throughSequence,
         cursor: decoded.nextCursor,

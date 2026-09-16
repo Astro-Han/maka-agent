@@ -152,18 +152,23 @@ globalThis.Deno = {
   },
 };
 await assert.rejects(networkFetch(1)('http://fixture.invalid'), (error) => error === native);
-for (const [statusCode, responseHeaders, reason] of [
+for (const [statusCode, responseHeaders, reason, code] of [
   [200, {}, 'network'],
   [401, {}, undefined],
-  [429, {}, undefined],
-  [429, { 'retry-after': 'invalid' }, undefined],
+  [429, {}, 'rate_limit'],
+  [429, { 'retry-after': 'invalid' }, 'rate_limit'],
   [429, { 'retry-after': '2' }, 'rate_limit'],
+  [429, {}, undefined, 'FreeUsageLimitError'],
+  [429, {}, undefined, 'insufficient_quota'],
+  [409, {}, undefined],
+  [500, {}, 'provider_unavailable', 'resource-exhausted'],
 ]) {
   const error = Object.assign(new Error('HTTP error body reset'), {
     name: 'AI_APICallError',
     statusCode,
     responseHeaders,
     cause: native,
+    responseBody: JSON.stringify({ error: { type: code } }),
   });
   const emitted = [];
   const forward = () =>
@@ -181,7 +186,10 @@ for (const [statusCode, responseHeaders, reason] of [
   } else {
     await forward();
     assert.equal(emitted.at(-1).error.reason, reason);
-    if (reason === 'rate_limit') assert.equal(emitted.at(-1).error.retryAfterMs, 2000);
+    assert.equal(
+      emitted.at(-1).error.retryAfterMs,
+      responseHeaders['retry-after'] === '2' ? 2000 : undefined,
+    );
   }
 }
 for (const [parts, replaySafe] of cases) {

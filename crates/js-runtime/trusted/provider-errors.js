@@ -26,10 +26,7 @@ const codes = new Set([
 ]);
 const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-// Called only for SDK provider failures, never for local emit/normalization errors.
-export function isContextOverflow(error, kind) {
-  if (!record(error) || error.name === 'AbortError') return false;
-  if (error instanceof Error && error.name !== 'AI_APICallError') return false;
+function providerRecords(error) {
   const candidates = [];
   const collect = (value) => {
     if (!record(value)) return;
@@ -48,6 +45,14 @@ export function isContextOverflow(error, kind) {
       /* No structured evidence. */
     }
   }
+  return candidates;
+}
+
+// Called only for SDK provider failures, never for local emit/normalization errors.
+export function isContextOverflow(error, kind) {
+  if (!record(error) || error.name === 'AbortError') return false;
+  if (error instanceof Error && error.name !== 'AI_APICallError') return false;
+  const candidates = providerRecords(error);
   if (candidates.some((value) => codes.has(value.code) || codes.has(value.type))) return true;
   if (kind !== 'anthropic' || error.statusCode !== 400) return false;
   return candidates.some((value) => {
@@ -184,18 +189,39 @@ function transientFailure(error) {
     transport ||= isTransportFailure(cause);
   }
   const status = error.name === 'AI_APICallError' ? error.statusCode : undefined;
+  const identifiers = new Set(
+    providerRecords(error).flatMap((value) =>
+      [value.code, value.type].filter((v) => typeof v === 'string').map((v) => v.toLowerCase()),
+    ),
+  );
+  // Account exhaustion is not throttling, even when a gateway labels it 429.
+  if (
+    status === 401 ||
+    status === 402 ||
+    status === 403 ||
+    [
+      'insufficient_quota',
+      'insufficient_balance',
+      'quota_exceeded',
+      'freeusagelimiterror',
+      'authentication_error',
+      'permission_error',
+      'invalid_api_key',
+      ...codes,
+    ].some((code) => identifiers.has(code))
+  )
+    return;
   // Once error headers arrived, body loss cannot erase authentication or
   // rate-limit evidence. Successful streaming responses may carry status 200.
   if (transport && (status === undefined || (status >= 200 && status < 300))) {
     return { reason: 'network', message: 'model HTTP transport interrupted' };
   }
-  const code = error.code ?? error.type ?? error.error?.code ?? error.error?.type;
-  const reason =
-    status === 429
+  const reason = identifiers.has('resource-exhausted')
+    ? 'provider_unavailable'
+    : status === 429 || identifiers.has('rate_limit_error')
       ? 'rate_limit'
-      : (Number.isInteger(status) &&
-            (status === 408 || status === 409 || (status >= 500 && status <= 599))) ||
-          ['server_error', 'overloaded_error'].includes(code)
+      : (Number.isInteger(status) && (status === 408 || (status >= 500 && status <= 599))) ||
+          ['server_error', 'overloaded_error'].some((code) => identifiers.has(code))
         ? 'provider_unavailable'
         : undefined;
   if (!reason) return;
@@ -210,10 +236,10 @@ function transientFailure(error) {
         : Number.isFinite(Number(seconds))
           ? Number(seconds) * 1000
           : Date.parse(seconds) - Date.now();
-    if (!Number.isFinite(delay) || delay <= 0 || delay > 2_147_483_647) return;
-    retryAfterMs = Math.ceil(delay);
+    if (Number.isFinite(delay) && delay > 0 && delay <= 2_147_483_647) {
+      retryAfterMs = Math.ceil(delay);
+    }
   }
-  if (reason === 'rate_limit' && retryAfterMs === undefined) return;
   return {
     reason,
     message:

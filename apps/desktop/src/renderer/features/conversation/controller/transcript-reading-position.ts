@@ -28,6 +28,7 @@ interface TranscriptRangeStore<Message> {
     readonly hostEpoch?: string;
   };
   sequenceForTurn(turnId: string, edge?: 'first' | 'last'): number | null;
+  pendingNavigation(): number | undefined;
   newestDurableUserSequence(): number | null;
   snapshot(): { readonly messages: readonly Message[] };
 }
@@ -282,9 +283,10 @@ export function restoreSessionTranscriptRange<Message>(options: {
     const residentSequence = currentTranscriptRange(controller, sessionId)
       ? controller.store.sequenceForTurn(target.turnId)
       : null;
-    // A resident target needs no page: the scroller reveals it from the window
-    // the Renderer already holds.
-    admitted = residentSequence !== null || target.sequence === undefined
+    // A resident target needs no page unless an older replacement is still
+    // pending. In that case this navigation must supersede the old read too.
+    admitted = (residentSequence !== null && controller.store.pendingNavigation() === undefined)
+      || target.sequence === undefined
       ? Promise.resolve()
       : controller.loadAround(target.sequence);
   } catch (error) {
@@ -304,8 +306,9 @@ export function restoreSessionTranscriptRange<Message>(options: {
         message !== null && typeof message === 'object' &&
         'turnId' in message && message.turnId === target.turnId,
       )) {
-        // Active Turns are overlay-only in the RuntimeEvent projection. Their
-        // bookmark is already visible even though no durable sequence exists.
+        // A live row can be on screen before the transcript assigns it a
+        // sequence. Its bookmark is already visible, so there is nothing to
+        // page in.
         return false;
       }
       return restoringReadingAnchor;

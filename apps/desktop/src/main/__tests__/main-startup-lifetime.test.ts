@@ -118,12 +118,12 @@ test('resolves persisted locale before first post-settings recovery prompt', () 
   assert.doesNotMatch(defaultHostRecovery, /resolveSystemUiLocale/u);
 });
 
-test('lets the Runtime Host migrate its State Root before Desktop opens shared tables', () => {
+test('isolates native Host tables and leaves shared E2E migration to the Host', () => {
   const hostStart = bootSource.indexOf(
     'runtimeHostManager = await startLocalRuntimeHostManager',
   );
   const workBoardOpen = bootSource.indexOf(
-    'store: createWorkBoardStore(workspaceRoot',
+    'store: createWorkBoardStore(desktopControlRoot',
   );
   const sessionCopyOpen = bootSource.indexOf(
     'createSessionCopyCleanupAuthority({',
@@ -135,12 +135,14 @@ test('lets the Runtime Host migrate its State Root before Desktop opens shared t
   assert.ok(hostStart < workBoardOpen);
   assert.match(
     bootSource.slice(workBoardOpen, bootSource.indexOf('});', workBoardOpen)),
-    /schemaMigration: 'require_current'/u,
+    /desktopDatabaseOptions/u,
   );
   assert.match(
     bootSource.slice(sessionCopyOpen, bootSource.indexOf('}),', sessionCopyOpen)),
-    /schemaMigration: 'require_current'/u,
+    /databaseOptions: desktopDatabaseOptions/u,
   );
+  assert.match(bootSource, /const desktopControlRoot = isE2e \? workspaceRoot : join\(userDataDir, "desktop-state"\)/u);
+  assert.match(bootSource, /schemaMigration: isE2e \? "require_current" as const : "migrate" as const/u);
 });
 
 test('routes the first-paint IPC only to the active Renderer recovery listener', () => {

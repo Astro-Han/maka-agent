@@ -1382,6 +1382,9 @@ async function bridgeResult<T>(operation: () => Promise<T>, code: string): Promi
 const browserDocumentId = crypto.randomUUID();
 ipcRenderer.send('browser:document-ready', browserDocumentId);
 const browserSelection = createBrowserSelectionCoordinator(runtimeHostSessionRef, {
+  capturePage(session) {
+    return ipcRenderer.invoke('browser:capture-page', session.scope, session.sessionId);
+  },
   show(documentId, generation, session) {
     ipcRenderer.send(
       'browser:active-session',
@@ -3580,6 +3583,9 @@ const makaBridge = {
     },
   },
   appWindow: {
+    popupMenu(input: import('../shared/native-menu.js').NativeMenuRequest): Promise<string | null> {
+      return ipcRenderer.invoke('window:popupMenu', input);
+    },
     setTitlebarControlsVisible(visible: boolean): Promise<void> {
       return ipcRenderer.invoke('window:setTitlebarControlsVisible', visible);
     },
@@ -3922,6 +3928,9 @@ const makaBridge = {
     /** Mirror the panel strip's on-screen rect (null hides the native view). */
     setViewport(input: { sessionId: string; rect: BrowserViewRect | null }): void {
       browserSelection.setViewport(input);
+    },
+    capturePage(sessionId: string): Promise<string | undefined> {
+      return browserSelection.capturePage(sessionId);
     },
     navigate(sessionId: string, url: string): Promise<void> {
       return invokeSessionRuntimeHost('browser:navigate', sessionId, url);

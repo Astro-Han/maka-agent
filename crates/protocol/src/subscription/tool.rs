@@ -129,7 +129,7 @@ fn validate_event(event: &SessionToolEvent) -> Result<()> {
                 "Invalid Session tool name",
             )?;
             if let Some(step_id) = step_id {
-                entity(step_id)?;
+                crate::codec::opaque_identity(step_id)?;
             }
             (id, turn_id, tool_use_id, operation_id)
         }
@@ -143,7 +143,7 @@ fn validate_event(event: &SessionToolEvent) -> Result<()> {
     };
     id(event_id)?;
     entity(turn_id)?;
-    id(tool_use_id)?;
+    crate::codec::opaque_identity(tool_use_id)?;
     if let Some(operation_id) = operation_id {
         entity(operation_id)?;
     }

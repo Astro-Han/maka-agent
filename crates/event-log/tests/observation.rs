@@ -328,7 +328,7 @@ async fn active_stream_seeds_are_fenced_bounded_and_survive_reopen() {
     assert_eq!(seed.step_id, "current");
     assert_eq!(seed.part_id, "same");
     assert_eq!(seed.text_kind, TextKind::Thinking);
-    assert_eq!(seed.offset, 3);
+    assert!(seed.start_sequence < fence.through_sequence);
     log.append(&EventWrite::plain((delta("current", "🎉")).clone()).unwrap())
         .await
         .unwrap();
@@ -357,8 +357,10 @@ async fn active_stream_seeds_are_fenced_bounded_and_survive_reopen() {
         .find(|stream| stream.part_id == "same")
         .unwrap();
     assert_eq!(reopened_seed.message_id, seed.message_id);
-    assert_eq!(reopened_seed.offset, 5);
-    assert_eq!(seed.offset, 3, "later commits cannot mutate a bootstrap");
+    assert_eq!(
+        reopened_seed.start_sequence, seed.start_sequence,
+        "later commits retain the same replay start"
+    );
     let catchup = log
         .session_events(
             "session",

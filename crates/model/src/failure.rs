@@ -58,7 +58,6 @@ impl ProviderFailure {
             || self
                 .retry_after_ms
                 .is_some_and(|delay| !(1..=2_147_483_647).contains(&delay))
-            || (self.reason == ProviderFailureReason::RateLimit && self.retry_after_ms.is_none())
         {
             return Err(crate::events::invalid("invalid provider failure evidence"));
         }

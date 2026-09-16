@@ -149,233 +149,25 @@ describe('ASF source release verification', () => {
     );
   });
 
-  test('distinguishes downloaded dependency metadata from bundled source licenses', async () => {
+  test('does not treat external dependency metadata as distributed source', async () => {
     const fixture = createFixtureCandidate({
-      'tools/runtime/package.json': `${JSON.stringify({
-        name: 'runtime',
-        license: 'Apache-2.0',
-        dependencies: { 'external-runtime': '1.0.0', 'unknown-runtime': '1.0.0' },
-      })}\n`,
-      'tools/runtime/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        packages: {
-          '': { name: 'runtime', license: 'Apache-2.0' },
-          'node_modules/external-runtime': { version: '1.0.0', license: 'LGPL-3.0-or-later' },
-          'node_modules/unknown-runtime': { version: '1.0.0' },
-        },
-      })}\n`,
-      'apps/desktop/resources/licenses/npm/THIRD_PARTY_NOTICES.txt':
-        'Package: external-runtime@1.0.0\nSelected license: GPL-3.0-only\n',
-    });
-    try {
-      await assert.doesNotReject(() => verifySourceCandidate({ archivePath: fixture.archivePath }));
-    } finally {
-      fixture.cleanup();
-    }
-
-    const bundled = createFixtureCandidate({
-      'vendor/runtime/package.json': JSON.stringify({
-        name: 'external-runtime',
-        version: '1.0.0',
-        license: 'LGPL-3.0-or-later',
-      }),
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: bundled.archivePath }),
-        /Category X.*vendor\/runtime\/package\.json/,
-      );
-    } finally {
-      bundled.cleanup();
-    }
-  });
-
-  test('accepts an unlicensed private manifest without dependencies', async () => {
-    const fixture = createFixtureCandidate({
-      'tools/profile/package.json': `${JSON.stringify({ name: 'profile', private: true })}\n`,
-    });
-    try {
-      await assert.doesNotReject(() => verifySourceCandidate({ archivePath: fixture.archivePath }));
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('rejects unlicensed private manifests whose dependencies lack lock provenance', async () => {
-    const dependencyDeclarations = {
-      bundleDependencies: ['runtime-helper'],
-      bundledDependencies: ['runtime-helper'],
-      dependencies: { 'runtime-helper': '1.0.0' },
-      devDependencies: { 'runtime-helper': '1.0.0' },
-      optionalDependencies: { 'runtime-helper': '1.0.0' },
-      peerDependencies: { 'runtime-helper': '1.0.0' },
-    };
-    for (const [field, declaration] of Object.entries(dependencyDeclarations)) {
-      const fixture = createFixtureCandidate({
-        [`tools/${field}/package.json`]: `${JSON.stringify({
-          [field]: declaration,
-          name: field,
-          private: true,
-        })}\n`,
-      });
-      try {
-        await assert.rejects(
-          () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-          new RegExp(
-            `Cannot safely classify.*${field}.*without (?:matching )?lock provenance`,
-            'u',
-          ),
-        );
-      } finally {
-        fixture.cleanup();
-      }
-    }
-  });
-
-  test('binds workspace links to candidate-owned manifests using archive paths', async () => {
-    const owned = createFixtureCandidate({
-      'packages/runtime/package.json': JSON.stringify({
-        license: 'Apache-2.0',
-        name: '@maka/runtime',
-        version: '1.0.0',
-      }),
-      'package-lock.json': JSON.stringify({
-        lockfileVersion: 3,
-        name: 'maka',
-        version: '0.1.12',
-        packages: {
-          '': { name: 'maka', version: '0.1.12' },
-          'packages/runtime': { name: '@maka/runtime', version: '1.0.0' },
-          'node_modules/@maka/runtime': { link: true, resolved: 'packages/runtime' },
-        },
-      }),
-    });
-    try {
-      await assert.doesNotReject(() => verifySourceCandidate({ archivePath: owned.archivePath }));
-    } finally {
-      owned.cleanup();
-    }
-
-    const fixture = createFixtureCandidate({
-      'tools/runtime/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        packages: {
-          '': { name: 'runtime' },
-          'node_modules/evil-runtime': { link: true, resolved: '../../evil-runtime' },
-        },
-      })}\n`,
-      'tools/runtime/package.json': `${JSON.stringify({ license: 'Apache-2.0', name: 'runtime' })}\n`,
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Cannot safely classify workspace link.*evil-runtime/,
-      );
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('rejects Category X metadata on workspace package lock entries', async () => {
-    const fixture = createFixtureCandidate({
-      'packages/evil/package.json': `${JSON.stringify({
-        license: 'Apache-2.0',
-        name: 'evil',
-        version: '1.0.0',
-      })}\n`,
-      'package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        name: 'maka',
-        packages: {
-          '': { name: 'maka', version: '0.1.12' },
-          'packages/evil': { license: 'GPL-3.0-only', name: 'evil', version: '1.0.0' },
-        },
-        version: '0.1.12',
-      })}\n`,
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Category X.*packages\/evil.*GPL-3\.0-only/,
-      );
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('binds licensed manifest dependencies to a package lock closure', async () => {
-    const fixture = createFixtureCandidate({
-      'tools/runtime/package.json': `${JSON.stringify({
-        dependencies: { 'unlocked-runtime': '1.0.0' },
-        license: 'Apache-2.0',
-        name: 'runtime',
+      'tools/build/package.json': JSON.stringify({
+        name: 'build',
         private: true,
-      })}\n`,
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Cannot safely classify.*tools\/runtime\/package\.json.*without (?:matching )?lock provenance/,
-      );
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('rejects unsupported npm lockfile versions', async () => {
-    const fixture = createFixtureCandidate({
-      'tools/runtime/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 99,
-        packages: { '': { name: 'runtime' } },
-      })}\n`,
-      'tools/runtime/package.json': `${JSON.stringify({ license: 'Apache-2.0', name: 'runtime' })}\n`,
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Unsupported npm lockfile version 99/,
-      );
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('classifies dependencies from a nested npm shrinkwrap', async () => {
-    const fixture = createFixtureCandidate({
-      'tools/source/npm-shrinkwrap.json': `${JSON.stringify({
+        devDependencies: { 'image-tool': '1.0.0' },
+      }),
+      'tools/build/package-lock.json': JSON.stringify({
         lockfileVersion: 3,
         packages: {
-          '': { name: 'source' },
-          'node_modules/source-helper': { license: 'MIT', version: '1.0.0' },
+          'node_modules/image-tool': { version: '1.0.0', license: 'LGPL-3.0-or-later' },
+          'node_modules/missing-license-metadata': { version: '1.0.0' },
         },
-      })}\n`,
-      'tools/source/package.json': `${JSON.stringify({
-        dependencies: { 'source-helper': '1.0.0' },
-        name: 'source',
-        private: true,
-      })}\n`,
+      }),
     });
     try {
       await assert.doesNotReject(() => verifySourceCandidate({ archivePath: fixture.archivePath }));
     } finally {
       fixture.cleanup();
-    }
-  });
-
-  test('rejects unsupported nested package manager lockfiles', async () => {
-    for (const [name, contents] of [
-      ['pnpm-lock.yaml', 'lockfileVersion: 9\n'],
-      ['yarn.lock', '# yarn lockfile v1\n'],
-    ]) {
-      const fixture = createFixtureCandidate({ [`tools/source/${name}`]: contents });
-      try {
-        await assert.rejects(
-          () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-          /Cannot safely classify unsupported package lockfile/,
-        );
-      } finally {
-        fixture.cleanup();
-      }
     }
   });
 
@@ -385,7 +177,8 @@ describe('ASF source release verification', () => {
       ['LicenseRef-Unknown', /Cannot safely classify license/],
     ]) {
       const fixture = createFixtureCandidate({
-        'tools/source/package.json': `${JSON.stringify({ license, name: 'source' })}\n`,
+        'tools/source/package.json': `${JSON.stringify({ license, name: 'source', private: true })}\n`,
+        'tools/source/index.js': 'export const source = true;\n',
       });
       try {
         await assert.rejects(

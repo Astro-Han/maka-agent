@@ -121,6 +121,7 @@ impl Capabilities {
         session_id: &str,
         connection_id: Uuid,
         required: &[&str],
+        optional: &[&str],
         cwd: String,
         interactions: Arc<dyn maka_tools::ClientInteractions>,
     ) -> Result<
@@ -134,7 +135,7 @@ impl Capabilities {
             .registry
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .bind_required_tools(session_id, connection_id, required)?;
+            .bind_required_tools(session_id, connection_id, required, optional)?;
         Ok((
             ClientTools::new(
                 snapshot,

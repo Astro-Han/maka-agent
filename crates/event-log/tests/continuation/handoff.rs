@@ -42,7 +42,7 @@ pub(super) fn execution() -> Box<maka_runtime::handoff::HandoffExecution> {
             catalog_digest: digest('c'),
             loaded: Default::default(),
         },
-        compaction_attempted: false,
+        compaction: maka_runtime::handoff::CompactionBudget::Available,
         replay_base: None,
     })
 }

@@ -108,6 +108,7 @@ impl Registry {
         session_id: &str,
         initiating: Uuid,
         required: &[&str],
+        optional: &[&str],
     ) -> Result<(super::Snapshot, maka_runtime::capability::ClientComposition), BindingError> {
         let next = self.select_bindings(
             self.sessions.get(session_id),
@@ -146,7 +147,8 @@ impl Registry {
         let mut snapshot = self.snapshot_bindings(Some(&next))?;
         snapshot.offers.retain(|entry| {
             entry.offer().tools.iter().any(|tool| {
-                required.contains(&crate::proxy_tool_name(&tool.server_id, &tool.name).as_str())
+                let name = crate::proxy_tool_name(&tool.server_id, &tool.name);
+                required.contains(&name.as_str()) || optional.contains(&name.as_str())
             })
         });
         let composition = composition(&next, &snapshot);

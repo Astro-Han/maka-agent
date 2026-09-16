@@ -196,6 +196,19 @@ impl Executions {
             .invocation_configuration()
             .await
             .map_err(internal)?;
+        configuration.tool_mode = if self
+            .configuration
+            .runtime_policy()
+            .await
+            .map_err(internal)?
+            .policy
+            .chat_defaults
+            .code_mode_enabled
+        {
+            maka_runtime::execution::ToolMode::CodeMode
+        } else {
+            maka_runtime::execution::ToolMode::Direct
+        };
         configuration.system_prompt = Some(profile::prompt());
         configuration.tool_composition = Some(composition);
         let run = RunInput {

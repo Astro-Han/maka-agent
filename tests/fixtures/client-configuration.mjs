@@ -185,8 +185,8 @@ export async function verifyConfiguration(connection, sessionId, connectSibling)
     );
     const after = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
     assert.equal(
-      after.subscription.transcriptBootstrap.throughSequence,
-      observer.subscription.transcriptBootstrap.throughSequence,
+      after.subscription.transcriptBootstrap.durable.throughSequence,
+      observer.subscription.transcriptBootstrap.durable.throughSequence,
       'configuration changes do not append runtime events',
     );
     await after.close();

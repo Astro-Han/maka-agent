@@ -152,7 +152,19 @@ async fn midturn_waits_for_all_code_mode_results_and_replays_exact_image_anchor_
         fixture::respond(&mut summary, fixture::SUMMARY, "stop").await;
         let (mut next, _) = listener.accept().await.unwrap();
         let after = fixture::read_request(&mut next).await;
-        fixture::respond(&mut next, "done", "stop").await;
+        code_mode::respond(&mut next, true).await;
+        // An accepted tool step renews compaction within this same turn.
+        let (mut summary, _) = listener.accept().await.unwrap();
+        let second_summary = fixture::read_request(&mut summary).await;
+        assert!(
+            second_summary["messages"]
+                .to_string()
+                .contains("tool_call_id")
+        );
+        fixture::respond(&mut summary, fixture::SUMMARY, "stop").await;
+        let (mut final_step, _) = listener.accept().await.unwrap();
+        fixture::read_request(&mut final_step).await;
+        fixture::respond(&mut final_step, "done", "stop").await;
         (summary_request, after)
     });
     let count = Arc::new(AtomicUsize::new(0));
@@ -187,7 +199,7 @@ async fn midturn_waits_for_all_code_mode_results_and_replays_exact_image_anchor_
     assert!(
         matches!(&source.baseline.as_ref().unwrap().checkpoint.mode,CheckpointMode::MidTurn {anchor_event_id} if anchor_event_id==&anchor)
     );
-    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert_eq!(count.load(Ordering::SeqCst), 4);
     let prefix = log.prefix(100, 256 * 1024).await.unwrap();
     assert_eq!(
         prefix
@@ -201,7 +213,7 @@ async fn midturn_waits_for_all_code_mode_results_and_replays_exact_image_anchor_
                 }
             ))
             .count(),
-        1
+        2
     );
     assert_eq!(
         prefix

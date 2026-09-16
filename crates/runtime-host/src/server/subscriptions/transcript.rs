@@ -26,7 +26,6 @@ use maka_protocol::subscription::TranscriptPolicy;
 use maka_protocol::transcript::SessionTranscriptBootstrap;
 use maka_protocol::{OperationError, OperationErrorCode as Code};
 use std::sync::Arc;
-use tokio::sync::Semaphore;
 
 pub(super) struct PreparedTranscript {
     pub access: TranscriptAccess,
@@ -47,6 +46,11 @@ enum Preparation {
 
 impl TranscriptAccess {
     pub fn catch_up_to(&mut self, through: u64) {
+        if maka_presentation::watermark(through)
+            .is_ok_and(|watermark| Some(watermark) <= self.state.watermark())
+        {
+            return;
+        }
         self.preparation = match self.preparation {
             Preparation::Idle => Preparation::Pending(through),
             Preparation::Pending(fence) => Preparation::Pending(fence.max(through)),
@@ -94,7 +98,6 @@ pub(super) async fn prepare(
     observation: &SessionObservation<SessionConfiguration>,
     id: String,
     policy: &TranscriptPolicy,
-    budget: Arc<Semaphore>,
 ) -> Result<Option<PreparedTranscript>, OperationError> {
     let TranscriptPolicy::Tail { max_bytes } = policy else {
         return Ok(None);
@@ -113,15 +116,7 @@ pub(super) async fn prepare(
     }
     let through =
         maka_presentation::watermark(source_fence).map_err(|error| store_error(error.into()))?;
-    let overlay = match &observation.root_turn {
-        Some(root) => log
-            .active_transcript(&root.invocation, source_fence)
-            .await
-            .map_err(store_error)?,
-        None => Vec::new(),
-    };
-    let state = Transcript::new(id, session.clone(), Some(through), overlay, budget)
-        .map_err(operation_error)?;
+    let state = Transcript::new(id, session.clone(), Some(through)).map_err(operation_error)?;
     let bootstrap = state
         .bootstrap(log, *max_bytes)
         .await
@@ -160,14 +155,7 @@ mod tests {
 
     fn access() -> TranscriptAccess {
         TranscriptAccess {
-            state: Transcript::new(
-                "subscription".into(),
-                "session".into(),
-                Some(0),
-                Vec::new(),
-                Arc::new(Semaphore::new(1)),
-            )
-            .unwrap(),
+            state: Transcript::new("subscription".into(), "session".into(), Some(0)).unwrap(),
             preparation: Preparation::Idle,
         }
     }
@@ -215,7 +203,6 @@ mod tests {
             access.catch_up_to(u64::MAX);
             assert!(!access.is_pending());
             assert_eq!(access.poll(log, "".into()).await.unwrap(), None);
-            access.state.release_overlay();
         }
     }
 

@@ -28,26 +28,17 @@ use serde_json::Value;
 
 pub(super) fn decode_fragment(
     v: &Value,
-    source: SessionTranscriptPageSource,
     watermark: Option<u64>,
 ) -> Result<(SessionTranscriptFragment, u64)> {
-    let fields = match source {
-        SessionTranscriptPageSource::Durable => &[
-            "kind",
+    exact(
+        record(v, "transcript fragment")?,
+        &[
             "sequence",
             "byteOffset",
             "totalBytes",
             "payloadDigest",
             "data",
-        ][..],
-        SessionTranscriptPageSource::Overlay => {
-            &["kind", "messageIndex", "byteOffset", "totalBytes", "data"][..]
-        }
-    };
-    exact(record(v, "transcript fragment")?, fields)?;
-    ensure(
-        super::codec::source(&v["kind"])? == source,
-        "Fragment source changed",
+        ],
     )?;
     let byte_offset = count(&v["byteOffset"], "byteOffset")?;
     let total_bytes = count(&v["totalBytes"], "totalBytes")?;
@@ -74,43 +65,35 @@ pub(super) fn decode_fragment(
         "Invalid fragment bounds",
     )?;
     let data = data.to_owned();
-    let fragment = match source {
-        SessionTranscriptPageSource::Durable => {
-            let sequence = count(&v["sequence"], "sequence")?;
+    let fragment = {
+        let sequence = count(&v["sequence"], "sequence")?;
+        ensure(
+            watermark.is_some_and(|w| sequence <= w),
+            "Fragment exceeds watermark",
+        )?;
+        let payload_digest = if v["payloadDigest"].is_null() {
+            None
+        } else {
+            let digest = v["payloadDigest"]
+                .as_str()
+                .ok_or_else(|| ProtocolError::invalid("Invalid payload digest"))?;
             ensure(
-                watermark.is_some_and(|w| sequence <= w),
-                "Fragment exceeds watermark",
+                digest.strip_prefix("sha256:").is_some_and(|s| {
+                    s.len() == 64
+                        && s.bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                }),
+                "Invalid payload digest",
             )?;
-            let payload_digest = if v["payloadDigest"].is_null() {
-                None
-            } else {
-                let digest = v["payloadDigest"]
-                    .as_str()
-                    .ok_or_else(|| ProtocolError::invalid("Invalid payload digest"))?;
-                ensure(
-                    digest.strip_prefix("sha256:").is_some_and(|s| {
-                        s.len() == 64
-                            && s.bytes()
-                                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-                    }),
-                    "Invalid payload digest",
-                )?;
-                Some(digest.to_owned())
-            };
-            SessionTranscriptFragment::Durable {
-                sequence,
-                byte_offset,
-                total_bytes,
-                payload_digest,
-                data,
-            }
-        }
-        SessionTranscriptPageSource::Overlay => SessionTranscriptFragment::Overlay {
-            message_index: count(&v["messageIndex"], "messageIndex")?,
+            Some(digest.to_owned())
+        };
+        SessionTranscriptFragment {
+            sequence,
             byte_offset,
             total_bytes,
+            payload_digest,
             data,
-        },
+        }
     };
     Ok((fragment, size))
 }

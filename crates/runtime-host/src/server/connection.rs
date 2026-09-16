@@ -180,9 +180,8 @@ impl Host {
                     continue;
                 }
                 mut subscriptions = subscriptions.lock(), if shell_change.is_some() => {
-                    for frame in subscriptions.resource_changed(&self, &shell_change.take().unwrap())? {
-                        outbound.enqueue(frame).await?;
-                    }
+                    subscriptions.resource_changed(&self, &shell_change.take().unwrap())?;
+                    pending = true;
                     pty_pending = true;
                     continue;
                 }

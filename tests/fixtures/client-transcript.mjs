@@ -25,10 +25,9 @@ import { watchSession } from './client-subscription.mjs';
 import { assertReferencedRow } from './client-message-references.mjs';
 
 const tail = { kind: 'tail', maxBytes: 2 };
-const pageInput = (subscription, source = 'durable') => ({
-  source,
+const pageInput = (subscription) => ({
   direction: 'older',
-  throughSequence: subscription.transcriptBootstrap.throughSequence,
+  throughSequence: subscription.transcriptBootstrap.durable.throughSequence,
   cursor: null,
   anchorSequence: null,
   maxBytes: 97,
@@ -37,7 +36,7 @@ const pageInput = (subscription, source = 'durable') => ({
 function bootstrap(subscription) {
   const value = subscription.transcriptBootstrap;
   assert(value);
-  assert(value.durable.rawBytes + value.overlay.rawBytes <= 2);
+  assert(value.durable.rawBytes <= 2);
   return value;
 }
 
@@ -69,8 +68,7 @@ export async function emptyTail(connection, sessionId) {
   await withTail(connection, sessionId, (rows, subscription) => {
     assert.deepEqual(rows, []);
     const value = bootstrap(subscription);
-    assert.equal(value.overlayMessageCount, 0);
-    for (const page of [value.durable, value.overlay]) {
+    for (const page of [value.durable]) {
       assert.equal(page.rawBytes, 0);
       assert.deepEqual(page.fragments, []);
       assert.equal(page.nextCursor, null);
@@ -81,7 +79,7 @@ export async function emptyTail(connection, sessionId) {
 export async function finishTranscriptObservers(connection, sessionId, none, live) {
   // A fresh post-terminal bootstrap supplies the exact fence the live observer must reach.
   await withTail(connection, sessionId, async (_rows, subscription) => {
-    const throughSequence = bootstrap(subscription).throughSequence;
+    const throughSequence = bootstrap(subscription).durable.throughSequence;
     await live.waitFor(
       (frame) =>
         frame.kind === 'subscription.transcript_advanced' &&
@@ -98,7 +96,6 @@ export async function finishTranscriptObservers(connection, sessionId, none, liv
       'session.transcript.page',
       {
         subscriptionId: none.subscription.subscriptionId,
-        source: 'durable',
         direction: 'older',
         throughSequence: null,
         cursor: null,
@@ -169,46 +166,31 @@ export async function completedTail(connection, sessionId, frames, startedAt) {
 
 export async function activeTail(connection, observer, connectSibling) {
   const { subscription } = observer;
-  assert(bootstrap(subscription).overlayMessageCount > 0);
+  bootstrap(subscription);
   const sibling = await connectSibling();
   try {
     await assert.rejects(
-      sibling.request(
-        'session.transcript.overlay.release',
-        { subscriptionId: subscription.subscriptionId },
-        3000,
-      ),
+      sibling.request('subscription.ready', { subscriptionId: subscription.subscriptionId }, 3000),
       (error) => error.code === 'not_found',
     );
   } finally {
     await sibling.close();
   }
-  // Load after the suffix was committed: the overlay must retain the opening prefix.
+  // Active text is absent from durable pages and replayed from the log after ready.
   const rows = await subscription.loadTranscript(decodeStoredMessage);
-  const row = rows.find((row) => row.type === 'assistant' && row.turnId === 'cancelled-turn');
-  assert.equal(row.text, 'incomplete😀 fixture');
-  assert.equal(row.id, subscription.activeAssistantStreams[0].messageId);
-  assert.equal(
-    row.id,
-    observer.frames.find((frame) => frame.kind === 'subscription.session_delta').delta.messageId,
-  );
-  // Actual client loadTranscript automatically released the nonempty frozen overlay.
-  await assert.rejects(subscription.loadTranscriptPage(pageInput(subscription, 'overlay')));
+  assert(!rows.some((row) => row.type === 'assistant' && row.turnId === 'cancelled-turn'));
+  const deltas = observer.frames
+    .filter((frame) => frame.kind === 'subscription.session_delta')
+    .map((frame) => frame.delta);
+  let text = '';
+  for (const delta of deltas) {
+    assert.equal(delta.startOffset, text.length);
+    assert.equal(delta.messageId, subscription.activeAssistantStreams[0].messageId);
+    text += delta.text;
+  }
+  assert.equal(text, 'incomplete😀 fixture 🐈 suffix');
   await subscription.loadTranscriptPage(pageInput(subscription));
-  assert.deepEqual(
-    await connection.request(
-      'session.transcript.overlay.release',
-      { subscriptionId: subscription.subscriptionId },
-      3000,
-    ),
-    { subscriptionId: subscription.subscriptionId },
-    'release is idempotent and retains durable access',
-  );
-  assert.equal(
-    observer.frames.some((frame) => frame.kind === 'subscription.transcript_advanced'),
-    false,
-    'a text-only suffix must not announce nonexistent durable rows',
-  );
+  await subscription.ready(); // Repeated readiness retains the same subscription.
 }
 
 export async function cancelledTail(connection, sessionId, frames) {
@@ -222,7 +204,6 @@ export async function cancelledTail(connection, sessionId, frames) {
     );
     assert.equal(turn.at(-1).status, 'aborted');
     assert.equal(turn.at(-1).abortSource, 'runtime_cancellation');
-    assert.equal(bootstrap(subscription).overlayMessageCount, 0);
   });
 }
 

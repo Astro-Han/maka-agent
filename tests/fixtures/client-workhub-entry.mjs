@@ -131,6 +131,7 @@ try {
       assert.deepEqual(await query(), initial);
       const input = {
         expectedRevision: initial.revision,
+        thinkingLevel: null,
         modelTarget: {
           kind: 'explicit',
           connectionId: model.connectionId,
@@ -138,9 +139,19 @@ try {
           model: 'fixture-model',
         },
       };
+      await assert.rejects(
+        configure({ ...input, thinkingLevel: 'high' }),
+        (error) => error.code === 'invalid_request',
+      );
+      assert.deepEqual(
+        await query(),
+        initial,
+        'unsupported thinking cannot partially change the model',
+      );
       const configured = await configure(input);
       assert.equal(configured.kind, 'committed');
       assert.equal(configured.session.connectionLocked, true);
+      assert.equal(configured.session.thinkingLevel, undefined);
       assert(configured.session.revision > initial.revision);
       assert.deepEqual(await configure(input), {
         kind: 'revision_conflict',

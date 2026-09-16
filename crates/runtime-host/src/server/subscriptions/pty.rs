@@ -77,12 +77,17 @@ impl PtyObservers {
         }
     }
 
-    pub fn poll(&mut self, host: &Host, outbound: &Outbound) -> Result<Option<Value>, HostError> {
+    pub fn poll(
+        &mut self,
+        host: &Host,
+        outbound: &Outbound,
+        ready: impl Fn(&str) -> bool,
+    ) -> Result<Option<Value>, HostError> {
         let count = self.interests.len();
         for offset in 0..count {
             let index = (self.next + offset) % count;
             let entry = &mut self.interests[index];
-            if !outbound.pty_ready(&entry.subscription) {
+            if !ready(&entry.subscription) || !outbound.pty_ready(&entry.subscription) {
                 continue;
             }
             let Some(event) = entry.stream.as_mut().and_then(PtyStream::try_next) else {

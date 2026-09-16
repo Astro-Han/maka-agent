@@ -84,18 +84,38 @@ impl EventLog {
                             )
                             .await?;
                         }
-                        boundary::source_fence(&mut tx, &selection, opening.as_ref(), mode).await?
+                        boundary::source_fence(
+                            &mut tx,
+                            &selection,
+                            opening.as_ref(),
+                            mode,
+                            i64::MAX as u64,
+                        )
+                        .await?
                     } else {
                         selection.high_water(&mut tx, i64::MAX as u64).await?
                     };
-                    let before = if mode.is_some() {
-                        sqlx::query_scalar::<_, Option<i64>>("SELECT MIN(sequence) FROM runtime_events WHERE invocation_id=? AND kind='model_requested' AND json_extract(event_json,'$.fact.purpose')='summary'")
-                            .bind(current.as_deref()).fetch_one(&mut *tx).await?.unwrap_or(i64::MAX) as u64
-                    } else { i64::MAX as u64 };
-                    let latest_main = latest_main::read_selected(&mut tx, &selection, high_water).await?;
+                    let before = if mode.is_some()
+                        && let Some(current) = current.as_deref()
+                    {
+                        boundary::summary_start(&mut tx, current, i64::MAX as u64)
+                            .await?
+                            .unwrap_or(i64::MAX as u64)
+                    } else {
+                        i64::MAX as u64
+                    };
+                    let latest_main =
+                        latest_main::read_selected(&mut tx, &selection, high_water).await?;
                     let source = materialize_selected(
-                        &mut tx, &selection, high_water, before, max_events, max_bytes, latest_main,
-                    ).await?;
+                        &mut tx,
+                        &selection,
+                        high_water,
+                        before,
+                        max_events,
+                        max_bytes,
+                        latest_main,
+                    )
+                    .await?;
                     tx.commit().await?;
                     Ok(source)
                 })

@@ -215,7 +215,7 @@ operations! {
     SessionRevisionCreate => ("session.revision.create", Command, Ready),
     SessionSharedQuery => ("session.shared.query", Query, Ready),
     SessionTodoQuery => ("session.todo.query", Query, Ready),
-    SessionTranscriptOverlayRelease => ("session.transcript.overlay.release", Control, Ready),
+    SubscriptionReady => ("subscription.ready", Control, Ready),
     SessionTranscriptPage => ("session.transcript.page", Query, Ready),
     SessionTurnLandmarksQuery => ("session.turn_landmarks.query", Query, Ready),
     SessionTurnsQuery => ("session.turns.query", Query, Ready),

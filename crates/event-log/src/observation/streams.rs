@@ -22,28 +22,17 @@ use crate::{
     turns::{InvocationState, TurnBoundary},
 };
 use maka_runtime::model::TextKind;
-use rusqlite::{Connection, functions::FunctionFlags};
 use sqlx::Row;
 
-/// Active stream identity and committed UTF-16 position, without transcript text.
+/// Active stream identity and replay start, without reading accumulated text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssistantStreamSeed {
+    pub start_sequence: u64,
     pub step_id: String,
     pub part_id: String,
     /// Canonical PartStarted event ID; provider IDs may repeat across steps.
     pub message_id: String,
     pub text_kind: TextKind,
-    pub offset: u64,
-}
-
-pub(crate) fn register_function(connection: &Connection) -> Result<(), StoreError> {
-    connection.create_scalar_function(
-        "maka_utf16_length",
-        1,
-        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
-        |context| Ok(context.get_raw(0).as_str()?.encode_utf16().count() as i64),
-    )?;
-    Ok(())
 }
 
 pub(super) async fn read(
@@ -104,20 +93,12 @@ pub(super) async fn read(
                 ));
             }
         };
-        let offset: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(maka_utf16_length(json_extract(event_json, '$.fact.event.data.text'))), 0)
-             FROM runtime_events WHERE invocation_id = ?1 AND json_extract(event_json, '$.fact.step_id') = ?2
-             AND sequence > ?3 AND kind = 'model_observed'
-             AND json_extract(event_json, '$.fact.event.kind') = 'part_delta'
-             AND json_extract(event_json, '$.fact.event.data.id') = ?4",
-        ).bind(&root.invocation.invocation_id).bind(&step_id).bind(sequence).bind(&part_id)
-            .fetch_one(&mut *connection).await?;
         result.push(AssistantStreamSeed {
+            start_sequence: crate::sequence_number(sequence)?,
             step_id,
             part_id,
             message_id: row.try_get(2)?,
             text_kind,
-            offset: u64::try_from(offset).map_err(|_| StoreError::PrefixTooLarge)?,
         });
     }
     Ok(result)

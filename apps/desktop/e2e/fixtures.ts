@@ -18,7 +18,7 @@
  */
 
 import { _electron as electron, test as base, expect } from '@playwright/test';
-import type { ElectronApplication, Page } from '@playwright/test';
+import type { ElectronApplication, Locator, Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -80,7 +80,7 @@ export async function ensureSidebarExpanded(page: Page): Promise<void> {
  * The control reflects local admission readiness, not Host connectivity.
  * Merely mounting the editor does not mean target selection has finished.
  */
-export async function awaitSendReady(page: Page): Promise<void> {
+export async function awaitSendReady(page: Page | Locator): Promise<void> {
   await expect(page.locator('.maka-composer button[type="submit"]')).toBeEnabled({
     timeout: 20_000,
   });
@@ -444,7 +444,8 @@ export async function withE2eWindow(
     // host locale. E2e-fixture workspaces use the explicit renderer override.
     if (locale && !e2eFixtureScenario) await seedE2eLocale(userDataDir, locale);
     // xvfb throttles a hidden window's compositor to ~1fps. Geometry fixtures
-    // opt in locally; every fixture is visible on isolated CI X.
+    // opt in locally; on CI Linux every fixture is visible, because the display
+    // there is headless and no one is watching it.
     const visibleWindow = showWindow || isCiLinuxDisplay();
     app = await electron.launch({
       // A visible fixture window is revealed inactively, which needs XWayland

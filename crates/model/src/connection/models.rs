@@ -156,7 +156,7 @@ fn model_info(row: &Value) -> Result<Option<Value>, Failure> {
     }
     let context = row
         .get("context_length")
-        .filter(|v| !v.is_null())
+        .filter(|v| token_limit(v).is_some())
         .or(row.get("context_window"));
     copy_number(context, &mut model, "contextWindow");
     copy_number(row.get("max_tokens"), &mut model, "maxOutputTokens");
@@ -166,16 +166,16 @@ fn model_info(row: &Value) -> Result<Option<Value>, Failure> {
     Ok(Some(Value::Object(model)))
 }
 
+fn token_limit(value: &Value) -> Option<u64> {
+    value
+        .as_f64()
+        .filter(|n| (1.0..=9_007_199_254_740_991.0).contains(n) && n.fract() == 0.0)
+        .map(|n| n as u64)
+}
+
 fn copy_number(value: Option<&Value>, model: &mut Map<String, Value>, key: &str) {
-    if let Some(Value::Number(number)) = value {
-        // JS has one numeric type; 4096.0 and 4.096e3 are valid integer limits.
-        let n = number.as_f64().unwrap();
-        let value = if (1.0..=9_007_199_254_740_991.0).contains(&n) && n.fract() == 0.0 {
-            Value::from(n as u64)
-        } else {
-            Value::Number(number.clone())
-        };
-        model.insert(key.into(), value);
+    if let Some(limit) = value.and_then(token_limit) {
+        model.insert(key.into(), limit.into());
     }
 }
 
@@ -213,7 +213,7 @@ mod tests {
     fn metadata_precedence_and_unknown_fields() {
         let rows = decode(
             br#"{"data":[{"id":" x ","display_name":"","name":"fallback",
-            "context_length":null,"context_window":4096.0,"max_tokens":1e3,
+            "context_length":0,"context_window":4096.0,"max_tokens":1e3,
             "input_modalities":["image"],"output_modalities":[null,"Text","image"],
             "supports_image_in":false,"capabilities":{"reasoning":true},
             "supports_reasoning":false,"tags":["reasoning","tool-use"],"providers":[],
@@ -251,7 +251,6 @@ mod tests {
             r#"{"data":[{"id":"x","providers":[null]}]}"#,
             r#"{"data":[{"id":"x","tags":null}]}"#,
             r#"{"data":[{"id":"x","name":42}]}"#,
-            r#"{"data":[{"id":"x","context_length":0}]}"#,
             r#"{"data":[{"id":"x"},{"id":"x","input_modalities":null}]}"#,
         ] {
             assert_eq!(

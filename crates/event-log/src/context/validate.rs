@@ -46,11 +46,6 @@ pub(crate) async fn validate_append(
             .await?;
             safety::active_boundary(connection, &event.invocation.invocation_id, i64::MAX as u64)
                 .await?;
-            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ? AND kind = 'context_checkpoint_recorded')")
-                .bind(&event.invocation.invocation_id).fetch_one(&mut *connection).await?;
-            if exists {
-                return Err(invalid("compact invocation already has a checkpoint"));
-            }
             chain(connection, event, i64::MAX as u64, false).await?;
         }
         Fact::InvocationEnded { outcome } => {

@@ -1751,6 +1751,7 @@ export interface MakaBridge {
      */
   };
   appWindow: {
+    popupMenu(input: import('../shared/native-menu.js').NativeMenuRequest): Promise<string | null>;
     setTitlebarControlsVisible(visible: boolean): Promise<void>;
     setThemeSource(themePref: ThemePreference): Promise<void>;
     // PR-WINDOW-TITLEBAR-0: re-sync the native Windows titleBarOverlay
@@ -1950,6 +1951,7 @@ export interface MakaBridge {
   browser: {
     setActiveSession(sessionId: string | null): void;
     setViewport(input: { sessionId: string; rect: BrowserViewRect | null }): void;
+  capturePage(sessionId: string): Promise<string | undefined>;
     navigate(sessionId: string, url: string): Promise<void>;
     back(sessionId: string): Promise<void>;
     forward(sessionId: string): Promise<void>;

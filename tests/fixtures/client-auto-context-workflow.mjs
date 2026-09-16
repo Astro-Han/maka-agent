@@ -46,8 +46,6 @@ async function rows(connection, sessionId) {
   const observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
   try {
     const subscription = observer.subscription;
-    const overlay = await subscription.loadTranscriptOverlay(decodeStoredMessage, 16 * 1024 * 1024);
-    noSummary(overlay);
     let page = subscription.transcriptBootstrap.durable;
     const entries = [];
     for (;;) {
@@ -59,7 +57,6 @@ async function rows(connection, sessionId) {
       entries.push(...decoded.messages);
       if (decoded.nextCursor === null) break;
       page = await subscription.loadTranscriptPage({
-        source: 'durable',
         direction: 'older',
         throughSequence: page.throughSequence,
         cursor: decoded.nextCursor,
@@ -211,9 +208,7 @@ export async function verifyAutoContext(connection, workspace, reopened) {
       assert.equal(during.subscription.snapshot.rootTurn.status, 'running');
       assert.equal(during.subscription.snapshot.rootTurn.rootExecutionKind, undefined);
       assert.deepEqual(during.subscription.activeAssistantStreams, []);
-      noSummary(
-        await during.subscription.loadTranscriptOverlay(decodeStoredMessage, 16 * 1024 * 1024),
-      );
+      noSummary(await during.subscription.loadTranscript(decodeStoredMessage));
       ordinaryRoot(live.frames);
       model.releaseSummary();
       await model.waitFor('main');

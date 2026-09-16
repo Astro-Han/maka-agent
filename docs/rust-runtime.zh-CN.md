@@ -21,7 +21,7 @@
 
 [English](./rust-runtime.md)
 
-Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 154。
+Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 158。
 重写尚未完成；未实现的操作明确返回错误。
 
 ## 构建与运行
@@ -144,6 +144,8 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
   失败响应的片段只用于展示，不纳入模型历史；用户取消不显示为 provider 失败。
 - 模型消息、内容块与工具结果在 provider 投影中保持类型化；路由与发现共享类型化契约。
   工具 JSON、schema 和厂商扩展保留开放结构。
+- 订阅收到 `subscription.ready` 后才交付帧。重连按背压从已提交日志补发活动文本，
+  不复制整份 transcript overlay。
 - 每个 State Root 只有一个写入与执行 authority；Session、Turn、Run、invocation
   身份保持独立。协作续接保留对外 Run 身份；恢复凭证与清理仍绑定精确物理 Run。
   已封口的任务可直接取消，无需加载 provider，也不重做副作用。

@@ -41,13 +41,14 @@ pub(super) async fn run(
         input.configuration.tool_mode,
         inner.cells.clone(),
     );
-    let mut attempted = false;
+    use maka_runtime::handoff::CompactionBudget;
+    let mut compaction = CompactionBudget::Available;
     // This tracks work after this physical opening, not after the logical root.
     // A successor may compact the sealed prefix with a PreTurn boundary.
     let mut completed_step = false;
     if let crate::RunWork::Handoff { pause, .. } = &input.work {
         tools.restore(&pause.execution.tools)?;
-        attempted = pause.execution.compaction_attempted;
+        compaction = pause.execution.compaction;
     }
     for step in 0..max_steps {
         if cancellation.is_cancelled() {
@@ -97,7 +98,7 @@ pub(super) async fn run(
                         main_output_limit: input.main_output_limit,
                         supports_vision: input.supports_vision,
                         tools: tools.checkpoint(),
-                        compaction_attempted: attempted,
+                        compaction,
                         replay_base: continuation_base,
                     }),
                 };
@@ -124,8 +125,8 @@ pub(super) async fn run(
                 8 * 1024 * 1024,
             )
             .await?;
-        if !attempted && auto_context::due(input, &source) {
-            attempted = true;
+        if compaction == CompactionBudget::Available && auto_context::due(input, &source) {
+            compaction = CompactionBudget::Failed;
             if auto_context::attempt(
                 inner,
                 input,
@@ -136,6 +137,7 @@ pub(super) async fn run(
             )
             .await?
             {
+                compaction = CompactionBudget::Reshaped;
                 tools.clear_loaded();
             }
             source = inner
@@ -178,8 +180,10 @@ pub(super) async fn run(
                 error @ RunError::Model(maka_model::ModelError::ContextOverflow {
                     observed_output: false,
                 }),
-            ) if !attempted && step + 1 < max_steps && !cancellation.is_cancelled() => {
-                attempted = true;
+            ) if compaction == CompactionBudget::Available
+                && step + 1 < max_steps
+                && !cancellation.is_cancelled() =>
+            {
                 if auto_context::attempt(
                     inner,
                     input,
@@ -190,6 +194,7 @@ pub(super) async fn run(
                 )
                 .await?
                 {
+                    compaction = CompactionBudget::Reshaped;
                     tools.clear_loaded();
                     continue;
                 }
@@ -197,6 +202,9 @@ pub(super) async fn run(
             }
             Err(error) => return Err(error),
         };
+        if compaction == CompactionBudget::Reshaped {
+            compaction = CompactionBudget::Available;
+        }
         let local_calls: Vec<_> = output
             .tool_calls()
             .filter(|call| !call.provider_executed)

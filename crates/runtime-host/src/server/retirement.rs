@@ -239,7 +239,7 @@ pub(super) fn allows_preparing(operation: maka_protocol::Operation) -> bool {
                 | SubscriptionOpen
                 | SubscriptionClose
                 | SubscriptionPtyInterestSet
-                | SessionTranscriptOverlayRelease
+                | SubscriptionReady
                 | WorkhubCoordinationActFromTurn
                 | WorkhubCoordinationSelectAndDelegate
         )

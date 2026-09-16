@@ -17,7 +17,9 @@
  * under the License.
  */
 
-use super::{Failure, copy_number, js_truthy, js_whitespace, object_array, optional_array};
+use super::{
+    Failure, copy_number, js_truthy, js_whitespace, object_array, optional_array, token_limit,
+};
 use serde_json::{Map, Value, json};
 
 pub(super) fn codex(root: &Value) -> Result<Vec<Value>, Failure> {
@@ -98,7 +100,7 @@ pub(super) fn copilot(root: &Value) -> Result<Vec<Value>, Failure> {
         copy_number(
             limits
                 .get("max_context_window_tokens")
-                .filter(|n| !n.is_null())
+                .filter(|n| token_limit(n).is_some())
                 .or_else(|| limits.get("max_prompt_tokens")),
             &mut model,
             "contextWindow",

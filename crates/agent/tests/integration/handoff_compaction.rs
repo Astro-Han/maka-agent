@@ -105,7 +105,7 @@ async fn handoff_preserves_conversation_replay_and_compacts_before_its_physical_
         }).unwrap();
         release.send(()).unwrap();
         let pause = reservation.ready().await.unwrap().commit().unwrap().wait().await.unwrap();
-        assert!(!pause.execution.compaction_attempted);
+        assert_eq!(pause.execution.compaction, maka_runtime::handoff::CompactionBudget::Available);
         assert_eq!(pause.execution.replay_base, None);
         running.wait().await.unwrap();
         engine.drain().await;

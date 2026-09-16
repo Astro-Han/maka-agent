@@ -325,13 +325,14 @@ fn required_tools_commit_only_one_session_owner_and_failed_selection_leaves_no_b
         })).collect::<Vec<_>>()})).unwrap()
     };
     let required = ["mcp__desktop__control", "mcp__desktop__tasks"];
+    let optional = ["mcp__desktop__browser"];
     let mut registry = Registry::default();
     let (first, _, _first_output) = attach(&mut registry, identity("first"));
     registry
         .replace(first, offers("partial", "session", &["control"]))
         .unwrap();
     assert!(matches!(
-        registry.bind_required_tools("fresh", first, &required),
+        registry.bind_required_tools("fresh", first, &required, &[]),
         Err(BindingError::RequiredProvider)
     ));
     assert!(registry.snapshot("fresh").unwrap().offers().is_empty());
@@ -343,7 +344,7 @@ fn required_tools_commit_only_one_session_owner_and_failed_selection_leaves_no_b
         .replace(second, offers("other", "session", &["tasks"]))
         .unwrap();
     assert!(matches!(
-        registry.bind_required_tools("mixed", second, &required),
+        registry.bind_required_tools("mixed", second, &required, &[]),
         Err(BindingError::RequiredProvider)
     ));
     assert_eq!(registry.snapshot("mixed").unwrap().offers().len(), 1);
@@ -353,7 +354,7 @@ fn required_tools_commit_only_one_session_owner_and_failed_selection_leaves_no_b
             .replace(second, offers(affinity, affinity, &["control", "tasks"]))
             .unwrap();
         assert!(matches!(
-            registry.bind_required_tools("fresh", second, &required),
+            registry.bind_required_tools("fresh", second, &required, &[]),
             Err(BindingError::RequiredProvider)
         ));
     }
@@ -361,15 +362,33 @@ fn required_tools_commit_only_one_session_owner_and_failed_selection_leaves_no_b
         .replace(second, offers("complete", "session", &["control", "tasks"]))
         .unwrap();
     let (snapshot, _) = registry
-        .bind_required_tools("fresh", second, &required)
+        .bind_required_tools("fresh", second, &required, &optional)
         .unwrap();
     assert_eq!(snapshot.offers().len(), 2);
     for offer in snapshot.offers() {
         assert_eq!(offer.resolve(&registry).unwrap().provider_id(), provider);
     }
+    registry
+        .replace(
+            second,
+            offers(
+                "with-browser",
+                "session",
+                &["control", "tasks", "browser", "unrelated"],
+            ),
+        )
+        .unwrap();
+    let (snapshot, _) = registry
+        .bind_required_tools("fresh", second, &required, &optional)
+        .unwrap();
+    assert_eq!(
+        snapshot.offers().len(),
+        3,
+        "optional tools are included, unrelated offers remain outside the profile"
+    );
     assert!(
         matches!(
-            registry.bind_required_tools("mixed", second, &required),
+            registry.bind_required_tools("mixed", second, &required, &[]),
             Err(BindingError::Lost)
         ),
         "A real prior binding remains authoritative; only failed selections leave nothing behind"

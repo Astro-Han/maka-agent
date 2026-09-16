@@ -99,6 +99,7 @@ pub(super) async fn validate(
             &selection,
             Some(&(opened as i64, opening)),
             &mode,
+            i64::MAX as u64,
         )
         .await?
     } else {
@@ -137,10 +138,14 @@ pub(super) async fn validate(
     if resolved == ModelPurpose::Main {
         return Ok(());
     }
+    let first_summary =
+        boundary::summary_start(connection, &event.invocation.invocation_id, i64::MAX as u64)
+            .await?
+            .map(|sequence| sequence as i64);
     let previous_effective: Option<(i64, Option<String>)> = sqlx::query_as(
         "SELECT sequence,json_extract(event_json,'$.fact.effective_source_digest') FROM runtime_events
-         WHERE invocation_id=? AND kind='model_requested' AND json_extract(event_json,'$.fact.purpose')='summary' ORDER BY sequence LIMIT 1",
-    ).bind(&event.invocation.invocation_id).fetch_optional(&mut *connection).await?;
+         WHERE sequence = ?",
+    ).bind(first_summary).fetch_optional(&mut *connection).await?;
     if let Some((sequence, expected)) = previous_effective {
         if expected != *effective_source_digest {
             return Err(invalid("summary repair changed effective source"));
@@ -152,9 +157,8 @@ pub(super) async fn validate(
         "SELECT json_extract(event_json, '$.fact.model_id'), json_extract(event_json, '$.fact.route_identity'),
          json_extract(event_json, '$.fact.source_high_water'), json_extract(event_json, '$.fact.source_digest'),
          json_extract(event_json, '$.fact.checkpoint_event_id') FROM runtime_events
-         WHERE invocation_id = ? AND kind = 'model_requested' AND json_extract(event_json, '$.fact.purpose') = 'summary'
-         ORDER BY sequence LIMIT 1",
-    ).bind(&event.invocation.invocation_id).fetch_optional(&mut *connection).await?;
+         WHERE sequence = ?",
+    ).bind(first_summary).fetch_optional(&mut *connection).await?;
     if first.is_some_and(|(m, r, h, d, p)| {
         m != *model_id
             || r != *route_identity
@@ -163,11 +167,6 @@ pub(super) async fn validate(
             || p != *checkpoint_event_id
     }) {
         return Err(invalid("summary repair changed source or route"));
-    }
-    let applied: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ? AND kind = 'context_checkpoint_recorded')")
-        .bind(&event.invocation.invocation_id).fetch_one(connection).await?;
-    if applied {
-        return Err(invalid("invocation already applied its compaction attempt"));
     }
     Ok(())
 }

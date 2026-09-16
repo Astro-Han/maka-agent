@@ -19,15 +19,14 @@
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use maka_event_log::EventLog;
-use maka_presentation::{Content, Message, watermark};
+use maka_presentation::watermark;
 use maka_protocol::transcript::*;
 use maka_runtime::event::{
     EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent,
 };
 use maka_runtime_host::transcript::Transcript;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::Semaphore;
+use std::collections::BTreeMap;
 
 async fn fixture() -> (tempfile::TempDir, EventLog, u64) {
     let dir = tempfile::tempdir().unwrap();
@@ -76,14 +75,7 @@ async fn fixture() -> (tempfile::TempDir, EventLog, u64) {
     (dir, log, watermark(fence).unwrap())
 }
 fn pager(id: &str, through: u64) -> Transcript {
-    Transcript::new(
-        id.into(),
-        "session".into(),
-        Some(through),
-        vec![],
-        Arc::new(Semaphore::new(64 * 1024 * 1024)),
-    )
-    .unwrap()
+    Transcript::new(id.into(), "session".into(), Some(through)).unwrap()
 }
 fn request(
     through: u64,
@@ -92,7 +84,6 @@ fn request(
 ) -> SessionTranscriptPageInput {
     SessionTranscriptPageInput {
         subscription_id: "sub".into(),
-        source: SessionTranscriptPageSource::Durable,
         direction,
         through_sequence: Some(through),
         cursor: None,
@@ -124,16 +115,13 @@ async fn byte_fragments_reassemble_both_directions_with_digest_and_reachable_tur
                 boundary = page.range_boundary_sequence;
             }
             assert_eq!(page.range_boundary_sequence, boundary);
-            let SessionTranscriptFragment::Durable {
+            let SessionTranscriptFragment {
                 sequence,
                 byte_offset,
                 total_bytes,
                 payload_digest,
                 data,
-            } = &page.fragments[0]
-            else {
-                panic!()
-            };
+            } = &page.fragments[0];
             let bytes = STANDARD.decode(data).unwrap();
             let buffer = messages
                 .entry(*sequence)
@@ -218,68 +206,16 @@ async fn anchors_are_exclusive_and_cursors_reject_tampering_and_transplants() {
 }
 
 #[tokio::test]
-async fn overlay_is_frozen_released_idempotently_and_returns_shared_capacity() {
+async fn bootstrap_and_pages_share_the_announced_log_fence() {
     let (_dir, log, through) = fixture().await;
-    let message = Message {
-        id: "active".into(),
-        turn_id: "turn".into(),
-        ts: 123,
-        content: Content::User {
-            attachments: None,
-            text: "frozen😀".into(),
-            display_text: None,
-            quotes: None,
-            directory_references: None,
-            inline_references: None,
-        },
-    };
-    let size = serde_json::to_vec(&message).unwrap().len();
-    let budget = Arc::new(Semaphore::new(size));
-    let mut state = Transcript::new(
-        "sub".into(),
-        "session".into(),
-        Some(through),
-        vec![message.clone()],
-        budget.clone(),
-    )
-    .unwrap();
-    assert_eq!(budget.available_permits(), 0);
-    assert!(
-        Transcript::new(
-            "other".into(),
-            "session".into(),
-            Some(through),
-            vec![message.clone()],
-            budget.clone()
-        )
-        .is_err()
-    );
+    let mut state = pager("sub", through);
     let bootstrap = state.bootstrap(&log, 2).await.unwrap();
-    assert_eq!(bootstrap.overlay_message_count, 1);
-    assert_eq!(bootstrap.overlay.raw_bytes + bootstrap.durable.raw_bytes, 2);
+    assert_eq!(bootstrap.durable.raw_bytes, 2);
+    let mut input = request(through + 256, SessionTranscriptPageDirection::Older, 1);
+    assert!(state.page(&log, &input).await.is_err());
     assert!(state.advance(Some(through + 256)).unwrap());
     assert!(!state.advance(Some(through + 256)).unwrap());
     assert!(state.advance(Some(through)).is_err());
-    let mut input = request(through, SessionTranscriptPageDirection::Older, 1);
-    input.source = SessionTranscriptPageSource::Overlay;
-    assert!(state.page(&log, &input).await.is_ok());
-    input.through_sequence = Some(through + 256);
-    assert!(state.page(&log, &input).await.is_err());
     input.through_sequence = Some(through);
-    state.release_overlay();
-    state.release_overlay();
-    assert_eq!(budget.available_permits(), size);
-    assert!(state.page(&log, &input).await.is_err());
-    input.source = SessionTranscriptPageSource::Durable;
     assert!(state.page(&log, &input).await.is_ok());
-    let state = Transcript::new(
-        "sub".into(),
-        "session".into(),
-        Some(through),
-        vec![message],
-        budget.clone(),
-    )
-    .unwrap();
-    drop(state);
-    assert_eq!(budget.available_permits(), size);
 }

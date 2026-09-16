@@ -95,7 +95,6 @@ async function verifyAscii(connection, item) {
       messages.push(...decoded.messages);
       if (decoded.nextCursor === null) break;
       page = await subscription.loadTranscriptPage({
-        source: 'durable',
         direction: 'older',
         throughSequence: page.throughSequence,
         cursor: decoded.nextCursor,
@@ -128,7 +127,6 @@ async function verifyControlCapacity(connection, sessionId, live) {
     async () => {
       if (live) {
         await live.subscription.loadTranscriptPage({
-          source: 'durable',
           direction: 'older',
           throughSequence: null,
           cursor: null,

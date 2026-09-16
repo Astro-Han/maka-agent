@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! Provider endpoint/auth snapshot from core/provider-registry.ts (2026-09-11).
+//! Provider endpoint/auth snapshot from core/provider-registry.ts (2026-09-16).
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +41,7 @@ pub fn provider_default_base_url(provider: &str) -> Result<&'static str, String>
         "google" => Ok("https://generativelanguage.googleapis.com/v1beta"),
         "deepseek" => Ok("https://api.deepseek.com"),
         "moonshot" => Ok("https://api.moonshot.cn/v1"),
+        "moonshot-global" => Ok("https://api.moonshot.ai/v1"),
         "zai-coding-plan" => Ok("https://api.z.ai/api/coding/paas/v4"),
         "MiniMax" => Ok("https://api.minimax.io/anthropic/v1"),
         "MiniMax-cn" => Ok("https://api.minimaxi.com/anthropic/v1"),

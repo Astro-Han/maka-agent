@@ -33,6 +33,15 @@ const CLIENT_TOOLS: [&str; 2] = [
     "mcp__desktop_workhub__tasks",
 ];
 
+const BROWSER_TOOLS: [&str; 6] = [
+    "mcp__desktop_browser__browser_navigate",
+    "mcp__desktop_browser__browser_snapshot",
+    "mcp__desktop_browser__browser_click",
+    "mcp__desktop_browser__browser_type",
+    "mcp__desktop_browser__browser_wait",
+    "mcp__desktop_browser__browser_extract",
+];
+
 pub(super) fn tools(
     executions: &Executions,
     session: &SessionConfiguration,
@@ -44,6 +53,7 @@ pub(super) fn tools(
             COORDINATION_SESSION_ID,
             connection_id,
             &CLIENT_TOOLS,
+            &BROWSER_TOOLS,
             session.workspace.host_cwd.clone(),
             executions.interactions.clone(),
         )
@@ -72,7 +82,10 @@ pub(in crate::execution) fn catalog(
     executions: &Executions,
     mut tools: Vec<ToolRegistration>,
 ) -> Result<ToolCatalog> {
-    tools.retain(|tool| CLIENT_TOOLS.contains(&tool.definition.name.as_str()));
+    tools.retain(|tool| {
+        CLIENT_TOOLS.contains(&tool.definition.name.as_str())
+            || BROWSER_TOOLS.contains(&tool.definition.name.as_str())
+    });
     tools.push(executions.interactions.question_tool());
     tools.push(ToolRegistration {
         definition: ToolDefinition {

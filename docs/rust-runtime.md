@@ -22,7 +22,7 @@
 [简体中文](./rust-runtime.zh-CN.md)
 
 The Rust workspace replaces Maka's runtime and host while preserving the
-TypeScript client protocol and interactions. Both use protocol epoch 154. The rewrite is incomplete;
+TypeScript client protocol and interactions. Both use protocol epoch 158. The rewrite is incomplete;
 unsupported operations return explicit errors.
 
 ## Build and run
@@ -178,6 +178,8 @@ Do not run untrusted code or point test instances at existing user data.
   committed semantic facts. Compaction changes the model projection, not history.
   Failed response fragments remain display evidence, not accepted model history;
   user cancellation is not displayed as a provider failure.
+- Subscriptions deliver frames only after `subscription.ready`. Reconnection replays
+  active text from the committed log under backpressure; no copied transcript overlay.
 - Model messages, content and tool outcomes are typed through provider projection.
   Routing and discovery share typed provider contracts. Tool JSON, schemas and
   provider extensions remain open-ended.

@@ -79,7 +79,9 @@ pub(super) fn lane(value: &Value) -> Lane {
     {
         return match operation {
             // No stream data may precede open or follow its close acknowledgement.
-            Operation::SubscriptionOpen | Operation::SubscriptionClose => Lane::Barrier,
+            Operation::SubscriptionOpen
+            | Operation::SubscriptionReady
+            | Operation::SubscriptionClose => Lane::Barrier,
             Operation::SessionTranscriptPage
             | Operation::ArtifactQuery
             | Operation::RuntimeResourceQuery => Lane::Bulk,

@@ -119,7 +119,7 @@ impl Operation {
                 | Self::SessionRevisionAbandon
                 | Self::SessionRevisionCreate
                 | Self::SessionTranscriptPage
-                | Self::SessionTranscriptOverlayRelease
+                | Self::SubscriptionReady
                 | Self::SessionTurnLandmarksQuery
                 | Self::SessionTurnsQuery
                 | Self::SessionWorkspaceRelocate

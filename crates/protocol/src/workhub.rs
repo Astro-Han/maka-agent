@@ -73,16 +73,16 @@ pub struct ResolveResult {
     pub session_id: String,
 }
 
-/// Only the model is writable through WorkHub authority.
+/// WorkHub model selection includes its explicit thinking preference.
 pub fn decode_model_input(value: &Value) -> Result<SessionConfigurationUpdateInput> {
     codec::exact(
         codec::record(value, "WorkHub model configuration")?,
-        &["expectedRevision", "modelTarget"],
+        &["expectedRevision", "modelTarget", "thinkingLevel"],
     )?;
     decode_session_configuration_update_input(&json!({
         "sessionId": COORDINATION_SESSION_ID,
         "expectedRevision": value["expectedRevision"],
-        "patch": {"modelTarget": value["modelTarget"]}
+        "patch": {"modelTarget": value["modelTarget"], "thinkingLevel": value["thinkingLevel"]}
     }))
 }
 

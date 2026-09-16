@@ -256,7 +256,7 @@ fn path_free(request: &Request) -> bool {
         | Operation::SubscriptionClose
         | Operation::SubscriptionPtyInterestSet
         | Operation::SessionTranscriptPage
-        | Operation::SessionTranscriptOverlayRelease => true,
+        | Operation::SubscriptionReady => true,
         _ => false,
     }
 }

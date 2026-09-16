@@ -46,6 +46,8 @@ pub fn decode_host_frame(value: &Value) -> Result<HostFrame> {
                 &["cwd"],
             )?;
             let arguments = decode_input(&fields["arguments"], "arguments")?;
+            let tool_call_id = string(&fields["toolCallId"], "toolCallId", 256)?;
+            crate::codec::opaque_identity(&tool_call_id)?;
             Ok(HostFrame::Call {
                 invocation_id: entity(&fields["invocationId"], "invocationId")?,
                 registration_id: entity(&fields["registrationId"], "registrationId")?,
@@ -55,7 +57,7 @@ pub fn decode_host_frame(value: &Value) -> Result<HostFrame> {
                 arguments,
                 session_id: entity(&fields["sessionId"], "sessionId")?,
                 turn_id: entity(&fields["turnId"], "turnId")?,
-                tool_call_id: entity(&fields["toolCallId"], "toolCallId")?,
+                tool_call_id,
                 cwd: fields
                     .get("cwd")
                     .map(|v| string(v, "cwd", 4096))

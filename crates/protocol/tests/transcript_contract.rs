@@ -22,13 +22,13 @@ use maka_protocol::transcript::*;
 use serde_json::{Value, json};
 
 fn page() -> Value {
-    json!({"kind":"page","sessionId":"session_1","source":"durable","direction":"older",
-        "throughSequence":8,"rawBytes":1,"fragments":[{"kind":"durable","sequence":8,
+    json!({"kind":"page","sessionId":"session_1","direction":"older",
+        "throughSequence":8,"rawBytes":1,"fragments":[{"sequence":8,
         "byteOffset":1,"totalBytes":3,"payloadDigest":null,"data":"uA=="}],
         "rangeBoundarySequence":8,"protectedTurnSequence":8,"nextCursor":null})
 }
 fn input() -> Value {
-    json!({"subscriptionId":"sub","source":"durable","direction":"older",
+    json!({"subscriptionId":"sub","direction":"older",
         "throughSequence":8,"cursor":null,"anchorSequence":null,"maxBytes":1})
 }
 
@@ -114,47 +114,30 @@ fn fragments_are_bytes_and_require_canonical_base64_bounds_and_order() {
 }
 
 #[test]
-fn page_and_bootstrap_match_identity_watermark_and_combined_budget() {
+fn page_and_bootstrap_match_identity_watermark_and_budget() {
     let request = decode_session_transcript_page_input(&input()).unwrap();
     let result = decode_session_transcript_page(&page()).unwrap();
     assert!(assert_page_for_input(&request, &result).is_ok());
     let mut changed = result.clone();
     changed.through_sequence = Some(9);
     assert!(assert_page_for_input(&request, &changed).is_err());
-    let mut overlay = page();
-    overlay["source"] = json!("overlay");
-    overlay["fragments"] =
-        json!([{"kind":"overlay","messageIndex":0,"byteOffset":0,"totalBytes":1,"data":"eA=="}]);
-    overlay["rangeBoundarySequence"] = Value::Null;
-    overlay["protectedTurnSequence"] = Value::Null;
-    let value =
-        json!({"throughSequence":8,"overlayMessageCount":1,"durable":page(),"overlay":overlay});
+    let value = json!({"durable":page()});
     let bootstrap = decode_session_transcript_bootstrap(&value).unwrap();
     assert!(validate_bootstrap_for_input(&bootstrap, "session_1", 2).is_ok());
     assert!(validate_bootstrap_for_input(&bootstrap, "wrong", 2).is_err());
     let mut changed = bootstrap.clone();
-    changed.overlay.raw_bytes = 2;
+    changed.durable.raw_bytes = 3;
     assert!(validate_bootstrap_for_input(&changed, "session_1", 2).is_err());
     let mut changed = value.clone();
-    changed["overlay"]["throughSequence"] = json!(7);
-    assert!(decode_session_transcript_bootstrap(&changed).is_err());
-    let mut changed = value.clone();
-    changed["overlayMessageCount"] = json!(4097);
+    changed["durable"]["direction"] = json!("newer");
     assert!(decode_session_transcript_bootstrap(&changed).is_err());
     let mut changed = value;
-    changed["overlay"]["rangeBoundarySequence"] = json!(0);
+    changed["overlay"] = json!({});
     assert!(decode_session_transcript_bootstrap(&changed).is_err());
 }
 
 #[test]
-fn empty_pages_are_explicit_and_release_shape_is_exact() {
-    let release =
-        decode_session_transcript_overlay_release_input(&json!({"subscriptionId":"sub"})).unwrap();
-    let other =
-        decode_session_transcript_overlay_release_result(&json!({"subscriptionId":"other"}))
-            .unwrap();
-    assert!(assert_overlay_release_for_input(&release, &release).is_ok());
-    assert!(assert_overlay_release_for_input(&release, &other).is_err());
+fn empty_pages_are_explicit() {
     assert!(decode_session_transcript_page(&json!({})).is_err());
     let mut empty = page();
     empty["throughSequence"] = Value::Null;
@@ -167,13 +150,4 @@ fn empty_pages_are_explicit_and_release_shape_is_exact() {
     assert_eq!(serde_json::to_value(decoded).unwrap(), empty);
     empty["nextCursor"] = json!("unreachable");
     assert!(decode_session_transcript_page(&empty).is_err());
-    assert!(
-        decode_session_transcript_overlay_release_input(&json!({"subscriptionId":"sub"})).is_ok()
-    );
-    assert!(
-        decode_session_transcript_overlay_release_result(
-            &json!({"subscriptionId":"sub","released":true})
-        )
-        .is_err()
-    );
 }

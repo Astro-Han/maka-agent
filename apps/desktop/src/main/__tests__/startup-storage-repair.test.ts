@@ -55,7 +55,7 @@ const boot = await compile('runtime-host-boot', true);
 const context = await compile('startup-context');
 
 for (const accept of [false, true]) {
-  test(`startup storage repair reaches the dialog and ${accept ? 'adopts' : 'preserves'} the root`, async () => {
+  test(`TS E2E storage repair reaches the dialog and ${accept ? 'adopts' : 'preserves'} the root`, async () => {
     const userData = await mkdtemp(join(tmpdir(), 'maka-startup-repair-'));
     const root = join(userData, 'workspaces', 'default');
     const stopped = new Error('boot stopped after the storage decision');
@@ -72,14 +72,14 @@ for (const accept of [false, true]) {
       await writeFile(markerPath, staleMarker);
 
       const app = {
-        isPackaged: true,
+        isPackaged: false,
         getAppPath: () => '/test/Maka.app',
         getPath: () => userData,
         getVersion: () => 'test',
         getPreferredSystemLanguages: () => ['en-US'],
         quit: () => { quit = true; throw stopped; },
       };
-      const process = { env: {}, argv: [] };
+      const process = { env: { MAKA_E2E: '1', MAKA_E2E_USER_DATA_DIR: userData, MAKA_E2E_SHOW_WINDOW: '1' }, argv: [] };
       const contextModule = { exports: {} };
       runInNewContext(context, {
         module: contextModule, process,
@@ -115,13 +115,14 @@ for (const accept of [false, true]) {
         createSettingsStore: () => { settingsOpened = true; throw stopped; },
       };
       const completion = runInNewContext(`${boot}\nmodule.exports.default()`, {
-        module: { exports: {} }, process, console,
+        module: { exports: {} }, process, console, URL,
+        importMeta: { url: new URL('../runtime-host-boot.js', import.meta.url).href },
         require: (name: string) => name.startsWith('node:') ? require(name)
           : name === './startup-context.js' ? contextModule.exports : deps,
       }) as Promise<void>;
       await assert.rejects(completion, (error) => error === stopped);
       assert.equal(dialogs.length, 1);
-      assert.equal(dialogs[0]?.revealMode, 'active');
+      assert.equal(dialogs[0]?.revealMode, 'inactive');
       assert.equal(quit, !accept);
       assert.equal(settingsOpened, accept);
       if (accept) {

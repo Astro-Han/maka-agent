@@ -36,7 +36,6 @@ pub(super) struct Position {
 struct Claims {
     version: u8,
     binding: String,
-    source: SessionTranscriptPageSource,
     direction: SessionTranscriptPageDirection,
     through: Option<u64>,
     position: Position,
@@ -63,7 +62,6 @@ impl Signer {
         let bytes = serde_json::to_vec(&Claims {
             version: 1,
             binding: self.binding.clone(),
-            source: input.source,
             direction: input.direction,
             through: input.through_sequence,
             position,
@@ -94,7 +92,6 @@ impl Signer {
         let claims: Claims = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
         if claims.version != 1
             || claims.binding != self.binding
-            || claims.source != input.source
             || claims.direction != input.direction
             || claims.through != input.through_sequence
         {

@@ -52,7 +52,7 @@ impl Streams {
                         run_id: invocation.run_id.clone(),
                         message_id: seed.message_id,
                         kind: kind(seed.text_kind),
-                        offset: seed.offset,
+                        offset: 0,
                     },
                 );
             }
@@ -218,18 +218,18 @@ mod tests {
             ..invocation.clone()
         };
         for failed in [false, true] {
-            let seeds = [
+            let seeds: Vec<_> = [
                 ("text", TextKind::Text),
                 ("unfinished", TextKind::Thinking),
                 ("finalized", TextKind::Thinking),
             ]
             .into_iter()
             .map(|(id, text_kind)| AssistantStreamSeed {
+                start_sequence: 1,
                 step_id: "step".into(),
                 part_id: id.into(),
                 message_id: id.into(),
                 text_kind,
-                offset: 5,
             })
             .collect();
             let event = |fact| StoreStreamEvent {
@@ -240,9 +240,7 @@ mod tests {
                 recorded_at: std::time::SystemTime::UNIX_EPOCH,
                 fact,
             };
-            let mut streams = if failed {
-                Streams::bootstrap(Some(&root), seeds)
-            } else {
+            let mut streams = {
                 let mut streams = Streams::default();
                 for seed in seeds {
                     let mut start = event(StreamFact::PartStarted {

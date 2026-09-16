@@ -186,7 +186,7 @@ fn completed_and_interrupted_rows_keep_overlay_identity_time_and_original_decode
                         catalog_digest: format!("sha256:{}", "c".repeat(64)),
                         loaded: Default::default(),
                     },
-                    compaction_attempted: false,
+                    compaction: maka_runtime::handoff::CompactionBudget::Available,
                     replay_base: None,
                 }),
             },

@@ -34,7 +34,6 @@ pub(crate) async fn register(connection: &mut SqliteConnection) -> Result<(), St
     let borrowed = unsafe { rusqlite::Connection::from_handle(locked.as_raw_handle().as_ptr()) }?;
     let registered = crate::sessions::register_functions(&borrowed)
         .and_then(|()| crate::message_identity::register(&borrowed))
-        .and_then(|()| crate::observation::register_function(&borrowed))
         .and_then(|()| crate::transcript::navigation::register(&borrowed));
     // With rusqlite's optional hooks features, wrapper Drop also removes hooks.
     // Register once at startup before any hooks exist, never during operations.
@@ -52,14 +51,6 @@ mod tests {
     async fn sqlx_uses_registered_functions_after_borrowed_wrapper_drops() {
         let mut connection = SqliteConnection::connect("sqlite::memory:").await.unwrap();
         register(&mut connection).await.unwrap();
-        for text in ["", "a\0😀", "中文𐐷", "\u{feff} \tA\u{85} B "] {
-            let actual: i64 = sqlx::query_scalar("SELECT maka_utf16_length(?)")
-                .bind(text)
-                .fetch_one(&mut connection)
-                .await
-                .unwrap();
-            assert_eq!(actual, text.encode_utf16().count() as i64);
-        }
         let prefix = format!("\u{feff}\t{} trailing", "😀".repeat(100));
         let preview: String = sqlx::query_scalar("SELECT catalog_preview(?)")
             .bind(prefix)

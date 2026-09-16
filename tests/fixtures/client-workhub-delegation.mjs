@@ -43,7 +43,6 @@ async function coordinationRecord(observer, sequence, kind, actionId) {
     sequence = frame.sequence;
     // loadTranscript is a frozen bootstrap; live reads use the announced fence.
     const page = await observer.subscription.loadTranscriptPage({
-      source: 'durable',
       direction: 'older',
       throughSequence: frame.throughSequence,
       cursor: null,

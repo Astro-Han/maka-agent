@@ -107,8 +107,8 @@ async fn http_and_sse_failures_preserve_typed_evidence_across_sdk_families() {
         }
         for (status, header, reason) in [
             (503, None, Some(maka_model::ProviderFailureReason::ProviderUnavailable)),
-            (503, Some("invalid"), None),
-            (429, None, None),
+            (503, Some("invalid"), Some(maka_model::ProviderFailureReason::ProviderUnavailable)),
+            (429, None, Some(maka_model::ProviderFailureReason::RateLimit)),
             (429, Some("0.01"), Some(maka_model::ProviderFailureReason::RateLimit)),
             (401, Some("0.01"), None),
         ] {
@@ -119,7 +119,7 @@ async fn http_and_sse_failures_preserve_typed_evidence_across_sdk_families() {
                 (Some(reason), ModelError::Provider(failure)) => {
                     assert_eq!(failure.reason(), reason);
                     assert!(failure.replay_safe());
-                    assert_eq!(failure.retry_after(), header.map(|_| Duration::from_millis(10)));
+                    assert_eq!(failure.retry_after(), header.filter(|h| *h == "0.01").map(|_| Duration::from_millis(10)));
                 }
                 (None, ModelError::Adapter(_)) => {}
                 (_, result) => panic!("unexpected failure classification: {result}"),

@@ -354,7 +354,7 @@ async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_res
                     catalog_digest: content_digest(b"unavailable-tools"),
                     loaded: Default::default(),
                 },
-                compaction_attempted: false,
+                compaction: maka_runtime::handoff::CompactionBudget::Available,
                 replay_base: None,
             }),
         };
