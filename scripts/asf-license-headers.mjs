@@ -369,6 +369,10 @@ const reviewedProvenance = new Map([
     'Synthetic fixtures written to exercise the provenance markers.',
   ],
   [
+    'scripts/source-legal-inventory.test.mjs',
+    'Maka-authored assertions quoting the upstream copyright notices required in the source release documents.',
+  ],
+  [
     'scripts/generate-third-party-notices.mjs',
     'Maka-authored generator that emits upstream copyright lines into THIRD_PARTY_NOTICES.txt. The copyright it names is its output, not its own.',
   ],

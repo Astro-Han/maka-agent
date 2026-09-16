@@ -252,6 +252,9 @@ rejected even if a path is listed here.
 - `apps/desktop/build/*.png`: contributor-submitted DMG artwork from pull request #3817; that contribution records Codex as review and verification assistance, not as the source of the artwork.
 - `apps/desktop/resources/status/*.png`: the status images recorded above and reproducibly rendered by `scripts/generate-cu-status-icons.mjs`.
 - `docs/images/**/*.png`: screenshots of Maka's own user interface committed as review evidence, including pull requests #3584 and #3588.
+- `crates/network/tests/fixtures/ca.pem`: generated loopback TLS test certificate; provenance is recorded in the adjacent `README.md`.
+- `crates/network/tests/fixtures/localhost.pem`: generated loopback TLS test certificate; provenance is recorded in the adjacent `README.md`.
+- `crates/network/tests/fixtures/localhost.key`: public test-only TLS key generated for Maka, not a deployment credential; provenance is recorded in the adjacent `README.md`.
 - `packages/core/src/__tests__/foreign-session.test.ts`: Apache-licensed source fixture containing a literal NUL, bidi override, and zero-width character to verify imported-session sanitization.
 - `packages/runtime-host/src/protocol/artifact.ts`: Apache-licensed protocol source containing literal C0 and DEL characters in the control-character rejection expression.
 - `packages/storage/src/__tests__/foreign-session-store.test.ts`: Apache-licensed storage fixture containing literal bidi and bell characters to verify durable imported-title sanitization.

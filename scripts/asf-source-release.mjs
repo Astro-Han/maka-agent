@@ -120,6 +120,7 @@ const textSourceBasenames = new Set([
   'LICENSE',
   'NOTICE',
   'network-policy',
+  'pre-commit',
 ]);
 const maxCommandBuffer = 64 * 1024 * 1024;
 const rejectedGpgStatuses = new Set([
