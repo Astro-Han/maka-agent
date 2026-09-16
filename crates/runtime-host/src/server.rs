@@ -145,6 +145,11 @@ impl Drop for Host {
 }
 
 impl Host {
+    /// Observe shutdown without granting the observer cancellation authority.
+    pub fn wait_for_drain(&self) -> impl Future<Output = ()> + Send + 'static + use<> {
+        self.draining.clone().cancelled_owned()
+    }
+
     pub async fn open(root: RootOwner) -> Result<Arc<Self>, HostError> {
         Self::open_with_global_instructions(root, None).await
     }

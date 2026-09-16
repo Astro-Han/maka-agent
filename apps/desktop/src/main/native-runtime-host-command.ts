@@ -34,7 +34,7 @@ export type NativeRuntimeHostOperator =
   | { readonly kind: 'wsl'; readonly distribution: string;
       readonly operator: RuntimeHostNativeOperatorCommand<'posix'> };
 
-/** Drain and reap even on excess output: never kill an in-flight durable mutation. */
+/** Keep draining after an observation timeout; a lost response is not rollback. */
 export function runNativeRuntimeHostCommand(
   target: NativeRuntimeHostOperator,
   args: readonly string[],
@@ -48,9 +48,14 @@ export function runNativeRuntimeHostCommand(
     const output: Buffer[] = [];
     let bytes = 0;
     let errorText = '';
-    // A readonly query can be abandoned. Mutations must settle or explicitly
-    // report an unknown outcome when the underlying connection breaks.
-    const timer = readOnly ? setTimeout(() => child.kill(), 15_000) : undefined;
+    // Bound the caller's wait without killing an in-flight durable mutation.
+    // Its listeners keep draining; later activation checks native authority.
+    const timer = setTimeout(() => {
+      if (readOnly) child.kill();
+      reject(new Error(readOnly
+        ? 'Native Host query timed out.'
+        : 'Native Host operation timed out; its outcome is unknown.'));
+    }, readOnly ? 15_000 : 120_000);
     child.stdout.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
       if (bytes <= 256 * 1024) output.push(chunk);
@@ -101,4 +106,3 @@ function invocation(target: NativeRuntimeHostOperator, args: readonly string[]) 
     }
   }
 }
-

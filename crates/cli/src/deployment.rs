@@ -26,6 +26,7 @@ mod logs;
 mod package;
 mod query;
 mod service;
+mod setup;
 mod store;
 mod update;
 mod updates;
@@ -35,6 +36,7 @@ pub(super) use control::{Control, ControlAction};
 pub(super) use entry::ServiceRun;
 pub(super) use logs::Logs;
 pub(super) use query::Status;
+pub(super) use setup::Setup;
 pub(super) use update::{Expected, Update};
 
 use clap::{Args, ValueEnum};
@@ -172,6 +174,12 @@ pub(super) fn directory(root_id: &str) -> Result<PathBuf, HostError> {
 
 impl Install {
     pub async fn run(self) -> Result<(), HostError> {
+        let (deployment, _lease) = self.install().await?;
+        println!("{}", serde_json::to_string(&deployment)?);
+        Ok(())
+    }
+
+    async fn install(self) -> Result<(Deployment, Arc<FileLease>), HostError> {
         if self.websocket.ip() != std::net::Ipv4Addr::LOCALHOST {
             return Err("managed Host listener must use 127.0.0.1".into());
         }
@@ -200,8 +208,7 @@ impl Install {
             }
             if existing.executable == std::env::current_exe()?.canonicalize()? {
                 lease.validate()?;
-                println!("{}", serde_json::to_string(existing)?);
-                return Ok(());
+                return Ok((existing.clone(), lease));
             }
         }
         let stage_directory = directory.clone();
@@ -268,8 +275,7 @@ impl Install {
             store::install(&directory, lease.clone(), owner, requested).await?
         };
         lease.validate()?;
-        println!("{}", serde_json::to_string(&deployment)?);
-        Ok(())
+        Ok((deployment, lease))
     }
 }
 

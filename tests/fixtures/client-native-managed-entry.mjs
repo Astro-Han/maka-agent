@@ -180,7 +180,7 @@ async function verifyManagement() {
     change: async (run) =>
       run({
         hold() {},
-        resumeOnSuccess() {
+        resumeOnSettled() {
           resumes++;
         },
         async retire(deployment, hostEpoch, prepareRemote) {
@@ -267,7 +267,7 @@ async function verifyManagement() {
   assert.equal(pending.outcome.kind, 'active_tasks');
   assert.deepEqual(pending.status.pendingUpdate, pending.outcome.target);
   assert.equal(pending.status.host.identity.hostEpoch, epoch);
-  assert.equal(resumes, 1);
+  assert.equal(resumes, 2);
   await other.close();
   const changed = await management.run({ action: 'reconcile', expected });
   assert.equal(changed.outcome.kind, 'ready');

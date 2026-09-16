@@ -26,13 +26,40 @@ use std::{
 #[test]
 fn native_pairing_finalizes_once_binds_client_and_revokes_live_transport() {
     let temporary = tempfile::tempdir().unwrap();
+    let invalid_root = temporary.path().join("invalid");
+    let invalid = Command::new(env!("CARGO_BIN_EXE_maka"))
+        .args(["host", "setup", "--root"])
+        .arg(&invalid_root)
+        .args(["--principal", ""])
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success());
+    assert!(
+        !invalid_root.exists(),
+        "invalid pairing must not install a Host"
+    );
     let mut fixture = CandidateFixture::new(temporary.path().join("root"));
+    let installed = Command::new(env!("CARGO_BIN_EXE_maka"))
+        .args(["host", "install", "--root"])
+        .arg(&fixture.root)
+        .output()
+        .unwrap();
+    assert!(installed.status.success(), "{installed:?}");
+    let deployment: serde_json::Value = serde_json::from_slice(&installed.stdout).unwrap();
+    let executable = deployment["executable"].as_str().unwrap();
     fixture.child = Some(
-        Command::new(env!("CARGO_BIN_EXE_maka"))
-            .args(["host", "serve", "--root"])
+        // A foreground candidate also works inside Windows Cargo's enclosing Job.
+        Command::new(executable)
+            .args(["host", "candidate", "--root"])
             .arg(&fixture.root)
-            .args(["--websocket", "127.0.0.1:0"])
-            .stdin(Stdio::null())
+            .args([
+                "--expected-root-id",
+                &fixture.root_id,
+                "--startup-attempt-id",
+                &uuid::Uuid::new_v4().to_string(),
+                "--owner-stdin",
+            ])
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()
@@ -41,7 +68,7 @@ fn native_pairing_finalizes_once_binds_client_and_revokes_live_transport() {
     fixture.wait_for_registration();
     let client = Command::new("node")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/client.mjs"))
-        .args(["--native-access", env!("CARGO_BIN_EXE_maka"), "--root"])
+        .args(["--native-access", executable, "--root"])
         .arg(&fixture.root)
         .output()
         .unwrap();

@@ -59,7 +59,7 @@ pub(super) struct Revoke {
 // No Debug: this receipt is intended only for the importing Client.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Pairing {
+pub(super) struct Pairing {
     root_id: String,
     credential_id: String,
     credential: String,
@@ -76,48 +76,59 @@ impl Access {
 
 impl Prepare {
     async fn run(self) -> Result<(), HostError> {
-        // Match the Desktop owner policy, without granting arbitrary Host paths.
-        // Pending credentials expire and must be finalized by the importing
-        // Client; its instance identity then remains bound to the credential.
-        let input = serde_json::to_value(AccessCredentialPrepareInput {
-            principal_kind: ManagedPrincipalKind::RemoteOwner,
-            principal_id: self.principal,
-            operation_grants: Operation::ALL
-                .iter()
-                .filter(|operation| operation.allows_remote_owner())
-                .map(|operation| operation.as_str().into())
-                .collect(),
-            can_publish_client_capabilities: true,
-            can_use_host_paths: false,
-            bind_client_instance: Some(true),
-        })?;
-        decode_prepare_input(&input)?;
+        let input = pairing_input(self.principal)?;
         let mut client = HostClient::connect(&self.root.root, None).await?;
-        let result = decode_issue_result(
-            &client
-                .request(Operation::AccessCredentialPrepare, input)
-                .await?,
-        )?;
-        let control = RootNamespaces::for_current_account()?
-            .control
-            .join(client.root_id());
-        let credential_id = result.credential_id.clone();
-        let credential = tokio::task::spawn_blocking(move || {
-            access_delivery::consume(&control, &result.delivery_id, &credential_id)
-        })
-        .await??;
-        println!(
-            "{}",
-            serde_json::to_string(&Pairing {
-                root_id: client.root_id().into(),
-                credential_id: result.credential_id,
-                credential,
-            })?
-        );
-        // Retain the connection through delivery consumption and output.
+        let pairing = prepare(&mut client, input).await?;
+        println!("{}", serde_json::to_string(&pairing)?);
         drop(client);
         Ok(())
     }
+}
+
+pub(super) fn pairing_input(principal: String) -> Result<AccessCredentialPrepareInput, HostError> {
+    // Match the Desktop owner policy, without granting arbitrary Host paths.
+    // Pending credentials expire and must be finalized by the importing
+    // Client; its instance identity then remains bound to the credential.
+    let input = serde_json::to_value(AccessCredentialPrepareInput {
+        principal_kind: ManagedPrincipalKind::RemoteOwner,
+        principal_id: principal,
+        operation_grants: Operation::ALL
+            .iter()
+            .filter(|operation| operation.allows_remote_owner())
+            .map(|operation| operation.as_str().into())
+            .collect(),
+        can_publish_client_capabilities: true,
+        can_use_host_paths: false,
+        bind_client_instance: Some(true),
+    })?;
+    Ok(decode_prepare_input(&input)?)
+}
+
+pub(super) async fn prepare(
+    client: &mut HostClient,
+    input: AccessCredentialPrepareInput,
+) -> Result<Pairing, HostError> {
+    let result = decode_issue_result(
+        &client
+            .request(
+                Operation::AccessCredentialPrepare,
+                serde_json::to_value(input)?,
+            )
+            .await?,
+    )?;
+    let control = RootNamespaces::for_current_account()?
+        .control
+        .join(client.root_id());
+    let credential_id = result.credential_id.clone();
+    let credential = tokio::task::spawn_blocking(move || {
+        access_delivery::consume(&control, &result.delivery_id, &credential_id)
+    })
+    .await??;
+    Ok(Pairing {
+        root_id: client.root_id().into(),
+        credential_id: result.credential_id,
+        credential,
+    })
 }
 
 impl Revoke {

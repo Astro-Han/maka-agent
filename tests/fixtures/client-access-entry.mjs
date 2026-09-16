@@ -29,18 +29,15 @@ const { values } = parseArgs({
   options: { 'native-access': { type: 'string' }, root: { type: 'string' } },
 });
 const run = promisify(execFile);
-const cli = async (...args) => {
-  const result = await run(
-    values['native-access'],
-    ['host', 'access', ...args, '--root', values.root],
-    {
-      timeout: 15_000,
-      maxBuffer: 16 * 1024,
-      windowsHide: true,
-    },
-  );
+const hostCommand = async (...args) => {
+  const result = await run(values['native-access'], ['host', ...args, '--root', values.root], {
+    timeout: 15_000,
+    maxBuffer: 16 * 1024,
+    windowsHide: true,
+  });
   return JSON.parse(result.stdout);
 };
+const cli = (...args) => hostCommand('access', ...args);
 const local = await connectExistingRuntimeHost({
   rootPath: values.root,
   protocol: { min: 0, max: 0 },
@@ -51,7 +48,13 @@ const connections = [];
 let pairing;
 let revoked = false;
 try {
-  pairing = await cli('prepare', '--principal', 'native-pairing');
+  const setup = await hostCommand('setup', '--principal', 'native-pairing');
+  pairing = setup.pairing;
+  assert.equal(setup.deployment.rootId, local.connection.rootId);
+  assert.equal(setup.host.hostEpoch, local.connection.hostEpoch);
+  const reused = await hostCommand('setup');
+  assert.deepEqual(reused, { deployment: setup.deployment, host: setup.host });
+  await assert.rejects(hostCommand('setup', '--mode', 'supervised'));
   assert.equal(pairing.rootId, local.connection.rootId);
   assert(typeof pairing.credential === 'string' && pairing.credential.startsWith('maka_rh_'));
   const connect = async (clientInstanceId) => {
@@ -108,6 +111,13 @@ try {
   }
   assert.equal((await connect('pairing-winner')).kind, 'unavailable');
   assert.equal((await local.connection.status()).state, 'ready');
+  const prepared = await cli('prepare', '--principal', 'native-pairing-again');
+  assert.equal(prepared.rootId, pairing.rootId);
+  assert.notEqual(prepared.credentialId, pairing.credentialId);
+  assert.deepEqual(await cli('revoke', '--credential-id', prepared.credentialId), {
+    credentialId: prepared.credentialId,
+    revoked: true,
+  });
   console.log('NATIVE_PAIRING_FINALIZED_BOUND_AND_REVOKED');
 } finally {
   await Promise.all(connections.map((connection) => connection.close()));

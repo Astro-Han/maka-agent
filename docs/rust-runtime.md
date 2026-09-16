@@ -79,18 +79,26 @@ starts an account-level systemd service, LaunchAgent or Windows scheduled task.
 Linux requires an active user manager with lingering enabled; macOS requires an
 Aqua login and Windows an interactive user session. Installation alone does not
 start a service or change account policy.
+`host setup --root <directory>` combines installation and activation; optional
+`--principal <id>` also returns a short-lived Desktop pairing credential. Protect
+this JSON as a secret. Repeating setup reuses matching code and configuration;
+changes still require `host update`.
 Desktop reuses managed native Hosts and activates pinned code when needed;
 its own generation and exit do not govern their lifetime. Pausing local launches
 waits for outstanding activations before handing off the Root.
 Desktop can manage local native deployments and existing SSH/WSL native-operator
 profiles. Remote lifecycle commands use SSH/WSL OS authority, not WebSocket
-credentials. Stopped or uncertain targets stay paused until startup is confirmed.
+credentials. Stop/uninstall retain the connection pause. Start/restart/update
+resume normal reconnection even after an unconfirmed result; activation checks
+the actual deployment rather than replaying the mutation.
 Deployment authority lives in account-level
 SQLite, outside the State Root; startup checks it before database migrations.
 On Windows, supervised installations use the sibling `maka-service.exe`, a
 windowless entry to the same Host. Distribute it alongside `maka.exe`.
 On-demand activation requires permission to leave the launcher's Windows Job;
 run the built executable directly, not through `cargo run`.
+Once shutdown begins, the CLI allows ten seconds for cleanup before exiting with
+code 70. Interrupted work is recovered from the log, never assumed rolled back.
 
 For a code update, run the new binary with
 `host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`.
@@ -102,8 +110,9 @@ and revision; `reconcile` never selects different settings.
 Active clients or non-cooperative work defer the switch; `host reconcile` with the
 same identity arguments finishes the recorded update. A committed target is never
 automatically rolled back, even if startup fails. Supervised activation replaces
-the service definition only while holding the Root. Unattended release selection
-and uninterrupted listener handoff are not yet connected.
+the service definition only while holding the Root. Upgrades target recoverable
+restarts, not uninterrupted sockets or PTYs; no separate control daemon is planned.
+Unattended release selection is not yet connected.
 
 `host stop`, `host restart` and `host uninstall` take the same identity arguments.
 Stop and restart preserve pending updates. Uninstall revokes startup before removing

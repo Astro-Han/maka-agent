@@ -17,8 +17,9 @@
  * under the License.
  */
 
+use maka_runtime_host::server::{Host, HostError, websocket::WebSocketListener};
 use serde_json::json;
-use std::path::Path;
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 pub(super) async fn run(
@@ -27,7 +28,6 @@ pub(super) async fn run(
     expected_root: Option<&str>,
 ) -> Result<(), maka_runtime_host::server::HostError> {
     use maka_event_log::root::{ROOT_MARKER, RootNamespaces, RootOwner};
-    use maka_runtime_host::server::{Host, websocket::WebSocketListener};
     let namespaces = RootNamespaces::for_current_account()?;
     let owner = if path.join(ROOT_MARKER).exists() {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -97,7 +97,24 @@ pub(super) async fn run(
         ready["websocketUrl"] = format!("ws://{}/runtime-host", listener.local_addr()?).into();
     }
     println!("{ready}");
-    let result = match websocket {
+    let result = listen(endpoint, websocket, host, cancellation).await;
+    result.and(registration.remove())
+}
+
+/// Process policy belongs to the CLI, never to an embedded Host library.
+pub(super) async fn listen(
+    endpoint: super::endpoint::LocalEndpoint,
+    websocket: Option<WebSocketListener>,
+    host: Arc<Host>,
+    cancellation: CancellationToken,
+) -> Result<(), HostError> {
+    let _finished = cancellation.clone().drop_guard();
+    watch_shutdown(
+        host.wait_for_drain(),
+        cancellation.clone(),
+        Duration::from_secs(10),
+    );
+    match websocket {
         Some(websocket) => {
             endpoint
                 .listener
@@ -105,8 +122,36 @@ pub(super) async fn run(
                 .await
         }
         None => endpoint.listener.serve(host, cancellation).await,
-    };
-    result.and(registration.remove())
+    }
+}
+
+fn watch_shutdown(
+    draining: impl Future<Output = ()> + Send + 'static,
+    cancellation: CancellationToken,
+    grace: Duration,
+) {
+    let runtime = tokio::runtime::Handle::current();
+    // Observe before polling the listener: its synchronous diagnostics can block.
+    // Neither notification needs a Tokio worker or I/O driver to make progress.
+    // The thread owns no Host/Root and stays armed through runtime teardown;
+    // normal process exit needs no join. Never block it on diagnostic output.
+    if std::thread::Builder::new()
+        .name("host-exit".into())
+        .spawn(move || {
+            runtime.block_on(async {
+                tokio::select! {
+                    _ = draining => {},
+                    _ = cancellation.cancelled() => {},
+                }
+            });
+            std::thread::sleep(grace);
+            // Recovery, not this exit, determines outcomes of interrupted work.
+            std::process::exit(70);
+        })
+        .is_err()
+    {
+        std::process::exit(70);
+    }
 }
 
 pub(super) fn global_instructions()
@@ -123,4 +168,68 @@ pub(super) fn home_directory()
     #[cfg(windows)]
     let instructions = Some(maka_event_log::root::windows::account_home()?);
     Ok(instructions)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        process::{Command, Stdio},
+        time::Instant,
+    };
+
+    #[test]
+    fn shutdown_deadline_bounds_blocking_runtime_teardown_without_delaying_normal_exit() {
+        const CHILD: &str = "MAKA_SHUTDOWN_DEADLINE_TEST";
+        if let Ok(mode) = std::env::var(CHILD) {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            runtime.block_on(async {
+                let draining = CancellationToken::new();
+                let finished = CancellationToken::new();
+                let _finished = finished.clone().drop_guard();
+                watch_shutdown(
+                    draining.clone().cancelled_owned(),
+                    finished,
+                    Duration::from_millis(250),
+                );
+                if mode == "synchronous" {
+                    draining.cancel();
+                    // No yield between announcing drain and blocking the listener.
+                    std::thread::sleep(Duration::from_secs(60));
+                } else if mode == "teardown" {
+                    let (started, ready) = tokio::sync::oneshot::channel();
+                    tokio::task::spawn_blocking(move || {
+                        started.send(()).unwrap();
+                        std::thread::sleep(Duration::from_secs(60));
+                    });
+                    ready.await.unwrap();
+                }
+                // A direct listener return must also bound final runtime teardown.
+            });
+            drop(runtime);
+            return;
+        }
+        for (mode, code) in [("normal", 0), ("synchronous", 70), ("teardown", 70)] {
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "serve::tests::shutdown_deadline_bounds_blocking_runtime_teardown_without_delaying_normal_exit"])
+                .env(CHILD, mode)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit())
+                .spawn().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                    panic!("Host exit deadline did not terminate blocked cleanup");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            assert_eq!(status.code(), Some(code));
+        }
+    }
 }

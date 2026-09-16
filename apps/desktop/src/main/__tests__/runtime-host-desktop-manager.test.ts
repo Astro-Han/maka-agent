@@ -187,7 +187,7 @@ test('quiesces Local reconnect while a managed service changes', async () => {
   await owner.close();
 });
 
-test('native management rejects stale retirement and retains stop intent until confirmed start', async () => {
+test('native management preserves stop intent but reconnects after an unconfirmed start', async () => {
   const deployment = {
     deploymentId: 'f7672ac5-42f0-4456-8a46-0e36f6d6137b', configRevision: 2,
     rootId: 'test-host', rootPath: '/test/root', executable: '/test/maka', sha256: 'a'.repeat(64),
@@ -227,10 +227,11 @@ test('native management rejects stale retirement and retains stop intent until c
     assert.equal(starts, 1);
     assert.equal(pauses, 2); // Failed start reused the retained suspension.
     assert.equal(resumes, 1);
-    await owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => {
+    await assert.rejects(owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => {
       scope.hold();
-      scope.resumeOnSuccess();
-    });
+      scope.resumeOnSettled();
+      throw new Error('start outcome unknown');
+    }), /start outcome unknown/);
     await owner.waitUntilReady('local', 'test-host-epoch');
     assert.equal(starts, 2);
     assert.equal(resumes, 2);

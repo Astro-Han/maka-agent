@@ -775,7 +775,7 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
         if (expectedTarget.profile.kind === 'local') throw new Error('Local Host manager is unavailable');
         // Disabled profiles have no reconnect or client lifetime to suspend.
         // Their native operator still acquires the exact deployment and Root.
-        return change({ hold() {}, async retire() { return true; }, resumeOnSuccess() {} });
+        return change({ hold() {}, async retire() { return true; }, resumeOnSettled() {} });
       }
       if (!sameResolvedRuntimeHostProfileTarget(target.target, expectedTarget) ||
         target.target.profileIncarnationId !== expectedTarget.profileIncarnationId) {
@@ -799,14 +799,13 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
         } };
       }
       let keepPaused = alreadyPaused;
-      let resumeOnSuccess = false;
-      let succeeded = false;
+      let resumeOnSettled = false;
       try {
         // Finish pre-existing launches before a management command can acquire Root.
         await barrier?.retireExcept(lifecycle.current?.hostPid ?? -1);
         const result = await change({
           hold: () => { keepPaused = true; },
-          resumeOnSuccess: () => { resumeOnSuccess = true; },
+          resumeOnSettled: () => { resumeOnSettled = true; },
           retire: async (deployment, hostEpoch, prepareRemote) => {
             const current = lifecycle.current;
             if (!current) return true; // Native RootOwner still proves exclusivity.
@@ -837,10 +836,9 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
             return true;
           },
         });
-        succeeded = true;
         return result;
       } finally {
-        if ((!keepPaused || (succeeded && resumeOnSuccess)) && !this.#closed) {
+        if ((!keepPaused || resumeOnSettled) && !this.#closed) {
           const suspension = target.nativeSuspension;
           target.nativeSuspension = undefined;
           suspension?.resume();

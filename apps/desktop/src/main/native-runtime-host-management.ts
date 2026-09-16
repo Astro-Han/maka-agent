@@ -38,11 +38,12 @@ import {
 import { runNativeRuntimeHostCommand, type NativeRuntimeHostOperator } from './native-runtime-host-command.js';
 
 export interface NativeRuntimeHostChangeScope {
-  /** Once a mutation may have run, reconnect stays paused until confirmed ready. */
+  /** Retain the pause for stop/uninstall, including an unconfirmed outcome. */
   hold(): void;
   retire(deployment: NativeRuntimeHostDeployment | null, hostEpoch?: string,
     prepareRemote?: (connectionId: string) => Promise<boolean>): Promise<boolean>;
-  resumeOnSuccess(): void;
+  /** Resume after the command settles, including failure; activation reads native authority. */
+  resumeOnSettled(): void;
 }
 
 export function createNativeRuntimeHostManagement(input: {
@@ -115,6 +116,7 @@ export function createNativeRuntimeHostManagement(input: {
         }
         const rootPath = status.kind === 'installed' ? status.deployment.rootPath : input.rootPath;
         if (!rootPath) throw new Error('Native Host installation requires a known Root path');
+        scope.resumeOnSettled();
         if (!await scope.retire(null)) return { kind: 'active_tasks' };
         scope.hold();
         const installed = nativeRuntimeHostDeploymentSchema.parse(JSON.parse(await execute([
@@ -133,10 +135,9 @@ export function createNativeRuntimeHostManagement(input: {
       if (status.kind !== 'installed' || status.deployment.admission !== undefined) {
         throw new Error('Install a native Host deployment before starting it');
       }
+      scope.resumeOnSettled();
       scope.hold();
-      const result = await activate(status.deployment);
-      scope.resumeOnSuccess();
-      return result;
+      return activate(status.deployment);
     }
 
     const observed = await requireCurrent(request.expected);
@@ -144,27 +145,24 @@ export function createNativeRuntimeHostManagement(input: {
     const hostEpoch = observed.host.kind === 'connected' ? observed.host.identity.hostEpoch : undefined;
     if (request.action === 'update' || request.action === 'reconcile') {
       // Stage under native authority while the old Host is still serving.
+      scope.resumeOnSettled();
       scope.hold();
       const staged = await mutate(request.action, current,
         request.action === 'update' ? request.settings : undefined);
       if (staged.kind === 'ready') {
-        scope.resumeOnSuccess();
         return staged;
       }
       if (staged.kind !== 'active_tasks' || !staged.target) {
         throw new Error('Native Host did not confirm a pending update');
       }
       if (!await retire(scope, current, hostEpoch)) return staged;
-      const result = await mutate('reconcile', current);
-      if (result.kind === 'ready') scope.resumeOnSuccess();
-      return result;
+      return mutate('reconcile', current);
     }
 
+    if (request.action === 'restart') scope.resumeOnSettled();
     if (!await retire(scope, current, hostEpoch)) return { kind: 'active_tasks', deployment: current };
     scope.hold();
-    const result = await mutate(request.action, current);
-    if (result.kind === 'ready') scope.resumeOnSuccess();
-    return result;
+    return mutate(request.action, current);
   };
   return {
     async run(value: unknown): Promise<NativeRuntimeHostManagementResult> {

@@ -68,14 +68,17 @@ Linux inode 未变并保留 Root ID。不要用它接管复制的根或旧版数
 复用就绪 Host，或启动固定版本；supervised 模式会注册并启动账户级 systemd 服务、LaunchAgent
 或 Windows 计划任务。Linux 要求用户服务管理器已运行且启用 linger；macOS 要求 Aqua 登录，
 Windows 要求交互式用户会话。单独安装不会启动服务或修改账户策略。
+`host setup --root <目录>` 合并安装与激活；可选 `--principal <id>` 同时返回短期 Desktop
+配对凭据，须将该 JSON 视为秘密。重复 setup 复用相同代码及配置，变更仍须使用 `host update`。
 Desktop 复用原生托管 Host，需要时激活固定版本；自身版本变化和退出不控制托管 Host 的寿命。
 暂停本地启动后，会等待已发出的激活收尾，再交接 Root。
 Desktop 可管理本机原生部署及已有的 SSH／WSL 原生 operator 配置。远程生命周期命令使用
-SSH／WSL 的操作系统权限，不扩大 WebSocket 凭据权限；停止或结果未确认的目标保持暂停，
-直到启动得到确认。
+SSH／WSL 的操作系统权限，不扩大 WebSocket 凭据权限。停止/卸载保持连接暂停；启动/重启/更新
+即使结果未确认也恢复正常重连，由激活流程检查真实部署，不自动重放变更。
 部署权威保存在 State Root 之外的账户级 SQLite 中，启动时先校验再执行数据库迁移。
 Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host 的无窗口入口，须与 `maka.exe` 一起分发。
 按需激活要求启动环境允许脱离 Windows Job；应直接运行已构建的程序，不要通过 `cargo run` 激活。
+关闭开始后，CLI 最多等待十秒清理，超期以 70 退出；中断工作的结果由日志恢复判定，不视为已经回滚。
 
 更新部署时，用新二进制运行
 `host update --root-id <rootId> --expected-deployment-id <deploymentId> --expected-revision <revision>`。
@@ -85,7 +88,8 @@ Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host �
 代码和配置共用一个目标及 revision；`reconcile` 不重新选择配置。
 活跃客户端或不可交接任务会推迟切换；随后用相同身份参数运行 `host reconcile` 完成已记录的更新。
 目标一旦提交，即使启动失败也不自动回退。Supervised 激活仅在持有 Root 时替换服务定义。
-无人值守版本选择和不中断监听的交接尚未接通。
+升级以可恢复的短暂重启为目标，不保证 socket 或 PTY 连续存活，不计划增加独立控制进程。
+无人值守版本选择尚未接通。
 
 `host stop`、`host restart`、`host uninstall` 使用相同的身份参数。
 停止和重启保留待更新目标。卸载先撤销启动资格，再注销服务；Root 数据、代码包及部署撤销记录均保留。

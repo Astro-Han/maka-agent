@@ -185,6 +185,15 @@ pub(super) async fn connect_or_launch(
                 HostClient::connect(&deployment.root_path, Some(&deployment.generation())).await
             {
                 let live = client.live_host(deployment.websocket.port()).await?;
+                if let Some(child) = &mut child {
+                    let mut owner = child
+                        .stdin
+                        .take()
+                        .ok_or("candidate owner pipe is missing")?;
+                    owner
+                        .write_all(b"{\"kind\":\"runtime-host-launch-owner-release\"}\n")
+                        .await?;
+                }
                 return Ok::<_, HostError>((client, live));
             }
             if let Some(child) = &mut child {
@@ -241,29 +250,32 @@ pub(super) async fn connect_or_launch(
     .and_then(|result| result);
 
     match result {
-        Ok(connected) => {
-            if let Some(child) = &mut child {
-                let mut owner = child
-                    .stdin
-                    .take()
-                    .ok_or("candidate owner pipe is missing")?;
-                owner
-                    .write_all(b"{\"kind\":\"runtime-host-launch-owner-release\"}\n")
-                    .await?;
-                drop(owner);
-            }
-            Ok(connected)
-        }
+        Ok(connected) => Ok(connected),
         Err(error) => {
-            if let Some(mut child) = child {
-                // EOF requests the existing orderly drain. Never hard-kill a
-                // candidate which may already have recovered committed work.
-                drop(child.stdin.take());
-                child.wait().await?;
+            if let Some(mut child) = child
+                && let Err(cleanup) =
+                    stop_failed_candidate(&mut child, Duration::from_secs(5)).await
+            {
+                return Err(format!("{error}; candidate cleanup: {cleanup}").into());
             }
             Err(error)
         }
     }
+}
+
+async fn stop_failed_candidate(child: &mut Child, grace: Duration) -> Result<(), HostError> {
+    // EOF asks for normal drain. Only an unsuccessful launch's own child may
+    // be terminated; never kill a discovered Host or infer rollback from exit.
+    drop(child.stdin.take());
+    if let Ok(result) = tokio::time::timeout(grace, child.wait()).await {
+        result?;
+        return Ok(());
+    }
+    child.start_kill()?;
+    tokio::time::timeout(grace, child.wait())
+        .await
+        .map_err(|_| "candidate exit is unconfirmed; State Root remains authoritative")??;
+    Ok(())
 }
 
 fn emit(frame: &Frame, framed: bool) -> Result<(), HostError> {
@@ -281,4 +293,27 @@ fn emit(frame: &Frame, framed: bool) -> Result<(), HostError> {
     stdout.write_all(line.as_bytes())?;
     stdout.flush()?;
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_candidate_drains_or_is_reaped_without_waiting_forever() {
+        // No descendants: each child is either an EOF-driven reader or exec'd sleep.
+        for (command, graceful) in [("read line; exit 0", true), ("exec sleep 60", false)] {
+            let mut child = detached::spawn(std::path::Path::new("/bin/sh"), &["-c", command])
+                .await
+                .unwrap();
+            tokio::time::timeout(
+                Duration::from_secs(3),
+                stop_failed_candidate(&mut child, Duration::from_millis(250)),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(child.try_wait().unwrap().unwrap().success(), graceful);
+        }
+    }
 }

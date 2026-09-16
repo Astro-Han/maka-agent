@@ -54,6 +54,8 @@ enum HostCommand {
     Init(Root),
     /// Install this native executable as the root's managed Host.
     Install(crate::deployment::Install),
+    /// Install or reuse native code, activate it, and optionally prepare Desktop pairing.
+    Setup(crate::deployment::Setup),
     /// Activate an installed Host and report its verified loopback endpoint.
     Activate(crate::deployment::Activate),
     /// Connect an installed Host to stdin/stdout using the client wire protocol.
@@ -125,6 +127,7 @@ impl Cli {
             Command::Host(HostCommand::Access(args)) => args.run().await,
             Command::Host(HostCommand::Candidate(args)) => args.run().await,
             Command::Host(HostCommand::Install(args)) => args.run().await,
+            Command::Host(HostCommand::Setup(args)) => args.run().await,
             Command::Host(HostCommand::Activate(args)) => args.run().await,
             Command::Host(HostCommand::Connect(args)) => args.run().await,
             Command::Host(HostCommand::Update(args)) => args.run().await,

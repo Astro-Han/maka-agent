@@ -117,15 +117,7 @@ impl Candidate {
                 .await;
             idle_cancel.cancel();
         });
-        let result = match websocket {
-            Some(websocket) => {
-                endpoint
-                    .listener
-                    .serve_with_websocket(websocket, host, cancel)
-                    .await
-            }
-            None => endpoint.listener.serve(host, cancel).await,
-        };
+        let result = super::serve::listen(endpoint, websocket, host, cancel).await;
         expiry.abort();
         let _ = expiry.await;
         drop(signals);

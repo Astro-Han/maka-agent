@@ -42,6 +42,19 @@ pub struct Child {
 }
 
 impl Child {
+    /// Signal only this owned process; the caller must still observe its exit.
+    pub fn start_kill(&mut self) -> io::Result<()> {
+        if self.try_wait()?.is_some() {
+            return Ok(());
+        }
+        // SAFETY: the handle pins the exact spawned process, not a recycled PID.
+        let result = unsafe { checked(TerminateProcess(self.process.as_raw_handle(), 1)) };
+        if result.is_err() && self.try_wait()?.is_some() {
+            return Ok(());
+        }
+        result
+    }
+
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         try_wait_process(&self.process)
     }
