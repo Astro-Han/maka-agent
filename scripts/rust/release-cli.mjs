@@ -26,16 +26,41 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 import { controlledProcessEnvironment, verifySourceCandidate } from '../asf-source-release.mjs';
 import { npmSpawnOptions } from '../npm-spawn.mjs';
+import { parseProductReleaseVersion } from '../release-version.mjs';
 import { buildCli, rustTarget } from './build-cli.mjs';
 import { nativeCliTargets, packNativeCli } from './pack-cli.mjs';
 
 const run = promisify(execFile);
 
+export function previewVersion(sourceVersion, buildId) {
+  if (
+    parseProductReleaseVersion(sourceVersion).prerelease.length > 0 ||
+    typeof buildId !== 'string' ||
+    !buildId
+  ) {
+    throw new Error('A stable source version and a SemVer build-id are required');
+  }
+  const version = `${sourceVersion}-rust-preview.${buildId}`;
+  if (version.length > 256) throw new Error('Native preview version exceeds 256 characters');
+  parseProductReleaseVersion(version);
+  return version;
+}
+
 /** Build only the verified archive, never caller-supplied executable bytes. Does not publish. */
-export async function releaseNativeCli({ source, keys, target, notices, validator, output }) {
+export async function releaseNativeCli({
+  source,
+  keys,
+  target,
+  notices,
+  validator,
+  output,
+  buildId,
+}) {
   const platform = Object.hasOwn(nativeCliTargets, target) ? nativeCliTargets[target] : undefined;
-  if (!platform || !source || !notices || !validator || !output) {
-    throw new Error('source, supported target, notices, validator, and output are required');
+  if (!platform || !source || !notices || !validator || !output || !buildId) {
+    throw new Error(
+      'source, supported target, notices, validator, output, and build-id are required',
+    );
   }
   const stage = await mkdtemp(join(tmpdir(), 'maka-native-source-'));
   try {
@@ -48,6 +73,7 @@ export async function releaseNativeCli({ source, keys, target, notices, validato
       archivePath,
       ...(keys ? { keysPath: resolve(keys) } : {}),
     });
+    const version = previewVersion(candidate.version, buildId);
     const extraction = join(stage, 'source');
     await mkdir(extraction);
     await run('tar', ['-xzf', archivePath, '-C', extraction], {
@@ -98,13 +124,13 @@ export async function releaseNativeCli({ source, keys, target, notices, validato
     });
     return await packNativeCli({
       target,
-      version: candidate.version,
+      version,
       binary,
       notices,
       validator,
       output,
       repositoryRoot,
-      source: { archive: basename(source), sha512: candidate.digest },
+      source: { archive: basename(source), version: candidate.version, sha512: candidate.digest },
     });
   } finally {
     await rm(stage, { recursive: true, force: true });
@@ -125,11 +151,11 @@ async function execute(command, args, options) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { values } = parseArgs({
     options: Object.fromEntries(
-      ['source', 'keys', 'target', 'notices', 'validator', 'output'].map((name) => [
+      ['source', 'keys', 'target', 'notices', 'validator', 'output', 'build-id'].map((name) => [
         name,
         { type: 'string' },
       ]),
     ),
   });
-  console.log(JSON.stringify(await releaseNativeCli(values)));
+  console.log(JSON.stringify(await releaseNativeCli({ ...values, buildId: values['build-id'] })));
 }

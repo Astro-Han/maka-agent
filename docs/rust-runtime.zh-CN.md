@@ -192,9 +192,12 @@ Client Capability 注册与反向调用所有权位于 `client-capability`，Hos
 
 `node scripts/rust/release-cli.mjs --source <源码.tar.gz> --keys <KEYS>
 --target <目标> --validator <本机maka> --notices <已审阅许可证文档>
---output <目录>` 校验源码归档及相邻的校验和、签名文件，安装锁定的 npm 依赖并应用仓库补丁，
-再编译、打包原生 CLI。Cargo workspace 版本必须匹配源码版本，npm 使用同一版本。
-包内 `makaSource` 记录源码归档名与 SHA-512，用于溯源，不是签名构建证明。
+--build-id <构建标识> --output <目录>` 校验源码归档及相邻的校验和、签名文件，安装锁定的 npm 依赖并应用仓库补丁，
+再编译、打包原生 CLI。Cargo workspace 与 `maka --version` 保持源码版本；npm 使用
+`<源码版本>-rust-preview.<构建标识>`，例如 `0.2.0-rust-preview.20260916.1`。
+同一构建的全部平台使用相同标识，每次发布使用新标识；CI 可使用 `<run-id>.<attempt>`。
+标识遵循 SemVer 预发布规则。包内 `makaSource` 记录源码归档名、源码版本与 SHA-512，
+用于溯源，不是签名构建证明。
 仅本地未签名候选可省略 `--keys`。命令不发布 npm，通道仍为 `rust-preview`。
 可用 `CARGO_TARGET_DIR` 保留构建缓存；`MAKA_JS_DEPS` 固定为解包源码自身的安装目录。
 

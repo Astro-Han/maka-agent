@@ -24,7 +24,20 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { releaseNativeCli } from './release-cli.mjs';
+import { previewVersion, releaseNativeCli } from './release-cli.mjs';
+
+test('preview builds have distinct package versions without changing the source version', () => {
+  assert.equal(previewVersion('0.2.0', '20260916.1'), '0.2.0-rust-preview.20260916.1');
+  assert.equal(previewVersion('0.2.0', '20260916.2'), '0.2.0-rust-preview.20260916.2');
+  assert.equal(previewVersion('0.2.0', '123.2.gabc123'), '0.2.0-rust-preview.123.2.gabc123');
+  for (const buildId of [undefined, '', '01', '1..2', '1+sha', 'a/b', 'a'.repeat(256)]) {
+    assert.throws(
+      () => previewVersion('0.2.0', buildId),
+      /build-id|release version|256 characters/,
+    );
+  }
+  assert.throws(() => previewVersion('0.2.0-beta', '1'), /stable source version/);
+});
 
 test('source identity failures cannot reach dependency installation or compilation', async () => {
   const stage = await mkdtemp(join(tmpdir(), 'maka-source-release-test-'));
@@ -55,6 +68,7 @@ test('source identity failures cannot reach dependency installation or compilati
       .digest('hex');
     await writeFile(source + '.sha512', digest + '  ' + name + '-src.tar.gz\n');
     const args = {
+      buildId: '1',
       source,
       target: 'linux-x64-gnu',
       // Deliberately absent: source identity must fail before any of these is used.
