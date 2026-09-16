@@ -109,7 +109,7 @@ export interface RuntimeHostDesktopManager {
     signal?: AbortSignal,
   ): Promise<void>;
   runManagedLocalHostChange<T>(change: () => Promise<T>): Promise<T>;
-  runNativeLocalHostChange<T>(change: (scope: NativeRuntimeHostChangeScope) => Promise<T>): Promise<T>;
+  runNativeHostChange<T>(target: ResolvedRuntimeHostProfile, change: (scope: NativeRuntimeHostChangeScope) => Promise<T>): Promise<T>;
   setDefaultProfile(profileId: string): void;
   retireOwnedLocalHost(mode: RuntimeHostRetirementMode): Promise<DesktopLocalHostRetirement>;
   prepareOwnedLocalHostQuit(mode: RuntimeHostRetirementMode): Promise<'ready' | 'active_tasks'>;
@@ -235,6 +235,7 @@ interface DesktopRuntimeHostTargetGeneration {
   state: RuntimeHostDesktopTargetState;
   hostId?: string;
   lifecycle?: RuntimeHostReconnectLifecycle<DesktopRuntimeHostCandidate>;
+  nativeSuspension?: { resume(): void };
   unsubscribeLifecycle?: () => void;
   unsubscribeRoutes?: () => void;
   skipPeerRouteRefreshOnce?: boolean;
@@ -312,7 +313,6 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
   #defaultProfileId: string = LOCAL_RUNTIME_HOST_PROFILE.id;
   #localHostRetirement: Extract<PreparedLocalHostRetirement, { kind: 'retired' }> | undefined;
   #localHostRetirementTask: DesktopLocalHostRetirementTask | undefined;
-  #nativeLocalSuspension: { resume(): void } | undefined;
   #closed = false;
   #closeTask: Promise<void> | undefined;
 
@@ -765,20 +765,36 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
     });
   }
 
-  runNativeLocalHostChange<T>(change: (scope: NativeRuntimeHostChangeScope) => Promise<T>): Promise<T> {
-    return this.#mutateTarget(LOCAL_RUNTIME_HOST_PROFILE.id, async () => {
-      const lifecycle = this.#requireLifecycle(this.#requireTarget(LOCAL_RUNTIME_HOST_PROFILE.id));
-      const alreadyPaused = this.#nativeLocalSuspension !== undefined;
-      if (!this.#nativeLocalSuspension) {
+  runNativeHostChange<T>(expectedTarget: ResolvedRuntimeHostProfile, change: (scope: NativeRuntimeHostChangeScope) => Promise<T>): Promise<T> {
+    return this.#mutateTarget(expectedTarget.profile.id, async () => {
+      if (expectedTarget.profile.kind === 'remote' && expectedTarget.profile.access === 'session_guest') {
+        throw new Error('Session Guest profiles cannot manage native Hosts');
+      }
+      const target = this.#targets.get(expectedTarget.profile.id);
+      if (!target) {
+        if (expectedTarget.profile.kind === 'local') throw new Error('Local Host manager is unavailable');
+        // Disabled profiles have no reconnect or client lifetime to suspend.
+        // Their native operator still acquires the exact deployment and Root.
+        return change({ hold() {}, async retire() { return true; }, resumeOnSuccess() {} });
+      }
+      if (!sameResolvedRuntimeHostProfileTarget(target.target, expectedTarget) ||
+        target.target.profileIncarnationId !== expectedTarget.profileIncarnationId) {
+        throw new Error('Native Host management target changed or is not an owner');
+      }
+      const local = expectedTarget.profile.kind === 'local';
+      const barrier = local ? this.#baseInput.candidateLaunchBarrier : undefined;
+      const lifecycle = this.#requireLifecycle(target);
+      const alreadyPaused = target.nativeSuspension !== undefined;
+      if (!target.nativeSuspension) {
         const suspension = await lifecycle.suspend();
         try {
-          this.#baseInput.candidateLaunchBarrier?.pause();
+          barrier?.pause();
         } catch (error) {
           suspension.resume();
           throw error;
         }
-        this.#nativeLocalSuspension = { resume: () => {
-          this.#baseInput.candidateLaunchBarrier?.resume();
+        target.nativeSuspension = { resume: () => {
+          barrier?.resume();
           suspension.resume();
         } };
       }
@@ -787,27 +803,36 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
       let succeeded = false;
       try {
         // Finish pre-existing launches before a management command can acquire Root.
-        await this.#baseInput.candidateLaunchBarrier?.retireExcept(lifecycle.current?.hostPid ?? -1);
+        await barrier?.retireExcept(lifecycle.current?.hostPid ?? -1);
         const result = await change({
           hold: () => { keepPaused = true; },
           resumeOnSuccess: () => { resumeOnSuccess = true; },
-          retire: async (deployment) => {
+          retire: async (deployment, hostEpoch, prepareRemote) => {
             const current = lifecycle.current;
             if (!current) return true; // Native RootOwner still proves exclusivity.
-            if (deployment
-              ? current.hostOwnership !== 'managed' || current.client.hostId !== deployment.rootId ||
-                current.managedDeployment?.deploymentId !== deployment.deploymentId ||
-                current.managedDeployment.configRevision !== deployment.configRevision
-              : current.hostOwnership !== 'owned_ephemeral') {
+            const matches = deployment
+              ? current.client.hostId === deployment.rootId && (local
+                ? current.hostOwnership === 'managed' &&
+                  current.managedDeployment?.deploymentId === deployment.deploymentId &&
+                  current.managedDeployment.configRevision === deployment.configRevision
+                : hostEpoch !== undefined && current.client.hostEpoch === hostEpoch)
+              : local && current.hostOwnership === 'owned_ephemeral';
+            if (!matches) {
               throw new Error('Connected native Host no longer matches the management target');
             }
             keepPaused = true; // RPC failure may follow a successful retirement.
-            const retirement = await current.client.prepareHostRetirement('refuse_active_work');
-            if (retirement.kind === 'active_tasks') {
+            const retirement = local
+              ? await current.client.prepareHostRetirement('refuse_active_work')
+              : undefined;
+            if (!local && !prepareRemote) throw new Error('Native remote retirement requires its trusted operator');
+            const prepared = retirement
+              ? retirement.kind === 'prepared'
+              : await prepareRemote!(current.client.connectionId);
+            if (!prepared) {
               keepPaused = alreadyPaused;
               return false;
             }
-            await this.waitForHostExit(retirement.pid);
+            if (retirement?.kind === 'prepared') await this.waitForHostExit(retirement.pid);
             await current.close();
             return true;
           },
@@ -816,8 +841,8 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
         return result;
       } finally {
         if ((!keepPaused || (succeeded && resumeOnSuccess)) && !this.#closed) {
-          const suspension = this.#nativeLocalSuspension;
-          this.#nativeLocalSuspension = undefined;
+          const suspension = target.nativeSuspension;
+          target.nativeSuspension = undefined;
           suspension?.resume();
         }
       }
@@ -1444,6 +1469,9 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
           ...(input.profileTarget.credential === undefined
             ? {}
             : { credential: input.profileTarget.credential }),
+          ...(input.profileTarget.profileIncarnationId === undefined
+            ? {}
+            : { profileIncarnationId: input.profileTarget.profileIncarnationId }),
         }
       : { profile: LOCAL_RUNTIME_HOST_PROFILE };
     const epoch = randomUUID();

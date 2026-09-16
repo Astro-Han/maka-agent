@@ -882,6 +882,7 @@ export interface MakaBridge {
   runtimeHostManagement: {
     runNative(
       request: import('../shared/native-runtime-host-management.js').NativeRuntimeHostManagementRequest,
+      profileId?: string,
     ): Promise<import('../shared/native-runtime-host-management.js').NativeRuntimeHostManagementResult | null>;
     run(
       profileId: string,

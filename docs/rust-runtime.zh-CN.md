@@ -70,6 +70,9 @@ Linux inode 未变并保留 Root ID。不要用它接管复制的根或旧版数
 Windows 要求交互式用户会话。单独安装不会启动服务或修改账户策略。
 Desktop 复用原生托管 Host，需要时激活固定版本；自身版本变化和退出不控制托管 Host 的寿命。
 暂停本地启动后，会等待已发出的激活收尾，再交接 Root。
+Desktop 可管理本机原生部署及已有的 SSH／WSL 原生 operator 配置。远程生命周期命令使用
+SSH／WSL 的操作系统权限，不扩大 WebSocket 凭据权限；停止或结果未确认的目标保持暂停，
+直到启动得到确认。
 部署权威保存在 State Root 之外的账户级 SQLite 中，启动时先校验再执行数据库迁移。
 Windows 托管服务使用同目录的 `maka-service.exe`，它是同一 Host 的无窗口入口，须与 `maka.exe` 一起分发。
 按需激活要求启动环境允许脱离 Windows Job；应直接运行已构建的程序，不要通过 `cargo run` 激活。

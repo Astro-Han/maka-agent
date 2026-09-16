@@ -212,7 +212,7 @@ pub(super) async fn retire(deployment: &Deployment) -> Result<Option<RootOwner>,
             if let Ok(mut client) =
                 HostClient::connect(&deployment.root_path, Some(&deployment.generation())).await
             {
-                match client.retire(None, false).await? {
+                match client.retire(None, false, None).await? {
                     RetirementResult::ActiveTasks => return Ok(None),
                     RetirementResult::Prepared { .. } => {}
                 }

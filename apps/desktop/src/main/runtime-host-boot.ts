@@ -242,6 +242,7 @@ import { createDesktopLocalRuntimeHostRemoteAccess } from './runtime-host-local-
 import { createDesktopRuntimeHostOnboarding } from "./runtime-host-onboarding.js";
 import { createDesktopRuntimeHostManagement } from "./runtime-host-management.js";
 import { createNativeRuntimeHostManagement } from './native-runtime-host-management.js';
+import type { NativeRuntimeHostOperator } from './native-runtime-host-command.js';
 import { createDesktopRuntimeHostLocalManagement } from './runtime-host-local-management.js';
 import { createDesktopRuntimeHostPeerMeshManagement } from './runtime-host-peer-mesh-management.js';
 import { registerExternalAgentSetupIpc } from "./external-agent-setup-ipc-main.js";
@@ -762,16 +763,43 @@ const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
     mainWindowController.send("runtime-host-onboarding:changed", snapshot),
 });
 const nativeRuntimeHostManagement = isE2e ? undefined : createNativeRuntimeHostManagement({
-  executable: nativeHostExecutable,
+  operator: { kind: 'local', executable: nativeHostExecutable },
   rootId: startupLocalStorageRoot.rootId,
   rootPath: startupLocalStorageRoot.canonicalPath,
   change: (run) => {
     if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');
-    return runtimeHostManager.runNativeLocalHostChange(run);
+    return runtimeHostManager.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, run);
   },
 });
-ipcMain.handle('runtime-host-management:native', (_event, request: unknown) =>
-  nativeRuntimeHostManagement?.run(request) ?? null);
+ipcMain.handle('runtime-host-management:native', async (_event, request: unknown, profileId: unknown = 'local') => {
+  if (typeof profileId !== 'string' || !profileId || profileId.length > 128) {
+    throw new Error('Invalid native Host profile ID');
+  }
+  if (profileId === 'local') return nativeRuntimeHostManagement?.run(request) ?? null;
+  const target = await runtimeHostProfileCatalog.resolve(profileId);
+  const profile = target.profile;
+  let operator: NativeRuntimeHostOperator;
+  if (profile.kind === 'environment' && profile.operator.kind === 'native') {
+    operator = { kind: 'wsl', distribution: profile.provider.distribution, operator: profile.operator };
+  } else if (profile.kind === 'remote' && profile.access !== 'session_guest' &&
+    profile.transport.kind === 'ssh' && profile.transport.activation?.operator.kind === 'native') {
+    operator = {
+      kind: 'ssh', destination: profile.transport.destination,
+      ...(profile.transport.sshPort === undefined ? {} : { sshPort: profile.transport.sshPort }),
+      operator: profile.transport.activation.operator,
+    };
+  } else {
+    throw new Error('This profile has no native Host operator');
+  }
+  return createNativeRuntimeHostManagement({
+    operator,
+    rootId: profile.rootId,
+    change: (run) => {
+      if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');
+      return runtimeHostManager.runNativeHostChange(target, run);
+    },
+  }).run(request);
+});
 
 const localRuntimeHostManagement = createDesktopRuntimeHostLocalManagement({
   remoteAccess: localRuntimeHostRemoteAccess,

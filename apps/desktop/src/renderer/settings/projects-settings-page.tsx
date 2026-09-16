@@ -77,7 +77,7 @@ export function ProjectsSettingsPage(props: {
   ): Promise<UpdateAppSettingsResult>;
   onRetryRuntimeHost(): Promise<void>;
   onRemoteHostAdded(profileId: string): void;
-  onManageNativeHost(): void;
+  onManageNativeHost(target: { readonly id: string; readonly name: string }): void;
 }) {
   const host = useOptionalRuntimeHostSettingsTarget();
   const locale = useUiLocale();

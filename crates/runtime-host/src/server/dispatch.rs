@@ -42,7 +42,10 @@ impl Host {
     ) -> Result<Outcome, HostError> {
         if operation == Operation::HostUpgradePrepare {
             return match self
-                .prepare_retirement(maka_protocol::host::decode_retirement_input(&input)?)
+                .prepare_retirement(
+                    maka_protocol::host::decode_retirement_input(&input)?,
+                    connection_id,
+                )
                 .await
             {
                 Ok(result) => Ok(Outcome::success(serde_json::to_value(result)?)),

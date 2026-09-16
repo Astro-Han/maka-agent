@@ -19,7 +19,7 @@
 
 use super::Host;
 use maka_protocol::host::{Diagnostics, Platform, Residency, Status};
-use std::{collections::VecDeque, sync::atomic::Ordering};
+use std::collections::VecDeque;
 
 pub(super) struct Activity {
     connections: usize,
@@ -56,8 +56,14 @@ impl Activity {
 
 impl Host {
     pub(super) fn activity(&self) -> Activity {
+        self.activity_except(None)
+    }
+
+    pub(super) fn activity_except(&self, handoff_connection: Option<uuid::Uuid>) -> Activity {
+        let connections = self.accepted_connections.lock().unwrap();
         Activity {
-            connections: self.accepted_connections.load(Ordering::SeqCst),
+            connections: connections.len()
+                - usize::from(handoff_connection.is_some_and(|id| connections.contains(&id))),
             commands: self.commands.len(),
             executions: self.executions.active_count(),
             shells: self.shells.active_count(),

@@ -92,7 +92,7 @@ function createRemoteHostDraft() {
 
 export function RuntimeHostProfilesSection(props: {
   readonly onRemoteHostAdded: (profileId: string) => void;
-  readonly onManageNativeHost: () => void;
+  readonly onManageNativeHost: (target: { readonly id: string; readonly name: string }) => void;
 }) {
   const locale = useUiLocale();
   const copy = getSettingsProjectsCopy(locale).runtimeHost;
@@ -418,7 +418,9 @@ export function RuntimeHostProfilesSection(props: {
         {nativeManagementAvailable ? <SettingsRow
           label={locale === 'zh-CN' ? '本机 Host' : 'Local Host'}
           end={<Button variant="secondary" size="sm" label={copy.manage}
-            isDisabled={switching} onClick={props.onManageNativeHost} />}
+            isDisabled={switching} onClick={() => props.onManageNativeHost({
+              id: 'local', name: locale === 'zh-CN' ? '本机 Host' : 'Local Host',
+            })} />}
         /> : nativeManagementAvailable === false ? <SettingsRow
           label={copy.thisComputerRemoteAccess}
           description={
@@ -653,6 +655,10 @@ export function RuntimeHostProfilesSection(props: {
             {connectedEntries.map((entry) => {
               const profile = entry.profile;
               if (profile.kind === 'local') return null;
+              const nativeManagement = profile.kind === 'environment'
+                ? profile.operator.kind === 'native'
+                : profile.access !== 'session_guest' && profile.transport.kind === 'ssh' &&
+                  profile.transport.activation?.operator.kind === 'native';
               const managementTarget: RuntimeHostManagementTarget | undefined =
                 entry.managedService
                   ? profile.kind === 'environment'
@@ -745,7 +751,12 @@ export function RuntimeHostProfilesSection(props: {
                         onChanged={() => void reload()}
                         onWorkingChange={setSwitching}
                         items={[
-                          ...(managementTarget && !entry.pairingPending
+                          ...(nativeManagement && !entry.pairingPending ? [{
+                            label: copy.manage,
+                            isDisabled: switching,
+                            onClick: () => props.onManageNativeHost({ id: profile.id, name: profile.name }),
+                          }] : []),
+                          ...(managementTarget && !nativeManagement && !entry.pairingPending
                             ? [{
                                 label: copy.manage,
                                 isDisabled: switching,

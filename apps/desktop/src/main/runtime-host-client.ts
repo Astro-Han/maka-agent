@@ -290,6 +290,10 @@ export class DesktopRuntimeHostClient {
     return this.connection.hostEpoch;
   }
 
+  get connectionId(): string {
+    return this.connection.connectionId;
+  }
+
   get hostId(): string {
     return this.rootId;
   }

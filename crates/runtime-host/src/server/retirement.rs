@@ -61,7 +61,14 @@ impl Host {
     pub(super) async fn prepare_retirement(
         &self,
         input: RetirementInput,
+        requesting_connection: uuid::Uuid,
     ) -> Result<RetirementResult, OperationError> {
+        let handoff_connection = input
+            .handoff_connection_id
+            .as_deref()
+            .map(str::parse::<uuid::Uuid>)
+            .transpose()
+            .map_err(|_| failure(Code::OperationConflict, "Invalid handoff connection"))?;
         let admission = self.executions.lock_admission().await;
         let preparation = {
             let mut phase = self.retirement.lock().unwrap_or_else(|e| e.into_inner());
@@ -74,7 +81,16 @@ impl Host {
                     "Host lifetime changed or retirement already began",
                 ));
             }
-            let activity = self.activity();
+            if handoff_connection.is_some_and(|id| {
+                id == requesting_connection
+                    || !self.accepted_connections.lock().unwrap().contains(&id)
+            }) {
+                return Err(failure(
+                    Code::OperationConflict,
+                    "Handoff connection is no longer attached",
+                ));
+            }
+            let activity = self.activity_except(handoff_connection);
             if input.allow_interrupt_active_tasks || !activity.blocks_retirement(1) {
                 *phase = Phase::Retiring;
                 self.draining.cancel();
@@ -90,12 +106,13 @@ impl Host {
             }
         };
         drop(admission);
-        self.cooperate(preparation).await
+        self.cooperate(preparation, handoff_connection).await
     }
 
     async fn cooperate(
         &self,
         mut preparation: Preparation<'_>,
+        handoff_connection: Option<uuid::Uuid>,
     ) -> Result<RetirementResult, OperationError> {
         let handoff_id = uuid::Uuid::new_v4().to_string();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -103,7 +120,11 @@ impl Host {
         let mut reserved = BTreeSet::new();
         loop {
             let admission = self.executions.lock_admission().await;
-            if self.draining.is_cancelled() || self.activity().blocks_cooperation(1) {
+            if self.draining.is_cancelled()
+                || self
+                    .activity_except(handoff_connection)
+                    .blocks_cooperation(1)
+            {
                 return Ok(RetirementResult::ActiveTasks);
             }
             let Some(runs) = self.executions.cooperative_runs() else {
@@ -142,7 +163,11 @@ impl Host {
                     // fence. A callback either retains command residency here or
                     // observes Retiring before it can enter the dispatcher.
                     let mut phase = self.retirement.lock().unwrap_or_else(|e| e.into_inner());
-                    if self.draining.is_cancelled() || self.activity().blocks_cooperation(1) {
+                    if self.draining.is_cancelled()
+                        || self
+                            .activity_except(handoff_connection)
+                            .blocks_cooperation(1)
+                    {
                         return Ok(RetirementResult::ActiveTasks);
                     }
                     // All admitted owners are held or have completed. Commit is

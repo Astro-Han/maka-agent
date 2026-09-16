@@ -32,6 +32,9 @@ pub struct RetirementInput {
     pub allow_interrupt_active_tasks: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_cooperative_handoff: Option<bool>,
+    /// A trusted operator may coordinate retirement with this still-connected client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handoff_connection_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,7 +48,7 @@ pub fn decode_retirement_input(value: &Value) -> Result<RetirementInput> {
     codec::shaped(
         codec::record(value, "Host retirement")?,
         &["expectedHostEpoch", "allowInterruptActiveTasks"],
-        &["allowCooperativeHandoff"],
+        &["allowCooperativeHandoff", "handoffConnectionId"],
     )?;
     let boolean = |value: &Value| {
         value
@@ -58,6 +61,10 @@ pub fn decode_retirement_input(value: &Value) -> Result<RetirementInput> {
         allow_cooperative_handoff: value
             .get("allowCooperativeHandoff")
             .map(boolean)
+            .transpose()?,
+        handoff_connection_id: value
+            .get("handoffConnectionId")
+            .map(|value| codec::string(value, "Handoff connection ID", 128))
             .transpose()?,
     })
 }

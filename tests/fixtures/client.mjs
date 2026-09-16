@@ -54,19 +54,22 @@ await withSourceBundle(fileURLToPath(new URL(entry, import.meta.url)), (bundle, 
   const child = spawnSync(process.execPath, [bundle, ...process.argv.slice(2)], {
     stdio: 'inherit',
     // The parent owns cleanup even if a failed fixture retains handles.
-    timeout: process.argv.includes('--live-provider-workspace')
-      ? 330000
-      : process.argv.includes('--oauth-execution-workspace')
-        ? 150000
-        : process.argv.includes('--message-queue-workspace')
-          ? 55000
-          : process.argv.includes('--large-output-workspace')
-            ? 120000
-            : process.argv.includes('--bash-workspace') ||
-                process.argv.includes('--onboarding-workspace') ||
-                (process.argv.includes('--native-managed') && process.argv.includes('--management'))
-              ? 45000
-              : 15000,
+    timeout: process.argv.includes('--ssh')
+      ? 180000
+      : process.argv.includes('--live-provider-workspace')
+        ? 330000
+        : process.argv.includes('--oauth-execution-workspace')
+          ? 150000
+          : process.argv.includes('--message-queue-workspace')
+            ? 55000
+            : process.argv.includes('--large-output-workspace')
+              ? 120000
+              : process.argv.includes('--bash-workspace') ||
+                  process.argv.includes('--onboarding-workspace') ||
+                  (process.argv.includes('--native-managed') &&
+                    process.argv.includes('--management'))
+                ? 45000
+                : 15000,
   });
   if (child.error) throw child.error;
   if (child.signal) throw new Error(`Original-client subprocess terminated by ${child.signal}`);

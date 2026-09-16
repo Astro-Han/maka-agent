@@ -82,6 +82,9 @@ start a service or change account policy.
 Desktop reuses managed native Hosts and activates pinned code when needed;
 its own generation and exit do not govern their lifetime. Pausing local launches
 waits for outstanding activations before handing off the Root.
+Desktop can manage local native deployments and existing SSH/WSL native-operator
+profiles. Remote lifecycle commands use SSH/WSL OS authority, not WebSocket
+credentials. Stopped or uncertain targets stay paused until startup is confirmed.
 Deployment authority lives in account-level
 SQLite, outside the State Root; startup checks it before database migrations.
 On Windows, supervised installations use the sibling `maka-service.exe`, a

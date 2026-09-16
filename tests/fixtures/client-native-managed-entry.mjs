@@ -18,16 +18,15 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { parseArgs, promisify } from 'node:util';
+import { parseArgs } from 'node:util';
 import { createNativeRuntimeHostCandidateLaunchBarrier } from '../../apps/desktop/src/main/native-runtime-host.js';
 import { readNativeRuntimeHostDeployment } from '../../apps/desktop/src/main/native-runtime-host-deployment.js';
 import { createNativeRuntimeHostManagement } from '../../apps/desktop/src/main/native-runtime-host-management.js';
+import { runNativeRuntimeHostCommand } from '../../apps/desktop/src/main/native-runtime-host-command.js';
 import { decodeNativeRuntimeHostDeploymentStatus } from '../../apps/desktop/src/shared/native-runtime-host-deployment.js';
 import { connectExistingRuntimeHost } from '../../packages/runtime-host/src/client/connection.js';
-import { prepareConnectedRuntimeHostRetirement } from '../../packages/runtime-host/src/client/host-retirement.js';
+import { connectRuntimeHostProfile } from '../../packages/runtime-host/src/client/host-profile.js';
 
-const run = promisify(execFile);
 const { values } = parseArgs({
   options: {
     'native-managed': { type: 'string' },
@@ -35,11 +34,27 @@ const { values } = parseArgs({
     'root-id': { type: 'string' },
     revoked: { type: 'boolean', default: false },
     management: { type: 'boolean', default: false },
+    ssh: { type: 'string' },
   },
 });
 const executable = values['native-managed'];
 assert(executable && values.root && values['root-id']);
-const observed = await readNativeRuntimeHostDeployment(executable, values['root-id']);
+const operator = values.ssh
+  ? {
+      kind: 'ssh',
+      destination: values.ssh,
+      operator: { kind: 'native', platform: 'posix', executablePath: executable },
+    }
+  : { kind: 'local', executable };
+const execute = (args, readOnly = false) => runNativeRuntimeHostCommand(operator, args, readOnly);
+const read = async () =>
+  values.ssh
+    ? decodeNativeRuntimeHostDeploymentStatus(
+        JSON.parse(await execute(['status', '--root-id', values['root-id']], true)),
+        values['root-id'],
+      )
+    : readNativeRuntimeHostDeployment(executable, values['root-id']);
+const observed = await read();
 assert.equal(observed.kind, 'installed');
 assert.throws(() => decodeNativeRuntimeHostDeploymentStatus(observed, 'f'.repeat(64)));
 assert.throws(() =>
@@ -65,23 +80,19 @@ const request = {
   closeOnLauncherExit: true,
 };
 const connections = [];
+let pairing;
 async function stop() {
   const deadline = Date.now() + 5000;
   for (;;) {
-    const { stdout } = await run(
-      executable,
-      [
-        'host',
-        'stop',
-        '--root-id',
-        values['root-id'],
-        '--expected-deployment-id',
-        expected.deploymentId,
-        '--expected-revision',
-        String(expected.configRevision),
-      ],
-      { windowsHide: true },
-    );
+    const stdout = await execute([
+      'stop',
+      '--root-id',
+      values['root-id'],
+      '--expected-deployment-id',
+      expected.deploymentId,
+      '--expected-revision',
+      String(expected.configRevision),
+    ]);
     const outcome = JSON.parse(stdout);
     if (outcome.kind === 'stopped') return;
     assert.equal(outcome.kind, 'active_tasks');
@@ -141,8 +152,17 @@ try {
 } finally {
   barrier.release();
   for (const connection of connections) await connection.close();
+  if (pairing)
+    await execute([
+      'access',
+      'revoke',
+      '--root',
+      values.root,
+      '--credential-id',
+      pairing.credentialId,
+    ]);
   if (!values.revoked) {
-    const current = await readNativeRuntimeHostDeployment(executable, values['root-id']);
+    const current = await read();
     if (current.kind === 'installed' && current.deployment.admission === undefined) {
       expected = current.deployment;
       await stop();
@@ -154,7 +174,7 @@ async function verifyManagement() {
   let owned;
   let resumes = 0;
   const management = createNativeRuntimeHostManagement({
-    executable: observed.deployment.executable,
+    operator: values.ssh ? operator : { kind: 'local', executable: observed.deployment.executable },
     rootId: values['root-id'],
     rootPath: values.root,
     change: async (run) =>
@@ -163,15 +183,11 @@ async function verifyManagement() {
         resumeOnSuccess() {
           resumes++;
         },
-        async retire(deployment) {
+        async retire(deployment, hostEpoch, prepareRemote) {
           if (!owned) return true;
           assert.equal(deployment.deploymentId, expected.deploymentId);
-          const retired = await prepareConnectedRuntimeHostRetirement(
-            owned,
-            'refuse_active_work',
-            5000,
-          );
-          if (retired.kind === 'active_tasks') return false;
+          assert.equal(hostEpoch, owned.hostEpoch);
+          if (!(await prepareRemote(owned.connectionId))) return false;
           await owned.close();
           owned = undefined;
           return true;
@@ -181,7 +197,37 @@ async function verifyManagement() {
   const started = await management.run({ action: 'start' });
   assert.equal(started.outcome.kind, 'ready');
   assert.equal(resumes, 1);
+  if (values.ssh)
+    pairing = JSON.parse(
+      await execute([
+        'access',
+        'prepare',
+        '--root',
+        values.root,
+        '--principal',
+        'native-management-test',
+      ]),
+    );
   const connect = async () => {
+    if (pairing) {
+      const connection = await connectRuntimeHostProfile({
+        profile: {
+          id: 'native-test',
+          name: 'Native test',
+          kind: 'remote',
+          rootId: values['root-id'],
+          transport: {
+            kind: 'ssh',
+            destination: values.ssh,
+            activation: { kind: 'ssh_operator', operator: operator.operator },
+          },
+        },
+        credential: pairing.credential,
+        clientInstanceId: 'native-management-test',
+      });
+      connections.push(connection);
+      return connection;
+    }
     const result = await connectExistingRuntimeHost({
       rootPath: values.root,
       protocol: request.protocol,
@@ -192,6 +238,18 @@ async function verifyManagement() {
     return result.connection;
   };
   owned = await connect();
+  if (pairing) {
+    await owned.request('access.credential.finalize', {});
+    await owned.close();
+    owned = await connect();
+    await assert.rejects(
+      owned.request('host.upgrade.prepare', {
+        expectedHostEpoch: owned.hostEpoch,
+        allowInterruptActiveTasks: false,
+      }),
+      { code: 'unauthorized' },
+    );
+  }
   const other = await connect();
   const epoch = owned.hostEpoch;
   await assert.rejects(

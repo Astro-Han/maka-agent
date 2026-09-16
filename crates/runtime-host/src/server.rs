@@ -104,7 +104,7 @@ impl Default for HostOptions {
 pub struct Host {
     options: HostOptions,
     retirement: Arc<Mutex<retirement::Phase>>,
-    accepted_connections: AtomicUsize,
+    accepted_connections: Mutex<std::collections::HashSet<Uuid>>,
     started: std::time::Instant,
     accepted_connection_revision: AtomicU64,
     executions: Arc<crate::execution::Executions>,
@@ -227,7 +227,7 @@ impl Host {
         let host = Arc::new(Self {
             options,
             retirement: interactions.retirement.clone(),
-            accepted_connections: AtomicUsize::new(0),
+            accepted_connections: Mutex::default(),
             started: std::time::Instant::now(),
             accepted_connection_revision: AtomicU64::new(0),
             shells: executions.shells.clone(),
@@ -347,5 +347,15 @@ struct ConnectionCount<'a>(&'a AtomicUsize);
 impl Drop for ConnectionCount<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+struct AcceptedConnection<'a> {
+    connections: &'a Mutex<std::collections::HashSet<Uuid>>,
+    id: Uuid,
+}
+impl Drop for AcceptedConnection<'_> {
+    fn drop(&mut self) {
+        self.connections.lock().unwrap().remove(&self.id);
     }
 }

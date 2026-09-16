@@ -18,10 +18,11 @@
  */
 
 
-import { spawn } from 'node:child_process';
 import { decodeRuntimeHostActivationFrame } from '@maka/runtime-host/operator';
+import { z } from 'zod';
 import {
   nativeRuntimeHostDeploymentSchema,
+  decodeNativeRuntimeHostDeploymentStatus,
   type NativeRuntimeHostDeployment,
 } from '../shared/native-runtime-host-deployment.js';
 import {
@@ -34,31 +35,34 @@ import {
   type NativeRuntimeHostMutation,
   type NativeRuntimeHostSettings,
 } from '../shared/native-runtime-host-management.js';
-import { readNativeRuntimeHostDeployment } from './native-runtime-host-deployment.js';
+import { runNativeRuntimeHostCommand, type NativeRuntimeHostOperator } from './native-runtime-host-command.js';
 
 export interface NativeRuntimeHostChangeScope {
   /** Once a mutation may have run, reconnect stays paused until confirmed ready. */
   hold(): void;
-  retire(deployment: NativeRuntimeHostDeployment | null): Promise<boolean>;
+  retire(deployment: NativeRuntimeHostDeployment | null, hostEpoch?: string,
+    prepareRemote?: (connectionId: string) => Promise<boolean>): Promise<boolean>;
   resumeOnSuccess(): void;
 }
 
 export function createNativeRuntimeHostManagement(input: {
-  readonly executable: string;
+  readonly operator: NativeRuntimeHostOperator;
   readonly rootId: string;
-  readonly rootPath: string;
+  readonly rootPath?: string;
   readonly change: <T>(run: (scope: NativeRuntimeHostChangeScope) => Promise<T>) => Promise<T>;
 }) {
-  const read = () => readNativeRuntimeHostDeployment(input.executable, input.rootId);
-  const execute = (args: string[]) => runNativeRuntimeHostCommand(input.executable, ['host', ...args]);
+  const execute = (args: string[], readOnly = false) => runNativeRuntimeHostCommand(input.operator, args, readOnly);
   const rooted = (action: string) => [action, '--root-id', input.rootId];
+  const read = async () => decodeNativeRuntimeHostDeploymentStatus(
+    JSON.parse(await execute(rooted('status'), true)), input.rootId,
+  );
   const requireCurrent = async (expected: NativeRuntimeHostExpected) => {
     const status = await read();
     if (status.kind !== 'installed' || status.deployment.deploymentId !== expected.deploymentId ||
       status.deployment.configRevision !== expected.configRevision) {
       throw new Error('Native Host deployment changed; refresh before applying this operation');
     }
-    return status.deployment;
+    return status;
   };
   const activate = async (deployment: NativeRuntimeHostDeployment): Promise<NativeRuntimeHostMutation> => {
     const receipt = decodeRuntimeHostActivationFrame((await execute([...rooted('activate'), '--framed'])).trim());
@@ -71,6 +75,18 @@ export function createNativeRuntimeHostManagement(input: {
       hostEpoch: receipt.hostEpoch, pid: receipt.pid, port: receipt.endpoint.port,
     } };
   };
+  const retire = (scope: NativeRuntimeHostChangeScope, deployment: NativeRuntimeHostDeployment, hostEpoch?: string) =>
+    scope.retire(deployment, hostEpoch, async (connectionId) => {
+      if (!hostEpoch) throw new Error('Native Host epoch is unavailable; refresh before retiring it');
+      const result = z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('active_tasks') }).strict(),
+        z.object({ kind: z.literal('prepared'), pid: z.number().int().positive().max(0xffff_ffff) }).strict(),
+      ]).parse(JSON.parse(await execute([
+        'retire', '--root', deployment.rootPath, '--expected-host-epoch', hostEpoch,
+        '--handoff-connection-id', connectionId,
+      ])));
+      return result.kind === 'prepared';
+    });
   const mutate = async (
     action: 'stop' | 'restart' | 'uninstall' | 'update' | 'reconcile',
     current: NativeRuntimeHostDeployment,
@@ -97,10 +113,12 @@ export function createNativeRuntimeHostManagement(input: {
           (status.kind === 'installed' && status.deployment.admission !== 'revoked')) {
           throw new Error('Native Host is already installed or incomplete; refresh deployment status');
         }
+        const rootPath = status.kind === 'installed' ? status.deployment.rootPath : input.rootPath;
+        if (!rootPath) throw new Error('Native Host installation requires a known Root path');
         if (!await scope.retire(null)) return { kind: 'active_tasks' };
         scope.hold();
         const installed = nativeRuntimeHostDeploymentSchema.parse(JSON.parse(await execute([
-          'install', '--root', input.rootPath, ...settingsArguments(request.settings),
+          'install', '--root', rootPath, ...settingsArguments(request.settings),
         ])));
         if (installed.rootId !== input.rootId || installed.admission !== undefined) {
           throw new Error('Native Host install returned another Root or revoked deployment');
@@ -121,7 +139,9 @@ export function createNativeRuntimeHostManagement(input: {
       return result;
     }
 
-    const current = await requireCurrent(request.expected);
+    const observed = await requireCurrent(request.expected);
+    const current = observed.deployment;
+    const hostEpoch = observed.host.kind === 'connected' ? observed.host.identity.hostEpoch : undefined;
     if (request.action === 'update' || request.action === 'reconcile') {
       // Stage under native authority while the old Host is still serving.
       scope.hold();
@@ -134,13 +154,13 @@ export function createNativeRuntimeHostManagement(input: {
       if (staged.kind !== 'active_tasks' || !staged.target) {
         throw new Error('Native Host did not confirm a pending update');
       }
-      if (!await scope.retire(current)) return staged;
+      if (!await retire(scope, current, hostEpoch)) return staged;
       const result = await mutate('reconcile', current);
       if (result.kind === 'ready') scope.resumeOnSuccess();
       return result;
     }
 
-    if (!await scope.retire(current)) return { kind: 'active_tasks', deployment: current };
+    if (!await retire(scope, current, hostEpoch)) return { kind: 'active_tasks', deployment: current };
     scope.hold();
     const result = await mutate(request.action, current);
     if (result.kind === 'ready') scope.resumeOnSuccess();
@@ -151,7 +171,7 @@ export function createNativeRuntimeHostManagement(input: {
       const request = nativeRuntimeHostManagementRequestSchema.parse(value);
       if (request.action === 'status') return { status: await read() };
       if (request.action === 'logs') {
-        const logs = nativeRuntimeHostLogsSchema.parse(JSON.parse(await execute(rooted('logs'))));
+        const logs = nativeRuntimeHostLogsSchema.parse(JSON.parse(await execute(rooted('logs'), true)));
         return { status: await read(), logs };
       }
       return input.change(async (scope) => {
@@ -210,26 +230,4 @@ function validateMutation(
       return;
   }
   throw new Error('Native Host operation returned an unexpected revision or outcome');
-}
-
-/** Drain and reap even on excess output: never kill an in-flight durable mutation. */
-function runNativeRuntimeHostCommand(executable: string, args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    const output: Buffer[] = [];
-    let bytes = 0;
-    let errorText = '';
-    child.stdout.on('data', (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (bytes <= 256 * 1024) output.push(chunk);
-    });
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => { errorText = (errorText + chunk).slice(-8192); });
-    child.once('error', reject);
-    child.once('close', (code) => {
-      if (code !== 0 || bytes > 256 * 1024) {
-        reject(new Error(`Native Host operation was not confirmed; refresh status before retrying. ${errorText.trim()}`));
-      } else resolve(Buffer.concat(output).toString('utf8'));
-    });
-  });
 }

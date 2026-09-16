@@ -185,6 +185,7 @@ impl HostClient {
         &mut self,
         expected_epoch: Option<&str>,
         interrupt: bool,
+        handoff_connection_id: Option<uuid::Uuid>,
     ) -> Result<RetirementResult, HostError> {
         if expected_epoch.is_some_and(|epoch| epoch != self.discovery.host_epoch) {
             return Err("Host epoch does not match the retirement target".into());
@@ -193,6 +194,7 @@ impl HostClient {
             expected_host_epoch: self.discovery.host_epoch.clone(),
             allow_interrupt_active_tasks: interrupt,
             allow_cooperative_handoff: Some(true),
+            handoff_connection_id: handoff_connection_id.map(|id| id.to_string()),
         };
         let result = decode_retirement_result(
             &self

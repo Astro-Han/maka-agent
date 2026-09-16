@@ -31,11 +31,14 @@ import type {
 import { getSettingsProjectsCopy } from '../locales/settings-projects-copy.js';
 import { RuntimeHostProjectDirectoryEditor } from './runtime-host-project-directory-editor.js';
 
-export function NativeRuntimeHostManagementDialog(props: { readonly onClose: () => void }) {
+export function NativeRuntimeHostManagementDialog(props: {
+  readonly target: { readonly id: string; readonly name: string };
+  readonly onClose: () => void;
+}) {
   const locale = useUiLocale();
   const zh = locale === 'zh-CN';
   const copy = {
-    title: zh ? '本机 Host' : 'Local Host',
+    title: props.target.name,
     refresh: zh ? '刷新' : 'Refresh',
     install: zh ? '安装并启动' : 'Install and start',
     start: zh ? '启动' : 'Start',
@@ -44,7 +47,9 @@ export function NativeRuntimeHostManagementDialog(props: { readonly onClose: () 
     uninstall: zh ? '卸载（保留数据）' : 'Uninstall (retain data)',
     confirm: zh ? '确认卸载' : 'Confirm uninstall',
     cancel: zh ? '取消' : 'Cancel',
-    update: zh ? '应用此 Desktop 的 Host 版本' : 'Apply this Desktop’s Host version',
+    update: props.target.id === 'local'
+      ? (zh ? '应用此 Desktop 的 Host 版本' : 'Apply this Desktop’s Host version')
+      : (zh ? '应用所选 Host 版本' : 'Apply selected Host version'),
     edit: zh ? '编辑配置' : 'Edit configuration',
     save: zh ? '应用配置与当前版本' : 'Apply settings and current version',
     reconcile: zh ? '继续待处理更新' : 'Continue pending update',
@@ -80,17 +85,17 @@ export function NativeRuntimeHostManagementDialog(props: { readonly onClose: () 
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
-    void window.maka.runtimeHostManagement.runNative({ action: 'status' }).then((value) => {
+    void window.maka.runtimeHostManagement.runNative({ action: 'status' }, props.target.id).then((value) => {
       if (alive.current && value) setResult(value);
     }, (cause: unknown) => { if (alive.current) setError(String(cause)); });
     return () => { alive.current = false; };
-  }, []);
+  }, [props.target.id]);
 
   async function run(request: NativeRuntimeHostManagementRequest) {
     setBusy(true);
     setError(undefined);
     try {
-      const value = await window.maka.runtimeHostManagement.runNative(request);
+      const value = await window.maka.runtimeHostManagement.runNative(request, props.target.id);
       if (!alive.current) return;
       if (!value) throw new Error('Native Host management is unavailable');
       setResult(value);

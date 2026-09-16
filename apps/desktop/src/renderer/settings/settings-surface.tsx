@@ -295,7 +295,7 @@ function SettingsSurfaceContent(
   const [clientSettings, setClientSettings] = useState(
     initialClientSettings ?? defaultSettings,
   );
-  const [showNativeManagement, setShowNativeManagement] = useState(false);
+  const [nativeManagementTarget, setNativeManagementTarget] = useState<{ readonly id: string; readonly name: string }>();
   const [runtimeHostSettings, setRuntimeHostSettings] = useState<
     SettingsResourceState<RuntimeHostAppSettings>
   >(() => createSettingsResourceState(
@@ -1045,7 +1045,7 @@ function SettingsSurfaceContent(
                             archivedTasks={props.archivedTasks}
                             onTaskImported={props.onTaskImported}
                             onRemoteHostAdded={props.onRemoteHostAdded}
-                            onManageNativeHost={() => setShowNativeManagement(true)}
+                            onManageNativeHost={setNativeManagementTarget}
                             openProviderCatalog={providerCatalogRequested}
                             initialConnectionSlug={props.initialConnectionSlug}
                             initialCreateProviderType={createProviderRequest}
@@ -1067,14 +1067,15 @@ function SettingsSurfaceContent(
           </section>
         )}
       />
-      {showNativeManagement ? <NativeRuntimeHostManagementDialog
-        onClose={() => setShowNativeManagement(false)} /> : null}
+      {nativeManagementTarget ? <NativeRuntimeHostManagementDialog
+        key={nativeManagementTarget.id} target={nativeManagementTarget}
+        onClose={() => setNativeManagementTarget(undefined)} /> : null}
     </div>
   );
 }
 
 function SettingsPageBody(props: {
-  onManageNativeHost(): void;
+  onManageNativeHost(target: { readonly id: string; readonly name: string }): void;
   section: SettingsSection;
   isLocalRuntimeHost: boolean;
   settings: AppSettings;

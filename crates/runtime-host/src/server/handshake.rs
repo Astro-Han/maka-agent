@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{ConnectionCount, Host, HostError, LifecycleMode, authority::Authority};
+use super::{AcceptedConnection, Host, HostError, LifecycleMode, authority::Authority};
 use maka_protocol::{
     COMPATIBILITY_EPOCH, COMPOSITION_ID,
     handshake::{ClientHello, HostHandshake, Lifecycle, ProtocolRange, Replacement},
@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 type Admission<'a> = (
     HostHandshake,
-    Option<ConnectionCount<'a>>,
+    Option<AcceptedConnection<'a>>,
     Option<DropGuard>,
 );
 
@@ -54,7 +54,7 @@ impl Host {
         let generation_mismatch =
             ephemeral && hello.generation.is_some() && hello.generation != self.options.generation;
         let local_owner = matches!(authority, Authority::LocalOwner);
-        let settled = self.accepted_connections.load(Ordering::SeqCst) == 0
+        let settled = self.accepted_connections.lock().unwrap().is_empty()
             && self.requests.is_empty()
             && self.executions.active_count() == 0
             && self.shells.active_count() == 0;
@@ -103,7 +103,10 @@ impl Host {
                 None,
             ));
         };
-        self.accepted_connections.fetch_add(1, Ordering::SeqCst);
+        self.accepted_connections
+            .lock()
+            .unwrap()
+            .insert(connection_id);
         Ok((
             HostHandshake::Accepted {
                 root_id: self.root_id().into(),
@@ -116,7 +119,10 @@ impl Host {
                 state: Lifecycle::Ready,
                 cooperative_handoff: Some(true),
             },
-            Some(ConnectionCount(&self.accepted_connections)),
+            Some(AcceptedConnection {
+                connections: &self.accepted_connections,
+                id: connection_id,
+            }),
             None,
         ))
     }
@@ -124,7 +130,7 @@ impl Host {
     fn activity_snapshot(&self, version: Option<u8>) -> Value {
         let activity = self.activity();
         let mut result = json!({
-            "connections": self.accepted_connections.load(Ordering::SeqCst),
+            "connections": self.accepted_connections.lock().unwrap().len(),
             "activeOperations": self.commands.len(),
             "processUptimeSeconds": self.started.elapsed().as_secs(),
             "residencies": activity.residencies(),

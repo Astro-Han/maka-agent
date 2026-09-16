@@ -235,6 +235,7 @@ export interface DesktopRuntimeHostCandidateStartInput
   readonly profileTarget?: {
     readonly profile: PersistedRuntimeHostProfile;
     readonly credential?: string;
+    readonly profileIncarnationId?: string;
     readonly sshInteraction?: RuntimeHostSshInteraction;
   };
 }

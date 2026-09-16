@@ -70,6 +70,31 @@ async fn receive(frames: &mut mpsc::UnboundedReceiver<Value>) -> Value {
         .unwrap()
 }
 
+async fn attach(
+    host: &std::sync::Arc<Host>,
+) -> (
+    mpsc::UnboundedSender<Value>,
+    Value,
+    tokio::task::JoinHandle<Result<(), maka_runtime_host::server::HostError>>,
+) {
+    let (requests, reader) = mpsc::unbounded_channel();
+    let (frames, mut responses) = mpsc::unbounded_channel();
+    let task = tokio::spawn(host.clone().local_owner_connection(
+        Reader(reader),
+        Writer {
+            frames,
+            gate: None,
+            fail: false,
+        },
+    ));
+    requests.send(hello()).unwrap();
+    let handshake = receive(&mut responses).await;
+    assert_eq!(handshake["kind"], "accepted");
+    // Keep the writer open until the request side leaves.
+    tokio::spawn(async move { while responses.recv().await.is_some() {} });
+    (requests, handshake, task)
+}
+
 async fn short_connections_reset_idle_expiry(host: &std::sync::Arc<Host>) {
     let connect = || async {
         let (requests, reader) = mpsc::unbounded_channel();
@@ -164,8 +189,34 @@ async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_aba
         requests.send(hello()).unwrap();
         let handshake = receive(&mut responses).await;
         assert_eq!(handshake["state"], "ready");
-        requests.send(json!({"requestId":"retire", "operation":"host.upgrade.prepare",
-            "input":{"expectedHostEpoch":handshake["hostEpoch"], "allowInterruptActiveTasks":false}}))
+        let (desktop, desktop_identity, desktop_task) = attach(&host).await;
+        let (unrelated, _, unrelated_task) = attach(&host).await;
+        let mut input = json!({"expectedHostEpoch":handshake["hostEpoch"],
+            "allowInterruptActiveTasks":false, "allowCooperativeHandoff":true,
+            "handoffConnectionId":desktop_identity["connectionId"]});
+        requests
+            .send(json!({"requestId":"blocked", "operation":"host.upgrade.prepare", "input":input}))
+            .unwrap();
+        assert_eq!(
+            receive(&mut responses).await["result"]["kind"],
+            "active_tasks"
+        );
+        drop(unrelated);
+        unrelated_task.await.unwrap().unwrap();
+        input["handoffConnectionId"] = uuid::Uuid::new_v4().to_string().into();
+        requests
+            .send(json!({"requestId":"stale", "operation":"host.upgrade.prepare", "input":input}))
+            .unwrap();
+        assert_eq!(
+            receive(&mut responses).await["error"]["code"],
+            "operation_conflict"
+        );
+        input["handoffConnectionId"] = desktop_identity["connectionId"].clone();
+        requests
+            .send(
+                json!({"requestId":"retire", "operation":"host.upgrade.prepare",
+            "input":input}),
+            )
             .unwrap();
         tokio::time::timeout(Duration::from_secs(5), entered.cancelled())
             .await
@@ -202,6 +253,8 @@ async fn retirement_fences_admission_and_keeps_root_until_receipt_flushed_or_aba
         }
         drop(requests);
         assert_eq!(connection.await.unwrap().is_err(), fail);
+        drop(desktop);
+        desktop_task.await.unwrap().unwrap();
         drop(host);
         tokio::time::timeout(Duration::from_secs(5), server)
             .await

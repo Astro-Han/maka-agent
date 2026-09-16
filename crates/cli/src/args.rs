@@ -78,6 +78,9 @@ enum HostCommand {
         root: Root,
         #[arg(long)]
         expected_host_epoch: Option<String>,
+        /// Coordinate with this exact connected client without interrupting other clients.
+        #[arg(long, requires = "expected_host_epoch")]
+        handoff_connection_id: Option<uuid::Uuid>,
         /// Permit interrupting other clients and non-cooperative resources.
         #[arg(long)]
         allow_interrupt_active_tasks: bool,
@@ -151,11 +154,16 @@ impl Cli {
             Command::Host(HostCommand::Retire {
                 root,
                 expected_host_epoch,
+                handoff_connection_id,
                 allow_interrupt_active_tasks,
             }) => {
                 let mut client = crate::host_client::HostClient::connect(&root.root, None).await?;
                 let result = client
-                    .retire(expected_host_epoch.as_deref(), allow_interrupt_active_tasks)
+                    .retire(
+                        expected_host_epoch.as_deref(),
+                        allow_interrupt_active_tasks,
+                        handoff_connection_id,
+                    )
                     .await?;
                 drop(client);
                 println!("{}", serde_json::to_string(&result)?);

@@ -33,6 +33,7 @@ import {
   type HostHandoffAction,
   type OpenHostHandoffSurface,
   HostHandoffRequiredError,
+  LOCAL_RUNTIME_HOST_PROFILE,
 } from '@maka/runtime-host/client';
 import {
   INTERACTIVE_RUNTIME_HOST_COMPOSITION_ID,
@@ -208,17 +209,17 @@ test('native management rejects stale retirement and retains stop intent until c
     waitForHostExit: async () => {},
   });
   try {
-    await assert.rejects(owner.runNativeLocalHostChange(async (scope) => {
+    await assert.rejects(owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => {
       await scope.retire({ ...deployment, configRevision: 1 });
     }), /no longer matches/);
     assert.equal(first.prepareRetirementCalls, 0);
     assert.equal(resumes, 1);
-    await owner.runNativeLocalHostChange(async (scope) => {
+    await owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => {
       assert.equal(await scope.retire(deployment), true);
       scope.hold();
     });
     assert.equal(first.prepareRetirementCalls, 1);
-    await assert.rejects(owner.runNativeLocalHostChange(async (scope) => {
+    await assert.rejects(owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => {
       scope.hold();
       throw new Error('activation receipt lost');
     }), /receipt lost/);
@@ -226,13 +227,60 @@ test('native management rejects stale retirement and retains stop intent until c
     assert.equal(starts, 1);
     assert.equal(pauses, 2); // Failed start reused the retained suspension.
     assert.equal(resumes, 1);
-    await owner.runNativeLocalHostChange(async (scope) => {
+    await owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => {
       scope.hold();
       scope.resumeOnSuccess();
     });
     await owner.waitUntilReady('local', 'test-host-epoch');
     assert.equal(starts, 2);
     assert.equal(resumes, 2);
+  } finally {
+    await owner.close();
+  }
+});
+
+test('native remote management pins its epoch and uses only its operator without affecting local ownership', async () => {
+  const target = { ...remoteTarget('native-remote'), profileIncarnationId: 'persisted-incarnation' };
+  const local = candidateHarness();
+  const remote = candidateHarness({ ownership: 'external', hostId: target.profile.rootId });
+  const deployment = {
+    deploymentId: 'f7672ac5-42f0-4456-8a46-0e36f6d6137b', configRevision: 2,
+    rootId: target.profile.rootId, rootPath: '/remote/root', executable: '/remote/maka', sha256: 'a'.repeat(64),
+    mode: 'on_demand' as const, websocket: '127.0.0.1:0',
+  };
+  const owner = await startRuntimeHostDesktopManager({
+    candidateLaunchBarrier: {
+      pause() { assert.fail('remote mutation paused local launches'); },
+      resume() { assert.fail('remote mutation resumed local launches'); }, async retireExcept() {},
+    },
+  } as unknown as DesktopRuntimeHostCandidateStartInput, {
+    startCandidate: async (input) => ready(input.profileTarget?.profile.kind === 'remote' ? remote.candidate : local.candidate),
+    waitForHostExit: async () => { assert.fail('remote PID is not a local process'); },
+  });
+  try {
+    await owner.enable(target);
+    await owner.waitUntilReady(target.profile.id);
+    await assert.rejects(owner.runNativeHostChange({ ...target, profileIncarnationId: 'replaced' }, async () => {
+      assert.fail('replaced profile entered mutation');
+    }), /target changed/);
+    await assert.rejects(owner.runNativeHostChange(target, async (scope) => {
+      await scope.retire(deployment, 'stale-epoch', async () => { assert.fail('stale operator invoked'); });
+    }), /no longer matches/);
+    await owner.runNativeHostChange(target, async (scope) => {
+      assert.equal(await scope.retire(deployment, 'test-host-epoch', async (id) => {
+        assert.equal(id, 'desktop-connection');
+        assert.equal(remote.closeCalls, 0);
+        return false;
+      }), false);
+    });
+    await owner.runNativeHostChange(target, async (scope) => {
+      assert.equal(await scope.retire(deployment, 'test-host-epoch', async () => true), true);
+      scope.hold();
+    });
+    assert.equal(remote.prepareRetirementCalls, 0);
+    assert.equal(remote.closeCalls, 1);
+    assert.equal(local.closeCalls, 0);
+    await assert.rejects(owner.runNativeHostChange(remoteTarget('guest', 'default', 'session_guest'), async () => {}), /Guest/);
   } finally {
     await owner.close();
   }
@@ -253,10 +301,10 @@ test('native retirement refusal releases a new pause, but ambiguous retirement r
     startCandidate: async () => ready(first.candidate),
   });
   try {
-    await owner.runNativeLocalHostChange(async (scope) => assert.equal(await scope.retire(null), false));
+    await owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => assert.equal(await scope.retire(null), false));
     assert.equal(resumes, 1);
     uncertain = true;
-    await assert.rejects(owner.runNativeLocalHostChange(async (scope) => {
+    await assert.rejects(owner.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, async (scope) => {
       await scope.retire(null);
     }), /reply lost/);
     assert.equal(resumes, 1);
@@ -1987,6 +2035,7 @@ function candidateHarness(
     hostPid: 42,
     ...(options.ownedProcess ? { ownedProcess: options.ownedProcess } : {}),
     client: {
+      connectionId: 'desktop-connection',
       hostId: options.hostId ?? 'test-host',
       hostEpoch: options.hostEpoch ?? 'test-host-epoch',
       get lifecycleState() {
