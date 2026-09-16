@@ -24,6 +24,7 @@ import {
   connectExistingRuntimeHost,
   connectRemoteRuntimeHost,
 } from '../../packages/runtime-host/src/client/connection.js';
+import { createRuntimeHostFramedOutputFilter } from '../../apps/desktop/src/main/runtime-host-framed-output.ts';
 
 const { values } = parseArgs({
   options: { 'native-access': { type: 'string' }, root: { type: 'string' } },
@@ -35,7 +36,31 @@ const hostCommand = async (...args) => {
     maxBuffer: 16 * 1024,
     windowsHide: true,
   });
-  return JSON.parse(result.stdout);
+  if (!args.includes('--framed')) return JSON.parse(result.stdout);
+  const prefix = '__MAKA_NATIVE_HOST_SETUP__';
+  let receipt;
+  const filter = createRuntimeHostFramedOutputFilter({
+    prefix,
+    pendingMaxBytes: 64 * 1024,
+    label: 'Native setup',
+    decode: (line) => JSON.parse(line.slice(prefix.length)),
+    onFrame: (frame) => {
+      assert.equal(receipt, undefined);
+      receipt = frame;
+    },
+    onError: (error) => {
+      throw error;
+    },
+  });
+  // Actual CLI output, split across both marker and credential boundaries.
+  let visible = '';
+  for (let offset = 0; offset < result.stdout.length; offset += 13) {
+    visible += filter.push(result.stdout.slice(offset, offset + 13));
+  }
+  visible += filter.finish();
+  assert.equal(visible, '', 'pairing receipt must never reach the interactive terminal');
+  assert.ok(receipt);
+  return receipt;
 };
 const cli = (...args) => hostCommand('access', ...args);
 const local = await connectExistingRuntimeHost({
@@ -48,7 +73,7 @@ const connections = [];
 let pairing;
 let revoked = false;
 try {
-  const setup = await hostCommand('setup', '--principal', 'native-pairing');
+  const setup = await hostCommand('setup', '--framed', '--principal', 'native-pairing');
   pairing = setup.pairing;
   assert.equal(setup.deployment.rootId, local.connection.rootId);
   assert.equal(setup.host.hostEpoch, local.connection.hostEpoch);

@@ -30,6 +30,9 @@ pub(crate) struct Setup {
     /// Prepare a short-lived credential for this remote Desktop principal.
     #[arg(long)]
     principal: Option<String>,
+    /// Reserve the result line so an interactive launcher can hide pairing secrets.
+    #[arg(long)]
+    framed: bool,
 }
 
 // Contains a secret when pairing; never log or derive Debug.
@@ -54,14 +57,17 @@ impl Setup {
             None => None,
         };
         lease.validate()?;
-        println!(
-            "{}",
-            serde_json::to_string(&Receipt {
-                deployment,
-                host,
-                pairing
-            })?
-        );
+        let receipt = serde_json::to_string(&Receipt {
+            deployment,
+            host,
+            pairing,
+        })?;
+        let prefix = if self.framed {
+            "__MAKA_NATIVE_HOST_SETUP__"
+        } else {
+            ""
+        };
+        println!("{prefix}{receipt}");
         drop(client);
         Ok(())
     }

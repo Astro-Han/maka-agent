@@ -69,7 +69,8 @@ Linux inode 未变并保留 Root ID。不要用它接管复制的根或旧版数
 或 Windows 计划任务。Linux 要求用户服务管理器已运行且启用 linger；macOS 要求 Aqua 登录，
 Windows 要求交互式用户会话。单独安装不会启动服务或修改账户策略。
 `host setup --root <目录>` 合并安装与激活；可选 `--principal <id>` 同时返回短期 Desktop
-配对凭据，须将该 JSON 视为秘密。重复 setup 复用相同代码及配置，变更仍须使用 `host update`。
+配对凭据，须将该 JSON 视为秘密。交互式启动器使用 `--framed` 并隐藏
+`__MAKA_NATIVE_HOST_SETUP__` 回执行。重复 setup 复用相同代码及配置，变更仍须使用 `host update`。
 
 `host fetch --target <目标> --version <精确版本> --cache <目录>` 从 npm 预备
 `@maka-agent/cli-<目标>`，不安装或启动 Host。目标支持 `darwin-arm64`、`darwin-x64`、

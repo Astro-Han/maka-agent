@@ -81,7 +81,8 @@ Aqua login and Windows an interactive user session. Installation alone does not
 start a service or change account policy.
 `host setup --root <directory>` combines installation and activation; optional
 `--principal <id>` also returns a short-lived Desktop pairing credential. Protect
-this JSON as a secret. Repeating setup reuses matching code and configuration;
+this JSON as a secret. Interactive launchers use `--framed` and hide the reserved
+`__MAKA_NATIVE_HOST_SETUP__` result line. Repeating setup reuses matching code and configuration;
 changes still require `host update`.
 
 `host fetch --target <target> --version <exact-version> --cache <directory>` prepares
