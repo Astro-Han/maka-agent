@@ -76,6 +76,13 @@ import type {
 } from '../preload/bridge-contract.js';
 import { createRuntimeHostFramedOutputFilter } from './runtime-host-framed-output.js';
 import {
+  decodeRuntimeHostTarget,
+  posixRuntimeHostTargetProbe,
+  windowsRuntimeHostTargetProbe,
+  type RuntimeHostTargetIdentity,
+} from './runtime-host-target.js';
+export type { RuntimeHostTargetIdentity } from './runtime-host-target.js';
+import {
   runtimeHostSetupPackageVersion,
   type DesktopRuntimeHostDevelopmentPeerTarget,
   type DesktopRuntimeHostSetupPackage,
@@ -123,11 +130,6 @@ export interface DesktopRuntimeHostSshTargetInput {
   readonly destination: string;
   readonly sshPort?: number;
   readonly signal?: AbortSignal;
-}
-
-export interface DesktopRuntimeHostSshNodeIdentity {
-  readonly platform: string;
-  readonly architecture: string;
 }
 
 export interface DesktopRuntimeHostSshManagementInput {
@@ -271,9 +273,9 @@ export function createDesktopRuntimeHostSshTerminal(input: {
     input: RuntimeHostSshOperatorActivationInput,
   ): Promise<RuntimeHostActivationResult>;
   openSshTunnel(input: RuntimeHostSshTunnelInput): Promise<RuntimeHostSshTunnel>;
-  resolveNodeIdentity(
+  resolveTargetIdentity(
     input: DesktopRuntimeHostSshTargetInput,
-  ): Promise<DesktopRuntimeHostSshNodeIdentity>;
+  ): Promise<RuntimeHostTargetIdentity>;
   runSetup(
     input: DesktopRuntimeHostSshSetupInput,
     onProgress: (frame: Extract<RuntimeHostSetupFrame, { kind: 'progress' }>) => void,
@@ -653,7 +655,7 @@ export function createDesktopRuntimeHostSshTerminal(input: {
       }
       return tunnel;
     },
-    resolveNodeIdentity: async (targetInput) => {
+    resolveTargetIdentity: async (targetInput) => {
       if (closed) throw new Error('Runtime Host SSH terminal is closed');
       targetInput.signal?.throwIfAborted();
       const destination = normalizeRuntimeHostSshDestination(targetInput.destination);
@@ -661,26 +663,21 @@ export function createDesktopRuntimeHostSshTerminal(input: {
         ? undefined
         : requireSetupPort(targetInput.sshPort);
       const marker = `__MAKA_RUNTIME_HOST_TARGET_${randomUUID().replaceAll('-', '')}__`;
-      const nodeProbe = `node -e "process.stdout.write('${marker}'+process.platform+':'+process.arch+'\\n')"`;
+      const deadline = Date.now() + 60_000;
       const detect = async (remoteCommand: string) => {
-        let identity: DesktopRuntimeHostSshNodeIdentity | undefined;
+        let identity: RuntimeHostTargetIdentity | undefined;
         let failure: Error | undefined;
         const filter = createRuntimeHostFramedOutputFilter({
           prefix: marker,
           pendingMaxBytes: 256,
-          decode: (line) => line.slice(marker.length).replaceAll('\r', '').trimEnd(),
+          decode: (line) => decodeRuntimeHostTarget(line.slice(marker.length).replaceAll('\r', '').trimEnd()),
           label: 'Remote Runtime Host target detection',
           onFrame: (value) => {
             if (identity) {
               failure = new Error('Remote Runtime Host target detection returned multiple results');
               return;
             }
-            const [platform, architecture, ...extra] = value.split(':');
-            if (!platform || !architecture || extra.length > 0) {
-              failure = new Error('Remote Runtime Host target detection returned an invalid result');
-              return;
-            }
-            identity = { platform, architecture };
+            identity = value;
           },
           onError: (error) => {
             failure = error;
@@ -694,7 +691,7 @@ export function createDesktopRuntimeHostSshTerminal(input: {
         );
         const wait = await waitForTerminalProcess(process, {
           signal: targetInput.signal,
-          timeoutMs: input.managementTimeoutMs ?? MANAGEMENT_TIMEOUT_MS,
+          timeoutMs: Math.max(1, Math.min(input.managementTimeoutMs ?? 60_000, deadline - Date.now())),
           stopGraceMs: input.processStopGraceMs,
           onAbort: () => dismissPresentation(terminal),
         }, input.terminateProcessTree);
@@ -704,27 +701,27 @@ export function createDesktopRuntimeHostSshTerminal(input: {
         completePresentation(terminal);
         return { identity, exitCode: wait.exit.code };
       };
-      const direct = await detect(nodeProbe);
+      const direct = await detect(`sh -c ${quotePosix(posixRuntimeHostTargetProbe(marker))}`);
       if (direct.exitCode === 0) {
         if (!direct.identity)
           throw new Error('Remote Runtime Host target detection returned no result');
         return direct.identity;
       }
-      if (direct.exitCode !== 127) {
+      if (direct.identity || ![1, 127, 9009].includes(direct.exitCode ?? -1)) {
         throw new Error(
           `Remote Runtime Host target detection exited with code ${String(direct.exitCode)}`,
         );
       }
-      const loginProbe = `exec "\${SHELL:-/bin/sh}" -lic ${quotePosix(`exec ${nodeProbe}`)}`;
-      const login = await detect(loginProbe);
-      if (login.exitCode !== 0) {
+      targetInput.signal?.throwIfAborted();
+      const windows = await detect(windowsRuntimeHostTargetProbe(marker));
+      if (windows.exitCode !== 0) {
         throw new Error(
-          `Remote Runtime Host target detection exited with code ${String(login.exitCode)}`,
+          `Remote Runtime Host target detection exited with code ${String(windows.exitCode)}`,
         );
       }
-      if (!login.identity)
+      if (!windows.identity)
         throw new Error('Remote Runtime Host target detection returned no result');
-      return login.identity;
+      return windows.identity;
     },
     runSetup: async (setupInput, onProgress, onComplete) => {
       if (closed) throw new Error('Runtime Host SSH terminal is closed');
@@ -983,7 +980,7 @@ export function createDesktopRuntimeHostSshTerminal(input: {
   };
 }
 
-export function runtimeHostPeerTargetFromNode(
+export function runtimeHostPeerTargetFromPlatform(
   platform: string,
   arch: string,
 ): Exclude<DesktopRuntimeHostDevelopmentPeerTarget, 'none'> {

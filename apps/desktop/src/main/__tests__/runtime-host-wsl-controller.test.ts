@@ -31,6 +31,7 @@ import {
   RUNTIME_HOST_SETUP_SOURCE_PACKAGE_INTEGRITY_ENV,
 } from '@maka/runtime-host/operator';
 import {
+  resolveDesktopRuntimeHostWslTarget,
   runDesktopRuntimeHostWslManagement,
   runDesktopRuntimeHostWslSetup,
   runDesktopRuntimeHostWslUpdate,
@@ -42,6 +43,45 @@ const OPERATOR = {
   nodePath: '/usr/bin/node',
   modulePath: '/home/operator/.local/share/maka/operator.mjs',
 };
+
+test('WSL target detection uses the selected Linux environment without Node and can be cancelled', async () => {
+  for (const cancel of [false, true]) {
+    const abort = new AbortController();
+    let killed = false;
+    const outcome = resolveDesktopRuntimeHostWslTarget({ distribution: 'Ubuntu Arm', signal: abort.signal }, {
+      wslExecutable: 'wsl.exe',
+      processFactory: (executable, args) => {
+        assert.equal(executable, 'wsl.exe');
+        assert.deepEqual(args.slice(0, 5), ['--distribution', 'Ubuntu Arm', '--exec', '/bin/sh', '-c']);
+        const script = args.at(-1) ?? '';
+        assert.doesNotMatch(script, /\bnode\b/u);
+        const suffix = script.match(/[0-9a-f]{32}__/u)?.[0];
+        assert.ok(suffix);
+        const marker = `__MAKA_RUNTIME_HOST_TARGET_${suffix}`;
+        const child = new EventEmitter() as ChildProcessWithoutNullStreams;
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        const finish = () => { stdout.end(); stderr.end(); child.emit('close', cancel ? 1 : 0, null); };
+        Object.assign(child, { stdin: new PassThrough(), stdout, stderr, kill: () => {
+          killed = true; process.nextTick(finish); return true;
+        } });
+        process.nextTick(() => {
+          if (cancel) { abort.abort(); return; }
+          stdout.write(`${marker}Linux:aarch64:glibc 2.39\n`);
+          finish();
+        });
+        return child;
+      },
+    });
+    if (cancel) {
+      await assert.rejects(outcome, /abort/iu);
+      assert.equal(killed, true);
+    } else {
+      assert.deepEqual(await outcome, { platform: 'linux', architecture: 'arm64', glibcVersion: '2.39' });
+      assert.equal(killed, false);
+    }
+  }
+});
 
 test('WSL management invokes the stable operator directly with the exact deployment target', async () => {
   let launch:

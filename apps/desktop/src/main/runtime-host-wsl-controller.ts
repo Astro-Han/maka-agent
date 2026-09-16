@@ -18,6 +18,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import {
   normalizeRuntimeHostWslDistribution,
@@ -43,10 +44,35 @@ import {
 } from '@maka/runtime-host/operator';
 import { createRuntimeHostFramedOutputFilter } from './runtime-host-framed-output.js';
 import type { DesktopRuntimeHostSetupPackage } from './runtime-host-setup-package.js';
+import { decodeRuntimeHostTarget, posixRuntimeHostTargetProbe, type RuntimeHostTargetIdentity } from './runtime-host-target.js';
 
 const WSL_SETUP_TIMEOUT_MS = 10 * 60_000;
 const WSL_SETUP_OUTPUT_MAX_BYTES = 64 * 1024;
 const WSL_SETUP_STDERR_MAX_BYTES = 8 * 1024;
+
+export async function resolveDesktopRuntimeHostWslTarget(
+  input: { readonly distribution: string; readonly signal?: AbortSignal },
+  overrides: { readonly processFactory?: RuntimeHostWslProcessFactory; readonly wslExecutable?: string } = {},
+): Promise<Extract<RuntimeHostTargetIdentity, { platform: 'linux' }>> {
+  input.signal?.throwIfAborted();
+  const marker = `__MAKA_RUNTIME_HOST_TARGET_${randomUUID().replaceAll('-', '')}__`;
+  const child = (overrides.processFactory ?? spawnWsl)(
+    overrides.wslExecutable ?? resolveSystemRuntimeHostWslExecutable(),
+    ['--distribution', normalizeRuntimeHostWslDistribution(input.distribution), '--exec',
+      '/bin/sh', '-c', posixRuntimeHostTargetProbe(marker)],
+  );
+  const deadline = AbortSignal.timeout(30_000);
+  return runWslFramedProcess({
+    child, signal: input.signal ? AbortSignal.any([input.signal, deadline]) : deadline,
+    prefix: marker,
+    decode: (line) => decodeRuntimeHostTarget(line.slice(marker.length).replaceAll('\r', '').trimEnd()),
+    label: 'WSL Runtime Host target detection',
+    onFrame: (identity) => {
+      if (identity.platform !== 'linux') throw new Error('WSL did not report a Linux target');
+      return identity;
+    },
+  });
+}
 
 type RuntimeHostSetupCompleteFrame = Extract<RuntimeHostSetupFrame, { kind: 'complete' | 'existing_environment' }>;
 type RuntimeHostWslSetupCompleteFrame = Omit<RuntimeHostSetupCompleteFrame, 'operator'> & {

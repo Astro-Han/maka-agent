@@ -53,11 +53,11 @@ import {
 } from './runtime-host-managed-services.js';
 import { requireProjectDirectoryRoots } from '../shared/runtime-host-project-directory-policy.js';
 import {
-  runtimeHostPeerTargetFromNode,
+  runtimeHostPeerTargetFromPlatform,
   type DesktopRuntimeHostSshCleanupInput,
   type DesktopRuntimeHostSshAccessInput,
   type DesktopRuntimeHostSshManagementInput,
-  type DesktopRuntimeHostSshNodeIdentity,
+  type RuntimeHostTargetIdentity,
   type DesktopRuntimeHostSshPeerManagementInput,
   type DesktopRuntimeHostSshUpdateInput,
   type DesktopRuntimeHostSshUpdatePolicyInput,
@@ -130,11 +130,11 @@ export function createDesktopRuntimeHostManagement(input: {
     onProgress: (phase: DesktopRuntimeHostManagementProgress['phase']) => void,
   ) => Promise<RuntimeHostServiceUpdateReconciliationTerminalFrame>;
   readonly setupPackageMode: 'published' | 'development';
-  readonly resolveSshNodeIdentity: (input: {
+  readonly resolveSshTargetIdentity: (input: {
     readonly destination: string;
     readonly sshPort?: number;
     readonly signal?: AbortSignal;
-  }) => Promise<DesktopRuntimeHostSshNodeIdentity>;
+  }) => Promise<RuntimeHostTargetIdentity>;
   readonly resolveUpdatePackage: (
     peerTarget: DesktopRuntimeHostDevelopmentPeerTarget,
   ) =>
@@ -657,11 +657,11 @@ export function createDesktopRuntimeHostManagement(input: {
       input.sendProgress({ profileId, phase: 'preparing_cli' });
       let peerTarget: DesktopRuntimeHostDevelopmentPeerTarget = 'none';
       if (input.setupPackageMode === 'development') {
-        const identity = await input.resolveSshNodeIdentity({
+        const identity = await input.resolveSshTargetIdentity({
           destination: transport.destination,
           ...(transport.sshPort === undefined ? {} : { sshPort: transport.sshPort }),
         });
-        peerTarget = runtimeHostPeerTargetFromNode(identity.platform, identity.architecture);
+        peerTarget = runtimeHostPeerTargetFromPlatform(identity.platform, identity.architecture);
       }
       const setupPackage = await input.resolveUpdatePackage(peerTarget);
       execute = () => input.runUpdate(

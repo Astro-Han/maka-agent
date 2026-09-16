@@ -228,6 +228,7 @@ import {
 import {
   runDesktopRuntimeHostWslManagement,
   runDesktopRuntimeHostWslSetup,
+  resolveDesktopRuntimeHostWslTarget,
 } from './runtime-host-wsl-controller.js';
 import {
   createRuntimeHostSetupPackageResolver,
@@ -755,9 +756,10 @@ const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
   profiles: runtimeHostProfileService,
   runSetup: runtimeHostSshTerminal.runSetup,
   runWslSetup: runDesktopRuntimeHostWslSetup,
+  resolveWslTargetIdentity: resolveDesktopRuntimeHostWslTarget,
   listWslDistributions: listRuntimeHostWslDistributions,
   setupPackageMode: runtimeHostSetupPackage.mode,
-  resolveSshNodeIdentity: runtimeHostSshTerminal.resolveNodeIdentity,
+  resolveSshTargetIdentity: runtimeHostSshTerminal.resolveTargetIdentity,
   resolveSetupPackage: runtimeHostSetupPackage.resolve,
   send: (snapshot) =>
     mainWindowController.send("runtime-host-onboarding:changed", snapshot),
@@ -828,7 +830,7 @@ const runtimeHostManagement = createDesktopRuntimeHostManagement({
   runUpdatePolicy: runtimeHostSshTerminal.runUpdatePolicy,
   runUpdateReconciliation: runtimeHostSshTerminal.runUpdateReconciliation,
   setupPackageMode: runtimeHostSetupPackage.mode,
-  resolveSshNodeIdentity: runtimeHostSshTerminal.resolveNodeIdentity,
+  resolveSshTargetIdentity: runtimeHostSshTerminal.resolveTargetIdentity,
   resolveUpdatePackage: runtimeHostSetupPackage.resolve,
   currentHostEpoch: (profileId) =>
     runtimeHostManager?.current(profileId)?.candidate?.client.hostEpoch,

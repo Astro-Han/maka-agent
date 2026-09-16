@@ -164,8 +164,8 @@ test('onboards WSL as a credential-free environment profile', async () => {
 
 test('projects WSL setup failures as recoverable onboarding state', async () => {
   const harness = createHarness({
-    runWslSetup: async () => {
-      throw new Error('WSL requires Linux Node.js');
+    resolveWslTargetIdentity: async () => {
+      throw new Error('Native Linux Runtime Host requires GNU libc');
     },
   });
 
@@ -176,7 +176,7 @@ test('projects WSL setup failures as recoverable onboarding state', async () => 
     }),
     {
       kind: 'failed',
-      message: 'WSL requires Linux Node.js',
+      message: 'Native Linux Runtime Host requires GNU libc',
       revision: 3,
     },
   );
@@ -329,7 +329,8 @@ function createHarness(overrides: HarnessOverrides = {}) {
       ...profiles,
     },
     setupPackageMode: 'published',
-    resolveSshNodeIdentity: async () => ({ platform: 'darwin', architecture: 'x64' }),
+    resolveSshTargetIdentity: async () => ({ platform: 'darwin', architecture: 'x64' }),
+    resolveWslTargetIdentity: async () => ({ platform: 'linux', architecture: 'x64', glibcVersion: '2.39' }),
     resolveSetupPackage: () => ({ kind: 'npm', specifier: 'maka-agent@0.2.0' }),
     runSetup: async () => assert.fail('SSH must not start'),
     runWslSetup: async () => assert.fail('WSL must not start'),

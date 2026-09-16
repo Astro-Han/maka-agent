@@ -38,7 +38,7 @@ import {
 } from '@maka/runtime-host/operator';
 import {
   createDesktopRuntimeHostSshTerminal,
-  runtimeHostPeerTargetFromNode,
+  runtimeHostPeerTargetFromPlatform,
 } from '../runtime-host-ssh-terminal.js';
 import { waitFor as pollFor } from '@maka/core/test-only/async-primitives';
 
@@ -56,35 +56,58 @@ const WINDOWS_OPERATOR = {
   modulePath: 'C:\\Users\\operator\\AppData\\Local\\Maka\\operator.mjs',
 };
 
-test('maps supported SSH Node identities to peer targets', () => {
-  assert.equal(runtimeHostPeerTargetFromNode('linux', 'x64'), 'linux-x64');
-  assert.equal(runtimeHostPeerTargetFromNode('linux', 'arm64'), 'linux-arm64');
-  assert.equal(runtimeHostPeerTargetFromNode('darwin', 'arm64'), 'darwin-arm64');
-  assert.equal(runtimeHostPeerTargetFromNode('win32', 'x64'), 'win32-x64');
+test('maps supported SSH platform identities to peer targets', () => {
+  assert.equal(runtimeHostPeerTargetFromPlatform('linux', 'x64'), 'linux-x64');
+  assert.equal(runtimeHostPeerTargetFromPlatform('linux', 'arm64'), 'linux-arm64');
+  assert.equal(runtimeHostPeerTargetFromPlatform('darwin', 'arm64'), 'darwin-arm64');
+  assert.equal(runtimeHostPeerTargetFromPlatform('win32', 'x64'), 'win32-x64');
   assert.throws(
-    () => runtimeHostPeerTargetFromNode('linux', 'riscv64'),
+    () => runtimeHostPeerTargetFromPlatform('linux', 'riscv64'),
     /not available/u,
   );
 });
 
 test('detects the peer target through the bounded SSH preflight', async () => {
   const harness = createHarness('pending');
-  const detection = harness.terminal.resolveNodeIdentity({
+  const detection = harness.terminal.resolveTargetIdentity({
     destination: 'operator@example.com',
   });
   await waitFor(() => harness.pty.hasDataListener());
   const command = harness.launchArgs[0]?.at(-1) ?? '';
-  const marker = command.match(/__MAKA_RUNTIME_HOST_TARGET_[0-9a-f]+__/u)?.[0];
-  assert.ok(marker);
-  harness.pty.emitData(`${marker}linux:x64\r\n`);
+  const suffix = command.match(/[0-9a-f]{32}__/u)?.[0];
+  assert.ok(suffix);
+  const marker = `__MAKA_RUNTIME_HOST_TARGET_${suffix}`;
+  assert.doesNotMatch(command, /\bnode\b/u);
+  harness.pty.emitData(`${marker}Linux:x86_64:glibc 2.39\r\n`);
   harness.pty.exit(0);
 
-  assert.deepEqual(await detection, { platform: 'linux', architecture: 'x64' });
+  assert.deepEqual(await detection, { platform: 'linux', architecture: 'x64', glibcVersion: '2.39' });
   assert.doesNotMatch(JSON.stringify(harness.events), /MAKA_RUNTIME_HOST_TARGET/u);
   await harness.terminal.close();
 });
 
-test('retries target detection through the POSIX login shell when Node is not on the default PATH', async (t) => {
+test('rejects unsupported SSH targets without crashing the output listener or retrying another OS', async () => {
+  for (const [value, expected] of [
+    ['Linux:x86_64:unknown', /requires GNU libc/u],
+    ['Linux:riscv64:glibc 2.39', /Unsupported.*architecture/u],
+    ['Linux:x86_64:glibc 2.39:extra', /Invalid.*result/u],
+  ] as const) {
+    const harness = createHarness('pending');
+    const detection = harness.terminal.resolveTargetIdentity({ destination: 'operator@example.com' });
+    const rejected = assert.rejects(detection, expected);
+    await waitFor(() => harness.pty.hasDataListener());
+    const suffix = harness.launchArgs[0]?.at(-1)?.match(/[0-9a-f]{32}__/u)?.[0];
+    assert.ok(suffix);
+    const marker = `__MAKA_RUNTIME_HOST_TARGET_${suffix}`;
+    harness.pty.emitData(`${marker}${value}\r\n`);
+    harness.pty.exit(0);
+    await rejected;
+    assert.equal(harness.launchArgs.length, 1);
+    await harness.terminal.close();
+  }
+});
+
+test('detects a Windows SSH target through PowerShell when no POSIX shell exists', async (t) => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const launches: Array<{ args: string[]; pty: FakePty }> = [];
   const terminal = createDesktopRuntimeHostSshTerminal({
@@ -101,18 +124,20 @@ test('retries target detection through the POSIX login shell when Node is not on
   });
   t.after(() => terminal.close());
 
-  const detection = terminal.resolveNodeIdentity({ destination: 'operator@example.com' });
+  const detection = terminal.resolveTargetIdentity({ destination: 'operator@example.com' });
   await waitFor(() => launches.length === 1);
   launches[0]?.pty.exit(127);
   await waitFor(() => launches.length === 2);
   const command = launches[1]?.args.at(-1) ?? '';
-  const marker = command.match(/__MAKA_RUNTIME_HOST_TARGET_[0-9a-f]+__/u)?.[0];
+  const script = Buffer.from(command.split(' ').at(-1) ?? '', 'base64').toString('utf16le');
+  const marker = script.match(/__MAKA_RUNTIME_HOST_TARGET_[0-9a-f]+__/u)?.[0];
   assert.ok(marker);
-  assert.match(command, /\$\{SHELL:-\/bin\/sh\}.*-lic/u);
-  launches[1]?.pty.emitData(`${marker}linux:x64\r\n`);
+  assert.match(command, /powershell.exe .* -EncodedCommand/u);
+  assert.match(script, /OSArchitecture/u);
+  launches[1]?.pty.emitData(`${marker}Windows:X64:\r\n`);
   launches[1]?.pty.exit(0);
 
-  assert.deepEqual(await detection, { platform: 'linux', architecture: 'x64' });
+  assert.deepEqual(await detection, { platform: 'win32', architecture: 'x64' });
 });
 
 test('keeps a connecting SSH prompt observable across renderer presentation changes', async () => {

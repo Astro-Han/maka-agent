@@ -32,8 +32,8 @@ import type {
 } from '../preload/bridge-contract.js';
 import type { DesktopRuntimeHostProfileService } from './runtime-host-profile-service.js';
 import {
-  runtimeHostPeerTargetFromNode,
-  type DesktopRuntimeHostSshNodeIdentity,
+  runtimeHostPeerTargetFromPlatform,
+  type RuntimeHostTargetIdentity,
   type DesktopRuntimeHostSshSetupInput,
 } from './runtime-host-ssh-terminal.js';
 import type { DesktopRuntimeHostWslSetupInput } from './runtime-host-wsl-controller.js';
@@ -81,13 +81,17 @@ export function createDesktopRuntimeHostOnboarding(input: {
     readonly operator: RuntimeHostNodeOperatorCommand<'posix'> | RuntimeHostNativeOperatorCommand<'posix'>;
   }>;
   readonly listWslDistributions: () => Promise<readonly string[]>;
+  readonly resolveWslTargetIdentity: (input: {
+    readonly distribution: string;
+    readonly signal?: AbortSignal;
+  }) => Promise<Extract<RuntimeHostTargetIdentity, { platform: 'linux' }>>;
   readonly send: (snapshot: DesktopRuntimeHostOnboardingSnapshot) => void;
   readonly setupPackageMode: 'published' | 'development';
-  readonly resolveSshNodeIdentity: (input: {
+  readonly resolveSshTargetIdentity: (input: {
     readonly destination: string;
     readonly sshPort?: number;
     readonly signal?: AbortSignal;
-  }) => Promise<DesktopRuntimeHostSshNodeIdentity>;
+  }) => Promise<RuntimeHostTargetIdentity>;
   readonly resolveSetupPackage: (
     peerTarget: DesktopRuntimeHostDevelopmentPeerTarget,
     signal?: AbortSignal,
@@ -138,12 +142,17 @@ export function createDesktopRuntimeHostOnboarding(input: {
   ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
     try {
       if (request.kind === 'wsl') {
-        const setupPackage = await input.resolveSetupPackage('none', signal);
+        publish({ kind: 'running', phase: 'connecting_wsl' });
+        const target = await input.resolveWslTargetIdentity({ distribution: request.distribution, signal });
+        publish({ kind: 'running', phase: 'preparing_cli' });
+        const peerTarget = input.setupPackageMode === 'development'
+          ? runtimeHostPeerTargetFromPlatform(target.platform, target.architecture) : 'none';
+        const setupPackage = await input.resolveSetupPackage(peerTarget, signal);
         return await runWsl(request, setupPackage, signal);
       }
-      const nodeIdentity = await resolveSshNodeIdentity(request, signal);
+      const targetIdentity = await resolveSshTargetIdentity(request, signal);
       const peerTarget = input.setupPackageMode === 'development'
-        ? runtimeHostPeerTargetFromNode(nodeIdentity.platform, nodeIdentity.architecture)
+        ? runtimeHostPeerTargetFromPlatform(targetIdentity.platform, targetIdentity.architecture)
         : 'none';
       const setupPackage = await input.resolveSetupPackage(
         peerTarget,
@@ -167,7 +176,7 @@ export function createDesktopRuntimeHostOnboarding(input: {
           destination: request.destination,
           ...(request.sshPort === undefined ? {} : { sshPort: request.sshPort }),
           setupPackage,
-          remotePlatform: nodeIdentity.platform === 'win32' ? 'win32' : 'posix',
+          remotePlatform: targetIdentity.platform === 'win32' ? 'win32' : 'posix',
           lifecycle,
           principalId: `desktop:${input.clientInstanceId}`,
           ...(request.projectDirectoryRoots
@@ -238,12 +247,12 @@ export function createDesktopRuntimeHostOnboarding(input: {
     }
   };
 
-  const resolveSshNodeIdentity = async (
+  const resolveSshTargetIdentity = async (
     request: Extract<DesktopRuntimeHostOnboardingInput, { readonly kind: 'ssh' }>,
     signal: AbortSignal,
-  ): Promise<DesktopRuntimeHostSshNodeIdentity> => {
+  ): Promise<RuntimeHostTargetIdentity> => {
     publish({ kind: 'running', phase: 'connecting_ssh' });
-    const identity = await input.resolveSshNodeIdentity({
+    const identity = await input.resolveSshTargetIdentity({
       destination: request.destination,
       ...(request.sshPort === undefined ? {} : { sshPort: request.sshPort }),
       signal,

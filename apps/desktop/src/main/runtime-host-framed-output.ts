@@ -58,9 +58,13 @@ export function createRuntimeHostFramedOutputFilter<Frame>(input: {
         }
         const line = pending.slice(0, newline + 1);
         pending = pending.slice(newline + 1);
-        const frame = input.decode(line);
-        if (frame) input.onFrame(frame);
-        else input.onError(new Error(`${input.label} returned an invalid result`));
+        try {
+          const frame = input.decode(line);
+          if (frame) input.onFrame(frame);
+          else input.onError(new Error(`${input.label} returned an invalid result`));
+        } catch (error) {
+          input.onError(error instanceof Error ? error : new Error(`${input.label} returned an invalid result`));
+        }
         continue;
       }
       if (finished) {
