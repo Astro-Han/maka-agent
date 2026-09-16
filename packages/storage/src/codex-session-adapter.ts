@@ -563,7 +563,7 @@ class CodexRolloutConverter {
           turnId: this.activeTurnId,
           ts: this.timestampFor(record),
           kind: 'error',
-          data: JSON.parse(JSON.stringify(payload)) as unknown,
+          data: structuredClone(payload),
         });
         return;
       }
