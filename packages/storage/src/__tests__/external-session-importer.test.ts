@@ -262,7 +262,7 @@ describe('ExternalSessionImporter', () => {
     // malformed row that claims to be a user turn would otherwise reach.
     const adapter = fakeAdapter({
       metadata: { name: 'Invalid import', cwd: '/repo' },
-      messages: [{ type: 'user' } as unknown as StoredMessage],
+      messages: [{ type: 'user', id: 'user-1', turnId: 'turn-1', ts: 1 } as StoredMessage],
     });
     const importer = new ExternalSessionImporter(
       new ExternalSessionAdapterRegistry([adapter]),

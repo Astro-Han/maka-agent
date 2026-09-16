@@ -18,7 +18,7 @@
  */
 
 import type { CreateSessionInput } from '@maka/core/runtime-inputs';
-import { decodeCanonicalMessage, isConversationTextMessage } from '@maka/core/session';
+import { isConversationTextMessage } from '@maka/core/session';
 import type { SessionHeader } from '@maka/core/session';
 import {
   sanitizeExternalSessionCwd,
@@ -52,9 +52,7 @@ export class ExternalSessionImporter {
   async import(request: ExternalSessionImportRequest): Promise<SessionHeader> {
     const adapter = this.adapters.require(request.adapterId);
     const external = await adapter.readSession(request.sourceSessionId);
-    const messages = external.messages.map((message) =>
-      decodeCanonicalMessage(JSON.parse(JSON.stringify(message)) as unknown),
-    );
+    const { messages } = external;
     for (const message of messages) {
       if (!Number.isSafeInteger(message.ts) || message.ts < 0) {
         throw new Error('External Session contains an invalid message timestamp');
