@@ -202,7 +202,12 @@ Rust 许可证检查沿用 [OpenDAL 的 cargo-deny 做法](https://github.com/ap
 依赖变更后将 `check` 换为 `generate`，审阅
 [`DEPENDENCIES.rust.tsv`](../crates/cli/DEPENDENCIES.rust.tsv)。
 清单包含构建依赖，排除仅用于测试的依赖；许可证策略检查也覆盖测试。
-清单不是二进制许可证文本包；原生发布仍须收齐 Rust、内嵌原生库和 JS 的上游原文。
+清单不是二进制许可证文本包。
+
+ASF 投票制品是源码归档，许可审阅针对实际随包源码，包括根 `LICENSE` 和 `NOTICE`
+记录的 Codex 补丁改编代码与 Deno telemetry 拷贝；lockfile 引用不等于打包代码。
+npm 原生包是对应源码归档的便利构建，不是另一份源码发布；须保留来源版本和构建溯源。
+当前源码审计不作二进制许可认证。
 
 ```sh
 cargo fmt --all --check

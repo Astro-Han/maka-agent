@@ -149,73 +149,44 @@ describe('ASF source release verification', () => {
     );
   });
 
-  test('rejects Category X dependencies from a nested package lockfile', async () => {
+  test('distinguishes downloaded dependency metadata from bundled source licenses', async () => {
     const fixture = createFixtureCandidate({
-      'tools/runtime/package.json': `${JSON.stringify({ name: 'runtime', private: true, license: 'Apache-2.0' })}\n`,
+      'tools/runtime/package.json': `${JSON.stringify({
+        name: 'runtime',
+        license: 'Apache-2.0',
+        dependencies: { 'external-runtime': '1.0.0', 'unknown-runtime': '1.0.0' },
+      })}\n`,
       'tools/runtime/package-lock.json': `${JSON.stringify({
         lockfileVersion: 3,
-        name: 'runtime',
         packages: {
           '': { name: 'runtime', license: 'Apache-2.0' },
-          'node_modules/category-x-runtime': {
-            version: '1.0.0',
-            license: 'LGPL-3.0-or-later',
-          },
+          'node_modules/external-runtime': { version: '1.0.0', license: 'LGPL-3.0-or-later' },
+          'node_modules/unknown-runtime': { version: '1.0.0' },
         },
       })}\n`,
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Category X.*category-x-runtime.*LGPL-3\.0-or-later/,
-      );
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('accepts a classified dependency from a nested package lockfile', async () => {
-    const fixture = createFixtureCandidate({
-      'tools/source/package.json': `${JSON.stringify({
-        dependencies: { 'source-helper': '1.0.0' },
-        name: 'source',
-        private: true,
-      })}\n`,
-      'tools/source/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        name: 'source',
-        packages: {
-          '': { name: 'source', license: 'Apache-2.0' },
-          'node_modules/source-helper': { version: '1.0.0', license: 'MIT' },
-        },
-      })}\n`,
+      'apps/desktop/resources/licenses/npm/THIRD_PARTY_NOTICES.txt':
+        'Package: external-runtime@1.0.0\nSelected license: GPL-3.0-only\n',
     });
     try {
       await assert.doesNotReject(() => verifySourceCandidate({ archivePath: fixture.archivePath }));
     } finally {
       fixture.cleanup();
     }
-  });
 
-  test('rejects an unclassified dependency from a nested package lockfile', async () => {
-    const fixture = createFixtureCandidate({
-      'tools/unknown/package.json': `${JSON.stringify({ name: 'unknown', private: true, license: 'Apache-2.0' })}\n`,
-      'tools/unknown/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        name: 'unknown',
-        packages: {
-          '': { name: 'unknown', license: 'Apache-2.0' },
-          'node_modules/unknown-runtime': { version: '1.0.0' },
-        },
-      })}\n`,
+    const bundled = createFixtureCandidate({
+      'vendor/runtime/package.json': JSON.stringify({
+        name: 'external-runtime',
+        version: '1.0.0',
+        license: 'LGPL-3.0-or-later',
+      }),
     });
     try {
       await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Cannot safely classify unknown-runtime@1\.0\.0.*tools\/unknown\/package-lock\.json/,
+        () => verifySourceCandidate({ archivePath: bundled.archivePath }),
+        /Category X.*vendor\/runtime\/package\.json/,
       );
     } finally {
-      fixture.cleanup();
+      bundled.cleanup();
     }
   });
 
@@ -258,86 +229,6 @@ describe('ASF source release verification', () => {
       } finally {
         fixture.cleanup();
       }
-    }
-  });
-
-  test('does not accept arbitrary notice files as dependency license authority', async () => {
-    const fixture = createFixtureCandidate({
-      'tools/runtime/THIRD_PARTY_NOTICES.txt':
-        'Package: unknown-runtime@1.0.0\nSelected license: MIT\n',
-      'tools/runtime/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        packages: {
-          '': { name: 'runtime' },
-          'node_modules/unknown-runtime': { version: '1.0.0' },
-        },
-      })}\n`,
-      'tools/runtime/package.json': `${JSON.stringify({
-        dependencies: { 'unknown-runtime': '1.0.0' },
-        license: 'Apache-2.0',
-        name: 'runtime',
-        private: true,
-      })}\n`,
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Cannot safely classify unknown-runtime@1\.0\.0/,
-      );
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('uses the generated npm notice as the dependency license authority', async () => {
-    const fixture = createFixtureCandidate({
-      'apps/desktop/resources/licenses/npm/THIRD_PARTY_NOTICES.txt':
-        'Package: source-helper@1.0.0\nSelected license: MIT\n',
-      'tools/source/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        packages: {
-          '': { name: 'source' },
-          'node_modules/source-helper': { version: '1.0.0' },
-        },
-      })}\n`,
-      'tools/source/package.json': `${JSON.stringify({
-        dependencies: { 'source-helper': '1.0.0' },
-        name: 'source',
-        private: true,
-      })}\n`,
-    });
-    try {
-      await assert.doesNotReject(() => verifySourceCandidate({ archivePath: fixture.archivePath }));
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('does not let lock metadata override a Category X generated notice', async () => {
-    const fixture = createFixtureCandidate({
-      'apps/desktop/resources/licenses/npm/THIRD_PARTY_NOTICES.txt':
-        'Package: disguised-runtime@1.0.0\nSelected license: GPL-3.0-only\n',
-      'tools/runtime/package-lock.json': `${JSON.stringify({
-        lockfileVersion: 3,
-        packages: {
-          '': { name: 'runtime' },
-          'node_modules/disguised-runtime': { license: 'MIT', version: '1.0.0' },
-        },
-      })}\n`,
-      'tools/runtime/package.json': `${JSON.stringify({
-        dependencies: { 'disguised-runtime': '1.0.0' },
-        license: 'Apache-2.0',
-        name: 'runtime',
-        private: true,
-      })}\n`,
-    });
-    try {
-      await assert.rejects(
-        () => verifySourceCandidate({ archivePath: fixture.archivePath }),
-        /Category X.*disguised-runtime.*GPL-3\.0-only/,
-      );
-    } finally {
-      fixture.cleanup();
     }
   });
 

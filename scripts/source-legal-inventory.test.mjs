@@ -32,9 +32,13 @@ test('root release documents describe the source candidate', async () => {
   ]);
   assert.equal(
     notice,
-    'Apache Maka (incubating)\nCopyright 2026 The Apache Software Foundation\n\nThis product includes software developed at\nThe Apache Software Foundation (https://www.apache.org/).\n',
+    'Apache Maka (incubating)\nCopyright 2026 The Apache Software Foundation\n\nThis product includes software developed at\nThe Apache Software Foundation (https://www.apache.org/).\n\nThis product includes portions of OpenAI Codex.\nCopyright 2025 OpenAI\n',
   );
   assert.match(license, /apps\/desktop\/src\/renderer\/public\/THIRD_PARTY_LICENSES\.txt/);
+  assert.match(license, /OpenAI Codex apply-patch \(adapted source\)/);
+  assert.match(license, /crates\/apply-patch\/SOURCE\.md/);
+  assert.match(license, /Deno telemetry TypeScript sources \(unmodified\)/);
+  assert.match(license, /Copyright 2018-2026 the Deno authors/);
 
   const patches = (await readdir(join(root, 'patches'))).filter((name) => name.endsWith('.patch'));
   for (const patch of patches) assert.ok(license.includes(patch), patch);

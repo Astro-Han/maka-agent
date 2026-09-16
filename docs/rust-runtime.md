@@ -259,7 +259,13 @@ after dependency changes, run the same command with `generate` and review
 [`DEPENDENCIES.rust.tsv`](../crates/cli/DEPENDENCIES.rust.tsv).
 The inventory includes build dependencies but excludes dev-only dependencies;
 the policy check also covers tests. It is not a binary license-text bundle.
-Native publication still requires complete upstream texts for Rust, bundled native libraries and JS.
+
+The ASF voting artifact is the source archive. Its licensing review covers bundled
+source, including the adapted Codex patch code and copied Deno telemetry files
+documented in root `LICENSE` and `NOTICE`; lockfile references are not bundled code.
+npm native packages are convenience builds of the corresponding source archive,
+not a separate source release. Keep their source version and build provenance;
+the current source audit does not certify binary licensing.
 
 ```sh
 cargo fmt --all --check

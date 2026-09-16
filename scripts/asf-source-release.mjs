@@ -583,21 +583,6 @@ function validateNodePackageInputs(candidateRoot, identity, entries) {
   const rootPrefix = `${identity.rootDirectory}/`;
   const readEntry = (entry) =>
     readFileSync(join(candidateRoot, entry.slice(rootPrefix.length)), 'utf8');
-  const noticeLicenses = new Map();
-  const generatedNpmNotice = `${rootPrefix}apps/desktop/resources/licenses/npm/THIRD_PARTY_NOTICES.txt`;
-  if (files.includes(generatedNpmNotice)) {
-    const entry = generatedNpmNotice;
-    for (const block of readEntry(entry).split(/\n={20,}\n/u)) {
-      const packageKey = /^Package: (.+)$/mu.exec(block)?.[1];
-      const license = /^Selected license: (.+)$/mu.exec(block)?.[1];
-      if (!packageKey || !license) continue;
-      const previous = noticeLicenses.get(packageKey);
-      if (previous && previous !== license) {
-        throw new Error(`Conflicting license inventory for ${packageKey}: ${previous}, ${license}`);
-      }
-      noticeLicenses.set(packageKey, license);
-    }
-  }
 
   const lockEntries = files.filter((name) =>
     /\/(?:package-lock|npm-shrinkwrap)\.json$/u.test(name),
@@ -694,17 +679,9 @@ function validateNodePackageInputs(candidateRoot, identity, entries) {
         }
         continue;
       }
-      const name = dependency.name ?? lockPath.slice(lockPath.lastIndexOf('node_modules/') + 13);
-      const version = dependency.version;
-      const packageKey = version ? `${name}@${version}` : undefined;
-      const license =
-        (packageKey ? noticeLicenses.get(packageKey) : undefined) ?? dependency.license;
-      if (!license) {
-        throw new Error(
-          `Cannot safely classify ${name}${version ? `@${version}` : ''} in ${entry}`,
-        );
-      }
-      validateReleaseLicense(license, `${name}${version ? `@${version}` : ''} in ${entry}`);
+      // Registry entries describe separately downloaded dependencies, not code
+      // bundled in this source archive. Binary notices are not source authority.
+      // Included workspace manifests are checked above; node_modules is forbidden.
     }
   }
 }
