@@ -247,6 +247,8 @@ non-text image must match one of these paths; executable and archive magic is
 rejected even if a path is listed here.
 
 - `.github/assets/*.png`: the README hero images rendered from the website, recorded above.
+- `website/src/assets/incubator.png`: unmodified ASF Incubator logo; upstream URL and branding use are recorded in `website/README.md`.
+- `website/src/assets/social.*.png`: site previews rendered by `website/scripts/readme-hero.mjs` from Maka's own website, like the README heroes recorded above.
 - `apps/desktop/assets/icon.png`: the AI-generated application mark recorded above.
 - `apps/desktop/assets/app-icons/*.png`: `mono.png` is the contributor-submitted grayscale derivative of the application mark from pull request #3431; the remaining variants are reproducibly rendered from the Apache-licensed geometry and palette in `scripts/generate-app-icons.py` and byte-checked by `scripts/generate-app-icons.test.mjs`.
 - `apps/desktop/build/*.png`: contributor-submitted DMG artwork from pull request #3817; that contribution records Codex as review and verification assistance, not as the source of the artwork.

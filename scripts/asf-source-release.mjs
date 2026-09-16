@@ -79,8 +79,10 @@ const packageDependencyFields = [
 ];
 const bundledDependencyFields = ['bundleDependencies', 'bundledDependencies'];
 const textSourceExtensions = new Set([
+  '.astro',
   '.cjs',
   '.css',
+  '.diff',
   '.csv',
   '.html',
   '.js',
