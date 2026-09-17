@@ -471,3 +471,75 @@ test('a committed snapshot missing a staged directory is restaged', async (t) =>
     await rm(base, { recursive: true, force: true });
   }
 });
+
+test('a fenced upgrade reuses complete staging over committed debris', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-reuse-');
+  try {
+    const marker = JSON.parse(
+      await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'),
+    );
+    const authority = join(capability.canonicalPath, '.maka-host');
+    const staging = join(authority, `upgrade-${marker.upgrade.id}`);
+    const cache =
+      process.platform === 'darwin'
+        ? join(base, 'home', 'Library', 'Caches', 'Maka')
+        : process.platform === 'win32'
+          ? join(base, 'home', 'AppData', 'Local', 'Maka')
+          : join(base, 'home', '.cache', 'maka');
+    await fs.cp(join(cache, 'runtime-hosts', capability.rootId), join(staging, 'data'), {
+      recursive: true,
+    });
+    await mkdir(join(staging, 'deployment'), { recursive: true });
+    // A canary that only a completed staging carries proves resume renames the
+    // existing snapshot instead of restaging it.
+    await writeFile(join(staging, 'data', 'canary.txt'), 'staged');
+    await writeFile(
+      join(staging, '.upgrade-complete.json'),
+      JSON.stringify({ migrationId: marker.upgrade.id, deploymentRecord: false }),
+    );
+    await mkdir(join(authority, 'state', 'data'), { recursive: true });
+    await writeFile(join(authority, 'state', 'data', 'foreign.json'), '{}');
+    const upgraded = await prepareRuntimeHostRoot(root);
+    assert.equal(upgraded.rootId, capability.rootId);
+    const committed = resolveRootHostDataDirectory(root);
+    assert.equal(await readFile(join(committed, 'canary.txt'), 'utf8'), 'staged');
+    assert.equal(
+      await readFile(join(committed, 'plugin-state.json'), 'utf8'),
+      '{"value":"durable"}',
+    );
+    await assert.rejects(readFile(join(committed, 'foreign.json')));
+    assert.equal(
+      JSON.parse(await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'))
+        .schemaVersion,
+      2,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('a committed snapshot that keeps failing validation fails closed', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-wedged-');
+  try {
+    const committed = join(capability.canonicalPath, '.maka-host', 'state');
+    const rename = fs.rename;
+    t.mock.method(fs, 'rename', async (...[from, to]: Parameters<typeof fs.rename>) => {
+      await rename(from, to);
+      if (to === committed) await writeFile(join(to, 'data', ACCESS_FILE_NAME), '{"credential"');
+    });
+    syncBuiltinESMExports();
+    // The first committed snapshot restages; when the restaged copy fails the
+    // same check the upgrade stops instead of looping forever.
+    await assert.rejects(prepareRuntimeHostRoot(root));
+    assert.ok(
+      JSON.parse(await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'))
+        .upgrade,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});

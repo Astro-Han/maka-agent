@@ -197,12 +197,19 @@ async function upgradeRuntimeHostRoot(
   const transaction = session.upgrade!;
   const state = join(authority, 'state');
   const staging = join(authority, `upgrade-${transaction.id}`);
+  // A non-directory at either path is debris too: lstat decides type first so
+  // a stray file cannot wedge the loop through present()'s directory check.
+  const provenSnapshot = async (path: string) =>
+    (await lstat(path).catch(() => undefined))?.isDirectory() === true
+      ? await completedSnapshot(path, transaction.id)
+      : false;
   let restaged = false;
   for (;;) {
-    if (await completedSnapshot(state, transaction.id)) {
+    const committed = await provenSnapshot(state);
+    if (committed) {
       try {
         // The completion record only proves the staged copy; check what survived.
-        await assertCommittedState(state, session);
+        await assertCommittedState(state, session, committed);
         break;
       } catch (error) {
         // A completed snapshot is this transaction's disposable copy: a
@@ -211,12 +218,12 @@ async function upgradeRuntimeHostRoot(
         restaged = true;
       }
     }
-    // Everything under the fenced .maka-host is transaction-owned, so state
-    // without this transaction's completion record is debris, not foreign
-    // data; remove it like torn staging rather than preserving it.
-    await rm(state, { recursive: true, force: true });
-    if (!(await completedSnapshot(staging, transaction.id)))
+    // Stage before deleting: everything under the fenced .maka-host is
+    // transaction-owned, but a failed restage must leave the last complete
+    // snapshot in place rather than destroying its evidence.
+    if (!(await provenSnapshot(staging)))
       await stageSnapshot(session, staging, plan, transaction.id);
+    await rm(state, { recursive: true, force: true });
     await rename(staging, state);
     await syncDirectoryChain(authority, session.canonicalPath);
   }
@@ -246,6 +253,7 @@ async function upgradeRuntimeHostRoot(
 async function assertCommittedState(
   state: string,
   session: StorageRootUpgradeSession,
+  completion: { readonly deploymentRecord: boolean },
 ): Promise<void> {
   // stageSnapshot always creates both directories, so a snapshot missing
   // either is incomplete no matter what its remaining contents prove.
@@ -261,6 +269,10 @@ async function assertCommittedState(
     session.rootId,
     session.canonicalPath,
   );
+  // The completion record attests whether staging had a deployment record;
+  // an attested record that went missing is silent authority loss.
+  if (completion.deploymentRecord && committedDeployment === undefined)
+    throw new Error('Committed snapshot lost its deployment authority record');
   if (committedDeployment) {
     const target =
       committedDeployment.state === 'active' ? committedDeployment : committedDeployment.to;
@@ -373,16 +385,23 @@ async function stageSnapshot(
   }
   await readAccessCredentialFile(join(staging, 'data', ACCESS_FILE_NAME));
   await new HostPluginCompositionStore(join(staging, 'data')).read();
-  await validateDeploymentSource(
+  const stagedDeployment = await validateDeploymentSource(
     join(staging, 'deployment'),
     session.rootId,
     session.canonicalPath,
   );
   await syncTree(staging);
-  await writeFile(join(staging, COMPLETION), JSON.stringify({ migrationId: transactionId }), {
-    flag: 'wx',
-    mode: 0o600,
-  });
+  await writeFile(
+    join(staging, COMPLETION),
+    JSON.stringify({
+      migrationId: transactionId,
+      deploymentRecord: stagedDeployment !== undefined,
+    }),
+    {
+      flag: 'wx',
+      mode: 0o600,
+    },
+  );
   await syncFile(join(staging, COMPLETION));
   await syncDirectoryChain(staging, dirname(staging));
 }
@@ -534,7 +553,19 @@ async function present(path: string): Promise<boolean> {
   }
 }
 
-async function completedSnapshot(path: string, id: string): Promise<boolean> {
+const completionRecordSchema = z
+  .object({
+    migrationId: z.string(),
+    // Whether the staged deployment directory contained an authority record;
+    // the committed snapshot must still have it.
+    deploymentRecord: z.boolean(),
+  })
+  .strict();
+
+async function completedSnapshot(
+  path: string,
+  id: string,
+): Promise<{ readonly deploymentRecord: boolean } | false> {
   if (!(await present(path))) return false;
   let bytes: Buffer;
   try {
@@ -552,8 +583,8 @@ async function completedSnapshot(path: string, id: string): Promise<boolean> {
     throw error;
   }
   try {
-    const value = JSON.parse(bytes.toString('utf8'));
-    return value.migrationId === id && Object.keys(value).length === 1;
+    const value = completionRecordSchema.parse(JSON.parse(bytes.toString('utf8')));
+    return value.migrationId === id ? value : false;
   } catch {
     // A torn or foreign record cannot prove completion; re-verify instead.
     return false;
