@@ -367,7 +367,12 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
   const identity = await resolveStorageRootIdentity({ path: input.rootPath, kind: 'interactive' });
   if (
     (await inspectStorageRootFormat(identity.canonicalPath)).format === 'legacy' &&
-    (await inspectRuntimeHostManagedDeployment(identity.rootId))?.record
+    (
+      await inspectRuntimeHostManagedDeployment(
+        identity.rootId,
+        dependencies.managedDeploymentAuthority,
+      )
+    )?.record
   ) {
     // Only the managed lifecycle can prepare a successor before format takeover.
     return { kind: 'failed', reason: 'managed_root_requires_operator' };

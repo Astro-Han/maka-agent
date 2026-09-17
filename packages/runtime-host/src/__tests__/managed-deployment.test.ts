@@ -287,6 +287,20 @@ test('deployment lookup cannot change a legacy root even after its locator was p
   );
 });
 
+test('a stale legacy locator cannot demote the in-root deployment authority', async (t) => {
+  const input = await fixture(t);
+  await claimRuntimeHostManagedDeployment(input.capability, input.config, input.authority);
+  const account = join(input.authority.authorityRoot!, input.capability.rootId);
+  // Losing the locator falls back to a legacy record; the in-root record stays authoritative.
+  await rm(join(account, 'root-location.json'), { force: true });
+  await writeFile(join(account, 'runtime-host-deployment.json'), JSON.stringify(input.config));
+  const resolved = await resolveRuntimeHostManagedDeploymentAuthority(
+    input.capability.rootId,
+    input.authority,
+  );
+  assert.deepEqual(resolved?.record, input.config);
+});
+
 test('managed lookup repairs a known remount without depending on a resolver error code', async (t) => {
   const input = await fixture(t);
   await claimRuntimeHostManagedDeployment(input.capability, input.config, input.authority);

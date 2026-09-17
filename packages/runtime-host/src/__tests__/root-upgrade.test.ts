@@ -70,7 +70,9 @@ for (const interruptedAt of ['takeover', 'copy', 'snapshot', 'ready']) {
       const held = await open(join(source, 'owner.lock'), 'a+', 0o600);
       try {
         assert.ok(tryLock(held.fd));
-        await assert.rejects(prepareRuntimeHostRoot(root), { code: 'root_migration_busy' });
+        await assert.rejects(prepareRuntimeHostRoot(root, { migrationBusyWaitMs: 500 }), {
+          code: 'root_migration_busy',
+        });
         assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 1);
       } finally {
         await held.close();
@@ -143,6 +145,10 @@ for (const interruptedAt of ['takeover', 'copy', 'snapshot', 'ready']) {
         '{"value":"durable"}',
       );
       assert.deepEqual(JSON.parse(await readFile(markerPath, 'utf8')), original);
+      await assert.rejects(
+        fs.stat(join(capability.canonicalPath, '.maka-host', 'upgrade-plan.json')),
+        { code: 'ENOENT' },
+      );
     } finally {
       t.mock.restoreAll();
       syncBuiltinESMExports();
@@ -150,6 +156,65 @@ for (const interruptedAt of ['takeover', 'copy', 'snapshot', 'ready']) {
     }
   });
 }
+
+test('a torn upgrade completion record restages instead of wedging the root', async (t) => {
+  const base = await mkdtemp(join(os.tmpdir(), 'maka-upgrade-torn-'));
+  const home = join(base, 'home');
+  await mkdir(home);
+  const info = os.userInfo();
+  t.mock.method(os, 'userInfo', () => ({ ...info, homedir: home }));
+  syncBuiltinESMExports();
+  try {
+    const root = join(base, 'state');
+    const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
+    const markerPath = join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+    const original = JSON.parse(await readFile(markerPath, 'utf8'));
+    await writeFile(markerPath, JSON.stringify({ ...original, schemaVersion: 1 }));
+    const cache =
+      process.platform === 'darwin'
+        ? join(home, 'Library', 'Caches', 'Maka')
+        : process.platform === 'win32'
+          ? join(home, 'AppData', 'Local', 'Maka')
+          : join(home, '.cache', 'maka');
+    const source = join(cache, 'runtime-hosts', capability.rootId);
+    await mkdir(source, { recursive: true, mode: 0o700 });
+    await writeAccessCredentialFile(join(source, ACCESS_FILE_NAME), createAccessCredentialFile([]));
+    const rename = fs.rename;
+    let failed = false;
+    const failRename = t.mock.method(
+      fs,
+      'rename',
+      async (...[from, to]: Parameters<typeof fs.rename>) => {
+        if (!failed && to === join(capability.canonicalPath, '.maka-host', 'state')) {
+          failed = true;
+          throw Object.assign(new Error('snapshot interrupted'), { code: 'EIO' });
+        }
+        return rename(from, to);
+      },
+    );
+    syncBuiltinESMExports();
+    await assert.rejects(prepareRuntimeHostRoot(root), { code: 'EIO' });
+    const authority = join(capability.canonicalPath, '.maka-host');
+    // The fence payload must stay bounded: the plan lives in its own file.
+    const fenced = JSON.parse(await readFile(markerPath, 'utf8'));
+    assert.deepEqual(fenced.upgrade.payload, { plan: 'upgrade-plan.json' });
+    const plan = JSON.parse(await readFile(join(authority, 'upgrade-plan.json'), 'utf8'));
+    assert.equal(plan.data, source);
+    const staged = (await fs.readdir(authority)).find((entry) => entry.startsWith('upgrade-'));
+    assert.ok(staged);
+    failRename.mock.restore();
+    // Corrupt the durable completion record: the staged copy can no longer
+    // prove itself, so the retry must restage from the source.
+    await writeFile(join(authority, staged, '.upgrade-complete.json'), '{"migrationId"');
+    const recovered = await prepareRuntimeHostRoot(root);
+    assert.equal(recovered.rootId, capability.rootId);
+    assert.deepEqual(JSON.parse(await readFile(markerPath, 'utf8')), original);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
 
 test('the service entry upgrades a legacy root before serving', async (t) => {
   const base = await mkdtemp(join(os.tmpdir(), 'maka-upgrade-serve-'));

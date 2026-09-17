@@ -631,7 +631,8 @@ export async function resolveRuntimeHostManagedDeploymentAuthority(
     kind: 'interactive',
     expectedRootId: rootId,
   });
-  if (location.legacy) return undefined;
+  // The in-root record is the deployment authority once the root is current;
+  // a stale legacy locator does not demote it.
   const record = await readRuntimeHostManagedDeploymentAuthorityRecord(capability, options);
   if (!record) return undefined;
   return { capability, record };

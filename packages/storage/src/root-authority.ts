@@ -1395,6 +1395,7 @@ export async function withStorageRootUpgrade(
     encoded = contents;
     state = decode(encoded);
   };
+  let failed = true;
   try {
     const lockedRootId = state.ready.rootId;
     await acquire(join(authority, `${state.ready.rootId}.lock`));
@@ -1405,7 +1406,10 @@ export async function withStorageRootUpgrade(
         'root_identity_changed',
         'Root id changed while acquiring upgrade ownership',
       );
-    if (!state.legacy && !state.upgrade) return;
+    if (!state.legacy && !state.upgrade) {
+      failed = false;
+      return;
+    }
     await acquire(join(authority, ARTIFACT_WRITER_BOOTSTRAP_LOCK_FILE));
     await operation({
       canonicalPath: root,
@@ -1431,6 +1435,7 @@ export async function withStorageRootUpgrade(
         await publish(state.ready);
       },
     });
+    failed = false;
   } finally {
     active = false;
     const errors: unknown[] = [];
@@ -1438,7 +1443,10 @@ export async function withStorageRootUpgrade(
       releaseLock(handle);
       await handle.close().catch((error: unknown) => errors.push(error));
     }
-    if (errors.length) throw new AggregateError(errors, 'Unable to release upgrade locks');
+    if (errors.length && !failed)
+      throw errors.length === 1
+        ? errors[0]
+        : new AggregateError(errors, 'Unable to release upgrade locks');
   }
 }
 
