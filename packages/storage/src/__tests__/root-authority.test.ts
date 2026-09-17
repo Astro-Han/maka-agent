@@ -151,9 +151,13 @@ describe('storage root authority', () => {
       const moved = await prepareArtifactWriterBootstrapAuthority(movedRoot);
       assert.equal(moved.lockPath, direct.lockPath.replace(root, movedRoot));
 
+      // The lock path follows the canonical path, not the filesystem identity;
+      // a replacement root at the same path is distinguished by identity checks.
       await mkdir(root);
       const replacement = await prepareArtifactWriterBootstrapAuthority(root);
-      assert.notEqual(replacement.lockPath, direct.lockPath);
+      assert.equal(replacement.lockPath, direct.lockPath);
+      await assert.rejects(() => direct.assertCurrentRoot());
+      await replacement.assertCurrentRoot();
       assert.deepEqual(await readdir(root), ['.maka-host']);
 
       await Promise.all([
@@ -807,7 +811,7 @@ describe('storage root authority', () => {
   test('does not create a missing control directory while resolving an existing Host', async () => {
     await withRoots(async ({ root }) => {
       const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
-      const controlDirectory = join(resolveRootControlNamespace(root), capability.rootId);
+      const controlDirectory = resolveRootControlNamespace(root);
       await rm(controlDirectory, { recursive: true, force: true });
 
       await assert.rejects(

@@ -210,7 +210,7 @@ describe('models.dev provider conformance', () => {
       } finally {
         await owner.close();
         await rm(root, { recursive: true, force: true });
-        await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
+        await rm(resolveRootControlNamespace(capability.canonicalPath), {
           recursive: true,
           force: true,
         });
@@ -442,7 +442,7 @@ describe('models.dev provider conformance', () => {
     } finally {
       await owner.close();
       await rm(root, { recursive: true, force: true });
-      await rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
+      await rm(resolveRootControlNamespace(capability.canonicalPath), {
         recursive: true,
         force: true,
       });

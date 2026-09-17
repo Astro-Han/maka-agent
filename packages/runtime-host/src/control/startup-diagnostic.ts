@@ -81,15 +81,13 @@ export class CandidateStartupDiagnosticError extends Error {
 
 export function resolveCandidateStartupDiagnosticPath(
   rootPath: string,
-  rootId: string,
   startupAttemptId?: string,
 ): string {
-  assertRootId(rootId);
   if (startupAttemptId !== undefined) assertStartupAttemptId(startupAttemptId);
   const filename = startupAttemptId
     ? `startup-diagnostic.${startupAttemptId}.json`
     : RUNTIME_HOST_STARTUP_DIAGNOSTIC_FILE;
-  return join(resolveRootControlNamespace(rootPath), rootId, filename);
+  return join(resolveRootControlNamespace(rootPath), filename);
 }
 
 export async function writeCandidateStartupDiagnostic(input: {
@@ -100,11 +98,7 @@ export async function writeCandidateStartupDiagnostic(input: {
   readonly error: unknown;
   readonly logs?: readonly string[];
 }): Promise<void> {
-  const path = resolveCandidateStartupDiagnosticPath(
-    input.rootPath,
-    input.rootId,
-    input.startupAttemptId,
-  );
+  const path = resolveCandidateStartupDiagnosticPath(input.rootPath, input.startupAttemptId);
   const document: CandidateStartupDiagnostic = {
     schemaVersion: STARTUP_DIAGNOSTIC_SCHEMA_VERSION,
     rootId: input.rootId,
@@ -149,11 +143,9 @@ export async function writeCandidateStartupDiagnostic(input: {
   } finally {
     if (!replaced) await unlink(temporaryPath).catch(() => undefined);
   }
-  await pruneCandidateStartupDiagnostics(
-    input.rootPath,
-    input.rootId,
-    input.startupAttemptId,
-  ).catch(() => undefined);
+  await pruneCandidateStartupDiagnostics(input.rootPath, input.startupAttemptId).catch(
+    () => undefined,
+  );
 }
 
 export async function readCandidateStartupDiagnostic(
@@ -161,7 +153,7 @@ export async function readCandidateStartupDiagnostic(
   rootId: string,
   startupAttemptId?: string,
 ): Promise<CandidateStartupDiagnostic | undefined> {
-  const path = resolveCandidateStartupDiagnosticPath(rootPath, rootId, startupAttemptId);
+  const path = resolveCandidateStartupDiagnosticPath(rootPath, startupAttemptId);
   let contents: string;
   try {
     const diagnosticStat = await lstat(path);
@@ -202,8 +194,8 @@ export async function selectCandidateStartupDiagnostic(
   rootId: string,
   startupAttemptId: string,
 ): Promise<void> {
-  const attemptPath = resolveCandidateStartupDiagnosticPath(rootPath, rootId, startupAttemptId);
-  const selectedPath = resolveCandidateStartupDiagnosticPath(rootPath, rootId);
+  const attemptPath = resolveCandidateStartupDiagnosticPath(rootPath, startupAttemptId);
+  const selectedPath = resolveCandidateStartupDiagnosticPath(rootPath);
   await readCandidateStartupDiagnostic(rootPath, rootId, startupAttemptId);
   try {
     await rename(attemptPath, selectedPath);
@@ -222,7 +214,7 @@ export async function clearCandidateStartupDiagnostic(
   rootId: string,
   startupAttemptId?: string,
 ): Promise<void> {
-  const path = resolveCandidateStartupDiagnosticPath(rootPath, rootId, startupAttemptId);
+  const path = resolveCandidateStartupDiagnosticPath(rootPath, startupAttemptId);
   await unlink(path).catch((error: unknown) => {
     if (!isNodeError(error, 'ENOENT')) throw error;
   });
@@ -318,12 +310,6 @@ function boundedDiagnosticText(value: string, maximumBytes: number): string {
   return truncateUtf8(redactSecrets(value), maximumBytes, '\n<diagnostic truncated>');
 }
 
-function assertRootId(rootId: string): void {
-  if (!/^[a-f0-9]{64}$/u.test(rootId)) {
-    throw new TypeError('Runtime Host startup diagnostic requires a valid root id');
-  }
-}
-
 function assertStartupAttemptId(startupAttemptId: string): void {
   if (!isCandidateStartupAttemptId(startupAttemptId)) {
     throw new TypeError('Runtime Host startup diagnostic requires a valid attempt id');
@@ -332,10 +318,9 @@ function assertStartupAttemptId(startupAttemptId: string): void {
 
 async function pruneCandidateStartupDiagnostics(
   rootPath: string,
-  rootId: string,
   retainedAttemptId: string,
 ): Promise<void> {
-  const controlDirectory = dirname(resolveCandidateStartupDiagnosticPath(rootPath, rootId));
+  const controlDirectory = dirname(resolveCandidateStartupDiagnosticPath(rootPath));
   const entries = await readdir(controlDirectory, { withFileTypes: true });
   const attempts = await Promise.all(
     entries.flatMap((entry) => {

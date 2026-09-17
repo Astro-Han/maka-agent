@@ -123,7 +123,7 @@ test('two real managed activations converge on one Host and exit at true idle', 
         recursive: true,
         force: true,
       }),
-      rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
+      rm(resolveRootControlNamespace(capability.canonicalPath), {
         recursive: true,
         force: true,
       }),

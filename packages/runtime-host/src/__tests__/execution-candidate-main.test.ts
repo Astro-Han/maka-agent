@@ -140,11 +140,7 @@ test('preserves a valid Candidate invocation failure across the detached stderr 
   const root = await mkdtemp(join(tmpdir(), 'maka-candidate-diagnostic-'));
   const mismatchedRootId = createHash('sha256').update(randomUUID()).digest('hex');
   const startupAttemptId = randomUUID();
-  const diagnosticPath = resolveCandidateStartupDiagnosticPath(
-    root,
-    mismatchedRootId,
-    startupAttemptId,
-  );
+  const diagnosticPath = resolveCandidateStartupDiagnosticPath(root, startupAttemptId);
   const controlDirectory = dirname(diagnosticPath);
   try {
     await resolveStorageRoot({ path: root, kind: 'interactive' });

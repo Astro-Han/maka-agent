@@ -37,8 +37,8 @@ test('preserves a bounded redacted Candidate startup diagnostic in the private c
   const rootId = createHash('sha256').update(randomUUID()).digest('hex');
   const selectedAttemptId = randomUUID();
   const otherAttemptId = randomUUID();
-  const attemptPath = resolveCandidateStartupDiagnosticPath(rootPath, rootId, selectedAttemptId);
-  const selectedPath = resolveCandidateStartupDiagnosticPath(rootPath, rootId);
+  const attemptPath = resolveCandidateStartupDiagnosticPath(rootPath, selectedAttemptId);
+  const selectedPath = resolveCandidateStartupDiagnosticPath(rootPath);
   const controlDirectory = dirname(attemptPath);
   await mkdir(controlDirectory, { recursive: true, mode: 0o700 });
   try {
@@ -79,7 +79,7 @@ test('preserves a bounded redacted Candidate startup diagnostic in the private c
     assert.equal(otherDiagnostic?.reason, 'internal_startup_failure');
 
     await utimes(
-      resolveCandidateStartupDiagnosticPath(rootPath, rootId, otherAttemptId),
+      resolveCandidateStartupDiagnosticPath(rootPath, otherAttemptId),
       new Date(0),
       new Date(0),
     );

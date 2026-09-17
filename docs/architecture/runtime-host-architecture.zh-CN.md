@@ -100,7 +100,7 @@ Root capability 先规范化真实路径，再验证根标记中的随机 `rootI
 
 写入 authority 来自 canonical 物理 root 内 `.maka-host` 中稳定文件上的 OS lock。同一 root 的所有 Client 共享一个 Host，独立物理 root 分别持有自己的所有权。`rootId` 仍是协议身份，不承担账户全局或分布式互斥；registration 文件、PID、socket、health probe 和缓存目录都只是发现或观察信息。删除发现缓存不能合法地产生第二个 writer。
 
-root 拥有完整的持久状态：`.maka-host/state/data` 保存插件包、composition、插件数据及密钥、访问凭据；`.maka-host/state/deployment/runtime-host-deployment.json` 是唯一的 managed deployment 事务记录；`.maka-host/runtime/<rootId>` 保存可丢弃的 registration、启动诊断和一次性凭据交付文件。Owner 与 Artifact 锁都在 `runtime` 外。短路径本地 socket 可放在系统临时目录。普通新 root 启动不依赖账户 home。物理放在一起不代表凭据和机器部署信息可以直接导出，备份仍须保留访问限制。
+root 拥有完整的持久状态：`.maka-host/state/data` 保存插件包、composition、插件数据及密钥、访问凭据；`.maka-host/state/deployment/runtime-host-deployment.json` 是唯一的 managed deployment 事务记录；`.maka-host/runtime` 保存可丢弃的 registration、启动诊断和一次性凭据交付文件。Owner 与 Artifact 锁都在 `runtime` 外。短路径本地 socket 可放在系统临时目录。普通新 root 启动不依赖账户 home。物理放在一起不代表凭据和机器部署信息可以直接导出，备份仍须保留访问限制。
 
 `prepareRuntimeHostRoot` 是唯一的格式升级入口，普通 Storage 解析和 deployment 查找不迁移。Storage 负责 marker 校验、物理身份、锁和原子发布；Host 负责解释旧布局、验证完整快照并完成升级。显式身份修复保留旧格式或升级中状态，不发放业务 capability。
 

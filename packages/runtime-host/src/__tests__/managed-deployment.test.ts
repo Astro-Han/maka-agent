@@ -75,7 +75,7 @@ async function fixture(t: test.TestContext): Promise<Fixture> {
   const capability = await resolveStorageRoot({ path: rootPath, kind: 'interactive' });
   t.after(() =>
     Promise.all([
-      rm(join(resolveRootControlNamespace(capability.canonicalPath), capability.rootId), {
+      rm(resolveRootControlNamespace(capability.canonicalPath), {
         recursive: true,
         force: true,
       }),

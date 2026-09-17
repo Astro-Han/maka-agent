@@ -1276,13 +1276,10 @@ export class ExecutionFixture {
         () => undefined,
       );
     }
-    await rm(
-      join(resolveRootControlNamespace(this.capability.canonicalPath), this.capability.rootId),
-      {
-        recursive: true,
-        force: true,
-      },
-    );
+    await rm(resolveRootControlNamespace(this.capability.canonicalPath), {
+      recursive: true,
+      force: true,
+    });
     await removePosixEndpointDirectories(this.capability.rootId);
     await rm(this.base, { recursive: true, force: true });
   }
