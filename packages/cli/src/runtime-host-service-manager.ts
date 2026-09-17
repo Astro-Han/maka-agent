@@ -1358,9 +1358,11 @@ export async function verifyRuntimeHostManagedServiceReady(
       connectTimeoutMs: Math.max(1, Math.min(500, remaining)),
       handshakeTimeoutMs: Math.max(1, Math.min(500, remaining)),
     }).catch((error: unknown) => {
-      // A permanently unreachable root (pre-migration, corrupt marker, foreign
-      // or lost identity, deleted root) can never become ready; polling it
-      // out only hides the cause. Transient codes keep polling.
+      // A permanently unreachable root (pre-migration, corrupt marker,
+      // foreign identity) can never become ready; polling it out only hides
+      // the cause. root_unmarked/root_not_found stay transient: the Host we
+      // just spawned publishes the marker itself, so a fresh install starts
+      // unmarked until its first checkpoint.
       if (
         error instanceof StorageRootAuthorityError &&
         [
@@ -1369,8 +1371,6 @@ export async function verifyRuntimeHostManagedServiceReady(
           'invalid_root',
           'root_identity_collision',
           'root_identity_changed',
-          'root_not_found',
-          'root_unmarked',
         ].includes(error.code)
       )
         throw error;
