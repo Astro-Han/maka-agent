@@ -59,6 +59,7 @@ import {
 } from '@maka/storage/process-lifetime-file-update-lock';
 import {
   discoverMarkedStorageRoot,
+  inspectStorageRootFormat,
   resolveExistingStorageRoot,
   StorageRootAuthorityError,
   tryAcquireInteractiveRootOwner,
@@ -523,7 +524,7 @@ async function manageRuntimeHostServiceLocked(
     if (beforeStatus.installed && before && retirementRoot) {
       const retired = await retireManagedRuntimeHostService(
         { ...beforeStatus, config: before },
-        retirementRoot,
+        await requireExpectedServiceRoot(retirementRoot),
         backend,
         deps,
         input.allowInterruptActiveTasks ?? false,
@@ -621,13 +622,14 @@ async function manageRuntimeHostServiceLocked(
     }
     const service = await readServiceStatus(configPath, backend);
     const currentConfig = service.config;
-    const root = await resolveExpectedServiceRoot(currentConfig, input);
-    if (!service.installed || !currentConfig || !root) {
+    const identity = await resolveExpectedServiceRoot(currentConfig, input);
+    if (!service.installed || !currentConfig || !identity) {
       throw new RuntimeHostServiceManagerError(
         'not_installed',
         'Runtime Host service is not installed',
       );
     }
+    const root = await requireExpectedServiceRoot(identity);
     if (
       runtimeHostManagedServiceConfigFingerprint(currentConfig) !== input.expectedConfigFingerprint
     ) {
@@ -686,8 +688,8 @@ async function manageRuntimeHostServiceLocked(
     }
     const service = await readServiceStatus(configPath, backend);
     const currentConfig = service.config;
-    const root = await resolveExpectedServiceRoot(currentConfig, input);
-    if (!service.installed || !currentConfig || !root) {
+    const identity = await resolveExpectedServiceRoot(currentConfig, input);
+    if (!service.installed || !currentConfig || !identity) {
       throw new RuntimeHostServiceManagerError(
         'not_installed',
         'Runtime Host service is not installed',
@@ -695,7 +697,7 @@ async function manageRuntimeHostServiceLocked(
     }
     const retired = await retireManagedRuntimeHostService(
       { ...service, config: currentConfig },
-      root,
+      await requireExpectedServiceRoot(identity),
       backend,
       deps,
       input.allowInterruptActiveTasks ?? false,
@@ -709,11 +711,13 @@ async function manageRuntimeHostServiceLocked(
       'Runtime Host service is not installed',
     );
   }
-  const expectedRoot = await resolveExpectedServiceRoot(config, input);
+  const expectedIdentity = await resolveExpectedServiceRoot(config, input);
   if (input.action === 'start' || input.action === 'restart') {
     if (config.schemaVersion === 2) await backend.verifyDeployment(config);
     if (input.action === 'restart') {
-      const root = expectedRoot ?? (await discoverMarkedStorageRoot({ path: config.rootPath }));
+      const root = expectedIdentity
+        ? await requireExpectedServiceRoot(expectedIdentity)
+        : await discoverMarkedStorageRoot({ path: config.rootPath });
       const service = await readServiceStatus(configPath, backend);
       const retired = await retireManagedRuntimeHostService(
         { ...service, config },
@@ -759,8 +763,8 @@ async function replaceRuntimeHostManagedServiceLocked(
   const serviceId = resolveRuntimeHostManagedServiceId(input.clientDataRoot);
   assertExpectedServiceIdentity(serviceId, input.expectedTarget);
   const service = await readServiceStatus(configPath, backend);
-  const root = await resolveExpectedServiceRoot(service.config, input);
-  if (!service.installed || !service.config || !root) {
+  const identity = await resolveExpectedServiceRoot(service.config, input);
+  if (!service.installed || !service.config || !identity) {
     throw new RuntimeHostServiceManagerError(
       'not_installed',
       'Runtime Host service is not installed',
@@ -778,8 +782,9 @@ async function replaceRuntimeHostManagedServiceLocked(
   }
   await backend.preflightDeployment();
   const config = await prepareServiceConfig(input, service.config, deps);
-  let rootFence: InteractiveRootOwner | undefined =
-    await acquireRuntimeHostRootRetirementFence(root);
+  let rootFence: InteractiveRootOwner | undefined = await acquireRuntimeHostRootRetirementFence(
+    await requireExpectedServiceRoot(identity),
+  );
   try {
     await writeRuntimeHostServiceFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 0o600);
     await releaseRuntimeHostRootRetirementFence(rootFence);
@@ -850,18 +855,37 @@ function assertExpectedServiceIdentity(
 async function resolveExpectedServiceRoot(
   config: RuntimeHostManagedServiceConfig | null,
   input: Pick<RuntimeHostManagedServiceInput, 'expectedTarget'>,
-): Promise<StorageRootCapability<'interactive'> | undefined> {
+): Promise<{ readonly canonicalPath: string; readonly rootId: string } | undefined> {
   if (!input.expectedTarget) return undefined;
   try {
-    const root = await resolveExistingStorageRoot({
-      path: input.expectedTarget.rootPath,
-      kind: 'interactive',
-      expectedRootId: input.expectedTarget.rootId,
-    });
-    if (config && resolve(config.rootPath) !== root.canonicalPath) {
+    // Identity only: verifying that the service belongs to its expected root
+    // must not require business access to a legacy or upgrading root.
+    const identity = await inspectStorageRootFormat(input.expectedTarget.rootPath);
+    if (identity.rootId !== input.expectedTarget.rootId)
+      throw new Error('The expected State Root belongs to a different installation');
+    if (config && resolve(config.rootPath) !== identity.canonicalPath) {
       throw new Error('The service config points to a different State Root path');
     }
-    return root;
+    return identity;
+  } catch (error) {
+    throw new RuntimeHostServiceManagerError(
+      'target_mismatch',
+      'The managed Runtime Host service does not match the expected State Root',
+      { cause: error },
+    );
+  }
+}
+
+async function requireExpectedServiceRoot(identity: {
+  readonly canonicalPath: string;
+  readonly rootId: string;
+}): Promise<StorageRootCapability<'interactive'>> {
+  try {
+    return await resolveExistingStorageRoot({
+      path: identity.canonicalPath,
+      kind: 'interactive',
+      expectedRootId: identity.rootId,
+    });
   } catch (error) {
     if (
       error instanceof StorageRootAuthorityError &&

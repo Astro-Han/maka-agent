@@ -49,7 +49,7 @@ import {
 
 for (const interrupted of [false, true]) {
   test(`local CLI cold-starts the exact package ${interrupted ? 'after format upgrade before deployment activation' : 'with active deployment authority'}`, {
-    skip: process.platform === 'win32',
+    skip: process.platform === 'win32' ? 'requires a POSIX package-entrypoint symlink' : false,
     timeout: 30_000,
   }, async (t) => {
     const base = await mkdtemp(join(tmpdir(), 'maka-local-managed-'));

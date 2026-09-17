@@ -922,7 +922,7 @@ test('staging defers a cleanup receipt while its root predates the current forma
 });
 
 test('managed operator binds its Client Data Root and routes deployment cleanup', {
-  skip: process.platform === 'win32',
+  skip: process.platform === 'win32' ? 'requires a POSIX package-entrypoint symlink' : false,
 }, async (t) => {
   const base = await mkdtemp(join(tmpdir(), 'maka-runtime-host-operator-'));
   t.after(() => rm(base, { recursive: true, force: true }));

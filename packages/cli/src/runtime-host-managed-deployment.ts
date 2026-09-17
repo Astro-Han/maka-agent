@@ -33,8 +33,8 @@ import {
 } from './runtime-host-package-deployment.js';
 import { readStableBoundedFile, syncDirectory } from '@maka/storage/stable-storage';
 import {
-  inspectStorageRootFormat,
   resolveExistingStorageRoot,
+  StorageRootAuthorityError,
   tryAcquireStateRootOwner,
 } from '@maka/storage/root-authority';
 import {
@@ -134,35 +134,42 @@ async function reapRuntimeHostManagedDeploymentRetirement(
   }
   const cleanup = await readRuntimeHostManagedDeploymentCleanupReceipt(serviceId);
   if (cleanup) {
-    // A legacy or upgrading root cannot expose its authority record or
-    // current-format owner lock; post-migration staging retries the receipt.
-    const { format } = await inspectStorageRootFormat(cleanup.stateRootPath);
-    if (format !== 'current') return finishRetiredDeployment(root, serviceId);
-    const authority = await resolveRuntimeHostManagedDeploymentAuthority(serviceId);
-    if (authority) {
-      await clearRuntimeHostManagedDeploymentCleanupReceipt(serviceId);
-    } else {
-      const capability = await resolveExistingStorageRoot({
-        path: cleanup.stateRootPath,
-        kind: 'interactive',
-        expectedRootId: serviceId,
-      });
-      const owner = await tryAcquireStateRootOwner(capability);
-      if (!owner) {
-        throw new RuntimeHostManagedDeploymentError(
-          'deployment_failed',
-          'The Runtime Host still owns the State Root pending deployment cleanup',
-        );
-      }
-      try {
-        const fencedAuthority = await resolveRuntimeHostManagedDeploymentAuthority(serviceId);
-        if (!fencedAuthority) {
-          await removeRuntimeHostManagedDeployment(cleanup.deploymentRoot, serviceId);
-        }
+    try {
+      const authority = await resolveRuntimeHostManagedDeploymentAuthority(serviceId);
+      if (authority) {
         await clearRuntimeHostManagedDeploymentCleanupReceipt(serviceId);
-      } finally {
-        await owner.close();
+      } else {
+        const capability = await resolveExistingStorageRoot({
+          path: cleanup.stateRootPath,
+          kind: 'interactive',
+          expectedRootId: serviceId,
+        });
+        const owner = await tryAcquireStateRootOwner(capability);
+        if (!owner) {
+          throw new RuntimeHostManagedDeploymentError(
+            'deployment_failed',
+            'The Runtime Host still owns the State Root pending deployment cleanup',
+          );
+        }
+        try {
+          const fencedAuthority = await resolveRuntimeHostManagedDeploymentAuthority(serviceId);
+          if (!fencedAuthority) {
+            await removeRuntimeHostManagedDeployment(cleanup.deploymentRoot, serviceId);
+          }
+          await clearRuntimeHostManagedDeploymentCleanupReceipt(serviceId);
+        } finally {
+          await owner.close();
+        }
       }
+    } catch (error) {
+      // A legacy or upgrading root cannot expose its authority record or
+      // current-format owner lock; post-migration staging retries the receipt.
+      if (
+        error instanceof StorageRootAuthorityError &&
+        error.code === 'legacy_root_requires_migration'
+      )
+        return finishRetiredDeployment(root, serviceId);
+      throw error;
     }
   }
   await finishRetiredDeployment(root, serviceId);

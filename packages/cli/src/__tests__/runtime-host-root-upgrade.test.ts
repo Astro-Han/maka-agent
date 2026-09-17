@@ -43,6 +43,7 @@ import {
   runManagedRuntimeHostSelectedUpdateCli,
   type RuntimeHostUpdateFrame,
 } from '../runtime-host-update-command.js';
+import { recoverRuntimeHostManagedDeploymentState } from '../runtime-host-activation-command.js';
 import { resolveRecoverableRuntimeHostManagedDeployment } from '../runtime-host-lifecycle-transaction.js';
 import { runRuntimeHostSetupCli } from '../runtime-host-setup-command.js';
 
@@ -67,7 +68,12 @@ for (const failure of ['activation', 'locator', 'source_transition']) {
       configRevision: 1,
       deploymentRoot: join(base, 'deployment'),
       root: { id: root.rootId, path: root.canonicalPath },
-      projectDirectoryRoots: [],
+      // Large enough that embedding the upgrade plan inside the bounded root
+      // marker would exceed its byte limit; the plan must live in a side file.
+      projectDirectoryRoots: Array.from({ length: 128 }, (_, index) => ({
+        label: `Project ${index} ${'x'.repeat(220)}`,
+        path: join(base, `project-${index}`),
+      })),
       launch: {
         kind: 'exact_package',
         nodePath: process.execPath,
@@ -422,3 +428,99 @@ for (const failure of ['activation', 'locator', 'source_transition']) {
     assert.equal(await readFile(targetLayout.cliPath, 'utf8'), '');
   });
 }
+
+test('managed recovery settles a legacy transition before the root migrates', async (t) => {
+  const base = await mkdtemp(join(os.tmpdir(), 'maka-recover-order-'));
+  const home = join(base, 'home');
+  await mkdir(home);
+  const account = os.userInfo();
+  t.mock.method(os, 'userInfo', () => ({ ...account, homedir: home }));
+  syncBuiltinESMExports();
+  t.after(async () => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true, maxRetries: 10 });
+  });
+  const root = await resolveStorageRoot({ path: join(base, 'root'), kind: 'interactive' });
+  const current: RuntimeHostManagedDeploymentConfig = {
+    schemaVersion: 1,
+    state: 'active',
+    deploymentId: randomUUID(),
+    configRevision: 1,
+    deploymentRoot: join(base, 'deployment'),
+    root: { id: root.rootId, path: root.canonicalPath },
+    projectDirectoryRoots: [],
+    launch: {
+      kind: 'exact_package',
+      nodePath: process.execPath,
+      package: {
+        kind: 'npm_registry',
+        version: '1.2.3',
+        integrity: `sha512-${Buffer.alloc(64, 1).toString('base64')}`,
+      },
+    },
+    listeners: { localIpc: true },
+    lifecycle: { mode: 'on_demand', availability: 'activation' },
+    reconciliation: { trigger: 'manual' },
+  };
+  const legacyDirectory = join(resolveRuntimeHostManagedDeploymentAuthorityRoot(), root.rootId);
+  const legacyRecord = join(legacyDirectory, 'runtime-host-deployment.json');
+  await mkdir(legacyDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(
+    legacyRecord,
+    JSON.stringify({
+      schemaVersion: 1,
+      state: 'transition',
+      transactionId: randomUUID(),
+      operation: 'update',
+      recovery: 'restore_from',
+      root: current.root,
+      from: current,
+      to: { ...current, configRevision: 2 },
+    }),
+  );
+  const markerPath = join(root.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+  await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
+  const sourceLayout = resolveRuntimeHostNpmDeploymentLayout(
+    current.deploymentRoot,
+    current.launch.package.integrity,
+  );
+  const eventsFile = join(base, 'source-events.jsonl');
+  await mkdir(dirname(sourceLayout.cliPath), { recursive: true });
+  await writeFile(sourceLayout.cliPath, '');
+  await writeFile(
+    join(sourceLayout.packageRoot, 'package.json'),
+    JSON.stringify({ type: 'module', name: 'maka-agent', version: '1.2.3' }),
+  );
+  await mkdir(join(sourceLayout.packageRoot, 'node_modules', '@maka', 'storage', 'dist'), {
+    recursive: true,
+  });
+  await writeFile(
+    join(sourceLayout.packageRoot, 'node_modules', '@maka', 'storage', 'dist', 'root-authority.js'),
+    'export const STORAGE_ROOT_MARKER_SCHEMA_VERSION = 1;',
+  );
+  await writeFile(
+    join(dirname(sourceLayout.cliPath), 'runtime-host-lifecycle-transaction.js'),
+    `import { readFile, appendFile, writeFile } from 'node:fs/promises';
+    export async function resolveRecoverableRuntimeHostManagedDeployment() {
+      let config = JSON.parse(await readFile(${JSON.stringify(legacyRecord)}, 'utf8'));
+      if (config.state === 'transition') {
+        config = config.from;
+        await writeFile(${JSON.stringify(legacyRecord)}, JSON.stringify(config));
+        await appendFile(${JSON.stringify(eventsFile)}, '"recovered"\\n');
+      }
+      return {kind: 'active', config};
+    }
+  `,
+  );
+  // Recovery settles the transition through the installed package first; the
+  // format migration then refuses because the settled package predates schema 2.
+  await assert.rejects(
+    recoverRuntimeHostManagedDeploymentState(root.rootId),
+    /cannot open the upgraded State Root/,
+  );
+  assert.match(await readFile(eventsFile, 'utf8'), /"recovered"/);
+  assert.equal(JSON.parse(await readFile(legacyRecord, 'utf8')).state, 'active');
+  assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 1);
+});

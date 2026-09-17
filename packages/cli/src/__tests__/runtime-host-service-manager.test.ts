@@ -3149,6 +3149,50 @@ describe('managed Runtime Host service', () => {
     await installing;
     assert.notEqual((await status).service.config, null);
   });
+
+  it('verifies the expected target on a legacy State Root without migrating it', async () => {
+    const base = await realpath(await mkdtemp(join(tmpdir(), 'maka-runtime-host-legacy-status-')));
+    try {
+      const stateRoot = await resolveStorageRoot({
+        path: join(base, 'state'),
+        kind: 'interactive',
+      });
+      const markerPath = join(stateRoot.canonicalPath, '.maka-storage-root.json');
+      const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+      await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
+      const clientDataRoot = join(base, 'config');
+      const status = await manageRuntimeHostService(
+        {
+          clientDataRoot,
+          defaultRootPath: stateRoot.canonicalPath,
+          nodePath: process.execPath,
+          cliPath: join(base, 'maka', 'dist', 'cli.js'),
+          action: 'status',
+          expectedTarget: {
+            serviceId: resolveRuntimeHostManagedServiceId(clientDataRoot),
+            rootPath: stateRoot.canonicalPath,
+            rootId: stateRoot.rootId,
+          },
+        },
+        {
+          ...createUnusedBackend(),
+          status: async () => ({
+            manager: 'systemd_user' as const,
+            installed: false,
+            enabled: false,
+            active: false,
+            state: 'stopped' as const,
+            pid: null,
+            lastExitCode: null,
+          }),
+        },
+      );
+      assert.equal(status.action, 'status');
+      assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 1);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
 });
 
 function legacySystemdUnitFixture(config: RuntimeHostManagedServiceConfig): string {

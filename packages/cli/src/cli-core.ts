@@ -245,6 +245,10 @@ export async function runMakaCli(
     case 'runtime-host-serve': {
       const { runRuntimeHostServiceCli } = await import('./runtime-host-service-command.js');
       if (command.managedDeployment) {
+        const { recoverRuntimeHostManagedDeploymentState } = await import(
+          './runtime-host-activation-command.js'
+        );
+        await recoverRuntimeHostManagedDeploymentState(command.managedDeployment.rootId);
         const {
           resolveRuntimeHostManagedDeployment,
           resolveRuntimeHostNpmDeploymentLayout,

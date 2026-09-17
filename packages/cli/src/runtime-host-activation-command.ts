@@ -53,12 +53,14 @@ export async function recoverRuntimeHostManagedDeploymentState(
   } = {},
 ): Promise<void> {
   const recover = async () => {
-    await prepareRuntimeHostManagedRoot(rootId, options.authority);
+    // Settle the source transaction first: a pending legacy transition is
+    // resolved by its installed package before the root format can migrate.
     await resolveRecoverableRuntimeHostManagedDeployment(rootId, {
       convergeOperator: convergeRuntimeHostManagedOperator,
       verifyOperator: verifyRuntimeHostManagedOperator,
       resolveProvider: resolveRuntimeHostLifecycleProvider,
     });
+    await prepareRuntimeHostManagedRoot(rootId, options.authority);
   };
   if (options.deploymentLockHeld) return recover();
   await withRuntimeHostManagedServiceDeploymentLock(
