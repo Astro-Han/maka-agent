@@ -40,6 +40,7 @@ import {
 import type { ChatModelChoice, SessionViewMode, TurnViewModel, LiveTurnBuffer } from '@maka/ui';
 import { SessionRail, type SessionRailStoryProps } from '../../../packages/ui/stories/session-rail-harness.js';
 import { AppShellTopbarActions } from '../src/renderer/app-shell-chrome-actions';
+import { appShellFrameStyle } from '../src/renderer/shell/frame-style';
 import { SettingsOverlay } from '../src/renderer/app-shell-overlays';
 import {
   WorkbarServicesProvider,
@@ -60,6 +61,7 @@ import {
   deriveBranchBanner,
   deriveSessionRail,
   deriveSessionRevisionNavigation,
+  SESSION_LIST_EXPANDED_DEFAULT_WIDTH,
 } from '../src/renderer/features/session-navigation/testing';
 import { AppShell as AstryxAppShell } from '@astryxdesign/core/AppShell';
 import { Button } from '@astryxdesign/core';
@@ -310,17 +312,17 @@ function ShellFrame(props: {
       style={
         {
           minHeight: 640,
-          '--maka-session-workbar-width': `${props.workbarWidth ?? 480}px`,
           height: props.height,
-          /* Same publication point as production, for the same reason as
-             `data-sidebar-state` above: the titlebar's first grid track is a
-             `calc()` on this variable, and an unset variable makes the whole
-             track list invalid — the breadcrumb then parks against the icon
-             rail instead of the plate seam, so the seam and truncation stories
-             would be reviewing a layout the app never renders. Collapsed is
-             left to the CSS rule, exactly as in the app.
-             `SessionListPanel`'s own default width. */
-          ...(props.sidebarCollapsed ? null : { '--maka-sidenav-width': '260px' }),
+          /* Same writer as the production frame (app-shell.tsx) for the same
+             reason as `data-sidebar-state` above: the titlebar's first grid
+             track is a calc() on --maka-sidenav-width, so the story has to
+             publish the exact value the app writes or the seam and truncation
+             stories would review a layout the app never renders. */
+          ...appShellFrameStyle({
+            sessionListCollapsed: props.sidebarCollapsed ?? false,
+            sessionListWidth: SESSION_LIST_EXPANDED_DEFAULT_WIDTH,
+            workbarRightWidth: props.workbarWidth ?? SESSION_WORKBAR_DEFAULT_WIDTH,
+          }),
         } as CSSProperties
       }
     >
@@ -564,6 +566,14 @@ export const UpdateDownloadedCollapsed: Story = {
     if (!sidebar || !motion) throw new Error('Collapsed sidebar did not render');
     await expect(sidebar).not.toBeVisible();
     expect(getComputedStyle(motion).width).toBe('0px');
+    /* The rail must still hug the safe-area gutter: a --maka-sidenav-width
+       that is not a <length> (a unitless 0 was the regression) invalidates the
+       grid's calc(), the track list drops, and the rail parks mid-window. */
+    const titlebar = canvasElement.querySelector<HTMLElement>('.maka-window-titlebar');
+    const rail = canvasElement.querySelector<HTMLElement>('.maka-shell-topbar-rail');
+    if (!titlebar || !rail) throw new Error('Collapsed titlebar did not render');
+    expect(getComputedStyle(titlebar).gridTemplateColumns.trim().split(/\s+/)).toHaveLength(3);
+    expect(rail.getBoundingClientRect().left).toBeLessThan(160);
     const expand = canvas.getByRole('button', { name: '展开侧边栏' });
     await expect(expand).toBeVisible();
     expand.click();
