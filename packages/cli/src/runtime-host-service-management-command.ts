@@ -38,11 +38,7 @@ import {
   type RuntimeHostServiceManagementFrame,
   type RuntimeHostServiceSummary,
 } from '@maka/runtime-host/operator';
-import {
-  resolveExistingStorageRoot,
-  StorageRootAuthorityError,
-  tryAcquireStateRootOwner,
-} from '@maka/storage/root-authority';
+import { resolveExistingStorageRoot, tryAcquireStateRootOwner } from '@maka/storage/root-authority';
 import {
   cleanupRuntimeHostManagedDeployment,
   effectiveRuntimeHostProjectDirectoryRoots,
@@ -52,6 +48,7 @@ import {
   resolveRuntimeHostManagedServiceId,
   runtimeHostManagedServiceConfigFingerprint,
   RuntimeHostServiceManagerError,
+  storageRootErrorDetail,
   withRuntimeHostManagedServiceDeploymentLock,
   withRuntimeHostManagedServiceLifecycleLock,
   type RuntimeHostManagedServiceInput,
@@ -224,12 +221,7 @@ export async function runManagedRuntimeHostServiceCli(
     const code =
       error instanceof RuntimeHostServiceManagerError
         ? error.code
-        : error instanceof StorageRootAuthorityError &&
-            error.code === 'legacy_root_requires_migration'
-          ? 'root_requires_migration'
-          : error instanceof StorageRootAuthorityError && error.code === 'root_migration_busy'
-            ? 'root_migration_busy'
-            : 'internal_service_error';
+        : (storageRootErrorDetail(error)?.code ?? 'internal_service_error');
     const message = error instanceof Error ? error.message : String(error);
     if (options.framed) {
       deps.writeOutput(

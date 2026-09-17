@@ -25,6 +25,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   resolveExistingStorageRoot,
   inspectStorageRootFormat,
+  resolveStorageRoot,
   resolveStorageRootIdentity,
   tryAcquireStateRootOwner,
   type StateRootOwner,
@@ -218,6 +219,10 @@ export async function prepareRuntimeHostRootForDeployment(
         { cause: new AggregateError([error, inspectionError]) },
       );
     }
+    if (format === 'current')
+      // The fence committed before the failure reached us; only post-commit
+      // cleanup can still throw, and the root is already upgraded.
+      return await resolveStorageRoot({ path, kind: 'interactive' });
     if (format !== 'legacy')
       throw new RuntimeHostLifecycleTransactionError(
         'recovery_failed',

@@ -45,7 +45,11 @@ import {
   type RuntimeHostOperatorCapability,
   type RuntimeHostServiceManagementFrame,
 } from '@maka/runtime-host/operator';
-import { resolveStorageRoot, tryAcquireInteractiveRootOwner } from '@maka/storage/root-authority';
+import {
+  resolveStorageRoot,
+  StorageRootAuthorityError,
+  tryAcquireInteractiveRootOwner,
+} from '@maka/storage/root-authority';
 import { parseRuntimeHostCommand } from '../runtime-host-cli.js';
 import { runtimeHostServiceLaunchArguments } from '../runtime-host-service-launch.js';
 import {
@@ -66,6 +70,7 @@ import {
   resolveRuntimeHostManagedServiceId,
   runtimeHostManagedServiceConfigFingerprint,
   RuntimeHostServiceManagerError,
+  verifyRuntimeHostManagedServiceReady,
   type RuntimeHostManagedServiceConfig,
   type RuntimeHostManagedServiceResult,
   type RuntimeHostServiceManagerOverrides,
@@ -3192,6 +3197,134 @@ describe('managed Runtime Host service', () => {
     } finally {
       await rm(base, { recursive: true, force: true });
     }
+  });
+
+  it('reports root_requires_migration for mutations on a legacy State Root', async () => {
+    const base = await realpath(
+      await mkdtemp(join(tmpdir(), 'maka-runtime-host-legacy-mutation-')),
+    );
+    try {
+      const stateRoot = await resolveStorageRoot({
+        path: join(base, 'state'),
+        kind: 'interactive',
+      });
+      const markerPath = join(stateRoot.canonicalPath, '.maka-storage-root.json');
+      const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+      await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
+      const clientDataRoot = join(base, 'config');
+      await mkdir(clientDataRoot, { recursive: true, mode: 0o700 });
+      const cliPath = join(base, 'maka', 'dist', 'cli.js');
+      await mkdir(dirname(cliPath), { recursive: true });
+      await writeFile(cliPath, '', { mode: 0o600 });
+      await writeFile(
+        resolveRuntimeHostManagedServiceConfigPath(clientDataRoot),
+        `${JSON.stringify({
+          schemaVersion: 2,
+          rootPath: stateRoot.canonicalPath,
+          projectDirectoryRoots: [],
+          websocket: { host: '127.0.0.1', port: 7443, path: '/runtime-host' },
+          launch: { nodePath: process.execPath, cliPath },
+        })}\n`,
+        { mode: 0o600 },
+      );
+      const expectedTarget = {
+        serviceId: resolveRuntimeHostManagedServiceId(clientDataRoot),
+        rootPath: stateRoot.canonicalPath,
+        rootId: stateRoot.rootId,
+      };
+      const backend: RuntimeHostServiceBackend = {
+        ...createUnusedBackend(),
+        preflightDeployment: async () => undefined,
+        verifyDeployment: async () => undefined,
+        start: async () => undefined,
+        stop: async () => undefined,
+        status: async () => ({
+          manager: 'systemd_user' as const,
+          installed: true,
+          enabled: true,
+          active: false,
+          state: 'stopped' as const,
+          pid: null,
+          lastExitCode: null,
+        }),
+      };
+      const common = {
+        clientDataRoot,
+        defaultRootPath: stateRoot.canonicalPath,
+        nodePath: process.execPath,
+        cliPath,
+        expectedTarget,
+      } as const;
+      const needsMigration = (error: unknown) =>
+        error instanceof RuntimeHostServiceManagerError && error.code === 'root_requires_migration';
+      for (const action of ['retire', 'restart', 'uninstall'] as const)
+        await assert.rejects(
+          manageRuntimeHostService({ ...common, action }, backend),
+          needsMigration,
+        );
+      // start polls readiness through the real connector: a legacy root can
+      // never become ready, so it must surface immediately rather than time out.
+      await assert.rejects(
+        manageRuntimeHostService({ ...common, action: 'start' }, backend, {
+          waitForReady: verifyRuntimeHostManagedServiceReady,
+        }),
+        (error: unknown) =>
+          error instanceof StorageRootAuthorityError &&
+          error.code === 'legacy_root_requires_migration',
+      );
+      await assert.rejects(
+        manageRuntimeHostService(
+          {
+            ...common,
+            action: 'configure',
+            projectDirectoryRoots: [],
+            expectedConfigFingerprint: 'observed',
+          },
+          backend,
+        ),
+        needsMigration,
+      );
+      await assert.rejects(
+        replaceRuntimeHostManagedService({ ...common, cliPath }, backend),
+        needsMigration,
+      );
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('normalizes a legacy State Root error in framed management output', async () => {
+    let output = '';
+    const exitCode = await runManagedRuntimeHostServiceCli(
+      {
+        action: 'restart',
+        json: false,
+        framed: true,
+        clientDataRoot: '/config/Maka',
+        defaultRootPath: '/config/Maka/workspaces/default',
+        nodePath: '/usr/bin/node',
+        cliPath: '/opt/maka/cli.js',
+      },
+      {
+        manage: async () => {
+          throw new StorageRootAuthorityError(
+            'legacy_root_requires_migration',
+            'State Root predates this storage format',
+          );
+        },
+        withDeploymentLock: async (_root, operation) => operation(),
+        withLifecycleLock: async (_root, operation) => operation(),
+        createBackend: createUnusedBackend,
+        writeOutput: (value) => {
+          output += value;
+        },
+      },
+    );
+    assert.equal(exitCode, 1);
+    const frame = decodeRuntimeHostServiceManagementFrame(output);
+    assert.equal(frame?.kind, 'error');
+    if (frame?.kind !== 'error') assert.fail('Expected an error frame');
+    assert.equal(frame.error.code, 'root_requires_migration');
   });
 });
 

@@ -101,6 +101,7 @@ import {
   resolveRuntimeHostManagedServiceId,
   resolveRuntimeHostManagedProjectDirectoryRoots,
   RuntimeHostServiceManagerError,
+  storageRootErrorDetail,
   withRuntimeHostManagedServiceDeploymentLock,
   withRuntimeHostManagedServiceLifecycleLock,
   type RuntimeHostManagedServiceResult,
@@ -1383,7 +1384,11 @@ function createEmitter(json: boolean, deps: RuntimeHostSetupDeps): SetupEmitter 
 function setupFailure(error: unknown): { code: string; message: string } {
   let code = 'internal_setup_failure';
   let message = 'Runtime Host setup failed';
-  if (
+  const detail = storageRootErrorDetail(error);
+  if (detail) {
+    code = detail.code;
+    message = detail.message;
+  } else if (
     error instanceof RuntimeHostSetupError ||
     error instanceof RuntimeHostServiceManagerError ||
     error instanceof RuntimeHostManagedDeploymentError ||

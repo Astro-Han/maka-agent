@@ -28,6 +28,7 @@ import {
   RUNTIME_HOST_OPERATOR_UPDATE_SCHEDULER_CAPABILITY,
   type RuntimeHostServiceManagementFrame,
 } from '@maka/runtime-host/operator';
+import { StorageRootAuthorityError } from '@maka/storage/root-authority';
 import { parseRuntimeHostCommand } from '../runtime-host-cli.js';
 import {
   runManagedRuntimeHostUpdatePolicyCli,
@@ -588,6 +589,31 @@ describe('managed Runtime Host update reconciliation', () => {
       1,
     );
     assert.equal(JSON.parse(output).reconciliation.kind, 'manual_action');
+  });
+
+  it('preserves State Root authority error codes instead of collapsing them', async (t) => {
+    const clientDataRoot = await mkdtemp(join(tmpdir(), 'maka-update-reconcile-'));
+    t.after(() => rm(clientDataRoot, { recursive: true, force: true }));
+    let output = '';
+    assert.equal(
+      await runManagedRuntimeHostUpdateReconcileCli(
+        { json: true, framed: false, clientDataRoot, defaultRootPath: '/workspace' },
+        {
+          manage: async () => {
+            throw new StorageRootAuthorityError(
+              'root_migration_busy',
+              'State Root upgrade is in progress',
+            );
+          },
+          createBackend: () => unusedBackend(),
+          writeOutput: (value) => {
+            output += value;
+          },
+        },
+      ),
+      1,
+    );
+    assert.equal(JSON.parse(output).error.code, 'root_migration_busy');
   });
 });
 

@@ -876,6 +876,17 @@ async function resolveExpectedServiceRoot(
   }
 }
 
+/** One mapping for every CLI boundary so admission errors keep their code. */
+export function storageRootErrorDetail(
+  error: unknown,
+): { readonly code: string; readonly message: string } | undefined {
+  if (!(error instanceof StorageRootAuthorityError)) return undefined;
+  return {
+    code: error.code === 'legacy_root_requires_migration' ? 'root_requires_migration' : error.code,
+    message: error.message,
+  };
+}
+
 async function requireExpectedServiceRoot(identity: {
   readonly canonicalPath: string;
   readonly rootId: string;
@@ -1342,6 +1353,15 @@ export async function verifyRuntimeHostManagedServiceReady(
       connectTimeoutMs: Math.max(1, Math.min(500, remaining)),
       handshakeTimeoutMs: Math.max(1, Math.min(500, remaining)),
     }).catch((error: unknown) => {
+      // A permanently unreachable root (pre-migration, corrupt marker, foreign
+      // identity) can never become ready; polling it out only hides the cause.
+      if (
+        error instanceof StorageRootAuthorityError &&
+        ['legacy_root_requires_migration', 'invalid_marker', 'root_identity_collision'].includes(
+          error.code,
+        )
+      )
+        throw error;
       lastFailure = error instanceof Error ? error.message : String(error);
       return undefined;
     });

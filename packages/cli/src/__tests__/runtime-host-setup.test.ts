@@ -1176,6 +1176,44 @@ test('managed Windows task launcher is projected to a stable deployment path', a
   );
 });
 
+test('setup surfaces a State Root authority error instead of an internal failure', async (t) => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'maka-runtime-host-setup-root-')));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const stateRoot = join(base, 'state');
+  const capability = await resolveStorageRoot({ path: stateRoot, kind: 'interactive' });
+  const markerPath = join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+  await writeFile(markerPath, JSON.stringify({ ...marker, rootIdentity: { dev: '0', ino: '0' } }));
+  const outputs: string[] = [];
+  const exitCode = await runRuntimeHostSetupCli(
+    {
+      json: true,
+      lifecycle: 'on_demand',
+      clientDataRoot: join(base, 'client'),
+      defaultRootPath: stateRoot,
+      sourcePackageRoot: base,
+      version: '1.2.3',
+      principalId: 'desktop:client-1',
+      preset: 'desktop-client',
+    },
+    {
+      createBackend: () => assert.fail('setup must not create a service backend'),
+      manageService: async () => assert.fail('setup must not manage a service'),
+      resolveRegistryCandidate: async () => assert.fail('setup must not resolve a package'),
+      withRegistryPackage: async () => assert.fail('setup must not stage a package'),
+      prepareDeployment: async () => assert.fail('setup must not stage a deployment'),
+      openDeployment: async () => assert.fail('setup must not open a deployment'),
+      writeOutput: (value) => outputs.push(value),
+    },
+  );
+  assert.equal(exitCode, 1);
+  const failure = outputs.map(decodeRuntimeHostSetupFrame).find((frame) => frame?.kind === 'error');
+  assert.equal(
+    failure?.kind === 'error' ? failure.error.code : undefined,
+    'root_identity_collision',
+  );
+});
+
 async function createReleasePackage(base: string, version: string): Promise<string> {
   const root = join(base, `source-package-${version}`);
   await mkdir(join(root, 'dist'), { recursive: true });

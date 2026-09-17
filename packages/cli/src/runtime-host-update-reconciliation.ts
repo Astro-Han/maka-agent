@@ -27,6 +27,7 @@ import {
   RUNTIME_HOST_SERVICE_ERROR_CODE_MAX_BYTES,
   RUNTIME_HOST_SERVICE_ERROR_MESSAGE_MAX_BYTES,
   resolveRuntimeHostManagedDeployment,
+  RuntimeHostManagedDeploymentError as RuntimeHostOperatorDeploymentError,
   type RuntimeHostManagedUpdatePolicy,
   type RuntimeHostManagedDeploymentConfig,
   type RuntimeHostServiceManagementFrame,
@@ -36,6 +37,7 @@ import {
   manageRuntimeHostService,
   resolveRuntimeHostManagedServiceId,
   RuntimeHostServiceManagerError,
+  storageRootErrorDetail,
   withRuntimeHostManagedServiceDeploymentLock,
   type RuntimeHostManagedServiceTarget,
   type RuntimeHostServiceBackend,
@@ -61,6 +63,7 @@ import {
 import {
   assertRuntimeHostManagedOperatorDeployment,
   resolveRuntimeHostManagedControlRoot,
+  RuntimeHostManagedDeploymentError,
 } from './runtime-host-managed-deployment.js';
 import {
   resolveManagedRuntimeHostUpdateSelection,
@@ -573,9 +576,11 @@ function boundedError(error: unknown, fallback: string): { code: string; message
   const code =
     error instanceof RuntimeHostUpdatePolicyError ||
     error instanceof RuntimeHostUpdateDiscoveryError ||
-    error instanceof RuntimeHostServiceManagerError
+    error instanceof RuntimeHostServiceManagerError ||
+    error instanceof RuntimeHostManagedDeploymentError ||
+    error instanceof RuntimeHostOperatorDeploymentError
       ? error.code
-      : 'update_reconciliation_failed';
+      : (storageRootErrorDetail(error)?.code ?? 'update_reconciliation_failed');
   const message = error instanceof Error ? error.message : String(error);
   return {
     code:
