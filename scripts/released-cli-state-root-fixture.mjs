@@ -116,7 +116,10 @@ async function seedFixture(packageRoot, rootPath, rootOwner, rootId) {
         schedule: task.schedule,
         effect: task.effect,
       },
-      access: await seedAccessCredential(packageRoot, rootOwner.controlDirectory),
+      access: await seedAccessCredential(
+        packageRoot,
+        rootOwner.hostDataDirectory ?? rootOwner.controlDirectory,
+      ),
     };
   } finally {
     scheduledTasks.close();
@@ -124,10 +127,11 @@ async function seedFixture(packageRoot, rootPath, rootOwner, rootId) {
   }
 }
 
-// The access file lives in the account-local control namespace rather than the
-// State Root, and the Host opens it before the Kernel starts. A credential
-// issued by the released build is therefore the one durable record that decides
-// whether the current build can start at all.
+// The access file lives in the Host's durable data directory (`hostDataDirectory`
+// on schema 2, the account-local control namespace on released builds), and the
+// Host opens it before the Kernel starts. A credential issued by the released
+// build is therefore the one durable record that decides whether the current
+// build can start at all.
 async function seedAccessCredential(packageRoot, controlDirectory) {
   const accessAuthority = await loadInstalled(
     packageRoot,
@@ -233,7 +237,10 @@ async function inspectFixture(packageRoot, rootPath, rootOwner, rootId) {
         schedule: task.schedule,
         effect: task.effect,
       },
-      access: await inspectAccessCredential(packageRoot, rootOwner.controlDirectory),
+      access: await inspectAccessCredential(
+        packageRoot,
+        rootOwner.hostDataDirectory ?? rootOwner.controlDirectory,
+      ),
     };
   } finally {
     scheduledTasks.close();

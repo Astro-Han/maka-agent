@@ -134,7 +134,13 @@ export async function collectRuntimeHostFailureDiagnostic(packageRoot, rootPath,
   }
   if (!capability || !controlRoot) return finish();
 
-  const controlDirectory = join(controlRoot, capability.rootId);
+  // This release harness also diagnoses historical installed artifacts: schema
+  // 1 kept a per-root leaf under the account-side namespace; schema 2 flattens
+  // the control directory inside the root itself.
+  const controlDirectory =
+    authority.STORAGE_ROOT_MARKER_SCHEMA_VERSION >= 2
+      ? controlRoot
+      : join(controlRoot, capability.rootId);
   addPathEvidence(diagnostic.paths, 'control_directory', controlDirectory);
 
   try {
