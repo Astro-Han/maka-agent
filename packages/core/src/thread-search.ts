@@ -322,7 +322,6 @@ export async function runThreadSearch(
       const hit = findMatch(candidate, queryFolded);
       if (hit === undefined) continue;
 
-      // Build the snippet, redact secrets, cap length.
       const snippet = capCodePoints(
         redactSecrets(buildSnippet(candidate, hit, SNIPPET_CONTEXT_HALF)),
         SNIPPET_MAX_CODE_POINTS,
