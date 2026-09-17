@@ -53,6 +53,7 @@ import {
   type TranscriptRecord,
 } from './claude-code-transcript-lineage.js';
 import { listOffsetExternalSessionCatalogPage } from './offset-external-session-catalog.js';
+import { assertPositiveSafeInteger } from './positive-safe-integer.js';
 
 export const CLAUDE_CODE_SESSION_ADAPTER_ID = 'claude-code';
 
@@ -833,12 +834,6 @@ function assertSafeSessionId(sessionId: string): void {
   }
 }
 
-function assertPositiveSafeInteger(value: number, label: string): void {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${label} must be a positive safe integer`);
-  }
-}
-
 function timestampMs(record: TranscriptRecord): number | undefined {
   const value = record.timestamp;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -848,10 +843,6 @@ function timestampMs(record: TranscriptRecord): number | undefined {
   }
   return undefined;
 }
-
-/* ------------------------------------------------------------------ *
- * Transcript -> StoredMessage[]
- * ------------------------------------------------------------------ */
 
 /** `stop_reason` values that mean the model finished what it was saying. This
  *  is the recorded evidence a terminal `turn_state` needs: the Ledger refuses a

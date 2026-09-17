@@ -19,6 +19,7 @@
 
 import type { LlmConnection } from '@maka/core/llm-connections';
 import { isRetiredProvider } from '@maka/core/provider-registry';
+import { isRecord } from '@maka/core/record-schema';
 
 /**
  * Config import / export — Alma-style selective bundle.
@@ -103,7 +104,7 @@ export function parseConfigBundle(raw: string): ConfigParseResult {
   } catch {
     return { ok: false, reason: 'not_json', message: 'File is not valid JSON.' };
   }
-  if (!isJsonObject(parsed)) {
+  if (!isRecord(parsed)) {
     return { ok: false, reason: 'malformed', message: 'Config bundle must be a JSON object.' };
   }
   const version = parsed.schemaVersion;
@@ -128,7 +129,7 @@ export function parseConfigBundle(raw: string): ConfigParseResult {
       message: 'includedData must be an array of known categories.',
     };
   }
-  const rawData = isJsonObject(parsed.data) ? parsed.data : {};
+  const rawData = isRecord(parsed.data) ? parsed.data : {};
   const includedData = [...new Set(parsed.includedData as ConfigCategory[])];
   const data: ConfigData = {};
   // Only surface categories that are BOTH declared in the manifest AND present
@@ -190,10 +191,6 @@ export function planConnectionMerge(
 
 export function isConfigCategory(value: unknown): value is ConfigCategory {
   return typeof value === 'string' && (CONFIG_CATEGORIES as readonly string[]).includes(value);
-}
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function cloneJson<T>(value: T): T {
