@@ -1399,6 +1399,9 @@ export async function withStorageRootUpgrade(
   try {
     const lockedRootId = state.ready.rootId;
     await acquire(join(authority, `${state.ready.rootId}.lock`));
+    // Marker repair/adoption holds only the bootstrap lock; acquire it before
+    // re-reading so no writer can republish between the read and the checks.
+    await acquire(join(authority, ARTIFACT_WRITER_BOOTSTRAP_LOCK_FILE));
     encoded = await read();
     state = decode(encoded);
     if (state.ready.rootId !== lockedRootId)
@@ -1410,7 +1413,6 @@ export async function withStorageRootUpgrade(
       failed = false;
       return;
     }
-    await acquire(join(authority, ARTIFACT_WRITER_BOOTSTRAP_LOCK_FILE));
     await operation({
       canonicalPath: root,
       rootId: state.ready.rootId,

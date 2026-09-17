@@ -291,9 +291,16 @@ test('a stale legacy locator cannot demote the in-root deployment authority', as
   const input = await fixture(t);
   await claimRuntimeHostManagedDeployment(input.capability, input.config, input.authority);
   const account = join(input.authority.authorityRoot!, input.capability.rootId);
-  // Losing the locator falls back to a legacy record; the in-root record stays authoritative.
+  // Losing the locator falls back to a legacy record; the in-root record stays
+  // authoritative. A distinct legacy deployment id catches a silent demotion.
   await rm(join(account, 'root-location.json'), { force: true });
-  await writeFile(join(account, 'runtime-host-deployment.json'), JSON.stringify(input.config));
+  await writeFile(
+    join(account, 'runtime-host-deployment.json'),
+    JSON.stringify({
+      ...input.config,
+      deploymentId: '00000000-0000-4000-8000-000000000099',
+    }),
+  );
   const resolved = await resolveRuntimeHostManagedDeploymentAuthority(
     input.capability.rootId,
     input.authority,

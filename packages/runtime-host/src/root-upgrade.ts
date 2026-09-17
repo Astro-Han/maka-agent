@@ -55,6 +55,7 @@ import { resolveRuntimeHostNpmDeploymentLayout } from './operator/update-package
 const source = z.string().refine(isAbsolute).nullable();
 const planSchema = z
   .object({
+    rootId: z.string().optional(),
     data: source,
     deployment: source,
     locator: source,
@@ -98,12 +99,13 @@ export async function prepareRuntimeHostRoot(
     try {
       await withStorageRootUpgrade(path, (session) => upgradeRuntimeHostRoot(session, options));
     } catch (error) {
+      const remaining = deadline - Date.now();
       if (
         error instanceof StorageRootAuthorityError &&
         error.code === 'root_migration_busy' &&
-        Date.now() < deadline
+        remaining > 0
       ) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, Math.min(250, remaining)));
         continue;
       }
       throw error;
@@ -127,25 +129,14 @@ async function upgradeRuntimeHostRoot(
     )
       await rm(join(authority, entry.name), { recursive: true, force: true });
   }
-  let plan =
-    session.upgrade === undefined
-      ? undefined
-      : await readUpgradePlan(planPath, session.upgrade.payload);
-  if (plan) {
+  // The fence is the only stage bit: an upgrade marker means the plan file is
+  // part of the durable transaction record and must read, never be re-derived.
+  let plan: UpgradePlan;
+  if (session.upgrade !== undefined) {
+    plan = await readUpgradePlan(planPath, session.upgrade.payload, session.rootId);
     // The durable fence rejects old code, but a writer admitted before it
-    // was published still has to release its actual OS lock. A resumed plan
-    // is only trusted within the four legacy lock shapes it may name.
-    for (const lock of plan.locks) {
-      const name = basename(lock);
-      if (
-        name !== `${session.rootId}.lock` &&
-        name !== 'owner.lock' &&
-        name !== '.maka-artifact-writer.lock' &&
-        !/^[0-9a-f]{64}\.lock$/.test(name)
-      )
-        throw new Error(`Upgrade plan names an unexpected legacy lock: ${lock}`);
-      await lockIfParentPresent(session, lock);
-    }
+    // was published still has to release its actual OS lock.
+    await admitLegacyLocks(session, plan.locks, planSources(plan));
   } else {
     plan = await inspectLegacySources(session);
     const rootStat = await stat(session.canonicalPath);
@@ -184,23 +175,9 @@ async function upgradeRuntimeHostRoot(
       }
       await options.retireDeployment?.(active);
     }
-    for (const lock of plan.locks) {
-      // On first admission, create writable legacy lock directories so a
-      // simultaneous old startup cannot create a different, unlocked path.
-      // An inaccessible absent parent cannot admit an old writer either.
-      try {
-        await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (
-          (code === 'EACCES' || code === 'EROFS' || code === 'ENOENT') &&
-          !(await present(dirname(lock)))
-        )
-          continue;
-        throw error;
-      }
-      await session.acquireLegacyLock(lock);
-    }
+    // First admission creates writable legacy lock directories so a
+    // simultaneous old startup cannot create a different, unlocked path.
+    await admitLegacyLocks(session, plan.locks, planSources(plan));
     const lockedSources = await inspectLegacySources(session);
     const lockedDeployment = await validateDeploymentSource(
       lockedSources.deployment,
@@ -210,6 +187,7 @@ async function upgradeRuntimeHostRoot(
     if (JSON.stringify(current) !== JSON.stringify(lockedDeployment))
       throw new Error('Legacy deployment changed while preparing its upgrade');
     plan = {
+      rootId: session.rootId,
       ...lockedSources,
       ...(plan.targetDeployment ? { targetDeployment: plan.targetDeployment } : {}),
     };
@@ -219,41 +197,28 @@ async function upgradeRuntimeHostRoot(
   const transaction = session.upgrade!;
   const state = join(authority, 'state');
   const staging = join(authority, `upgrade-${transaction.id}`);
-  if (!(await completedSnapshot(state, transaction.id))) {
-    if (await present(state))
-      throw new Error('Existing Host state is not the snapshot owned by this upgrade');
-    if (!(await completedSnapshot(staging, transaction.id))) {
+  let restaged = false;
+  for (;;) {
+    if (await completedSnapshot(state, transaction.id)) {
       try {
-        await stageSnapshot(session, staging, plan, transaction.id);
-      } catch {
-        // Staging is disposable; a fixed source still unblocks the retry.
-        await stageSnapshot(session, staging, plan, transaction.id).catch((error: unknown) => {
-          const wrapped = new Error(
-            `State Root upgrade cannot stage its legacy sources (${describePlanSources(plan)}): repair or remove the failing entry, then retry`,
-            { cause: error },
-          );
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code) Object.assign(wrapped, { code });
-          throw wrapped;
-        });
+        // The completion record only proves the staged copy; check what survived.
+        await assertCommittedState(state, session);
+        break;
+      } catch (error) {
+        // A completed snapshot is this transaction's disposable copy: a
+        // corrupt one restages once rather than wedging the root.
+        if (restaged) throw error;
+        await rm(state, { recursive: true, force: true });
+        restaged = true;
+        continue;
       }
     }
+    if (await present(state))
+      throw new Error('Existing Host state is not the snapshot owned by this upgrade');
+    if (!(await completedSnapshot(staging, transaction.id)))
+      await stageSnapshot(session, staging, plan, transaction.id);
     await rename(staging, state);
     await syncDirectoryChain(authority, session.canonicalPath);
-  }
-  // The completion record only proves the staged copy; check what survived.
-  await readAccessCredentialFile(join(state, 'data', ACCESS_FILE_NAME));
-  await new HostPluginCompositionStore(join(state, 'data')).read();
-  const committedDeployment = await validateDeploymentSource(
-    join(state, 'deployment'),
-    session.rootId,
-    session.canonicalPath,
-  );
-  if (committedDeployment) {
-    const target =
-      committedDeployment.state === 'active' ? committedDeployment : committedDeployment.to;
-    if (!target) throw new Error('Upgraded deployment has no compatible recovery target');
-    await assertCompatibleDeployment(target);
   }
   if (plan.locator) {
     // The locator is a projection of the completed root snapshot. Recreate its
@@ -272,8 +237,71 @@ async function upgradeRuntimeHostRoot(
     await syncDirectoryChain(dirname(plan.locator), locatorBoundary);
   }
   await session.commit();
-  await rm(planPath, { force: true });
-  await syncDirectoryChain(authority, session.canonicalPath);
+  // The marker is durable once committed; cleanup failure must not report a
+  // committed upgrade as failed. A stray plan file is bounded litter.
+  await rm(planPath, { force: true }).catch(() => undefined);
+  await syncDirectoryChain(authority, session.canonicalPath).catch(() => undefined);
+}
+
+async function assertCommittedState(
+  state: string,
+  session: StorageRootUpgradeSession,
+): Promise<void> {
+  await readAccessCredentialFile(join(state, 'data', ACCESS_FILE_NAME));
+  await new HostPluginCompositionStore(join(state, 'data')).read();
+  const committedDeployment = await validateDeploymentSource(
+    join(state, 'deployment'),
+    session.rootId,
+    session.canonicalPath,
+  );
+  if (committedDeployment) {
+    const target =
+      committedDeployment.state === 'active' ? committedDeployment : committedDeployment.to;
+    if (!target) throw new Error('Upgraded deployment has no compatible recovery target');
+    await assertCompatibleDeployment(target);
+  }
+}
+
+function planSources(plan: UpgradePlan): ReadonlySet<string> {
+  return new Set([plan.data, plan.deployment].filter((source) => source !== null));
+}
+
+async function admitLegacyLocks(
+  session: StorageRootUpgradeSession,
+  locks: readonly string[],
+  sources: ReadonlySet<string>,
+): Promise<void> {
+  for (const lock of locks) {
+    // A resumed or derived plan is only trusted within the four legacy lock
+    // shapes; anything else is a torn transaction record.
+    const name = basename(lock);
+    if (
+      name !== `${session.rootId}.lock` &&
+      name !== 'owner.lock' &&
+      name !== '.maka-artifact-writer.lock' &&
+      !/^[0-9a-f]{64}\.lock$/.test(name)
+    )
+      throw new Error(`Upgrade plan names an unexpected legacy lock: ${lock}`);
+    const parent = dirname(lock);
+    if (sources.has(parent)) {
+      // A lock inside a plan source exists only with the source. Recreating a
+      // deleted source as an empty directory would let the copy below commit
+      // empty state, so a missing one skips the lock and fails at copy instead.
+      if (!(await present(parent))) continue;
+      await session.acquireLegacyLock(lock);
+      continue;
+    }
+    // An inaccessible absent parent cannot admit an old writer either.
+    try {
+      await mkdir(parent, { recursive: true, mode: 0o700 });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code === 'EACCES' || code === 'EROFS' || code === 'ENOENT') && !(await present(parent)))
+        continue;
+      throw error;
+    }
+    await session.acquireLegacyLock(lock);
+  }
 }
 
 async function stageSnapshot(
@@ -292,13 +320,24 @@ async function stageSnapshot(
     const target = join(staging, name);
     if (path === null) await hardenDirectory(target);
     else {
-      // cp must fail if a previously-present source is now missing.
-      await cp(path, target, {
-        recursive: true,
-        dereference: false,
-        filter: (entry) =>
-          entry !== join(path, 'owner.lock') && entry !== join(path, '.maka-artifact-writer.lock'),
-      });
+      try {
+        // cp must fail if a previously-present source is now missing.
+        await cp(path, target, {
+          recursive: true,
+          dereference: false,
+          filter: (entry) =>
+            entry !== join(path, 'owner.lock') &&
+            entry !== join(path, '.maka-artifact-writer.lock'),
+        });
+      } catch (error) {
+        const wrapped = new Error(
+          `State Root upgrade cannot copy its legacy ${name} source (${path}): repair or remove the failing entry, then retry`,
+          { cause: error },
+        );
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code) Object.assign(wrapped, { code });
+        throw wrapped;
+      }
     }
   }
   if (plan.targetDeployment) {
@@ -341,10 +380,6 @@ async function stageSnapshot(
   await syncDirectoryChain(staging, dirname(staging));
 }
 
-function describePlanSources(plan: UpgradePlan): string {
-  return `data: ${plan.data ?? 'absent'}, deployment: ${plan.deployment ?? 'absent'}`;
-}
-
 async function writeUpgradePlan(path: string, plan: UpgradePlan): Promise<void> {
   const temporary = `${path}.tmp`;
   await writeFile(temporary, `${JSON.stringify(plan)}\n`, { mode: 0o600 });
@@ -353,19 +388,50 @@ async function writeUpgradePlan(path: string, plan: UpgradePlan): Promise<void> 
   await syncDirectoryChain(dirname(path), dirname(path));
 }
 
-async function readUpgradePlan(path: string, embedded: unknown): Promise<UpgradePlan | undefined> {
-  try {
-    const bytes = await readStableBoundedFile({
-      path,
-      maxBytes: 4 * 1024 * 1024,
-      invalidFile: () => new Error('Invalid upgrade plan'),
-    });
-    return planSchema.parse(JSON.parse(bytes.toString('utf8')));
-  } catch {
-    // Fences published before the plan moved to its own file carry it inline.
-    const parsed = planSchema.safeParse(embedded);
-    return parsed.success ? parsed.data : undefined;
+async function readUpgradePlan(
+  path: string,
+  embedded: unknown,
+  rootId: string,
+): Promise<UpgradePlan> {
+  const payload = embedded as { plan?: unknown } | undefined;
+  if (payload && typeof payload === 'object' && typeof payload.plan === 'string') {
+    if (payload.plan !== UPGRADE_PLAN_FILE)
+      throw new Error('Invalid upgrade transaction record in the root marker');
+    try {
+      const bytes = await readStableBoundedFile({
+        path,
+        maxBytes: 4 * 1024 * 1024,
+        invalidFile: () => new Error('Invalid upgrade plan'),
+      });
+      const plan = planSchema.parse(JSON.parse(bytes.toString('utf8')));
+      if (plan.rootId !== rootId)
+        throw new Error(`Upgrade plan belongs to another State Root: ${path}`);
+      assertPlanSources(plan, path);
+      return plan;
+    } catch (error) {
+      throw new Error(
+        `State Root upgrade plan is missing or corrupt: ${path}; restore it, or remove the upgrade field from the root marker to re-admit the upgrade`,
+        { cause: error },
+      );
+    }
   }
+  // Fences published before the plan moved to its own file carry it inline.
+  const parsed = planSchema.safeParse(embedded);
+  if (parsed.success && (parsed.data.rootId === undefined || parsed.data.rootId === rootId)) {
+    assertPlanSources(parsed.data, 'the root marker');
+    return parsed.data;
+  }
+  throw new Error('Invalid upgrade transaction record in the root marker');
+}
+
+// Derived plans always place the locator inside the deployment source; a plan
+// naming it elsewhere is a torn record, not a write target to honor.
+function assertPlanSources(plan: UpgradePlan, where: string): void {
+  if (
+    plan.locator !== null &&
+    (plan.deployment === null || plan.locator !== join(plan.deployment, 'root-location.json'))
+  )
+    throw new Error(`Upgrade plan names an unexpected locator: ${where}`);
 }
 
 export async function prepareRuntimeHostManagedRoot(
@@ -410,7 +476,7 @@ async function assertCompatibleDeployment(
       'const m=await import((await import("node:url")).pathToFileURL(process.argv[1]).href); process.stdout.write(String(m.STORAGE_ROOT_MARKER_SCHEMA_VERSION));',
       authority,
     ],
-    { timeout: 15_000, maxBuffer: 4096 },
+    { timeout: 15_000, maxBuffer: 4096, env: { ...process.env, NODE_OPTIONS: '' } },
   );
   if (stdout !== '2')
     throw new Error('The prepared managed package cannot open the upgraded State Root');
@@ -450,13 +516,6 @@ async function inspectLegacySources(session: StorageRootUpgradeSession): Promise
   };
 }
 
-async function lockIfParentPresent(
-  session: StorageRootUpgradeSession,
-  path: string,
-): Promise<void> {
-  if (await present(dirname(path))) await session.acquireLegacyLock(path);
-}
-
 async function present(path: string): Promise<boolean> {
   try {
     const entry = await lstat(path);
@@ -469,13 +528,23 @@ async function present(path: string): Promise<boolean> {
 }
 
 async function completedSnapshot(path: string, id: string): Promise<boolean> {
+  if (!(await present(path))) return false;
+  let bytes: Buffer;
   try {
-    if (!(await present(path))) return false;
-    const bytes = await readStableBoundedFile({
+    bytes = await readStableBoundedFile({
       path: join(path, COMPLETION),
       maxBytes: 256,
-      invalidFile: () => new Error('Invalid upgrade completion record'),
+      invalidFile: () =>
+        Object.assign(new Error('Invalid upgrade completion record'), {
+          code: 'invalid_completion_record',
+        }),
     });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'invalid_completion_record') return false;
+    throw error;
+  }
+  try {
     const value = JSON.parse(bytes.toString('utf8'));
     return value.migrationId === id && Object.keys(value).length === 1;
   } catch {

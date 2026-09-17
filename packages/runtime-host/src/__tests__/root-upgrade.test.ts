@@ -273,3 +273,144 @@ test('an uninitialized legacy root upgrades with an inaccessible absent account 
     await rm(base, { recursive: true, force: true });
   }
 });
+
+async function fencedUpgradeFixture(
+  t: import('node:test').TestContext,
+  prefix: string,
+): Promise<{ base: string; root: string; capability: { rootId: string; canonicalPath: string } }> {
+  const base = await mkdtemp(join(os.tmpdir(), prefix));
+  const home = join(base, 'home');
+  await mkdir(home);
+  const info = os.userInfo();
+  t.mock.method(os, 'userInfo', () => ({ ...info, homedir: home }));
+  const root = join(base, 'state');
+  const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
+  const markerPath = join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+  await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
+  const cache =
+    process.platform === 'darwin'
+      ? join(home, 'Library', 'Caches', 'Maka')
+      : process.platform === 'win32'
+        ? join(home, 'AppData', 'Local', 'Maka')
+        : join(home, '.cache', 'maka');
+  const source = join(cache, 'runtime-hosts', capability.rootId);
+  await mkdir(source, { recursive: true, mode: 0o700 });
+  await writeAccessCredentialFile(join(source, ACCESS_FILE_NAME), createAccessCredentialFile([]));
+  await writeFile(join(source, 'plugin-state.json'), '{"value":"durable"}');
+  const failCopy = t.mock.method(fs, 'cp', async () => {
+    throw Object.assign(new Error('copy interrupted'), { code: 'EIO' });
+  });
+  syncBuiltinESMExports();
+  await assert.rejects(prepareRuntimeHostRoot(root), { code: 'EIO' });
+  failCopy.mock.restore();
+  syncBuiltinESMExports();
+  return { base, root, capability };
+}
+
+test('a fenced upgrade fails closed when its plan file is missing', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-no-plan-');
+  try {
+    const authority = join(capability.canonicalPath, '.maka-host');
+    await rm(join(authority, 'upgrade-plan.json'));
+    // The durable fence makes the plan a required transaction input; losing it
+    // must not silently re-derive a plan and drop the recorded successor.
+    await assert.rejects(prepareRuntimeHostRoot(root), /missing or corrupt/u);
+    assert.ok(
+      JSON.parse(await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'))
+        .upgrade,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('a fenced upgrade rejects a plan bound to another root', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-foreign-plan-');
+  try {
+    const planPath = join(capability.canonicalPath, '.maka-host', 'upgrade-plan.json');
+    const plan = JSON.parse(await readFile(planPath, 'utf8'));
+    await writeFile(planPath, JSON.stringify({ ...plan, rootId: '0'.repeat(64) }));
+    await assert.rejects(prepareRuntimeHostRoot(root), /missing or corrupt/u);
+    assert.ok(
+      JSON.parse(await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'))
+        .upgrade,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('upgrade resume recreates legacy lock directories removed while fenced', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-lockdirs-');
+  try {
+    const home = join(base, 'home');
+    const cache =
+      process.platform === 'darwin'
+        ? join(home, 'Library', 'Caches', 'Maka')
+        : process.platform === 'win32'
+          ? join(home, 'AppData', 'Local', 'Maka')
+          : join(home, '.cache', 'maka');
+    const durable =
+      process.platform === 'darwin'
+        ? join(home, 'Library', 'Application Support', 'Maka')
+        : process.platform === 'win32'
+          ? join(home, 'AppData', 'Local', 'Maka')
+          : join(home, '.local', 'share', 'Maka');
+    await rm(join(durable, 'state-root-owners'), { recursive: true, force: true });
+    await rm(join(cache, 'runtime-hosts', 'artifact-writer-bootstrap'), {
+      recursive: true,
+      force: true,
+    });
+    const upgraded = await prepareRuntimeHostRoot(root);
+    assert.equal(upgraded.rootId, capability.rootId);
+    // The locks are durable artifacts of admission: absence must recreate them.
+    assert.deepEqual(await fs.readdir(join(durable, 'state-root-owners')), [
+      `${capability.rootId}.lock`,
+    ]);
+    assert.match(
+      (await fs.readdir(join(cache, 'runtime-hosts', 'artifact-writer-bootstrap')))[0] ?? '',
+      /^[0-9a-f]{64}\.lock$/u,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('a committed snapshot that fails validation is restaged once', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-restaged-');
+  try {
+    const committed = join(capability.canonicalPath, '.maka-host', 'state');
+    const rename = fs.rename;
+    let corrupted = false;
+    t.mock.method(fs, 'rename', async (...[from, to]: Parameters<typeof fs.rename>) => {
+      await rename(from, to);
+      if (to === committed && !corrupted) {
+        corrupted = true;
+        await writeFile(join(to, 'data', ACCESS_FILE_NAME), '{"credential"');
+      }
+    });
+    syncBuiltinESMExports();
+    const upgraded = await prepareRuntimeHostRoot(root);
+    assert.equal(upgraded.rootId, capability.rootId);
+    assert.equal(
+      await readFile(join(resolveRootHostDataDirectory(root), 'plugin-state.json'), 'utf8'),
+      '{"value":"durable"}',
+    );
+    assert.equal(
+      JSON.parse(await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'))
+        .schemaVersion,
+      2,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
