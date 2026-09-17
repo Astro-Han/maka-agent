@@ -28,6 +28,7 @@ import {
   RUNTIME_HOST_ACTIVATION_ERROR_MESSAGE_MAX_BYTES,
   encodeRuntimeHostActivationFrame,
   prepareRuntimeHostManagedRoot,
+  type RuntimeHostManagedDeploymentAuthorityOptions,
 } from '@maka/runtime-host/operator';
 import { reconcileRuntimeHostUpdateOnActivation } from './runtime-host-update-reconciliation.js';
 import { resolveRecoverableRuntimeHostManagedDeployment } from './runtime-host-lifecycle-transaction.js';
@@ -44,24 +45,36 @@ export interface RuntimeHostManagedActivationCliOptions {
   readonly repairRootAfterRemount?: true;
 }
 
-export async function activateRuntimeHostManagedDeploymentWithReconciliation(
-  input: ActivateRuntimeHostManagedDeploymentInput,
-  options: { readonly deploymentLockHeld?: boolean } = {},
-) {
+export async function recoverRuntimeHostManagedDeploymentState(
+  rootId: string,
+  options: {
+    readonly authority?: RuntimeHostManagedDeploymentAuthorityOptions;
+    readonly deploymentLockHeld?: boolean;
+  } = {},
+): Promise<void> {
   const recover = async () => {
-    await prepareRuntimeHostManagedRoot(input.rootId, input.authority);
-    await resolveRecoverableRuntimeHostManagedDeployment(input.rootId, {
+    await prepareRuntimeHostManagedRoot(rootId, options.authority);
+    await resolveRecoverableRuntimeHostManagedDeployment(rootId, {
       convergeOperator: convergeRuntimeHostManagedOperator,
       verifyOperator: verifyRuntimeHostManagedOperator,
       resolveProvider: resolveRuntimeHostLifecycleProvider,
     });
   };
-  if (options.deploymentLockHeld) await recover();
-  else
-    await withRuntimeHostManagedServiceDeploymentLock(
-      resolveRuntimeHostManagedControlRoot(input.rootId),
-      recover,
-    );
+  if (options.deploymentLockHeld) return recover();
+  await withRuntimeHostManagedServiceDeploymentLock(
+    resolveRuntimeHostManagedControlRoot(rootId),
+    recover,
+  );
+}
+
+export async function activateRuntimeHostManagedDeploymentWithReconciliation(
+  input: ActivateRuntimeHostManagedDeploymentInput,
+  options: { readonly deploymentLockHeld?: boolean } = {},
+) {
+  await recoverRuntimeHostManagedDeploymentState(input.rootId, {
+    ...(input.authority ? { authority: input.authority } : {}),
+    ...(options.deploymentLockHeld ? { deploymentLockHeld: true } : {}),
+  });
   return activateRuntimeHostManagedDeployment(input, {
     reconcileActivation: (config) => reconcileRuntimeHostUpdateOnActivation(config, options),
   });

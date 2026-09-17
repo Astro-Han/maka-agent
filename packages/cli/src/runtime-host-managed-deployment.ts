@@ -32,7 +32,11 @@ import {
   type RuntimeHostPackageDeployment,
 } from './runtime-host-package-deployment.js';
 import { readStableBoundedFile, syncDirectory } from '@maka/storage/stable-storage';
-import { resolveExistingStorageRoot, tryAcquireStateRootOwner } from '@maka/storage/root-authority';
+import {
+  inspectStorageRootFormat,
+  resolveExistingStorageRoot,
+  tryAcquireStateRootOwner,
+} from '@maka/storage/root-authority';
 import {
   resolveRuntimeHostManagedDeploymentAuthorityRoot,
   resolveRuntimeHostManagedDeploymentAuthority,
@@ -130,6 +134,10 @@ async function reapRuntimeHostManagedDeploymentRetirement(
   }
   const cleanup = await readRuntimeHostManagedDeploymentCleanupReceipt(serviceId);
   if (cleanup) {
+    // A legacy or upgrading root cannot expose its authority record or
+    // current-format owner lock; post-migration staging retries the receipt.
+    const { format } = await inspectStorageRootFormat(cleanup.stateRootPath);
+    if (format !== 'current') return finishRetiredDeployment(root, serviceId);
     const authority = await resolveRuntimeHostManagedDeploymentAuthority(serviceId);
     if (authority) {
       await clearRuntimeHostManagedDeploymentCleanupReceipt(serviceId);
@@ -157,6 +165,10 @@ async function reapRuntimeHostManagedDeploymentRetirement(
       }
     }
   }
+  await finishRetiredDeployment(root, serviceId);
+}
+
+async function finishRetiredDeployment(root: string, serviceId: string): Promise<void> {
   const parent = await resolveExistingRuntimeHostManagedDeploymentParent(root, serviceId);
   if (!parent) return;
   await rm(join(parent, `.${serviceId}.retired`), {

@@ -27,6 +27,7 @@ import {
   realpath,
   rename,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -49,6 +50,7 @@ import {
   resolveRootControlNamespace,
   resolveRootOwnershipNamespace,
   resolveStorageRoot,
+  STORAGE_ROOT_MARKER_FILE,
   tryAcquireStateRootOwner,
 } from '@maka/storage/root-authority';
 import {
@@ -108,7 +110,7 @@ test('on-demand setup installs one exact deployment without a service backend', 
           })
         : Promise.resolve(),
       rootId
-        ? rm(join(resolveRootControlNamespace(stateRoot), rootId), {
+        ? rm(resolveRootControlNamespace(stateRoot), {
             recursive: true,
             force: true,
           })
@@ -441,7 +443,7 @@ test('fresh supervised setup discovers its provider before constructing a legacy
     await Promise.all([
       rm(base, { recursive: true, force: true }),
       rootId
-        ? rm(join(resolveRootControlNamespace(stateRoot), rootId), { recursive: true, force: true })
+        ? rm(resolveRootControlNamespace(stateRoot), { recursive: true, force: true })
         : Promise.resolve(),
       rootId
         ? rm(join(resolveRootOwnershipNamespace(stateRoot), `${rootId}.lock`), { force: true })
@@ -786,7 +788,7 @@ test('registry package identity avoids local content and recovers an interrupted
         recursive: true,
         force: true,
       }),
-      rm(join(resolveRootControlNamespace(authorityStateRoot), authorityServiceId), {
+      rm(resolveRootControlNamespace(authorityStateRoot), {
         recursive: true,
         force: true,
       }),
@@ -870,6 +872,53 @@ test('registry package identity avoids local content and recovers an interrupted
     basename(registryRoot),
   ]);
   await assert.rejects(readdir(join(base, 'drifted-data')), { code: 'ENOENT' });
+});
+
+test('staging defers a cleanup receipt while its root predates the current format', async (t) => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'maka-runtime-host-setup-')));
+  t.after(() => rm(base, { recursive: true, force: true, maxRetries: 10 }));
+  const version = '2.3.4';
+  const registryPackage = await createReleasePackage(join(base, 'registry'), version);
+  const pathOptions = {
+    env: { XDG_DATA_HOME: join(base, 'data') },
+    homeDir: join(base, 'home'),
+    platform: 'linux' as const,
+  };
+  const capability = await resolveStorageRoot({ path: join(base, 'state'), kind: 'interactive' });
+  const serviceId = capability.rootId;
+  t.after(async () => {
+    await rm(join(resolveRuntimeHostManagedDeploymentAuthorityRoot(), serviceId), {
+      recursive: true,
+      force: true,
+    });
+    await rm(resolveRuntimeHostManagedControlRoot(serviceId), { recursive: true, force: true });
+  });
+  const markerPath = join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+  await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
+  const deploymentRoot = resolveRuntimeHostManagedDeploymentRoot(serviceId, pathOptions);
+  await acknowledgeRuntimeHostManagedDeploymentCleanup({
+    serviceId,
+    deploymentId: '00000000-0000-4000-8000-000000000009',
+    deploymentRoot,
+    stateRootPath: capability.canonicalPath,
+  });
+  const retiredSibling = join(dirname(deploymentRoot), `.${serviceId}.retired`);
+  await mkdir(retiredSibling, { recursive: true });
+  const staged = await prepareRuntimeHostManagedPackageDeployment(
+    {
+      serviceId,
+      clientDataRoot: join(base, 'client'),
+      sourcePackageRoot: registryPackage,
+      version,
+      packageIntegrity: PACKAGE_INTEGRITY,
+      deploymentRoot,
+    },
+    pathOptions,
+  );
+  assert.equal(staged.root, deploymentRoot);
+  assert.ok(await readRuntimeHostManagedDeploymentCleanupReceipt(serviceId));
+  await assert.rejects(stat(retiredSibling), { code: 'ENOENT' });
 });
 
 test('managed operator binds its Client Data Root and routes deployment cleanup', {

@@ -60,6 +60,7 @@ import {
 import {
   discoverMarkedStorageRoot,
   resolveExistingStorageRoot,
+  StorageRootAuthorityError,
   tryAcquireInteractiveRootOwner,
   type InteractiveRootOwner,
   type StorageRootCapability,
@@ -298,6 +299,7 @@ export class RuntimeHostServiceManagerError extends Error {
       | 'invalid_config'
       | 'invalid_launch'
       | 'target_mismatch'
+      | 'root_requires_migration'
       | 'configuration_changed'
       | 'configuration_incomplete'
       | 'active_tasks'
@@ -861,6 +863,15 @@ async function resolveExpectedServiceRoot(
     }
     return root;
   } catch (error) {
+    if (
+      error instanceof StorageRootAuthorityError &&
+      error.code === 'legacy_root_requires_migration'
+    )
+      throw new RuntimeHostServiceManagerError(
+        'root_requires_migration',
+        'The managed Runtime Host State Root predates this version; run the update or activation workflow to migrate it',
+        { cause: error },
+      );
     throw new RuntimeHostServiceManagerError(
       'target_mismatch',
       'The managed Runtime Host service does not match the expected State Root',

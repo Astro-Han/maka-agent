@@ -68,6 +68,7 @@ import type {
   RuntimeHostLifecycleProviderOffer,
 } from './runtime-host-lifecycle-provider.js';
 import { manageRuntimeHostManagedLifecycle } from './runtime-host-managed-lifecycle-manager.js';
+import { recoverRuntimeHostManagedDeploymentState } from './runtime-host-activation-command.js';
 import {
   acknowledgeRuntimeHostManagedDeploymentCleanup,
   assertRuntimeHostManagedOperatorDeployment,
@@ -304,6 +305,7 @@ async function cleanupCanonicalRuntimeHostManagedDeployment(options: {
       'The managed Runtime Host deployment generation changed before cleanup',
     );
   }
+  await recoverRuntimeHostManagedDeploymentState(rootId, { deploymentLockHeld: true });
   const capability = await resolveExistingStorageRoot({
     path: expectedTarget.rootPath,
     kind: 'interactive',

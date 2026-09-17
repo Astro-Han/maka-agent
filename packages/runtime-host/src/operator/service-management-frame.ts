@@ -45,6 +45,7 @@ export type RuntimeHostServiceErrorCode =
   | 'invalid_config'
   | 'invalid_launch'
   | 'target_mismatch'
+  | 'root_requires_migration'
   | 'configuration_changed'
   | 'configuration_incomplete'
   | 'active_tasks'

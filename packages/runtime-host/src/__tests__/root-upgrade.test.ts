@@ -33,6 +33,7 @@ import {
   STORAGE_ROOT_MARKER_FILE,
 } from '@maka/storage/root-authority';
 import { prepareRuntimeHostRoot } from '../root-upgrade.js';
+import { startExecutionRuntimeHostService } from '../server/execution-service.js';
 import {
   createAccessCredentialFile,
   writeAccessCredentialFile,
@@ -149,6 +150,33 @@ for (const interruptedAt of ['takeover', 'copy', 'snapshot', 'ready']) {
     }
   });
 }
+
+test('the service entry upgrades a legacy root before serving', async (t) => {
+  const base = await mkdtemp(join(os.tmpdir(), 'maka-upgrade-serve-'));
+  const home = join(base, 'home');
+  await mkdir(home);
+  const info = os.userInfo();
+  t.mock.method(os, 'userInfo', () => ({ ...info, homedir: home }));
+  syncBuiltinESMExports();
+  const root = join(base, 'state');
+  try {
+    const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
+    const markerPath = join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+    const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+    await writeFile(markerPath, JSON.stringify({ ...marker, schemaVersion: 1 }));
+    const host = await startExecutionRuntimeHostService({ rootPath: root });
+    try {
+      assert.equal(host.rootId, capability.rootId);
+      assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 2);
+    } finally {
+      await host.close();
+    }
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
 
 test('an uninitialized legacy root upgrades with an inaccessible absent account home', async (t) => {
   const base = await mkdtemp(join(os.tmpdir(), 'maka-upgrade-no-home-'));
