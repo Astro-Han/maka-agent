@@ -31,6 +31,7 @@ import {
   manageRuntimeHostService,
   resolveRuntimeHostManagedServiceId,
   RuntimeHostServiceManagerError,
+  storageRootErrorDetail,
   withRuntimeHostManagedServiceDeploymentLock,
   type RuntimeHostManagedServiceTarget,
 } from './runtime-host-service-manager.js';
@@ -96,7 +97,7 @@ export async function runManagedRuntimeHostUpdateCheckCli(
       error instanceof RuntimeHostUpdateDiscoveryError ||
       error instanceof RuntimeHostServiceManagerError
         ? error.code
-        : 'update_check_failed';
+        : (storageRootErrorDetail(error)?.code ?? 'update_check_failed');
     const message = error instanceof Error ? error.message : String(error);
     writeFailure(code, message, options);
     return 1;

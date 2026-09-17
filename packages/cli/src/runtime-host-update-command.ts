@@ -58,6 +58,7 @@ import {
   replaceRuntimeHostManagedService,
   resolveRuntimeHostManagedServiceId,
   RuntimeHostServiceManagerError,
+  storageRootErrorDetail,
   verifyRuntimeHostManagedServiceReady,
   withRuntimeHostManagedServiceDeploymentLock,
   withRuntimeHostManagedServiceLegacyOperatorLeases,
@@ -607,7 +608,7 @@ export async function runManagedRuntimeHostUpdateCli(
       reportedError instanceof RuntimeHostManagedDeploymentError ||
       reportedError instanceof RuntimeHostUpdateSelectionError
         ? reportedError.code
-        : 'internal_service_error';
+        : (storageRootErrorDetail(reportedError)?.code ?? 'internal_service_error');
     const message = reportedError instanceof Error ? reportedError.message : String(reportedError);
     emit({
       schemaVersion: 1,
@@ -903,7 +904,7 @@ async function runCanonicalRuntimeHostUpdate(
           ? 'target_mismatch'
           : error instanceof RuntimeHostLifecycleTransactionError && error.code === 'active_tasks'
             ? 'active_tasks'
-            : 'update_incomplete';
+            : (storageRootErrorDetail(error)?.code ?? 'update_incomplete');
     emit({
       schemaVersion: 1,
       kind: 'error',
@@ -958,7 +959,7 @@ export async function runManagedRuntimeHostSelectedUpdateCli(
         ? error.code
         : error instanceof RuntimeHostLifecycleTransactionError && error.code === 'active_tasks'
           ? 'active_tasks'
-          : 'update_resolution_failed';
+          : (storageRootErrorDetail(error)?.code ?? 'update_resolution_failed');
     const message = error instanceof Error ? error.message : String(error);
     emit({
       schemaVersion: 1,
@@ -1048,7 +1049,7 @@ export async function runManagedRuntimeHostResolvedUpdateCli(
       error instanceof RuntimeHostServiceManagerError ||
       error instanceof RuntimeHostUpdatePackageError
         ? error.code
-        : 'update_resolution_failed';
+        : (storageRootErrorDetail(error)?.code ?? 'update_resolution_failed');
     const message = error instanceof Error ? error.message : String(error);
     frameSink({
       schemaVersion: 1,

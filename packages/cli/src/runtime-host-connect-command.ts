@@ -19,6 +19,7 @@
 
 import type { Readable, Writable } from 'node:stream';
 import { generalizedErrorMessage } from '@maka/core/redaction';
+import { StorageRootAuthorityError } from '@maka/storage/root-authority';
 import { openRuntimeHostManagedStdioBridge } from '@maka/runtime-host/client';
 import { activateRuntimeHostManagedDeploymentWithReconciliation } from './runtime-host-activation-command.js';
 
@@ -53,7 +54,11 @@ export async function runRuntimeHostManagedConnectCli(
     return 0;
   } catch (error) {
     (overrides.writeError ?? ((value) => process.stderr.write(value)))(
-      `${generalizedErrorMessage(error, 'Runtime Host stdio bridge failed')}\n`,
+      `${
+        error instanceof StorageRootAuthorityError
+          ? error.message
+          : generalizedErrorMessage(error, 'Runtime Host stdio bridge failed')
+      }\n`,
     );
     return 1;
   } finally {

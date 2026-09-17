@@ -38,7 +38,10 @@ import {
   resolveRuntimeHostManagedControlRoot,
 } from './runtime-host-managed-deployment.js';
 import { resolveRuntimeHostLifecycleProvider } from './runtime-host-service-management-command.js';
-import { withRuntimeHostManagedServiceDeploymentLock } from './runtime-host-service-manager.js';
+import {
+  storageRootErrorDetail,
+  withRuntimeHostManagedServiceDeploymentLock,
+} from './runtime-host-service-manager.js';
 
 export interface RuntimeHostManagedActivationCliOptions {
   readonly rootId: string;
@@ -102,10 +105,13 @@ export async function runRuntimeHostManagedActivationCli(
     writeOutput(encodeRuntimeHostActivationFrame(result));
     return 0;
   } catch (error) {
+    const authority = storageRootErrorDetail(error);
     const code =
-      error instanceof RuntimeHostManagedActivationError ? error.code : 'activation_failed';
+      error instanceof RuntimeHostManagedActivationError
+        ? error.code
+        : (authority?.code ?? 'activation_failed');
     const message = truncateUtf8(
-      generalizedErrorMessage(error, 'Runtime Host activation failed'),
+      authority?.message ?? generalizedErrorMessage(error, 'Runtime Host activation failed'),
       RUNTIME_HOST_ACTIVATION_ERROR_MESSAGE_MAX_BYTES,
     );
     writeOutput(

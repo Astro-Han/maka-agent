@@ -868,6 +868,8 @@ async function resolveExpectedServiceRoot(
     }
     return identity;
   } catch (error) {
+    // A damaged or missing root is not a mismatch with the expected one.
+    if (error instanceof StorageRootAuthorityError) throw error;
     throw new RuntimeHostServiceManagerError(
       'target_mismatch',
       'The managed Runtime Host service does not match the expected State Root',
@@ -907,6 +909,9 @@ async function requireExpectedServiceRoot(identity: {
         'The managed Runtime Host State Root predates this version; run the update or activation workflow to migrate it',
         { cause: error },
       );
+    // Other authority errors describe a damaged or lost root, not a target
+    // mismatch; pass them through so boundaries keep the actionable code.
+    if (error instanceof StorageRootAuthorityError) throw error;
     throw new RuntimeHostServiceManagerError(
       'target_mismatch',
       'The managed Runtime Host service does not match the expected State Root',
@@ -1354,12 +1359,19 @@ export async function verifyRuntimeHostManagedServiceReady(
       handshakeTimeoutMs: Math.max(1, Math.min(500, remaining)),
     }).catch((error: unknown) => {
       // A permanently unreachable root (pre-migration, corrupt marker, foreign
-      // identity) can never become ready; polling it out only hides the cause.
+      // or lost identity, deleted root) can never become ready; polling it
+      // out only hides the cause. Transient codes keep polling.
       if (
         error instanceof StorageRootAuthorityError &&
-        ['legacy_root_requires_migration', 'invalid_marker', 'root_identity_collision'].includes(
-          error.code,
-        )
+        [
+          'legacy_root_requires_migration',
+          'invalid_marker',
+          'invalid_root',
+          'root_identity_collision',
+          'root_identity_changed',
+          'root_not_found',
+          'root_unmarked',
+        ].includes(error.code)
       )
         throw error;
       lastFailure = error instanceof Error ? error.message : String(error);

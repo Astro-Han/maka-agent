@@ -3293,6 +3293,70 @@ describe('managed Runtime Host service', () => {
     }
   });
 
+  it('surfaces a missing State Root marker instead of a target mismatch', async () => {
+    const base = await realpath(
+      await mkdtemp(join(tmpdir(), 'maka-runtime-host-unmarked-mutation-')),
+    );
+    try {
+      const stateRoot = await resolveStorageRoot({
+        path: join(base, 'state'),
+        kind: 'interactive',
+      });
+      await rm(join(stateRoot.canonicalPath, '.maka-storage-root.json'));
+      const clientDataRoot = join(base, 'config');
+      await mkdir(clientDataRoot, { recursive: true, mode: 0o700 });
+      const cliPath = join(base, 'maka', 'dist', 'cli.js');
+      await mkdir(dirname(cliPath), { recursive: true });
+      await writeFile(cliPath, '', { mode: 0o600 });
+      await writeFile(
+        resolveRuntimeHostManagedServiceConfigPath(clientDataRoot),
+        `${JSON.stringify({
+          schemaVersion: 2,
+          rootPath: stateRoot.canonicalPath,
+          projectDirectoryRoots: [],
+          websocket: { host: '127.0.0.1', port: 7443, path: '/runtime-host' },
+          launch: { nodePath: process.execPath, cliPath },
+        })}\n`,
+        { mode: 0o600 },
+      );
+      const common = {
+        clientDataRoot,
+        defaultRootPath: stateRoot.canonicalPath,
+        nodePath: process.execPath,
+        cliPath,
+        expectedTarget: {
+          serviceId: resolveRuntimeHostManagedServiceId(clientDataRoot),
+          rootPath: stateRoot.canonicalPath,
+          rootId: stateRoot.rootId,
+        },
+      } as const;
+      const backend: RuntimeHostServiceBackend = {
+        ...createUnusedBackend(),
+        status: async () => ({
+          manager: 'systemd_user' as const,
+          installed: true,
+          enabled: true,
+          active: false,
+          state: 'stopped' as const,
+          pid: null,
+          lastExitCode: null,
+        }),
+      };
+      const unmarked = (error: unknown) =>
+        error instanceof StorageRootAuthorityError && error.code === 'root_unmarked';
+      await assert.rejects(
+        manageRuntimeHostService({ ...common, action: 'retire' }, backend),
+        unmarked,
+      );
+      await assert.rejects(
+        manageRuntimeHostService({ ...common, action: 'restart' }, backend),
+        unmarked,
+      );
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
   it('normalizes a legacy State Root error in framed management output', async () => {
     let output = '';
     const exitCode = await runManagedRuntimeHostServiceCli(
