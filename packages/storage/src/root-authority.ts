@@ -1343,6 +1343,10 @@ export async function withStorageRootUpgrade(
       path: markerPath,
       maxBytes: MAX_STORAGE_ROOT_MARKER_BYTES,
       invalidFile: () => invalidRootMarker(markerPath),
+    }).catch((error: unknown) => {
+      if (isNodeError(error, 'ENOENT'))
+        throw new StorageRootAuthorityError('root_unmarked', `Storage root is not marked: ${root}`);
+      throw error;
     });
   let encoded = await read();
   const decode = (text: string) => {

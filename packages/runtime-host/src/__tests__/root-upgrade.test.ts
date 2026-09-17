@@ -414,3 +414,60 @@ test('a committed snapshot that fails validation is restaged once', async (t) =>
     await rm(base, { recursive: true, force: true });
   }
 });
+
+test('a fenced upgrade treats state without its completion record as debris', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-debris-');
+  try {
+    const committed = join(capability.canonicalPath, '.maka-host', 'state');
+    await mkdir(join(committed, 'data'), { recursive: true });
+    await writeFile(join(committed, 'data', 'foreign.json'), '{}');
+    const upgraded = await prepareRuntimeHostRoot(root);
+    assert.equal(upgraded.rootId, capability.rootId);
+    assert.equal(
+      await readFile(join(resolveRootHostDataDirectory(root), 'plugin-state.json'), 'utf8'),
+      '{"value":"durable"}',
+    );
+    await assert.rejects(readFile(join(committed, 'data', 'foreign.json')));
+    assert.equal(
+      JSON.parse(await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'))
+        .schemaVersion,
+      2,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('a committed snapshot missing a staged directory is restaged', async (t) => {
+  const { base, root, capability } = await fencedUpgradeFixture(t, 'maka-upgrade-hollow-');
+  try {
+    const marker = JSON.parse(
+      await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'),
+    );
+    const committed = join(capability.canonicalPath, '.maka-host', 'state');
+    // A snapshot reduced to its completion record still proves completion but
+    // not survival; without the data directory assertion this commits empty.
+    await mkdir(join(committed, 'deployment'), { recursive: true });
+    await writeFile(
+      join(committed, '.upgrade-complete.json'),
+      JSON.stringify({ migrationId: marker.upgrade.id }),
+    );
+    const upgraded = await prepareRuntimeHostRoot(root);
+    assert.equal(upgraded.rootId, capability.rootId);
+    assert.equal(
+      await readFile(join(resolveRootHostDataDirectory(root), 'plugin-state.json'), 'utf8'),
+      '{"value":"durable"}',
+    );
+    assert.equal(
+      JSON.parse(await readFile(join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE), 'utf8'))
+        .schemaVersion,
+      2,
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});

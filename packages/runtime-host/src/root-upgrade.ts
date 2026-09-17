@@ -208,13 +208,13 @@ async function upgradeRuntimeHostRoot(
         // A completed snapshot is this transaction's disposable copy: a
         // corrupt one restages once rather than wedging the root.
         if (restaged) throw error;
-        await rm(state, { recursive: true, force: true });
         restaged = true;
-        continue;
       }
     }
-    if (await present(state))
-      throw new Error('Existing Host state is not the snapshot owned by this upgrade');
+    // Everything under the fenced .maka-host is transaction-owned, so state
+    // without this transaction's completion record is debris, not foreign
+    // data; remove it like torn staging rather than preserving it.
+    await rm(state, { recursive: true, force: true });
     if (!(await completedSnapshot(staging, transaction.id)))
       await stageSnapshot(session, staging, plan, transaction.id);
     await rename(staging, state);
@@ -247,6 +247,13 @@ async function assertCommittedState(
   state: string,
   session: StorageRootUpgradeSession,
 ): Promise<void> {
+  // stageSnapshot always creates both directories, so a snapshot missing
+  // either is incomplete no matter what its remaining contents prove.
+  for (const name of ['data', 'deployment'] as const) {
+    const entry = await lstat(join(state, name)).catch(() => undefined);
+    if (!entry?.isDirectory())
+      throw new Error(`Committed snapshot is missing its ${name} directory`);
+  }
   await readAccessCredentialFile(join(state, 'data', ACCESS_FILE_NAME));
   await new HostPluginCompositionStore(join(state, 'data')).read();
   const committedDeployment = await validateDeploymentSource(
@@ -586,7 +593,9 @@ async function syncTree(path: string): Promise<void> {
     else if (entry.isFile()) {
       await chmod(child, ((await lstat(child)).mode & 0o700) | 0o600);
       await syncFile(child);
-    } else throw new Error(`Unsupported entry in legacy Host data: ${child}`);
+    }
+    // Other entries (symlinks kept by dereference:false, sockets) are inert
+    // copied data whose dirent durability the parent directory sync covers.
   }
   await syncDirectoryChain(path, path);
 }
