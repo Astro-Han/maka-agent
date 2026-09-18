@@ -898,7 +898,7 @@ async function resolveExpectedServiceRoot(
   }
 }
 
-/** One mapping for every CLI boundary so admission errors keep their code. */
+/** Storage authority errors fold onto the wire member whose guidance applies. */
 export function storageRootErrorDetail(
   error: unknown,
 ): { readonly code: RuntimeHostServiceErrorCode; readonly message: string } | undefined {
@@ -913,8 +913,8 @@ export function storageRootErrorDetail(
 }
 
 /**
- * The canonical managed-domain code for an error reaching a CLI boundary, or
- * undefined when the boundary should use its own fallback.
+ * The committed wire code for a managed-domain error, or undefined for
+ * errors outside the managed domain.
  */
 // Deployment-authority codes outside the committed wire union fold into the
 // member whose guidance still applies; the precise code stays in the message.
