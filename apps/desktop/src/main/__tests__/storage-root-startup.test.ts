@@ -39,7 +39,7 @@ test('Desktop startup reads identity without upgrading or granting business acce
     const marker = JSON.parse(await readFile(path, 'utf8'));
     for (const format of [
       { schemaVersion: 1 },
-      { schemaVersion: 2, upgrade: { id: randomUUID(), payload: {} } },
+      { schemaVersion: 2, upgrade: { id: randomUUID() } },
     ]) {
       const persisted = JSON.stringify({ ...marker, ...format });
       await writeFile(path, persisted);
