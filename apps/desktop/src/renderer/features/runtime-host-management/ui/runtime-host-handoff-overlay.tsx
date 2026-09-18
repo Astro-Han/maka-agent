@@ -20,9 +20,10 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
 import { Layout, LayoutContent, LayoutFooter } from '@astryxdesign/core/Layout';
-import { Button, Text, useUiLocale } from '@maka/ui';
-import type { DesktopHostHandoffPayload } from '../preload/bridge-contract.js';
-import { getRuntimeHostHandoffCopy } from './locales/runtime-host-handoff-copy.js';
+import { Button, Text, useToast, useUiLocale } from '@maka/ui';
+import type { RuntimeHostHandoffPayload } from '../ports.js';
+import { getRuntimeHostHandoffCopy } from '../locales/runtime-host-handoff-copy.js';
+import { useRuntimeHostManagementServices } from '../services-context.js';
 
 /**
  * The in-window face of a Runtime Host handoff. Background reconciliation is
@@ -32,19 +33,19 @@ import { getRuntimeHostHandoffCopy } from './locales/runtime-host-handoff-copy.j
 export function RuntimeHostHandoffOverlay() {
   const locale = useUiLocale();
   const copy = getRuntimeHostHandoffCopy(locale);
-  const [payload, setPayload] = useState<DesktopHostHandoffPayload | null>(null);
+  const toast = useToast();
+  const handoff = useRuntimeHostManagementServices().handoff;
+  const [payload, setPayload] = useState<RuntimeHostHandoffPayload | null>(null);
   useEffect(() => {
-    const bridge = window.maka?.runtimeHostHandoff;
-    if (!bridge) return;
     let mounted = true;
     // Subscribe before fetching the snapshot: a push wins over the older
     // current() response whenever both are in flight.
     let pushed = false;
-    const unsubscribe = bridge.subscribe((next) => {
+    const unsubscribe = handoff.subscribe((next) => {
       pushed = true;
       if (mounted) setPayload(next);
     });
-    void bridge
+    void handoff
       .current()
       .then((current) => {
         if (mounted && !pushed) setPayload(current);
@@ -54,13 +55,13 @@ export function RuntimeHostHandoffOverlay() {
       mounted = false;
       unsubscribe();
     };
-  }, []);
+  }, [handoff]);
 
   const view = payload?.view;
   const presentation = payload?.presentation;
   if (view?.state !== 'attention' || !presentation) return null;
   const decide = (action: string) => {
-    void window.maka.runtimeHostHandoff.decide(view.revision, action);
+    void handoff.decide(view.revision, action);
   };
 
   return (
@@ -83,8 +84,9 @@ export function RuntimeHostHandoffOverlay() {
               variant="ghost"
               label={copy.copyDiagnostics}
               onClick={() =>
-                void navigator.clipboard
-                  .writeText(JSON.stringify(view, null, 2))
+                void handoff
+                  .copyText(JSON.stringify(view, null, 2))
+                  .then(() => toast.success(copy.diagnosticsCopied))
                   .catch(() => {})}
             />
           </LayoutContent>

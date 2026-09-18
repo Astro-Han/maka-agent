@@ -479,6 +479,12 @@ function managementServices(): RuntimeHostManagementServices {
       readClipboardText: unexpectedCall, writeClipboardText: unexpectedCall,
     },
     resources: { query: unexpectedCall, schedule: unexpectedCall },
+    handoff: {
+      current: async () => null,
+      subscribe: () => () => {},
+      decide: unexpectedCall,
+      copyText: unexpectedCall,
+    },
     peerMesh: {
       execute: unexpectedCall, cancel: unexpectedCall,
       getConnectivityPolicy: unexpectedCall, setConnectivityPolicy: unexpectedCall,

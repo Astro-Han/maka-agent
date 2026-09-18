@@ -752,11 +752,11 @@
           "useAppShellTurnPresentation": 1,
           "useComposerAttachments": 1,
           "useEffect": 7,
-          "useLayoutEffect": 2,
+          "useLayoutEffect": 1,
           "useNewTaskChoice": 1,
           "useOnboardingSnapshot": 1,
           "usePlanModeState": 1,
-          "useRef": 16,
+          "useRef": 15,
           "useSessionCollaborationDialog": 1,
           "useSessionEventHealthPolling": 1,
           "useSessionNavigationReads": 1,
@@ -810,6 +810,7 @@
           "./features/goals": 1,
           "./features/module-hub": 1,
           "./features/overlays/index.js": 1,
+          "./features/runtime-host-management/index.js": 1,
           "./features/session-collaboration": 1,
           "./features/session-navigation": 1,
           "./features/session-settings": 1,
@@ -862,7 +863,7 @@
           "react": 1
         },
         "importSpecifiers": 100,
-        "nonTriviaTokens": 13139
+        "nonTriviaTokens": 13037
       },
       "src/renderer/use-app-shell-composer-quotes.ts": {
         "importDeclarations": 2,
@@ -4388,16 +4389,13 @@
         "react": 1
       },
       "importSpecifiers": 6,
-      "nonTriviaTokens": 206
+      "nonTriviaTokens": 176
     },
     "src/renderer/main.tsx": {
       "importDeclarations": 7,
-      "bridgePaths": {
-        "window.maka.onboarding.getSnapshot": 2
-      },
+      "bridgePaths": {},
       "environmentCapabilities": {
-        "document.getElementById": 1,
-        "setTimeout": 2
+        "document.getElementById": 1
       },
       "hookCalls": {},
       "lifecycleMethods": {},
@@ -4413,7 +4411,7 @@
         "react-dom/client": 1
       },
       "importSpecifiers": 7,
-      "nonTriviaTokens": 260
+      "nonTriviaTokens": 102
     }
   },
   "rootDebtClosure": {

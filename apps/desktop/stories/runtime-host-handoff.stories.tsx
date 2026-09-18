@@ -19,10 +19,14 @@
 
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
-import { AstryxLocaleProvider, LocaleProvider } from '@maka/ui';
+import { AstryxLocaleProvider, LocaleProvider, ToastProvider } from '@maka/ui';
 import type { HostHandoffAttentionView } from '@maka/runtime-host/client';
-import { RuntimeHostHandoffOverlay } from '../src/renderer/runtime-host-handoff-overlay';
-import { withScopedMakaBridge } from './maka-bridge';
+import { RuntimeHostHandoffOverlay } from '../src/renderer/features/runtime-host-management/index.js';
+import { RuntimeHostManagementServicesProvider } from '../src/renderer/features/runtime-host-management/index.js';
+import {
+  createDesktopRuntimeHostManagementServices,
+  type DesktopRuntimeHostManagementBridge,
+} from '../src/renderer/platform/desktop/create-runtime-host-management-services';
 import type { DesktopHostHandoffPayload } from '../src/preload/bridge-contract.js';
 
 const meta = {
@@ -35,14 +39,28 @@ type Story = StoryObj<typeof meta>;
 
 const decide = fn(async () => undefined);
 
-function withHandoffBridge(payload: DesktopHostHandoffPayload) {
-  return withScopedMakaBridge({
+function handoffServices(payload: DesktopHostHandoffPayload) {
+  return createDesktopRuntimeHostManagementServices({
     runtimeHostHandoff: {
       current: async () => payload,
       subscribe: () => () => {},
       decide,
     },
-  });
+  } as unknown as DesktopRuntimeHostManagementBridge);
+}
+
+function renderWithServices(payload: DesktopHostHandoffPayload) {
+  return () => (
+    <LocaleProvider locale="en">
+      <AstryxLocaleProvider>
+        <ToastProvider>
+          <RuntimeHostManagementServicesProvider services={handoffServices(payload)}>
+            <RuntimeHostHandoffOverlay />
+          </RuntimeHostManagementServicesProvider>
+        </ToastProvider>
+      </AstryxLocaleProvider>
+    </LocaleProvider>
+  );
 }
 
 const replacementView: HostHandoffAttentionView = {
@@ -76,14 +94,7 @@ const replacementPayload: DesktopHostHandoffPayload = {
 // Real path: launch while a managed Runtime Host update needs package-change
 // consent — the main window mounts the overlay above the shell.
 export const ReplacementConsent: Story = {
-  decorators: [withHandoffBridge(replacementPayload)],
-  render: () => (
-    <LocaleProvider locale="en">
-      <AstryxLocaleProvider>
-        <RuntimeHostHandoffOverlay />
-      </AstryxLocaleProvider>
-    </LocaleProvider>
-  ),
+  render: renderWithServices(replacementPayload),
   play: async ({ canvasElement }) => {
     decide.mockClear();
     const body = within(canvasElement.ownerDocument.body);
@@ -119,14 +130,7 @@ const retryPayload: DesktopHostHandoffPayload = {
 // Real path: a Local Host update failed after retries were exhausted — the
 // only offered action is the one the surface advertised (#5476's stuck view).
 export const RetryExhausted: Story = {
-  decorators: [withHandoffBridge(retryPayload)],
-  render: () => (
-    <LocaleProvider locale="en">
-      <AstryxLocaleProvider>
-        <RuntimeHostHandoffOverlay />
-      </AstryxLocaleProvider>
-    </LocaleProvider>
-  ),
+  render: renderWithServices(retryPayload),
   play: async ({ canvasElement }) => {
     decide.mockClear();
     const body = within(canvasElement.ownerDocument.body);
@@ -139,32 +143,23 @@ export const RetryExhausted: Story = {
 // Real path: the same launch while reconciliation is still in progress —
 // progress views stay silent and nothing mounts.
 export const ProgressStaysSilent: Story = {
-  decorators: [
-    withHandoffBridge({
-      view: {
-        revision: 'handoff-progress',
-        state: 'progress',
-        phase: 'staging',
-        target: { name: 'Local', location: 'local' },
-        mayExitNaturally: false,
-        actions: ['cancel'],
-        defaultAction: 'cancel',
-      },
-      presentation: {
-        title: 'Continuing to your workspace',
-        description: 'Preparing the update',
-        detail: 'Finishing the handoff or its safe recovery. Please wait.',
-        actions: [{ action: 'cancel', label: 'Cancel' }],
-      },
-    }),
-  ],
-  render: () => (
-    <LocaleProvider locale="en">
-      <AstryxLocaleProvider>
-        <RuntimeHostHandoffOverlay />
-      </AstryxLocaleProvider>
-    </LocaleProvider>
-  ),
+  render: renderWithServices({
+    view: {
+      revision: 'handoff-progress',
+      state: 'progress',
+      phase: 'staging',
+      target: { name: 'Local', location: 'local' },
+      mayExitNaturally: false,
+      actions: ['cancel'],
+      defaultAction: 'cancel',
+    },
+    presentation: {
+      title: 'Continuing to your workspace',
+      description: 'Preparing the update',
+      detail: 'Finishing the handoff or its safe recovery. Please wait.',
+      actions: [{ action: 'cancel', label: 'Cancel' }],
+    },
+  }),
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body);
     await new Promise((resolve) => setTimeout(resolve, 50));

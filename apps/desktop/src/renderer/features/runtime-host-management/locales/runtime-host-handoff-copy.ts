@@ -21,17 +21,21 @@ import type { UiCatalog, UiLocale } from '@maka/core/ui-locale';
 
 interface RuntimeHostHandoffCopy {
   readonly copyDiagnostics: string;
+  readonly diagnosticsCopied: string;
 }
 
 const COPY_BY_LOCALE: UiCatalog<RuntimeHostHandoffCopy> = {
   'zh-CN': {
     copyDiagnostics: '复制诊断信息',
+    diagnosticsCopied: '诊断信息已复制',
   },
   'zh-TW': {
     copyDiagnostics: '複製診斷資訊',
+    diagnosticsCopied: '診斷資訊已複製',
   },
   en: {
     copyDiagnostics: 'Copy diagnostics',
+    diagnosticsCopied: 'Diagnostics copied',
   },
 };
 
