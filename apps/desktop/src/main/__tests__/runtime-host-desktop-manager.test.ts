@@ -1749,6 +1749,40 @@ test('cancelling a live handoff does not authorize any replacement', async () =>
   await owner.close();
 });
 
+test('recovers a degraded Local start through a fresh target generation', async () => {
+  const recovered = candidateHarness();
+  let starts = 0;
+  const readiness: string[] = [];
+  const epochs = new Set<string>();
+  const owner = await startRuntimeHostDesktopManager({} as DesktopRuntimeHostCandidateStartInput, {
+    startCandidate: async () => {
+      starts += 1;
+      if (starts === 1) throw new Error('connect failed');
+      return ready(recovered.candidate);
+    },
+    onFatalError: () => undefined,
+    onTargetStateChanged: (state) => {
+      readiness.push(state.readiness);
+      epochs.add(state.epoch);
+    },
+  });
+  const failed = owner.entries().at(-1);
+  assert.equal(starts, 1);
+  assert.equal(failed?.readiness, 'unavailable');
+  if (failed?.readiness === 'unavailable') {
+    assert.equal(failed.error.message, 'connect failed');
+  }
+
+  await owner.retryLocalStart();
+
+  assert.equal(starts, 2);
+  assert.equal(owner.current()?.readiness, 'ready');
+  assert.equal(owner.current()?.hostId, 'test-host');
+  assert.equal(epochs.size, 2, 'the retry runs on a fresh epoch');
+  assert.deepEqual(readiness, ['connecting', 'unavailable', 'connecting', 'ready']);
+  await owner.close();
+});
+
 test('keeps a known repair actionable when its first authority inspection fails', async () => {
   const repaired = candidateHarness({ ownership: 'supervised' });
   let inspected = false;

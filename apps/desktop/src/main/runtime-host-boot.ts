@@ -2288,6 +2288,7 @@ async function confirmDesktopStorageRootRepair(
 }
 
 async function promptForDefaultRuntimeHostRecovery(input: {
+  readonly profileId: string;
   readonly profileName: string;
   readonly error: Error;
 }): Promise<"retry" | "use_local" | "keep_offline"> {
@@ -2298,5 +2299,8 @@ async function promptForDefaultRuntimeHostRecovery(input: {
     locale,
     dialogInput.diagnosticDetails,
   );
+  if (input.profileId === LOCAL_RUNTIME_HOST_PROFILE.id) {
+    return response === 0 ? "retry" : "keep_offline";
+  }
   return response === 0 ? "retry" : response === 1 ? "use_local" : "keep_offline";
 }
