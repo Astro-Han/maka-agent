@@ -207,6 +207,20 @@ for (const failure of ['activation', 'locator', 'source_transition']) {
     await writeFile(targetLayout.cliPath, '');
     await mkdir(dirname(targetLayout.candidateEntrypoint), { recursive: true });
     await writeFile(targetLayout.candidateEntrypoint, '');
+    // On Windows the managed path resolves a packaged task launcher beside the
+    // staged cli; the fixture only needs the artifact to exist and be readable.
+    for (const layout of [sourceLayout, targetLayout]) {
+      const launcher = join(
+        layout.packageRoot,
+        'native',
+        'runtime-host-windows-task-launcher',
+        'prebuilds',
+        'win32-x64',
+        'maka-runtime-host-task-launcher.exe',
+      );
+      await mkdir(dirname(launcher), { recursive: true });
+      await writeFile(launcher, 'stub-launcher');
+    }
     const spawn = childProcess.spawn;
     t.mock.method(childProcess, 'spawn', (...args: Parameters<typeof childProcess.spawn>) => {
       if (args[0] !== 'npm') return spawn(...args);

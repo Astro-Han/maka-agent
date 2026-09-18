@@ -594,10 +594,19 @@ describe('storage root authority', () => {
       assert.ok(firstOwner);
 
       const movedRoot = join(base, 'moved-root');
-      await rename(root, movedRoot);
-      await symlink(movedRoot, root, process.platform === 'win32' ? 'junction' : 'dir');
+      // The owner lock lives inside the root, so Windows cannot rename the
+      // directory while it is held; the alias stands beside the live root
+      // there instead of behind a move.
+      let aliasPath = root;
+      if (process.platform === 'win32') {
+        await symlink(root, movedRoot, 'junction');
+        aliasPath = movedRoot;
+      } else {
+        await rename(root, movedRoot);
+        await symlink(movedRoot, root, 'dir');
+      }
 
-      const movedCapability = await resolveStorageRoot({ path: root, kind: 'interactive' });
+      const movedCapability = await resolveStorageRoot({ path: aliasPath, kind: 'interactive' });
       assert.equal(movedCapability.rootId, firstCapability.rootId);
       assert.equal(await tryAcquireInteractiveRootOwner(movedCapability), undefined);
 

@@ -98,7 +98,7 @@ flowchart TD
 
 Root capability 先规范化真实路径，再验证根标记中的随机 `rootId` 与文件系统对象身份。别名不能产生另一个逻辑 owner；复制一个已初始化目录也不能自动获得原根身份。导入、remount 或 repair 通过各自的显式验证路径处理。Capability 和 lease 的真实性由进程内登记验证，不只依赖 TypeScript 类型。
 
-写入 authority 来自 canonical 物理 root 内 `.maka-host` 中稳定文件上的 OS lock。同一 root 的所有 Client 共享一个 Host，独立物理 root 分别持有自己的所有权。`rootId` 仍是协议身份，不承担账户全局或分布式互斥；registration 文件、PID、socket、health probe 和缓存目录都只是发现或观察信息。删除发现缓存不能合法地产生第二个 writer。
+写入 authority 来自 canonical 物理 root 内 `.maka-host` 中稳定文件上的 OS lock。同一 root 的所有 Client 共享一个 Host，独立物理 root 分别持有自己的所有权。`rootId` 仍是协议身份，不承担账户全局或分布式互斥；registration 文件、PID、socket、health probe 和缓存目录都只是发现或观察信息。删除发现缓存不能合法地产生第二个 writer。锁文件位于 root 内，因此 Windows 在 owner 持锁期间无法重命名该目录；移动存活中的 root 必须先释放 owner。
 
 root 拥有完整的持久状态：`.maka-host/state/data` 保存插件包、composition、插件数据及密钥、访问凭据；`.maka-host/state/deployment/runtime-host-deployment.json` 是唯一的 managed deployment 事务记录；`.maka-host/runtime` 保存可丢弃的 registration、启动诊断和一次性凭据交付文件。Owner 与 Artifact 锁都在 `runtime` 外。短路径本地 socket 可放在系统临时目录。普通新 root 启动不依赖账户 home。物理放在一起不代表凭据和机器部署信息可以直接导出，备份仍须保留访问限制。
 
