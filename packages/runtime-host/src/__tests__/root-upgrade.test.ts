@@ -195,9 +195,9 @@ test('a torn upgrade completion record restages instead of wedging the root', as
     syncBuiltinESMExports();
     await assert.rejects(prepareRuntimeHostRoot(root), { code: 'EIO' });
     const authority = join(capability.canonicalPath, '.maka-host');
-    // The fence payload must stay bounded: the plan lives in its own file.
+    // The fence carries only the transaction id; the plan lives in its own file.
     const fenced = JSON.parse(await readFile(markerPath, 'utf8'));
-    assert.deepEqual(fenced.upgrade.payload, { plan: 'upgrade-plan.json' });
+    assert.deepEqual(Object.keys(fenced.upgrade), ['id']);
     const plan = JSON.parse(await readFile(join(authority, 'upgrade-plan.json'), 'utf8'));
     assert.equal(plan.data, source);
     const staged = (await fs.readdir(authority)).find((entry) => entry.startsWith('upgrade-'));

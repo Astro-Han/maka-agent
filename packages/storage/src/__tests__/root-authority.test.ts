@@ -192,15 +192,11 @@ describe('storage root authority', () => {
         const markerPath = join(root, STORAGE_ROOT_MARKER_FILE);
         const marker = JSON.parse(await readFile(markerPath, 'utf8')) as {
           schemaVersion: number;
-          upgrade?: { id: string; payload: unknown };
+          upgrade?: { id: string };
           rootIdentity: { dev: string; ino: string };
         };
         if (format === 'legacy') marker.schemaVersion = 1;
-        if (format === 'upgrading')
-          marker.upgrade = {
-            id: '00000000-0000-4000-8000-000000000001',
-            payload: { immutableSource: '/old/data' },
-          };
+        if (format === 'upgrading') marker.upgrade = { id: '00000000-0000-4000-8000-000000000001' };
         marker.rootIdentity.dev = (BigInt(marker.rootIdentity.dev) + 1n).toString();
         await writeFile(markerPath, `${JSON.stringify(marker)}\n`);
 

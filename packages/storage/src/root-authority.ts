@@ -30,7 +30,7 @@ import {
   type FileHandle,
 } from 'node:fs/promises';
 import { isAbsolute, join, normalize, parse, resolve } from 'node:path';
-import { tryLock, unlock, waitForLock } from 'fs-native-extensions';
+import { tryLock, unlock } from 'fs-native-extensions';
 
 import { withArtifactWriterBootstrapLock } from './artifact-writer-bootstrap-lock.js';
 import { publishMarkerFile, readBoundedMarkerFile } from './marker-file.js';
@@ -1280,7 +1280,6 @@ function isRootMarker(value: unknown): value is RootMarker {
 
 interface RootUpgrade {
   readonly id: string;
-  readonly payload: unknown;
 }
 
 function isRootUpgrade(value: unknown): value is RootUpgrade {
@@ -1289,8 +1288,7 @@ function isRootUpgrade(value: unknown): value is RootUpgrade {
   return (
     typeof upgrade.id === 'string' &&
     /^[a-f0-9-]{36}$/.test(upgrade.id) &&
-    Object.keys(upgrade).every((key) => key === 'id' || key === 'payload') &&
-    'payload' in upgrade
+    Object.keys(upgrade).every((key) => key === 'id')
   );
 }
 
@@ -1300,7 +1298,7 @@ export interface StorageRootUpgradeSession {
   readonly rootId: string;
   readonly upgrade: RootUpgrade | undefined;
   acquireLegacyLock(path: string): Promise<void>;
-  begin(payload: unknown): Promise<RootUpgrade>;
+  begin(): Promise<void>;
   commit(): Promise<void>;
 }
 
@@ -1428,12 +1426,10 @@ export async function withStorageRootUpgrade(
         // Absence is handled by the legacy owner, never by creating an account home here.
         await acquire(lockPath);
       },
-      async begin(payload) {
+      async begin() {
         await check();
-        if (state.upgrade) return state.upgrade;
-        const upgrade = { id: randomUUID(), payload };
-        await publish({ ...state.ready, upgrade });
-        return upgrade;
+        if (state.upgrade) return;
+        await publish({ ...state.ready, upgrade: { id: randomUUID() } });
       },
       async commit() {
         if (!state.upgrade)
