@@ -181,6 +181,16 @@ async function upgradeRuntimeHostRoot(
     );
     if (JSON.stringify(current) !== JSON.stringify(lockedDeployment))
       throw new Error('Legacy deployment changed while preparing its upgrade');
+    // A source recorded by the first inspection must still be there after
+    // admission; otherwise the durable plan would attest its absence and the
+    // commit would silently drop that data. A source that only appears now is
+    // recorded and copied by this second inspection — admission itself
+    // creates a missing data directory to hold its owner lock.
+    if (
+      (plan.data !== null && lockedSources.data !== plan.data) ||
+      (plan.deployment !== null && lockedSources.deployment !== plan.deployment)
+    )
+      throw new Error('Legacy sources changed while preparing the upgrade');
     plan = {
       ...lockedSources,
       ...(plan.targetDeployment ? { targetDeployment: plan.targetDeployment } : {}),
@@ -344,11 +354,17 @@ async function stageSnapshot(
           },
         });
       } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        // The durable plan cannot re-derive a source that is gone entirely:
+        // pointing at "remove the failing entry" sends the operator after a
+        // file that no longer exists.
+        const sourceGone = code === 'ENOENT' && !(await present(path));
         const wrapped = new Error(
-          `State Root upgrade cannot copy its legacy ${name} source (${path}): repair or remove the failing entry, then retry`,
+          sourceGone
+            ? `State Root upgrade cannot find its legacy ${name} source (${path}) attested by the durable plan: restore it, or remove the marker's upgrade field and reset schemaVersion to 1 to re-derive the upgrade`
+            : `State Root upgrade cannot copy its legacy ${name} source (${path}): repair or remove the failing entry, then retry`,
           { cause: error },
         );
-        const code = (error as NodeJS.ErrnoException).code;
         if (code) Object.assign(wrapped, { code });
         throw wrapped;
       }

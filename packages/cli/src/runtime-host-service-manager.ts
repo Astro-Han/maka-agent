@@ -302,6 +302,7 @@ export class RuntimeHostServiceManagerError extends Error {
       | 'invalid_launch'
       | 'target_mismatch'
       | 'root_requires_migration'
+      | 'root_migration_busy'
       | 'configuration_changed'
       | 'configuration_incomplete'
       | 'active_tasks'
@@ -715,6 +716,19 @@ async function manageRuntimeHostServiceLocked(
   const expectedIdentity = await resolveExpectedServiceRoot(config, input);
   if (input.action === 'start' || input.action === 'restart') {
     if (config.schemaVersion === 2) await backend.verifyDeployment(config);
+    // Starting a legacy or fenced root would only spawn a daemon the
+    // readiness poll then kills — possibly mid self-migration. Fail before
+    // spawn with the action that actually helps.
+    if (expectedIdentity?.format === 'legacy')
+      throw new RuntimeHostServiceManagerError(
+        'root_requires_migration',
+        'The managed Runtime Host State Root predates this version; run the update or activation workflow to migrate it',
+      );
+    if (expectedIdentity?.format === 'upgrading')
+      throw new RuntimeHostServiceManagerError(
+        'root_migration_busy',
+        'The managed Runtime Host State Root is being migrated; retry once the upgrade completes',
+      );
     if (input.action === 'restart') {
       const root = expectedIdentity
         ? await requireExpectedServiceRoot(expectedIdentity)
@@ -856,7 +870,7 @@ function assertExpectedServiceIdentity(
 async function resolveExpectedServiceRoot(
   config: RuntimeHostManagedServiceConfig | null,
   input: Pick<RuntimeHostManagedServiceInput, 'expectedTarget'>,
-): Promise<{ readonly canonicalPath: string; readonly rootId: string } | undefined> {
+): Promise<Awaited<ReturnType<typeof inspectStorageRootFormat>> | undefined> {
   if (!input.expectedTarget) return undefined;
   try {
     // Identity only: verifying that the service belongs to its expected root

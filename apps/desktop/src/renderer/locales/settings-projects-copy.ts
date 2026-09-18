@@ -576,7 +576,8 @@ const SETTINGS_PROJECTS_COPY_BY_LOCALE = {
         target_mismatch: '服务已被其他安装接管，请刷新后重试',
         root_requires_migration: '此 Runtime Host 的 State Root 来自旧版本，请执行更新或激活流程完成迁移',
         root_migration_busy: 'State Root 迁移仍在进行，请稍后重试',
-        root_unavailable: '无法打开 State Root——它可能缺失、损坏或被占用，请检查路径与权限',
+        root_unavailable:
+          '无法打开 State Root——它可能缺失、损坏，或被其他进程占用。请检查路径与权限，或稍后重试',
         configuration_changed: '服务配置已在别处修改，请刷新后重试',
         configuration_incomplete: '服务配置不完整，请重新安装',
         retirement_failed: '无法安全停止当前 Runtime Host',
@@ -917,7 +918,8 @@ const SETTINGS_PROJECTS_COPY_BY_LOCALE = {
         target_mismatch: '服務已被其他安裝接管，請重新整理後重試',
         root_requires_migration: '此 Runtime Host 的 State Root 來自舊版本，請執行更新或啟用流程完成遷移',
         root_migration_busy: 'State Root 遷移仍在進行，請稍後重試',
-        root_unavailable: '無法開啟 State Root——它可能缺失、損毀或被佔用，請檢查路徑與權限',
+        root_unavailable:
+          '無法開啟 State Root——它可能缺失、損毀，或被其他行程佔用。請檢查路徑與權限，或稍後重試',
         configuration_changed: '服務設定已在別處修改，請重新整理後重試',
         configuration_incomplete: '服務設定不完整，請重新安裝',
         retirement_failed: '無法安全停止目前的 Runtime Host',
@@ -1279,7 +1281,7 @@ const SETTINGS_PROJECTS_COPY_BY_LOCALE = {
           'This State Root predates this version. Run an update or activation to migrate it.',
         root_migration_busy: 'A State Root migration is still running. Try again in a moment.',
         root_unavailable:
-          'The State Root could not be opened — it may be missing, damaged, or locked. Check its path and permissions.',
+          'The State Root could not be opened — it may be missing, damaged, or in use by another process. Check its path and permissions, or try again later.',
         configuration_changed: 'The service configuration changed elsewhere. Refresh and try again.',
         configuration_incomplete: 'The service configuration is incomplete. Reinstall the service.',
         retirement_failed: 'The current Runtime Host could not be stopped safely.',

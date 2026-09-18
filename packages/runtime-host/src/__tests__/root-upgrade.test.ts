@@ -216,6 +216,52 @@ test('a torn upgrade completion record restages instead of wedging the root', as
   }
 });
 
+test('a legacy source disappearing during lock admission fails the upgrade', async (t) => {
+  const base = await mkdtemp(join(os.tmpdir(), 'maka-upgrade-vanish-'));
+  const home = join(base, 'home');
+  await mkdir(home);
+  const info = os.userInfo();
+  t.mock.method(os, 'userInfo', () => ({ ...info, homedir: home }));
+  syncBuiltinESMExports();
+  try {
+    const root = join(base, 'state');
+    const capability = await resolveStorageRoot({ path: root, kind: 'interactive' });
+    const markerPath = join(capability.canonicalPath, STORAGE_ROOT_MARKER_FILE);
+    const original = JSON.parse(await readFile(markerPath, 'utf8'));
+    await writeFile(markerPath, JSON.stringify({ ...original, schemaVersion: 1 }));
+    const cache =
+      process.platform === 'darwin'
+        ? join(home, 'Library', 'Caches', 'Maka')
+        : process.platform === 'win32'
+          ? join(home, 'AppData', 'Local', 'Maka')
+          : join(home, '.cache', 'maka');
+    const source = join(cache, 'runtime-hosts', capability.rootId);
+    await mkdir(source, { recursive: true, mode: 0o700 });
+    await writeAccessCredentialFile(join(source, ACCESS_FILE_NAME), createAccessCredentialFile([]));
+    // The sources are re-inspected after legacy lock admission; a source that
+    // vanishes in between must fail the upgrade rather than be committed as
+    // an empty directory. Admission creates the state-root-owners directory
+    // between the two inspections, which is the injection point.
+    const mkdirOriginal = fs.mkdir;
+    t.mock.method(fs, 'mkdir', async (...args: Parameters<typeof fs.mkdir>) => {
+      if (String(args[0]).endsWith('state-root-owners'))
+        await rm(source, { recursive: true, force: true });
+      return mkdirOriginal(...args);
+    });
+    syncBuiltinESMExports();
+    await assert.rejects(prepareRuntimeHostRoot(root), /Legacy sources changed/);
+    assert.equal(JSON.parse(await readFile(markerPath, 'utf8')).schemaVersion, 1);
+    await assert.rejects(
+      fs.stat(join(capability.canonicalPath, '.maka-host', 'upgrade-plan.json')),
+      { code: 'ENOENT' },
+    );
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test('the service entry upgrades a legacy root before serving', async (t) => {
   const base = await mkdtemp(join(os.tmpdir(), 'maka-upgrade-serve-'));
   const home = join(base, 'home');

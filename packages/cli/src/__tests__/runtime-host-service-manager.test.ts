@@ -3264,16 +3264,23 @@ describe('managed Runtime Host service', () => {
           manageRuntimeHostService({ ...common, action }, backend),
           needsMigration,
         );
-      // start polls readiness through the real connector: a legacy root can
-      // never become ready, so it must surface immediately rather than time out.
+      // Starting on a legacy root would only spawn a daemon the readiness
+      // poll then kills — possibly mid self-migration — so the failure must
+      // surface before the backend ever starts it.
+      let spawned = false;
       await assert.rejects(
-        manageRuntimeHostService({ ...common, action: 'start' }, backend, {
-          waitForReady: verifyRuntimeHostManagedServiceReady,
-        }),
-        (error: unknown) =>
-          error instanceof StorageRootAuthorityError &&
-          error.code === 'legacy_root_requires_migration',
+        manageRuntimeHostService(
+          { ...common, action: 'start' },
+          {
+            ...backend,
+            start: async () => {
+              spawned = true;
+            },
+          },
+        ),
+        needsMigration,
       );
+      assert.equal(spawned, false);
       await assert.rejects(
         manageRuntimeHostService(
           {

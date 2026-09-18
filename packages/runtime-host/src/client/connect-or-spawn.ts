@@ -163,6 +163,12 @@ export type ConnectOrSpawnRuntimeHostResult =
     }
   | {
       kind: 'failed';
+      reason: 'startup_failed';
+      detail: string;
+      diagnostic?: RuntimeHostElectionDiagnostic;
+    }
+  | {
+      kind: 'failed';
       reason: CandidateStartupFailure['reason'] | 'startup_timeout' | 'host_unresponsive';
       diagnostic?: RuntimeHostElectionDiagnostic;
     };
@@ -302,19 +308,26 @@ export async function connectOwnedRuntimeHostWithDependencies(
   } catch (error) {
     await connection?.close().catch(() => undefined);
     releaseOwnedLaunch(launch);
-    const code =
-      error instanceof StorageRootAuthorityError ? error.code : 'internal_startup_failure';
-    const cause = error instanceof Error ? error.cause : undefined;
-    const causeCode =
-      cause instanceof Error && 'code' in cause && typeof cause.code === 'string'
-        ? cause.code
-        : undefined;
-    return {
-      kind: 'failed',
-      reason: 'startup_failed',
-      detail: `${code}${causeCode && /^[A-Z0-9_]{1,64}$/.test(causeCode) ? ` (${causeCode})` : ''}`,
-    };
+    return { kind: 'failed', reason: 'startup_failed', detail: startupFailureDetail(error) };
   }
+}
+
+function startupFailureDetail(error: unknown): string {
+  const code = error instanceof StorageRootAuthorityError ? error.code : 'internal_startup_failure';
+  const extras = [
+    errorCodeOf(error),
+    errorCodeOf(error instanceof Error ? error.cause : undefined),
+  ].filter((extra): extra is string => extra !== undefined && extra !== code);
+  return extras.length ? `${code} (${extras.join(', ')})` : code;
+}
+
+function errorCodeOf(error: unknown): string | undefined {
+  return error instanceof Error &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    /^[a-zA-Z0-9_]{1,64}$/.test(error.code)
+    ? error.code
+    : undefined;
 }
 
 export interface HostedRuntimeInitialization {
@@ -364,29 +377,42 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
       : decodeRuntimeHostManagedLaunchClaim(input.managedLaunchClaim);
   input.signal?.throwIfAborted();
   const clientInstanceId = requireClientInstanceId(input.clientInstanceId ?? randomUUID());
-  const identity = await resolveStorageRootIdentity({ path: input.rootPath, kind: 'interactive' });
-  if (
-    (await inspectStorageRootFormat(identity.canonicalPath)).format === 'legacy' &&
-    (
-      await inspectRuntimeHostManagedDeployment(
-        identity.rootId,
-        dependencies.managedDeploymentAuthority,
-      )
-    )?.record
-  ) {
-    // Only the managed lifecycle can prepare a successor before format takeover.
-    return { kind: 'failed', reason: 'managed_root_requires_operator' };
+  let controlDirectory: string;
+  let capability: Awaited<ReturnType<typeof prepareRuntimeHostRoot>>;
+  try {
+    const identity = await resolveStorageRootIdentity({
+      path: input.rootPath,
+      kind: 'interactive',
+    });
+    if (
+      (await inspectStorageRootFormat(identity.canonicalPath)).format === 'legacy' &&
+      (
+        await inspectRuntimeHostManagedDeployment(
+          identity.rootId,
+          dependencies.managedDeploymentAuthority,
+        )
+      )?.record
+    ) {
+      // Only the managed lifecycle can prepare a successor before format takeover.
+      return { kind: 'failed', reason: 'managed_root_requires_operator' };
+    }
+    capability = await prepareRuntimeHostRoot(input.rootPath);
+    input.signal?.throwIfAborted();
+    const composition = await readStateRootCompositionBinding(capability.canonicalPath);
+    if (composition && composition.compositionId !== input.compositionId) {
+      return {
+        kind: 'failed',
+        reason: 'composition_mismatch',
+        requiredCompositionId: composition.compositionId,
+      };
+    }
+    ({ controlDirectory } = await prepareStorageRootControlDirectory(capability));
+  } catch (error) {
+    // Abort wins over the folded classification so cancellation still
+    // propagates as the caller's own abort error.
+    input.signal?.throwIfAborted();
+    return { kind: 'failed', reason: 'startup_failed', detail: startupFailureDetail(error) };
   }
-  const capability = await prepareRuntimeHostRoot(input.rootPath);
-  const composition = await readStateRootCompositionBinding(capability.canonicalPath);
-  if (composition && composition.compositionId !== input.compositionId) {
-    return {
-      kind: 'failed',
-      reason: 'composition_mismatch',
-      requiredCompositionId: composition.compositionId,
-    };
-  }
-  const { controlDirectory } = await prepareStorageRootControlDirectory(capability);
   // Root authority initialization must settle before the bounded election window begins.
   const startedAt = performance.now();
   const deadline = startedAt + deadlineMs;
@@ -648,6 +674,9 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
         latestCandidate,
       }),
     };
+  } catch (error) {
+    input.signal?.throwIfAborted();
+    return { kind: 'failed', reason: 'startup_failed', detail: startupFailureDetail(error) };
   } finally {
     electionSettled = true;
   }
