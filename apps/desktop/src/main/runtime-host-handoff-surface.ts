@@ -22,15 +22,10 @@ import type { UiLocale } from '@maka/core/ui-locale';
 import {
   formatHostHandoff,
   type HostHandoffAction,
-  type HostHandoffPresentation,
   type HostHandoffView,
   type OpenHostHandoffSurface,
 } from '@maka/runtime-host/client';
-
-export interface DesktopHostHandoffPayload {
-  readonly view: HostHandoffView;
-  readonly presentation: HostHandoffPresentation;
-}
+import type { DesktopHostHandoffPayload } from '../preload/bridge-contract.js';
 
 interface OpenDesktopHandoff {
   readonly submit: (revision: string, action: HostHandoffAction) => void;
