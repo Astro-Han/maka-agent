@@ -48,7 +48,7 @@ import {
   resolveRuntimeHostManagedServiceId,
   runtimeHostManagedServiceConfigFingerprint,
   RuntimeHostServiceManagerError,
-  storageRootErrorDetail,
+  managedRuntimeHostErrorCode,
   withRuntimeHostManagedServiceDeploymentLock,
   withRuntimeHostManagedServiceLifecycleLock,
   type RuntimeHostManagedServiceInput,
@@ -218,10 +218,7 @@ export async function runManagedRuntimeHostServiceCli(
     }
     return blocked ? 1 : 0;
   } catch (error) {
-    const code =
-      error instanceof RuntimeHostServiceManagerError
-        ? error.code
-        : (storageRootErrorDetail(error)?.code ?? 'internal_service_error');
+    const code = managedRuntimeHostErrorCode(error) ?? 'internal_service_error';
     const message = error instanceof Error ? error.message : String(error);
     if (options.framed) {
       deps.writeOutput(

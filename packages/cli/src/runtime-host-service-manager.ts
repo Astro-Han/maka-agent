@@ -49,6 +49,7 @@ import {
 import {
   resolveRuntimeHostManagedServiceId,
   RUNTIME_HOST_SERVICE_LOG_MAX_BYTES,
+  RuntimeHostManagedDeploymentError as RuntimeHostDeploymentAuthorityError,
   type RuntimeHostReconciliationProvider,
   type RuntimeHostServiceErrorCode,
   type RuntimeHostSupervisorProvider,
@@ -72,7 +73,9 @@ import {
   resolveExistingRuntimeHostManagedDeploymentRoot,
   resolveRuntimeHostManagedDeploymentForCli,
   resolveRuntimeHostManagedDeploymentRoot,
+  RuntimeHostManagedDeploymentError,
 } from './runtime-host-managed-deployment.js';
+import { RuntimeHostLifecycleTransactionError } from './runtime-host-lifecycle-transaction.js';
 import { writeRuntimeHostManagedUpdatePolicy } from './runtime-host-update-policy-store.js';
 import { isTemporaryNpxInstallation } from './runtime-host-cli-installation.js';
 
@@ -286,8 +289,6 @@ interface RuntimeHostServiceManagerDeps {
   readonly homeDir: string;
   readonly platform: NodeJS.Platform;
 }
-
-export type RuntimeHostServiceManagerOverrides = Partial<RuntimeHostServiceManagerDeps>;
 
 export class RuntimeHostServiceManagerError extends Error {
   constructor(
@@ -512,7 +513,7 @@ async function manageRuntimeHostServiceLocked(
         ? undefined
         : await resolveExpectedServiceRoot(before, input);
     const retainedStateRoot =
-      before === null && !invalidConfig && input.expectedTarget
+      before === null && !invalidConfig
         ? input.expectedTarget.rootPath
         : retirementRoot?.canonicalPath;
     let retirement: RuntimeHostRetirementResult = { kind: 'stopped' };
@@ -887,6 +888,25 @@ export function storageRootErrorDetail(
     code: error.code === 'legacy_root_requires_migration' ? 'root_requires_migration' : error.code,
     message: error.message,
   };
+}
+
+/**
+ * The canonical managed-domain code for an error reaching a CLI boundary, or
+ * undefined when the boundary should use its own fallback.
+ */
+export function managedRuntimeHostErrorCode(error: unknown): string | undefined {
+  if (
+    error instanceof RuntimeHostServiceManagerError ||
+    error instanceof RuntimeHostManagedDeploymentError ||
+    error instanceof RuntimeHostDeploymentAuthorityError
+  )
+    return error.code;
+  if (error instanceof RuntimeHostLifecycleTransactionError) {
+    if (error.code === 'owner_changed') return 'target_mismatch';
+    if (error.code === 'active_tasks') return 'active_tasks';
+    return undefined;
+  }
+  return storageRootErrorDetail(error)?.code;
 }
 
 async function requireExpectedServiceRoot(identity: {

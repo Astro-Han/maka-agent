@@ -340,7 +340,6 @@ export async function resolveRecoverableRuntimeHostManagedDeployment(
     };
     readonly expectedOwner?: { readonly hostEpoch: string; readonly pid: number };
     readonly allowInterruptActiveTasks?: boolean;
-    readonly ensureAvailable?: boolean;
   } = {},
 ): Promise<RuntimeHostRecoverableDeployment> {
   const legacy = await resolveLegacyRuntimeHostPackage(rootId);
@@ -355,10 +354,6 @@ export async function resolveRecoverableRuntimeHostManagedDeployment(
   if (!resolved) return { kind: 'absent' };
   assertRecoveryTarget(options.expectedTarget, rootId, resolved.record);
   if (resolved.record.state === 'active') {
-    if (options.ensureAvailable) {
-      await activateRuntimeHostLifecycle(resolved.record, deps);
-      await verifyRuntimeHostLifecycleReady(resolved.record, deps);
-    }
     return { kind: 'active', config: resolved.record };
   }
   const previous = resolved.record.from ?? undefined;

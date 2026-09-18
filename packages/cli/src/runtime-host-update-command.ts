@@ -36,7 +36,6 @@ import {
   type RuntimeHostOperatorCommand,
   type RuntimeHostServiceManagementFrame,
   type RuntimeHostServiceUpdatePhase,
-  RuntimeHostManagedDeploymentError as RuntimeHostDeploymentAuthorityError,
 } from '@maka/runtime-host/operator';
 import {
   isRuntimeHostDevelopmentPackageVersion,
@@ -58,7 +57,7 @@ import {
   replaceRuntimeHostManagedService,
   resolveRuntimeHostManagedServiceId,
   RuntimeHostServiceManagerError,
-  storageRootErrorDetail,
+  managedRuntimeHostErrorCode,
   verifyRuntimeHostManagedServiceReady,
   withRuntimeHostManagedServiceDeploymentLock,
   withRuntimeHostManagedServiceLegacyOperatorLeases,
@@ -87,7 +86,6 @@ import {
   convergeRuntimeHostLifecycleControlProjection,
   replaceRuntimeHostLifecycle,
   resolveRecoverableRuntimeHostManagedDeployment,
-  RuntimeHostLifecycleTransactionError,
   verifyRuntimeHostLifecycleProjection,
   type RuntimeHostLifecycleTransactionDeps,
 } from './runtime-host-lifecycle-transaction.js';
@@ -604,11 +602,9 @@ export async function runManagedRuntimeHostUpdateCli(
         )
       : error;
     const code =
-      reportedError instanceof RuntimeHostServiceManagerError ||
-      reportedError instanceof RuntimeHostManagedDeploymentError ||
       reportedError instanceof RuntimeHostUpdateSelectionError
         ? reportedError.code
-        : (storageRootErrorDetail(reportedError)?.code ?? 'internal_service_error');
+        : (managedRuntimeHostErrorCode(reportedError) ?? 'internal_service_error');
     const message = reportedError instanceof Error ? reportedError.message : String(reportedError);
     emit({
       schemaVersion: 1,
@@ -895,16 +891,7 @@ async function runCanonicalRuntimeHostUpdate(
     if (staged && canDiscardRuntimeHostLifecycleDesiredArtifacts(error)) {
       await staged.rollback().catch(() => undefined);
     }
-    const code =
-      error instanceof RuntimeHostServiceManagerError ||
-      error instanceof RuntimeHostManagedDeploymentError ||
-      error instanceof RuntimeHostDeploymentAuthorityError
-        ? error.code
-        : error instanceof RuntimeHostLifecycleTransactionError && error.code === 'owner_changed'
-          ? 'target_mismatch'
-          : error instanceof RuntimeHostLifecycleTransactionError && error.code === 'active_tasks'
-            ? 'active_tasks'
-            : (storageRootErrorDetail(error)?.code ?? 'update_incomplete');
+    const code = managedRuntimeHostErrorCode(error) ?? 'update_incomplete';
     emit({
       schemaVersion: 1,
       kind: 'error',
@@ -954,12 +941,9 @@ export async function runManagedRuntimeHostSelectedUpdateCli(
   } catch (error) {
     const code =
       error instanceof RuntimeHostUpdateDiscoveryError ||
-      error instanceof RuntimeHostServiceManagerError ||
       error instanceof RuntimeHostUpdatePackageError
         ? error.code
-        : error instanceof RuntimeHostLifecycleTransactionError && error.code === 'active_tasks'
-          ? 'active_tasks'
-          : (storageRootErrorDetail(error)?.code ?? 'update_resolution_failed');
+        : (managedRuntimeHostErrorCode(error) ?? 'update_resolution_failed');
     const message = error instanceof Error ? error.message : String(error);
     emit({
       schemaVersion: 1,
@@ -1046,10 +1030,9 @@ export async function runManagedRuntimeHostResolvedUpdateCli(
   } catch (error) {
     const code =
       error instanceof RuntimeHostUpdateDiscoveryError ||
-      error instanceof RuntimeHostServiceManagerError ||
       error instanceof RuntimeHostUpdatePackageError
         ? error.code
-        : (storageRootErrorDetail(error)?.code ?? 'update_resolution_failed');
+        : (managedRuntimeHostErrorCode(error) ?? 'update_resolution_failed');
     const message = error instanceof Error ? error.message : String(error);
     frameSink({
       schemaVersion: 1,

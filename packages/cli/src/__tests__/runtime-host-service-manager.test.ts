@@ -73,7 +73,6 @@ import {
   verifyRuntimeHostManagedServiceReady,
   type RuntimeHostManagedServiceConfig,
   type RuntimeHostManagedServiceResult,
-  type RuntimeHostServiceManagerOverrides,
   type RuntimeHostServiceBackend,
 } from '../runtime-host-service-manager.js';
 import {
