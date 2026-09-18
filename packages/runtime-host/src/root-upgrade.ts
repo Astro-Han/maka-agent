@@ -583,9 +583,19 @@ async function validateDeploymentSource(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  const record = decodeRuntimeHostManagedDeploymentAuthorityRecord(
-    JSON.parse(contents.toString('utf8')),
-  );
+  let record: ReturnType<typeof decodeRuntimeHostManagedDeploymentAuthorityRecord>;
+  try {
+    record = decodeRuntimeHostManagedDeploymentAuthorityRecord(
+      JSON.parse(contents.toString('utf8')),
+    );
+  } catch (error) {
+    throw new Error(
+      `Invalid legacy deployment record: ${join(path, 'runtime-host-deployment.json')}`,
+      {
+        cause: error,
+      },
+    );
+  }
   if (record.root.id !== rootId || record.root.path !== rootPath)
     throw new Error('Legacy deployment does not belong to the upgrading root');
   return record;

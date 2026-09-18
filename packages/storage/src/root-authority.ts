@@ -1308,24 +1308,26 @@ export async function inspectStorageRootFormat(path: string): Promise<{
   readonly rootId: string;
   readonly format: 'legacy' | 'upgrading' | 'current';
 }> {
-  const { canonicalPath, rootStat } = await resolveExistingRootPath(path);
-  const marker = await readPersistedRootMarker(canonicalPath);
-  if (!markerMatchesIdentity(marker, { dev: rootStat.dev, ino: rootStat.ino })) {
-    throw new StorageRootAuthorityError(
-      'root_identity_collision',
-      'State Root identity must be repaired before opening',
+  return withAuthorityFailure('root_io_failed', 'Unable to inspect the storage root', async () => {
+    const { canonicalPath, rootStat } = await resolveExistingRootPath(path);
+    const marker = await readPersistedRootMarker(canonicalPath);
+    if (!markerMatchesIdentity(marker, { dev: rootStat.dev, ino: rootStat.ino })) {
+      throw new StorageRootAuthorityError(
+        'root_identity_collision',
+        'State Root identity must be repaired before opening',
+      );
+    }
+    await assertRootPathIdentity(
+      canonicalPath,
+      { dev: rootStat.dev, ino: rootStat.ino },
+      'Root moved during inspection',
     );
-  }
-  await assertRootPathIdentity(
-    canonicalPath,
-    { dev: rootStat.dev, ino: rootStat.ino },
-    'Root moved during inspection',
-  );
-  return {
-    canonicalPath,
-    rootId: marker.rootId,
-    format: marker.schemaVersion === 1 ? 'legacy' : marker.upgrade ? 'upgrading' : 'current',
-  };
+    return {
+      canonicalPath,
+      rootId: marker.rootId,
+      format: marker.schemaVersion === 1 ? 'legacy' : marker.upgrade ? 'upgrading' : 'current',
+    };
+  });
 }
 
 /** Storage owns exclusion/publication; the Host owns interpretation of legacy data. */
@@ -1333,7 +1335,11 @@ export async function withStorageRootUpgrade(
   path: string,
   operation: (session: StorageRootUpgradeSession) => Promise<void>,
 ): Promise<void> {
-  const { canonicalPath: root, rootStat } = await resolveExistingRootPath(path);
+  const { canonicalPath: root, rootStat } = await withAuthorityFailure(
+    'root_io_failed',
+    'Unable to open the storage root for upgrade',
+    () => resolveExistingRootPath(path),
+  );
   const identity = { dev: rootStat.dev, ino: rootStat.ino };
   const markerPath = join(root, STORAGE_ROOT_MARKER_FILE);
   const read = () =>
@@ -1344,7 +1350,11 @@ export async function withStorageRootUpgrade(
     }).catch((error: unknown) => {
       if (isNodeError(error, 'ENOENT'))
         throw new StorageRootAuthorityError('root_unmarked', `Storage root is not marked: ${root}`);
-      throw error;
+      throw normalizeAuthorityFailure(
+        error,
+        'root_io_failed',
+        `Unable to read the storage root marker: ${markerPath}`,
+      );
     });
   let encoded = await read();
   const decode = (text: string) => {
@@ -1360,7 +1370,11 @@ export async function withStorageRootUpgrade(
   };
   let state = decode(encoded);
   if (!state.legacy && !state.upgrade) return;
-  const authority = await prepareRootOwnershipDirectory(root);
+  const authority = await withAuthorityFailure(
+    'control_io_failed',
+    `Unable to prepare the control directory for storage root: ${root}`,
+    () => prepareRootOwnershipDirectory(root),
+  );
   const handles: FileHandle[] = [];
   let active = true;
   const check = async () => {
@@ -1373,7 +1387,13 @@ export async function withStorageRootUpgrade(
       );
   };
   const acquire = async (lockPath: string) => {
-    const handle = await tryAcquireStableRootLock(lockPath, 'write');
+    const handle = await tryAcquireStableRootLock(lockPath, 'write').catch((error: unknown) => {
+      throw normalizeAuthorityFailure(
+        error,
+        'lock_failed',
+        `Unable to acquire the root lock: ${lockPath}`,
+      );
+    });
     if (!handle)
       throw new StorageRootAuthorityError(
         'root_migration_busy',

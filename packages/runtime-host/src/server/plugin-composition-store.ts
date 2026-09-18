@@ -69,7 +69,7 @@ export class HostPluginCompositionStore {
       return decode(JSON.parse(encoded.toString('utf8')));
     } catch (error) {
       if (error instanceof HostPluginCompositionStoreError) throw error;
-      throw invalid('Plugin Composition is invalid JSON', error);
+      throw invalid(`Plugin Composition is invalid JSON: ${this.path}`, error);
     }
   }
 

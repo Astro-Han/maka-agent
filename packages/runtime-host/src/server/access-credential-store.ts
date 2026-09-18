@@ -277,7 +277,11 @@ export async function readAccessCredentialFile(path: string): Promise<AccessCred
   } finally {
     await handle.close();
   }
-  return decodeAccessFile(JSON.parse(raw.toString('utf8')) as unknown);
+  try {
+    return decodeAccessFile(JSON.parse(raw.toString('utf8')) as unknown);
+  } catch (error) {
+    throw new Error(`Runtime Host access file is corrupt: ${path}`, { cause: error });
+  }
 }
 
 export async function writeAccessCredentialFile(

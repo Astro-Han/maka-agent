@@ -630,9 +630,14 @@ describe('storage root authority', () => {
     );
   });
 
-  test('rejects an unbounded root marker before parsing it', async () => {
+  test('rejects an oversized root marker before parsing it', async () => {
     await withRoots(async ({ root }) => {
-      await writeFile(join(root, STORAGE_ROOT_MARKER_FILE), Buffer.alloc(1_025, 0x20));
+      const markerPath = join(root, STORAGE_ROOT_MARKER_FILE);
+      await resolveStorageRoot({ path: root, kind: 'interactive' });
+      const marker = await readFile(markerPath, 'utf8');
+      // Trailing whitespace keeps the marker parseable, so only the size bound
+      // can reject this file.
+      await writeFile(markerPath, `${marker}${' '.repeat(33 * 1_024)}`);
       await assert.rejects(
         () => resolveStorageRoot({ path: root, kind: 'interactive' }),
         (error: unknown) =>
