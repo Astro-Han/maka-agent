@@ -34,8 +34,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { generalizedErrorMessageForLocale } from '@maka/core/redaction';
-import { type LlmConnection } from '@maka/core/llm-connections';
-import { type SessionSummary } from '@maka/core/session';
 import { type UiLocale } from '@maka/core/ui-locale';
 import { hasSettledInitialOnboarding } from '@maka/core/onboarding-milestone';
 import { useUiLocale } from '@maka/ui';
@@ -54,11 +52,6 @@ export interface UseOnboardingSnapshotResult {
   snapshot: OnboardingSnapshot | null;
   error: string | null;
   refresh: () => void;
-  /** Sessions from the snapshot — populated on first load, before the separate sessions:list IPC. */
-  getSessions(): SessionSummary[] | null;
-  /** Connections from the snapshot — populated on first load before the live projection refresh. */
-  getConnections(): LlmConnection[] | null;
-  getDefaultSlug(): string | null;
 }
 
 export interface UseOnboardingSnapshotDeps {
@@ -113,9 +106,6 @@ export function useOnboardingSnapshotImpl(
   localeRef.current = locale;
   const [snapshot, setSnapshot] = useState<OnboardingSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const sessionsRef = useRef<SessionSummary[] | null>(null);
-  const connectionsRef = useRef<LlmConnection[] | null>(null);
-  const defaultSlugRef = useRef<string | null>(null);
   const pollerRef = useRef<OnboardingSnapshotPoller | null>(null);
 
   if (pollerRef.current === null) {
@@ -123,9 +113,6 @@ export function useOnboardingSnapshotImpl(
       onSnapshot: (next) => {
         setSnapshot(next);
         setError(null);
-        if (next.sessions) sessionsRef.current = next.sessions;
-        if (next.connections) connectionsRef.current = next.connections;
-        defaultSlugRef.current = next.defaultSlug;
       },
       onError: (message) => {
         setError(message);
@@ -150,17 +137,10 @@ export function useOnboardingSnapshotImpl(
     void pollerRef.current?.pull();
   }, []);
 
-  const getSessions = useCallback((): SessionSummary[] | null => sessionsRef.current, []);
-  const getConnections = useCallback((): LlmConnection[] | null => connectionsRef.current, []);
-  const getDefaultSlug = useCallback((): string | null => defaultSlugRef.current, []);
-
   return {
     snapshot,
     error,
     refresh,
-    getSessions,
-    getConnections,
-    getDefaultSlug,
   };
 }
 
