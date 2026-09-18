@@ -66,7 +66,7 @@ export function RuntimeHostHandoffOverlay() {
         content={(
           <LayoutContent padding={4}>
             {presentation.detail ? (
-              <Text type="body">
+              <Text type="body" display="block">
                 <span style={{ whiteSpace: 'pre-line' }}>{presentation.detail}</span>
               </Text>
             ) : null}
