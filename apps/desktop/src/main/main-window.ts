@@ -107,7 +107,6 @@ interface MainWindowControllerDeps {
   revealMode: WindowRevealMode;
   onClose?: () => void;
   onClosed?: () => void;
-  onShow?: () => void;
   onRendererProcessGone: (details: Electron.RenderProcessGoneDetails) => void | Promise<void>;
 }
 
@@ -462,7 +461,6 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
     //
     // Both are gated on the URL using `http(s):` or `mailto:` — everything else
     // (file://, electron internal, etc.) is allowed/denied per Electron defaults.
-    mainWindow.once('show', () => deps.onShow?.());
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       if (isExternalUrl(url)) {
         void shell.openExternal(url);

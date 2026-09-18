@@ -22,6 +22,8 @@ import { Theme } from '@astryxdesign/core/theme';
 import { makaTheme } from './astryx-theme/maka';
 import { AppShell } from './composition/legacy-desktop-region';
 import { useAstryxThemeMode } from './astryx-theme-mode';
+import { RuntimeHostHandoffOverlay } from './runtime-host-handoff-overlay';
+
 export function App() {
   // PR-SHOW-AFTER-FIRST-COMMIT: the BrowserWindow is created hidden
   // (main-window.ts show: false) so the OS never flashes the index.html
@@ -55,6 +57,7 @@ export function App() {
     <StrictMode>
       <Theme theme={makaTheme} mode={astryxMode}>
         <AppShell />
+        <RuntimeHostHandoffOverlay />
       </Theme>
     </StrictMode>
   );

@@ -264,10 +264,16 @@ import type { BundledSkillCatalogEntry, ManagedSkillSourceEntry, ManagedSkillUpd
 import type { ConfigCategory } from '@maka/storage/config-transfer';
 import type { OnboardingMilestone, OnboardingMilestoneId, OnboardingState } from '@maka/core/onboarding';
 import type {
+  HostHandoffPresentation,
+  HostHandoffView,
   RemoteRuntimeHostProfile,
   RuntimeHostProfile,
   RuntimeHostProfileAccess,
 } from '@maka/runtime-host/client';
+export interface DesktopHostHandoffPayload {
+  readonly view: HostHandoffView;
+  readonly presentation: HostHandoffPresentation;
+}
 export interface OnboardingSnapshot {
   state: OnboardingState;
   milestones: OnboardingMilestone[];
@@ -881,6 +887,14 @@ export interface MakaBridge {
     resolvePairingRecovery(profileId?: string): Promise<DesktopRuntimeHostProfileSnapshot>;
     subscribeChanges(
       handler: (event: DesktopRuntimeHostProfileChangedEvent) => void,
+    ): () => void;
+  };
+
+  runtimeHostHandoff: {
+    current(): Promise<DesktopHostHandoffPayload | null>;
+    decide(revision: string, action: string): Promise<void>;
+    subscribe(
+      handler: (payload: DesktopHostHandoffPayload | null) => void,
     ): () => void;
   };
 

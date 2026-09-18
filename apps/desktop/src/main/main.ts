@@ -46,7 +46,7 @@ import { isIsolatedE2e, revealMode } from './startup-context.js';
 import { reportDevelopmentLaunchResult } from './dev-single-instance-result.js';
 import { registerPreviousMainProcessDiagnosticsIpc } from './desktop-diagnostics-ipc-main.js';
 import { showBrowserMessageBox } from './browser-message-box.js';
-import { desktopStartupProgressWindow } from './startup-presentation.js';
+import { installDesktopStartupBranding } from './desktop-shell-presentation.js';
 
 let recoveryJournal: MainProcessRecoveryJournal | undefined;
 installMainProcessLogCapture(mainProcessLogBuffer, () => recoveryJournal?.markDirty());
@@ -199,6 +199,7 @@ if (!app.requestSingleInstanceLock()) {
     .whenReady()
     .then(() => {
       console.log('[startup] app ready');
+      installDesktopStartupBranding(revealMode);
       return import('./runtime-host-boot.js');
     })
     .catch(async (error: unknown) => {
@@ -226,7 +227,7 @@ if (!app.requestSingleInstanceLock()) {
             mainLogs: () => mainProcessLogBuffer.snapshot(),
             writeClipboard: (report) => clipboard.writeText(report),
             showMessageBox: (options) =>
-              showBrowserMessageBox(options, desktopStartupProgressWindow(), {
+              showBrowserMessageBox(options, undefined, {
                 locale,
                 revealMode,
               }),

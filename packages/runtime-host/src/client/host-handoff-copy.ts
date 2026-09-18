@@ -250,16 +250,18 @@ const COPY = {
   },
 } satisfies UiCatalog<HostHandoffCopy>;
 
-/** Shared consequence-oriented copy, not a second lifecycle policy. */
-export function formatHostHandoff(
-  view: HostHandoffView,
-  locale: UiLocale,
-): {
+export interface HostHandoffPresentation {
   title: string;
   description: string;
   detail: string;
   actions: readonly { action: HostHandoffAction; label: string }[];
-} {
+}
+
+/** Shared consequence-oriented copy, not a second lifecycle policy. */
+export function formatHostHandoff(
+  view: HostHandoffView,
+  locale: UiLocale,
+): HostHandoffPresentation {
   const copy = COPY[locale];
   const labels: Record<HostHandoffAction, string> = {
     cancel: copy.labels.cancel,

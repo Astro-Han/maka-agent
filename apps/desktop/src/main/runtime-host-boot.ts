@@ -209,7 +209,7 @@ import {
   buildRuntimeHostActiveQuitDialog,
 } from "./runtime-host-quit-copy.js";
 import { prepareRuntimeHostQuit } from "./runtime-host-quit.js";
-import { createDesktopHostHandoffSurface } from './startup-presentation.js';
+import { createDesktopHostHandoffSurface } from './runtime-host-handoff-surface.js';
 import { registerRuntimeHostMemoryIpc } from "./runtime-host-memory-ipc-main.js";
 import {
   createDesktopRuntimeHostProfileService,
@@ -271,12 +271,6 @@ import {
 } from "./startup-context.js";
 import { resolveDesktopStorageRoot } from "./storage-root-startup.js";
 import { startupStep } from "./startup-step.js";
-import {
-  closeDesktopStartupProgress,
-  desktopStartupProgressWindow,
-  isDesktopStartupInProgress,
-  updateDesktopStartupProgress,
-} from './startup-presentation.js';
 import { registerWorkspaceSearchIpc } from "./workspace-search-ipc-main.js";
 import {
   parseDesktopSessionResourceKey,
@@ -386,7 +380,7 @@ const desktopDiagnostics: DesktopDiagnosticsDeps = {
   resolveRuntimeHost: resolveRuntimeHostDiagnostics,
   writeClipboard: (report) => clipboard.writeText(report),
 };
-let resolveBrowserDialogParent = desktopStartupProgressWindow;
+let resolveBrowserDialogParent = (): BrowserWindow | undefined => undefined;
 let resolveBrowserDialogAppearance = async (): Promise<BrowserMessageBoxTheme> => ({
   locale: resolveSystemUiLocale(app.getPreferredSystemLanguages()),
   palette: "default",
@@ -434,7 +428,6 @@ const resolveLocalStorageRoot = () =>
           confirmRepair: () => confirmDesktopStorageRootRepair(workspaceRoot),
         }),
       );
-updateDesktopStartupProgress('storage');
 const startupLocalStorageRoot =
   await resolveLocalStorageRoot();
 if (!startupLocalStorageRoot) {
@@ -507,7 +500,6 @@ const mainWindowController = createMainWindowController({
   revealMode,
   onClose: () => onMainWindowClose(),
   onClosed: () => onMainWindowClosed(),
-  onShow: closeDesktopStartupProgress,
   onRendererProcessGone: async (details) => {
     const diagnosticInput = createDesktopMainRendererDiagnosticInput({
       title: "Maka main Renderer process exited unexpectedly",
@@ -533,7 +525,7 @@ const mainWindowController = createMainWindowController({
 });
 resolveBrowserDialogParent = () => {
   const main = mainWindowController.browserWindow();
-  return main?.isVisible() ? main : desktopStartupProgressWindow();
+  return main?.isVisible() ? main : undefined;
 };
 const runtimeHostSshTerminal = createDesktopRuntimeHostSshTerminal({
   ipcMain,
@@ -552,13 +544,8 @@ const localRuntimeHostRemoteAccess = createDesktopLocalRuntimeHostRemoteAccess({
   rootId: startupLocalStorageRoot.rootId,
   directPeerAvailable: runtimeHostDirectPeerAvailable,
   manager: () => runtimeHostManager,
-  resolveSetupPackage: async (signal) => {
-    updateDesktopStartupProgress('package');
-    const result = await runtimeHostSetupPackage.resolveForThisDesktop(signal);
-    updateDesktopStartupProgress('checking');
-    return result;
-  },
-  onUpdateProgress: updateDesktopStartupProgress,
+  resolveSetupPackage: async (signal) =>
+    runtimeHostSetupPackage.resolveForThisDesktop(signal),
   operator: localRuntimeHostOperator,
 });
 const native = assembleDesktopNativeCapabilities({
@@ -968,7 +955,7 @@ const windowsAppTray = createWindowsAppTray({
 onMainWindowClosed = () => {
   // A hidden WorkHub host window can keep window-all-closed from firing.
   // Without a tray, use the existing quit flow; cancelling it restores Maka.
-  if (process.platform !== 'darwin' && !windowsAppTray.hasTray() && !isDesktopStartupInProgress()) app.quit();
+  if (process.platform !== 'darwin' && !windowsAppTray.hasTray()) app.quit();
 };
 const mcpCapabilityPublisher = createCapabilityRevisionPublisher(() =>
   mcpManager.toolSnapshot().revision,
@@ -1298,7 +1285,11 @@ const createLocalRuntimeHostManager = () => createRuntimeHostDesktopManager(
       runtimeHostProfileService.resolveCollaborationConnectionTarget(profile),
   },
   {
-    handoffSurface: createDesktopHostHandoffSurface(() => desktopLocale.resolve()),
+    handoffSurface: createDesktopHostHandoffSurface({
+      ipcMain,
+      send: (payload) => mainWindowController.send('runtime-host-handoff:view', payload),
+      resolveLocale: () => desktopLocale.resolve(),
+    }),
     onTargetStateChanged: (state) => {
       const localTarget = localSessionTarget(state);
       if (localTarget) {
@@ -2156,8 +2147,7 @@ function wireLifecycle(): void {
   app.on("window-all-closed", () => {
     native.computerUseOverlay.destroyAll();
     native.computerUsePip.destroyAll();
-    if (process.platform !== "darwin" && !windowsAppTray.hasTray() && !isBrowserMessageBoxPresentationActive() &&
-      !isDesktopStartupInProgress()) app.quit();
+    if (process.platform !== "darwin" && !windowsAppTray.hasTray() && !isBrowserMessageBoxPresentationActive()) app.quit();
   });
   powerMonitor.on("resume", wakePeerRecoveryAfterResume);
   quitCoordinator.focusOrCreateWindow();
