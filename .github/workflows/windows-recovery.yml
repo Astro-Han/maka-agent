@@ -66,6 +66,7 @@ on:
       # `scripts/windows-package-source-closure.test.mjs` recomputes this set
       # from the dist tests the steps run and fails on any difference in either
       # direction.
+      - 'packages/cli/src/__tests__/runtime-host-root-upgrade.test.ts'
       - 'packages/cli/src/runtime-host-cli-installation.ts'
       - 'packages/cli/src/runtime-host-lifecycle-transaction.ts'
       - 'packages/cli/src/runtime-host-managed-deployment.ts'
