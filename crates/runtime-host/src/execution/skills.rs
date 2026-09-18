@@ -53,14 +53,19 @@ pub(crate) use prepared::PreparedSkillInput;
 /// A successor checks only the batch it will consume. Other queued messages
 /// keep their own target and prerequisites for a later Run.
 pub(super) fn validate_pending_tools(
-    input: &maka_agent::RunInput,
+    input: &super::prepare::PreparedRun,
     queue: &[maka_event_log::message_admissions::PendingMessageAdmission],
     sources: &[RootSourceMessage],
 ) -> Result<()> {
-    let maka_agent::RunWork::Message { tools, .. } = &input.work else {
-        return Err(internal("Message successor omitted its tool catalog"));
+    let names: HashSet<_> = match input {
+        super::prepare::PreparedRun::Model(input) => {
+            let maka_agent::RunWork::Message { tools, .. } = &input.work else {
+                return Err(internal("Message successor omitted its tool catalog"));
+            };
+            tools.names().into_iter().collect()
+        }
+        super::prepare::PreparedRun::Executor(_) => HashSet::new(),
     };
-    let names: HashSet<_> = tools.names().into_iter().collect();
     let selected: HashSet<_> = sources
         .iter()
         .map(|source| &source.message.message_id)
@@ -159,8 +164,20 @@ impl Executions {
         additional.push(self.interactions.question_tool());
         let skills = self.load_skills(cwd, Default::default()).await?;
         let native = self.native_tools(cwd, profile);
+        let ceiling = match session_id {
+            Some(id) => {
+                self.log
+                    .get_session::<crate::session::SessionConfiguration>(id)
+                    .await
+                    .map_err(internal)?
+                    .ok_or_else(|| failure(Code::NotFound, "Session does not exist"))?
+                    .configuration
+                    .bound_tools
+            }
+            None => None,
+        };
         let prepared = tokio::task::spawn_blocking(move || {
-            super::tools::catalog(native, mode, additional, skills)
+            super::tools::catalog(native, mode, additional, skills, ceiling.as_ref())
         })
         .await
         .map_err(internal)??;

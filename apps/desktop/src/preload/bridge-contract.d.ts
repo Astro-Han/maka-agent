@@ -823,6 +823,14 @@ export interface MakaBridge {
     ): Promise<CollaborationTurnRequestDecideResult>;
   };
 
+  clientPlugins: {
+    connection(host: DesktopRuntimeHostRef): Promise<string>;
+    session(host: DesktopRuntimeHostRef, targetEpoch: string, sessionId: string): Promise<string>;
+    remote(host: DesktopRuntimeHostRef, targetEpoch: string, input: OperationInput<'plugin.remote'>): Promise<OperationOutput<'plugin.remote'> | { kind: 'connection_retired' }>;
+    query(host: DesktopRuntimeHostRef, input: OperationInput<'plugin.client.query'>): Promise<OperationOutput<'plugin.client.query'>>;
+    subscribeChanges(host: DesktopRuntimeHostRef, handler: (revision: string) => void): () => void;
+  };
+
   runtimeHost: {
     query<K extends RendererRuntimeHostQueryOperation>(
       operation: K,

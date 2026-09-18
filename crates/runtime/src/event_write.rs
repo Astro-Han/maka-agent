@@ -25,6 +25,7 @@ use std::{sync::Arc, time::SystemTime};
 /// One checked transaction submission: successful facts cannot omit their bytes.
 #[derive(Clone, Debug)]
 pub struct EventWrite {
+    composition: Option<Arc<crate::composition::FrozenComposition>>,
     event: RuntimeEvent,
     raw_payload: Option<Arc<[u8]>>,
     projection_artifacts: Vec<ProjectionArtifactWrite>,
@@ -53,6 +54,20 @@ impl ProjectionArtifactWrite {
 
 impl EventWrite {
     pub fn plain(event: RuntimeEvent) -> Result<Self, CommitError> {
+        match &event.fact {
+            Fact::ExecutorStarted { binding } => binding
+                .validate()
+                .map_err(|reason| CommitError::Rejected(reason.into()))?,
+            Fact::ExecutorObserved { output } => output
+                .validate()
+                .map_err(|reason| CommitError::Rejected(reason.into()))?,
+            Fact::ExecutorCompleted { text } if text.len() > 1024 * 1024 => {
+                return Err(CommitError::Rejected(
+                    "executor result exceeds 1 MiB".into(),
+                ));
+            }
+            _ => {}
+        }
         if let Fact::InvocationOpened { input, .. } = &event.fact {
             input
                 .validate_inheritance(&event.invocation)
@@ -159,6 +174,7 @@ impl EventWrite {
             ));
         }
         Ok(Self {
+            composition: None,
             event,
             raw_payload: None,
             projection_artifacts: Vec::new(),
@@ -185,6 +201,7 @@ impl EventWrite {
         };
         Ok((
             Self {
+                composition: None,
                 event: RuntimeEvent {
                     id,
                     recorded_at,
@@ -206,6 +223,21 @@ impl EventWrite {
 
     pub fn event(&self) -> &RuntimeEvent {
         &self.event
+    }
+    pub fn with_composition(
+        mut self,
+        composition: Arc<crate::composition::FrozenComposition>,
+    ) -> Result<Self, CommitError> {
+        if !matches!(self.event.fact, Fact::ModelRequested { .. }) {
+            return Err(CommitError::Rejected(
+                "request composition requires a model request".into(),
+            ));
+        }
+        self.composition = Some(composition);
+        Ok(self)
+    }
+    pub fn composition(&self) -> Option<&crate::composition::FrozenComposition> {
+        self.composition.as_deref()
     }
     pub fn raw_payload(&self) -> Option<&[u8]> {
         self.raw_payload.as_deref()

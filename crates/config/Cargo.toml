@@ -25,6 +25,7 @@ publish.workspace = true
 
 [dependencies]
 maka-runtime.workspace = true
+maka-plugins.workspace = true
 maka-event-log.workspace = true
 sqlx.workspace = true
 serde.workspace = true

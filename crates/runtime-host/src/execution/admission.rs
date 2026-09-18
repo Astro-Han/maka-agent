@@ -79,6 +79,7 @@ impl Executions {
                                 &input.session_id,
                                 Some(connection_id),
                                 maka_client_capability::BindingMode::Strict,
+                                input.turn_orchestration.as_ref().map(|intent| intent.mode),
                             )
                             .await?;
                         environment
@@ -105,7 +106,7 @@ impl Executions {
                 }
             };
             input.skill_ids = None;
-            let (mut run, _) = self
+            let mut run = self
                 .prepare_message(
                     input,
                     super::prepare::MessageOrigin::Client { root_id },
@@ -114,17 +115,10 @@ impl Executions {
                     environment,
                 )
                 .await?;
-            let maka_agent::RunWork::Message {
-                message,
-                skill_invocation,
-                ..
-            } = &mut run.work
-            else {
-                return Err(internal("Message preparation produced a non-message Run"));
-            };
-            *message = content;
-            *skill_invocation =
-                (!selection_result.is_empty()).then(|| Box::new(selection_result.clone()));
+            run.message(
+                content,
+                (!selection_result.is_empty()).then(|| Box::new(selection_result.clone())),
+            )?;
             let turn = self.launch(run).await?;
             return Ok(TurnStartResult::Started {
                 turn,

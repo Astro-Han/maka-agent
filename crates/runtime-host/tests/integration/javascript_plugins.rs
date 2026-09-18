@@ -1,0 +1,280 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::support::{
+    client_probe::ClientFixture,
+    message_recovery::{Provider, configure},
+    peer::Peer,
+};
+use maka_plugins::{
+    composition::Scope,
+    execution::{Progress, Submit},
+    fiber::Fiber,
+};
+use maka_runtime::event::InvocationOutcome;
+use maka_runtime_host::server::{Host, local::LocalListener};
+use serde_json::{Value, json};
+use std::{path::Path, time::Duration};
+use tokio_util::sync::CancellationToken;
+
+const SERVICE: &str = r#"
+export default async function(ctx) {
+    if (await ctx.credentials.read('test-token') !== null) throw new Error('credential leaked across packages');
+    await ctx.services.provide('example.echo', async (value, call) => value.inspect
+        ? {invocation:call.invocation, operationId:call.operationId ?? null}
+        : { echoed: value });
+}
+"#;
+const CONSUMER: &str = include_str!("../fixtures/host-plugin.mjs");
+mod metering;
+pub(super) fn package(
+    root: &Path,
+    id: &str,
+    mode: &str,
+    source: &str,
+    dependency: bool,
+) -> std::path::PathBuf {
+    let path = root.join(id);
+    std::fs::create_dir(&path).unwrap();
+    let dependencies = if dependency {
+        json!([{"id":"example.service"}])
+    } else {
+        json!([])
+    };
+    std::fs::write(
+        path.join("maka.extension.json"),
+        serde_json::to_vec(&json!({
+            "schemaVersion":1, "id":id, "dependencies":dependencies,
+            "runtime":{"entry":"index.mjs","sdkVersion":1,"vm":mode},
+            "composition":{"patch":"maka.composition.yml"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let inject = if dependency {
+        "    inject: [example.echo]\n"
+    } else {
+        ""
+    };
+    std::fs::write(
+        path.join("maka.composition.yml"),
+        format!("- type: insert\n  entry:\n    id: {id}\n    packageId: {id}\n{inject}"),
+    )
+    .unwrap();
+    std::fs::write(path.join("index.mjs"), source).unwrap();
+    path
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn external_shared_and_dedicated_plugins_route_services_persist_data_and_drain_on_disable() {
+    if std::env::var_os("MAKA_PLUGIN_PROTOCOL_TEST_CHILD").is_some() {
+        use std::io::{BufRead, IsTerminal, Write};
+        if std::env::var_os("MAKA_PLUGIN_PTY_TEST_CHILD").is_some() {
+            assert!(std::io::stdin().is_terminal());
+            assert!(std::io::stdout().is_terminal());
+            assert!(std::io::stderr().is_terminal());
+        }
+        for line in std::io::stdin().lock().lines() {
+            let line = line.unwrap();
+            if line == "quit" {
+                return;
+            }
+            println!("protocol:{line}");
+            std::io::stdout().flush().unwrap();
+        }
+        return;
+    }
+    tokio::time::timeout(Duration::from_secs(40), async {
+        let fixture = ClientFixture::new("maka-js-plugin-");
+        let service = package(&fixture.workspace, "example.service", "shared", SERVICE, false);
+        let source = CONSUMER.replace("'__PROTOCOL_EXECUTABLE__'", &serde_json::to_string(&std::env::current_exe().unwrap()).unwrap());
+        let consumer = package(&fixture.workspace, "example.consumer", "dedicated", &source, true);
+        let (provider, mut requests) = Provider::controlled_with_usage(3, 5).await;
+        let model = configure(&fixture, &provider.base_url).await;
+        for reopened in [false, true] {
+            let host = Host::open(fixture.owner()).await.unwrap();
+            #[cfg(unix)]
+            let endpoint = fixture.workspace.parent().unwrap().join("javascript.sock");
+            #[cfg(windows)]
+            let endpoint = std::path::PathBuf::from(format!(r"\\.\pipe\maka-js-{}", uuid::Uuid::new_v4()));
+            let stop = CancellationToken::new();
+            let cleanup = stop.clone().drop_guard();
+            let server = tokio::spawn(LocalListener::bind(&endpoint).unwrap().serve(host.clone(), stop.clone()));
+            let mut peer = Peer::new(host.clone(), "javascript-plugin").await;
+            ready(&mut peer).await;
+            if !reopened {
+                for source in [&service, &consumer] {
+                    let result = peer.rpc("plugin.package.install", json!({"sourcePath":source})).await;
+                    assert_eq!(result["ok"], true, "{result}");
+                    ready(&mut peer).await;
+                }
+                let result = peer.rpc("session.create", json!({
+                    "sessionId":"js-session", "workspace":{"kind":"host_path","path":fixture.workspace},
+                    "permissionMode":"ask",
+                    "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
+                })).await;
+                assert_eq!(result["ok"], true, "{result}");
+                let external = peer.rpc("session.create", json!({
+                    "sessionId":"executor-session", "workspace":{"kind":"host_path","path":fixture.workspace},
+                    "executorId":"example.external", "permissionMode":"bypass"
+                })).await;
+                assert_eq!(external["ok"], true, "{external}");
+                assert_eq!(external["result"]["backend"], "plugin-executor", "{external}");
+                assert_eq!(external["result"]["executorId"], "example.external", "{external}");
+                let parent = peer.rpc("session.create", json!({
+                    "sessionId":"executor-parent", "workspace":{"kind":"host_path","path":fixture.workspace},
+                    "permissionMode":"bypass",
+                    "modelTarget":{"kind":"explicit","connectionId":model.connection_id,"connectionSlug":model.connection_slug,"model":model.model}
+                })).await;
+                assert_eq!(parent["ok"], true, "{parent}");
+            }
+            let driver = Fiber::new("driver", "driver", Scope::Profile).unwrap();
+            driver.begin_loading().unwrap();
+            let commands = host.authorize_plugin_execution(driver.context(), &["js-session".into(), "executor-parent".into()]).await.unwrap();
+            driver.ready().unwrap(); driver.publish().unwrap();
+            let child_request = maka_plugins::execution::CreateChild {
+                workspace: None,
+                operation_id: "external-child".into(), parent_session_id: "executor-parent".into(), name: "External worker".into(),
+                permission_mode: None, bound_tools: None, instructions: Some("Executor child instructions".into()),
+                target: Some(maka_plugins::execution::ChildTarget::Executor { executor_id: "example.external".to_owned().try_into().unwrap() }),
+            };
+            let external_child = commands.create_child(child_request.clone()).await.unwrap();
+            assert_eq!(commands.create_child(child_request).await.unwrap(), external_child);
+            let inspector = Fiber::new("example.consumer", "inspector", Scope::Profile).unwrap();
+            inspector.begin_loading().unwrap();
+            let storage = host.plugin_storage(inspector.context()).unwrap();
+            for waiting in if reopened { vec![false] } else { vec![false, true] } {
+                let operation = format!("request-{reopened}-{waiting}");
+                commands.submit(Submit { orchestration_mode: None, operation_id:operation.clone(), session_id:"js-session".into(), content:"Use PluginEcho".into() }).await.unwrap();
+                let search = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
+                assert!(search.body.to_string().contains("JavaScript plugin acceptance"));
+                assert!(!search.body.to_string().contains("nested answer"));
+                search.reply.send(tool("search", "tool_search", json!({"query":"PluginEcho"}))).unwrap();
+                let invoke = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
+                assert!(invoke.body["tools"].as_array().unwrap().iter().any(|tool| tool["function"]["name"] == "PluginEcho"));
+                invoke.reply.send(tool("echo", "PluginEcho", json!({"wait":waiting}))).unwrap();
+                if !waiting {
+                    let nested = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
+                    assert_eq!(nested.body["messages"], json!([
+                        {"role":"system","content":"Auxiliary only"},
+                        {"role":"user","content":"nested prompt"}
+                    ]));
+                    assert!(nested.body.get("tools").is_none());
+                    nested.reply.send(json!({"index":0,"delta":{"content":"nested answer"},"finish_reason":"stop"})).unwrap();
+                }
+                if waiting {
+                    let pending = tokio::time::timeout(Duration::from_secs(5), requests.recv()).await.unwrap().unwrap();
+                    assert_eq!(pending.body["messages"], json!([{"role":"user","content":"cancel this"}]));
+                    loop {
+                        if storage.read("waiting".into()).await.unwrap().is_some() { break; }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    toggle(&mut peer, true).await;
+                    let _ = pending.reply.send(json!({"index":0,"delta":{"content":"too late"},"finish_reason":"stop"}));
+                }
+                loop {
+                    if let Ok(unexpected) = requests.try_recv() {
+                        panic!("finishing plugin tool requested another model step: {}", unexpected.body);
+                    }
+                    match commands.query(operation.clone()).await.unwrap().progress {
+                        Progress::Ended { outcome } => { assert_eq!(outcome, InvocationOutcome::Completed); break; }
+                        _ => tokio::time::sleep(Duration::from_millis(10)).await,
+                    }
+                }
+                if waiting {
+                    ready(&mut peer).await;
+                    toggle(&mut peer, false).await;
+                    ready(&mut peer).await;
+                }
+            }
+            let count = storage.read("count".into()).await.unwrap().unwrap();
+            assert_eq!(count.data.value(), Some(&json!(if reopened { 2 } else { 1 })));
+            let executors = peer.rpc("plugin.platform.query", json!({"view":"executors"})).await;
+            assert_eq!(executors["ok"], true, "{executors}");
+            assert!(executors["result"]["items"].as_array().unwrap().iter().any(|executor| executor["id"] == "example.external"));
+            let mut external_runs = vec![("executor-session", false), (external_child.session_id.as_str(), false)];
+            if !reopened { external_runs.push((external_child.session_id.as_str(), true)); }
+            for (session_id, waiting) in external_runs {
+                let turn = format!("external-{reopened}-{waiting}");
+                let started = peer.rpc("turn.start", json!({"sessionId":session_id, "turnId":turn,
+                    "content":{"text":if waiting {"wait"} else {"complete"}}})).await;
+                assert_eq!(started["ok"], true, "{started}");
+                if waiting {
+                    while storage.read("executor-waiting".into()).await.unwrap().is_none() {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    toggle(&mut peer, true).await;
+                }
+                loop {
+                    let state = peer.rpc("turn.query", json!({"sessionId":session_id, "turnId":turn})).await;
+                    assert_eq!(state["ok"], true, "{state}");
+                    if !matches!(state["result"]["status"].as_str(), Some("admitted" | "created" | "running")) {
+                        assert_eq!(state["result"]["status"], if waiting { "cancelled" } else { "completed" }, "{state}");
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                if waiting {
+                    ready(&mut peer).await;
+                    toggle(&mut peer, false).await;
+                    ready(&mut peer).await;
+                }
+            }
+            driver.shutdown(tokio::time::Instant::now() + Duration::from_secs(1)).await.unwrap();
+            inspector.shutdown(tokio::time::Instant::now() + Duration::from_secs(1)).await.unwrap();
+            peer.close().await;
+            stop.cancel();
+            tokio::time::timeout(Duration::from_secs(10), server).await.unwrap().unwrap().unwrap();
+            cleanup.disarm();
+            drop(host);
+            let log = fixture.log().await;
+            metering::verify(&log, if reopened { 2 } else { 1 }).await;
+            for session in ["executor-session", external_child.session_id.as_str()] {
+                assert!(!log.has_unsettled_shells(session).await.unwrap(), "plugin retirement left a live or unknown PTY");
+                assert!(log.query_shell_resources(session, None, 0).await.unwrap().total >= 2);
+            }
+            assert_eq!(log.recover_shell_runs(100).await.unwrap(), 0, "clean shutdown must need no guessed PTY recovery");
+            log.close().await.unwrap();
+        }
+        assert_eq!(provider.requests.lock().unwrap().len(), 9);
+    }).await.expect("external plugin lifecycle must make bounded progress");
+}
+pub(super) async fn ready(peer: &mut Peer) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let status = peer
+            .rpc("plugin.platform.query", json!({"view":"status"}))
+            .await;
+        assert_eq!(status["ok"], true, "{status}");
+        if status["result"]["convergence"] == "converged" {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{status}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+async fn toggle(peer: &mut Peer, disabled: bool) {
+    let result = peer.rpc("plugin.composition.apply", json!({
+        "operations":[{"type":"update","entryId":"example.consumer","patch":{"disabled":disabled}}]
+    })).await;
+    assert_eq!(result["ok"], true, "{result}");
+}
+fn tool(id: &str, name: &str, input: Value) -> Value {
+    json!({"index":0,"delta":{"tool_calls":[{"index":0,"id":id,"type":"function","function":{"name":name,"arguments":input.to_string()}}]},"finish_reason":"tool_calls"})
+}

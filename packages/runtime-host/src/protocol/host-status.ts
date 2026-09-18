@@ -106,6 +106,13 @@ export interface HostDiagnosticsResult extends HostStatusResult {
 }
 
 export const HOST_BOOTSTRAP_OPERATION_SPECS = {
+  'host.wake': defineOperation({
+    mode: 'command',
+    availability: 'ready',
+    errors: ['host_draining', 'operation_unavailable', 'internal_failure'] as const,
+    decodeInput: (value) => decodeEmptyHostInput(value, 'host.wake input'),
+    decodeOutput: (value) => decodeEmptyHostInput(value, 'host.wake result'),
+  }),
   'host.status': defineOperation({
     mode: 'query',
     availability: 'bootstrap',

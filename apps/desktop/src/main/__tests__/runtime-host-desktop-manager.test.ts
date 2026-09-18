@@ -52,6 +52,31 @@ import {
   startRuntimeHostDesktopManager,
 } from '../runtime-host-desktop-manager.js';
 
+test('system resume notifies only the connected local Host and never launches one', async (t) => {
+  const requests: unknown[] = [];
+  const local = candidateHarness({ onRequest: (...args) => {
+    requests.push(args);
+    throw new Error('older Host');
+  } });
+  const remote = candidateHarness({ onRequest: () => assert.fail('remote Host did not resume') });
+  let starts = 0;
+  const manager = await startRuntimeHostDesktopManager({} as DesktopRuntimeHostCandidateStartInput, {
+    startCandidate: async (input) => {
+      starts++;
+      return ready(input.profileTarget ? remote.candidate : local.candidate);
+    },
+  });
+  t.after(() => manager.close());
+  await manager.enable(peerTarget('office'));
+  manager.notifySystemResume();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(requests, [['host.wake', {}, 2_000]]);
+  await manager.close();
+  manager.notifySystemResume();
+  assert.equal(requests.length, 1);
+  assert.equal(starts, 2);
+});
+
 test('replaces a disconnected Runtime Host generation', { timeout: 10_000 }, async () => {
   const first = candidateHarness({ delayDisconnect: true, hostEpoch: 'host-before' });
   const second = candidateHarness({ hostEpoch: 'host-after' });
@@ -2015,6 +2040,7 @@ function candidateHarness(
     finalizeReconnectRequired?: boolean;
     disconnectOnFinalizeFailure?: boolean;
     onPrepare?: (mode: string) => unknown | Promise<unknown>;
+    onRequest?: (operation: string, input: unknown, timeoutMs?: number) => unknown;
   } = {},
 ) {
   let resolveClosed: (() => void) | undefined;
@@ -2036,6 +2062,9 @@ function candidateHarness(
     hostPid: 42,
     ...(options.ownedProcess ? { ownedProcess: options.ownedProcess } : {}),
     client: {
+      async request(operation: string, input: unknown, timeoutMs?: number) {
+        return options.onRequest?.(operation, input, timeoutMs);
+      },
       connectionId: 'desktop-connection',
       hostId: options.hostId ?? 'test-host',
       hostEpoch: options.hostEpoch ?? 'test-host-epoch',

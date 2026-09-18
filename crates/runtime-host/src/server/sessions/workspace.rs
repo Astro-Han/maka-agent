@@ -49,6 +49,14 @@ pub(super) async fn relocate(host: &Host, value: &Value) -> Result<SessionUpdate
         });
     }
     let workspace = resolve(host, &input.workspace).await?;
+    if initial.configuration.worktree.is_some()
+        && workspace.host_cwd != initial.configuration.workspace.host_cwd
+    {
+        return Err(failure(
+            Code::OperationConflict,
+            "An isolated child workspace cannot be relocated",
+        ));
+    }
     // Resolution may await I/O while an existing run or metadata mutation commits.
     // Relocation requires quiescence even when its canonical workspace is unchanged.
     let current = host

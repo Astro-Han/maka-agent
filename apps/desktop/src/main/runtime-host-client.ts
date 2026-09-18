@@ -396,6 +396,11 @@ export class DesktopRuntimeHostClient {
     return this.connection.subscribeProjectCatalogChanges(listener);
   }
 
+  subscribePluginClientChanges(listener: (revision: string) => void): () => void {
+    this.#assertOpen();
+    return this.connection.subscribePluginClientChanges?.(listener) ?? (() => {});
+  }
+
   subscribeSessionCatalogChanges(
     listener: (frame: SessionCatalogChangedFrame) => void,
   ): () => void {

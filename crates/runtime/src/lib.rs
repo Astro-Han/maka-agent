@@ -23,6 +23,7 @@ pub mod archive;
 pub mod artifact;
 pub mod attachment;
 pub mod capability;
+pub mod composition;
 pub mod configuration;
 pub mod context;
 pub mod continuation;

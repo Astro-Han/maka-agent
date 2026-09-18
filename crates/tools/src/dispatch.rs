@@ -73,13 +73,37 @@ impl RunTools {
     }
 
     /// Capture once per logical model step, before sending any physical attempt.
-    pub fn capture(&self) -> RequestTools<'_> {
-        let availability = if self.mode == ToolMode::CodeMode {
-            self.availability.nested()
+    pub fn capture(&self) -> Result<RequestTools<'_>, ToolError> {
+        let (current, captured) = self.availability.capture()?;
+        Ok(self.request(current, captured))
+    }
+
+    /// Handoff seals settled history and Host capabilities, not a new model step.
+    /// Dynamic plugins are sampled afresh by the successor after restoration.
+    pub fn handoff_definitions(&self) -> Vec<ToolDefinition> {
+        self.request(self.availability.clone(), None).definitions()
+    }
+
+    fn request(
+        &self,
+        current: Availability,
+        captured: Option<maka_plugins::contributions::Captured>,
+    ) -> RequestTools<'_> {
+        let digest = current.digest();
+        let direct = if self.mode == ToolMode::CodeMode {
+            current.direct_only()
         } else {
-            self.availability.clone()
+            ToolCatalog::default()
+        };
+        let availability = if self.mode == ToolMode::CodeMode {
+            current.nested()
+        } else {
+            current
         };
         RequestTools {
+            captured,
+            digest,
+            direct,
             run: self,
             catalog: availability.snapshot(),
             availability,
@@ -90,12 +114,53 @@ impl RunTools {
 /// The advertised schemas and their handlers share one captured capability view.
 /// Search settlement affects future captures, never this request or its retries.
 pub struct RequestTools<'a> {
+    captured: Option<maka_plugins::contributions::Captured>,
+    digest: String,
+    direct: ToolCatalog,
     run: &'a RunTools,
     catalog: ToolCatalog,
     availability: Availability,
 }
 
 impl<'a> RequestTools<'a> {
+    pub fn catalog_digest(&self) -> &str {
+        &self.digest
+    }
+
+    pub async fn prompt(
+        &self,
+        base: Option<&str>,
+        invocation: Invocation,
+        cancellation: CancellationToken,
+    ) -> Result<maka_plugins::prompt::Resolved, ToolError> {
+        let request = maka_plugins::prompt::Request {
+            invocation,
+            cancellation,
+        };
+        let mut prompt = maka_plugins::prompt::resolve(self.captured.as_ref(), base, request)
+            .await
+            .map_err(|error| ToolError::Failed(error.to_string()))?;
+        if let Some(captured) = &self.captured {
+            for (name, entry) in captured.typed::<crate::plugins::PluginTool>().entries {
+                if !self.catalog.contains(&name) && !self.direct.contains(&name) {
+                    continue;
+                }
+                let definition = serde_json::to_string(entry.value.definition())
+                    .expect("validated tool definition");
+                prompt.sources.push(
+                    maka_plugins::prompt::source(
+                        &entry,
+                        maka_runtime::composition::SourceKind::Tool,
+                        &name,
+                        &definition,
+                    )
+                    .map_err(|error| ToolError::Failed(error.to_string()))?,
+                );
+            }
+        }
+        Ok(prompt)
+    }
+
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let mut definitions: Vec<_> = self.catalog.definitions().cloned().collect();
         if let Some(search) = self.availability.definition() {
@@ -103,11 +168,13 @@ impl<'a> RequestTools<'a> {
         }
         if self.run.mode == ToolMode::CodeMode {
             let mut exec = cell::definition();
-            exec.description.push_str("\nThis is the only callable tool. After searching, return its result and use the refreshed catalog in the next exec call. Available nested functions:\n");
+            exec.description.push_str("\nUse this tool for JavaScript and nested functions. Other advertised tools must be called directly. After searching, return its result and use the refreshed catalog in the next exec call. Available nested functions:\n");
             exec.description.push_str(
                 &serde_json::to_string(&definitions).expect("function definitions are JSON"),
             );
-            vec![exec]
+            std::iter::once(exec)
+                .chain(self.direct.definitions().cloned())
+                .collect()
         } else {
             definitions
         }
@@ -118,6 +185,7 @@ impl<'a> RequestTools<'a> {
             request: self,
             step_id,
             admission: Admission::Fresh,
+            finished: false,
         }
     }
 }
@@ -125,6 +193,7 @@ impl<'a> RequestTools<'a> {
 /// Call-order admission is separate from execution scheduling. Serial execution
 /// alone does not make exclusive-step siblings legal.
 pub struct StepTools<'a> {
+    finished: bool,
     request: RequestTools<'a>,
     step_id: &'a str,
     admission: Admission,
@@ -141,7 +210,9 @@ enum Admission {
 impl Admission {
     fn admit(&mut self, semantics: ToolSemantics) -> Result<(), ToolRejection> {
         *self = match (&self, semantics) {
-            (Self::Fresh, ToolSemantics::ExclusiveStep) => Self::Exclusive,
+            (Self::Fresh, ToolSemantics::ExclusiveStep | ToolSemantics::FinishTurn) => {
+                Self::Exclusive
+            }
             (Self::Fresh | Self::Parallel, ToolSemantics::Parallel) => Self::Parallel,
             _ => return Err(ToolRejection::ExclusiveConflict),
         };
@@ -150,6 +221,10 @@ impl Admission {
 }
 
 impl StepTools<'_> {
+    pub fn finished(&self) -> bool {
+        self.finished
+    }
+
     pub async fn invoke(
         &mut self,
         call: &ModelToolCall,
@@ -158,12 +233,14 @@ impl StepTools<'_> {
         let run = self.request.run;
         let operation_id = format!("{}:{}", self.step_id, call.id);
         let identity = ToolCallIdentity::provider(self.step_id.into(), call.id.clone());
+        let catalog = if run.mode == ToolMode::CodeMode {
+            &self.request.direct
+        } else {
+            &self.request.catalog
+        };
         let preparation: Result<PreparedEffect, ToolRejection> = async {
             if cancellation.is_cancelled() {
                 return Err(ToolRejection::Cancelled);
-            }
-            if run.mode == ToolMode::CodeMode && call.name != "exec" {
-                return Err(ToolRejection::Unavailable);
             }
             if call.name == "exec" && run.mode == ToolMode::CodeMode {
                 self.admission.admit(ToolSemantics::ExclusiveStep)?;
@@ -176,7 +253,7 @@ impl StepTools<'_> {
                     operation_id.clone(),
                     call.id.clone(),
                 );
-                let effect: PreparedEffect = Box::new(move |cancellation| {
+                let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                     Box::pin(async move {
                         executor
                             .invoke("exec".into(), Value::Null, cancellation)
@@ -185,14 +262,15 @@ impl StepTools<'_> {
                     })
                 });
                 Ok(effect)
-            } else if call.name == SEARCH && self.request.availability.enabled() {
+            } else if run.mode == ToolMode::Direct
+                && call.name == SEARCH
+                && self.request.availability.enabled()
+            {
                 self.admission.admit(ToolSemantics::Parallel)?;
                 self.request.availability.prepare_search(&call.input)
             } else {
-                self.admission
-                    .admit(self.request.catalog.semantics(&call.name)?)?;
-                self.request
-                    .catalog
+                self.admission.admit(catalog.semantics(&call.name)?)?;
+                catalog
                     .prepare(
                         call.name.clone(),
                         call.input.clone(),
@@ -223,7 +301,7 @@ impl StepTools<'_> {
         };
         let result = run
             .journal
-            .invoke_call_with(
+            .invoke_prepared_call(
                 operation_id,
                 identity,
                 call.name.clone(),
@@ -232,6 +310,9 @@ impl StepTools<'_> {
                 effect,
             )
             .await?;
+        if catalog.semantics(&call.name) == Ok(ToolSemantics::FinishTurn) {
+            self.finished = true;
+        }
         self.request.availability.settled(&call.name, &result)?;
         Ok(result)
     }

@@ -51,10 +51,24 @@ impl Executions {
             }
         };
         let mut configuration = session.observed_configuration(workspace);
+        if let Some(source) = self
+            .log
+            .invocation_configuration(&source.invocation)
+            .await
+            .map_err(internal)?
+        {
+            configuration.orchestration_mode = source.orchestration_mode;
+        }
         let (tools, system_prompt) = match mode {
             Mode::Prepared(environment) => {
+                let super::super::prepare::Backend::Model(model) = environment.backend else {
+                    return Err(super::failure(
+                        maka_protocol::OperationErrorCode::OperationUnavailable,
+                        "Executor has no native model continuation",
+                    ));
+                };
                 configuration.tool_composition = Some(environment.composition);
-                (environment.tools, environment.prompt)
+                (model.tools, environment.prompt)
             }
             Mode::Observe(connection) => {
                 let mut system_prompt = prompt::resolve(
@@ -67,6 +81,9 @@ impl Executions {
                 )
                 .await
                 .map_err(internal)?;
+                session
+                    .append_instructions(&mut system_prompt)
+                    .map_err(internal)?;
                 let (tools, skills) = self
                     .preview_tool_catalog(
                         Some(session_id),
@@ -76,6 +93,13 @@ impl Executions {
                         session.tool_profile,
                     )
                     .await?;
+                let tools = tools
+                    .with_plugins(
+                        self.plugin_catalog.clone(),
+                        maka_plugins::composition::Scope::Session(session_id.clone()),
+                        session.bound_tools.clone(),
+                    )
+                    .map_err(internal)?;
                 let fragment = skills
                     .catalog()
                     .prompt((64 * 1024usize).saturating_sub(system_prompt.text.len() + 2));

@@ -46,6 +46,17 @@ pub struct ModelUsage {
     pub reasoning_tokens: Option<u64>,
 }
 
+/// Auxiliary Host generation, not an assistant step in the parent conversation.
+/// Usage is provider-reported; absent counters are unknown, not zero.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelGeneration {
+    pub text: String,
+    pub model_id: String,
+    pub finish_reason: ModelFinishReason,
+    pub usage: ModelUsage,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModelFinishReason {

@@ -203,14 +203,32 @@ impl Tools {
                     return Err(ProjectionError::Invalid("result without dispatch"));
                 }
                 let (is_error, content) = ToolContent::from_outcome(outcome, resolved)?;
-                Ok(vec![self.result(
+                let mut rows = vec![self.result(
                     event,
                     ts,
                     operation_id,
                     event.id.clone(),
                     is_error,
                     content,
-                )?])
+                )?];
+                if let Some(ToolOutput::Model(result)) = resolved
+                    && let (Some(input), Some(output)) =
+                        (result.usage.input_tokens, result.usage.output_tokens)
+                {
+                    rows.push(message(
+                        event,
+                        ts,
+                        maka_runtime::tool_call::metered_usage_id(&event.id),
+                        Content::TokenUsage {
+                            input,
+                            output,
+                            cache_read: result.usage.cache_read_tokens,
+                            cache_creation: result.usage.cache_write_tokens,
+                            reasoning: result.usage.reasoning_tokens,
+                        },
+                    ));
+                }
+                Ok(rows)
             }
             _ => unreachable!(),
         }

@@ -304,7 +304,7 @@ pub(crate) fn validate_id(id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn validate_time(now: u64) -> Result<(), StoreError> {
+pub(crate) fn validate_time(now: u64) -> Result<(), StoreError> {
     if now > MAX_SAFE_INTEGER {
         return Err(invalid("timestamp exceeds safe integer range"));
     }

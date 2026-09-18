@@ -70,10 +70,10 @@ fn visible(request: &Value, mode: ToolMode) -> Vec<ToolDefinition> {
             .collect()
     }
 }
-fn call(id: &str, name: &str, input: Value) -> Value {
+pub(super) fn call(id: &str, name: &str, input: Value) -> Value {
     json!({"index":0,"id":id,"type":"function","function":{"name":name,"arguments":input.to_string()}})
 }
-async fn respond_tools(socket: &mut TcpStream, mut calls: Vec<Value>, usage: usize) {
+pub(super) async fn respond_tools(socket: &mut TcpStream, mut calls: Vec<Value>, usage: usize) {
     for (index, call) in calls.iter_mut().enumerate() {
         call["index"] = json!(index);
     }

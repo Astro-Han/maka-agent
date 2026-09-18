@@ -123,7 +123,7 @@ pub(super) async fn act(
             InvocationState::Admitted | InvocationState::Running => {
                 if host
                     .executions
-                    .workhub_target(&owner.invocation.session_id)
+                    .active_session_owner(&owner.invocation.session_id)
                     .as_ref()
                     != Some(&owner.invocation)
                 {
@@ -162,6 +162,11 @@ pub(super) async fn act(
                                 &owner.invocation.session_id,
                                 Some(connection),
                                 maka_client_capability::BindingMode::Strict,
+                                host.log
+                                    .invocation_configuration(&owner.invocation)
+                                    .await
+                                    .map_err(|error| super::stored(host, error))?
+                                    .map(|configuration| configuration.orchestration_mode),
                             )
                             .await,
                     );

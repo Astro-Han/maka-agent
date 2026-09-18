@@ -123,7 +123,7 @@ async fn original_client_native_anthropic_options_and_signed_history_survive_reo
                     let frozen = configuration
                         .as_ref()
                         .expect("opening freezes configuration");
-                    assert_eq!(frozen.model.as_ref(), Some(&current.configuration.model));
+                    assert_eq!(frozen.model.as_ref(), current.configuration.target.model());
                     Some(frozen.thinking_level)
                 })
                 .collect();

@@ -52,6 +52,12 @@ fn validate(value: &mut Value, field: &str) -> Result<()> {
             }
             let projection = map.contains_key("workspace") && map.contains_key("id");
             let page = map.get("kind").and_then(Value::as_str) == Some("page");
+            if projection
+                && (map.get("backend").and_then(Value::as_str) == Some("plugin-executor"))
+                    != map.contains_key("executorId")
+            {
+                return Err(invalid());
+            }
             if projection && !map.contains_key("llmConnectionId")
                 || page && !map.contains_key("nextCursor")
                 || map.get("kind").and_then(Value::as_str) == Some("session")

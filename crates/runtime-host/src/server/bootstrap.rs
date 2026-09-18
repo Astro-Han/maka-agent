@@ -32,7 +32,7 @@ impl OperationRegistry for Operations {
         }
         if !matches!(
             operation,
-            Operation::HostStatus | Operation::HostDiagnosticsQuery
+            Operation::HostStatus | Operation::HostDiagnosticsQuery | Operation::HostWake
         ) {
             return Err(ProtocolError::invalid("Unknown operation"));
         }
@@ -45,6 +45,7 @@ impl OperationRegistry for Operations {
             return Ok(value.clone());
         }
         match operation {
+            Operation::HostWake => exact(record(value, "host.wake result")?, &[])?,
             Operation::HostStatus => host::decode_status(value)?,
             Operation::HostDiagnosticsQuery => host::decode_diagnostics(value)?,
             _ => return Err(ProtocolError::invalid("Unknown operation")),
@@ -52,6 +53,13 @@ impl OperationRegistry for Operations {
         Ok(value.clone())
     }
     fn error_codes(&self, operation: Operation) -> Option<&[OperationErrorCode]> {
+        if operation == Operation::HostWake {
+            return Some(&[
+                OperationErrorCode::HostDraining,
+                OperationErrorCode::OperationUnavailable,
+                OperationErrorCode::InternalFailure,
+            ]);
+        }
         if operation == Operation::HostUpgradePrepare {
             return Some(&[
                 OperationErrorCode::OperationConflict,
@@ -61,7 +69,7 @@ impl OperationRegistry for Operations {
         }
         matches!(
             operation,
-            Operation::HostStatus | Operation::HostDiagnosticsQuery
+            Operation::HostStatus | Operation::HostDiagnosticsQuery | Operation::HostWake
         )
         .then_some(
             &[

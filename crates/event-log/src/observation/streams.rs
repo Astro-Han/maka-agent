@@ -50,6 +50,28 @@ pub(super) async fn read(
     {
         return Ok(Vec::new());
     }
+    let external: Option<(i64, String)> = sqlx::query_as(
+        "SELECT sequence, event_id FROM runtime_events started WHERE invocation_id = ?1 AND kind = 'executor_started'
+         AND NOT EXISTS(SELECT 1 FROM runtime_events done WHERE done.invocation_id = started.invocation_id AND done.kind = 'executor_completed')"
+    ).bind(&root.invocation.invocation_id).fetch_optional(&mut *connection).await?;
+    if let Some((sequence, message)) = external {
+        let sequence = crate::sequence_number(sequence)?;
+        return Ok([TextKind::Text, TextKind::Thinking]
+            .into_iter()
+            .map(|text_kind| AssistantStreamSeed {
+                start_sequence: sequence,
+                step_id: root.invocation.invocation_id.clone(),
+                part_id: if text_kind == TextKind::Text {
+                    "text"
+                } else {
+                    "thinking"
+                }
+                .into(),
+                message_id: message.clone(),
+                text_kind,
+            })
+            .collect());
+    }
     // Select only identities. Neither finished output bodies nor accumulated text
     // cross the SQL boundary. The existing invocation_sequence index scopes scans.
     let rows = sqlx::query(

@@ -84,6 +84,7 @@ async fn glob_matches_node_paths_hidden_names_directory_suffix_and_result_cap() 
             .await
             .unwrap();
         cases.push(json!({"pattern":pattern,"files":result["files"]}));
+        assert_eq!(result["complete"], true, "{pattern}");
     }
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/glob_source.mjs");
     let mut child = Command::new("node")
@@ -114,7 +115,7 @@ async fn glob_matches_node_paths_hidden_names_directory_suffix_and_result_cap() 
         .await
         .unwrap();
     let expected: Vec<String> = (0..200).map(|n| format!("cap{n:03}.txt")).collect();
-    assert_eq!(result, json!({"files":expected}));
+    assert_eq!(result, json!({"files":expected,"complete":false}));
 }
 
 #[tokio::test]
@@ -141,7 +142,7 @@ async fn glob_keeps_captured_authority_and_cannot_walk_external_aliases_or_hide_
             )
             .await
             .unwrap(),
-        json!({"files":["inside.txt"]})
+        json!({"files":["inside.txt"],"complete":true})
     );
     for input in [
         json!({"pattern":"**","cwd":"escape"}),
@@ -176,5 +177,5 @@ async fn glob_keeps_captured_authority_and_cannot_walk_external_aliases_or_hide_
         )
         .await
         .unwrap();
-    assert_eq!(missing, json!({"files":[]}));
+    assert_eq!(missing, json!({"files":[],"complete":true}));
 }

@@ -26,7 +26,56 @@ use uuid::Uuid;
 
 mod attachments;
 mod environment;
-pub(crate) use environment::Environment;
+pub(crate) use environment::executor_skills;
+pub(crate) use environment::{Backend, Environment};
+
+pub(super) enum PreparedRun {
+    Model(Box<RunInput>),
+    Executor(Box<maka_agent::ExecutorInput>),
+}
+impl PreparedRun {
+    pub fn invocation_mut(&mut self) -> &mut Invocation {
+        match self {
+            Self::Model(input) => &mut input.invocation,
+            Self::Executor(input) => &mut input.request.invocation,
+        }
+    }
+    pub fn message(
+        &mut self,
+        content: maka_runtime::input::MessageInput,
+        skills: Option<Box<maka_runtime::skills::SkillInvocationResult>>,
+    ) -> Result<()> {
+        match self {
+            Self::Model(input) => {
+                let RunWork::Message {
+                    message,
+                    skill_invocation,
+                    ..
+                } = &mut input.work
+                else {
+                    return Err(internal("Expected a Message Run"));
+                };
+                *message = content;
+                *skill_invocation = skills;
+            }
+            Self::Executor(input) => {
+                if skills.is_some() {
+                    return Err(failure(
+                        Code::OperationUnavailable,
+                        "Executor cannot accept native Skills",
+                    ));
+                }
+                input.request.content = content;
+            }
+        }
+        Ok(())
+    }
+}
+impl From<RunInput> for PreparedRun {
+    fn from(input: RunInput) -> Self {
+        Self::Model(Box::new(input))
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum MessageOrigin<'a> {
@@ -85,22 +134,49 @@ impl Executions {
         request_fingerprint: Option<String>,
         source_messages: Vec<RootSourceMessage>,
         environment: Environment,
-    ) -> Result<(RunInput, std::sync::Arc<super::skills::FrozenSkills>)> {
+    ) -> Result<PreparedRun> {
         let content = &input.content;
         if input.skill_ids.is_some() {
             return Err(internal("Skill selection must be handled by admission"));
-        }
-        if input.turn_orchestration.is_some() {
-            return Err(failure(
-                Code::OperationUnavailable,
-                "Turn orchestration execution is not installed",
-            ));
         }
         if let MessageOrigin::Client { root_id, .. } = origin {
             self.validate_message_content(&input.session_id, content, root_id)
                 .await?;
         }
         let session = environment.session;
+        let mut configuration = session.invocation_configuration().await.map_err(internal)?;
+        configuration.system_prompt = Some(environment.prompt.clone());
+        configuration.tool_composition = Some(environment.composition);
+        let invocation = Invocation {
+            session_id: input.session_id.clone(),
+            turn_id: input.turn_id.clone(),
+            run_id: Uuid::new_v4().to_string(),
+            invocation_id: Uuid::new_v4().to_string(),
+        };
+        let model = match environment.backend {
+            Backend::Executor(binding) => {
+                if input.max_steps.is_some() {
+                    return Err(failure(
+                        Code::OperationUnavailable,
+                        "Executor does not expose a native model-step limit",
+                    ));
+                }
+                return Ok(PreparedRun::Executor(Box::new(maka_agent::ExecutorInput {
+                    request: maka_plugins::executor::Request {
+                        invocation,
+                        conversation_key: input.session_id,
+                        content: input.content.into(),
+                        cwd: configuration.cwd.clone(),
+                        instructions: Some(environment.prompt.text),
+                    },
+                    binding,
+                    configuration,
+                    request_fingerprint,
+                    source_messages,
+                })));
+            }
+            Backend::Model(model) => model,
+        };
         let provider = provider::resolve(
             &self.configuration,
             &self.oauth,
@@ -108,36 +184,24 @@ impl Executions {
             &session,
         )
         .await?;
-        let mut configuration = session.invocation_configuration().await.map_err(internal)?;
-        configuration.system_prompt = Some(environment.prompt);
-        configuration.tool_composition = Some(environment.composition);
-        let (tools, skills) = (environment.tools, environment.skills);
+        let tools = model.tools;
         let max_steps = usize::try_from(input.max_steps.unwrap_or(64)).map_err(internal)?;
-        let invocation = Invocation {
-            session_id: input.session_id.clone(),
-            turn_id: input.turn_id.clone(),
-            run_id: Uuid::new_v4().to_string(),
-            invocation_id: Uuid::new_v4().to_string(),
-        };
-        Ok((
-            RunInput {
-                invocation: invocation.clone(),
-                work: RunWork::Message {
-                    source_messages,
-                    skill_invocation: Default::default(),
-                    message: input.content.into(),
-                    tools,
-                    max_steps,
-                },
-                request_fingerprint,
-                provider: provider.config,
-                provider_options: provider.options,
-                main_output_limit: provider.main_output_limit,
-                supports_vision: provider.supports_vision,
-                context: Some(provider.context),
-                configuration,
+        Ok(PreparedRun::Model(Box::new(RunInput {
+            invocation: invocation.clone(),
+            work: RunWork::Message {
+                source_messages,
+                skill_invocation: Default::default(),
+                message: input.content.into(),
+                tools,
+                max_steps,
             },
-            skills,
-        ))
+            request_fingerprint,
+            provider: provider.config,
+            provider_options: provider.options,
+            main_output_limit: provider.main_output_limit,
+            supports_vision: provider.supports_vision,
+            context: Some(provider.context),
+            configuration,
+        })))
     }
 }

@@ -283,6 +283,7 @@ export interface RuntimeHostConnection {
   subscribeConfigurationChanges(listener: (revision: number) => void): () => void;
   subscribeConnectionCatalogChanges(listener: (revision: number) => void): () => void;
   subscribeProjectCatalogChanges(listener: (revision: number) => void): () => void;
+  subscribePluginClientChanges?(listener: (revision: string) => void): () => void;
   subscribeSessionCatalogChanges(listener: (frame: SessionCatalogChangedFrame) => void): () => void;
   subscribeScheduledTaskChanges(listener: (frame: ScheduledTaskChangedFrame) => void): () => void;
 }
@@ -385,6 +386,7 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
   readonly #configurationChangeListeners = new Set<(revision: number) => void>();
   readonly #connectionCatalogChangeListeners = new Set<(revision: number) => void>();
   readonly #projectCatalogChangeListeners = new Set<(revision: number) => void>();
+  readonly #pluginClientChangeListeners = new Set<(revision: string) => void>();
   readonly #sessionCatalogChangeListeners = new Set<(frame: SessionCatalogChangedFrame) => void>();
   readonly #scheduledTaskChangeListeners = new Set<(frame: ScheduledTaskChangedFrame) => void>();
   #livenessTimer: NodeJS.Timeout | undefined;
@@ -724,6 +726,11 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
     return () => this.#projectCatalogChangeListeners.delete(listener);
   }
 
+  subscribePluginClientChanges(listener: (revision: string) => void): () => void {
+    this.#pluginClientChangeListeners.add(listener);
+    return () => this.#pluginClientChangeListeners.delete(listener);
+  }
+
   subscribeSessionCatalogChanges(
     listener: (frame: SessionCatalogChangedFrame) => void,
   ): () => void {
@@ -755,6 +762,15 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
               continue;
             case 'project.catalog.changed':
               this.#acceptProjectCatalogChanged(frame);
+              continue;
+            case 'plugin.client.changed':
+              for (const listener of this.#pluginClientChangeListeners) {
+                try {
+                  listener(frame.revision);
+                } catch {
+                  /* Listener faults do not close transport. */
+                }
+              }
               continue;
             case 'session.catalog.changed':
               this.#acceptSessionCatalogChanged(frame);
@@ -1034,6 +1050,7 @@ class RuntimeHostConnectionImpl implements RuntimeHostConnection {
     this.#retiredSubscriptionIds.clear();
     this.#clientCapabilities.close(error);
     this.#configurationChangeListeners.clear();
+    this.#pluginClientChangeListeners.clear();
     this.#sessionCatalogChangeListeners.clear();
     this.#scheduledTaskChangeListeners.clear();
     if (gracefulPeerClose) this.#transport.closeAfterFlush();

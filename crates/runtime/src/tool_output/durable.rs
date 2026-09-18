@@ -107,7 +107,7 @@ fn validate_raw_depth(output: &ToolOutput) -> Result<(), &'static str> {
                     | crate::capability::ContentBlock::ResourceLink { .. } => true,
                 })
         }
-        ToolOutput::Image(_) | ToolOutput::Text(_) => true,
+        ToolOutput::Image(_) | ToolOutput::Text(_) | ToolOutput::Model(_) => true,
     };
     if valid {
         Ok(())
@@ -190,6 +190,16 @@ pub(crate) fn freeze(
                 Vec::new(),
             )
         }),
+        ToolOutput::Model(result) => Some((
+            DurableToolProjection::Json {
+                value: serde_json::json!({
+                    "modelId": result.model_id,
+                    "finishReason": result.finish_reason,
+                    "usage": result.usage
+                }),
+            },
+            Vec::new(),
+        )),
     };
     prepared
         .filter(|(projection, _)| projection.validate(&invocation.session_id).is_ok())

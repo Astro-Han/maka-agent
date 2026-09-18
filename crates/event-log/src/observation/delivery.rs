@@ -38,6 +38,24 @@ pub struct StoreStreamEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamFact {
+    ExecutorStarted,
+    ExecutorDelta {
+        text_kind: TextKind,
+        text: String,
+    },
+    ExecutorCompleted,
+    ExecutorToolStart {
+        tool_call_id: String,
+        name: String,
+    },
+    ExecutorToolProgress {
+        tool_call_id: String,
+        text: String,
+    },
+    ExecutorToolResult {
+        tool_call_id: String,
+        is_error: bool,
+    },
     InvocationOpened,
     WorkhubDelegated,
     MessageSteered,
@@ -232,6 +250,18 @@ SELECT json_object(
         'run_id', json_extract(event_json, '$.invocation.run_id'),
         'invocation_id', invocation_id),
     'fact', json(CASE
+        WHEN kind IN ('executor_started', 'executor_completed') THEN json_object('kind', kind)
+        WHEN kind = 'executor_observed' AND json_extract(event_json, '$.fact.output.type') IN ('output_delta','thinking_delta') THEN
+            json_object('kind', 'executor_delta',
+                'text_kind', CASE WHEN json_extract(event_json, '$.fact.output.type') = 'thinking_delta' THEN 'thinking' ELSE 'text' END,
+                'text', json_extract(event_json, '$.fact.output.text'))
+        WHEN kind = 'executor_observed' AND json_extract(event_json, '$.fact.output.type') = 'tool_start' THEN
+            json_object('kind', 'executor_tool_start', 'tool_call_id', json_extract(event_json, '$.fact.output.toolCallId'), 'name', json_extract(event_json, '$.fact.output.name'))
+        WHEN kind = 'executor_observed' AND json_extract(event_json, '$.fact.output.type') = 'tool_progress' THEN
+            json_object('kind', 'executor_tool_progress', 'tool_call_id', json_extract(event_json, '$.fact.output.toolCallId'), 'text', json_extract(event_json, '$.fact.output.text'))
+        WHEN kind = 'executor_observed' THEN
+            json_object('kind', 'executor_tool_result', 'tool_call_id', json_extract(event_json, '$.fact.output.toolCallId'),
+                'is_error', json(CASE WHEN json_extract(event_json, '$.fact.output.isError') THEN 'true' ELSE 'false' END))
         WHEN kind IN ('tool_dispatched', 'tool_rejected') THEN
             json_object('kind', kind, 'operation_id', operation_id,
                 'name', json_extract(event_json, '$.fact.name'))
@@ -240,7 +270,10 @@ SELECT json_object(
                 'outcome', json_extract(event_json, '$.fact.outcome.kind'))
         WHEN kind IN ('invocation_opened', 'message_steered', 'workhub_delegated') THEN json_object('kind', kind)
         WHEN kind = 'invocation_ended' THEN json_object('kind', kind,
-            'failed', json(CASE WHEN json_extract(event_json, '$.fact.outcome.kind') = 'failed' THEN 'true' ELSE 'false' END))
+            'failed', json(CASE WHEN json_extract(event_json, '$.fact.outcome.kind') = 'failed'
+                OR (json_extract(event_json, '$.fact.outcome.kind') = 'cancelled' AND EXISTS (
+                    SELECT 1 FROM runtime_events started WHERE started.invocation_id = runtime_events.invocation_id AND started.kind = 'executor_started'))
+                THEN 'true' ELSE 'false' END))
         WHEN kind IN ('model_completed', 'model_interrupted') THEN
             json_object('kind', 'step_ended',
                 'step_id', json_extract(event_json, '$.fact.step_id'),
@@ -276,7 +309,7 @@ AND (kind NOT IN ('model_observed', 'model_completed', 'model_interrupted') OR
              AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'))
 AND (kind IN ('invocation_opened', 'message_steered', 'invocation_ended', 'model_completed', 'model_interrupted',
-             'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated')
+             'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated', 'executor_started', 'executor_observed', 'executor_completed')
      OR (kind = 'model_observed'
          AND json_extract(event_json, '$.fact.event.kind') IN
              ('part_started', 'part_delta', 'part_finished')))

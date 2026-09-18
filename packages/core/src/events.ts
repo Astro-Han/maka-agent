@@ -565,7 +565,7 @@ interface BaseEvent {
 
 interface ToolActivityIdentity {
   /** Execution surface that produced this tool activity. */
-  origin?: 'provider' | 'code_mode';
+  origin?: 'provider' | 'code_mode' | 'host_sdk';
   /** Provider-history projection policy for this activity. */
   modelVisibility?: 'visible' | 'hidden';
   /** Enclosing exec provider call, for nested CodeMode activity. */

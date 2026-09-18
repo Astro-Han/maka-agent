@@ -91,6 +91,7 @@ impl EventLog {
                 return Err(StoreError::EventConflict);
             }
             crate::tool_payloads::verify_replay(transaction, write).await?;
+            crate::composition::verify_replay(transaction, write).await?;
             crate::archive::verify_replay(transaction, event).await?;
             return Ok(AppendResult::Existing(sequence_number(sequence)?));
         }
@@ -150,6 +151,7 @@ impl EventLog {
                 }
             }
         }
+        crate::executor::validate(transaction, event).await?;
         crate::tool_calls::validate(transaction, event).await?;
         crate::continuation::validate(transaction, event).await?;
         crate::handoff::validate(transaction, event).await?;
@@ -234,6 +236,7 @@ impl EventLog {
         let sequence = sequence_number(inserted.last_insert_rowid())?;
         crate::message_sources::insert(transaction, event).await?;
         crate::tool_payloads::insert(transaction, write).await?;
+        crate::composition::insert(transaction, write).await?;
         if matches!(event.fact, Fact::InvocationEnded { .. }) {
             crate::sessions::read_state::mark_unread(
                 transaction,

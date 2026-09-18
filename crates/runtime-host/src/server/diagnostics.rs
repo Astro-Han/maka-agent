@@ -27,6 +27,7 @@ pub(super) struct Activity {
     executions: usize,
     shells: usize,
     oauth: usize,
+    background: usize,
 }
 
 impl Activity {
@@ -53,6 +54,7 @@ impl Activity {
             ("execution", self.executions),
             ("shell", self.shells),
             ("oauth", self.oauth),
+            ("plugin-background", self.background),
         ]
         .into_iter()
         .filter(|(_, count)| *count != 0)
@@ -75,6 +77,7 @@ impl Host {
             executions: self.executions.active_count(),
             shells: self.shells.active_count(),
             oauth: self.oauth.active_count(),
+            background: self.plugins.pending_background_work(),
         }
     }
 
@@ -86,7 +89,7 @@ impl Host {
             state: self.lifecycle(),
             connections: activity.connections,
             active_operations: activity.commands,
-            active_residencies: activity.resident_count(),
+            active_residencies: activity.resident_count() + activity.background,
         }
     }
 

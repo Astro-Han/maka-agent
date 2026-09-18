@@ -102,6 +102,7 @@ export interface RuntimeHostDesktopManager {
   ): Promise<RuntimeHostGuestAccessFinalization>;
   unmountGuest(mountId: string): Promise<void>;
   wakePeerRecovery(profileId?: string): void;
+  notifySystemResume(): void;
   disable(profileId: string): Promise<void>;
   waitUntilReady(
     profileId: string,
@@ -703,6 +704,18 @@ class RuntimeHostDesktopManagerImpl implements RuntimeHostDesktopManager {
         throw new Error('Runtime Host target is not a Session Guest mount');
       }
       await this.#disable(mountId);
+    });
+  }
+
+  notifySystemResume(): void {
+    this.wakePeerRecovery();
+    // Only this machine resumed. Never treat a remote reconnect as a Host wake.
+    const local = this.#targets.get(LOCAL_RUNTIME_HOST_PROFILE.id);
+    const client = local?.valid ? local.lifecycle?.current?.client : undefined;
+    if (client?.lifecycleState !== 'ready') return;
+    void client.request('host.wake', {}, 2_000).catch(() => {
+      // A closing/older Host is harmless: scheduler recovery also runs on startup
+      // and periodically. A wake must never wait for a connection or launch one.
     });
   }
 

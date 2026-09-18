@@ -282,15 +282,18 @@ async fn resolve(host: &Host) -> Result<(), OperationError> {
             }
         })?;
     let config = SessionConfiguration {
+        worktree: None,
         workspace,
         name: "WorkHub".into(),
         labels: Vec::new(),
         is_flagged: false,
         title_is_manual: false,
-        model,
+        target: crate::session::SessionTarget::Model { model },
         connection_locked: false,
         thinking_level: None,
         tool_profile: Some(SessionToolProfile::WorkhubCoordinationV2),
+        bound_tools: None,
+        instructions: None,
         tool_mode: ToolMode::Direct,
         permission_mode: PermissionMode::Bypass,
         boundary_revision: 0,

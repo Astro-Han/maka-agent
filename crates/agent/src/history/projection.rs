@@ -148,6 +148,15 @@ pub(super) fn build<'a>(
                     vision,
                 )?);
             }
+            Fact::ExecutorCompleted { text } => {
+                messages.push(Message::Assistant {
+                    content: vec![AssistantPart::Text {
+                        text: text.clone(),
+                        provider_options: None,
+                    }],
+                    provider_options: None,
+                });
+            }
             Fact::ModelCompleted { step_id, output } => {
                 match purposes.get(&(&stored.event.invocation.invocation_id, step_id)) {
                     Some(ModelPurpose::Summary) => continue,
@@ -239,7 +248,9 @@ pub(super) fn build<'a>(
                         ));
                     }
                 }
-                ToolOrigin::CodeMode { .. } | ToolOrigin::Standalone => {
+                ToolOrigin::CodeMode { .. }
+                | ToolOrigin::HostSdk { .. }
+                | ToolOrigin::Standalone => {
                     if calls.contains_key(operation) {
                         return Err(RunError::ReconciliationRequired(
                             "hidden tool operation aliases provider call".into(),
@@ -270,7 +281,9 @@ pub(super) fn build<'a>(
                         ToolOutput::ErrorText(reason.to_string()),
                     ));
                 }
-                ToolOrigin::CodeMode { .. } | ToolOrigin::Standalone => {
+                ToolOrigin::CodeMode { .. }
+                | ToolOrigin::HostSdk { .. }
+                | ToolOrigin::Standalone => {
                     if calls.contains_key(operation) {
                         return Err(RunError::ReconciliationRequired(
                             "hidden tool rejection aliases provider call".into(),

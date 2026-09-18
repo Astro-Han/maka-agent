@@ -378,7 +378,9 @@ fn check_layout(path: &Path) -> io::Result<()> {
         }
         // These dedicated data directories are not alternate database layouts.
         // Do not accept a symlink/reparse point in place of either directory.
-        if (name == "skills" || name == "workhub-coordination") && entry.file_type()?.is_dir() {
+        if (name == "skills" || name == "workhub-coordination" || name == "subagent-worktrees")
+            && entry.file_type()?.is_dir()
+        {
             continue;
         }
         if !matches!(

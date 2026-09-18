@@ -1467,6 +1467,42 @@ test('Plugin Platform protocol rejects open and malformed generic composition sh
   assert.equal(config['__proto__'], 'configured');
   assert.equal(Object.hasOwn(isolate, 'constructor'), true);
   assert.equal(isolate['constructor'], 'mapped');
+  for (const config of [null, 'native-config', { nested: { array: [true, null, 3] } }]) {
+    const decoded = decodePluginCompositionApplyInput({
+      operations: [{ type: 'insert', entry: { id: 'json-config', config } }],
+    }).operations[0];
+    assert.equal(decoded?.type, 'insert');
+    if (decoded?.type !== 'insert') throw new Error('Expected insert');
+    assert.deepEqual(decoded.entry.config, config);
+    assert.doesNotThrow(() =>
+      decodeResponseFrame({
+        requestId: 'config-query',
+        operation: 'plugin.platform.query',
+        ok: true,
+        result: {
+          view: 'entries',
+          items: [
+            {
+              id: 'json-config',
+              rootId: 'profile',
+              config,
+              disabled: false,
+              status: 'active',
+              waitingFor: [],
+              effects: [],
+              children: [],
+            },
+          ],
+          nextCursor: null,
+        },
+      }),
+    );
+  }
+  assert.throws(() =>
+    decodePluginCompositionApplyInput({
+      operations: [{ type: 'insert', entry: { id: 'bad-config', config: { value: Number.NaN } } }],
+    }),
+  );
   assert.throws(() =>
     decodePluginCompositionApplyInput(
       JSON.parse(

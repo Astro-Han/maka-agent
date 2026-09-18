@@ -35,7 +35,7 @@ use std::{
 use uuid::Uuid;
 
 pub mod directory;
-mod git;
+pub(crate) mod git;
 pub mod project;
 
 pub const MARKER_FILE: &str = ".maka-workspace.json";
@@ -161,7 +161,7 @@ impl Workspace {
     }
 }
 
-fn options() -> OpenOptions {
+pub(crate) fn options() -> OpenOptions {
     let mut options = OpenOptions::new();
     options.follow(FollowSymlinks::No);
     #[cfg(unix)]
@@ -199,7 +199,7 @@ fn read_bounded(dir: &Dir, name: &OsStr, file: &mut File, max: usize) -> io::Res
     Ok(bytes)
 }
 
-fn invalid(message: &str) -> io::Error {
+pub(crate) fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 

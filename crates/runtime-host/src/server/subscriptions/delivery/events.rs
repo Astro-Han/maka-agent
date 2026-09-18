@@ -81,6 +81,9 @@ impl Delivery {
                     | StreamFact::ToolDispatched { .. }
                     | StreamFact::ToolRejected { .. }
                     | StreamFact::ToolSettled { .. }
+                    | StreamFact::ExecutorCompleted
+                    | StreamFact::ExecutorToolStart { .. }
+                    | StreamFact::ExecutorToolResult { .. }
             ) && let Some(transcript) = &mut self.transcript
             {
                 transcript.catch_up_to(stored.sequence);

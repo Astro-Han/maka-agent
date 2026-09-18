@@ -30,6 +30,7 @@ pub mod model_fetch;
 pub mod network;
 pub mod oauth;
 pub mod onboarding;
+mod plugin_credentials;
 mod policy;
 pub mod projection;
 pub mod skills;

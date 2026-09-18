@@ -42,7 +42,9 @@ use tokio_util::sync::CancellationToken;
 
 /// A run-owned capability snapshot; permission is captured separately per call.
 /// Registry access is synchronous; no policy wait holds its mutation gate.
+#[derive(Clone)]
 pub struct ClientTools {
+    permission_ceiling: Option<PermissionMode>,
     snapshot: Arc<Snapshot>,
     registry: Arc<Mutex<Registry>>,
     broker: Arc<Broker>,
@@ -77,6 +79,7 @@ impl ClientTools {
             })
             .collect();
         Arc::new(Self {
+            permission_ceiling: None,
             snapshot: Arc::new(snapshot),
             registry,
             broker,
@@ -114,6 +117,12 @@ impl ClientTools {
                 }
             })
             .collect()
+    }
+
+    /// Invocation-bound SDK calls cannot widen their originally admitted mode.
+    pub fn with_permission_ceiling(mut self: Arc<Self>, mode: PermissionMode) -> Arc<Self> {
+        Arc::make_mut(&mut self).permission_ceiling = Some(mode);
+        self
     }
 }
 impl ToolPreparer for ClientTools {
@@ -165,10 +174,17 @@ impl ToolPreparer for ClientTools {
                 .map_err(rejected)
         })();
         let permission = self.interactions.permission_mode(context.clone());
+        let ceiling = self.permission_ceiling;
         let snapshot = self.snapshot.clone();
         let interactions = self.interactions.clone();
         Box::pin(async move {
-            let mode = permission.await?;
+            let mode = match (permission.await?, ceiling) {
+                (PermissionMode::Explore, _) | (_, Some(PermissionMode::Explore)) => {
+                    PermissionMode::Explore
+                }
+                (PermissionMode::Ask, _) | (_, Some(PermissionMode::Ask)) => PermissionMode::Ask,
+                (mode, _) => mode,
+            };
             let (pending, registration, offer_index, tool_index) = pending?;
             let accepted = pending.accepted().await.map_err(rejected)?;
             match mode {
@@ -207,7 +223,7 @@ impl ToolPreparer for ClientTools {
                 interactions,
                 context,
             });
-            let effect: PreparedEffect = Box::new(move |_| {
+            let effect: PreparedEffect = PreparedEffect::new(move |_| {
                 Box::pin(async move {
                     let result = accepted.admit_with_interactions(forms).await.map_err(
                         |error| match error {

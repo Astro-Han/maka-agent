@@ -73,9 +73,14 @@ async fn durable_lifecycle_keeps_terminal_output_mutable_and_never_reattaches_on
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("runtime.sqlite");
     let log = EventLog::open(&path).await.unwrap();
-    log.create_session("session", "create", &json!({}), 1)
-        .await
-        .unwrap();
+    log.create_session(
+        "session",
+        "create",
+        &json!({"workspace":{"hostCwd":"/captured/workspace"}}),
+        1,
+    )
+    .await
+    .unwrap();
     let record = starting("finished");
     let mut changes = log.subscribe_shell_changes();
     assert_eq!(log.create_shell_run(record.clone()).await.unwrap(), record);
@@ -222,7 +227,16 @@ async fn durable_lifecycle_keeps_terminal_output_mutable_and_never_reattaches_on
     log.close().await.unwrap();
 
     let log = EventLog::open(&path).await.unwrap();
+    let before = log.workspace_fence("/captured/workspace").await.unwrap();
+    assert_eq!(before.0.len(), 1);
+    assert!(!before.0[0].orphaned_shells);
     assert_eq!(log.recover_shell_runs(50).await.unwrap(), 2);
+    let after = log.workspace_fence("/captured/workspace").await.unwrap();
+    assert!(
+        after.0[0].orphaned_shells,
+        "unknown cleanup is not a transient busy workspace"
+    );
+    assert_ne!(before, after);
     assert_eq!(log.recover_shell_runs(60).await.unwrap(), 0);
     assert_eq!(
         log.read_shell_run("session", "finished").await.unwrap(),
@@ -264,7 +278,7 @@ async fn migration_and_recovery_commit_are_atomic_under_real_sqlite_faults() {
         .unwrap();
     // A prior Rust schema, not an old Maka/user database.
     sqlx::raw_sql(
-        "DROP VIEW workhub_corrections; DROP VIEW workhub_assignments; DROP VIEW workhub_stops; ALTER TABLE legacy_workhub_stops RENAME TO workhub_stops; DROP VIEW runtime_events; DROP VIEW session_events; ALTER TABLE event_log RENAME TO runtime_events; DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE shell_runs; DELETE FROM _sqlx_migrations WHERE version >= 6;
+        "DROP TABLE model_request_compositions; DROP TABLE request_compositions; DROP TABLE graph_wakes; DROP TABLE graph_intents; DROP TABLE graph_updates; DROP TABLE graph_epochs; DROP TABLE plugin_execution_receipts; DROP TABLE plugin_data; DROP TABLE plugin_packages; DROP TABLE plugin_package_files; DROP TABLE plugin_package_blobs; DROP TABLE plugin_composition; DROP VIEW workhub_corrections; DROP VIEW workhub_assignments; DROP VIEW workhub_stops; ALTER TABLE legacy_workhub_stops RENAME TO workhub_stops; DROP VIEW runtime_events; DROP VIEW session_events; ALTER TABLE event_log RENAME TO runtime_events; DROP TABLE workhub_stops; DROP INDEX workhub_action_identity; DROP TABLE project_locations; DROP TABLE project_identities; DROP TABLE projects; DROP INDEX continuation_claim_id; DROP INDEX continuation_source_boundary; DROP TABLE message_interrupt_receipts; DROP TABLE message_submit_receipts; DROP TABLE queue_command_receipts; DROP TABLE message_queue_state; DROP TABLE message_cancellations; DROP TABLE message_admissions; DROP TABLE shell_runs; DELETE FROM _sqlx_migrations WHERE version >= 6;
         PRAGMA user_version = 5;",
     )
     .execute(&mut observer)

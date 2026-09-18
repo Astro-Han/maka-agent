@@ -40,6 +40,35 @@ impl Host {
         authority: &super::authority::Authority,
         client_instance_id: &str,
     ) -> Result<Outcome, HostError> {
+        if super::scheduler::supports(operation) {
+            return super::scheduler::execute(self, operation, &input).await;
+        }
+        if maka_protocol::plugin::supports(operation) {
+            let input = maka_protocol::plugin::decode_input(operation, &input)?;
+            if let maka_protocol::plugin::Input::Remote(request) = input {
+                return Ok(
+                    match super::plugin_remote::execute(
+                        self,
+                        connection_id,
+                        client_instance_id,
+                        *request,
+                    )
+                    .await
+                    {
+                        Ok(result) => Outcome::success(serde_json::to_value(result)?),
+                        Err(error) => Outcome::failure(error),
+                    },
+                );
+            }
+            return Ok(match self.plugins.execute(input).await {
+                Ok(result) => Outcome::success(result),
+                Err(error) => Outcome::failure(error),
+            });
+        }
+        if operation == Operation::HostWake {
+            self.plugins.wake_background_work();
+            return Ok(Outcome::success(serde_json::json!({})));
+        }
         if operation == Operation::HostUpgradePrepare {
             return match self
                 .prepare_retirement(

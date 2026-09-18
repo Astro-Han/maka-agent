@@ -116,6 +116,8 @@ pub struct InvocationConfiguration {
 #[serde(deny_unknown_fields)]
 pub struct ToolComposition {
     pub clients: crate::capability::ClientComposition,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_tools: Option<std::collections::BTreeSet<String>>,
     /// None for fixed profiles without Skill / SkillSearch handlers.
     pub skills_digest: Option<String>,
 }

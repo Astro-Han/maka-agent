@@ -74,16 +74,14 @@ impl Peer {
         let hello = peer.frame().await;
         (peer, hello)
     }
-    async fn frame(&mut self) -> Value {
+    pub async fn frame(&mut self) -> Value {
         tokio::time::timeout(Duration::from_secs(15), self.receive.recv())
             .await
             .unwrap()
             .expect("Host closed before response")
     }
     pub async fn rpc(&mut self, operation: &str, input: Value) -> Value {
-        self.send
-            .send(json!({"requestId":operation,"operation":operation,"input":input}))
-            .unwrap();
+        self.send_rpc(operation, operation, input);
         loop {
             let value = self.frame().await;
             if value["requestId"] == operation {
@@ -91,6 +89,14 @@ impl Peer {
             }
             assert!(value.get("requestId").is_none(), "{value}");
         }
+    }
+    pub fn send_rpc(&self, request_id: &str, operation: &str, input: Value) {
+        self.send
+            .send(json!({"requestId":request_id,"operation":operation,"input":input}))
+            .unwrap();
+    }
+    pub fn send_frame(&self, frame: Value) {
+        self.send.send(frame).unwrap();
     }
     pub async fn close(self) {
         drop(self.send);

@@ -62,7 +62,9 @@ pub(crate) async fn validate(
             // fresh across the invocation, including collisions across origins.
             let provider_step = match &call.origin {
                 ToolOrigin::Provider { step_id } => Some(step_id.as_str()),
-                ToolOrigin::CodeMode { .. } | ToolOrigin::Standalone => None,
+                ToolOrigin::CodeMode { .. }
+                | ToolOrigin::HostSdk { .. }
+                | ToolOrigin::Standalone => None,
             };
             let duplicate: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM runtime_events
@@ -86,6 +88,35 @@ pub(crate) async fn validate(
             }
             match &call.origin {
                 ToolOrigin::Standalone => {}
+                ToolOrigin::HostSdk {
+                    package_id,
+                    entry_id,
+                    activation,
+                    parent_operation_id,
+                } => {
+                    for value in [package_id, entry_id, activation] {
+                        identity(value)?;
+                    }
+                    if let Some(parent) = parent_operation_id {
+                        identity(parent)?;
+                    }
+                    let active: bool = if let Some(parent) = parent_operation_id {
+                        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events AS parent
+                            WHERE parent.invocation_id = ? AND parent.operation_id = ? AND parent.kind = 'tool_dispatched'
+                            AND NOT EXISTS(SELECT 1 FROM runtime_events AS settled WHERE settled.operation_id = parent.operation_id
+                                AND settled.kind = 'tool_settled'))")
+                            .bind(invocation).bind(parent).fetch_one(&mut *tx).await?
+                    } else {
+                        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND kind = 'executor_started')
+                            AND NOT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND kind = 'executor_completed')")
+                            .bind(invocation).fetch_one(&mut *tx).await?
+                    };
+                    if !active {
+                        return Err(invalid(
+                            "Host SDK operation requires an active parent call or executor",
+                        ));
+                    }
+                }
                 ToolOrigin::CodeMode {
                     parent_operation_id,
                     parent_tool_call_id,
@@ -147,7 +178,7 @@ pub(crate) async fn validate(
             let pending: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM runtime_events AS child
                  WHERE child.invocation_id = ? AND child.kind = 'tool_dispatched'
-                 AND json_extract(child.event_json, '$.fact.call.origin.kind') = 'code_mode'
+                 AND json_extract(child.event_json, '$.fact.call.origin.kind') IN ('code_mode', 'host_sdk')
                  AND json_extract(child.event_json, '$.fact.call.origin.parent_operation_id') = ?
                  AND NOT EXISTS(SELECT 1 FROM runtime_events AS settled
                      WHERE settled.invocation_id = child.invocation_id

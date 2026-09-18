@@ -113,8 +113,15 @@ fn execution_available(
     if let Some(execution) = &record.execution
         && matches!(execution.state, SessionExecutionState::Live { .. })
     {
+        // External adapters have no native model-step steering boundary.
+        if matches!(
+            record.configuration.target,
+            crate::session::SessionTarget::Executor { .. }
+        ) {
+            return false;
+        }
         executions
-            .workhub_target(&record.id)
+            .active_session_owner(&record.id)
             .is_some_and(|owner| owner.turn_id == execution.turn_id)
     } else {
         !executions.has_active_session(&record.id)

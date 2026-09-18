@@ -93,11 +93,10 @@ impl EventLog {
                         return Ok(Vec::new());
                     }
                     let step = evidence::pending_step(&mut tx, id, fence).await?;
-                    let Some(step) = step else {
-                        return Ok(Vec::new());
-                    };
                     let mut view = InvocationView::new(MAX_TEXT_BYTES)?;
-                    for fact in evidence::selected(&mut tx, id, Some(&step), fence, false).await? {
+                    for fact in
+                        evidence::selected(&mut tx, id, step.as_deref(), fence, false).await?
+                    {
                         if fact.event.invocation != invocation {
                             return Err(ProjectionError::Invalid(
                                 "active transcript invocation mismatch",

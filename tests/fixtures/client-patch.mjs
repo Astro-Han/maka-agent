@@ -82,6 +82,7 @@ async function fixture(workspace) {
         'Read',
         'Write',
         'apply_patch',
+        'tool_search',
       ]);
       if (Object.hasOwn(action, 'expected')) {
         const result = input.messages.at(-1);

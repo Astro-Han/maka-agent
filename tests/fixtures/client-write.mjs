@@ -30,7 +30,7 @@ const content = 'written 😀 中文\n';
 const edited = 'edited $& 😀\n';
 const sessionIds = ['write-ask', 'write-explore'];
 const editMetadata = { ok: true, replacements: 1, matchedVia: 'exact', startLine: 1, endLine: 1 };
-const globResult = { files: ['written.txt'] };
+const globResult = { files: ['written.txt'], complete: true };
 const grepResult = { matches: ['1:edited $& 😀'], complete: true };
 
 async function fixture(writeResult) {
@@ -67,8 +67,17 @@ async function fixture(writeResult) {
       assert.deepEqual(
         input.tools.map((tool) => tool.function.name).sort(),
         index <= 6
-          ? ['AskUserQuestion', 'Edit', 'Glob', 'Grep', 'Read', 'Write', 'apply_patch']
-          : ['AskUserQuestion', 'Glob', 'Grep', 'Read'],
+          ? [
+              'AskUserQuestion',
+              'Edit',
+              'Glob',
+              'Grep',
+              'Read',
+              'Write',
+              'apply_patch',
+              'tool_search',
+            ]
+          : ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'tool_search'],
       );
       if (Object.hasOwn(action, 'expected')) {
         const result = input.messages.at(-1);

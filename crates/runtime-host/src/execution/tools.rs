@@ -37,6 +37,35 @@ use std::{path::PathBuf, sync::Arc};
 mod live;
 pub(super) use live::NativeTools;
 
+pub(super) fn reserve_core_names(
+    catalog: &maka_plugins::contributions::Catalog,
+) -> Result<(), maka_plugins::Error> {
+    catalog.host_only::<maka_tools::plugins::PluginTool>()?;
+    catalog.host_only::<maka_plugins::prompt::Section>()?;
+    catalog.host_only::<maka_plugins::prompt::Variable>()?;
+    catalog.host_only::<maka_plugins::prompt::DynamicContext>()?;
+    catalog.host_only::<maka_plugins::executor::Executor>()?;
+    for name in [
+        READ_NAME,
+        GLOB_NAME,
+        GREP_NAME,
+        WRITE_NAME,
+        EDIT_NAME,
+        PATCH_NAME,
+        SHELL_NAME,
+        shell::STOP_NAME,
+        shell::WRITE_STDIN_NAME,
+        "Skill",
+        "SkillSearch",
+        "AskUserQuestion",
+        "tool_search",
+        "exec",
+    ] {
+        catalog.reserve::<maka_tools::plugins::PluginTool>(name)?;
+    }
+    Ok(())
+}
+
 /// Definitions and capability identities remain Run-owned. Native calls capture
 /// the current durable permission boundary during preparation, before T1.
 pub(super) fn catalog(
@@ -44,6 +73,7 @@ pub(super) fn catalog(
     mode: PermissionMode,
     additional_tools: Vec<ToolRegistration>,
     mut skills: super::skills::FrozenSkills,
+    ceiling: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<(ToolCatalog, Arc<super::skills::FrozenSkills>), OperationError> {
     let mut registrations = native.registrations(mode)?;
     let live = Arc::new(live::LiveTools::new(native, &registrations, mode));
@@ -51,19 +81,30 @@ pub(super) fn catalog(
         registration.handler = ToolHandler::Prepared(live.clone());
     }
     registrations.extend(additional_tools);
+    if let Some(ceiling) = ceiling {
+        registrations.retain(|tool| ceiling.contains(&tool.definition.name));
+        skills.host.tools.retain(|name| ceiling.contains(name));
+    }
     skills.host.tools.extend(
         registrations
             .iter()
             .map(|tool| tool.definition.name.clone()),
     );
-    skills
-        .host
-        .tools
-        .extend(["Skill".into(), "SkillSearch".into()]);
+    skills.host.tools.extend(
+        ["Skill", "SkillSearch"]
+            .into_iter()
+            .filter(|name| ceiling.is_none_or(|names| names.contains(*name)))
+            .map(str::to_owned),
+    );
     let skills = Arc::new(skills);
     // An empty frozen inventory cannot service either tool during this Run.
     if skills.catalog().available().next().is_some() {
-        registrations.extend(skills.registrations());
+        registrations.extend(
+            skills
+                .registrations()
+                .into_iter()
+                .filter(|tool| ceiling.is_none_or(|names| names.contains(&tool.definition.name))),
+        );
     }
     ToolCatalog::new(registrations)
         .map(ToolCatalog::with_discovery)

@@ -10,5 +10,5 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.stories.ts", "src/**/*.stories.tsx"],
-  "references": [{ "path": "../core" }]
+  "references": [{ "path": "../core" }, { "path": "../plugin-sdk" }]
 }

@@ -57,6 +57,16 @@ impl ToolMetadata {
                 parent_tool_call_id: tool_message_id(invocation, parent_operation_id),
                 parent_operation_id: parent_operation_id.clone(),
             }),
+            ToolOrigin::HostSdk {
+                parent_operation_id,
+                ..
+            } => Ok(Self::HostSdk {
+                model_visibility: Hidden::Hidden,
+                parent_tool_call_id: parent_operation_id
+                    .as_ref()
+                    .map(|id| tool_message_id(invocation, id)),
+                parent_operation_id: parent_operation_id.clone(),
+            }),
             ToolOrigin::Standalone => Err(crate::ProjectionError::Unsupported(
                 "standalone tool presentation",
             )),
@@ -212,6 +222,13 @@ pub(crate) fn message(
     rename_all_fields = "camelCase"
 )]
 pub enum ToolMetadata {
+    HostSdk {
+        model_visibility: Hidden,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_tool_call_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_operation_id: Option<String>,
+    },
     Provider {
         model_visibility: Visible,
     },

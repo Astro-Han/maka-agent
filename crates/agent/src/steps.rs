@@ -83,7 +83,7 @@ pub(super) async fn run(
                 let replay = crate::continuation::replay(
                     input,
                     prompt,
-                    tools.capture().definitions(),
+                    tools.handoff_definitions(),
                     cancellation,
                 )
                 .ok()?;
@@ -150,7 +150,11 @@ pub(super) async fn run(
                 )
                 .await?;
         }
-        let request_tools = tools.capture();
+        let request_tools = tools.capture()?;
+        let surface = Arc::new(
+            crate::request_composition::Surface::capture(&request_tools, input, cancellation)
+                .await?,
+        );
         let prompt = model_attempt::prompt(
             inner,
             input,
@@ -165,11 +169,12 @@ pub(super) async fn run(
             inner,
             input,
             &source,
-            prompt,
+            surface.apply(prompt),
             request_tools.definitions(),
             model_attempt::Attempt::Main {
                 lane: lane.clone(),
                 continuation_base,
+                surface: surface.clone(),
             },
             cancellation,
         )
@@ -228,6 +233,9 @@ pub(super) async fn run(
         // Drain and persist all tool outcomes before rewriting the next model view.
         // Bound the view before either Responses confirmation or compaction reads it.
         prune::run(inner, input, cancellation).await?;
+        if step_tools.finished() {
+            return Ok(maka_runtime::event::InvocationOutcome::Completed);
+        }
         if step + 1 < max_steps && !cancellation.is_cancelled() && lane.needs_confirmation() {
             let source = inner
                 .log
@@ -249,7 +257,7 @@ pub(super) async fn run(
             )
             .await?;
             let ids: Vec<_> = local_calls.iter().map(|call| call.id.as_str()).collect();
-            lane.confirm(&replay, &ids, output.response_id.as_deref());
+            lane.confirm(&surface.apply(replay), &ids, output.response_id.as_deref());
         }
         completed_step = true;
     }

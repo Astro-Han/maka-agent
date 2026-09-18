@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{ToolError, ToolFuture};
+use super::{PreparedEffect, ToolError, ToolFuture};
 use crate::event::{EventSink, EventWrite, Fact, Invocation, RuntimeEvent, ToolOutcome};
 use crate::tool_call::{ToolCallIdentity, ToolRejection};
 use crate::tool_output::{ToolOutput, ToolSuccess};
@@ -83,6 +83,27 @@ impl ToolJournal {
         cancellation: CancellationToken,
         effect: impl FnOnce(CancellationToken) -> ToolFuture<T> + Send + 'static,
     ) -> ToolFuture {
+        self.invoke_prepared_call(
+            operation_id,
+            call,
+            name,
+            input,
+            cancellation,
+            PreparedEffect::new(move |cancellation| {
+                Box::pin(async move { effect(cancellation).await.map(Into::into) })
+            }),
+        )
+    }
+
+    pub fn invoke_prepared_call(
+        &self,
+        operation_id: String,
+        call: ToolCallIdentity,
+        name: String,
+        input: Value,
+        cancellation: CancellationToken,
+        mut effect: PreparedEffect,
+    ) -> ToolFuture {
         let sink = self.sink.clone();
         let invocation = self.invocation.clone();
         Box::pin(async move {
@@ -104,10 +125,9 @@ impl ToolJournal {
                 .map_err(|error| ToolError::Persistence(error.to_string()))?;
 
             let result = if cancellation.is_cancelled() {
-                drop(effect);
                 Err(ToolError::Failed("cancelled before effect".into()))
             } else {
-                effect(cancellation).await.map(Into::into)
+                effect.start(cancellation).await
             };
             let id = uuid::Uuid::new_v4().to_string();
             let recorded_at = std::time::SystemTime::now();
@@ -135,6 +155,7 @@ impl ToolJournal {
             sink.commit(write)
                 .await
                 .map_err(|error| ToolError::OutcomeUnknown(error.to_string()))?;
+            drop(effect);
             result.map(ToolOutput::into_json)
         })
     }

@@ -1,0 +1,299 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+use super::callbacks;
+use maka_js_runtime::plugin::Module;
+use maka_plugins::{contributions::Staged, prompt};
+use maka_runtime::tools::{
+    ToolDefinition, ToolHandler, ToolNesting, ToolRegistration, ToolSemantics,
+};
+use maka_tools::plugins::PluginTool;
+use serde::Deserialize;
+use serde_json::Value;
+use std::sync::Arc;
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum Registration {
+    RemoteMethod {
+        name: String,
+        callback: u32,
+    },
+    RemoteStream {
+        name: String,
+        callback: u32,
+    },
+    #[serde(rename_all = "camelCase")]
+    Executor {
+        name: maka_runtime::executor::ExecutorId,
+        display_name: String,
+        #[serde(default)]
+        capabilities: maka_plugins::executor::Capabilities,
+        callback: u32,
+    },
+    #[serde(rename_all = "camelCase")]
+    Tool {
+        name: String,
+        description: String,
+        input_schema: Value,
+        callback: u32,
+        #[serde(default)]
+        direct_only: bool,
+        #[serde(default)]
+        semantics: Semantics,
+    },
+    Section {
+        name: String,
+        callback: u32,
+        #[serde(default)]
+        order: i32,
+        #[serde(default)]
+        complete: bool,
+    },
+    Variable {
+        name: String,
+        callback: u32,
+    },
+    Context {
+        name: String,
+        callback: u32,
+        #[serde(default)]
+        order: i32,
+    },
+}
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Semantics {
+    #[default]
+    Parallel,
+    ExclusiveStep,
+    FinishTurn,
+}
+
+pub(super) fn stage(
+    value: Value,
+    module: &Module,
+    outputs: &Arc<super::executor::Outputs>,
+    calls: &Arc<super::invocation::Calls>,
+    source: &super::remote::Source,
+) -> Result<Staged, String> {
+    let registrations: Vec<Registration> = serde_json::from_value(value).map_err(super::message)?;
+    stage_entries(registrations, module, outputs, calls, source)
+}
+pub(super) fn stage_entries(
+    registrations: Vec<Registration>,
+    module: &Module,
+    outputs: &Arc<super::executor::Outputs>,
+    calls: &Arc<super::invocation::Calls>,
+    source: &super::remote::Source,
+) -> Result<Staged, String> {
+    if registrations.len() > 128 {
+        return Err("plugin contribution limit exceeded".into());
+    }
+    let mut staged = Staged::default();
+    for registration in registrations {
+        let remote_stream = matches!(&registration, Registration::RemoteStream { .. });
+        match registration {
+            Registration::RemoteMethod { name, callback }
+            | Registration::RemoteStream { name, callback } => {
+                validate_callback(callback)?;
+                let handler = Arc::new(super::remote::Remote(Arc::new(callbacks::Callback {
+                    module: module.clone(),
+                    id: callback,
+                    calls: calls.clone(),
+                })));
+                let handler = if remote_stream {
+                    maka_plugins::remote::Handler::Stream(handler)
+                } else {
+                    maka_plugins::remote::Handler::Method(handler)
+                };
+                staged
+                    .insert(
+                        maka_plugins::remote::key(&source.package_id, &name)
+                            .map_err(super::message)?,
+                        maka_plugins::remote::Endpoint::new(source.content_digest.clone(), handler),
+                    )
+                    .map_err(super::message)?;
+            }
+            Registration::Executor {
+                name,
+                display_name,
+                capabilities,
+                callback,
+            } => {
+                validate_callback(callback)?;
+                if display_name.is_empty() || display_name.len() > 256 {
+                    return Err("invalid executor display name".into());
+                }
+                staged
+                    .insert(
+                        name.as_str(),
+                        maka_plugins::executor::Executor {
+                            id: name.clone(),
+                            display_name,
+                            capabilities,
+                            provider: Arc::new(super::executor::Executor {
+                                callback: Arc::new(callbacks::Callback {
+                                    module: module.clone(),
+                                    id: callback,
+                                    calls: calls.clone(),
+                                }),
+                                outputs: outputs.clone(),
+                            }),
+                        },
+                    )
+                    .map_err(super::message)?;
+            }
+            Registration::Tool {
+                name,
+                description,
+                input_schema,
+                callback,
+                direct_only,
+                semantics,
+            } => {
+                validate_callback(callback)?;
+                let tool = PluginTool::new(ToolRegistration {
+                    definition: ToolDefinition {
+                        name: name.clone(),
+                        description,
+                        input_schema,
+                    },
+                    nesting: if direct_only {
+                        ToolNesting::DirectOnly
+                    } else {
+                        ToolNesting::Nestable
+                    },
+                    semantics: match semantics {
+                        Semantics::Parallel => ToolSemantics::Parallel,
+                        Semantics::ExclusiveStep => ToolSemantics::ExclusiveStep,
+                        Semantics::FinishTurn => ToolSemantics::FinishTurn,
+                    },
+                    handler: ToolHandler::Prepared(Arc::new(callbacks::Tool {
+                        callback: Arc::new(callbacks::Callback {
+                            module: module.clone(),
+                            id: callback,
+                            calls: calls.clone(),
+                        }),
+                        name: name.clone(),
+                    })),
+                })
+                .map_err(super::message)?;
+                staged.insert(name, tool).map_err(super::message)?;
+            }
+            Registration::Section {
+                name,
+                callback,
+                order,
+                complete,
+            } => {
+                staged
+                    .insert(
+                        name,
+                        prompt::Section {
+                            order,
+                            mode: if complete {
+                                prompt::SectionMode::Complete
+                            } else {
+                                prompt::SectionMode::Append
+                            },
+                            text: provider(module, callback, calls)?,
+                        },
+                    )
+                    .map_err(super::message)?;
+            }
+            Registration::Variable { name, callback } => {
+                staged
+                    .insert(name, prompt::Variable(provider(module, callback, calls)?))
+                    .map_err(super::message)?;
+            }
+            Registration::Context {
+                name,
+                callback,
+                order,
+            } => {
+                staged
+                    .insert(
+                        name,
+                        prompt::DynamicContext {
+                            order,
+                            text: provider(module, callback, calls)?,
+                        },
+                    )
+                    .map_err(super::message)?;
+            }
+        }
+    }
+    Ok(staged)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Kind {
+    RemoteMethod,
+    RemoteStream,
+    Executor,
+    Tool,
+    Section,
+    Variable,
+    Context,
+}
+
+pub(super) fn withdraw(
+    catalog: &maka_plugins::contributions::Catalog,
+    context: &maka_plugins::fiber::Context,
+    kind: Kind,
+    name: &str,
+) -> Result<(), maka_plugins::Error> {
+    match kind {
+        Kind::RemoteMethod | Kind::RemoteStream => {
+            let package = context.identity()?.package_id;
+            catalog.withdraw::<maka_plugins::remote::Endpoint>(
+                context,
+                &maka_plugins::remote::key(&package, name)?,
+            )
+        }
+        Kind::Executor => catalog.withdraw::<maka_plugins::executor::Executor>(context, name),
+        Kind::Tool => catalog.withdraw::<PluginTool>(context, name),
+        Kind::Section => catalog.withdraw::<prompt::Section>(context, name),
+        Kind::Variable => catalog.withdraw::<prompt::Variable>(context, name),
+        Kind::Context => catalog.withdraw::<prompt::DynamicContext>(context, name),
+    }
+}
+fn provider(
+    module: &Module,
+    callback: u32,
+    calls: &Arc<super::invocation::Calls>,
+) -> Result<prompt::Text, String> {
+    validate_callback(callback)?;
+    Ok(prompt::Text::Dynamic(Arc::new(callbacks::Prompt {
+        callback: Arc::new(callbacks::Callback {
+            module: module.clone(),
+            id: callback,
+            calls: calls.clone(),
+        }),
+    })))
+}
+fn validate_callback(callback: u32) -> Result<(), String> {
+    if callback != 0 {
+        Ok(())
+    } else {
+        Err("invalid JS callback identity".into())
+    }
+}

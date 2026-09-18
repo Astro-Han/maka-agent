@@ -418,7 +418,7 @@ export function backfillRuntimeEventsFromStoredMessages(
 }
 
 function storedToolActivityIdentity(message: {
-  origin?: 'provider' | 'code_mode';
+  origin?: ToolCallMessage['origin'];
   modelVisibility?: 'visible' | 'hidden';
 }): Pick<RuntimeEvent, 'origin' | 'modelVisibility'> {
   return {

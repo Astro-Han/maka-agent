@@ -211,6 +211,7 @@ async fn check_boundary(boundary: Boundary) {
         );
         let result = run
             .capture()
+            .unwrap()
             .into_step("step")
             .invoke(&call, CancellationToken::new())
             .await;
@@ -293,6 +294,7 @@ async fn check_boundary(boundary: Boundary) {
     );
     assert!(matches!(
         run.capture()
+            .unwrap()
             .into_step("step")
             .invoke(&call, CancellationToken::new())
             .await,

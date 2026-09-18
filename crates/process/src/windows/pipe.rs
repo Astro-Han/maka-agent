@@ -36,8 +36,12 @@ use windows_sys::Win32::{
 };
 
 /// One connected, owner-only output pipe. Only its write end is inherited.
-pub(super) async fn output() -> io::Result<(NamedPipeServer, File)> {
+pub(crate) async fn output() -> io::Result<(NamedPipeServer, File)> {
     connected(true, true).await
+}
+
+pub(crate) async fn input() -> io::Result<(NamedPipeServer, File)> {
+    connected(false, true).await
 }
 
 /// The ConPTY ends are synchronous and never inherited by the child.

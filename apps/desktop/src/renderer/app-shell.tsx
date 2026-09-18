@@ -71,7 +71,7 @@ import { useTaskSubmissionReadiness } from './use-task-submission-readiness';
 import { useAppShellSessionUiReads } from './use-app-shell-session-ui-reads';
 import * as Conversation from './features/conversation';
 import { deriveWorkspaceReadinessRecovery } from './workspace-readiness-recovery';
-import { AgentGraphPanel } from './agent-graph-panel';
+import { ClientPluginComposerSlot } from './features/client-plugins/index.js';
 import { ChatComposerRegion, selectLatestRequestUsage } from './chat-composer-region';
 import { WorkbarHost, useWorkbarController } from './features/workbar';
 import { AppUpdateProvider } from './features/app-update/index.js';
@@ -2427,15 +2427,15 @@ function AppShellContent({
                         onOpenSession={openSessionInChat}
                       />
                     ) : null}
-                    {sessionsSelected &&
-                    ownerActiveId &&
-                    activeSessionForView &&
-                    !isLinkedSubagentSession(activeSessionForView) ? (
-                      <AgentGraphPanel
-                        rootSessionId={ownerActiveId}
-                        enabled={(activeSessionForView.orchestrationMode ?? 'default') === 'graph'}
-                        locale={uiLocale}
-                        onOpenSession={openSessionInChat}
+                    {sessionsSelected && ownerActiveId && activeCatalogSession ? (
+                      <ClientPluginComposerSlot
+                        key={activeCatalogSession.profileId + '/' + activeCatalogSession.runtimeHostId}
+                        host={{ profileId: activeCatalogSession.profileId, hostId: activeCatalogSession.runtimeHostId }}
+                        input={{
+                          sessionId: ownerActiveId,
+                          locale: uiLocale,
+                          onOpenSession: openSessionInChat,
+                        }}
                       />
                     ) : null}
                     {!sharedSessionActive && sessionsSelected ? <PlanExecutionPanel planMode={planMode} /> : null}

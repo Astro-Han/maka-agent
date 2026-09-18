@@ -43,6 +43,19 @@ impl Executions {
         connection: uuid::Uuid,
         active_tools: Option<Arc<HashSet<String>>>,
     ) -> Result<PreparedSkillInput> {
+        if session.configuration.target.model().is_none() {
+            super::super::prepare::executor_skills(&content, &[])?;
+            return Ok(PreparedSkillInput {
+                digest: session.configuration_digest,
+                preferences: None,
+                bindings: None,
+                content,
+                selection: SkillPreparation::Ready {
+                    skill_invocation: Default::default(),
+                    required_tools: Default::default(),
+                },
+            });
+        }
         let cwd = &session.configuration.workspace.host_cwd;
         let (bindings, skills) = match active_tools {
             Some(tools) => (
@@ -64,8 +77,9 @@ impl Executions {
                 let skills = self.load_skills(cwd, Default::default()).await?;
                 let native = self.native_tools(cwd, session.configuration.tool_profile);
                 let mode = session.configuration.permission_mode;
+                let ceiling = session.configuration.bound_tools.clone();
                 let (_, skills) = tokio::task::spawn_blocking(move || {
-                    super::super::tools::catalog(native, mode, additional, skills)
+                    super::super::tools::catalog(native, mode, additional, skills, ceiling.as_ref())
                 })
                 .await
                 .map_err(internal)??;
@@ -105,13 +119,14 @@ impl PreparedSkillInput {
             return Err(failure(Code::SessionArchived, "Session is archived"));
         }
         if record.configuration_digest != self.digest
-            || executions
-                .configuration
-                .skill_preferences()
-                .await
-                .ok()
-                .map(|p| p.revision)
-                != self.preferences
+            || record.configuration.target.model().is_some()
+                && executions
+                    .configuration
+                    .skill_preferences()
+                    .await
+                    .ok()
+                    .map(|p| p.revision)
+                    != self.preferences
         {
             return Ok(None);
         }

@@ -20,6 +20,7 @@
 mod bridge;
 mod evaluate;
 mod execution_budget;
+pub mod plugin;
 mod result;
 pub mod terminal;
 pub mod trusted;

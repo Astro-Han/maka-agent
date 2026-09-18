@@ -265,7 +265,7 @@ async fn legacy_catalog_and_vault_migrate_without_losing_revisions_or_secrets() 
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        9
+        10
     );
 }
 

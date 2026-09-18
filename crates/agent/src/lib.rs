@@ -20,10 +20,13 @@
 mod auto_context;
 mod compact;
 mod continuation;
+mod executor;
+pub use executor::ExecutorInput;
 mod handoff;
 pub use handoff::{HandoffGate, HandoffReservation, HeldHandoff, PendingSeal};
 mod history;
 mod model_attempt;
+mod request_composition;
 pub use history::project as project_model_history;
 mod cancellation;
 mod prune;
@@ -267,7 +270,47 @@ impl Engine {
                 "invalid invocation configuration".into(),
             ));
         }
-        let session_id = input.invocation.session_id.clone();
+        let handoff = (!matches!(input.work, RunWork::ContextCompact)).then(|| {
+            let root = match &input.work {
+                RunWork::Handoff { pause, .. } => &pause.intent.root_run_id,
+                _ => &input.invocation.run_id,
+            };
+            HandoffGate::new(input.invocation.clone(), root.clone())
+        });
+        let inner = self.0.clone();
+        let invocation = input.invocation.clone();
+        let tool_names = Arc::new(match &input.work {
+            RunWork::Message { tools, .. }
+            | RunWork::Continuation { tools, .. }
+            | RunWork::Handoff { tools, .. } => tools.names().into_iter().collect(),
+            RunWork::ContextCompact => Default::default(),
+        });
+        let worker_handoff = handoff.clone();
+        self.start_owned(
+            invocation,
+            tool_names,
+            handoff,
+            cancellation,
+            move |cancellation, admitted| {
+                runner::run(inner, input, cancellation, admitted, worker_handoff)
+            },
+        )
+        .await
+    }
+
+    async fn start_owned<F, Fut>(
+        &self,
+        invocation: Invocation,
+        tool_names: Arc<HashSet<String>>,
+        handoff: Option<HandoffGate>,
+        cancellation: CancellationToken,
+        run: F,
+    ) -> Result<RunningInvocation, RunError>
+    where
+        F: FnOnce(RunCancellation, tokio::sync::oneshot::Sender<()>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<Invocation, RunError>> + Send + 'static,
+    {
+        let session_id = invocation.session_id.clone();
         if !self
             .0
             .active
@@ -277,13 +320,6 @@ impl Engine {
         {
             return Err(RunError::Busy);
         }
-        let handoff = (!matches!(input.work, RunWork::ContextCompact)).then(|| {
-            let root = match &input.work {
-                RunWork::Handoff { pause, .. } => &pause.intent.root_run_id,
-                _ => &input.invocation.run_id,
-            };
-            HandoffGate::new(input.invocation.clone(), root.clone())
-        });
         let admission = Admission {
             inner: self.0.clone(),
             session_id,
@@ -292,20 +328,11 @@ impl Engine {
         let cancellation = cancellation.child_token();
         let cancel_on_drop = cancellation.clone().drop_guard();
         let cancellation = RunCancellation::new(cancellation);
-        let inner = self.0.clone();
-        let invocation = input.invocation.clone();
-        let tool_names = Arc::new(match &input.work {
-            RunWork::Message { tools, .. }
-            | RunWork::Continuation { tools, .. }
-            | RunWork::Handoff { tools, .. } => tools.names().into_iter().collect(),
-            RunWork::ContextCompact => Default::default(),
-        });
         let worker_cancellation = cancellation.clone();
         let (admitted, ready) = tokio::sync::oneshot::channel();
-        let worker_handoff = handoff.clone();
         let worker = self.0.workers.spawn(async move {
             let _admission = admission;
-            runner::run(inner, input, worker_cancellation, admitted, worker_handoff).await
+            run(worker_cancellation, admitted).await
         });
         if ready.await.is_err() {
             return match worker.await {

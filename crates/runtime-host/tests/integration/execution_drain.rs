@@ -183,7 +183,13 @@ async fn foreground_background_and_closure_commit_failures_drain_host() {
             if frame["requestId"] == "turn.start" {
                 break frame;
             }
-            assert_eq!(frame["kind"], "session.catalog.changed");
+            assert!(
+                matches!(
+                    frame["kind"].as_str(),
+                    Some("session.catalog.changed" | "plugin.client.changed")
+                ),
+                "{frame}"
+            );
         };
         if failed_kind == "invocation_opened" {
             assert_eq!(response["error"]["code"], "internal_failure");

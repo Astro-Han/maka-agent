@@ -684,7 +684,7 @@ function decodeCompositionEntry(value: unknown): MakaCompositionEntry {
     ...(entry.packageId === undefined
       ? {}
       : { packageId: requireId(entry.packageId, 'Plugin package identity') }),
-    ...(entry.config === undefined ? {} : { config: decodeScalarRecord(entry.config, 'config') }),
+    ...(entry.config === undefined ? {} : { config: decodeConfig(entry.config) }),
     ...(entry.disabled === undefined ? {} : { disabled: requireBoolean(entry.disabled) }),
     ...(entry.inject === undefined ? {} : { inject: decodeInject(entry.inject) }),
     ...(entry.isolate === undefined ? {} : { isolate: decodeIsolate(entry.isolate) }),
@@ -712,7 +712,7 @@ function decodeEntryPatch(value: unknown): Partial<Omit<MakaCompositionEntry, 'i
     ...(patch.packageId === undefined
       ? {}
       : { packageId: requireId(patch.packageId, 'Plugin package identity') }),
-    ...(patch.config === undefined ? {} : { config: decodeScalarRecord(patch.config, 'config') }),
+    ...(patch.config === undefined ? {} : { config: decodeConfig(patch.config) }),
     ...(patch.disabled === undefined ? {} : { disabled: requireBoolean(patch.disabled) }),
     ...(patch.inject === undefined ? {} : { inject: decodeInject(patch.inject) }),
     ...(patch.isolate === undefined ? {} : { isolate: decodeIsolate(patch.isolate) }),
@@ -755,9 +755,7 @@ function decodeInspections(value: unknown): readonly MakaCompositionEntryInspect
       ...(inspection.packageId === undefined
         ? {}
         : { packageId: requireId(inspection.packageId, 'Plugin package identity') }),
-      ...(inspection.config === undefined
-        ? {}
-        : { config: decodeScalarRecord(inspection.config, 'config') }),
+      ...(inspection.config === undefined ? {} : { config: decodeConfig(inspection.config) }),
       disabled: requireBoolean(inspection.disabled),
       status: inspection.status as MakaCompositionEntryInspection['status'],
       ...(inspection.generation === undefined
@@ -837,23 +835,31 @@ function decodeJsonRecord(value: unknown, label: string): Readonly<Record<string
   }
 }
 
-function decodeScalarRecord(
-  value: unknown,
-  label: string,
-): Readonly<Record<string, string | number | boolean>> {
-  const record = requireRecord(value, `Plugin Entry ${label}`);
-  const output: Array<readonly [string, string | number | boolean]> = [];
-  for (const [key, item] of Object.entries(record)) {
-    requireId(key, `Plugin Entry ${label} key`);
+function decodeConfig(value: unknown): unknown {
+  let nodes = 0;
+  const visit = (item: unknown, depth: number): unknown => {
+    if (++nodes > 8192 || depth > 64) throw invalidProtocolFrame('Plugin config is too large');
     if (
+      item === null ||
       typeof item === 'string' ||
       typeof item === 'boolean' ||
       (typeof item === 'number' && Number.isFinite(item))
     )
-      output.push([key, item]);
-    else throw invalidProtocolFrame(`Invalid Plugin Entry ${label} value`);
-  }
-  return Object.fromEntries(output);
+      return item;
+    if (Array.isArray(item)) return item.map((child) => visit(child, depth + 1));
+    if (typeof item === 'object' && item !== null) {
+      const prototype = Object.getPrototypeOf(item);
+      if (prototype === Object.prototype || prototype === null) {
+        return Object.fromEntries(
+          Object.entries(item).map(([key, child]) => [key, visit(child, depth + 1)]),
+        );
+      }
+    }
+    throw invalidProtocolFrame('Invalid Plugin config');
+  };
+  const decoded = visit(value, 0);
+  requireEncodedByteLimit(decoded, 'Plugin config', 64 * 1024);
+  return decoded;
 }
 
 function requireBoolean(value: unknown): boolean {

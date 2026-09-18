@@ -32,6 +32,15 @@ use sqlx::SqliteConnection;
 const MAX_POLICY_DOCUMENT_BYTES: usize = 64 * 1024;
 
 impl ConfigurationStore {
+    pub async fn set_subagents(
+        &self,
+        expected_revision: u64,
+        value: maka_runtime::configuration::policy::SubagentSettings,
+    ) -> Result<RuntimePolicyMutationResult> {
+        self.update_policy(expected_revision, move |policy| policy.subagents = value)
+            .await
+    }
+
     pub async fn set_network_proxy(
         &self,
         expected_revision: u64,

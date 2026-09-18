@@ -134,6 +134,11 @@ pub fn content_digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
+pub fn workspace_patch_id(session: &str, turn: &str) -> String {
+    let identity = serde_json::to_vec(&(session, turn)).expect("string identity serializes");
+    format!("worktree-{:x}", Sha256::digest(identity))
+}
+
 pub fn normalize_name(name: &str) -> String {
     let mut cleaned = String::new();
     let mut whitespace = false;

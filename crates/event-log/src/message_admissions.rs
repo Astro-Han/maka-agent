@@ -186,7 +186,7 @@ pub(super) async fn pending(
         .collect()
 }
 
-async fn read(
+pub(crate) async fn read(
     connection: &mut SqliteConnection,
     session: &str,
     message: &str,

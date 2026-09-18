@@ -73,7 +73,11 @@ pub(super) async fn observe(
     session_id: &str,
     session: &SessionConfiguration,
 ) -> Result<PreparedProvider, OperationError> {
-    observe_binding(config, session_id, &session.model, session.thinking_level).await
+    let model = session
+        .target
+        .model()
+        .ok_or_else(|| unavailable("Executor Session has no model backend"))?;
+    observe_binding(config, session_id, model, session.thinking_level).await
 }
 
 /// The caller supplies the admitted model identity, never a replacement Session.

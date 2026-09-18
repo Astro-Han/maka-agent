@@ -57,15 +57,26 @@ impl Drop for Provider {
 }
 impl Provider {
     pub async fn start() -> Self {
-        Self::serve(None).await
+        Self::serve(None, None).await
     }
 
     pub async fn controlled() -> (Self, mpsc::Receiver<ModelRequest>) {
         let (send, receive) = mpsc::channel(1);
-        (Self::serve(Some(send)).await, receive)
+        (Self::serve(Some(send), None).await, receive)
     }
 
-    async fn serve(control: Option<mpsc::Sender<ModelRequest>>) -> Self {
+    pub async fn controlled_with_usage(
+        input: u64,
+        output: u64,
+    ) -> (Self, mpsc::Receiver<ModelRequest>) {
+        let (send, receive) = mpsc::channel(1);
+        (
+            Self::serve(Some(send), Some((input, output))).await,
+            receive,
+        )
+    }
+
+    async fn serve(control: Option<mpsc::Sender<ModelRequest>>, usage: Option<(u64, u64)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -94,18 +105,24 @@ impl Provider {
                                     } else {
                                         json!({"index":0,"delta":{"content":"recovered"},"finish_reason":"stop"})
                                     };
-                                    let chunk = json!({
+                                    let mut chunk = json!({
                                         "id":"recovered-reply", "object":"chat.completion.chunk", "created":1,
                                         "model":"fixture-model",
                                         "choices":[choice]
                                     });
+                                    if let Some((input, output)) = usage {
+                                        chunk["usage"] = json!({"prompt_tokens":input,"completion_tokens":output,"total_tokens":input+output});
+                                    }
                                     Ok::<_, Infallible>(Response::builder()
                                         .header("content-type", "text/event-stream")
                                         .header("connection", "close")
                                         .body(Full::new(Bytes::from(format!("data: {chunk}\n\ndata: [DONE]\n\n")))).unwrap())
                                 }
                             });
-                            http1::Builder::new().serve_connection(TokioIo::new(socket), service).await.unwrap();
+                            if let Err(error) = http1::Builder::new().serve_connection(TokioIo::new(socket), service).await {
+                                assert!(error.is_incomplete_message() || error.is_closed() || error.is_canceled(),
+                                    "fixture HTTP connection: {error}");
+                            }
                         });
                     }
                     Some(result) = connections.join_next(), if !connections.is_empty() => { result.unwrap(); }

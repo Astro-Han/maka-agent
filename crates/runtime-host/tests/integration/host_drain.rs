@@ -45,6 +45,9 @@ struct Writer {
 }
 impl MessageWriter for Writer {
     async fn write(&mut self, value: &Value) -> Result<(), TransportError> {
+        if value["kind"] == "plugin.client.changed" {
+            return Ok(());
+        }
         if value.get("requestId").is_some()
             && let Some((entered, release)) = &self.gate
         {
@@ -75,6 +78,19 @@ async fn receive(frames: &mut mpsc::UnboundedReceiver<Value>) -> Value {
         .await
         .unwrap()
         .unwrap()
+}
+
+async fn receive_response(reader: &mut impl MessageReader) -> Value {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let frame = reader.read().await.unwrap().unwrap();
+            if frame["kind"] != "plugin.client.changed" {
+                return frame;
+            }
+        }
+    })
+    .await
+    .unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -234,11 +250,7 @@ async fn exercise(fail_write: bool, fault: Fault) {
         ),
     ] {
         live_writer.write(&request(operation, input)).await.unwrap();
-        let response = tokio::time::timeout(Duration::from_secs(2), live_reader.read())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let response = receive_response(&mut live_reader).await;
         assert_eq!(response["error"]["code"], "host_draining");
     }
     release.cancel();
@@ -278,11 +290,7 @@ async fn exercise(fail_write: bool, fault: Fault) {
         .write(&request("host.status", json!({})))
         .await
         .unwrap();
-    let status = tokio::time::timeout(Duration::from_secs(2), live_reader.read())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    let status = receive_response(&mut live_reader).await;
     assert_eq!(status["result"]["state"], "draining");
     prior_release.cancel();
     assert_eq!(

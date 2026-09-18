@@ -17,34 +17,17 @@
  * under the License.
  */
 
-use crate::{PreparationFuture, ToolCallContext, ToolHandler};
+use crate::{PreparationFuture, ToolCallContext};
 use jsonschema::Validator;
 use maka_runtime::tool_call::ToolRejection;
 use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
-pub use maka_runtime::{execution::ToolMode, tools::ToolDefinition};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolNesting {
-    Nestable,
-    DirectOnly,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolSemantics {
-    Parallel,
-    ExclusiveStep,
-}
-
-/// Constructed by the execution owner, never from model-issued arguments.
-/// An executor is paired with its advertised definition in the frozen catalog.
-pub struct ToolRegistration {
-    pub definition: ToolDefinition,
-    pub nesting: ToolNesting,
-    pub semantics: ToolSemantics,
-    pub handler: ToolHandler,
-}
+pub use maka_runtime::{
+    execution::ToolMode,
+    tools::{ToolDefinition, ToolNesting, ToolRegistration, ToolSemantics},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogError {
@@ -54,15 +37,17 @@ pub enum CatalogError {
     Schema(String),
 }
 
-struct RegisteredTool {
-    registration: ToolRegistration,
-    validator: Validator,
+pub(crate) struct RegisteredTool {
+    pub(crate) registration: ToolRegistration,
+    pub(crate) validator: Arc<Validator>,
+    pub(crate) bytes: usize,
 }
 
 #[derive(Clone, Default)]
 pub struct ToolCatalog {
-    entries: Arc<BTreeMap<String, Arc<RegisteredTool>>>,
+    pub(crate) entries: Arc<BTreeMap<String, Arc<RegisteredTool>>>,
     pub(super) discovery: bool,
+    pub(crate) plugins: Option<crate::plugins::Source>,
 }
 
 impl ToolCatalog {
@@ -72,6 +57,13 @@ impl ToolCatalog {
         let mut entries = BTreeMap::new();
         let mut bytes = 0usize;
         for registration in registrations {
+            if registration.semantics == ToolSemantics::FinishTurn
+                && registration.nesting != ToolNesting::DirectOnly
+            {
+                return Err(CatalogError::Invalid(
+                    "a finishing tool must be direct-only".into(),
+                ));
+            }
             let definition = &registration.definition;
             if entries.len() == 128
                 || definition.name.is_empty()
@@ -87,14 +79,16 @@ impl ToolCatalog {
                     "duplicate, reserved, absent or excessive tool name".into(),
                 ));
             }
-            bytes = bytes
-                .saturating_add(definition.name.len())
+            let definition_bytes = definition
+                .name
+                .len()
                 .saturating_add(definition.description.len())
                 .saturating_add(
                     serde_json::to_vec(&definition.input_schema)
                         .map_err(|e| CatalogError::Schema(e.to_string()))?
                         .len(),
                 );
+            bytes = bytes.saturating_add(definition_bytes);
             if bytes > 1024 * 1024 {
                 return Err(CatalogError::Invalid("definition budget exceeded".into()));
             }
@@ -109,13 +103,15 @@ impl ToolCatalog {
                 definition.name.clone(),
                 Arc::new(RegisteredTool {
                     registration,
-                    validator,
+                    validator: Arc::new(validator),
+                    bytes: definition_bytes,
                 }),
             );
         }
         Ok(Self {
             entries: Arc::new(entries),
             discovery: false,
+            plugins: None,
         })
     }
 
@@ -135,6 +131,7 @@ impl ToolCatalog {
                     .collect(),
             ),
             discovery: self.discovery,
+            plugins: self.plugins.clone(),
         }
     }
 
@@ -154,7 +151,12 @@ impl ToolCatalog {
                     .collect(),
             ),
             discovery: self.discovery,
+            plugins: self.plugins.clone(),
         }
+    }
+
+    pub(super) fn direct_only(&self) -> Self {
+        self.select(|name| self.entries[name].registration.nesting == ToolNesting::DirectOnly)
     }
 
     /// Stable request-surface identity; process-local handler addresses are excluded.
@@ -167,13 +169,24 @@ impl ToolCatalog {
                 (
                     &r.definition,
                     r.nesting == ToolNesting::Nestable,
-                    r.semantics == ToolSemantics::ExclusiveStep,
+                    r.semantics != ToolSemantics::Parallel,
                 )
             })
             .collect();
-        maka_runtime::artifact::content_digest(
-            &serde_json::to_vec(&(self.discovery, entries)).expect("tool definitions are JSON"),
-        )
+        let finishing: Vec<_> = self
+            .entries
+            .values()
+            .filter(|entry| entry.registration.semantics == ToolSemantics::FinishTurn)
+            .map(|entry| &entry.registration.definition.name)
+            .collect();
+        // Preserve the existing durable identity when no new semantic is used.
+        let bytes = if finishing.is_empty() {
+            serde_json::to_vec(&(self.discovery, entries))
+        } else {
+            serde_json::to_vec(&(self.discovery, entries, finishing))
+        }
+        .expect("tool definitions are JSON");
+        maka_runtime::artifact::content_digest(&bytes)
     }
 
     pub fn semantics(&self, name: &str) -> Result<ToolSemantics, ToolRejection> {

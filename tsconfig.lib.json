@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "packages/plugin-sdk" },
     { "path": "packages/core" },
     { "path": "packages/storage" },
     { "path": "packages/mcp" },

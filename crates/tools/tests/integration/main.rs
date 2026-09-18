@@ -22,6 +22,7 @@ mod child_image;
 mod client_preparation;
 mod commit_faults;
 mod large_child_output;
+mod plugins;
 mod preflight;
 
 mod support {

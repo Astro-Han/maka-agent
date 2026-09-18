@@ -124,7 +124,7 @@ async fn original_client_native_openai_options_reach_both_wires_and_survive_reop
                         .expect("opening freezes configuration");
                     assert_eq!(
                         configuration.model.as_ref(),
-                        Some(&current.configuration.model)
+                        current.configuration.target.model()
                     );
                     Some(configuration.thinking_level)
                 })

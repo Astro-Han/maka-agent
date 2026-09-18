@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{Result, failure};
+use crate::server::configuration::failure as configuration_error;
 use crate::session::SessionModel;
 use maka_config::{ConfigurationStore, model_catalog};
 use maka_protocol::{
@@ -28,15 +28,12 @@ use maka_runtime::configuration::{
     ConnectionCredentialKind, ConnectionCredentialTarget, CredentialLocator, ProviderAuthKind,
 };
 
-pub(in crate::server) async fn resolve(
+pub(crate) async fn resolve(
     configuration: &ConfigurationStore,
     target: &SessionModelTarget,
     thinking: Option<ThinkingLevel>,
-) -> Result<SessionModel> {
-    let catalog = configuration
-        .catalog()
-        .await
-        .map_err(super::super::configuration::failure)?;
+) -> Result<SessionModel, maka_protocol::OperationError> {
+    let catalog = configuration.catalog().await.map_err(configuration_error)?;
     let (id, slug, model) = match target {
         SessionModelTarget::Default => {
             let target = catalog.default_target.as_ref().ok_or_else(|| {
@@ -81,16 +78,14 @@ pub(in crate::server) async fn resolve(
             "Bound model connection identity changed",
         ));
     }
-    let facts = model_catalog::provider_facts(&row.provider_type)
-        .map_err(super::super::configuration::failure)?;
+    let facts = model_catalog::provider_facts(&row.provider_type).map_err(configuration_error)?;
     if !row.enabled || !row.enabled_model_ids.iter().any(|id| id == model) || facts.retired {
         return Err(failure(
             OperationErrorCode::InvalidRequest,
             "Model connection or model is not enabled",
         ));
     }
-    let entries =
-        model_catalog::resolve(row, Some(model)).map_err(super::super::configuration::failure)?;
+    let entries = model_catalog::resolve(row, Some(model)).map_err(configuration_error)?;
     let entry = entries
         .iter()
         .find(|entry| entry.id == model)
@@ -134,7 +129,7 @@ pub(in crate::server) async fn resolve(
                 Some(&target),
             )
             .await
-            .map_err(super::super::configuration::failure)?;
+            .map_err(configuration_error)?;
         if secret.is_none() {
             return Err(failure(
                 OperationErrorCode::OperationUnavailable,
@@ -147,4 +142,11 @@ pub(in crate::server) async fn resolve(
         connection_slug: row.slug.clone(),
         model: model.into(),
     })
+}
+
+fn failure(code: OperationErrorCode, message: &str) -> maka_protocol::OperationError {
+    maka_protocol::OperationError {
+        code,
+        message: message.into(),
+    }
 }

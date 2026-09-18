@@ -19,7 +19,7 @@
 
 pub(super) mod configuration;
 pub(super) mod create;
-pub(super) mod model;
+pub(super) use crate::session::model;
 pub(super) mod mutation;
 pub(super) mod projection;
 pub(super) mod workspace;

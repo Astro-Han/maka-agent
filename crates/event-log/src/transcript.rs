@@ -129,9 +129,10 @@ impl EventLog {
              AND request.operation_id = runtime_events.operation_id
              AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')
              AND COALESCE(json_extract(request.event_json, '$.fact.purpose'), 'main') = 'main'))
-                   AND kind IN ('invocation_opened', 'message_steered', 'model_completed',
+                   AND (kind IN ('invocation_opened', 'message_steered', 'model_completed',
                                 'model_interrupted', 'invocation_ended',
-                                'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated')
+                                'tool_dispatched', 'tool_rejected', 'tool_settled', 'workhub_delegated', 'executor_completed')
+                       OR (kind = 'executor_observed' AND json_extract(event_json, '$.fact.output.type') IN ('tool_start','tool_result')))
                  UNION ALL
                  SELECT sequence, NULL, NULL FROM session_events
                  WHERE json_extract(event_json, '$.session_id') = ?1

@@ -160,7 +160,7 @@ async fn admit(
         ));
     };
     let target = target::prepare(host, &input, selected).await?;
-    let owner = host.executions.workhub_target(target.id());
+    let owner = host.executions.active_session_owner(target.id());
     let delivery = match (&target, &owner) {
         (
             target::Target::Existing {

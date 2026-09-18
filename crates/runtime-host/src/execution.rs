@@ -21,11 +21,13 @@
 mod admission;
 mod archive;
 mod compact;
+mod control;
 mod handoff;
 pub(crate) use handoff::CooperativeRun;
 mod interrupt;
 mod launch;
 mod message;
+mod plugins;
 mod prepare;
 mod prompt;
 mod provider;
@@ -38,6 +40,7 @@ pub(crate) mod snapshot;
 mod successor;
 mod tools;
 mod workhub;
+mod workspaces;
 
 use crate::server::capabilities::Capabilities;
 use maka_agent::{Engine, RunError};
@@ -56,9 +59,11 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 type Result<T> = std::result::Result<T, OperationError>;
 
 pub(crate) struct Executions {
+    pub(crate) plugin_catalog: maka_plugins::contributions::Catalog,
     pub(crate) shells: Arc<crate::shell::ShellResources>,
     pub(crate) controllers: crate::controllers::Controllers,
     engine: Engine,
+    models: ModelExecutor,
     log: Arc<EventLog>,
     configuration: Arc<ConfigurationStore>,
     // Control-plane discovery shares this owner; requests drain before workers.
@@ -70,6 +75,7 @@ pub(crate) struct Executions {
     // never the model, effect, or human approval lifetime.
     interactions: Arc<crate::server::interactions::Interactions>,
     active: Mutex<HashMap<String, ActiveRun>>,
+    plugin_processes: Arc<Mutex<HashMap<String, usize>>>,
     workers: TaskTracker,
     handoff_wake: tokio::sync::Notify,
     shutdown: CancellationToken,
@@ -101,7 +107,11 @@ impl Executions {
         runtime: maka_js_runtime::trusted::TrustedRuntime,
     ) -> std::result::Result<Self, crate::server::HostError> {
         let workers = TaskTracker::new();
+        let plugin_catalog = maka_plugins::contributions::Catalog::default();
+        tools::reserve_core_names(&plugin_catalog)?;
+        let models = ModelExecutor::with_runtime(runtime.clone(), 64, Duration::from_secs(120))?;
         Ok(Self {
+            plugin_catalog,
             oauth: crate::oauth::Authority::new(workers.clone(), shutdown.clone()),
             controllers: Default::default(),
             shells: Arc::new(crate::shell::ShellResources::with_runtime(
@@ -111,16 +121,18 @@ impl Executions {
             )),
             engine: Engine::new(
                 log.clone(),
-                ModelExecutor::with_runtime(runtime, 64, Duration::from_secs(120))?,
+                models.clone(),
                 CodeExecutor::new(4, CellLimits::default())?,
             ),
             log,
+            models,
             configuration,
             paths,
             capabilities,
             interactions,
             writes: Arc::new(maka_fs_tools::WriteCoordinator::default()),
             active: Mutex::new(HashMap::new()),
+            plugin_processes: Arc::default(),
             workers,
             handoff_wake: tokio::sync::Notify::new(),
             shutdown,

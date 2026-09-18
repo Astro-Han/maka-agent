@@ -150,22 +150,10 @@ export async function verifyConfiguration(connection, sessionId, connectSibling)
     const swarm = await update(connection, clear.session, { orchestrationMode: 'swarm' });
     assert.equal(swarm.kind, 'committed');
     assert.equal(swarm.session.orchestrationMode, 'swarm');
-    await assert.rejects(
-      connection.request(
-        'turn.start',
-        {
-          sessionId,
-          turnId: 'unsupported-swarm',
-          content: { text: 'must not execute' },
-        },
-        3000,
-      ),
-      (error) => error.code === 'operation_unavailable',
-    );
     assert.deepEqual(
       await query(connection, sessionId),
       swarm.session,
-      'unsupported execution does not create a turn or change Session',
+      'orchestration configuration is visible without starting execution',
     );
     const restored = await update(connection, swarm.session, { orchestrationMode: 'default' });
     assert.equal(restored.kind, 'committed');

@@ -166,8 +166,25 @@ pub(super) async fn inspect(
     if let crate::RunWork::Handoff { pause, .. } = &input.work {
         tools.restore(&pause.execution.tools)?;
     }
-    let definitions = tools.capture().definitions();
-    let mut available: std::collections::HashSet<_> = catalog.names().into_iter().collect();
+    let definitions = if matches!(input.work, crate::RunWork::Handoff { .. }) {
+        tools.handoff_definitions()
+    } else {
+        tools.capture()?.definitions()
+    };
+    // Handoff restores the base catalog's checkpoint; dynamic plugins must not
+    // change that digest. Ordinary resume validates the full current inventory,
+    // including lazy plugin tools not yet advertised in this continuation.
+    let mut available: std::collections::HashSet<_> =
+        if matches!(input.work, crate::RunWork::Handoff { .. }) {
+            catalog.names()
+        } else {
+            catalog
+                .resolve_plugins()
+                .map_err(|error| invalid(&error.to_string()))?
+                .names()
+        }
+        .into_iter()
+        .collect();
     available.extend(definitions.iter().map(|definition| definition.name.clone()));
     // A handoff replays settled facts, including rejected calls to unavailable
     // tools. It never executes them again; the live catalog is checked above.

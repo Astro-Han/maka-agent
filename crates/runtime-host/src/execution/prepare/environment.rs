@@ -27,13 +27,26 @@ use std::sync::Arc;
 /// without the admission gate; commit rechecks the mutable control basis.
 pub(crate) struct Environment {
     digest: String,
-    bindings: Option<PreparedBindings>,
     pub session: SessionConfiguration,
-    pub tools: maka_tools::ToolCatalog,
-    pub skills: Arc<super::super::skills::FrozenSkills>,
+    pub backend: Backend,
     pub prompt: SystemPrompt,
     pub composition: maka_runtime::execution::ToolComposition,
+    bindings: Option<PreparedBindings>,
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
+}
+pub(crate) enum Backend {
+    Model(Box<ModelEnvironment>),
+    Executor(maka_plugins::executor::Binding),
+}
+pub(crate) struct ModelEnvironment {
+    behavior: Option<BehaviorBasis>,
+    pub tools: maka_tools::ToolCatalog,
+    pub skills: Arc<super::super::skills::FrozenSkills>,
+}
+
+struct BehaviorBasis {
+    source: maka_plugins::contributions::Contribution<maka_plugins::session::SessionBehavior>,
+    admission: Option<tokio_util::sync::CancellationToken>,
 }
 
 impl Executions {
@@ -42,6 +55,7 @@ impl Executions {
         session_id: &str,
         connection: Option<uuid::Uuid>,
         mode: BindingMode,
+        orchestration: Option<maka_runtime::execution::OrchestrationMode>,
     ) -> Result<Environment> {
         let record = self
             .log
@@ -49,7 +63,8 @@ impl Executions {
             .await
             .map_err(internal)?
             .ok_or_else(|| failure(Code::NotFound, "Session does not exist"))?;
-        self.prepare_environment_for(record, connection, mode).await
+        self.prepare_environment_for(record, connection, mode, orchestration)
+            .await
     }
 
     pub(in crate::execution) async fn prepare_environment_for(
@@ -57,19 +72,22 @@ impl Executions {
         record: maka_event_log::sessions::SessionRecord<SessionConfiguration>,
         connection: Option<uuid::Uuid>,
         mode: BindingMode,
+        orchestration: Option<maka_runtime::execution::OrchestrationMode>,
     ) -> Result<Environment> {
         let session_id = &record.id;
-        let session = record.configuration;
+        let mut session = record.configuration;
+        if let Some(mode) = orchestration {
+            session.orchestration_mode = mode;
+        }
         if record.archived {
             return Err(failure(Code::SessionArchived, "Session is archived"));
         }
+        self.prepare_worktree(&session).await?;
         use maka_protocol::session::{CollaborationMode, OrchestrationMode};
-        if session.collaboration_mode != CollaborationMode::Agent
-            || session.orchestration_mode != OrchestrationMode::Default
-        {
+        if session.collaboration_mode != CollaborationMode::Agent {
             return Err(failure(
                 Code::OperationUnavailable,
-                "Plan and non-default orchestration execution are not installed",
+                "Plan execution is not installed",
             ));
         }
         let (bindings, mut additional) = self
@@ -82,6 +100,77 @@ impl Executions {
                 self.interactions.clone(),
             )
             .map_err(binding_error)?;
+        if let crate::session::SessionTarget::Executor { executor_id } = &session.target {
+            if orchestration.is_some() {
+                return Err(failure(
+                    Code::OperationUnavailable,
+                    "Executor does not support native Turn orchestration",
+                ));
+            }
+            let binding = self.executor_binding(session_id, executor_id)?;
+            let policy = self
+                .configuration
+                .runtime_policy()
+                .await
+                .map_err(crate::server::configuration::failure)?;
+            let mut prompt = super::super::prompt::resolve(
+                policy,
+                session.workspace.host_cwd.clone().into(),
+                self.paths.global_instructions.clone(),
+            )
+            .await
+            .map_err(internal)?;
+            session.append_instructions(&mut prompt).map_err(internal)?;
+            let cwd = session.workspace.host_cwd.clone();
+            let directory = tokio::task::spawn_blocking(move || {
+                maka_fs_tools::workspace::directory::PublishedDirectory::open(std::path::Path::new(
+                    &cwd,
+                ))
+            })
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+            return Ok(Environment {
+                composition: maka_runtime::execution::ToolComposition {
+                    clients: bindings.composition(),
+                    bound_tools: session.bound_tools.clone(),
+                    skills_digest: None,
+                },
+                bindings: Some(bindings),
+                digest: record.configuration_digest,
+                session,
+                backend: Backend::Executor(binding),
+                prompt,
+                directory,
+            });
+        }
+        let (behavior, basis) = if session.orchestration_mode != OrchestrationMode::Default {
+            let snapshot = self
+                .plugin_catalog
+                .capture(&maka_plugins::composition::Scope::Profile)
+                .typed::<maka_plugins::session::SessionBehavior>();
+            let behavior = snapshot.entries.get("agent-graph").ok_or_else(|| {
+                failure(
+                    Code::OperationUnavailable,
+                    "Agent Graph plugin is not active",
+                )
+            })?;
+            let _lease = behavior.admit().map_err(internal)?;
+            let preparation = behavior
+                .value
+                .0
+                .prepare(session_id.clone(), session.orchestration_mode)
+                .await
+                .map_err(internal)?;
+            preparation.validate().map_err(internal)?;
+            let basis = BehaviorBasis {
+                source: behavior.clone(),
+                admission: preparation.admission.clone(),
+            };
+            (preparation, Some(basis))
+        } else {
+            (maka_plugins::session::Preparation::default(), None)
+        };
         additional.push(self.interactions.question_tool());
         let policy = self
             .configuration
@@ -98,19 +187,35 @@ impl Executions {
         );
         let skills = skills?;
         let mut prompt = prompt.map_err(internal)?;
+        session.append_instructions(&mut prompt).map_err(internal)?;
+        if !behavior.instructions.is_empty() {
+            prompt.text.push_str("\n\n");
+            prompt.text.push_str(&behavior.instructions);
+            prompt.validate().map_err(internal)?;
+        }
         let native = self.native_tools(&session.workspace.host_cwd, session.tool_profile);
+        let ceiling = session.tool_ceiling(behavior.tool_ceiling);
+        let native_ceiling = ceiling.clone();
         let mode = session.permission_mode;
         let (directory, tools, skills, skills_digest) = tokio::task::spawn_blocking(move || {
             let directory = maka_fs_tools::workspace::directory::PublishedDirectory::open(
                 std::path::Path::new(&native.cwd),
             )
             .map_err(internal)?;
-            let (tools, skills) = tools::catalog(native, mode, additional, skills)?;
+            let (tools, skills) =
+                tools::catalog(native, mode, additional, skills, native_ceiling.as_ref())?;
             let skills_digest = skills.catalog().fingerprint().map_err(internal)?;
             Ok::<_, maka_protocol::OperationError>((directory, tools, skills, skills_digest))
         })
         .await
         .map_err(internal)??;
+        let tools = tools
+            .with_plugins(
+                self.plugin_catalog.clone(),
+                maka_plugins::composition::Scope::Session(session_id.clone()),
+                ceiling.clone(),
+            )
+            .map_err(internal)?;
         let fragment = skills
             .catalog()
             .prompt((64 * 1024usize).saturating_sub(prompt.text.len() + 2));
@@ -121,13 +226,17 @@ impl Executions {
         Ok(Environment {
             composition: maka_runtime::execution::ToolComposition {
                 clients: bindings.composition(),
+                bound_tools: ceiling,
                 skills_digest: Some(skills_digest),
             },
-            digest: record.configuration_digest,
             bindings: Some(bindings),
+            backend: Backend::Model(Box::new(ModelEnvironment {
+                behavior: basis,
+                tools,
+                skills,
+            })),
+            digest: record.configuration_digest,
             session,
-            tools,
-            skills,
             prompt,
             directory,
         })
@@ -144,7 +253,18 @@ impl Environment {
         maka_runtime::input::MessageInput,
         super::super::skills::SkillPreparation,
     )> {
-        let skills = self.skills.clone();
+        let Backend::Model(model) = &self.backend else {
+            executor_skills(&content, &ids)?;
+            return Ok((
+                self,
+                content,
+                super::super::skills::SkillPreparation::Ready {
+                    skill_invocation: Default::default(),
+                    required_tools: Default::default(),
+                },
+            ));
+        };
+        let skills = model.skills.clone();
         let (content, selection) = tokio::task::spawn_blocking(move || {
             let selection = skills.prepare(&mut content, &ids)?;
             Ok::<_, maka_protocol::OperationError>((content, selection))
@@ -177,13 +297,6 @@ impl Environment {
                 .map_err(crate::server::configuration::failure)?
                 .revision
                 != self.prompt.policy_revision
-            || executions
-                .configuration
-                .skill_preferences()
-                .await
-                .ok()
-                .map(|p| p.revision)
-                != self.skills.preference_revision
         {
             return Ok(None);
         }
@@ -193,6 +306,36 @@ impl Environment {
         self.directory
             .validate(std::path::Path::new(&self.session.workspace.host_cwd))
             .map_err(internal)?;
+        match &mut self.backend {
+            Backend::Model(model) => {
+                if model.behavior.as_ref().is_some_and(|basis| {
+                    !basis.source.is_effective()
+                        || basis
+                            .admission
+                            .as_ref()
+                            .is_some_and(|gate| gate.is_cancelled())
+                }) {
+                    return Err(failure(
+                        Code::OperationUnavailable,
+                        "Prepared Session behavior has retired",
+                    ));
+                }
+                if executions
+                    .configuration
+                    .skill_preferences()
+                    .await
+                    .ok()
+                    .map(|p| p.revision)
+                    != model.skills.preference_revision
+                {
+                    return Ok(None);
+                }
+            }
+            Backend::Executor(binding) if !binding.is_effective() => {
+                return Err(failure(Code::OperationUnavailable, "Executor was retired"));
+            }
+            Backend::Executor(_) => {}
+        }
         if !executions
             .capabilities
             .commit_tools(self.bindings.take().expect("candidate binding"))
@@ -202,6 +345,25 @@ impl Environment {
         }
         Ok(Some(self))
     }
+}
+
+pub(crate) fn executor_skills(
+    content: &maka_runtime::input::MessageInput,
+    ids: &[String],
+) -> Result<()> {
+    if !ids.is_empty()
+        || content
+            .inline_references
+            .iter()
+            .flatten()
+            .any(|reference| reference.kind == maka_runtime::input::InlineReferenceKind::Skill)
+    {
+        return Err(failure(
+            Code::OperationUnavailable,
+            "Executor adapters do not accept Maka Skill invocations",
+        ));
+    }
+    Ok(())
 }
 
 fn binding_error(error: maka_client_capability::BindingError) -> maka_protocol::OperationError {

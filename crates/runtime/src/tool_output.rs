@@ -37,6 +37,7 @@ pub use media::ToolSuccess;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "format", content = "value", rename_all = "snake_case")]
 pub enum ToolOutput {
+    Model(Box<crate::model::ModelGeneration>),
     Json(Value),
     Mcp(CallResult),
     Image(ImageOutput),
@@ -68,6 +69,7 @@ impl ToolOutput {
     /// JavaScript and presentation see the original result, not model clipping.
     pub fn into_json(self) -> Value {
         match self {
+            Self::Model(result) => serde_json::to_value(result).expect("typed model result"),
             Self::Json(value) => value,
             Self::Mcp(result) => {
                 serde_json::to_value(result).expect("MCP evidence contains only JSON values")
@@ -79,6 +81,7 @@ impl ToolOutput {
 
     pub fn to_json(&self) -> Value {
         match self {
+            Self::Model(result) => serde_json::to_value(result).expect("typed model result"),
             Self::Json(value) => value.clone(),
             Self::Mcp(result) => {
                 serde_json::to_value(result).expect("MCP evidence contains only JSON values")

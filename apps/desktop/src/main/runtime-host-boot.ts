@@ -256,6 +256,7 @@ import { registerRuntimeHostOAuthIpc } from "./runtime-host-oauth-ipc-main.js";
 import { RuntimeHostOAuthPresentation } from "./runtime-host-oauth-presentation.js";
 import { registerRuntimeHostPermissionsIpc } from "./runtime-host-permissions-ipc-main.js";
 import { registerRuntimeHostRendererIpc } from "./runtime-host-renderer-ipc-main.js";
+import { registerClientPluginRemoteIpc } from './client-plugin-remote-ipc.js';
 import { registerRuntimeHostSearchIpc } from "./runtime-host-search-ipc-main.js";
 import { createRuntimeHostProjectCatalog } from "./runtime-host-project-catalog.js";
 import { createRuntimeHostDefaultRecovery } from "./runtime-host-default-recovery.js";
@@ -1736,6 +1737,9 @@ function registerHostClientIpc(
   const unsubscribeProjectCatalogChanges = client.subscribeProjectCatalogChanges(() => {
     sendToRenderer("projects:changed");
   });
+  const unsubscribePluginClientChanges = client.subscribePluginClientChanges((revision) => {
+    sendToRenderer("plugins:client-changed", revision);
+  });
   const unsubscribeScheduledTaskChanges = client.subscribeScheduledTaskChanges((frame) => {
     if (!isTargetActive()) return;
     sendToRenderer("scheduled-tasks:changed", {
@@ -1781,6 +1785,11 @@ function registerHostClientIpc(
     emitConnectionListChanged: emitTargetConnectionListChanged,
   });
   registerRuntimeHostRendererIpc({ ipcMain: scopedIpc, client });
+  const disposeClientPluginRemotes = registerClientPluginRemoteIpc({
+    ipcMain: scopedIpc, client,
+    ownsRenderer: (contents) => mainWindowController.ownsRenderer(contents),
+    report: (error) => console.error('[plugins] Remote cleanup failed:', error),
+  });
   registerRuntimeHostArtifactsIpc({
     uiLocale: () => desktopLocale.current(),
     ipcMain: scopedIpc,
@@ -1999,10 +2008,12 @@ function registerHostClientIpc(
   registerTaskSubmissionReadinessIpc(taskSubmissionReadinessService, scopedIpc);
   return async () => {
     unsubscribeConfigurationChanges();
+    await disposeClientPluginRemotes();
     await managedArtifactPreview.closeScope(scope.targetEpoch);
     unsubscribeConnectionCatalogChanges();
     unsubscribeSessionCatalogChanges();
     unsubscribeProjectCatalogChanges();
+    unsubscribePluginClientChanges();
     unsubscribeScheduledTaskChanges();
     runtimePolicyTargets.delete(target);
     if (runtimePolicyTargetsByEpoch.get(scope.targetEpoch) === targetContext) {
@@ -2334,7 +2345,7 @@ async function disposeRuntimeHostDesktop(): Promise<void> {
 }
 
 function wakePeerRecoveryAfterResume(): void {
-  runtimeHostManager?.wakePeerRecovery();
+  runtimeHostManager?.notifySystemResume();
 }
 
 function resolveDesktopE2eFixture(): ReturnType<typeof resolveE2eFixture> {

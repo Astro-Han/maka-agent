@@ -107,6 +107,15 @@ pub enum ToolOutcome {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Fact {
+    ExecutorStarted {
+        binding: crate::executor::Binding,
+    },
+    ExecutorObserved {
+        output: crate::executor::Output,
+    },
+    ExecutorCompleted {
+        text: String,
+    },
     InvocationOpened {
         input: InvocationInput,
         /// Absent only for older/synthetic facts; never recover it from mutable metadata.
@@ -190,6 +199,9 @@ pub enum Fact {
 impl Fact {
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::ExecutorStarted { .. } => "executor_started",
+            Self::ExecutorObserved { .. } => "executor_observed",
+            Self::ExecutorCompleted { .. } => "executor_completed",
             Self::InvocationOpened { .. } => "invocation_opened",
             Self::MessageSteered { .. } => "message_steered",
             Self::WorkhubDelegated { .. } => "workhub_delegated",
@@ -289,6 +301,7 @@ pub struct InvocationProjection {
     pub terminal: Option<TerminalStatus>,
     pub uncertain_operations: Vec<String>,
     pub unfinished_model_steps: Vec<String>,
+    pub unfinished_executor: bool,
 }
 
 impl LogPrefix {
@@ -296,6 +309,7 @@ impl LogPrefix {
         let mut terminal = None;
         let mut pending = std::collections::BTreeSet::new();
         let mut model_steps = std::collections::BTreeSet::new();
+        let mut unfinished_executor = false;
         for stored in &self.events {
             if stored.event.invocation.invocation_id != invocation_id {
                 continue;
@@ -307,13 +321,22 @@ impl LogPrefix {
                 Fact::ToolSettled { operation_id, .. } => {
                     pending.remove(operation_id);
                 }
-                Fact::InvocationEnded { outcome } => terminal = Some(outcome.status()),
+                Fact::ExecutorStarted { .. } => unfinished_executor = true,
+                Fact::ExecutorCompleted { .. } => unfinished_executor = false,
+                Fact::InvocationEnded { outcome } => {
+                    terminal = Some(outcome.status());
+                    if !matches!(outcome, InvocationOutcome::Failed { class, .. } if class == "outcome_unknown")
+                    {
+                        unfinished_executor = false;
+                    }
+                }
                 Fact::InvocationOpened { .. }
                 | Fact::MessageSteered { .. }
                 | Fact::WorkhubDelegated { .. }
                 | Fact::WorkhubResumeObserved { .. }
                 | Fact::ContextCheckpointRecorded { .. }
                 | Fact::ToolResultArchived { .. }
+                | Fact::ExecutorObserved { .. }
                 | Fact::ModelObserved { .. }
                 | Fact::ToolRejected { .. } => {}
                 Fact::ModelRequested { step_id, .. } => {
@@ -328,6 +351,7 @@ impl LogPrefix {
             terminal,
             uncertain_operations: pending.into_iter().collect(),
             unfinished_model_steps: model_steps.into_iter().collect(),
+            unfinished_executor,
         }
     }
 }

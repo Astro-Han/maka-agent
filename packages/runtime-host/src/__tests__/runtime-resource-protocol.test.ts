@@ -269,6 +269,12 @@ test('Runtime Resource PTY data has an independent sequence and explicit recover
   };
   assert.deepEqual(decodeSubscriptionFrame(frame), frame);
   assert.deepEqual(decodeSubscriptionFrame({ ...frame, reset: true }), { ...frame, reset: true });
+  assert.deepEqual(decodeSubscriptionFrame({ ...frame, data: '', reset: true }), {
+    ...frame,
+    data: '',
+    reset: true,
+  });
+  assertInvalid(() => decodeSubscriptionFrame({ ...frame, data: '' }));
   assertInvalid(() => decodeSubscriptionFrame({ ...frame, sequence: 4 }));
   assertInvalid(() => decodeSubscriptionFrame({ ...frame, reset: false }));
   assertInvalid(() => decodeSubscriptionFrame({ ...frame, ptySequence: 0 }));

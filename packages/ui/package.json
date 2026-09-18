@@ -7,6 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./client-plugins": "./dist/client-plugins/index.js",
     ".": "./dist/index.js",
     "./artifact-preview-registry": "./dist/artifact-preview-registry.js",
     "./assistant-stream": "./dist/assistant-stream.js",
@@ -23,9 +24,10 @@
     "build": "tsc -p tsconfig.json",
     "benchmark:redaction": "npm run build && node scripts/benchmark-streaming-redaction.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:dist": "node --test \"dist/**/*.test.js\""
+    "test:dist": "node --test \"dist/**/*.test.js\" \"tests/*.test.mjs\""
   },
   "dependencies": {
+    "@maka-agent/plugin-sdk": "1.0.0",
     "@astryxdesign/core": "0.5.2",
     "@maka/core": "0.1.0",
     "clsx": "^2.1.1",

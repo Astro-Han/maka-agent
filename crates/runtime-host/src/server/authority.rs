@@ -154,6 +154,7 @@ impl Authority {
 
     pub(super) fn receives(&self, notice: &Value) -> bool {
         let operation = match notice["kind"].as_str() {
+            Some("plugin.client.changed") => Operation::PluginClientQuery,
             Some("configuration.changed") => Operation::RuntimePolicyQuery,
             Some("connection.catalog.changed") => Operation::ConnectionCatalogQuery,
             Some("project.catalog.changed") => Operation::ProjectCatalogQuery,
@@ -179,6 +180,10 @@ fn restricted_candidate(credential: &AccessCredential) -> bool {
 /// silently grant host-path access to restricted remote credentials.
 fn path_free(request: &Request) -> bool {
     match request.operation {
+        Operation::ScheduledTaskMutate => {
+            serde_json::from_value::<maka_scheduler::command::Mutation>(request.input.clone())
+                .is_ok_and(|input| !input.uses_host_paths())
+        }
         Operation::SkillCatalogQuery => maka_protocol::skills::decode_catalog_input(&request.input)
             .is_ok_and(|input| !input.uses_host_paths()),
         Operation::SkillCatalogInvocableQuery => {
@@ -225,6 +230,7 @@ fn path_free(request: &Request) -> bool {
         | Operation::CredentialVaultSet
         | Operation::CredentialVaultDelete
         | Operation::SessionCatalogQuery
+        | Operation::ScheduledTaskQuery
         | Operation::WorkhubCoordinationResolve
         | Operation::WorkhubCoordinationAnswer
         | Operation::WorkhubCoordinationCandidates

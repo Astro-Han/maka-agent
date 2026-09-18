@@ -129,13 +129,19 @@ impl Executions {
                 .await?;
             let native = self.native_tools(&configuration.cwd, record.configuration.tool_profile);
             let mode = configuration.permission_mode;
+            let ceiling = proof.bound_tools.clone();
             let expected = proof
                 .skills_digest
                 .clone()
                 .ok_or_else(|| unavailable("Handoff has no frozen Skills evidence"))?;
             let (tools, skills) = tokio::task::spawn_blocking(move || {
-                let (tools, skills) =
-                    super::super::tools::catalog(native, mode, additional, skills)?;
+                let (tools, skills) = super::super::tools::catalog(
+                    native,
+                    mode,
+                    additional,
+                    skills,
+                    ceiling.as_ref(),
+                )?;
                 if skills.catalog().fingerprint().map_err(internal)? != expected {
                     return Err(unavailable("Handoff Skills changed"));
                 }
@@ -148,6 +154,17 @@ impl Executions {
         if tools.digest() != pause.execution.tools.catalog_digest {
             return Err(unavailable("Handoff tool catalog changed"));
         }
+        let tools = if source.session_id == COORDINATION_SESSION_ID {
+            tools
+        } else {
+            tools
+                .with_plugins(
+                    self.plugin_catalog.clone(),
+                    maka_plugins::composition::Scope::Session(source.session_id.clone()),
+                    proof.bound_tools.clone(),
+                )
+                .map_err(internal)?
+        };
         let cwd = configuration.cwd.clone();
         let expected = configuration.workspace_identity.clone();
         let directory = tokio::task::spawn_blocking(move || {

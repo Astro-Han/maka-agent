@@ -139,7 +139,7 @@ async fn original_client_relay_profiles_reach_http_and_reopen_exact_facts() {
                         .expect("opening freezes configuration");
                     assert_eq!(
                         configuration.model.as_ref(),
-                        Some(&current.configuration.model)
+                        current.configuration.target.model()
                     );
                     Some(configuration.thinking_level)
                 })

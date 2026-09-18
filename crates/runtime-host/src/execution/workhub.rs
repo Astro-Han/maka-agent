@@ -33,77 +33,19 @@ use uuid::Uuid;
 pub(super) mod profile;
 
 impl Executions {
-    pub(crate) fn workhub_target(&self, session: &str) -> Option<Invocation> {
-        self.active
-            .lock()
-            .unwrap()
-            .values()
-            .find(|run| run.invocation.session_id == session && !run.cancellation.is_cancelled())
-            .map(|run| run.invocation.clone())
-    }
-
     /// Caller owns admission; waiting for cleanup must happen after releasing it.
     pub(crate) async fn stop_workhub_owner(
         &self,
         owner: &Invocation,
         action_id: &ActionId,
     ) -> Result<Option<tokio_util::sync::CancellationToken>> {
-        self.retire_workhub_owner(
+        self.retire_owner(
             owner,
             maka_agent::CancellationCause::WorkhubStop {
                 action_id: action_id.clone(),
             },
         )
         .await
-    }
-
-    pub(crate) async fn retire_workhub_owner(
-        &self,
-        owner: &Invocation,
-        cause: maka_agent::CancellationCause,
-    ) -> Result<Option<tokio_util::sync::CancellationToken>> {
-        let stored = |error: maka_event_log::StoreError| {
-            if matches!(
-                error,
-                maka_event_log::StoreError::CommitUnknown(_)
-                    | maka_event_log::StoreError::OperationUnknown
-            ) {
-                self.begin_drain();
-                failure(Code::CommitOutcomeUnknown, &error.to_string())
-            } else {
-                internal(error)
-            }
-        };
-        let boundary = self.log.handoff_owner(owner).await.map_err(stored)?;
-        let boundary = if matches!(
-            boundary.state,
-            maka_event_log::turns::InvocationState::Ended {
-                outcome: maka_runtime::event::InvocationOutcome::HandoffPaused { .. },
-                ..
-            }
-        ) {
-            self.log
-                .cancel_handoff(&boundary.invocation, cause.clone())
-                .await
-                .map_err(stored)?
-        } else {
-            boundary
-        };
-        let owner = &boundary.invocation;
-        let active = self
-            .active
-            .lock()
-            .unwrap()
-            .get(&owner.run_id)
-            .filter(|run| run.invocation == *owner)
-            .cloned();
-        let Some(active) = active else {
-            return Ok(None);
-        };
-        let stopped = self.interactions.stop_run(owner).await;
-        active.cancellation.cancel_with(cause);
-        stopped?;
-        Ok(Some(active.completed))
     }
 
     pub(crate) async fn workhub_source(

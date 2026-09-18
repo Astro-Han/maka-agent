@@ -18,8 +18,8 @@
  */
 
 //! Minimal outbound epoch-141 tool observation subset, not a full inbound
-//! SessionToolEvent decoder. Only start/result with operation/step identity are
-//! supported. Rich presentation, previews, progress and output are unimplemented.
+//! SessionToolEvent decoder. Start, progress and result carry activity identity;
+//! rich presentation and complete output remain in the durable transcript.
 //! Live events never carry full args/results, ancestry, origin or model visibility.
 use super::{SUBSCRIPTION_FRAME_MAX_BYTES, decode, ensure, entity, id};
 use crate::{ProtocolError, Result};
@@ -63,6 +63,13 @@ pub enum SessionToolEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         operation_id: Option<String>,
         status: ToolResultStatus,
+    },
+    ToolProgress {
+        id: String,
+        turn_id: String,
+        ts: u64,
+        tool_use_id: String,
+        chunk: String,
     },
 }
 
@@ -114,6 +121,19 @@ pub fn decode_tool_observation_frame(value: &Value) -> Result<ToolObservationFra
 }
 
 fn validate_event(event: &SessionToolEvent) -> Result<()> {
+    if let SessionToolEvent::ToolProgress {
+        id: event_id,
+        turn_id,
+        tool_use_id,
+        chunk,
+        ..
+    } = event
+    {
+        id(event_id)?;
+        entity(turn_id)?;
+        crate::codec::opaque_identity(tool_use_id)?;
+        return ensure(chunk.len() <= 64 * 1024, "Tool progress exceeds byte limit");
+    }
     let (event_id, turn_id, tool_use_id, operation_id) = match event {
         SessionToolEvent::ToolStart {
             id,
@@ -140,6 +160,7 @@ fn validate_event(event: &SessionToolEvent) -> Result<()> {
             operation_id,
             ..
         } => (id, turn_id, tool_use_id, operation_id),
+        SessionToolEvent::ToolProgress { .. } => unreachable!(),
     };
     id(event_id)?;
     entity(turn_id)?;

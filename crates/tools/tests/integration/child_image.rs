@@ -53,7 +53,7 @@ impl ToolPreparer for ImageTools {
     ) -> PreparationFuture {
         let log = self.0.clone();
         Box::pin(async move {
-            let effect: PreparedEffect = Box::new(move |_| {
+            let effect: PreparedEffect = PreparedEffect::new(move |_| {
                 Box::pin(async move {
                     if name == "read" {
                         return Ok(ToolSuccess::image(GIF.to_vec(), "image/gif".into()).unwrap());
@@ -145,6 +145,7 @@ async fn nested_image_is_committed_before_js_and_parent_stays_json() {
     );
     let result = run
         .capture()
+        .unwrap()
         .into_step(&invocation.invocation_id)
         .invoke(&call, CancellationToken::new())
         .await

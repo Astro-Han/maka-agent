@@ -79,7 +79,7 @@ async fn unchanged_client_reads_scoped_file_and_reopens_identical_facts_and_rows
                 assert_eq!(configuration.tool_mode, ToolMode::Direct);
                 assert_eq!(
                     configuration.model.as_ref(),
-                    Some(&current.configuration.model)
+                    current.configuration.target.model()
                 );
             }
             if let Fact::ToolDispatched { operation_id, .. } = &stored.event.fact {

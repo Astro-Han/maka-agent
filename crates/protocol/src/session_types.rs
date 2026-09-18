@@ -32,7 +32,7 @@ wire_enum!(SessionStartMode { DeepResearch=>"deep_research", Bot=>"bot" });
 wire_enum!(SessionToolProfile { HeadlessCodingV1=>"headless-coding-v1", WorkhubCoordinationV1=>"workhub-coordination-v1", WorkhubCoordinationV2=>"workhub-coordination-v2" });
 wire_enum!(SessionStatus { Active=>"active", Running=>"running", WaitingForUser=>"waiting_for_user", Blocked=>"blocked", Aborted=>"aborted" });
 wire_enum!(BlockedReason { NoRealConnection=>"NO_REAL_CONNECTION", Auth=>"auth", PermissionRequired=>"permission_required", ToolFailed=>"tool_failed", Unknown=>"unknown" });
-wire_enum!(Backend { AiSdk=>"ai-sdk", Fake=>"fake" });
+wire_enum!(Backend { AiSdk=>"ai-sdk", PluginExecutor=>"plugin-executor", Fake=>"fake" });
 wire_enum!(RevisionState { Preparing=>"preparing", Committed=>"committed" });
 wire_enum!(SessionLifecycleState { Active=>"active", Archived=>"archived" });
 wire_enum!(UnsupportedReason { NotWireRepresentable=>"not_wire_representable" });
@@ -91,6 +91,8 @@ pub struct SessionCatalogProjection {
     pub has_unread: bool,
     pub status: SessionStatus,
     pub backend: Backend,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor_id: Option<maka_runtime::executor::ExecutorId>,
     pub llm_connection_id: Option<String>,
     pub llm_connection_slug: String,
     pub connection_locked: bool,

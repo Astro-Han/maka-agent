@@ -20,6 +20,7 @@
 //! Pure, disposable presentation of committed invocation facts. Model context is
 //! a separate projection; retaining interrupted text here never accepts it there.
 mod compact;
+mod executor;
 mod message;
 pub mod navigation;
 pub mod shell;
@@ -70,6 +71,7 @@ enum State {
 }
 
 pub struct InvocationView {
+    executor: Option<executor::Execution>,
     state: State,
     last_sequence: u64,
     max_text_bytes: usize,
@@ -84,6 +86,7 @@ impl InvocationView {
             return Err(ProjectionError::TooLarge);
         }
         Ok(Self {
+            executor: None,
             state: State::Vacant,
             last_sequence: 0,
             max_text_bytes,
@@ -183,6 +186,35 @@ impl InvocationView {
                     return Err(ProjectionError::Invalid("invocation identity changed"));
                 }
                 match fact {
+                    Fact::ExecutorStarted { binding } => {
+                        if step.is_some() || self.executor.is_some() {
+                            return Err(ProjectionError::Invalid("overlapping execution backends"));
+                        }
+                        self.executor = Some(executor::Execution::new(
+                            event,
+                            ts,
+                            binding,
+                            self.max_text_bytes,
+                        ));
+                    }
+                    Fact::ExecutorObserved { output } => {
+                        messages.extend(
+                            self.executor
+                                .as_mut()
+                                .ok_or(ProjectionError::Invalid("executor output without start"))?
+                                .observe(event, ts, output)?,
+                        );
+                    }
+                    Fact::ExecutorCompleted { text } => {
+                        messages.extend(
+                            self.executor
+                                .as_mut()
+                                .ok_or(ProjectionError::Invalid(
+                                    "executor completion without start",
+                                ))?
+                                .complete(event, ts, text)?,
+                        );
+                    }
                     Fact::MessageSteered { message, .. } => {
                         if step.is_some() {
                             return Err(ProjectionError::Invalid(
@@ -255,6 +287,9 @@ impl InvocationView {
                         );
                     }
                     Fact::InvocationEnded { outcome } => {
+                        if let Some(executor) = self.executor.take() {
+                            messages.extend(executor.finish(event, ts));
+                        }
                         if let Some(unfinished) = step.take() {
                             if matches!(
                                 outcome,
@@ -325,6 +360,9 @@ impl InvocationView {
     /// Frozen caller-owned copies of observed text, including closed parts whose
     /// model completion has not committed. These are overlay, not durable rows.
     pub fn overlay(&self) -> Vec<Message> {
+        if let Some(executor) = &self.executor {
+            return executor.overlay();
+        }
         match &self.state {
             State::Active {
                 step: Some(step), ..

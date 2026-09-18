@@ -21,6 +21,7 @@ use super::evidence;
 use crate::StoreError;
 use maka_presentation::ProjectionError;
 use maka_runtime::event::StoredEvent;
+use maka_runtime::tool_call::ToolOrigin;
 use sqlx::SqliteConnection;
 use std::collections::BTreeSet;
 
@@ -46,10 +47,8 @@ pub(super) async fn selected(
         if ids.len() > 33 {
             return Err(StoreError::PrefixTooLarge);
         }
-        let header: Option<(i64, String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT sequence, json_extract(event_json, '$.fact.call.origin.kind'),
-                json_extract(event_json, '$.fact.call.origin.step_id'),
-                json_extract(event_json, '$.fact.call.origin.parent_operation_id')
+        let header: Option<(i64, String)> = sqlx::query_as(
+            "SELECT sequence, json_extract(event_json, '$.fact.call.origin')
              FROM runtime_events
              WHERE invocation_id = ?1 AND operation_id = ?2 AND operation_id IS NOT NULL
                AND kind = ?3 AND sequence <= ?4 LIMIT 1",
@@ -64,7 +63,7 @@ pub(super) async fn selected(
         .bind(before)
         .fetch_optional(&mut *tx)
         .await?;
-        let Some((sequence, origin, step, parent)) = header else {
+        let Some((sequence, origin)) = header else {
             return Err(
                 ProjectionError::Invalid("tool presentation has no dispatch provenance").into(),
             );
@@ -73,17 +72,25 @@ pub(super) async fn selected(
         if ids.len() > 33 {
             return Err(StoreError::PrefixTooLarge);
         }
-        match origin.as_str() {
-            "provider" => {
-                break Some(step.ok_or(ProjectionError::Invalid("missing provider step"))?);
+        match serde_json::from_str::<ToolOrigin>(&origin)? {
+            ToolOrigin::Provider { step_id } => break Some(step_id),
+            ToolOrigin::Standalone
+            | ToolOrigin::HostSdk {
+                parent_operation_id: None,
+                ..
+            } => break None,
+            ToolOrigin::CodeMode {
+                parent_operation_id,
+                ..
             }
-            "standalone" => break None,
-            "code_mode" => {
-                current = parent.ok_or(ProjectionError::Invalid("missing parent operation"))?;
+            | ToolOrigin::HostSdk {
+                parent_operation_id: Some(parent_operation_id),
+                ..
+            } => {
+                current = parent_operation_id;
                 before = sequence - 1;
                 rejected = false;
             }
-            _ => return Err(ProjectionError::Invalid("unknown tool origin").into()),
         }
     };
     if let Some(step) = &step {

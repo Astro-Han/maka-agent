@@ -136,7 +136,13 @@ impl Executions {
             {
                 return Ok(None);
             }
-            let Some((basis, candidate)) = environment.take() else {
+            let sources = successor_sources(&queue)?;
+            let requested_mode = sources[0]
+                .submitted_intent
+                .as_ref()
+                .and_then(|intent| intent.turn_orchestration.as_ref())
+                .map(|intent| intent.mode);
+            let Some((basis, candidate_mode, candidate)) = environment.take() else {
                 let record = self
                     .log
                     .get_session::<crate::session::SessionConfiguration>(session)
@@ -150,12 +156,16 @@ impl Executions {
                         record,
                         None,
                         maka_client_capability::BindingMode::Degrade,
+                        requested_mode,
                     )
                     .await;
                 *admission = Some(self.lock_admission().await);
-                environment = Some((basis, candidate));
+                environment = Some((basis, requested_mode, candidate));
                 continue;
             };
+            if candidate_mode != requested_mode {
+                continue;
+            }
             let candidate = match candidate {
                 Ok(candidate) => match candidate.commit(self, session).await {
                     Ok(Some(candidate)) => Ok(candidate),
@@ -174,7 +184,6 @@ impl Executions {
                     Err(error)
                 }
             };
-            let sources = successor_sources(&queue)?;
             let content = message::aggregate(sources.iter().map(|source| &source.message.content));
             let invocation = if sources[0].disposition == Disposition::TurnStarted {
                 queue[0].invocation.clone()
@@ -198,7 +207,10 @@ impl Executions {
                             // Accepted source content already contains the frozen
                             // instructions; recovery must not load it a second time.
                             skill_ids: intent
-                                .filter(|_| sources[0].skill_invocation.loaded.is_empty())
+                                .filter(|intent| {
+                                    !intent.skill_ids.is_empty()
+                                        && sources[0].skill_invocation.loaded.is_empty()
+                                })
                                 .map(|intent| intent.skill_ids.clone()),
                             turn_orchestration: intent
                                 .and_then(|intent| intent.turn_orchestration.clone()),
@@ -212,16 +224,15 @@ impl Executions {
                     .await
                 }
             };
-            let prepared = prepared.and_then(|(input, _)| {
+            let prepared = prepared.and_then(|input| {
                 super::skills::validate_pending_tools(&input, &queue, &sources)?;
                 Ok(input)
             });
             let cancellation = self.shutdown.child_token();
             let result = match prepared {
                 Ok(mut input) => {
-                    input.invocation = invocation.clone();
-                    self.engine
-                        .start(input, cancellation.clone())
+                    *input.invocation_mut() = invocation.clone();
+                    self.start_run(input, cancellation.clone())
                         .await
                         .map_err(|error| {
                             if requires_drain(&error) {

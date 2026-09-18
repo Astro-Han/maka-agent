@@ -112,6 +112,10 @@ impl Interactions {
         self.admission.lock().await
     }
 
+    pub(crate) async fn own_admission(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.admission.clone().lock_owned().await
+    }
+
     /// Caller holds the shared admission gate, before cancelling the Run.
     pub(crate) async fn stop_run(
         &self,

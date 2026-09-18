@@ -21,7 +21,7 @@
 
 [English](./rust-runtime.md)
 
-Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 158。
+Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 159。
 重写尚未完成；未实现的操作明确返回错误。
 
 ## 构建与运行
@@ -177,7 +177,7 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
 - Rust 管理存储、网络路由、工具和原生进程／PTY。一个惰性启动的长期 V8 并发处理模型
   请求与终端解析；Code Mode 使用独立短生命周期 isolate。数量与字节限制提供背压，
   V8 heap 限制不等于进程内存隔离。
-- 插件后续须通过目录注册和有作用域的 Host 服务接入，复用日志、权限与排空机制，不替换 Engine。
+- 插件通过目录注册和有作用域的 Host 服务接入，复用日志、权限与排空机制，不替换 Engine。
 - Code Mode 限制累计 VM 执行时间，不计异步工具等待或收尾时间。
 - 请求的代理策略同时覆盖 HTTP 与 Responses WebSocket。WS 握手失败后指数退避重试
   5 次，再经同一网络策略降级 HTTP。主模型请求另对已识别的临时 provider 或原生网络故障最多尝试
@@ -271,4 +271,9 @@ WorkHub 已支持受限对话、候选发现、交互式目标选择、向已有
 Skills 变更、更新预览及其事务恢复仍未完成。
 会话分支、删除、导入导出、回顾及其它 runtime policy 设置也未完成。
 编排、部分 capability 服务及其它协议域仍未完成；原生部署和更新能力不代表完整产品兼容。
-插件实现排在 Agent Graph 之后；OS 沙箱暂缓。Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。
+插件平台支持静态链接 Rust 包、共享／独立 V8 的 JavaScript 包、作用域 Host 服务、外部 Executor，
+以及 Desktop Slot／Remote stream。Graph／Swarm 与定时任务是内置插件。
+Graph 实现类工作使用 Host 管理的 gix worktree，发布不可变补丁，不自动合并。
+单次 Turn 编排跨 yield 和 resume 保留，不改变 Session 默认值；Swarm checkpoint 提供状态和最终结果 ID，
+通过历史分页取回正文。接口与限制见[插件 SDK](../packages/plugin-sdk/README.zh-CN.md)。
+OS 沙箱暂缓。Memory 留待单独重做，不移植旧实现，也不纳入本次重写。内容脱敏不实现。

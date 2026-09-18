@@ -23,6 +23,7 @@ pub use edit_match::EditMatchStrategy;
 pub mod instructions;
 mod search;
 pub mod workspace;
+pub mod worktree;
 pub use search::{GLOB_DESCRIPTION, GLOB_NAME, glob_schema};
 mod grep;
 pub use grep::{GREP_DESCRIPTION, GREP_NAME, grep_schema};

@@ -71,7 +71,7 @@ pub async fn recover(log: &EventLog) -> Result<usize, RunError> {
         }
         append(Fact::InvocationEnded {
             outcome: InvocationOutcome::Failed {
-                class: if state.uncertain_operations.is_empty() {
+                class: if state.uncertain_operations.is_empty() && !state.unfinished_executor {
                     "host_interrupted"
                 } else {
                     "outcome_unknown"

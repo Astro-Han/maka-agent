@@ -53,6 +53,15 @@ macro_rules! unresolved {
                     AND NOT EXISTS(SELECT 1 FROM runtime_events AS dispatch
                         WHERE dispatch.invocation_id = completed.invocation_id AND dispatch.kind IN ('tool_dispatched', 'tool_rejected')
                         AND dispatch.operation_id = completed.operation_id || ':' || json_extract(part.value, '$.call.id'))
+                    UNION ALL
+                    SELECT 3, started.event_id, '', 'null', 'null'
+                    FROM runtime_events started
+                    WHERE started.invocation_id = ?1 AND started.kind = 'executor_started'
+                    AND NOT EXISTS(SELECT 1 FROM runtime_events done
+                        WHERE done.invocation_id = started.invocation_id
+                        AND (done.kind = 'executor_completed' OR
+                            (done.kind = 'invocation_ended' AND
+                             COALESCE(json_extract(done.event_json, '$.fact.outcome.class'), '') != 'outcome_unknown')))
                 )",
         $tail
     ) };
@@ -60,6 +69,7 @@ macro_rules! unresolved {
 pub(crate) use unresolved;
 
 pub struct InvocationRecovery {
+    pub unfinished_executor: bool,
     pub unfinished_model_steps: Vec<String>,
     pub uncertain_operations: Vec<String>,
     pub undispatched_calls: Vec<UndispatchedCall>,
@@ -101,6 +111,7 @@ impl EventLog {
         }
         crate::tool_payloads::verify_invocation_bindings(&mut transaction, &invocation.invocation_id).await?;
         let mut evidence = InvocationRecovery {
+            unfinished_executor: false,
             unfinished_model_steps: Vec::new(),
             uncertain_operations: Vec::new(),
             undispatched_calls: Vec::new(),
@@ -129,6 +140,7 @@ impl EventLog {
                         name: row.try_get(2)?,
                         input: serde_json::from_str(row.try_get(3)?)?,
                     }),
+                    3 => evidence.unfinished_executor = true,
                     _ => unreachable!("query emits only recovery fact kinds"),
                 }
             }

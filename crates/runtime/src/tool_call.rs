@@ -32,6 +32,14 @@ pub fn provider_result_id(event_id: &str, part_index: usize) -> String {
     format!("{event_id}_tool_result_{part_index}")
 }
 
+pub fn metered_usage_id(event_id: &str) -> String {
+    format!("{event_id}:usage")
+}
+
+pub fn parse_metered_usage_id(id: &str) -> Option<&str> {
+    id.strip_suffix(":usage")
+}
+
 pub fn parse_provider_result_id(id: &str) -> Option<(&str, usize)> {
     let (event, index) = id.rsplit_once("_tool_result_")?;
     let index: usize = index.parse().ok()?;
@@ -75,6 +83,13 @@ pub enum ToolOrigin {
         parent_tool_call_id: String,
     },
     Standalone,
+    /// Explicit Host SDK work, never dispatch inferred from executor observations.
+    HostSdk {
+        package_id: String,
+        entry_id: String,
+        activation: String,
+        parent_operation_id: Option<String>,
+    },
 }
 
 impl ToolCallIdentity {

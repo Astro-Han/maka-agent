@@ -178,7 +178,7 @@ async fn unchanged_client_configures_session_checks_cas_and_reopens_durable_stat
             assert_eq!(configuration.tool_mode, ToolMode::Direct);
             assert_eq!(
                 configuration.model.as_ref(),
-                Some(&current.configuration.model)
+                current.configuration.target.model()
             );
         }
         let bytes = serde_json::to_vec(&prefix).unwrap();

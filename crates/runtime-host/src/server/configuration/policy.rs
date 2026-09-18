@@ -81,6 +81,11 @@ pub(super) async fn execute(
         Operation::RuntimePolicyMutate => {
             let input = parsed(runtime_policy::decode_mutation_input(value)).map_err(failure)?;
             match input.operation {
+                RuntimePolicyMutation::SetSubagents { value } => store
+                    .set_subagents(input.expected_revision, value)
+                    .await
+                    .map(Output::PolicyMutation)
+                    .map_err(failure),
                 RuntimePolicyMutation::SetNetworkProxy { value } => store
                     .set_network_proxy(input.expected_revision, value)
                     .await

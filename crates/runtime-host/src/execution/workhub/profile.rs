@@ -73,6 +73,7 @@ pub(super) fn tools(
         catalog(executions, tools)?,
         maka_runtime::execution::ToolComposition {
             clients,
+            bound_tools: None,
             skills_digest: None,
         },
     ))

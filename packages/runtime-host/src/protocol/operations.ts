@@ -43,6 +43,8 @@ import { OAUTH_OPERATION_SPECS } from './oauth.js';
 import { PLAN_OPERATION_SPECS } from './plan.js';
 import { PEER_MESH_OPERATION_SPECS } from './peer-mesh.js';
 import { PLUGIN_PLATFORM_OPERATION_SPECS } from './plugin-platform.js';
+import { PLUGIN_CLIENT_OPERATION_SPECS } from './plugin-client.js';
+import { PLUGIN_REMOTE_OPERATION_SPECS } from './plugin-remote.js';
 import { PROJECT_CATALOG_OPERATION_SPECS } from './project-catalog.js';
 import {
   composeOperationSpecMaps,
@@ -171,6 +173,8 @@ export * from './oauth.js';
 export * from './external-agent-setup.js';
 export * from './plan.js';
 export * from './plugin-platform.js';
+export * from './plugin-client.js';
+export * from './plugin-remote.js';
 export * from './project-catalog.js';
 export * from './runtime-policy.js';
 export * from './runtime-resource.js';
@@ -232,6 +236,8 @@ export const HOST_OPERATION_SPECS = composeOperationSpecMaps(
   CONFIGURATION_OPERATION_SPECS,
   WORKHUB_COORDINATION_OPERATION_SPECS,
   PLUGIN_PLATFORM_OPERATION_SPECS,
+  PLUGIN_CLIENT_OPERATION_SPECS,
+  PLUGIN_REMOTE_OPERATION_SPECS,
 );
 
 export type OperationSpecMap = typeof HOST_OPERATION_SPECS;
@@ -240,6 +246,8 @@ export type OperationKey = keyof OperationSpecMap;
 // Remote credentials are fail-closed: adding a protocol operation does not
 // grant it to remote owners until this policy is deliberately updated.
 export const REMOTE_OWNER_OPERATION_GRANTS = Object.freeze([
+  'plugin.client.query',
+  'plugin.remote',
   'access.credential.finalize',
   'agent.graph.epochs.query',
   'agent.graph.operator.query',

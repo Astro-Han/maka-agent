@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use maka_runtime::event::{EventWrite, Invocation};
+use maka_runtime::event::Invocation;
 use maka_runtime::tool_call::ToolRejection;
 use maka_runtime::tools::{ToolExecutor, ToolFuture};
 use maka_tools::*;
@@ -104,15 +104,39 @@ async fn frozen_catalog_prevents_unadvertised_or_invalid_effects_and_direct_only
         .await
         .unwrap();
     assert_eq!(effects.0.load(Ordering::SeqCst), 0);
-    let (_, output) = EventWrite::tool_success(
-        "outcome".into(),
-        std::time::SystemTime::now(),
-        context().invocation,
-        context().operation_id,
-        effect(CancellationToken::new()).await.unwrap(),
+    let directory = tempfile::tempdir().unwrap();
+    let log = Arc::new(
+        maka_event_log::EventLog::open(&directory.path().join("tools.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let invocation = context().invocation;
+    crate::support::preflight::accepted(
+        &log,
+        &invocation,
+        &[crate::support::preflight::call(
+            "call",
+            "echo",
+            json!({"n":2}),
+        )],
     )
-    .unwrap();
-    assert_eq!(output.into_json(), json!({"n": 2}));
+    .await;
+    let output = maka_runtime::tools::ToolJournal::new(log.clone(), invocation.clone())
+        .invoke_prepared_call(
+            format!("{}:call", invocation.invocation_id),
+            maka_runtime::tool_call::ToolCallIdentity::provider(
+                invocation.invocation_id,
+                "call".into(),
+            ),
+            "echo".into(),
+            json!({"n":2}),
+            CancellationToken::new(),
+            effect,
+        )
+        .await
+        .unwrap();
+    assert_eq!(output, json!({"n": 2}));
+    log.shutdown().await.unwrap();
     assert_eq!(effects.0.load(Ordering::SeqCst), 1);
     assert_eq!(catalog.names(), ["direct", "echo"]); // filtering never mutates another scope
 }
@@ -191,7 +215,7 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
             ToolMode::Direct,
             CodeExecutor::new(1, CellLimits::default()).unwrap(),
         );
-        let request = run.capture();
+        let request = run.capture().unwrap();
         assert_eq!(
             request
                 .definitions()
@@ -223,7 +247,7 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
             }
         );
         assert!(result["blocked"]["schemaChars"].as_u64().unwrap() > 33_000);
-        let next = run.capture();
+        let next = run.capture().unwrap();
         let checkpoint = run.checkpoint();
         let restored = RunTools::new(
             log.clone(),
@@ -233,7 +257,10 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
             CodeExecutor::new(1, CellLimits::default()).unwrap(),
         );
         restored.restore(&checkpoint).unwrap();
-        assert_eq!(restored.capture().definitions(), next.definitions());
+        assert_eq!(
+            restored.capture().unwrap().definitions(),
+            next.definitions()
+        );
         let mut invalid = checkpoint.clone();
         invalid.loaded.insert("withheld".into());
         assert!(restored.restore(&invalid).is_err());
@@ -267,7 +294,7 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
                 .count(),
             1
         );
-        assert_eq!(run.capture().definitions().len(), 1);
+        assert_eq!(run.capture().unwrap().definitions().len(), 1);
         assert_eq!(effects.0.load(Ordering::SeqCst), 0);
         drop(run);
         Arc::try_unwrap(log).ok().unwrap().close().await.unwrap();

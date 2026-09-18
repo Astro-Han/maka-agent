@@ -82,7 +82,7 @@ impl ToolPreparer for SessionRead {
         let log = self.log.clone();
         Box::pin(async move {
             // Even metadata reads belong to the journal-owned effect after T1.
-            let effect: PreparedEffect = Box::new(move |cancellation| {
+            let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {
                     cancelled(&cancellation)?;
                     if name != READ_NAME {

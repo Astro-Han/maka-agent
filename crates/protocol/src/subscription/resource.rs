@@ -123,12 +123,16 @@ pub fn decode_resource_observation_frame(value: &Value) -> Result<ResourceObserv
             resource_ref: reference,
             pty_sequence,
             data,
-            ..
+            reset,
         } => {
             envelope(host_epoch, subscription_id, session_id)?;
             resource_ref(reference)?;
             ensure(*pty_sequence > 0, "Invalid PTY sequence")?;
             ensure(data.len() <= 48 * 1024, "PTY data exceeds byte limit")?;
+            ensure(
+                !data.is_empty() || reset.is_some(),
+                "Empty PTY data without reset",
+            )?;
         }
     }
     Ok(frame)

@@ -22,7 +22,7 @@ use maka_runtime::{
     event::{CommitError, CommitFuture, EventSink, EventWrite, Fact, Invocation, ToolOutcome},
     tool_call::ToolCallIdentity,
     tool_output::{DurableToolProjection, ToolOutput, ToolSuccess, decode_raw_tool_result},
-    tools::{ToolError, ToolJournal},
+    tools::{PreparedEffect, ToolError, ToolJournal},
 };
 use serde_json::{Value, json};
 use std::{
@@ -248,6 +248,7 @@ enum Fault {
 struct Sink {
     fault: Fault,
     events: Mutex<Vec<EventWrite>>,
+    leases: Arc<AtomicUsize>,
 }
 impl EventSink for Sink {
     fn commit(self: Arc<Self>, write: EventWrite) -> CommitFuture {
@@ -256,6 +257,7 @@ impl EventSink for Sink {
                 return Err(CommitError::Rejected("T1 rejected".into()));
             }
             let outcome = matches!(write.event().fact, Fact::ToolSettled { .. });
+            assert_eq!(self.leases.load(Ordering::SeqCst), usize::from(outcome));
             let mut events = self.events.lock().unwrap();
             events.push(write);
             if outcome && matches!(self.fault, Fault::OutcomeAck) {
@@ -268,10 +270,19 @@ impl EventSink for Sink {
 
 #[tokio::test]
 async fn journal_effect_runs_once_and_raw_is_delivered_only_after_t2_ack() {
+    struct Lease(Arc<AtomicUsize>);
+    impl Drop for Lease {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
     for fault in [Fault::None, Fault::Dispatch, Fault::OutcomeAck] {
+        let leases = Arc::new(AtomicUsize::new(0));
+        let admitted = leases.clone();
         let sink = Arc::new(Sink {
             fault,
             events: Mutex::new(Vec::new()),
+            leases: leases.clone(),
         });
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = calls.clone();
@@ -288,20 +299,25 @@ async fn journal_effect_runs_once_and_raw_is_delivered_only_after_t2_ack() {
         };
         let output = ToolSuccess::projected(ToolOutput::Json(raw.clone()), expected.clone());
         let result = ToolJournal::new(sink.clone(), invocation())
-            .invoke_call_with(
+            .invoke_prepared_call(
                 "operation".into(),
                 ToolCallIdentity::standalone("call".into()),
                 "tool".into(),
                 Value::Null,
                 CancellationToken::new(),
-                move |_| {
+                PreparedEffect::new(move |_| {
                     Box::pin(async move {
                         seen.fetch_add(1, Ordering::SeqCst);
                         Ok(output)
                     })
-                },
+                })
+                .guarded(move || {
+                    admitted.fetch_add(1, Ordering::SeqCst);
+                    Ok(Lease(admitted))
+                }),
             )
             .await;
+        assert_eq!(leases.load(Ordering::SeqCst), 0);
         match fault {
             Fault::None => assert_eq!(result.unwrap(), raw),
             Fault::Dispatch => {

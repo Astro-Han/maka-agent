@@ -105,9 +105,14 @@ pub(super) async fn serve(
         }
     };
     host.draining.cancel();
+    host.plugin_remotes.close();
     host.record_diagnostic("Host admission closed; awaiting accepted response flush");
     host.requests.close();
     host.requests.wait().await;
+    // Stop orchestration before Host-owned executions and storage. Independent
+    // accepted executions retain their ordinary Host shutdown semantics.
+    host.plugin_tasks.close();
+    host.plugin_tasks.wait().await;
     // Registry drain closes provider transports. Admitted ordinary responses
     // must finish flushing before those shared cancellation tokens are closed.
     host.capabilities.begin_drain();

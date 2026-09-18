@@ -54,6 +54,7 @@
     "smoke:browser:run": "electron scripts/browser-observe-act-smoke.mjs"
   },
   "dependencies": {
+    "@maka-agent/plugin-sdk": "1.0.0",
     "@jackwener/opencli": "1.8.7",
     "@maka/computer-use": "0.1.0",
     "@maka/core": "0.1.0",

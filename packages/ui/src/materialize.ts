@@ -39,7 +39,7 @@ import type {
 } from '@maka/core/events';
 import type { ToolActivityStatus } from '@maka/core/tool-result-status';
 import type { ShellRunToolResult } from '@maka/core/shell-run-result';
-import type { StoredMessage, TurnRecord, TurnStatus, UserMessage } from '@maka/core/session';
+import type { StoredMessage, ToolCallMessage, TurnRecord, TurnStatus, UserMessage } from '@maka/core/session';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type {
   LiveSteeringProjection,
@@ -95,7 +95,7 @@ export interface ToolActivityItem {
    * read `args ?? argsPreview`; never rendered as raw JSON.
    */
   argsPreview?: unknown;
-  origin?: 'provider' | 'code_mode';
+  origin?: ToolCallMessage['origin'];
   modelVisibility?: 'visible' | 'hidden';
   parentToolCallId?: string;
   parentOperationId?: string;

@@ -65,6 +65,33 @@ pub struct EventPage {
 }
 
 impl EventLog {
+    /// Exact, bounded lookup; both Session and logical Turn are authority filters.
+    pub async fn execution_event(
+        &self,
+        invocation: &maka_runtime::event::Invocation,
+        event_id: &str,
+        through: u64,
+    ) -> Result<Option<StoredEvent>, StoreError> {
+        self.validate_root()?;
+        sessions::validate_id(event_id)?;
+        if through > i64::MAX as u64 {
+            return Err(invalid("invalid event fence"));
+        }
+        let invocation = invocation.clone();
+        let event_id = event_id.to_owned();
+        self.connection.run(move |connection| Box::pin(async move {
+            let row: Option<(i64, String)> = sqlx::query_as(
+                "SELECT sequence, event_json FROM runtime_events WHERE event_id = ?1 AND sequence <= ?2
+                 AND json_extract(event_json, '$.invocation.session_id') = ?3
+                 AND json_extract(event_json, '$.invocation.turn_id') = ?4"
+            ).bind(event_id).bind(through as i64).bind(invocation.session_id).bind(invocation.turn_id)
+                .fetch_optional(connection).await?;
+            row.map(|(sequence, json)| Ok(StoredEvent {
+                sequence: sequence_number(sequence)?, event: serde_json::from_str(&json)?,
+            })).transpose()
+        })).await
+    }
+
     pub async fn observation_versions(
         &self,
         sessions: &[String],
@@ -242,7 +269,7 @@ async fn read_projection<T: DeserializeOwned + Send>(
     }))
 }
 
-async fn high_water(connection: &mut sqlx::SqliteConnection) -> Result<u64, StoreError> {
+pub(crate) async fn high_water(connection: &mut sqlx::SqliteConnection) -> Result<u64, StoreError> {
     sequence_number(
         sqlx::query_scalar("SELECT COALESCE(MAX(sequence), 0) FROM event_log")
             .fetch_one(connection)

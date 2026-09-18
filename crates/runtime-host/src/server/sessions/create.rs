@@ -18,7 +18,7 @@
  */
 
 use super::{Result, failure, invalid, item, stored};
-use crate::session::{PreparedSession, SessionConfiguration};
+use crate::session::{PreparedSession, SessionConfiguration, SessionTarget};
 use maka_config::ConfigurationStore;
 use maka_protocol::OperationErrorCode;
 use maka_protocol::session::*;
@@ -33,12 +33,6 @@ pub(super) async fn create(
         return Err(failure(
             OperationErrorCode::OperationConflict,
             "Session identity is reserved for WorkHub coordination",
-        ));
-    }
-    if matches!(input.target, SessionCreateTarget::Executor { .. }) {
-        return Err(failure(
-            OperationErrorCode::OperationUnavailable,
-            "Plugin executors are not implemented by this Host",
         ));
     }
     let thinking = input.thinking_level;
@@ -96,6 +90,9 @@ pub(super) async fn create(
             }
             error
         })?;
+        if let SessionCreateTarget::Executor { executor_id } = prepared.target() {
+            host.executions.executor_binding(&id, executor_id)?;
+        }
         let config = resolve(&host.configuration, prepared, thinking, workspace).await?;
         super::super::projects::record_usage(host, &config.workspace).await?;
         let record = log
@@ -117,7 +114,14 @@ pub(in crate::server) async fn resolve(
     thinking: Option<ThinkingLevel>,
     workspace: WorkspaceProjection,
 ) -> Result<SessionConfiguration> {
-    let model = super::model::resolve(configuration, prepared.model_target(), thinking).await?;
+    let target = match prepared.target() {
+        SessionCreateTarget::Model { model_target } => SessionTarget::Model {
+            model: super::model::resolve(configuration, model_target, thinking).await?,
+        },
+        SessionCreateTarget::Executor { executor_id } => SessionTarget::Executor {
+            executor_id: executor_id.clone(),
+        },
+    };
     let policy = configuration
         .runtime_policy()
         .await
@@ -133,5 +137,5 @@ pub(in crate::server) async fn resolve(
     } else {
         maka_runtime::execution::ToolMode::Direct
     };
-    Ok(prepared.bind(workspace, model, default_permission, tool_mode))
+    Ok(prepared.bind(workspace, target, default_permission, tool_mode))
 }

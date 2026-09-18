@@ -29,6 +29,7 @@ import type {
 } from '../shared/workhub-conversation.js';
 import type { SessionObservationMessage } from '../shared/session-execution-projection.js';
 import { contextBridge, ipcRenderer } from 'electron';
+import { HOST_OPERATION_SPECS } from '@maka/runtime-host/protocol';
 import { workHubControlBridge } from './workhub-control.js';
 import { workHubPresentationBridge } from './workhub-presentation.js';
 import {
@@ -1411,6 +1412,35 @@ const browserSelection = createBrowserSelectionCoordinator(runtimeHostSessionRef
 const makaBridge = {
   workHubControl: workHubControlBridge,
   workHubPresentation: workHubPresentationBridge,
+  clientPlugins: {
+    async connection(host) { return (await runtimeHostScope(host)).targetEpoch; },
+    async session(host, targetEpoch, sessionId) {
+      const scope = await runtimeHostScope(host);
+      if (scope.targetEpoch !== targetEpoch) throw new Error('Client connection has retired');
+      return recordRuntimeHostSessionScope(scope, sessionId);
+    },
+    async remote(host, targetEpoch, input) {
+      const scope = await runtimeHostScope(host);
+      if (scope.targetEpoch !== targetEpoch) return { kind: 'connection_retired' };
+      let value = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(input);
+      if ('binding' in value && value.binding.sessionId !== null) {
+        const session = await runtimeHostSessionRef(value.binding.sessionId);
+        if (runtimeHostScopeKey(scope) !== runtimeHostScopeKey(session.scope))
+          throw new Error('Remote Session belongs to another Host');
+        value = { ...value, binding: { ...value.binding, sessionId: session.sessionId } };
+      }
+      return HOST_OPERATION_SPECS['plugin.remote'].decodeOutput(
+        await ipcRenderer.invoke('plugins:remote', scope, browserDocumentId, value),
+      );
+    },
+    async query(host, input) {
+      const scope = await runtimeHostScope(host);
+      return scopedRuntimeHost(scope).query('plugin.client.query', input);
+    },
+    subscribeChanges(host, handler) {
+      return subscribeSelectedRuntimeHostEvent<[string]>('plugins:client-changed', host, handler);
+    },
+  },
   runtimeHost,
   sessionCollaboration: {
     async prepareInvitation(sessionId, preset, allowInsecure = false) {

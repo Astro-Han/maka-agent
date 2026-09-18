@@ -166,18 +166,6 @@ pub(super) async fn prepare(
             Ok(target)
         }
         RoutingProposal::CreateNew { title } => {
-            if matches!(
-                input
-                    .new_work_defaults
-                    .as_ref()
-                    .and_then(|defaults| defaults.execution.as_ref()),
-                Some(maka_runtime::workhub::CreateExecution::Executor(_))
-            ) {
-                return Err(failure(
-                    Code::OperationUnavailable,
-                    "Plugin executors are not implemented by this Host",
-                ));
-            }
             let id = created_session_id(&input.action_id);
             let context = input.create.as_ref().ok_or_else(|| {
                 failure(
@@ -196,10 +184,23 @@ pub(super) async fn prepare(
                         model: model.model.clone(),
                     }
                 });
+            let target = match input
+                .new_work_defaults
+                .as_ref()
+                .and_then(|defaults| defaults.execution.as_ref())
+            {
+                Some(maka_runtime::workhub::CreateExecution::Executor(executor_id)) => {
+                    host.executions.executor_binding(&id, executor_id)?;
+                    SessionCreateTarget::Executor {
+                        executor_id: executor_id.clone(),
+                    }
+                }
+                _ => SessionCreateTarget::Model { model_target },
+            };
             let prepared = PreparedSession::new(SessionCreateInput {
                 session_id: id.clone(),
                 workspace: context.workspace.clone(),
-                target: SessionCreateTarget::Model { model_target },
+                target,
                 mode: None,
                 name: Some(title.clone()),
                 labels: None,

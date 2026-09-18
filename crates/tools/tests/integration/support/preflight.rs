@@ -62,7 +62,7 @@ pub fn catalog(effect: Arc<Effect>) -> ToolCatalog {
             ToolNesting::Nestable
         },
         semantics: if name == "direct" {
-            ToolSemantics::ExclusiveStep
+            ToolSemantics::FinishTurn
         } else {
             ToolSemantics::Parallel
         },

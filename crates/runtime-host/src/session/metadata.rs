@@ -81,10 +81,12 @@ mod tests {
                 },
                 host_cwd: "/tmp".into(),
             },
-            SessionModel {
-                connection_id: "connection".into(),
-                connection_slug: "connection".into(),
-                model: "model".into(),
+            crate::session::SessionTarget::Model {
+                model: SessionModel {
+                    connection_id: "connection".into(),
+                    connection_slug: "connection".into(),
+                    model: "model".into(),
+                },
             },
             PermissionMode::Explore,
             maka_runtime::execution::ToolMode::Direct,

@@ -101,10 +101,18 @@ impl AcceptedCall {
     /// Caller completes policy and durable dispatch admission before this call.
     /// No execution deadline runs while the caller is deciding.
     pub async fn admit(self) -> Result<CallResult, CallError> {
+        self.start().await
+    }
+
+    /// Cross the admission cut synchronously, then wait outside Host policy
+    /// locks. Dropping the returned future still cancels the owned call.
+    pub fn start(self) -> impl Future<Output = Result<CallResult, CallError>> + Send {
         self.guard.inner.admit(&self.guard.id, None);
-        self.result
-            .await
-            .map_err(|_| CallError::OutcomeUnknown("result owner was lost"))?
+        async move {
+            let result = self.result.await;
+            drop(self.guard);
+            result.map_err(|_| CallError::OutcomeUnknown("result owner was lost"))?
+        }
     }
 
     /// The handler owns canonical interaction publication and withdrawal.

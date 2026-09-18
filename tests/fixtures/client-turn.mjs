@@ -160,7 +160,7 @@ export async function verifyTurns(connection, sessionId, fixture, connectSibling
   assertReferencedModel(fixture.requests[0], connection.rootId);
   assert.deepEqual(
     fixture.requests[0].tools.map((tool) => tool.function.name),
-    ['AskUserQuestion', 'Glob', 'Grep', 'Read'],
+    ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'tool_search'],
     'next real turn uses Explore tool permissions',
   );
   assert(
@@ -193,7 +193,16 @@ export async function verifyTurns(connection, sessionId, fixture, connectSibling
   assertReferencedModel(fixture.requests[1], connection.rootId);
   assert.deepEqual(
     fixture.requests[1].tools.map((tool) => tool.function.name).sort(),
-    ['AskUserQuestion', 'Edit', 'Glob', 'Grep', 'Read', 'Write', 'apply_patch'].sort(),
+    [
+      'AskUserQuestion',
+      'Edit',
+      'Glob',
+      'Grep',
+      'Read',
+      'Write',
+      'apply_patch',
+      'tool_search',
+    ].sort(),
     'restored Ask is captured by next invocation',
   );
   await observer.waitFor(

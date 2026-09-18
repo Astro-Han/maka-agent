@@ -39,7 +39,7 @@ async function main() {
       reopened: { type: 'boolean' },
     },
   });
-  assert.equal(RUNTIME_HOST_COMPATIBILITY_EPOCH, 158);
+  assert.equal(RUNTIME_HOST_COMPATIBILITY_EPOCH, 159);
   const clients = [];
   const open = async () => {
     const socket = connect(values.socket);

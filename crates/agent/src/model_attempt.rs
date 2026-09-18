@@ -38,6 +38,7 @@ pub(super) enum Attempt {
     Main {
         lane: maka_model::ResponsesLane,
         continuation_base: Option<u64>,
+        surface: Arc<crate::request_composition::Surface>,
     },
     Summary,
 }
@@ -107,6 +108,7 @@ pub(super) async fn execute(
     let Attempt::Main {
         lane,
         continuation_base,
+        surface,
     } = attempt
     else {
         return execute_once(
@@ -134,6 +136,7 @@ pub(super) async fn execute(
             Attempt::Main {
                 lane: lane.clone(),
                 continuation_base,
+                surface: surface.clone(),
             },
             cancellation,
         )
@@ -180,7 +183,7 @@ pub(super) async fn execute(
                 &input.invocation.invocation_id,
             )
             .await?;
-            if replay != prompt {
+            if surface.apply(replay) != prompt {
                 return Err(RunError::ReconciliationRequired(
                     "continuation retry changed frozen model input".into(),
                 ));
@@ -199,18 +202,17 @@ async fn execute_once(
     attempt: Attempt,
     cancellation: &CancellationToken,
 ) -> Result<(String, ModelStep), RunError> {
-    let (purpose, lane) = match attempt {
-        Attempt::Main { lane, .. } => (ModelPurpose::Main, Some(lane)),
-        Attempt::Summary => (ModelPurpose::Summary, None),
+    let (purpose, lane, surface) = match attempt {
+        Attempt::Main { lane, surface, .. } => (ModelPurpose::Main, Some(lane), Some(surface)),
+        Attempt::Summary => (ModelPurpose::Summary, None, None),
     };
     if cancellation.is_cancelled() {
         return Err(RunError::Cancelled);
     }
     let prepared = prepare_request(input, prompt, definitions, purpose)?;
     let step_id = Uuid::new_v4().to_string();
-    append(
-        inner,
-        &input.invocation,
+    let event = maka_runtime::event::RuntimeEvent::new(
+        input.invocation.clone(),
         Fact::ModelRequested {
             effective_source_digest: (purpose == ModelPurpose::Summary
                 || matches!(
@@ -232,8 +234,13 @@ async fn execute_once(
                 .as_ref()
                 .map(|baseline| baseline.event_id.clone()),
         },
-    )
-    .await?;
+    );
+    let mut write = maka_runtime::event::EventWrite::plain(event)?;
+    if let Some(surface) = surface {
+        write = write.with_composition(surface.evidence.clone())?;
+    }
+    use maka_runtime::event::EventSink;
+    inner.log.clone().commit(write).await?;
     let result: Result<_, RunError> = async {
         let stream = inner
             .model

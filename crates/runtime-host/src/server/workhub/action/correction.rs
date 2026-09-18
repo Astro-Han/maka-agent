@@ -130,7 +130,7 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
                     request,
                     matches!(&prepared, target::Target::Existing { .. })
                         .then(|| prepared.revision()),
-                    host.executions.workhub_target(prepared.id()),
+                    host.executions.active_session_owner(prepared.id()),
                 )
                 .await
                 .map_err(|e| stored(host, e))?
@@ -143,7 +143,7 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
         }
         let completed = if let Some(owner) = &record.intent.owner {
             host.executions
-                .retire_workhub_owner(
+                .retire_owner(
                     owner,
                     maka_agent::CancellationCause::WorkhubCorrection {
                         action_id: record.intent.request.action_id.clone(),
@@ -189,7 +189,7 @@ pub(in crate::server) async fn recover(host: &Arc<Host>) -> Result<(), Operation
         for record in records {
             if let Some(owner) = &record.intent.owner {
                 host.executions
-                    .retire_workhub_owner(
+                    .retire_owner(
                         owner,
                         maka_agent::CancellationCause::WorkhubCorrection {
                             action_id: record.intent.request.action_id.clone(),
@@ -322,7 +322,7 @@ async fn prepare_frozen(
 }
 
 fn delegation(host: &Host, target: &target::Target, request: &CorrectionRequest) -> Delegation {
-    let owner = host.executions.workhub_target(target.id());
+    let owner = host.executions.active_session_owner(target.id());
     let delivery = match (&owner, target) {
         (
             Some(_),

@@ -154,8 +154,11 @@ async fn slow_rpc_allows_same_connection_status_and_flushes_after_input_eof() {
             .unwrap();
     }
     let mut seen = std::collections::HashSet::new();
-    for _ in 0..65 {
+    while seen.len() < 65 {
         let frame = receive(&mut replies).await;
+        if frame["kind"] == "plugin.client.changed" {
+            continue;
+        }
         assert_eq!(frame["result"]["state"], "ready", "{frame}");
         assert!(seen.insert(frame["requestId"].as_str().unwrap().to_owned()));
     }

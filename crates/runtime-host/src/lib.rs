@@ -21,6 +21,7 @@ pub mod access_delivery;
 mod controllers;
 mod execution;
 pub mod oauth;
+pub mod plugins;
 mod provider_route;
 pub mod server;
 pub mod session;

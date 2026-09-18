@@ -18,7 +18,9 @@
  */
 
 //! Session metadata policy. Execution content remains in the runtime log.
+mod constraints;
 mod metadata;
+pub(crate) mod model;
 mod name;
 
 pub use metadata::apply_metadata_patch;
@@ -33,19 +35,50 @@ use sha2::{Digest, Sha256};
 pub use maka_runtime::execution::ModelBinding as SessionModel;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum SessionTarget {
+    Model {
+        model: SessionModel,
+    },
+    Executor {
+        executor_id: maka_runtime::executor::ExecutorId,
+    },
+}
+impl SessionTarget {
+    pub fn model(&self) -> Option<&SessionModel> {
+        match self {
+            Self::Model { model } => Some(model),
+            Self::Executor { .. } => None,
+        }
+    }
+}
+impl From<SessionModel> for SessionTarget {
+    fn from(model: SessionModel) -> Self {
+        Self::Model { model }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SessionConfiguration {
     pub workspace: WorkspaceProjection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<maka_fs_tools::worktree::Binding>,
     pub name: String,
     pub labels: Vec<String>,
     #[serde(default)]
     pub is_flagged: bool,
     #[serde(default)]
     pub title_is_manual: bool,
-    pub model: SessionModel,
+    #[serde(flatten)]
+    pub target: SessionTarget,
     #[serde(default)]
     pub connection_locked: bool,
     pub thinking_level: Option<ThinkingLevel>,
     pub tool_profile: Option<SessionToolProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_tools: Option<std::collections::BTreeSet<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
     /// Frozen at creation. Missing on older Rust Sessions means direct tools.
     #[serde(default)]
     pub tool_mode: maka_runtime::execution::ToolMode,
@@ -81,7 +114,7 @@ impl SessionConfiguration {
             collaboration_mode: self.collaboration_mode,
             orchestration_mode: self.orchestration_mode,
             tool_mode: self.tool_mode,
-            model: Some(self.model.clone()),
+            model: self.target.model().cloned(),
             thinking_level: self.thinking_level,
         }
     }
@@ -92,7 +125,7 @@ impl SessionConfiguration {
 pub struct PreparedSession {
     session_id: String,
     workspace: WorkspaceTarget,
-    model_target: SessionModelTarget,
+    target: SessionCreateTarget,
     name: String,
     labels: Vec<String>,
     permission_mode: Option<PermissionMode>,
@@ -104,11 +137,21 @@ pub struct PreparedSession {
 
 impl PreparedSession {
     pub fn new(input: SessionCreateInput) -> Result<Self> {
-        let SessionCreateTarget::Model { model_target } = input.target else {
+        if matches!(input.target, SessionCreateTarget::Executor { .. })
+            && (input.thinking_level.is_some()
+                || input.tool_profile.is_some()
+                || input.mode.is_some()
+                || input
+                    .orchestration_mode
+                    .is_some_and(|mode| mode != OrchestrationMode::Default)
+                || input
+                    .collaboration_mode
+                    .is_some_and(|mode| mode != CollaborationMode::Agent))
+        {
             return Err(ProtocolError::invalid(
-                "Native Session preparation requires a model target",
+                "Executor Sessions do not accept native model or orchestration settings",
             ));
-        };
+        }
         if input.labels.as_ref().is_some_and(|labels| {
             labels
                 .iter()
@@ -142,7 +185,7 @@ impl PreparedSession {
         Ok(Self {
             session_id: input.session_id,
             workspace: input.workspace,
-            model_target,
+            target: input.target,
             name,
             labels,
             permission_mode,
@@ -161,8 +204,8 @@ impl PreparedSession {
     pub fn workspace(&self) -> &WorkspaceTarget {
         &self.workspace
     }
-    pub fn model_target(&self) -> &SessionModelTarget {
-        &self.model_target
+    pub fn target(&self) -> &SessionCreateTarget {
+        &self.target
     }
 
     pub fn fingerprint(&self) -> String {
@@ -170,12 +213,18 @@ impl PreparedSession {
             WorkspaceTarget::HostPath { path } => json!(["host_path", path]),
             WorkspaceTarget::Project { project_id } => json!(["project", project_id]),
         };
-        let model = match &self.model_target {
-            SessionModelTarget::Default => json!(["default"]),
-            SessionModelTarget::Explicit {
-                connection_id,
-                connection_slug,
-                model,
+        let model = match &self.target {
+            SessionCreateTarget::Executor { executor_id } => json!(["executor", executor_id]),
+            SessionCreateTarget::Model {
+                model_target: SessionModelTarget::Default,
+            } => json!(["default"]),
+            SessionCreateTarget::Model {
+                model_target:
+                    SessionModelTarget::Explicit {
+                        connection_id,
+                        connection_slug,
+                        model,
+                    },
             } => json!([connection_id, connection_slug, model]),
         };
         let permission = self
@@ -204,20 +253,23 @@ impl PreparedSession {
     pub fn bind(
         self,
         workspace: WorkspaceProjection,
-        model: SessionModel,
+        target: impl Into<SessionTarget>,
         default_permission: PermissionMode,
         tool_mode: maka_runtime::execution::ToolMode,
     ) -> SessionConfiguration {
         SessionConfiguration {
             workspace,
+            worktree: None,
             name: self.name,
             labels: self.labels,
             is_flagged: false,
             title_is_manual: false,
-            model,
+            target: target.into(),
             connection_locked: false,
             thinking_level: self.thinking_level,
             tool_profile: self.tool_profile,
+            bound_tools: None,
+            instructions: None,
             tool_mode,
             permission_mode: self.permission_mode.unwrap_or(default_permission),
             boundary_revision: 0,
@@ -248,6 +300,25 @@ pub fn metadata_projection(
             labels.push(label);
         }
     }
+    let (backend, executor_id, connection_id, connection_slug, model) = match config.target {
+        SessionTarget::Model { model } => (
+            Backend::AiSdk,
+            None,
+            Some(model.connection_id),
+            model.connection_slug,
+            model.model,
+        ),
+        SessionTarget::Executor { executor_id } => {
+            let name = executor_id.as_str().to_owned();
+            (
+                Backend::PluginExecutor,
+                Some(executor_id),
+                None,
+                format!("executor:{name}"),
+                name,
+            )
+        }
+    };
     SessionCatalogProjection {
         id: record.id,
         revision: record.revision,
@@ -261,11 +332,12 @@ pub fn metadata_projection(
         labels_truncated,
         has_unread: record.read_state.has_unread,
         status: SessionStatus::Active,
-        backend: Backend::AiSdk,
-        llm_connection_id: Some(config.model.connection_id),
-        llm_connection_slug: config.model.connection_slug,
+        backend,
+        executor_id,
+        llm_connection_id: connection_id,
+        llm_connection_slug: connection_slug,
         connection_locked: config.connection_locked,
-        model: config.model.model,
+        model,
         permission_mode: config.permission_mode,
         collaboration_mode: config.collaboration_mode,
         orchestration_mode: config.orchestration_mode,

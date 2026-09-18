@@ -39,6 +39,17 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
     let cells = CodeExecutor::new(1, CellLimits::default()).unwrap();
     let cases = [
         (
+            "finish",
+            ToolMode::CodeMode,
+            vec![
+                (call("finish", "direct", json!({"n": 1})), None),
+                (
+                    call("after", "exec", json!({"code": "return 4"})),
+                    Some(ToolRejection::ExclusiveConflict),
+                ),
+            ],
+        ),
+        (
             "direct",
             ToolMode::Direct,
             vec![
@@ -134,14 +145,14 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
             mode,
             cells.clone(),
         );
-        let request = run.capture();
+        let request = run.capture().unwrap();
         let names: Vec<_> = request.definitions().into_iter().map(|d| d.name).collect();
         assert_eq!(
             names,
             if mode == ToolMode::Direct {
                 vec!["direct", "echo"]
             } else {
-                vec!["exec"]
+                vec!["exec", "direct"]
             }
         );
         let token = CancellationToken::new();
@@ -196,6 +207,7 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
                 );
             }
         }
+        assert_eq!(step.finished(), id == "finish");
         assert!(
             log.invocation_recovery(&invocation, 32, 128 * 1024)
                 .await
@@ -204,7 +216,7 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
                 .is_empty()
         );
     }
-    assert_eq!(effect.0.load(Ordering::SeqCst), 2);
+    assert_eq!(effect.0.load(Ordering::SeqCst), 3);
     let before = log.prefix(200, 1024 * 1024).await.unwrap();
     close(log).await;
     let reopened = EventLog::open(&path).await.unwrap();
@@ -252,6 +264,7 @@ async fn nested_preflight_is_effect_free_and_diagnostics_are_successful_parent_v
         );
         let value = run
             .capture()
+            .unwrap()
             .into_step(&invocation.invocation_id)
             .invoke(&call, CancellationToken::new())
             .await

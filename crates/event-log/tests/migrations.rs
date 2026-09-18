@@ -113,7 +113,8 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
             .map(|(version, _)| *version)
             .collect::<Vec<_>>(),
         vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26
         ]
     );
     assert!(checksums.iter().all(|(_, checksum)| checksum.len() == 48));
@@ -149,7 +150,9 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
     // table also exercises idempotent backfill after interrupted adoption.
     connection
         .execute_batch(
-            "DROP VIEW workhub_corrections; DROP VIEW workhub_assignments;
+            "DROP TABLE model_request_compositions; DROP TABLE request_compositions; DROP TABLE graph_wakes; DROP TABLE graph_intents; DROP TABLE graph_updates; DROP TABLE graph_epochs; DROP TABLE plugin_execution_receipts; DROP TABLE plugin_data; DROP TABLE plugin_packages; DROP TABLE plugin_package_files;
+             DROP TABLE plugin_package_blobs; DROP TABLE plugin_composition;
+             DROP VIEW workhub_corrections; DROP VIEW workhub_assignments;
              DROP VIEW workhub_stops; ALTER TABLE legacy_workhub_stops RENAME TO workhub_stops;
              DROP VIEW runtime_events; DROP VIEW session_events;
              ALTER TABLE event_log RENAME TO runtime_events;
@@ -202,7 +205,7 @@ async fn embedded_migration_adopts_only_rust_schema_and_reopens_without_rewritin
             .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
-        23
+        26
     );
 }
 
@@ -271,7 +274,7 @@ async fn mismatched_and_unknown_migrations_fail_closed_without_touching_committe
                 .query_row("SELECT count(*) FROM _sqlx_migrations", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            23
+            26
         );
     }
 
@@ -333,7 +336,7 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        23
+        26
     );
     assert_eq!(
         connection
@@ -343,6 +346,6 @@ async fn interrupted_initial_migration_remains_openable_under_the_rust_applicati
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
-        23
+        26
     );
 }

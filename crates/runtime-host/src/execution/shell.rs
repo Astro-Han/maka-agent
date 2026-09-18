@@ -97,7 +97,7 @@ impl ToolPreparer for SessionShell {
     ) -> PreparationFuture {
         let shell = self.clone();
         Box::pin(async move {
-            let effect: PreparedEffect = Box::new(move |cancellation| {
+            let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {
                     cancelled(&cancellation)?;
                     if name == WRITE_STDIN_NAME {

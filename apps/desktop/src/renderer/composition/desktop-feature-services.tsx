@@ -18,6 +18,8 @@
  */
 
 import type { ReactNode } from 'react';
+import { ClientPluginServicesProvider } from '../features/client-plugins/index.js';
+import { createDesktopClientPluginServices } from '../platform/desktop/create-client-plugin-services.js';
 import { WorkHubServicesProvider } from '../features/workhub';
 import { createDesktopWorkHubServices } from '../platform/desktop/create-workhub-services';
 import { ConversationServicesProvider } from '../features/conversation';
@@ -57,6 +59,7 @@ if (import.meta.env.DEV) {
 
 export function createDesktopFeatureServices() {
   return {
+    clientPlugins: createDesktopClientPluginServices(),
     appUpdate: createDesktopAppUpdateServices(),
     workHub: createDesktopWorkHubServices(),
     conversation: createDesktopConversationServices(),
@@ -95,7 +98,9 @@ export function DesktopFeatureServicesProvider(props: {
                           <WorkHubServicesProvider services={props.services.workHub}>
                             <SessionBundleServicesProvider services={props.services.sessionBundle}>
                               <OverlaysServicesProvider services={props.services.overlays}>
-                                {props.children}
+                                <ClientPluginServicesProvider services={props.services.clientPlugins}>
+                                  {props.children}
+                                </ClientPluginServicesProvider>
                               </OverlaysServicesProvider>
                             </SessionBundleServicesProvider>
                           </WorkHubServicesProvider>

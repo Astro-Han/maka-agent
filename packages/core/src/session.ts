@@ -868,7 +868,7 @@ export interface ToolCallMessage {
    */
   stepId?: string;
   /** Execution surface and replay policy retained for missing-ledger recovery. */
-  origin?: 'provider' | 'code_mode';
+  origin?: 'provider' | 'code_mode' | 'host_sdk';
   modelVisibility?: 'visible' | 'hidden';
   parentToolCallId?: string;
   parentOperationId?: string;
@@ -889,7 +889,7 @@ export interface ToolResultMessage {
   providerOutput?: unknown;
   durationMs?: number;
   /** Execution surface and replay policy retained for missing-ledger recovery. */
-  origin?: 'provider' | 'code_mode';
+  origin?: 'provider' | 'code_mode' | 'host_sdk';
   modelVisibility?: 'visible' | 'hidden';
   parentToolCallId?: string;
   parentOperationId?: string;
@@ -1893,7 +1893,10 @@ function isOptionalFiniteDuration(value: unknown): boolean {
 
 function isToolActivityIdentity(value: Record<string, unknown>): boolean {
   return (
-    (value.origin === undefined || value.origin === 'provider' || value.origin === 'code_mode') &&
+    (value.origin === undefined ||
+      value.origin === 'provider' ||
+      value.origin === 'code_mode' ||
+      value.origin === 'host_sdk') &&
     (value.modelVisibility === undefined ||
       value.modelVisibility === 'visible' ||
       value.modelVisibility === 'hidden') &&

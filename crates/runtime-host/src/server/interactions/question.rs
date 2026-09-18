@@ -87,7 +87,7 @@ impl ToolPreparer for Interactions {
                         message: error.to_string(),
                     }
                 })?;
-            let effect: PreparedEffect = Box::new(move |cancellation| {
+            let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {
                     let record = owner
                         .admit_request(context, request, &cancellation)

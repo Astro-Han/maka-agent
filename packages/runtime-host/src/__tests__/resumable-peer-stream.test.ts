@@ -616,6 +616,7 @@ test('real TCP replacement preserves one Host dispatcher and does not re-execute
             ok: false,
             error: { code: 'internal_failure', message: 'not used' },
           }),
+          'host.wake': async () => ({ ok: true, result: {} }),
           'host.resources.query': async () => ({
             ok: false,
             error: { code: 'internal_failure', message: 'not used' },

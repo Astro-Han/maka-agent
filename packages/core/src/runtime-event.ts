@@ -163,7 +163,7 @@ export function isRuntimeEventStatus(value: unknown): value is RuntimeEventStatu
 }
 
 /** Execution surface that produced a fact; absent on legacy ledgers. */
-export const RUNTIME_EVENT_ORIGINS = ['provider', 'code_mode'] as const;
+export const RUNTIME_EVENT_ORIGINS = ['provider', 'code_mode', 'host_sdk'] as const;
 export type RuntimeEventOrigin = (typeof RUNTIME_EVENT_ORIGINS)[number];
 
 /** Explicit provider-history policy; absent means visible. */

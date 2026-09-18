@@ -47,7 +47,7 @@ async function fixture(workspace) {
       requests.push(input);
       assert.deepEqual(
         input.tools.map((tool) => tool.function.name),
-        ['AskUserQuestion', 'Glob', 'Grep', 'Read'],
+        ['AskUserQuestion', 'Glob', 'Grep', 'Read', 'tool_search'],
       );
       const index = requests.length;
       assert(index <= 4, 'exactly two model steps per turn');

@@ -184,7 +184,7 @@ impl ToolPreparer for FrozenSkills {
         })();
         Box::pin(async move {
             let output = result?;
-            let effect: PreparedEffect = Box::new(move |cancellation| {
+            let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                 Box::pin(async move {
                     if cancellation.is_cancelled() {
                         return Err(ToolError::Failed("skill operation cancelled".into()));

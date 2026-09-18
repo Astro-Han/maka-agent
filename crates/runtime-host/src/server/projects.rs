@@ -216,7 +216,7 @@ pub(super) async fn resolve(host: &Host, id: &str) -> Result<WorkspaceProjection
 }
 
 /// Filesystem observation only. Admission revalidates the captured record.
-pub(super) async fn resolve_record(
+pub(crate) async fn resolve_record(
     record: maka_event_log::projects::ProjectRecord,
 ) -> Result<WorkspaceProjection> {
     if record.archived_at.is_some() {

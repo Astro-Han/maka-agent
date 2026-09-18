@@ -96,6 +96,7 @@ async fn child_output_limit_after_t2_preserves_raw_and_remains_catchable() {
         );
         let result = run
             .capture()
+            .unwrap()
             .into_step(&invocation.invocation_id)
             .invoke(&call, CancellationToken::new())
             .await

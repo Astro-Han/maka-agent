@@ -1232,7 +1232,7 @@ function projectFunctionResponse(
 }
 
 function toolActivityIdentity(event: RuntimeEvent): {
-  origin?: 'provider' | 'code_mode';
+  origin?: RuntimeEvent['origin'];
   modelVisibility?: 'visible' | 'hidden';
   parentToolCallId?: string;
   parentOperationId?: string;

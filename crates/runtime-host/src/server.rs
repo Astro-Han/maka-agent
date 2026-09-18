@@ -40,7 +40,10 @@ mod oauth;
 mod onboarding;
 mod operations;
 mod outbound;
+mod plugin_remote;
 mod projects;
+mod scheduler;
+pub(crate) use projects::resolve_record as resolve_project_workspace;
 mod registration;
 mod resources;
 pub(crate) mod retirement;
@@ -81,6 +84,7 @@ pub enum LifecycleMode {
 }
 
 pub struct HostOptions {
+    pub plugins: crate::plugins::Setup,
     pub lifecycle_mode: LifecycleMode,
     pub project_directory_roots: Option<Vec<DirectoryRootSpec>>,
     /// Explicit user skill root; library embedders do not inspect ambient home.
@@ -92,6 +96,7 @@ pub struct HostOptions {
 impl Default for HostOptions {
     fn default() -> Self {
         Self {
+            plugins: Default::default(),
             lifecycle_mode: LifecycleMode::Ephemeral,
             project_directory_roots: None,
             skill_home: None,
@@ -102,6 +107,9 @@ impl Default for HostOptions {
 }
 
 pub struct Host {
+    plugins: crate::plugins::Platform,
+    plugin_tasks: TaskTracker,
+    plugin_remotes: plugin_remote::Registry,
     options: HostOptions,
     retirement: Arc<Mutex<retirement::Phase>>,
     accepted_connections: Mutex<std::collections::HashSet<Uuid>>,
@@ -228,7 +236,56 @@ impl Host {
             },
             runtime.clone(),
         )?);
+        let mut setup = std::mem::take(&mut options.plugins);
+        crate::plugins::graph::install(
+            &mut setup,
+            log.clone(),
+            configuration.clone(),
+            &executions,
+            root.root_id().into(),
+        )?;
+        crate::plugins::scheduler::install(
+            &mut setup,
+            log.clone(),
+            configuration.clone(),
+            &executions,
+            capabilities.clone(),
+            root.root_id().into(),
+            changes.clone(),
+        )?;
+        if setup.loader.is_none() {
+            setup.loader = Some(Arc::new(crate::plugins::javascript::Loader::new(
+                &executions,
+                root.root_id().into(),
+            )?));
+        }
+        let (plugins, plugin_owner) = crate::plugins::Platform::open(
+            log.clone(),
+            Arc::new(crate::plugins::ExternalLoader(setup.loader)),
+            setup.builtins,
+            setup.layers,
+            maka_plugins::services::Services::default(),
+            executions.plugin_catalog.clone(),
+            draining.clone(),
+        )
+        .await?;
+        let plugin_tasks = TaskTracker::new();
+        plugin_tasks.spawn(
+            plugins
+                .clone()
+                .publish_client_changes(changes.clone(), draining.clone()),
+        );
+        let plugin_failure = draining.clone();
+        plugin_tasks.spawn(async move {
+            if let Err(error) = plugin_owner.await {
+                eprintln!("plugin platform cleanup failed: {error}");
+                plugin_failure.cancel();
+            }
+        });
         let host = Arc::new(Self {
+            plugin_remotes: Default::default(),
+            plugins,
+            plugin_tasks,
             options,
             retirement: interactions.retirement.clone(),
             accepted_connections: Mutex::default(),
@@ -265,6 +322,9 @@ impl Host {
         }
         .await;
         if let Err(error) = recovery {
+            host.draining.cancel();
+            host.plugin_tasks.close();
+            host.plugin_tasks.wait().await;
             host.capabilities.begin_drain();
             host.executions.shutdown().await;
             host.shells.shutdown().await;
@@ -281,8 +341,75 @@ impl Host {
     pub fn root_id(&self) -> &str {
         self.root.root_id()
     }
+
+    pub fn plugin_storage(
+        &self,
+        context: maka_plugins::fiber::Context,
+    ) -> Result<Arc<dyn maka_plugins::storage::Store>, maka_plugins::Error> {
+        Ok(Arc::new(crate::plugins::storage::BoundStore::new(
+            self.log.clone(),
+            self.configuration.clone(),
+            context,
+            self.requests.clone(),
+            self.draining.clone(),
+        )?))
+    }
+
+    pub fn plugin_credentials(
+        &self,
+        context: maka_plugins::fiber::Context,
+    ) -> Result<Arc<dyn maka_plugins::credentials::Credentials>, maka_plugins::Error> {
+        Ok(self.executions.plugin_store(context)?)
+    }
+
+    /// Explicit Host grant for background plugin execution. The capability is
+    /// bound to this instance and these Sessions' current permission boundaries.
+    pub async fn authorize_plugin_execution(
+        &self,
+        context: maka_plugins::fiber::Context,
+        sessions: &[String],
+    ) -> Result<
+        std::sync::Arc<dyn maka_plugins::execution::Commands>,
+        maka_plugins::execution::CommandError,
+    > {
+        self.executions
+            .authorize_plugin(context, sessions, self.root_id(), CancellationToken::new())
+            .await
+    }
     pub fn control_directory(&self) -> &std::path::Path {
         self.root.control_directory()
+    }
+
+    /// An embedder's explicit grant remains restricted to the original persisted
+    /// boundaries. Deserializing these records alone grants no authority.
+    pub fn restore_plugin_execution(
+        &self,
+        context: maka_plugins::fiber::Context,
+        boundaries: Vec<maka_plugins::execution::SessionBoundary>,
+    ) -> Result<Arc<dyn maka_plugins::execution::Commands>, maka_plugins::execution::CommandError>
+    {
+        self.executions.restore_plugin_authority(
+            context,
+            boundaries,
+            self.root_id(),
+            CancellationToken::new(),
+        )
+    }
+
+    /// Separately grant root creation from one fully explicit, frozen template.
+    /// Ordinary Session execution grants never include this capability.
+    pub fn authorize_plugin_root_execution(
+        &self,
+        context: maka_plugins::fiber::Context,
+        approval: maka_plugins::execution::RootApproval,
+    ) -> Result<Arc<dyn maka_plugins::execution::Commands>, maka_plugins::execution::CommandError>
+    {
+        self.executions.authorize_plugin_root(
+            context,
+            approval,
+            self.root_id(),
+            CancellationToken::new(),
+        )
     }
 
     /// Candidate expiry observes accepted work; a disconnected model or PTY still owns residency.
@@ -299,16 +426,19 @@ impl Host {
                 idle_since = None;
                 observed = revision;
             }
-            if revision == 0 {
-                if now >= initial {
-                    return;
-                }
-            } else if self.connections.load(Ordering::SeqCst) == 0
+            // Recovery can admit work before the first client connection.
+            // Read the recoverable producer before its Host-owned executions:
+            // scheduler settlement is allowed only after Host admission.
+            let idle = self.plugins.pending_background_work() == 0
+                && self.connections.load(Ordering::SeqCst) == 0
                 && self.requests.is_empty()
                 && self.executions.active_count() == 0
                 && self.shells.active_count() == 0
-            {
-                if now.duration_since(*idle_since.get_or_insert(now)) >= idle_grace {
+                && self.oauth.active_count() == 0;
+            if idle {
+                if (revision != 0 || now >= initial)
+                    && now.duration_since(*idle_since.get_or_insert(now)) >= idle_grace
+                {
                     return;
                 }
             } else {

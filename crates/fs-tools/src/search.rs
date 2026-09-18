@@ -34,7 +34,7 @@ mod pattern;
 use pattern::{Segment, compile};
 
 pub const GLOB_NAME: &str = "Glob";
-pub const GLOB_DESCRIPTION: &str = "Find paths matching a Unix glob (*, ?, **, character classes), relative to the search directory. Returns at most 200 paths. Wildcard matching is case-insensitive on macOS and Windows, case-sensitive on Linux. Hidden names require an explicit dot; recursive wildcards do not follow directory symlinks. cwd is limited to the Session's admitted filesystem roots.";
+pub const GLOB_DESCRIPTION: &str = "Find paths matching a Unix glob (*, ?, **, character classes), relative to the search directory. Returns files and complete, with at most 200 paths; complete=false means some paths were not scanned. Wildcard matching is case-insensitive on macOS and Windows, case-sensitive on Linux. Hidden names require an explicit dot; recursive wildcards do not follow directory symlinks. cwd is limited to the Session's admitted filesystem roots.";
 
 pub fn glob_schema() -> Value {
     json!({"type":"object","properties":{
@@ -73,6 +73,7 @@ impl ReadExecutor {
                 visited: 0,
                 bytes: 0,
                 files: BTreeSet::new(),
+                complete: true,
             };
             search.check()?;
             let mut opened = None;
@@ -97,7 +98,7 @@ impl ReadExecutor {
                 search.walk(&directory, Path::new(""), &segments, 0)?;
             }
             search.check()?;
-            Ok(json!({"files":search.files}))
+            Ok(json!({"files":search.files,"complete":search.complete}))
         })
         .await
         .map_err(|e| failed(format!("Glob worker failed: {e}")))?
@@ -110,6 +111,7 @@ struct Search {
     visited: usize,
     bytes: usize,
     files: BTreeSet<String>,
+    complete: bool,
 }
 
 impl Search {
@@ -153,6 +155,7 @@ impl Search {
     ) -> Result<(), ToolError> {
         self.check()?;
         if self.files.len() >= 200 {
+            self.complete = false;
             return Ok(());
         }
         let Some((segment, rest)) = segments.split_first() else {
@@ -184,6 +187,7 @@ impl Search {
             self.walk(root, relative, rest, depth)?;
         }
         if self.files.len() >= 200 {
+            self.complete = false;
             return Ok(());
         }
         let path = if relative.as_os_str().is_empty() {
@@ -213,6 +217,7 @@ impl Search {
         for (name, kind) in children {
             self.check()?;
             if self.files.len() >= 200 {
+                self.complete = false;
                 break;
             }
             let name = name

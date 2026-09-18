@@ -421,11 +421,14 @@ export function decodeSubscriptionFrame(value: unknown): SubscriptionFrame {
       sessionId: requireEntityId(record.sessionId, 'sessionId'),
       ref: decodeRuntimeResourceRef(record.ref),
       ptySequence: requirePositiveCount(record.ptySequence, 'PTY sequence'),
-      data: requireUtf8BoundedString(
-        record.data,
-        'Runtime Resource PTY data',
-        SESSION_RUNTIME_RESOURCE_PTY_DATA_MAX_BYTES,
-      ),
+      data:
+        record.reset === true && record.data === ''
+          ? ''
+          : requireUtf8BoundedString(
+              record.data,
+              'Runtime Resource PTY data',
+              SESSION_RUNTIME_RESOURCE_PTY_DATA_MAX_BYTES,
+            ),
       ...(record.reset === true ? { reset: true } : {}),
     };
   }

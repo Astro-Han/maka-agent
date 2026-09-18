@@ -67,6 +67,24 @@ enum BlockReason {
 }
 
 impl Availability {
+    pub fn capture(
+        &self,
+    ) -> Result<(Self, Option<maka_plugins::contributions::Captured>), ToolError> {
+        let captured = self.catalog.capture_plugins();
+        let catalog = match &captured {
+            Some(captured) => self.catalog.resolve_captured(captured),
+            None => Ok(self.catalog.clone()),
+        }
+        .map_err(|error| ToolError::Failed(error.to_string()))?;
+        Ok((
+            Self {
+                catalog,
+                active: self.active.clone(),
+            },
+            captured,
+        ))
+    }
+
     pub fn new(catalog: ToolCatalog) -> Self {
         Self {
             catalog,
@@ -86,6 +104,13 @@ impl Availability {
             active: self.active.clone(),
         }
     }
+
+    pub fn direct_only(&self) -> ToolCatalog {
+        self.catalog.direct_only()
+    }
+    pub fn digest(&self) -> String {
+        self.catalog.digest()
+    }
     pub fn snapshot(&self) -> ToolCatalog {
         if !self.enabled() {
             return self.catalog.clone();
@@ -101,7 +126,16 @@ impl Availability {
     pub fn checkpoint(&self) -> maka_runtime::handoff::HandoffTools {
         maka_runtime::handoff::HandoffTools {
             catalog_digest: self.catalog.digest(),
-            loaded: self.active.lock().unwrap().clone(),
+            // A successor samples dynamic plugins again. Their executable
+            // identities are not promised across Host handoff or restart.
+            loaded: self
+                .active
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|name| self.catalog.contains(name))
+                .cloned()
+                .collect(),
         }
     }
 
@@ -149,7 +183,7 @@ impl Availability {
             return Err(invalid());
         }
         let availability = self.clone();
-        Ok(Box::new(move |_| {
+        Ok(PreparedEffect::new(move |_| {
             Box::pin(async move {
                 serde_json::to_value(availability.search(&input))
                     .map(Into::into)

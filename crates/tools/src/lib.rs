@@ -24,9 +24,9 @@ mod cell;
 mod client;
 pub use client::{ApprovalFuture, ClientInteractions, ClientTools, PermissionFuture};
 mod dispatch;
-mod preparation;
+pub mod plugins;
 pub use catalog::*;
 pub use dispatch::{RequestTools, RunTools, StepTools};
-pub use preparation::{
+pub use maka_runtime::tools::{
     PreparationFuture, PreparedEffect, ToolCallContext, ToolHandler, ToolPreparer,
 };

@@ -107,7 +107,7 @@ async fn initialize(connection: &mut SqliteConnection) -> std::result::Result<()
     .fetch_one(&mut *connection)
     .await?;
     if !((application_id == 0 && version == 0 && tables == 0)
-        || (application_id == 0x4d414b43 && matches!(version, 0..=9)))
+        || (application_id == 0x4d414b43 && matches!(version, 0..=10)))
     {
         return Err(StoreError::UnsupportedDatabase);
     }

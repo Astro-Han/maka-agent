@@ -17,8 +17,8 @@
  * under the License.
  */
 
+use super::prepare::PreparedRun;
 use super::{ActiveRun, Executions, Result, execution_error, failure, requires_drain};
-use maka_agent::RunInput;
 use maka_protocol::{
     OperationErrorCode as Code,
     turn::{TurnQueryInput, TurnSnapshot},
@@ -29,16 +29,16 @@ impl Executions {
     /// The caller holds the shared admission gate through durable startup.
     pub(super) async fn launch(
         self: &std::sync::Arc<Self>,
-        input: RunInput,
+        input: impl Into<PreparedRun>,
     ) -> Result<TurnSnapshot> {
-        let invocation = input.invocation.clone();
+        let mut input = input.into();
+        let invocation = input.invocation_mut().clone();
         let cancellation = self.shutdown.child_token();
         if self.retiring() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
         let running = self
-            .engine
-            .start(input, cancellation.clone())
+            .start_run(input, cancellation.clone())
             .await
             .map_err(|error| {
                 if requires_drain(&error) {
@@ -52,6 +52,17 @@ impl Executions {
             turn_id: invocation.turn_id,
         })
         .await
+    }
+
+    pub(super) async fn start_run(
+        &self,
+        input: PreparedRun,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> std::result::Result<maka_agent::RunningInvocation, maka_agent::RunError> {
+        match input {
+            PreparedRun::Model(input) => self.engine.start(*input, cancellation).await,
+            PreparedRun::Executor(input) => self.engine.start_executor(*input, cancellation).await,
+        }
     }
 
     pub(super) fn track(self: &std::sync::Arc<Self>, running: maka_agent::RunningInvocation) {

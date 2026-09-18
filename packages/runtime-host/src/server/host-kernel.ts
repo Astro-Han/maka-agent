@@ -716,6 +716,13 @@ export class RuntimeHostKernel {
   #createOperationHandlers(domainHandlers: DomainOperationHandlerMap): OperationHandlerMap {
     return composeOperationHandlers(
       {
+        'host.wake': async () => ({
+          ok: false,
+          error: {
+            code: 'operation_unavailable',
+            message: 'System wake notifications require the Rust Host',
+          },
+        }),
         'host.status': async () => ({
           ok: true,
           result: this.#statusSnapshot(),

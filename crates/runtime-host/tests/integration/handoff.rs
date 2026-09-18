@@ -90,7 +90,7 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
         .rpc(
             "turn.start",
             json!({"sessionId":"session", "turnId":"turn",
-        "content":{"text":"write once, then finish"}, "maxSteps":3}),
+        "content":{"text":"write once, then finish"}, "maxSteps":4}),
         )
         .await;
     assert_eq!(started["result"]["kind"], "started", "{started}");
@@ -120,6 +120,25 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
         provider.requests.lock().unwrap().len(),
         1,
         "rollback must not retry the model"
+    );
+    first
+        .reply
+        .send(json!({"index":0,"delta":{"tool_calls":[{
+        "index":0,"id":"load-plugin","type":"function","function":{
+            "name":"tool_search","arguments":json!({"query":"ScheduledTask"}).to_string()
+        }
+    }]},"finish_reason":"tool_calls"}))
+        .unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(5), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        first.body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["function"]["name"] == "ScheduledTask")
     );
     let retire = |mut peer: Peer| {
         let epoch = hello["hostEpoch"].clone();
@@ -227,6 +246,18 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
         .await
         .unwrap()
         .unwrap();
+    let tools = second.body["tools"].as_array().unwrap();
+    assert!(
+        tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "tool_search")
+    );
+    assert!(
+        tools
+            .iter()
+            .all(|tool| tool["function"]["name"] != "ScheduledTask"),
+        "successor rediscovers plugins instead of retaining old loaded implementations"
+    );
     assert_eq!(
         second.body["messages"]
             .as_array()
@@ -280,7 +311,7 @@ async fn cooperative_retirement_recovers_frozen_step_without_repeating_effects()
     assert_ne!(owner.invocation.run_id, source.run_id);
     assert_eq!(owner.invocation.turn_id, source.turn_id);
     log.close().await.unwrap();
-    assert_eq!(provider.requests.lock().unwrap().len(), 2);
+    assert_eq!(provider.requests.lock().unwrap().len(), 3);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

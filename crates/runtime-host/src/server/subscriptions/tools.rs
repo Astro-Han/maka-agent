@@ -26,7 +26,29 @@ use std::time::UNIX_EPOCH;
 /// Live payloads contain activity, not full arguments/results or ancestry. Those
 /// are available through the immutable transcript at the same committed fence.
 pub(super) fn events(stored: &StoreStreamEvent) -> Result<Vec<SessionToolEvent>, HostError> {
+    if let StreamFact::ExecutorToolProgress { tool_call_id, text } = &stored.fact {
+        return Ok(vec![SessionToolEvent::ToolProgress {
+            id: stored.id.clone(),
+            turn_id: stored.invocation.turn_id.clone(),
+            ts: u64::try_from(stored.recorded_at.duration_since(UNIX_EPOCH)?.as_millis())?,
+            tool_use_id: tool_message_id(&stored.invocation.invocation_id, tool_call_id),
+            chunk: text.clone(),
+        }]);
+    }
     let (operation, name, status) = match &stored.fact {
+        StreamFact::ExecutorToolStart { tool_call_id, name } => (tool_call_id, Some(name), None),
+        StreamFact::ExecutorToolResult {
+            tool_call_id,
+            is_error,
+        } => (
+            tool_call_id,
+            None,
+            Some(if *is_error {
+                ToolResultStatus::Errored
+            } else {
+                ToolResultStatus::Completed
+            }),
+        ),
         StreamFact::ToolDispatched { operation_id, name } => (operation_id, Some(name), None),
         StreamFact::ToolRejected { operation_id, name } => {
             (operation_id, Some(name), Some(ToolResultStatus::Errored))

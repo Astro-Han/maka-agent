@@ -26,6 +26,8 @@ impl Operation {
         matches!(
             self,
             Self::AccessCredentialFinalize
+                | Self::PluginClientQuery
+                | Self::PluginRemote
                 | Self::AgentGraphEpochsQuery
                 | Self::AgentGraphOperatorQuery
                 | Self::AgentGraphQuery

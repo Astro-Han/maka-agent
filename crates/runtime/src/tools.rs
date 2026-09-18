@@ -29,8 +29,13 @@ use uuid::Uuid;
 use crate::event::{EventSink, Invocation};
 
 mod journal;
+mod preparation;
 use crate::tool_call::ToolCallIdentity;
 pub use journal::ToolJournal;
+pub use preparation::{
+    PreparationFuture, PreparedEffect, ToolCallContext, ToolHandler, ToolNesting, ToolPreparer,
+    ToolRegistration, ToolSemantics,
+};
 
 /// A callable function's closed contract; only its JSON Schema is open-ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

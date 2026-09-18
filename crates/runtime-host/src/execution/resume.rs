@@ -181,6 +181,11 @@ impl Executions {
                         &input.session_id,
                         Some(connection),
                         maka_client_capability::BindingMode::Strict,
+                        self.log
+                            .invocation_configuration(&source.invocation)
+                            .await
+                            .map_err(internal)?
+                            .map(|configuration| configuration.orchestration_mode),
                     )
                     .await,
                 );
@@ -265,10 +270,8 @@ impl Executions {
                 "Cannot resume an archived Session",
             ));
         }
-        use maka_protocol::session::{CollaborationMode, OrchestrationMode};
-        if session.configuration.collaboration_mode != CollaborationMode::Agent
-            || session.configuration.orchestration_mode != OrchestrationMode::Default
-        {
+        use maka_protocol::session::CollaborationMode;
+        if session.configuration.collaboration_mode != CollaborationMode::Agent {
             return Err(failure(
                 Code::OperationUnavailable,
                 "This execution mode does not support resume",

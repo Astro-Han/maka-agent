@@ -150,6 +150,21 @@ async fn merge(
     current: &SessionConfiguration,
     patch: SessionConfigurationPatch,
 ) -> Result<SessionConfiguration> {
+    if current.target.model().is_none()
+        && (patch.model_target.is_some()
+            || !patch.thinking_level.is_keep()
+            || patch
+                .orchestration_mode
+                .is_some_and(|mode| mode != OrchestrationMode::Default)
+            || patch
+                .collaboration_mode
+                .is_some_and(|mode| mode != CollaborationMode::Agent))
+    {
+        return Err(failure(
+            Code::OperationUnavailable,
+            "Executor Sessions do not support native model or orchestration configuration",
+        ));
+    }
     let mut next = current.clone();
     next.thinking_level = match patch.thinking_level {
         Patch::Keep => current.thinking_level,
@@ -157,15 +172,23 @@ async fn merge(
         Patch::Set(level) => Some(level),
     };
     if let Some(target) = &patch.model_target {
-        next.model = model::resolve(&host.configuration, target, next.thinking_level).await?;
+        next.target = crate::session::SessionTarget::Model {
+            model: model::resolve(&host.configuration, target, next.thinking_level).await?,
+        };
         next.connection_locked = true;
     } else if !patch.thinking_level.is_keep() {
+        let current = current
+            .target
+            .model()
+            .expect("validated model configuration");
         let target = SessionModelTarget::Explicit {
-            connection_id: current.model.connection_id.clone(),
-            connection_slug: current.model.connection_slug.clone(),
-            model: current.model.model.clone(),
+            connection_id: current.connection_id.clone(),
+            connection_slug: current.connection_slug.clone(),
+            model: current.model.clone(),
         };
-        next.model = model::resolve(&host.configuration, &target, next.thinking_level).await?;
+        next.target = crate::session::SessionTarget::Model {
+            model: model::resolve(&host.configuration, &target, next.thinking_level).await?,
+        };
     }
     if let Some(mode) = patch.permission_mode {
         next.permission_mode = mode;

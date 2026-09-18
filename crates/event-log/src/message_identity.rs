@@ -79,6 +79,14 @@ pub(crate) async fn validate(
         Fact::ToolDispatched { operation_id, .. } | Fact::ToolRejected { operation_id, .. } => {
             reject_claim(tx, session, &tool_use_id(invocation, operation_id)).await?;
         }
+        Fact::ToolSettled { .. } => {
+            reject_claim(
+                tx,
+                session,
+                &maka_runtime::tool_call::metered_usage_id(&event.id),
+            )
+            .await?;
+        }
         _ => {}
     }
     for message_id in crate::message_sources::identities(event) {
@@ -101,6 +109,20 @@ pub(crate) async fn validate_source_id(
     .await?;
     if used {
         return Err(conflict());
+    }
+    if let Some(event_id) = maka_runtime::tool_call::parse_metered_usage_id(message_id) {
+        let used: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE event_id = ?1
+                 AND kind = 'tool_settled'
+                 AND json_extract(event_json, '$.invocation.session_id') = ?2)",
+        )
+        .bind(event_id)
+        .bind(session)
+        .fetch_one(&mut *tx)
+        .await?;
+        if used {
+            return Err(conflict());
+        }
     }
     if let Some((event_id, index)) = maka_runtime::tool_call::parse_provider_result_id(message_id) {
         let used: bool = sqlx::query_scalar(

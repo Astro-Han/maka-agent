@@ -18,6 +18,27 @@
  */
 
 use serde::{Deserialize, Serialize};
+mod output;
+pub use output::Output;
+
+/// The concrete implementation accepted for an external execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Binding {
+    pub executor_id: ExecutorId,
+    pub package_id: String,
+    pub entry_id: String,
+    pub activation: String,
+}
+
+impl Binding {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        ExecutorId::try_from(self.package_id.clone())?;
+        ExecutorId::try_from(self.entry_id.clone())?;
+        crate::interaction::entity_id(&self.activation)?;
+        Ok(())
+    }
+}
 
 /// A plugin-contributed execution backend identity, not a model or connection ID.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

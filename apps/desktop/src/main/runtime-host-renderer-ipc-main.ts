@@ -88,6 +88,8 @@ function request(
   value: unknown,
 ): Promise<unknown> {
   switch (operation) {
+    case 'plugin.client.query':
+      return client.request(operation, HOST_OPERATION_SPECS[operation].decodeInput(value));
     case 'context.diagnostics.query':
       return client.request(operation, HOST_OPERATION_SPECS[operation].decodeInput(value));
     case 'daily-review.mutate':

@@ -39,6 +39,7 @@ pub mod oauth;
 pub mod onboarding;
 pub mod operation;
 pub mod operation_error;
+pub mod plugin;
 pub mod project;
 pub mod request_headers;
 pub mod resource;
@@ -58,7 +59,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub const PROTOCOL_VERSION: u64 = 0;
-pub const COMPATIBILITY_EPOCH: u64 = 158;
+pub const COMPATIBILITY_EPOCH: u64 = 159;
 pub const COMPOSITION_ID: &str = "maka.interactive";
 pub const MAX_MESSAGE_BYTES: usize = 768 * 1024;
 pub const MAX_IN_FLIGHT_DOMAIN_REQUESTS: usize = 64;

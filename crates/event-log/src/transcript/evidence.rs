@@ -76,6 +76,22 @@ pub(super) async fn selected(
             return super::tools::selected(tx, invocation, through).await;
         }
     }
+    let external: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE invocation_id = ?1 AND sequence <= ?2 AND kind = 'executor_started')"
+    ).bind(invocation).bind(through).fetch_one(&mut *tx).await?;
+    if external {
+        return read(tx, sqlx::query(
+            "SELECT sequence, length(CAST(event_json AS BLOB)) FROM runtime_events
+             WHERE invocation_id = ?1 AND sequence <= ?2 AND (
+                 kind IN ('invocation_opened','executor_started')
+                 OR (?3 AND sequence = ?2)
+                 OR (kind IN ('executor_observed','executor_completed') AND (
+                     NOT ?3 OR NOT EXISTS(SELECT 1 FROM runtime_events boundary WHERE boundary.sequence = ?2 AND boundary.kind = 'executor_observed')
+                     OR json_extract(event_json, '$.fact.output.toolCallId') =
+                         (SELECT json_extract(event_json, '$.fact.output.toolCallId') FROM runtime_events WHERE sequence = ?2))))
+             ORDER BY sequence LIMIT ?4"
+        ).bind(invocation).bind(through).bind(boundary).bind((MAX_EVENTS + 1) as i64)).await;
+    }
     // A failed/cancelled terminal can seal a request without a separate model
     // interruption (for example after a model-observation commit failure).
     let unresolved = if step.is_none() {

@@ -22,7 +22,7 @@
 [简体中文](./rust-runtime.zh-CN.md)
 
 The Rust workspace replaces Maka's runtime and host while preserving the
-TypeScript client protocol and interactions. Both use protocol epoch 158. The rewrite is incomplete;
+TypeScript client protocol and interactions. Both use protocol epoch 159. The rewrite is incomplete;
 unsupported operations return explicit errors.
 
 ## Build and run
@@ -225,7 +225,7 @@ Do not run untrusted code or point test instances at existing user data.
   preferences and source updates without reading baselines or claiming Run advertisement.
   Pages are revision-bound; Plan and Skill mutations remain unavailable.
 - Rust owns storage, network routing, tools and native process/PTY lifetimes.
-  Future plugins must enter through catalogs and scoped Host services, sharing
+  Plugins enter through catalogs and scoped Host services, sharing
   journaled effects, permissions and draining rather than replacing the Engine.
   One lazy, long-lived V8 serves concurrent model requests and terminal parsers.
   Code Mode cells use separate short-lived isolates. Count and byte limits provide
@@ -347,5 +347,12 @@ Session branching, removal, import/export and recap, along with additional runti
 policy settings, also remain incomplete.
 Orchestration, some capability services and other protocol domains remain incomplete;
 native deployment and updates do not imply full product compatibility.
-Plugin implementation follows Agent Graph; OS sandboxing is deferred. Memory is excluded pending a
-separate redesign; its existing implementation is not ported. Content redaction is omitted.
+The plugin platform supports linked Rust packages, shared/dedicated-V8 JavaScript packages,
+scoped Host services, external executors, and Desktop Slots/Remote streams.
+Graph/Swarm and scheduling are built-in plugins. Graph implementation workers use
+Host-owned gix worktrees and publish immutable patches without automatic merging.
+Per-Turn orchestration survives yield and resume without changing Session defaults;
+Swarm checkpoints carry status and final-result IDs, with paged history for retrieval.
+See the [plugin SDK](../packages/plugin-sdk/README.md) for contracts and limits.
+OS sandboxing is deferred. Memory is excluded pending a separate redesign;
+its existing implementation is not ported. Content redaction is omitted.

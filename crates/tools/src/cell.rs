@@ -162,7 +162,7 @@ impl ToolExecutor for NestedTools {
                 }
             };
             let result = journal
-                .invoke_call_with(
+                .invoke_prepared_call(
                     operation_id,
                     call,
                     name.clone(),

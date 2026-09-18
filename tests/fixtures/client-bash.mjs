@@ -78,8 +78,18 @@ async function fixture(terminal) {
               'Write',
               'WriteStdin',
               'apply_patch',
+              'tool_search',
             ]
-          : ['AskUserQuestion', 'Edit', 'Glob', 'Grep', 'Read', 'Write', 'apply_patch'],
+          : [
+              'AskUserQuestion',
+              'Edit',
+              'Glob',
+              'Grep',
+              'Read',
+              'Write',
+              'apply_patch',
+              'tool_search',
+            ],
       );
       if (Object.hasOwn(action, 'expected')) {
         const result = input.messages.at(-1);

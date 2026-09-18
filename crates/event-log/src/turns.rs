@@ -78,6 +78,26 @@ impl InvocationState {
 }
 
 impl EventLog {
+    /// Read the frozen execution boundary without loading message or model bodies.
+    pub async fn invocation_configuration(
+        &self,
+        invocation: &Invocation,
+    ) -> Result<Option<maka_runtime::execution::InvocationConfiguration>, StoreError> {
+        self.validate_root()?;
+        let invocation = invocation.clone();
+        self.connection.run(move |connection| Box::pin(async move {
+            let configuration: Option<String> = sqlx::query_scalar(
+                "SELECT json_extract(event_json, '$.fact.configuration') FROM runtime_events
+                 WHERE invocation_id = ?1 AND kind = 'invocation_opened'
+                 AND json_extract(event_json, '$.invocation.session_id') = ?2
+                 AND json_extract(event_json, '$.invocation.run_id') = ?3
+                 AND json_extract(event_json, '$.invocation.turn_id') = ?4"
+            ).bind(&invocation.invocation_id).bind(&invocation.session_id).bind(&invocation.run_id).bind(&invocation.turn_id)
+                .fetch_optional(connection).await?.flatten();
+            configuration.map(|value| serde_json::from_str(&value).map_err(StoreError::from)).transpose()
+        })).await
+    }
+
     /// Exact physical Run, including an earlier Run of the same logical Turn.
     pub async fn run_boundary(
         &self,

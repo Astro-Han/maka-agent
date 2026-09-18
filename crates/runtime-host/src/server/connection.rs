@@ -81,6 +81,7 @@ impl Host {
             .validate_client(&self.configuration, &hello.client_instance_id)
             .await?;
         let connection_id = Uuid::new_v4();
+        let mut plugin_remotes = Some(self.plugin_remotes.connection(connection_id));
         let _uploads = self.uploads.connection(connection_id);
         let (handshake, _accepted, _retirement) =
             self.admit_handshake(&hello, &authority, connection_id)?;
@@ -157,6 +158,7 @@ impl Host {
                         input_open = false;
                         capability_connection.take();
                         controllers.take();
+                        plugin_remotes.take();
                         continue;
                     }
                 },
@@ -362,6 +364,7 @@ impl Host {
                 closed.cancel();
             }
             drop(controllers);
+            drop(plugin_remotes.take());
             drop(capability_connection);
             // Drop observation-only work before draining accepted operations;
             // otherwise a paused refresh could retain their subscription lock.

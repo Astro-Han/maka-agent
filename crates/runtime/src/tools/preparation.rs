@@ -17,17 +17,58 @@
  * under the License.
  */
 
-use maka_runtime::{
+use crate::{
     event::Invocation,
     tool_call::{ToolRejection, tool_use_id},
     tool_output::ToolSuccess,
-    tools::{ToolExecutor, ToolFuture},
+    tools::{ToolError, ToolExecutor, ToolFuture},
 };
 use serde_json::Value;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
-pub type PreparedEffect = Box<dyn FnOnce(CancellationToken) -> ToolFuture<ToolSuccess> + Send>;
+type Execute = Box<dyn FnOnce(CancellationToken) -> ToolFuture<ToolSuccess> + Send>;
+type Admission = Box<dyn FnOnce() -> Result<Box<dyn Send>, ToolError> + Send>;
+
+/// The journal owns admission leases until the durable outcome is settled,
+/// including failures. Preparation itself does not begin a plugin call.
+pub struct PreparedEffect {
+    execute: Option<Execute>,
+    admissions: Vec<Admission>,
+    leases: Vec<Box<dyn Send>>,
+}
+
+impl PreparedEffect {
+    pub fn new(
+        execute: impl FnOnce(CancellationToken) -> ToolFuture<ToolSuccess> + Send + 'static,
+    ) -> Self {
+        Self {
+            execute: Some(Box::new(execute)),
+            admissions: Vec::new(),
+            leases: Vec::new(),
+        }
+    }
+
+    pub fn guarded<G: Send + 'static>(
+        mut self,
+        admit: impl FnOnce() -> Result<G, ToolError> + Send + 'static,
+    ) -> Self {
+        self.admissions.push(Box::new(move || {
+            admit().map(|guard| Box::new(guard) as Box<dyn Send>)
+        }));
+        self
+    }
+
+    pub(super) fn start(&mut self, cancellation: CancellationToken) -> ToolFuture<ToolSuccess> {
+        for admit in self.admissions.drain(..) {
+            match admit() {
+                Ok(guard) => self.leases.push(guard),
+                Err(error) => return Box::pin(async { Err(error) }),
+            }
+        }
+        self.execute.take().expect("prepared effect starts once")(cancellation)
+    }
+}
 pub type PreparationFuture =
     Pin<Box<dyn Future<Output = Result<PreparedEffect, ToolRejection>> + Send>>;
 
@@ -65,7 +106,7 @@ pub enum ToolHandler {
     Prepared(Arc<dyn ToolPreparer>),
 }
 impl ToolHandler {
-    pub(crate) fn names(&self) -> Vec<String> {
+    pub fn names(&self) -> Vec<String> {
         match self {
             Self::Immediate(executor) => executor.names(),
             Self::Prepared(preparer) => preparer.names(),
@@ -83,7 +124,7 @@ impl ToolHandler {
             Self::Immediate(executor) => {
                 let executor = executor.clone();
                 Box::pin(async move {
-                    let effect: PreparedEffect = Box::new(move |cancellation| {
+                    let effect: PreparedEffect = PreparedEffect::new(move |cancellation| {
                         Box::pin(async move {
                             executor
                                 .invoke(name, input, cancellation)
@@ -97,4 +138,27 @@ impl ToolHandler {
             Self::Prepared(preparer) => preparer.prepare(name, input, context, cancellation),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolNesting {
+    Nestable,
+    DirectOnly,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolSemantics {
+    Parallel,
+    ExclusiveStep,
+    /// Complete this Turn only after a successful durable settlement.
+    FinishTurn,
+}
+
+/// A definition and its implementation travel together through request capture.
+#[derive(Clone)]
+pub struct ToolRegistration {
+    pub definition: super::ToolDefinition,
+    pub nesting: ToolNesting,
+    pub semantics: ToolSemantics,
+    pub handler: ToolHandler,
 }

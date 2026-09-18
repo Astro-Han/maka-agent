@@ -241,6 +241,7 @@ impl Executions {
                                 &input.session_id,
                                 Some(connection_id),
                                 maka_client_capability::BindingMode::Strict,
+                                input.turn_orchestration.as_ref().map(|intent| intent.mode),
                             )
                             .await?;
                         environment
@@ -269,7 +270,7 @@ impl Executions {
             let mut source = source;
             source.message.content = content.clone();
             source.skill_invocation = skill_invocation.clone();
-            let (mut run, _) = self
+            let mut run = self
                 .prepare_message(
                     TurnStartInput {
                         session_id: input.session_id,
@@ -287,10 +288,7 @@ impl Executions {
                     environment,
                 )
                 .await?;
-            let maka_agent::RunWork::Message { message, .. } = &mut run.work else {
-                return Err(internal("Message preparation produced a non-message Run"));
-            };
-            *message = content;
+            run.message(content, None)?;
             // Opening and original source identity commit together before any model
             // or tool effect. There is no separately accepted, unstarted idle row.
             let turn = self.launch(run).await.map_err(|error| {
