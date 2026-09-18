@@ -1440,6 +1440,9 @@ runtimeHostManager.setDefaultProfile(runtimeHostStartup.preferences.defaultProfi
 wireLifecycle();
 sessionLocal.wake();
 windowsAppTray.start();
+// Remote profiles do not depend on the Local Host: a handoff parked on a
+// user decision must not hold their activation for the whole session.
+void runtimeHostProfileService.startEnabledProfiles();
 // Runtime Host is the only schema-migration authority for its State Root.
 // Work Board remains a Desktop-owned table, but it opens only while a ready
 // Host has verified the schema — including a Local Host that only becomes
@@ -1488,7 +1491,6 @@ void (async () => {
   await localRuntimeHostRemoteAccess.recover().catch((error: unknown) => {
     console.error('[runtime-host] interrupted Local Host setup could not be recovered:', error);
   });
-  void runtimeHostProfileService.startEnabledProfiles();
   const unavailableDefault = runtimeHostStartup.unavailable.get(
     runtimeHostStartup.preferences.defaultProfileId,
   );
