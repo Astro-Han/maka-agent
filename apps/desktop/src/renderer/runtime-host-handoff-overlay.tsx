@@ -44,9 +44,12 @@ export function RuntimeHostHandoffOverlay() {
       pushed = true;
       if (mounted) setPayload(next);
     });
-    void bridge.current().then((current) => {
-      if (mounted && !pushed) setPayload(current);
-    });
+    void bridge
+      .current()
+      .then((current) => {
+        if (mounted && !pushed) setPayload(current);
+      })
+      .catch(() => {});
     return () => {
       mounted = false;
       unsubscribe();
@@ -80,7 +83,9 @@ export function RuntimeHostHandoffOverlay() {
               variant="ghost"
               label={copy.copyDiagnostics}
               onClick={() =>
-                void navigator.clipboard.writeText(JSON.stringify(view, null, 2))}
+                void navigator.clipboard
+                  .writeText(JSON.stringify(view, null, 2))
+                  .catch(() => {})}
             />
           </LayoutContent>
         )}

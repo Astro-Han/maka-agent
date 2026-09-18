@@ -18,6 +18,7 @@
  */
 
 import { WorkHubControlOverlay, WorkHubDock, WorkHubMainNavigation, WorkHubReturnButton } from './features/workhub';
+import { RuntimeHostHandoffOverlay } from './runtime-host-handoff-overlay';
 import {
   useCallback,
   useEffect,
@@ -239,6 +240,7 @@ export function AppShell() {
         <ToastProvider errorAction={errorToastAction}>
           <ErrorBoundary locale={uiLocale}>
             <AppUpdateProvider>
+              <RuntimeHostHandoffOverlay />
               <WorkHubControlOverlay />
               <TaskEntry.TaskEntryRoot>
                 {(taskEntry) => (
