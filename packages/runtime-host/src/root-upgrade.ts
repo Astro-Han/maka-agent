@@ -45,6 +45,7 @@ import { readAccessCredentialFile, ACCESS_FILE_NAME } from './server/access-cred
 import { HostPluginCompositionStore } from './server/plugin-composition-store.js';
 import {
   decodeRuntimeHostManagedDeploymentAuthorityRecord,
+  RuntimeHostManagedDeploymentError,
   decodeRuntimeHostManagedDeploymentConfig,
   type RuntimeHostManagedDeploymentAuthorityRecord,
   type RuntimeHostManagedDeploymentConfig,
@@ -589,12 +590,15 @@ async function validateDeploymentSource(
       JSON.parse(contents.toString('utf8')),
     );
   } catch (error) {
-    throw new Error(
-      `Invalid legacy deployment record: ${join(path, 'runtime-host-deployment.json')}`,
-      {
+    const recordPath = join(path, 'runtime-host-deployment.json');
+    if (error instanceof SyntaxError)
+      throw new Error(`Invalid legacy deployment record: ${recordPath}`, { cause: error });
+    // Keep the typed code; only the message gains the path.
+    if (error instanceof RuntimeHostManagedDeploymentError)
+      throw new RuntimeHostManagedDeploymentError(error.code, `${error.message}: ${recordPath}`, {
         cause: error,
-      },
-    );
+      });
+    throw error;
   }
   if (record.root.id !== rootId || record.root.path !== rootPath)
     throw new Error('Legacy deployment does not belong to the upgrading root');
