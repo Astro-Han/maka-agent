@@ -172,7 +172,7 @@ describe('Runtime Host operator commands', () => {
     const frame = decodeRuntimeHostActivationFrame(output);
     assert.equal(frame?.kind, 'error');
     if (frame?.kind !== 'error') throw new Error('expected an error frame');
-    assert.equal(frame.error.code, 'root_unmarked');
+    assert.equal(frame.error.code, 'root_unavailable');
     assert.equal(frame.error.message, 'Storage root is not marked: /srv/maka');
 
     let stderr = '';

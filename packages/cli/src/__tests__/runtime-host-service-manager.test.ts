@@ -42,6 +42,7 @@ import {
   RUNTIME_HOST_OPERATOR_PROJECT_DIRECTORY_CONFIGURATION_REQUEST_ENV,
   RUNTIME_HOST_OPERATOR_PROCESS_LIFETIME_LOCK_CAPABILITY,
   RUNTIME_HOST_SERVICE_LOG_MAX_BYTES,
+  RuntimeHostManagedDeploymentError as RuntimeHostDeploymentAuthorityError,
   type RuntimeHostOperatorCapability,
   type RuntimeHostServiceManagementFrame,
 } from '@maka/runtime-host/operator';
@@ -58,12 +59,14 @@ import {
   removeRuntimeHostManagedDeployment,
   resolveRuntimeHostManagedDeploymentRoot,
   resolveRuntimeHostManagedPackageCliPath,
+  RuntimeHostManagedDeploymentError,
 } from '../runtime-host-managed-deployment.js';
 import { runManagedRuntimeHostServiceCli } from '../runtime-host-service-management-command.js';
 import { runManagedRuntimeHostUpdateCli } from '../runtime-host-update-command.js';
 import {
   cleanupRuntimeHostManagedDeployment,
   effectiveRuntimeHostProjectDirectoryRoots,
+  managedRuntimeHostErrorCode,
   manageRuntimeHostService,
   replaceRuntimeHostManagedService,
   resolveRuntimeHostManagedServiceConfigPath,
@@ -3388,6 +3391,51 @@ describe('managed Runtime Host service', () => {
     assert.equal(frame?.kind, 'error');
     if (frame?.kind !== 'error') assert.fail('Expected an error frame');
     assert.equal(frame.error.code, 'root_requires_migration');
+  });
+
+  it('maps every domain error onto a committed wire code', () => {
+    // Storage-authority codes fold by family; only the retryable migration
+    // window and the migration gate keep their own wire codes.
+    for (const [code, expected] of [
+      ['legacy_root_requires_migration', 'root_requires_migration'],
+      ['root_migration_busy', 'root_migration_busy'],
+      ['root_unmarked', 'root_unavailable'],
+      ['invalid_marker', 'root_unavailable'],
+      ['root_identity_collision', 'root_unavailable'],
+      ['control_io_failed', 'root_unavailable'],
+    ] as const) {
+      assert.equal(
+        managedRuntimeHostErrorCode(new StorageRootAuthorityError(code, 'x')),
+        expected,
+        code,
+      );
+    }
+    // Deployment-authority codes fold by the guidance that still applies.
+    for (const [code, expected] of [
+      ['deployment_transition_in_progress', 'active_tasks'],
+      ['state_root_owned', 'target_mismatch'],
+      ['deployment_claim_mismatch', 'target_mismatch'],
+      ['deployment_record_missing', 'service_manager_operation_failed'],
+      ['deployment_needs_repair', 'service_manager_operation_failed'],
+      ['deployment_io_failed', 'deployment_io_failed'],
+      ['invalid_config', 'invalid_config'],
+    ] as const) {
+      assert.equal(
+        managedRuntimeHostErrorCode(new RuntimeHostDeploymentAuthorityError(code, 'x')),
+        expected,
+        code,
+      );
+    }
+    for (const [code, expected] of [
+      ['deployment_failed', 'service_manager_operation_failed'],
+      ['invalid_package', 'invalid_package'],
+    ] as const) {
+      assert.equal(
+        managedRuntimeHostErrorCode(new RuntimeHostManagedDeploymentError(code, 'x')),
+        expected,
+        code,
+      );
+    }
   });
 });
 

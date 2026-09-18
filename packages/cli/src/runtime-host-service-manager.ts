@@ -884,23 +884,46 @@ export function storageRootErrorDetail(
   error: unknown,
 ): { readonly code: string; readonly message: string } | undefined {
   if (!(error instanceof StorageRootAuthorityError)) return undefined;
-  return {
-    code: error.code === 'legacy_root_requires_migration' ? 'root_requires_migration' : error.code,
-    message: error.message,
-  };
+  const code =
+    error.code === 'legacy_root_requires_migration'
+      ? 'root_requires_migration'
+      : error.code === 'root_migration_busy'
+        ? 'root_migration_busy'
+        : 'root_unavailable';
+  return { code, message: error.message };
 }
 
 /**
  * The canonical managed-domain code for an error reaching a CLI boundary, or
  * undefined when the boundary should use its own fallback.
  */
+// Deployment-authority codes outside the committed wire union fold into the
+// member whose guidance still applies; the precise code stays in the message.
+const DEPLOYMENT_RETRY_CODES = new Set(['deployment_transition_in_progress']);
+const DEPLOYMENT_OWNERSHIP_CODES = new Set([
+  'state_root_owned',
+  'lifecycle_owner_exists',
+  'deployment_transaction_mismatch',
+  'deployment_claim_mismatch',
+  'deployment_lifecycle_mismatch',
+  'deployment_launch_mismatch',
+]);
+
 export function managedRuntimeHostErrorCode(error: unknown): string | undefined {
+  if (error instanceof RuntimeHostServiceManagerError) return error.code;
   if (
-    error instanceof RuntimeHostServiceManagerError ||
     error instanceof RuntimeHostManagedDeploymentError ||
     error instanceof RuntimeHostDeploymentAuthorityError
-  )
-    return error.code;
+  ) {
+    if (DEPLOYMENT_RETRY_CODES.has(error.code)) return 'active_tasks';
+    if (DEPLOYMENT_OWNERSHIP_CODES.has(error.code)) return 'target_mismatch';
+    return error.code === 'invalid_config' ||
+      error.code === 'invalid_package' ||
+      error.code === 'deployment_io_failed' ||
+      error.code === 'deployment_commit_unknown'
+      ? error.code
+      : 'service_manager_operation_failed';
+  }
   if (error instanceof RuntimeHostLifecycleTransactionError) {
     if (error.code === 'owner_changed') return 'target_mismatch';
     if (error.code === 'active_tasks') return 'active_tasks';

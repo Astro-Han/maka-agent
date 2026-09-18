@@ -46,6 +46,8 @@ export type RuntimeHostServiceErrorCode =
   | 'invalid_launch'
   | 'target_mismatch'
   | 'root_requires_migration'
+  | 'root_migration_busy'
+  | 'root_unavailable'
   | 'configuration_changed'
   | 'configuration_incomplete'
   | 'active_tasks'

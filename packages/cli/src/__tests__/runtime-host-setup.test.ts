@@ -1208,10 +1208,7 @@ test('setup surfaces a State Root authority error instead of an internal failure
   );
   assert.equal(exitCode, 1);
   const failure = outputs.map(decodeRuntimeHostSetupFrame).find((frame) => frame?.kind === 'error');
-  assert.equal(
-    failure?.kind === 'error' ? failure.error.code : undefined,
-    'root_identity_collision',
-  );
+  assert.equal(failure?.kind === 'error' ? failure.error.code : undefined, 'root_unavailable');
 });
 
 async function createReleasePackage(base: string, version: string): Promise<string> {
