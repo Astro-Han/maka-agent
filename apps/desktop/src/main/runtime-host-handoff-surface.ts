@@ -36,8 +36,9 @@ interface OpenDesktopHandoff {
  * Host handoffs render inside the main window: background progress stays
  * silent and only attention views reach the renderer, which decides through
  * `runtime-host-handoff:decide`. Concurrent handoffs (e.g. Local plus an
- * enabled remote) each keep their own submit; the most recently updated one
- * owns the visible slot.
+ * enabled remote) each keep their own submit; the most recently updated
+ * attention view owns the visible slot — a silent progress update must never
+ * displace a pending decision.
  */
 export function createDesktopHostHandoffSurface(input: {
   ipcMain: IpcMain;
@@ -47,10 +48,6 @@ export function createDesktopHostHandoffSurface(input: {
   const open = new Map<number, OpenDesktopHandoff>();
   let sequence = 0;
   let activeId: number | undefined;
-  const locale = input.resolveLocale().then(
-    (resolved) => resolved,
-    () => 'en' as UiLocale,
-  );
 
   const currentEntry = (): OpenDesktopHandoff | undefined =>
     activeId === undefined ? undefined : open.get(activeId);
@@ -58,10 +55,22 @@ export function createDesktopHostHandoffSurface(input: {
     entry: OpenDesktopHandoff | undefined,
   ): Promise<DesktopHostHandoffPayload | null> =>
     entry
-      ? { view: entry.view, presentation: formatHostHandoff(entry.view, await locale) }
+      ? {
+          view: entry.view,
+          presentation: formatHostHandoff(
+            entry.view,
+            await input.resolveLocale().catch(() => 'en' as UiLocale),
+          ),
+        }
       : null;
   const publish = (): void => {
     void payloadFor(currentEntry()).then((payload) => input.send(payload));
+  };
+  const refreshActive = (): void => {
+    activeId = undefined;
+    for (const [id, entry] of open) {
+      if (entry.view.state === 'attention') activeId = id;
+    }
   };
 
   input.ipcMain.handle('runtime-host-handoff:current', () =>
@@ -89,16 +98,17 @@ export function createDesktopHostHandoffSurface(input: {
     const id = sequence++;
     return {
       update(view) {
+        // Reinsert so iteration order tracks recency: the newest attention
+        // view owns the slot and a silent update cannot displace it.
+        open.delete(id);
         open.set(id, { submit, view });
-        activeId = id;
+        refreshActive();
         publish();
       },
       close() {
         open.delete(id);
-        if (activeId === id) {
-          activeId = [...open.keys()].pop();
-          publish();
-        }
+        refreshActive();
+        publish();
       },
     };
   };

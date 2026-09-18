@@ -38,6 +38,14 @@ const mainWindowSource = readFileSync(
   fileURLToPath(new URL('../../../src/main/main-window.ts', import.meta.url)),
   'utf8',
 );
+const appShellSource = readFileSync(
+  fileURLToPath(new URL('../../../src/renderer/app-shell.tsx', import.meta.url)),
+  'utf8',
+);
+const appSource = readFileSync(
+  fileURLToPath(new URL('../../../src/renderer/app.tsx', import.meta.url)),
+  'utf8',
+);
 
 test('retains process lifetime before a standalone startup dialog can close', () => {
   const retentionPolicy = mainSource.search(
@@ -75,6 +83,15 @@ test('registers one shared quit cleanup before the initial Host handoff', () => 
   assert.match(bootSource, /cleanup: closeRuntimeHostDesktop/u);
   assert.match(bootSource, /return runtimeHostDesktopShutdown \?\?= disposeRuntimeHostDesktop\(\)/u);
   assert.match(bootSource, /workBoardIpc\?\.close\(\)/u);
+});
+
+test('mounts the handoff overlay inside the locale providers', () => {
+  const provider = appShellSource.indexOf('<LocaleProvider');
+  const overlay = appShellSource.indexOf('<RuntimeHostHandoffOverlay');
+  assert.ok(provider >= 0 && overlay > provider);
+  // Above the providers it crashes the root: useUiLocale() throws without
+  // the context, and the window never reports renderer-ready.
+  assert.doesNotMatch(appSource, /RuntimeHostHandoffOverlay/u);
 });
 
 test('creates the main window before starting Local Host reconciliation', () => {
