@@ -26,10 +26,12 @@ import {
   decodeRuntimeHostServiceManagementFrame,
   RUNTIME_HOST_OPERATOR_CAPABILITY_REQUEST_ENV,
   RUNTIME_HOST_OPERATOR_UPDATE_SCHEDULER_CAPABILITY,
+  RuntimeHostManagedDeploymentError as RuntimeHostDeploymentAuthorityError,
   type RuntimeHostServiceManagementFrame,
 } from '@maka/runtime-host/operator';
 import { StorageRootAuthorityError } from '@maka/storage/root-authority';
 import { parseRuntimeHostCommand } from '../runtime-host-cli.js';
+import { RuntimeHostManagedDeploymentError } from '../runtime-host-managed-deployment.js';
 import {
   runManagedRuntimeHostUpdatePolicyCli,
   runManagedRuntimeHostUpdateReconcileCli,
@@ -614,6 +616,47 @@ describe('managed Runtime Host update reconciliation', () => {
       1,
     );
     assert.equal(JSON.parse(output).error.code, 'root_migration_busy');
+  });
+
+  it('folds deployment errors onto committed wire codes', async (t) => {
+    const clientDataRoot = await mkdtemp(join(tmpdir(), 'maka-update-reconcile-'));
+    t.after(() => rm(clientDataRoot, { recursive: true, force: true }));
+    for (const [thrown, expected] of [
+      [
+        new RuntimeHostManagedDeploymentError('deployment_failed', 'stale operator claim'),
+        'service_manager_operation_failed',
+      ],
+      [
+        new RuntimeHostDeploymentAuthorityError(
+          'deployment_transition_in_progress',
+          'another transition is in progress',
+        ),
+        'active_tasks',
+      ],
+      [
+        new RuntimeHostDeploymentAuthorityError('state_root_owned', 'owned by another deployment'),
+        'target_mismatch',
+      ],
+    ] as const) {
+      let output = '';
+      assert.equal(
+        await runManagedRuntimeHostUpdateReconcileCli(
+          { json: true, framed: false, clientDataRoot, defaultRootPath: '/workspace' },
+          {
+            manage: async () => {
+              throw thrown;
+            },
+            createBackend: () => unusedBackend(),
+            writeOutput: (value) => {
+              output += value;
+            },
+          },
+        ),
+        1,
+        thrown.message,
+      );
+      assert.equal(JSON.parse(output).error.code, expected, thrown.message);
+    }
   });
 });
 

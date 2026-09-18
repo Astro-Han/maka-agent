@@ -592,7 +592,11 @@ async function validateDeploymentSource(
   } catch (error) {
     const recordPath = join(path, 'runtime-host-deployment.json');
     if (error instanceof SyntaxError)
-      throw new Error(`Invalid legacy deployment record: ${recordPath}`, { cause: error });
+      throw new RuntimeHostManagedDeploymentError(
+        'invalid_config',
+        `Invalid legacy deployment record: ${recordPath}`,
+        { cause: error },
+      );
     // Keep the typed code; only the message gains the path.
     if (error instanceof RuntimeHostManagedDeploymentError)
       throw new RuntimeHostManagedDeploymentError(error.code, `${error.message}: ${recordPath}`, {

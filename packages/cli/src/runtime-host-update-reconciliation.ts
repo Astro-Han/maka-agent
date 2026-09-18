@@ -27,17 +27,16 @@ import {
   RUNTIME_HOST_SERVICE_ERROR_CODE_MAX_BYTES,
   RUNTIME_HOST_SERVICE_ERROR_MESSAGE_MAX_BYTES,
   resolveRuntimeHostManagedDeployment,
-  RuntimeHostManagedDeploymentError as RuntimeHostOperatorDeploymentError,
   type RuntimeHostManagedUpdatePolicy,
   type RuntimeHostManagedDeploymentConfig,
   type RuntimeHostServiceManagementFrame,
   type RuntimeHostUpdateSchedulerState,
 } from '@maka/runtime-host/operator';
 import {
+  managedRuntimeHostErrorCode,
   manageRuntimeHostService,
   resolveRuntimeHostManagedServiceId,
   RuntimeHostServiceManagerError,
-  storageRootErrorDetail,
   withRuntimeHostManagedServiceDeploymentLock,
   type RuntimeHostManagedServiceTarget,
   type RuntimeHostServiceBackend,
@@ -63,7 +62,6 @@ import {
 import {
   assertRuntimeHostManagedOperatorDeployment,
   resolveRuntimeHostManagedControlRoot,
-  RuntimeHostManagedDeploymentError,
 } from './runtime-host-managed-deployment.js';
 import {
   resolveManagedRuntimeHostUpdateSelection,
@@ -573,14 +571,14 @@ function reconcileError(error: unknown): ReconcileUpdateFrame {
 }
 
 function boundedError(error: unknown, fallback: string): { code: string; message: string } {
+  // The first three classes only carry committed wire codes; domain errors
+  // fold through the shared mapper so internal codes never reach the frame.
   const code =
     error instanceof RuntimeHostUpdatePolicyError ||
     error instanceof RuntimeHostUpdateDiscoveryError ||
-    error instanceof RuntimeHostServiceManagerError ||
-    error instanceof RuntimeHostManagedDeploymentError ||
-    error instanceof RuntimeHostOperatorDeploymentError
+    error instanceof RuntimeHostServiceManagerError
       ? error.code
-      : (storageRootErrorDetail(error)?.code ?? 'update_reconciliation_failed');
+      : (managedRuntimeHostErrorCode(error) ?? 'update_reconciliation_failed');
   const message = error instanceof Error ? error.message : String(error);
   return {
     code:
