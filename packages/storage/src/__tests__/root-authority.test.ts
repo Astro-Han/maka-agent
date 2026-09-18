@@ -29,6 +29,7 @@ import {
   readFile,
   rename,
   rm,
+  stat,
   symlink,
   utimes,
   writeFile,
@@ -57,6 +58,7 @@ import {
   StorageRootAuthorityError,
   tryAcquireInteractiveRootOwner,
   tryAcquireInteractiveRootReader,
+  withStorageRootUpgrade,
   type StorageRootCapability,
   type StorageRootLease,
 } from '../root-authority.js';
@@ -164,6 +166,49 @@ describe('storage root authority', () => {
         rm(direct.lockPath, { force: true }),
         rm(replacement.lockPath, { force: true }),
       ]);
+    });
+  });
+
+  test('refuses to silently re-mark a root that lost its marker', async () => {
+    await withRoots(async ({ root }) => {
+      await resolveStorageRoot({ path: root, kind: 'interactive' });
+      // Committed state proves the root was marked before; losing the marker
+      // then must not mint a fresh identity over the durable state. A bare
+      // .maka-host (e.g. bootstrap-lock debris) still marks normally.
+      await mkdir(join(root, '.maka-host', 'state'), { recursive: true });
+      await rm(join(root, STORAGE_ROOT_MARKER_FILE));
+      await assert.rejects(
+        () => resolveStorageRoot({ path: root, kind: 'interactive' }),
+        (error: unknown) =>
+          error instanceof StorageRootAuthorityError && error.code === 'invalid_marker',
+      );
+      await rm(join(root, '.maka-host'), { recursive: true, force: true });
+      await mkdir(join(root, '.maka-host'));
+      await resolveStorageRoot({ path: root, kind: 'interactive' });
+    });
+  });
+
+  test('refuses to migrate a re-marked root that still holds committed state', async () => {
+    await withRoots(async ({ root }) => {
+      await resolveStorageRoot({ path: root, kind: 'interactive' });
+      // An old binary re-marks a marker-lost root at schema 1; the committed
+      // state directory must stop the upgrade from wiping it.
+      await mkdir(join(root, '.maka-host', 'state'), { recursive: true });
+      const rootStat = await stat(root);
+      await writeFile(
+        join(root, STORAGE_ROOT_MARKER_FILE),
+        `${JSON.stringify({
+          schemaVersion: 1,
+          kind: 'interactive',
+          rootId: '0'.repeat(64),
+          rootIdentity: { dev: rootStat.dev.toString(), ino: rootStat.ino.toString() },
+        })}\n`,
+      );
+      await assert.rejects(
+        () => withStorageRootUpgrade(root, async () => undefined),
+        (error: unknown) =>
+          error instanceof StorageRootAuthorityError && error.code === 'invalid_marker',
+      );
     });
   });
 

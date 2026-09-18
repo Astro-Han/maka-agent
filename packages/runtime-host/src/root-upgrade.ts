@@ -20,6 +20,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { lstatSync } from 'node:fs';
 import { chmod, cp, lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -327,12 +328,20 @@ async function stageSnapshot(
     else {
       try {
         // cp must fail if a previously-present source is now missing.
+        // Dereference so durable state holds real files, not links out of the
+        // root; skip entries cp cannot carry (sockets, FIFOs, devices).
         await cp(path, target, {
           recursive: true,
-          dereference: false,
-          filter: (entry) =>
-            entry !== join(path, 'owner.lock') &&
-            entry !== join(path, '.maka-artifact-writer.lock'),
+          dereference: true,
+          filter: (entry) => {
+            if (
+              entry === join(path, 'owner.lock') ||
+              entry === join(path, '.maka-artifact-writer.lock')
+            )
+              return false;
+            const kind = lstatSync(entry);
+            return kind.isFile() || kind.isDirectory() || kind.isSymbolicLink();
+          },
         });
       } catch (error) {
         const wrapped = new Error(
@@ -369,6 +378,9 @@ async function stageSnapshot(
       { mode: 0o600 },
     );
   }
+  // Copied entries keep the source's modes; normalize before the validation
+  // reads so an unreadable legacy file cannot wedge the upgrade on EACCES.
+  await hardenTree(staging);
   await readAccessCredentialFile(join(staging, 'data', ACCESS_FILE_NAME));
   await new HostPluginCompositionStore(join(staging, 'data')).read();
   const stagedDeployment = await validateDeploymentSource(
@@ -518,7 +530,7 @@ async function inspectLegacySources(session: StorageRootUpgradeSession): Promise
 
 async function present(path: string): Promise<boolean> {
   try {
-    const entry = await lstat(path);
+    const entry = await stat(path);
     if (!entry.isDirectory()) throw new Error(`Upgrade source is not a directory: ${path}`);
     return true;
   } catch (error) {
@@ -609,17 +621,22 @@ async function validateDeploymentSource(
   return record;
 }
 
-async function syncTree(path: string): Promise<void> {
+async function hardenTree(path: string): Promise<void> {
   await chmod(path, 0o700);
   for (const entry of await readdir(path, { withFileTypes: true })) {
     const child = join(path, entry.name);
+    if (entry.isDirectory()) await hardenTree(child);
+    else if (entry.isFile()) await chmod(child, ((await lstat(child)).mode & 0o700) | 0o600);
+  }
+}
+
+async function syncTree(path: string): Promise<void> {
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    const child = join(path, entry.name);
     if (entry.isDirectory()) await syncTree(child);
-    else if (entry.isFile()) {
-      await chmod(child, ((await lstat(child)).mode & 0o700) | 0o600);
-      await syncFile(child);
-    }
-    // Other entries (symlinks kept by dereference:false, sockets) are inert
-    // copied data whose dirent durability the parent directory sync covers.
+    else if (entry.isFile()) await syncFile(child);
+    // The copy admits only files and directories; their parents' directory
+    // syncs cover any other dirent that could appear.
   }
   await syncDirectoryChain(path, path);
 }
