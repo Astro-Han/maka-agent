@@ -1288,6 +1288,7 @@ const createLocalRuntimeHostManager = () => createRuntimeHostDesktopManager(
     handoffSurface: createDesktopHostHandoffSurface({
       ipcMain,
       send: (payload) => mainWindowController.send('runtime-host-handoff:view', payload),
+      focus: () => mainWindowController.focus(),
       resolveLocale: () => desktopLocale.resolve(),
     }),
     onTargetStateChanged: (state) => {

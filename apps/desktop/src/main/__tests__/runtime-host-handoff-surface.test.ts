@@ -46,6 +46,7 @@ const progressView = (revision: string): HostHandoffView => ({
 function harness() {
   const sent: Array<DesktopHostHandoffPayload | null> = [];
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
+  let focuses = 0;
   const surface = createDesktopHostHandoffSurface({
     ipcMain: {
       handle(channel: string, listener: (...args: unknown[]) => unknown) {
@@ -53,10 +54,13 @@ function harness() {
       },
     } as never,
     send: (payload) => sent.push(payload),
+    focus: () => {
+      focuses += 1;
+    },
     resolveLocale: async () => 'en',
   });
   const last = () => sent.at(-1);
-  return { surface, sent, handlers, last };
+  return { surface, sent, handlers, last, focuses: () => focuses };
 }
 
 test('publishes only the newest attention view; progress cannot steal the slot', async () => {
@@ -87,6 +91,28 @@ test('publishes only the newest attention view; progress cannot steal the slot',
   first.close();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(last(), null);
+});
+
+test('raises the window once per attention revision, never for progress', async () => {
+  const { surface, focuses } = harness();
+  const handoff = surface(() => {});
+
+  handoff.update(progressView('p1'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(focuses(), 0);
+
+  handoff.update(attentionView('a1'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(focuses(), 1);
+
+  // Repeats of the decision already on screen do not steal focus again.
+  handoff.update(attentionView('a1'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(focuses(), 1);
+
+  handoff.update(attentionView('a2'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(focuses(), 2);
 });
 
 test('decide routes only a live attention revision and advertised action', async () => {

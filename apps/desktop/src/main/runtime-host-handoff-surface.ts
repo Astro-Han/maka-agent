@@ -43,11 +43,15 @@ interface OpenDesktopHandoff {
 export function createDesktopHostHandoffSurface(input: {
   ipcMain: IpcMain;
   send: (payload: DesktopHostHandoffPayload | null) => void;
+  focus: () => void;
   resolveLocale: () => Promise<UiLocale>;
 }): OpenHostHandoffSurface {
   const open = new Map<number, OpenDesktopHandoff>();
   let sequence = 0;
   let activeId: number | undefined;
+  // An attention view asks for the window once per revision — repeat updates
+  // of a decision the user is already looking at must not keep stealing focus.
+  let raisedRevision: string | undefined;
 
   const currentEntry = (): OpenDesktopHandoff | undefined =>
     activeId === undefined ? undefined : open.get(activeId);
@@ -64,7 +68,13 @@ export function createDesktopHostHandoffSurface(input: {
         }
       : null;
   const publish = (): void => {
-    void payloadFor(currentEntry()).then((payload) => input.send(payload));
+    void payloadFor(currentEntry()).then((payload) => {
+      input.send(payload);
+      const revision =
+        payload?.view.state === 'attention' ? payload.view.revision : undefined;
+      if (revision !== undefined && revision !== raisedRevision) input.focus();
+      raisedRevision = revision;
+    });
   };
   const refreshActive = (): void => {
     activeId = undefined;
