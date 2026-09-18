@@ -223,7 +223,7 @@ test('an automated run never lets a handoff pull the app to the front', async ()
     const h = harness(mode);
     h.progress.handoff(attention, () => {}, 'en');
     h.resolveLoad(); await flush();
-    h.progress.handoff({ ...attention, revision: 'second', state: 'progress' }, () => {}, 'en');
+    h.progress.handoff({ revision: 'second', target: attention.target, state: 'progress', phase: 'staging', mayExitNaturally: false, actions: ['cancel'], defaultAction: 'cancel' }, () => {}, 'en');
     h.progress.handoff({ ...attention, revision: 'third' }, () => {}, 'en');
     h.progress.focus();
     assert.deepEqual(h.reveals, expected[mode], mode);
