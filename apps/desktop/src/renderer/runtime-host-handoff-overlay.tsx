@@ -37,10 +37,16 @@ export function RuntimeHostHandoffOverlay() {
     const bridge = window.maka?.runtimeHostHandoff;
     if (!bridge) return;
     let mounted = true;
-    void bridge.current().then((current) => {
-      if (mounted) setPayload(current);
+    // Subscribe before fetching the snapshot: a push wins over the older
+    // current() response whenever both are in flight.
+    let pushed = false;
+    const unsubscribe = bridge.subscribe((next) => {
+      pushed = true;
+      if (mounted) setPayload(next);
     });
-    const unsubscribe = bridge.subscribe(setPayload);
+    void bridge.current().then((current) => {
+      if (mounted && !pushed) setPayload(current);
+    });
     return () => {
       mounted = false;
       unsubscribe();
