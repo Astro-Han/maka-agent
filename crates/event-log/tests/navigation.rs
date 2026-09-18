@@ -93,7 +93,69 @@ async fn pages(log: &EventLog, through: u64, limit: usize) -> Vec<TurnContributi
 }
 
 #[tokio::test]
-async fn settled_navigation_anchors_fixed_fence_byte_pages_and_reopen() {
+async fn interleaved_turns_keep_full_extents_and_do_not_create_false_page_boundaries() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(&temp.path().join("events.sqlite"))
+        .await
+        .unwrap();
+    log.create_session("session", "fingerprint", &json!({}), 1)
+        .await
+        .unwrap();
+    let first = open(&log, "parent", "parent", "parent").await;
+    end(&log, "parent", "parent").await;
+    let child = open(&log, "child", "child", "child").await;
+    let child_end = end(&log, "child", "child").await;
+    open(&log, "parent-continuation", "parent", "continued").await;
+    let last = end(&log, "parent-continuation", "parent").await;
+    prepare(&log, last).await;
+    let fence = maka_presentation::watermark(last).unwrap();
+    for cut in [first * 256, child * 256, child_end * 256] {
+        assert!(
+            !log.transcript_between_turns("session", fence, cut)
+                .await
+                .unwrap()
+        );
+    }
+    assert!(
+        log.transcript_between_turns("session", fence, last * 256)
+            .await
+            .unwrap()
+    );
+    let parent = log
+        .navigation_landmarks("session", fence, 1, Some("parent"))
+        .await
+        .unwrap();
+    assert_eq!(
+        (parent[0].sequence, parent[0].last_sequence),
+        (first * 256, last * 256)
+    );
+    assert!(
+        log.navigation_landmarks("session", fence, 1, Some("missing"))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    open(&log, "resumed-parent", "parent", "continued").await;
+    let last = end(&log, "resumed-parent", "parent").await;
+    prepare(&log, last).await;
+    let sampled = log
+        .navigation_landmarks(
+            "session",
+            maka_presentation::watermark(last).unwrap(),
+            64,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        sampled.iter().filter(|row| row.turn_id == "parent").count(),
+        1
+    );
+    log.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn navigation_anchors_fixed_fence_byte_pages_and_reopen() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("events.sqlite");
     let log = EventLog::open(&path).await.unwrap();
@@ -112,7 +174,10 @@ async fn settled_navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         &format!("\u{feff}  {}  ", "😀".repeat(100)),
     )
     .await;
-    assert_eq!(log.navigation_fence("session").await.unwrap(), None);
+    assert_eq!(
+        log.navigation_fence("session").await.unwrap(),
+        Some(maka_presentation::watermark(first).unwrap())
+    );
     end(&log, "first", "shared").await;
     let second = open(&log, "middle", "middle", "middle").await;
     let ending = end(&log, "middle", "middle").await;
@@ -132,14 +197,17 @@ async fn settled_navigation_anchors_fixed_fence_byte_pages_and_reopen() {
         Some("😀".repeat(64).as_str())
     );
     let landmarks = log
-        .navigation_landmarks("session", fence, 64)
+        .navigation_landmarks("session", fence, 64, None)
         .await
         .unwrap();
     assert_eq!(landmarks.len(), 2);
     assert_eq!(landmarks[0].label, "😀".repeat(24));
     assert_eq!(landmarks[0].sequence, first * 256);
     assert_eq!(
-        log.navigation_landmarks("session", fence, 1).await.unwrap()[0].turn_id,
+        log.navigation_landmarks("session", fence, 1, None)
+            .await
+            .unwrap()[0]
+            .turn_id,
         "middle"
     );
     let mid = log
@@ -151,7 +219,18 @@ async fn settled_navigation_anchors_fixed_fence_byte_pages_and_reopen() {
 
     let active = open(&log, "active", "active", "not settled").await;
     prepare(&log, active).await;
-    assert_eq!(log.navigation_fence("session").await.unwrap(), Some(fence));
+    let active_fence = maka_presentation::watermark(active).unwrap();
+    assert_eq!(
+        log.navigation_fence("session").await.unwrap(),
+        Some(active_fence)
+    );
+    let active_landmark = log
+        .navigation_landmarks("session", active_fence, 1, Some("active"))
+        .await
+        .unwrap();
+    assert_eq!(active_landmark.len(), 1);
+    assert_eq!(active_landmark[0].sequence, active * 256);
+    assert_eq!(active_landmark[0].last_sequence, active * 256);
     assert_eq!(pages(&log, fence, 1).await, initial);
     end(&log, "active", "active").await;
     open(&log, "successor", "shared", "successor").await;
@@ -186,7 +265,7 @@ async fn settled_navigation_anchors_fixed_fence_byte_pages_and_reopen() {
     // Every landmark is an actual persisted user row, not an opening/header guess.
     let db = rusqlite::Connection::open(&path).unwrap();
     for landmark in log
-        .navigation_landmarks("session", current, 64)
+        .navigation_landmarks("session", current, 64, None)
         .await
         .unwrap()
     {

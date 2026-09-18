@@ -118,8 +118,10 @@ impl ResponsesLane {
         let mut state = self.semantic.lock().unwrap();
         let confirmed = state.confirmed.take();
         state.pending = None;
-        if !matches!(request.provider.kind, ProviderKind::OpenaiResponses)
-            || !request.provider.headers.is_empty()
+        if !matches!(
+            request.provider.kind,
+            ProviderKind::OpenaiResponses | ProviderKind::OpenResponses(_)
+        ) || !request.provider.headers.is_empty()
             || request
                 .provider
                 .body_overlay

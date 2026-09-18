@@ -31,7 +31,7 @@ fn current_source_navigation_codec_preserves_nullable_fields_and_bounded_state()
         "parentTurnId":"","retry":{"decision":"exhausted","attempts":1.0},"partialOutputRetained":"retired"});
     let contribution = json!({"turnId":"turn","firstSequence":1.0,"latestState":{"sequence":2.0,"message":state},"userPromptPreview":null});
     let turns = json!({"sessionId":"session","throughSequence":3.0,"contributions":[contribution],"nextPosition":null});
-    let landmarks = json!({"sessionId":"session","throughSequence":null,"landmarks":[{"turnId":"turn","sequence":1.0,"label":"😀".repeat(24)}]});
+    let landmarks = json!({"sessionId":"session","throughSequence":null,"landmarks":[{"turnId":"turn","sequence":1.0,"lastSequence":2.0,"label":"😀".repeat(24)}]});
     let input = json!({"sessionId":"session","throughSequence":null,"position":0.0,"maxContributions":128.0});
     let mut cases = vec![
         (Operation::SessionTurnsQuery, "input", input.clone()),
@@ -44,7 +44,7 @@ fn current_source_navigation_codec_preserves_nullable_fields_and_bounded_state()
         (
             Operation::SessionTurnLandmarksQuery,
             "input",
-            json!({"sessionId":"session","maxLandmarks":1.0}),
+            json!({"sessionId":"session","maxLandmarks":1.0,"turnId":null}),
         ),
     ];
     for (field, value) in [

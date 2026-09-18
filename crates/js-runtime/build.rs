@@ -49,6 +49,7 @@ fn main() {
 }
 
 fn bundle_providers() {
+    println!("cargo:rerun-if-changed=trusted/open-responses.js");
     println!("cargo:rerun-if-changed=trusted/adapter.js");
     println!("cargo:rerun-if-changed=trusted/codex-auth.js");
     println!("cargo:rerun-if-changed=trusted/provider-errors.js");

@@ -207,7 +207,7 @@ export async function verifyWriteWorkflow(connection, workspace, reopened) {
         sessionId,
         workspace: { kind: 'host_path', path: workspace },
         modelTarget: { kind: 'default' },
-        ...(explore ? { mode: 'bot', permissionMode: 'explore' } : {}),
+        ...(explore ? { mode: 'bot', permissionMode: 'explore' } : { permissionMode: 'ask' }),
       });
       const live = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
       try {

@@ -33,8 +33,7 @@ pub(super) async fn read(
         through_sequence: input.through_sequence,
         raw_bytes: 0,
         fragments: vec![],
-        range_boundary_sequence: None,
-        protected_turn_sequence: None,
+        ends_at_turn_boundary: true,
         next_cursor: None,
     };
     let Some(mut position) = start(state, input)? else {
@@ -46,35 +45,6 @@ pub(super) async fn read(
         }
         return Ok(result);
     };
-    if position.boundary.is_none() {
-        let bounds = log
-            .transcript_turn_bounds(
-                &state.session_id,
-                &row.turn_id,
-                input.through_sequence.unwrap(),
-            )
-            .await?
-            .ok_or(TranscriptError::InvalidRequest("turn range unavailable"))?;
-        // One Turn per range is sufficient for bounded whole-Turn navigation.
-        // Oversized Turns deliberately use the TS null-boundary fallback: clients
-        // can assemble individual rows without claiming a bounded complete Turn.
-        if bounds.rows <= SESSION_TRANSCRIPT_RANGE_MAX_MESSAGES as u64
-            && bounds.bytes <= SESSION_TRANSCRIPT_RANGE_MAX_BYTES
-        {
-            position.boundary = Some(if input.direction == Older {
-                bounds.first
-            } else {
-                bounds.last
-            });
-            position.protected = Some(if input.direction == Older {
-                row.sequence
-            } else {
-                bounds.last
-            });
-        }
-    }
-    result.range_boundary_sequence = position.boundary;
-    result.protected_turn_sequence = position.protected;
     loop {
         let (offset, length, continuation) = slice(
             row.total_bytes,
@@ -94,12 +64,12 @@ pub(super) async fn read(
         });
         result.raw_bytes += length;
         if let Some(offset) = continuation {
+            result.ends_at_turn_boundary = false;
             position.position = row.sequence;
             position.offset = Some(offset);
             result.next_cursor = Some(state.cursor.encode(input, position)?);
             break;
         }
-        let boundary_reached = position.boundary == Some(row.sequence);
         let next = step(row.sequence, input.direction);
         let Some(next) = next else {
             break;
@@ -109,14 +79,17 @@ pub(super) async fn read(
         };
         position.position = next_row.sequence;
         position.offset = None;
-        if boundary_reached {
-            position.boundary = None;
-            position.protected = None;
-        }
-        if boundary_reached
-            || result.raw_bytes == input.max_bytes
+        if result.raw_bytes == input.max_bytes
             || result.fragments.len() == SESSION_TRANSCRIPT_PAGE_MAX_MESSAGES
         {
+            let cut = if input.direction == Older {
+                next_row.sequence
+            } else {
+                row.sequence
+            };
+            result.ends_at_turn_boundary = log
+                .transcript_between_turns(&state.session_id, input.through_sequence.unwrap(), cut)
+                .await?;
             result.next_cursor = Some(state.cursor.encode(input, position)?);
             break;
         }
@@ -168,8 +141,6 @@ fn start(state: &Transcript, input: &SessionTranscriptPageInput) -> Result<Optio
     Ok(position.filter(|p| *p <= last).map(|position| Position {
         position,
         offset: None,
-        boundary: None,
-        protected: None,
     }))
 }
 fn step(position: u64, direction: SessionTranscriptPageDirection) -> Option<u64> {

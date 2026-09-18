@@ -26,7 +26,7 @@ use maka_runtime::event::{
 use maka_runtime_host::transcript::Transcript;
 
 #[tokio::test]
-async fn oversized_turn_uses_null_boundary_without_losing_rows() {
+async fn oversized_turn_reports_incomplete_boundary_without_losing_rows() {
     let dir = tempfile::tempdir().unwrap();
     let log = EventLog::open(&dir.path().join("log.sqlite"))
         .await
@@ -84,13 +84,12 @@ async fn oversized_turn_uses_null_boundary_without_losing_rows() {
     };
     let first = state.page(&log, &request).await.unwrap();
     assert_eq!(first.fragments.len(), 256);
-    assert_eq!(first.range_boundary_sequence, None);
-    assert_eq!(first.protected_turn_sequence, None);
+    assert!(!first.ends_at_turn_boundary);
     request.cursor = first.next_cursor;
     assert!(request.cursor.is_some());
     let last = state.page(&log, &request).await.unwrap();
     assert_eq!(last.fragments.len(), 2);
-    assert_eq!(last.range_boundary_sequence, None);
+    assert!(last.ends_at_turn_boundary);
     assert!(last.next_cursor.is_none());
     assert!(last.fragments[0].identity() < first.fragments.last().unwrap().identity());
 }

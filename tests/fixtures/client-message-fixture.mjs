@@ -52,6 +52,7 @@ export async function createMessageSession(connection, workspace, sessionId, bas
   });
   await request('session.create', {
     sessionId,
+    permissionMode: 'ask',
     workspace: { kind: 'host_path', path: workspace },
     modelTarget: { kind: 'default' },
   });

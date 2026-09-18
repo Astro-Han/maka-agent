@@ -34,6 +34,7 @@ export async function verifySessionWorkflow(connection, workspace, reopened, con
     workspace: { kind: 'host_path', path: workspace },
     modelTarget: { kind: 'default' },
     name: 'Rust  会话',
+    permissionMode: 'ask',
   };
   const pluginSessionId = 'unavailable-executor-session';
   await assert.rejects(
@@ -202,7 +203,11 @@ export async function verifySessionWorkflow(connection, workspace, reopened, con
 
 async function verifyNavigation(connection, sessionId, workspace, reopened) {
   const request = (operation, input) => connection.request(operation, input, 3000);
-  const landmarks = await request('session.turn_landmarks.query', { sessionId, maxLandmarks: 64 });
+  const landmarks = await request('session.turn_landmarks.query', {
+    sessionId,
+    maxLandmarks: 64,
+    turnId: null,
+  });
   assert(landmarks.throughSequence !== null);
   const merged = new Map();
   let position = 0;

@@ -102,7 +102,7 @@ export async function forwardProviderStream(open, normalize, emit, kind) {
   const failed = async (error) => {
     // The compatible SDK synthesizes precisely this error on incomplete EOF.
     if (
-      kind?.openai_compatible &&
+      (kind?.openai_compatible || kind?.open_responses) &&
       error instanceof Error &&
       error.name === 'AI_InvalidResponseDataError' &&
       error.data === undefined &&

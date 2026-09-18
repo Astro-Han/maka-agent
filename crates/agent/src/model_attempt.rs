@@ -286,6 +286,7 @@ pub(super) fn prepare_request(
         prompt
     };
     let prompt = history::project_compatible(prompt, &input.provider.kind);
+    let prompt = maka_model::reasoning::project(prompt, &input.provider.kind);
     let mut evidence = json!({"projection":"maka.model-history.v1","prompt":prompt,
         "tools":definitions,"providerOptions":input.provider_options});
     if let Some(limit) = max_output_tokens {

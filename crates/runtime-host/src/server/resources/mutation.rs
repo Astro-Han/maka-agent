@@ -20,7 +20,7 @@
 use super::{Host, HostError, failure};
 use crate::{session::SessionConfiguration, shell::ShellError};
 use maka_event_log::sessions::SessionRecord;
-use maka_presentation::shell::{RESOURCE_REF_PREFIX, local_update};
+use maka_presentation::shell::{RESOURCE_REF_PREFIX, local_state};
 use maka_protocol::{
     OperationErrorCode as Code, Outcome,
     resource::{ResourceMutationResult, ResourceStartInput, ResourceStopInput},
@@ -177,7 +177,7 @@ pub(super) async fn stop(host: &Host, input: ResourceStopInput) -> Result<Outcom
         },
         observed_at: None,
     });
-    let record = match host
+    match host
         .log
         .patch_shell_run(
             &input.session_id,
@@ -190,10 +190,9 @@ pub(super) async fn stop(host: &Host, input: ResourceStopInput) -> Result<Outcom
         )
         .await
     {
-        Ok(record) => record,
-        Err(error) => return Ok(fault(host, error)),
-    };
-    Ok(projected(record).unwrap_or_else(|error| fault(host, error)))
+        Ok(_) => Ok(Outcome::success(serde_json::json!({}))),
+        Err(error) => Ok(fault(host, error)),
+    }
 }
 
 pub(super) async fn active_session(
@@ -212,7 +211,7 @@ pub(super) async fn active_session(
 
 fn projected(record: ShellRun) -> Result<Outcome, HostError> {
     let value = serde_json::to_value(ResourceMutationResult {
-        resource: local_update(record)?.result,
+        resource: local_state(record)?,
     })?;
     maka_protocol::resource::decode_mutation_result(&value)?;
     Ok(Outcome::success(value))

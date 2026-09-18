@@ -50,6 +50,38 @@ pub struct TranscriptTurnBounds {
 }
 
 impl EventLog {
+    /// True only when no logical Turn straddles the cut, including resumed Turns.
+    pub async fn transcript_between_turns(
+        &self,
+        session: &str,
+        through: u64,
+        cut: u64,
+    ) -> Result<bool, StoreError> {
+        self.validate_root()?;
+        sessions::validate_id(session)?;
+        let session = session.to_owned();
+        let through_sql = sql_number(through)?;
+        let cut = sql_number(cut)?;
+        self.connection
+            .run(move |connection| {
+                Box::pin(async move {
+                    prepared(connection, &session, through).await?;
+                    let crossing: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM transcript_rows
+                 WHERE session_id = ?1 AND sequence <= ?2
+                 GROUP BY turn_id HAVING MIN(sequence) <= ?3 AND MAX(sequence) > ?3)",
+                    )
+                    .bind(session)
+                    .bind(through_sql)
+                    .bind(cut)
+                    .fetch_one(connection)
+                    .await?;
+                    Ok(!crossing)
+                })
+            })
+            .await
+    }
+
     pub async fn transcript_headers(
         &self,
         session: &str,

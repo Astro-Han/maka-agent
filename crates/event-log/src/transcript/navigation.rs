@@ -33,8 +33,7 @@ pub struct TurnPage {
 }
 
 impl EventLog {
-    /// Last ended visible invocation, captured with Session existence in one snapshot.
-    /// A global log watermark (or an active transcript row) is not a settled fence.
+    /// Visible history watermark, including running Turns, captured with Session existence.
     pub async fn navigation_fence(&self, session: &str) -> Result<Option<u64>, StoreError> {
         self.validate_root()?;
         sessions::validate_id(session)?;
@@ -162,16 +161,21 @@ impl EventLog {
             .await
     }
 
-    /// Rank small settled opening headers in SQL; load only sampled user labels.
+    /// Rank unique Turn openings in SQL; load only selected labels and row bounds.
     pub async fn navigation_landmarks(
         &self,
         session: &str,
         through: u64,
         limit: usize,
+        turn: Option<&str>,
     ) -> Result<Vec<TurnLandmark>, StoreError> {
         self.validate_root()?;
         sessions::validate_id(session)?;
         let through_sql = super::read::sql_number(through)?;
+        if let Some(turn) = turn {
+            sessions::validate_id(turn)?;
+        }
+        let turn = turn.map(str::to_owned);
         if !(1..=64).contains(&limit) {
             return Err(invalid("invalid landmark limit"));
         }
@@ -181,6 +185,24 @@ impl EventLog {
                 Box::pin(async move {
                     let mut tx = connection.begin().await?;
                     super::read::prepared(&mut tx, &session, through).await?;
+                    if let Some(turn) = turn {
+                        let bounds: (Option<i64>, Option<i64>) = sqlx::query_as(
+                            "SELECT MIN(sequence), MAX(sequence) FROM transcript_rows
+                             WHERE session_id = ?1 AND turn_id = ?2 AND sequence <= ?3",
+                        ).bind(&session).bind(&turn).bind(through_sql).fetch_one(&mut *tx).await?;
+                        let Some((first, last)) = bounds.0.zip(bounds.1) else { return Ok(vec![]); };
+                        let label: Option<String> = sqlx::query_scalar(
+                            "SELECT navigation_preview(COALESCE(json_extract(row.payload, '$.displayText'),
+                                json_extract(row.payload, '$.text')), 96)
+                             FROM transcript_rows row JOIN runtime_events source ON source.sequence = row.sequence / 256
+                             WHERE row.session_id = ?1 AND row.turn_id = ?2 AND row.sequence <= ?3
+                             AND source.kind IN ('invocation_opened', 'message_steered') ORDER BY row.sequence LIMIT 1",
+                        ).bind(&session).bind(&turn).bind(through_sql).fetch_optional(&mut *tx).await?.flatten();
+                        return Ok(vec![TurnLandmark {
+                            turn_id: turn, sequence: sequence_number(first)?, last_sequence: sequence_number(last)?,
+                            label: label.unwrap_or_default(),
+                        }]);
+                    }
                     let selected: Vec<String> = sqlx::query_scalar(queries::LANDMARKS)
                         .bind(&session)
                         .bind(through_sql / 256)
@@ -198,9 +220,15 @@ impl EventLog {
                         {
                             let label: Option<String> = row.try_get(2)?;
                             if let Some(label) = label {
+                                let turn_id: String = row.try_get(1)?;
+                                let (first, last): (i64, i64) = sqlx::query_as(
+                                    "SELECT MIN(sequence), MAX(sequence) FROM transcript_rows
+                                     WHERE session_id = ?1 AND turn_id = ?2 AND sequence <= ?3",
+                                ).bind(&session).bind(&turn_id).bind(through_sql).fetch_one(&mut *tx).await?;
                                 result.push(TurnLandmark {
-                                    sequence: sequence_number(row.try_get(0)?)?,
-                                    turn_id: row.try_get(1)?,
+                                    sequence: sequence_number(first)?,
+                                    last_sequence: sequence_number(last)?,
+                                    turn_id,
                                     label,
                                 });
                             }

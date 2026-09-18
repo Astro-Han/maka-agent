@@ -158,14 +158,22 @@ import {
   type EvidenceReadBudget,
 } from './bounded-evidence.js';
 import type { OperationalStateDatabaseLease } from './operational-state-store.js';
+import {
+  assertFoldedSearchTerm,
+  recallFoldedMatchClause,
+  registerRecallFoldFunction,
+} from './recall-fold.js';
 import { immutableSteeringMessageId, isRuntimeStorageSafeId } from './runtime-event-invariants.js';
 import { assertNoReservedWorkspaceAuthorityAppend } from './runtime-event-authority.js';
 import {
+  rebuildTranscriptTurnExtents,
+  recordTranscriptTurnExtent,
   RuntimeTranscriptQuery,
   TERMINAL_RUNTIME_EVENT_SQL,
-  type RuntimeTranscriptLandmark,
   type RuntimeTranscriptRun,
   type RuntimeTranscriptRunRequest,
+  type RuntimeTranscriptTurn,
+  type RuntimeTranscriptTurnsRequest,
 } from './runtime-transcript-query.js';
 
 export { SQLITE_RUNTIME_SCHEMA_VERSION } from './sqlite-runtime-schema.js';
@@ -307,6 +315,7 @@ export class SqliteRuntimeStore
       assertRecoveryAuthorityCapability(this.db);
       assertContinuationAuthorityCapability(this.db);
       assertWorkspaceVersionAuthorityCapability(this.db);
+      registerRecallFoldFunction(this.db);
       if (!options.readOnly) {
         this.registerWorkspaceBaselineAuthorityWriter();
         this.refreshToolLedgerHealth();
@@ -333,6 +342,7 @@ export class SqliteRuntimeStore
       assertRecoveryAuthorityCapability(this.db);
       assertContinuationAuthorityCapability(this.db);
       assertWorkspaceVersionAuthorityCapability(this.db);
+      registerRecallFoldFunction(this.db);
       if (!options.readOnly) {
         this.registerWorkspaceBaselineAuthorityWriter();
         this.refreshToolLedgerHealth();
@@ -569,16 +579,17 @@ export class SqliteRuntimeStore
     return this.readTransaction(() => this.transcriptQuery().run(sessionId, request, project));
   }
 
-  async readTranscriptLandmarks(
+  async readTranscriptTurns(
     sessionId: string,
-    throughOrdinal: number,
-    limit: number,
-  ): Promise<RuntimeTranscriptLandmark[]> {
+    request: RuntimeTranscriptTurnsRequest,
+  ): Promise<RuntimeTranscriptTurn[]> {
     assertRuntimeStorageSafeId(sessionId, 'Invalid session id');
-    assertInvocationSearchLimit(limit);
-    return this.readTransaction(() =>
-      this.transcriptQuery().landmarks(sessionId, throughOrdinal, limit),
-    );
+    return this.readTransaction(() => this.transcriptQuery().turns(sessionId, request));
+  }
+
+  async readTranscriptTurnCrossing(sessionId: string, ordinal: number): Promise<boolean> {
+    assertRuntimeStorageSafeId(sessionId, 'Invalid session id');
+    return this.readTransaction(() => this.transcriptQuery().crossing(sessionId, ordinal));
   }
 
   /**
@@ -1505,6 +1516,73 @@ export class SqliteRuntimeStore
     }
   }
 
+  /**
+   * Narrows recall to the Sessions whose ledger could project a message
+   * containing one of the folded terms. The answer is a superset of the true
+   * matches, never an answer: the caller projects each candidate Session and
+   * re-runs the real predicate on the projected, redacted text.
+   *
+   * Every event payload is scanned, whatever its kind: a message's visible
+   * text — a user or model `text`, a `function_call` intent, the string values
+   * of a `function_response` result — is a JSON string value of the event that
+   * carries it, so a term inside the projected text is inside the payload
+   * (escaped forms excepted, which the caller routes around). Kinds that never
+   * project only cost the scan a little work.
+   *
+   * A Session with an in-flight partial stream is offered unconditionally: its
+   * arriving text lives in segments a per-row `instr` could straddle, and the
+   * read model presents that text as settled.
+   */
+  async listSessionsWithRuntimeEventText(
+    sessionIds: readonly string[],
+    terms: readonly string[],
+  ): Promise<string[]> {
+    if (sessionIds.length === 0 || terms.length === 0) return [];
+    for (const sessionId of sessionIds) assertRuntimeStorageSafeId(sessionId, 'Invalid session id');
+    for (const term of terms) assertFoldedSearchTerm(term);
+    const sessions = sessionIds.map(() => '?').join(', ');
+    const rows = this.db
+      .prepare(
+        `
+        SELECT DISTINCT session_id
+          FROM runtime_events
+         WHERE session_id IN (${sessions})
+           AND (${recallFoldedMatchClause('payload_json', terms.length)})
+        UNION
+        SELECT DISTINCT session_id
+          FROM runtime_partial_snapshots
+         WHERE session_id IN (${sessions})
+        `,
+      )
+      .all(...sessionIds, ...terms, ...sessionIds) as Array<{ session_id?: unknown }>;
+    return rows.map((row) => {
+      if (typeof row.session_id !== 'string') throw new Error('Invalid recall candidate row');
+      return row.session_id;
+    });
+  }
+
+  /**
+   * How many ledger events could project to a searchable message, for
+   * recall's idf term. Counted by event kind rather than by projecting, so it
+   * is cheap and identical whichever path recall takes to find its hits.
+   */
+  async countRuntimeEventMessages(sessionIds: readonly string[]): Promise<number> {
+    if (sessionIds.length === 0) return 0;
+    for (const sessionId of sessionIds) assertRuntimeStorageSafeId(sessionId, 'Invalid session id');
+    const sessions = sessionIds.map(() => '?').join(', ');
+    const row = this.db
+      .prepare(
+        `
+        SELECT count(*) AS total
+          FROM runtime_events
+         WHERE session_id IN (${sessions})
+           AND event_kind IN ('text', 'function_call', 'function_response')
+        `,
+      )
+      .get(...sessionIds) as { total?: unknown } | undefined;
+    return typeof row?.total === 'number' ? row.total : 0;
+  }
+
   async readSessionRuntimeEvents(sessionId: string): Promise<RuntimeEvent[]> {
     const rows = this.db
       .prepare(`
@@ -1608,6 +1686,7 @@ export class SqliteRuntimeStore
         WHERE session_id = :sessionId
       `)
         .run({ sessionId });
+      rebuildTranscriptTurnExtents(this.db, sessionId);
     });
   }
 
@@ -4031,6 +4110,11 @@ export class SqliteRuntimeStore
         VALUES (?, ?, ?)
       `)
       .run(canonicalEvent.sessionId, ordinal, canonicalEvent.id);
+    recordTranscriptTurnExtent(
+      this.db,
+      { ...canonicalEvent, kind: runtimeEventKind(canonicalEvent) },
+      ordinal,
+    );
     this.noteEventCommit(canonicalEvent.sessionId);
     this.deleteCompletedPartialSnapshot(canonicalEvent);
     return next;

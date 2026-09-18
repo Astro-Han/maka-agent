@@ -22,7 +22,7 @@
 [简体中文](./rust-runtime.zh-CN.md)
 
 The Rust workspace replaces Maka's runtime and host while preserving the
-TypeScript client protocol and interactions. Both use protocol epoch 159. The rewrite is incomplete;
+TypeScript client protocol and interactions. Both use protocol epoch 163. The rewrite is incomplete;
 unsupported operations return explicit errors.
 
 ## Build and run
@@ -232,6 +232,9 @@ Do not run untrusted code or point test instances at existing user data.
   backpressure; V8 heap limits are not process-memory containment.
 - Code Mode budgets cumulative VM execution, excluding asynchronous tool waits
   and cleanup.
+- Responses reasoning follows the declared encrypted, plaintext-content or plaintext-summary
+  contract. Summary replay preserves item identity and Unicode-safe part boundaries without
+  storing a second copy of its text; malformed metadata is not replayed.
 - Request-scoped proxy policy applies to HTTP and Responses WebSocket transport.
   Failed WS handshakes retry five times with exponential backoff, then use HTTP
   through the same policy. Separately, main requests allow up to ten attempts for
@@ -342,11 +345,22 @@ Discovery does not authorize delegation; admission rechecks interactions and uns
 Pending interactions drive the shared Session catalog and its change notifications,
 so WorkHub's “Needs you” view agrees with candidate discovery and clears after resolution.
 
-Skill mutations, update previews and their transaction recovery remain incomplete.
-Session branching, removal, import/export and recap, along with additional runtime
-policy settings, also remain incomplete.
-Orchestration, some capability services and other protocol domains remain incomplete;
-native deployment and updates do not imply full product compatibility.
+The remaining parity gaps below are checked against main `f02ac9433` (2026-09-18).
+An implemented protocol name or stored setting does not imply an execution consumer.
+
+| Area | Remaining work |
+| --- | --- |
+| Skills | Create/install/delete/enable/pin/update, update previews, atomic publication and recovery. Discovery and invocation are implemented. |
+| Session/Turn | Branch/revision, removal and preview, recap, shared/todo queries, regeneration, session bundles and external imports (Codex/Claude Code/OpenCode). Ordinary resume and crash recovery are implemented. |
+| Execution | Plan, Goal, daily review, deep research, hosted execution and ordinary named tool profiles. Graph/Swarm and scheduling are implemented. |
+| Capability services | Recall ranked Session-history passages; built-in WebSearch/WebFetch; Usage/Pricing revision-consistent screens and activity paging; background-task process/endpoint health. |
+| Configuration | Shell, web-search and external-agent policy consumers; credential export and external-agent setup. Subagent presets, network proxy, personalization and new-Session defaults are consumed. |
+| Cross-Host collaboration | Principal revocation, rotation prepare/revoke, invitations, grants, Turn requests and Peer Mesh. Pairing, credential replacement/finalization/revocation and authenticated remote transport are implemented. |
+| Providers | Google/Cohere and Command Code GO execution; remaining adapter-specific auth/options; runtime models.dev metadata refresh; Copilot/xAI inference and credential-backed verification. OpenAI/Codex, Chat-compatible, Anthropic and plaintext Responses paths are distinct contracts, not blanket provider support. |
+| Host | `host.resources.query`. Diagnostics, local/SSH/WSL deployment and recoverable updates are implemented. |
+
+Recall is conversation-history retrieval, not the excluded Memory subsystem.
+Native deployment and updates do not imply full product compatibility.
 The plugin platform supports linked Rust packages, shared/dedicated-V8 JavaScript packages,
 scoped Host services, external executors, and Desktop Slots/Remote streams.
 Graph/Swarm and scheduling are built-in plugins. Graph implementation workers use

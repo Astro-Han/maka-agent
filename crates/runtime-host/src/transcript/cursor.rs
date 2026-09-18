@@ -28,8 +28,6 @@ use sha2::{Digest, Sha256};
 pub(super) struct Position {
     pub position: u64,
     pub offset: Option<u64>,
-    pub boundary: Option<u64>,
-    pub protected: Option<u64>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

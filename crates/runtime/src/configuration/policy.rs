@@ -34,8 +34,8 @@ pub const MAX_POLICY_SNAPSHOT_BYTES: usize = 48 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatDefaultPermissionMode {
-    #[default]
     Ask,
+    #[default]
     Bypass,
 }
 

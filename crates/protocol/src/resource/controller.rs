@@ -19,7 +19,6 @@
 
 use super::{MAX_RESULT_BYTES, entity, invalid, text};
 use crate::{Operation, Result};
-use maka_presentation::shell::ShellSnapshot;
 use maka_runtime::terminal::TerminalSize;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -113,7 +112,6 @@ pub struct ControllerAcquireResult {
 pub struct ControllerControlResult {
     pub controller_id: String,
     pub sequence: u64,
-    pub resource: ShellSnapshot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -167,7 +165,6 @@ pub fn validate_controller_output(operation: Operation, value: &Value) -> Result
                 serde_json::from_value(value.clone()).map_err(invalid)?;
             entity(&output.controller_id)?;
             sequence(output.sequence, MAX_CONTROL_SEQUENCE)?;
-            output.resource.validate().map_err(invalid)?;
             bounded(value, MAX_RESULT_BYTES)
         }
         RuntimeResourceControllerRelease => {

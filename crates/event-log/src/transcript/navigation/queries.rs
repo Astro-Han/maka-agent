@@ -18,10 +18,9 @@
  */
 
 pub(super) const FENCE: &str = "
-SELECT MAX(ending.sequence) FROM runtime_events ending
-JOIN runtime_events opening ON opening.invocation_id = ending.invocation_id AND opening.kind = 'invocation_opened'
-WHERE json_extract(ending.event_json, '$.invocation.session_id') = ?1
-AND ending.kind = 'invocation_ended'
+SELECT MAX(event.sequence) FROM runtime_events event
+JOIN runtime_events opening ON opening.invocation_id = event.invocation_id AND opening.kind = 'invocation_opened'
+WHERE json_extract(event.event_json, '$.invocation.session_id') = ?1
 AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation', 'handoff')";
 
 pub(super) const ROWS: &str = "
@@ -34,22 +33,19 @@ SELECT row.sequence, row.turn_id,
 FROM transcript_rows row
 JOIN runtime_events source ON source.sequence = row.sequence / 256
 WHERE row.session_id = ?1 AND row.sequence <= ?2 AND row.sequence >= ?3
-AND EXISTS (SELECT 1 FROM runtime_events ending
-    WHERE ending.invocation_id = source.invocation_id AND ending.kind = 'invocation_ended'
-    AND ending.sequence <= ?2 / 256)
 ORDER BY row.sequence LIMIT 257";
 
 pub(super) const LANDMARKS: &str = "
-WITH settled AS (
- SELECT opening.invocation_id, opening.sequence
+WITH openings AS (
+ SELECT opening.invocation_id, opening.sequence,
+ ROW_NUMBER() OVER (PARTITION BY json_extract(opening.event_json, '$.invocation.turn_id') ORDER BY opening.sequence) AS first
  FROM runtime_events opening
- JOIN runtime_events ending ON ending.invocation_id = opening.invocation_id AND ending.kind = 'invocation_ended'
  WHERE json_extract(opening.event_json, '$.invocation.session_id') = ?1
- AND opening.kind = 'invocation_opened' AND ending.sequence <= ?2
+ AND opening.kind = 'invocation_opened' AND opening.sequence <= ?2
  AND json_extract(opening.event_json, '$.fact.input.kind') IN ('message', 'continuation')
 ), candidates AS (
  SELECT invocation_id, sequence, ROW_NUMBER() OVER (ORDER BY sequence) - 1 AS rank, COUNT(*) OVER () AS total
- FROM settled
+ FROM openings WHERE first = 1
 ), samples(n) AS (
  SELECT 0 UNION ALL SELECT n + 1 FROM samples WHERE n + 1 < ?3
 )

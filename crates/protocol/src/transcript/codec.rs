@@ -71,6 +71,11 @@ pub fn decode_session_transcript_page_input(v: &Value) -> Result<SessionTranscri
     )?;
     let cursor = cursor(&v["cursor"])?;
     let anchor_sequence = nullable_count(&v["anchorSequence"])?;
+    let direction = direction(&v["direction"])?;
+    ensure(
+        anchor_sequence.is_none() || direction == SessionTranscriptPageDirection::Newer,
+        "Only newer transcript pages accept an anchor",
+    )?;
     ensure(
         cursor.is_none() || anchor_sequence.is_none(),
         "Cursor and anchor are mutually exclusive",
@@ -82,7 +87,7 @@ pub fn decode_session_transcript_page_input(v: &Value) -> Result<SessionTranscri
     )?;
     Ok(SessionTranscriptPageInput {
         subscription_id: string(&v["subscriptionId"], "subscriptionId", 128)?,
-        direction: direction(&v["direction"])?,
+        direction,
         through_sequence: nullable_count(&v["throughSequence"])?,
         cursor,
         anchor_sequence,
@@ -107,8 +112,7 @@ pub fn decode_session_transcript_page(v: &Value) -> Result<SessionTranscriptPage
             "throughSequence",
             "rawBytes",
             "fragments",
-            "rangeBoundarySequence",
-            "protectedTurnSequence",
+            "endsAtTurnBoundary",
             "nextCursor",
         ],
     )?;
@@ -152,25 +156,16 @@ pub fn decode_session_transcript_page(v: &Value) -> Result<SessionTranscriptPage
         !fragments.is_empty() || next_cursor.is_none(),
         "Empty page cannot have a cursor",
     )?;
-    let range_boundary_sequence = nullable_count(&v["rangeBoundarySequence"])?;
-    let protected_turn_sequence = nullable_count(&v["protectedTurnSequence"])?;
-    for boundary in [range_boundary_sequence, protected_turn_sequence]
-        .into_iter()
-        .flatten()
-    {
-        ensure(
-            through_sequence.is_some_and(|w| boundary <= w),
-            "Invalid transcript range boundary",
-        )?;
-    }
+    let ends_at_turn_boundary = v["endsAtTurnBoundary"]
+        .as_bool()
+        .ok_or_else(|| ProtocolError::invalid("Invalid transcript Turn boundary"))?;
     Ok(SessionTranscriptPage {
         session_id,
         direction,
         through_sequence,
         raw_bytes,
         fragments,
-        range_boundary_sequence,
-        protected_turn_sequence,
+        ends_at_turn_boundary,
         next_cursor,
     })
 }

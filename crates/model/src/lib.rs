@@ -26,6 +26,7 @@ pub mod oauth;
 #[cfg(test)]
 mod overflow_tests;
 pub mod prompt;
+pub mod reasoning;
 mod responses;
 mod step;
 pub use maka_runtime::{model::ModelEvent, tools::ToolDefinition};
@@ -49,6 +50,7 @@ pub use auth::{AuthResolver, ProviderAuth};
 pub enum ProviderKind {
     OpenaiChat,
     OpenaiResponses,
+    OpenResponses(maka_runtime::model::PlaintextResponses),
     OpenaiCompatible { name: String },
     Anthropic,
 }
@@ -235,6 +237,7 @@ impl ModelExecutor {
                 "maxOutputTokens must be a positive JavaScript safe integer".into(),
             ));
         }
+        request.prompt = reasoning::project(request.prompt, &request.provider.kind);
         let cancellation = cancellation.child_token();
         let permit = tokio::select! {
             biased;

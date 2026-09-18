@@ -49,22 +49,20 @@ pub struct SessionTranscriptPage {
     pub through_sequence: Option<u64>,
     pub raw_bytes: u64,
     pub fragments: Vec<SessionTranscriptFragment>,
-    pub range_boundary_sequence: Option<u64>,
-    pub protected_turn_sequence: Option<u64>,
+    pub ends_at_turn_boundary: bool,
     pub next_cursor: Option<String>,
 }
 
 impl Serialize for SessionTranscriptPage {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("SessionTranscriptPage", 9)?;
+        let mut s = serializer.serialize_struct("SessionTranscriptPage", 8)?;
         s.serialize_field("kind", "page")?;
         s.serialize_field("sessionId", &self.session_id)?;
         s.serialize_field("direction", &self.direction)?;
         s.serialize_field("throughSequence", &self.through_sequence)?;
         s.serialize_field("rawBytes", &self.raw_bytes)?;
         s.serialize_field("fragments", &self.fragments)?;
-        s.serialize_field("rangeBoundarySequence", &self.range_boundary_sequence)?;
-        s.serialize_field("protectedTurnSequence", &self.protected_turn_sequence)?;
+        s.serialize_field("endsAtTurnBoundary", &self.ends_at_turn_boundary)?;
         s.serialize_field("nextCursor", &self.next_cursor)?;
         s.end()
     }

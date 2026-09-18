@@ -23,7 +23,7 @@ use super::{
 };
 use crate::controllers::{self as state, conflict};
 use crate::shell::ShellHandle;
-use maka_presentation::shell::{RESOURCE_REF_PREFIX, local_update};
+use maka_presentation::shell::RESOURCE_REF_PREFIX;
 use maka_protocol::{Operation, OperationErrorCode as Code, Outcome, resource::*};
 use serde::Serialize;
 use serde_json::Value;
@@ -160,26 +160,14 @@ pub(super) async fn control(
     drop(admission);
     let (bytes, size) = input.control.parts().expect("decoded control");
     let outcome = match handle.write_raw(bytes.to_owned(), size).await {
-        Ok(_) => match host
-            .log
-            .read_shell_run(&identity.session_id, resource_id(&identity).unwrap())
-            .await
-        {
-            Ok(Some(record)) => match local_update(record) {
-                Ok(update) => encoded(
-                    host,
-                    Operation::RuntimeResourceControllerControl,
-                    ControllerControlResult {
-                        controller_id: identity.controller_id.clone(),
-                        sequence: input.sequence,
-                        resource: update.result,
-                    },
-                ),
-                Err(error) => fault(host, error),
+        Ok(_) => encoded(
+            host,
+            Operation::RuntimeResourceControllerControl,
+            ControllerControlResult {
+                controller_id: identity.controller_id.clone(),
+                sequence: input.sequence,
             },
-            Ok(None) => fault(host, "Controlled Runtime Resource disappeared"),
-            Err(error) => fault(host, error),
-        },
+        ),
         Err(error) => {
             handle.stop();
             if error.accepted_bytes.is_none() || error.resized.is_none() {

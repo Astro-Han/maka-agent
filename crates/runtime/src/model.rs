@@ -20,6 +20,44 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlaintextResponses {
+    pub reasoning_replay: PlaintextReasoningReplay,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatibility: Option<OpenResponsesCompatibility>,
+}
+
+impl PlaintextResponses {
+    pub fn profile(self) -> &'static str {
+        match (self.reasoning_replay, self.compatibility) {
+            (PlaintextReasoningReplay::PlaintextContent, None) => "plaintext-content:standard",
+            (PlaintextReasoningReplay::PlaintextSummary, None) => "plaintext-summary:standard",
+            (
+                PlaintextReasoningReplay::PlaintextContent,
+                Some(OpenResponsesCompatibility::AlibabaTokenPlan),
+            ) => "plaintext-content:alibaba-token-plan",
+            (
+                PlaintextReasoningReplay::PlaintextSummary,
+                Some(OpenResponsesCompatibility::AlibabaTokenPlan),
+            ) => "plaintext-summary:alibaba-token-plan",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlaintextReasoningReplay {
+    PlaintextContent,
+    PlaintextSummary,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OpenResponsesCompatibility {
+    AlibabaTokenPlan,
+}
+
 /// Provider metadata is an open adapter-owned object, merged without losing
 /// nested reasoning/signature evidence as subsequent observations arrive.
 pub fn merge_provider_options(target: &mut Option<Value>, next: Option<Value>) {

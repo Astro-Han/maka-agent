@@ -37,7 +37,7 @@ export async function verifyConnectionProtocols(connection, provider, secret) {
     ['opencode', ['openai-chat', 'openai-responses', 'anthropic-messages']],
     ['google', [null]],
     ['openai', ['anthropic-messages']],
-    ['alibaba-token-plan', [null]],
+    ['alibaba-token-plan', ['openai-responses']],
   ]) {
     const created = await request('connection.catalog.create', {
       expectedCatalogRevision: (await catalog()).revision,

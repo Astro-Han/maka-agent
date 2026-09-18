@@ -19,7 +19,10 @@
 
 use maka_config::model_catalog::{
     ProviderFacts,
-    adapter::{AdapterKind, AdapterName, AnthropicAuth, RuntimeAdapter},
+    adapter::{
+        AdapterKind, AdapterName, AnthropicAuth, OpenaiReasoningReplay, ResponsesContract,
+        RuntimeAdapter,
+    },
 };
 use maka_model::ProviderKind;
 use maka_protocol::{OperationError, OperationErrorCode};
@@ -29,32 +32,45 @@ pub(crate) use maka_runtime::configuration::ApiProtocol as Wire;
 
 fn supports(adapter: &RuntimeAdapter, wire: Wire) -> bool {
     match &adapter.kind {
-        AdapterKind::OpenaiCodex => wire == Wire::OpenaiResponses,
-        AdapterKind::Openai { api_protocol } => {
+        AdapterKind::OpenaiCodex { .. } => wire == Wire::OpenaiResponses,
+        AdapterKind::Openai { api_protocol, .. } => {
             wire != Wire::AnthropicMessages && api_protocol.is_none_or(|selected| selected == wire)
         }
         AdapterKind::OpenaiCompatible { responses, .. } => {
             wire == Wire::OpenaiChat || (wire == Wire::OpenaiResponses && responses.is_some())
         }
         AdapterKind::Anthropic { .. } => wire == Wire::AnthropicMessages,
-        AdapterKind::Google { .. } | AdapterKind::Cohere | AdapterKind::Unavailable => false,
+        AdapterKind::Google { .. }
+        | AdapterKind::Cohere
+        | AdapterKind::CommandcodeCli
+        | AdapterKind::Unavailable => false,
     }
 }
 
 fn check_execution(adapter: &RuntimeAdapter, wire: Wire) -> Result<(), OperationError> {
     let supported = match &adapter.kind {
-        AdapterKind::Openai { .. } | AdapterKind::OpenaiCodex => true,
+        AdapterKind::Openai { responses, .. } | AdapterKind::OpenaiCodex { responses } => {
+            wire != Wire::OpenaiResponses
+                || !matches!(
+                    responses,
+                    ResponsesContract::Openai {
+                        reasoning_replay: OpenaiReasoningReplay::None
+                    }
+                )
+        }
         AdapterKind::Anthropic {
             auth: AnthropicAuth::ApiKey,
             include_beta_headers: None,
             ..
         } => true,
         AdapterKind::OpenaiCompatible {
+            responses: Some(_), ..
+        } if wire == Wire::OpenaiResponses => true,
+        AdapterKind::OpenaiCompatible {
             include_usage: None,
             replay_assistant_reasoning_as: None,
             replay_assistant_reasoning_details: None,
             normalize_usage: None,
-            runtime_profile: None,
             ..
         } => wire == Wire::OpenaiChat,
         _ => false,
@@ -104,14 +120,11 @@ fn unavailable(message: impl Into<String>) -> OperationError {
 }
 
 fn adapter(value: &RuntimeAdapter) -> Result<&RuntimeAdapter, OperationError> {
-    // A delegated profile can change the available wires; never silently
-    // interpret it as a plain adapter when that profile is not implemented.
     match value.kind {
-        AdapterKind::OpenaiCompatible {
-            runtime_profile: Some(_),
-            ..
-        } => Err(unavailable("Provider runtime profile is not supported")),
-        AdapterKind::Google { .. } | AdapterKind::Cohere | AdapterKind::Unavailable => {
+        AdapterKind::Google { .. }
+        | AdapterKind::Cohere
+        | AdapterKind::CommandcodeCli
+        | AdapterKind::Unavailable => {
             Err(unavailable("Provider adapter or protocol is not supported"))
         }
         _ => Ok(value),
@@ -232,7 +245,24 @@ pub(crate) fn resolve<'a>(
             }
         }
         Wire::OpenaiChat => ProviderKind::OpenaiChat,
-        Wire::OpenaiResponses => ProviderKind::OpenaiResponses,
+        Wire::OpenaiResponses => {
+            let responses = match &selected.kind {
+                AdapterKind::Openai { responses, .. } | AdapterKind::OpenaiCodex { responses } => {
+                    responses
+                }
+                AdapterKind::OpenaiCompatible {
+                    responses: Some(responses),
+                    ..
+                } => responses,
+                _ => return Err(unavailable("Responses contract is not declared")),
+            };
+            match responses {
+                ResponsesContract::Openai { .. } => ProviderKind::OpenaiResponses,
+                ResponsesContract::OpenResponses { contract } => {
+                    ProviderKind::OpenResponses(*contract)
+                }
+            }
+        }
         Wire::AnthropicMessages => ProviderKind::Anthropic,
     };
     Ok(Route {

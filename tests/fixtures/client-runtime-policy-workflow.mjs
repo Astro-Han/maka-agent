@@ -73,7 +73,7 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
 
     const initialSettings = await settingsSnapshot(request);
     assert.equal(initialSettings.policy.revision, 0);
-    assert.deepEqual(initialSettings.policy.policy.chatDefaults, { permissionMode: 'ask' });
+    assert.deepEqual(initialSettings.policy.policy.chatDefaults, { permissionMode: 'bypass' });
     assert.equal(initialSettings.proxy.status.configured, false);
     assert.equal(initialSettings.web.status.configured, false);
     await barrier();
@@ -97,7 +97,7 @@ export async function verifyRuntimePolicy(connection, workspace, reopened, conne
       sessions.push({ input, snapshot });
       return snapshot;
     };
-    const old = await create('runtime-policy-old');
+    const old = await create('runtime-policy-old', 'ask');
     modelDefault(old, 'ask');
 
     const value = { permissionMode: 'bypass', thinkingLevel: 'high', codeModeEnabled: true };

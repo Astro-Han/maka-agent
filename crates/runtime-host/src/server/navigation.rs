@@ -52,7 +52,7 @@ pub(super) async fn execute(
             {
                 return Ok(failure(
                     Code::InvalidRequest,
-                    "Turn navigation fence is beyond settled history",
+                    "Turn navigation fence is beyond visible history",
                 ));
             }
             let through = input.through_sequence.or(current);
@@ -95,7 +95,12 @@ pub(super) async fn execute(
                 }
                 match host
                     .log
-                    .navigation_landmarks(&input.session_id, through, input.max_landmarks)
+                    .navigation_landmarks(
+                        &input.session_id,
+                        through,
+                        input.max_landmarks,
+                        input.turn_id.as_deref(),
+                    )
                     .await
                 {
                     Ok(rows) => rows,

@@ -100,9 +100,9 @@ export async function verifyResourceController(
     };
     const accepted = await request(connection, 'control', first);
     assert.equal(accepted.sequence, 1);
-    assert.equal(accepted.resource.mode, 'pty');
-    assert.equal(accepted.resource.output.cols, 91);
-    assert.equal(accepted.resource.output.rows, 31);
+    assert.deepEqual(accepted, { controllerId: identity.controllerId, sequence: 1 });
+    const resized = await request(connection, 'acquire', identity);
+    assert.deepEqual(resized.pty.size, { cols: 91, rows: 31 });
     await effect('一');
     await stream.expect('一', acquired.pty.sequence);
     const pausedFrames = await stream.pause();
@@ -231,7 +231,13 @@ export async function verifyResourceController(
         { sessionId, ref: second.ref },
         5000,
       );
-      assert.equal(stopped.resource.status, 'cancelled');
+      assert.deepEqual(stopped, {});
+      const stoppedState = await connection.request(
+        'runtime.resource.query',
+        { kind: 'get', sessionId, ref: second.ref },
+        5000,
+      );
+      assert.equal(stoppedState.resource.result.status, 'cancelled');
       assert.equal((await writing)?.code, 'operation_conflict');
       await conflict(request(connection, 'control', input));
       assert.equal(

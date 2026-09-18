@@ -57,6 +57,28 @@ pub(super) fn resolve(
                 .and_then(|item| item.metadata.capabilities)
                 .and_then(|caps| caps.parallel_tool_calls)
         });
+    if let ProviderKind::OpenResponses(contract) = &route.kind {
+        if parallel == Some(false) {
+            return Err(unavailable(
+                "Open Responses does not expose parallel-call policy",
+            ));
+        }
+        let mut options = json!({});
+        if let Some(level) = thinking_level {
+            options["reasoningEffort"] = if level == ThinkingLevel::Off {
+                json!("none")
+            } else {
+                json!(level)
+            };
+        }
+        if contract.reasoning_replay
+            == maka_runtime::model::PlaintextReasoningReplay::PlaintextSummary
+            && thinking_level != Some(ThinkingLevel::Off)
+        {
+            options["reasoningSummary"] = json!("auto");
+        }
+        return Ok(json!({"openResponses":options}));
+    }
     if row.provider_type == "anthropic" {
         return Ok(anthropic(facts, model, thinking_level));
     }
@@ -185,6 +207,44 @@ fn claude_family(model: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn declared_plaintext_contract_drives_route_and_thinking_options() {
+        for (provider, profile, summary) in [
+            ("deepseek", "plaintext-content:standard", false),
+            ("moonshot-global", "plaintext-summary:standard", true),
+            (
+                "alibaba-token-plan",
+                "plaintext-summary:alibaba-token-plan",
+                true,
+            ),
+        ] {
+            let row: ConnectionCatalogEntry = serde_json::from_value(json!({
+                "connectionId":"connection", "revision":1, "slug":"fixture", "name":"Fixture",
+                "providerType":provider, "enabled":true, "enabledModelIds":["custom"],
+                "models":[{"id":"custom","apiProtocol":"openai-responses"}]
+            }))
+            .unwrap();
+            let facts = maka_config::model_catalog::provider_facts(provider).unwrap();
+            let route = crate::provider_route::resolve(&row, facts, "custom").unwrap();
+            route.check_execution().unwrap();
+            assert_eq!(route.wire, Wire::OpenaiResponses);
+            let ProviderKind::OpenResponses(contract) = route.kind else {
+                panic!("declared plaintext contract was not selected");
+            };
+            assert_eq!(contract.profile(), profile);
+            let high = resolve(&row, facts, "custom", Some(ThinkingLevel::High), &route).unwrap();
+            assert_eq!(high["openResponses"]["reasoningEffort"], "high");
+            assert_eq!(
+                high["openResponses"].get("reasoningSummary").is_some(),
+                summary
+            );
+            assert_eq!(
+                resolve(&row, facts, "custom", Some(ThinkingLevel::Off), &route).unwrap(),
+                json!({"openResponses":{"reasoningEffort":"none"}})
+            );
+        }
+    }
 
     #[test]
     fn claude_policy_uses_sdk_capabilities_without_enabling_unknown_models() {

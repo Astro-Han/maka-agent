@@ -20,7 +20,7 @@
 //! Client-facing shell state. It is a projection, never the operational authority.
 mod project;
 pub use maka_runtime::shell_result::*;
-pub use project::local_update;
+pub use project::{local_state, local_update};
 use serde::{Deserialize, Serialize};
 
 pub const SNAPSHOT_MAX_BYTES: usize = 48 * 1024;

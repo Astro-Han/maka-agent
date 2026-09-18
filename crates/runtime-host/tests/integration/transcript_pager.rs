@@ -105,16 +105,11 @@ async fn byte_fragments_reassemble_both_directions_with_digest_and_reachable_tur
         let mut messages: BTreeMap<u64, Vec<u8>> = BTreeMap::new();
         let mut offsets = BTreeMap::new();
         let mut digests = BTreeMap::new();
-        let mut boundary = None;
         let mut completed_ranges = 0;
         loop {
             let page = state.page(&log, &input).await.unwrap();
             assert_eq!(page.raw_bytes, 1);
             assert_eq!(page.fragments.len(), 1);
-            if boundary.is_none() {
-                boundary = page.range_boundary_sequence;
-            }
-            assert_eq!(page.range_boundary_sequence, boundary);
             let SessionTranscriptFragment {
                 sequence,
                 byte_offset,
@@ -151,8 +146,8 @@ async fn byte_fragments_reassemble_both_directions_with_digest_and_reachable_tur
             } else {
                 *previous == *total_bytes
             };
-            if complete && boundary == Some(*sequence) {
-                boundary = None;
+            if page.ends_at_turn_boundary {
+                assert!(complete);
                 completed_ranges += 1;
             }
             input.cursor = page.next_cursor;
@@ -183,13 +178,13 @@ async fn anchors_are_exclusive_and_cursors_reject_tampering_and_transplants() {
     let state = pager("sub", through);
     let mut input = request(through, SessionTranscriptPageDirection::Newer, 512 * 1024);
     let first = state.page(&log, &input).await.unwrap();
-    assert_eq!(first.fragments.len(), 2);
+    assert_eq!(first.fragments.len(), 4);
     let first_sequence = first.fragments[0].identity();
     input.anchor_sequence = Some(first_sequence);
     let next = state.page(&log, &input).await.unwrap();
     assert!(next.fragments.iter().all(|f| f.identity() > first_sequence));
     input.direction = SessionTranscriptPageDirection::Older;
-    assert!(state.page(&log, &input).await.unwrap().fragments.is_empty());
+    assert!(state.page(&log, &input).await.is_err());
     input.anchor_sequence = None;
     input.max_bytes = 1;
     input.cursor = state.page(&log, &input).await.unwrap().next_cursor;

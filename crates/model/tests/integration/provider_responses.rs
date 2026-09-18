@@ -31,8 +31,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-// Fixture vocabulary follows @ai-sdk/openai 4.0.52's Responses API schema and
-// streaming converter. This tests the installed SDK over loopback, not OpenAI.
+// Exercise the locked Responses SDKs over loopback, not a live provider.
 fn frames(events: &[Value]) -> String {
     events
         .iter()
@@ -235,4 +234,147 @@ async fn responses_http_preserves_reasoning_and_raw_tool_identity_across_steps()
         assert_eq!(history[4]["call_id"], "call_raw_1");
         assert_eq!(serde_json::from_str::<Value>(history[4]["output"].as_str().unwrap()).unwrap(), json!({"echo":"你好😀"}));
     }).await.expect("Responses SSE and continuation must make bounded progress");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plaintext_responses_replays_only_its_declared_carrier_after_a_tool_step() {
+    use maka_runtime::model::{
+        OpenResponsesCompatibility, PlaintextReasoningReplay as Replay, PlaintextResponses,
+    };
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for (replay, compatibility) in [
+            (Replay::PlaintextContent, None),
+            (Replay::PlaintextSummary, None),
+            (Replay::PlaintextSummary, Some(OpenResponsesCompatibility::AlibabaTokenPlan)),
+        ] {
+            let summary = replay == Replay::PlaintextSummary;
+            let contract = PlaintextResponses { reasoning_replay: replay, compatibility };
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+            let gate = Arc::new(Notify::new());
+            let release = gate.clone();
+            let delta_type = if summary { "response.reasoning_summary_text.delta" } else { "response.reasoning_text.delta" };
+            let other_type = if summary { "response.reasoning_text.delta" } else { "response.reasoning_summary_text.delta" };
+            let first = frames(&[
+                json!({"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_plain","summary":[]}}),
+                json!({"type":other_type,"item_id":"rs_plain","output_index":0,"summary_index":0,"content_index":0,"delta":"wrong carrier"}),
+                json!({"type":delta_type,"item_id":"rs_plain","output_index":0,"summary_index":0,"content_index":0,"delta":"想😀"}),
+            ]);
+            let mut item = json!({"type":"reasoning","id":"rs_plain",
+                "summary":[{"type":"summary_text","text":"wrong carrier"}],
+                "content":[{"type":"reasoning_text","text":"wrong carrier"}]});
+            if summary {
+                item["summary"] = json!([{"type":"summary_text","text":"想😀"},{"type":"summary_text","text":""},{"type":"summary_text","text":"好"}]);
+            } else {
+                item["content"] = json!([{"type":"reasoning_text","text":"想😀好"}]);
+            }
+            let tail = frames(&[
+                json!({"type":"response.output_item.done","output_index":0,"item":item}),
+                json!({"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_plain","call_id":"call_plain","name":"maka_tool_search","arguments":""}}),
+                json!({"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_plain","call_id":"call_plain","name":"maka_tool_search","arguments":"{}","status":"completed"}}),
+                completed(),
+            ]);
+            let mut done = text_events("done"); done.push(completed());
+            let second = frames(&done);
+            let server = tokio::spawn(async move {
+                let mut requests = Vec::new();
+                for index in 0..2 {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    requests.push(read_request(&mut socket).await);
+                    let length = if index == 0 { first.len() + tail.len() } else { second.len() };
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                    if index == 0 {
+                        socket.write_all(first.as_bytes()).await.unwrap();
+                        release.notified().await;
+                        socket.write_all(tail.as_bytes()).await.unwrap();
+                    } else { socket.write_all(second.as_bytes()).await.unwrap(); }
+                }
+                requests
+            });
+            let mut prompt = vec![maka_model::prompt::Message::user("Use the tool")];
+            for index in 0..2 {
+                let executor = ModelExecutor::new(1, Duration::from_secs(5)).unwrap();
+                let request = ModelRequest {
+                    provider: ProviderConfig { network: Default::default(), kind: ProviderKind::OpenResponses(contract),
+                        model: "plain".into(), base_url: base_url.clone(), auth: maka_model::ProviderAuth::ApiKey("local-test-key".into()),
+                        headers: BTreeMap::from([("x-test-provider".into(),"responses".into())]), body_overlay: None },
+                    prompt: prompt.clone(), tools: vec![maka_model::ToolDefinition { name: "tool_search".into(), description: "Search tools".into(), input_schema: json!({"type":"object"}) }],
+                    provider_options: json!({"openResponses":{"reasoningEffort":"high","reasoningSummary":"auto"}}),
+                    max_output_tokens: Some(256),
+                };
+                let mut stream = executor.stream(request, CancellationToken::new()).await.unwrap();
+                let mut builder = StepBuilder::for_step(&format!("plain-{index}")).unwrap();
+                while let Some(event) = stream.next().await {
+                    let event = event.unwrap();
+                    if matches!(&event, ModelEvent::PartDelta { text, .. } if text == "想😀") { gate.notify_one(); }
+                    builder.push(event).unwrap();
+                }
+                let output = builder.finish().unwrap();
+                // Only serializable canonical parts survive to a fresh model request.
+                let parts: Vec<ModelPart> = serde_json::from_slice(&serde_json::to_vec(&output.parts).unwrap()).unwrap();
+                if index == 1 {
+                    assert!(matches!(&parts[..], [ModelPart::Text { text, .. }] if text == "done")); continue;
+                }
+                assert!(matches!(&parts[0], ModelPart::Text { text, text_kind: TextKind::Thinking, .. } if text == "想😀好"));
+                let content: Vec<Value> = parts.iter().map(|part| match part {
+                    ModelPart::Text { text, provider_options, .. } => json!({"type":"reasoning","text":text,"providerOptions":provider_options}),
+                    ModelPart::ToolCall { call } => json!({"type":"tool-call","toolCallId":call.id,"toolName":call.name,"input":call.input,"providerOptions":call.provider_options}),
+                    _ => unreachable!(),
+                }).collect();
+                prompt.push(serde_json::from_value(json!({"role":"assistant","content":content})).unwrap());
+                prompt.push(maka_model::prompt::Message::tool("call_plain", "tool_search", maka_model::prompt::ToolOutput::Text("found".into())));
+            }
+            let requests = server.await.unwrap();
+            assert_eq!(requests[0]["reasoning"]["effort"], "high");
+            let input = requests[1]["input"].as_array().unwrap();
+            let reasoning = input.iter().find(|part| part["type"] == "reasoning").unwrap();
+            if summary {
+                assert_eq!(reasoning["id"], "rs_plain");
+                assert_eq!(reasoning["summary"], item["summary"]);
+                assert!(reasoning.get("content").is_none());
+            } else {
+                assert_eq!(reasoning["content"], item["content"]);
+                assert_eq!(reasoning["summary"], json!([]));
+            }
+            assert!(input.iter().any(|part| part["type"] == "function_call" && part["call_id"] == "call_plain" && part["name"] == "maka_tool_search"));
+            assert!(input.iter().any(|part| part["type"] == "function_call_output" && part["call_id"] == "call_plain"));
+            assert!(!serde_json::to_string(input).unwrap().contains("wrong carrier"));
+            if compatibility.is_some() { assert!(requests.iter().all(|body| body["store"] == false)); }
+        }
+    }).await.expect("plaintext reasoning and continuation must make bounded progress");
+}
+
+#[tokio::test]
+async fn plaintext_responses_does_not_turn_transport_eof_into_success() {
+    use maka_runtime::model::{PlaintextReasoningReplay, PlaintextResponses};
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request(&mut socket).await;
+            let body = frames(&text_events("incomplete"));
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let executor = ModelExecutor::new(1, Duration::from_secs(3)).unwrap();
+        let mut stream = executor.stream(ModelRequest {
+            provider: ProviderConfig { network: Default::default(),
+                kind: ProviderKind::OpenResponses(PlaintextResponses { reasoning_replay: PlaintextReasoningReplay::PlaintextSummary, compatibility: None }),
+                model: "plain".into(), base_url, auth: maka_model::ProviderAuth::ApiKey("local-test-key".into()),
+                headers: BTreeMap::from([("x-test-provider".into(), "responses".into())]), body_overlay: None },
+            prompt: vec![maka_model::prompt::Message::user("hello")],
+            tools: vec![], provider_options: json!({}), max_output_tokens: None,
+        }, CancellationToken::new()).await.unwrap();
+        let mut failure = None;
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(ModelEvent::Finished { .. }) => panic!("EOF was mistaken for provider completion"),
+                Err(error) => { failure = Some(error); break; }
+                _ => {}
+            }
+        }
+        assert!(matches!(failure, Some(maka_model::ModelError::Provider(error))
+            if error.reason() == maka_model::ProviderFailureReason::StreamTruncated));
+        server.await.unwrap();
+    }).await.expect("truncated stream must fail promptly");
 }

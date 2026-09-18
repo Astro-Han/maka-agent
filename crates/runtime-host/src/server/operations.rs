@@ -166,11 +166,15 @@ impl OperationRegistry for Operations {
             maka_protocol::resource::validate_controller_output(operation, value)?;
             return Ok(value.clone());
         }
-        if matches!(
-            operation,
-            Operation::RuntimeResourceStart | Operation::RuntimeResourceStop
-        ) {
+        if operation == Operation::RuntimeResourceStart {
             maka_protocol::resource::decode_mutation_result(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::RuntimeResourceStop {
+            maka_protocol::codec::exact(
+                maka_protocol::codec::record(value, "resource stop result")?,
+                &[],
+            )?;
             return Ok(value.clone());
         }
         if operation == Operation::RuntimeResourceQuery {

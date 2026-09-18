@@ -30,6 +30,17 @@ const FIELD_MARKER: &str = "[runtime resource field truncated]";
 const RECOVERY: &str = "If the command is safe to re-run, redirect its output to a file (e.g. `cmd > out.txt 2>&1`) then Read or Grep that file for the omitted portion. If re-running could repeat side effects, do not. Otherwise work from the kept output above.";
 
 pub fn local_update(record: ShellRun) -> Result<ResourceUpdate, ProjectionError> {
+    let desktop_terminal = record.output.is_pty()
+        && record.source_turn_id.starts_with("desktop-terminal-")
+        && record.source_turn_id == record.source_tool_call_id;
+    project(record, !desktop_terminal)
+}
+
+pub fn local_state(record: ShellRun) -> Result<ShellSnapshot, ProjectionError> {
+    project(record, false).map(|update| update.result)
+}
+
+fn project(record: ShellRun, include_output: bool) -> Result<ResourceUpdate, ProjectionError> {
     record.validate().map_err(ProjectionError::Invalid)?;
     let (status, completed_at, exit_code, failure_message) = match record.state {
         ShellState::Starting => (ShellStatus::Starting, None, None, None),
@@ -70,7 +81,7 @@ pub fn local_update(record: ShellRun) -> Result<ResourceUpdate, ProjectionError>
         exit_code,
         failure_message,
         revision: record.revision,
-        output: Some(model_output(record.output)),
+        output: include_output.then(|| model_output(record.output)),
     };
     bound(&mut result)?;
     Ok(ResourceUpdate {

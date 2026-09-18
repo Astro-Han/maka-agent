@@ -336,7 +336,8 @@ async fn handoff_output_keeps_one_public_identity_and_all_physical_evidence_afte
         log.navigation_landmarks(
             "session",
             maka_presentation::watermark(terminal).unwrap(),
-            64
+            64,
+            None,
         )
         .await
         .unwrap()

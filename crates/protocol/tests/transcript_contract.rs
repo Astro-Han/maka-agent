@@ -25,7 +25,7 @@ fn page() -> Value {
     json!({"kind":"page","sessionId":"session_1","direction":"older",
         "throughSequence":8,"rawBytes":1,"fragments":[{"sequence":8,
         "byteOffset":1,"totalBytes":3,"payloadDigest":null,"data":"uA=="}],
-        "rangeBoundarySequence":8,"protectedTurnSequence":8,"nextCursor":null})
+        "endsAtTurnBoundary":false,"nextCursor":null})
 }
 fn input() -> Value {
     json!({"subscriptionId":"sub","direction":"older",
@@ -38,12 +38,7 @@ fn exact_nullable_fields_numeric_spellings_and_wire_constants() {
     value["throughSequence"] = json!(8.0);
     let decoded = decode_session_transcript_page(&value).unwrap();
     assert_eq!(serde_json::to_value(decoded).unwrap(), page());
-    for field in [
-        "nextCursor",
-        "throughSequence",
-        "protectedTurnSequence",
-        "rangeBoundarySequence",
-    ] {
+    for field in ["nextCursor", "throughSequence", "endsAtTurnBoundary"] {
         let mut bad = page();
         bad.as_object_mut().unwrap().remove(field);
         assert!(decode_session_transcript_page(&bad).is_err(), "{field}");
@@ -143,8 +138,7 @@ fn empty_pages_are_explicit() {
     empty["throughSequence"] = Value::Null;
     empty["fragments"] = json!([]);
     empty["rawBytes"] = json!(0);
-    empty["rangeBoundarySequence"] = Value::Null;
-    empty["protectedTurnSequence"] = Value::Null;
+    empty["endsAtTurnBoundary"] = json!(true);
     let decoded = decode_session_transcript_page(&empty).unwrap();
     assert!(decoded.fragments.is_empty());
     assert_eq!(serde_json::to_value(decoded).unwrap(), empty);

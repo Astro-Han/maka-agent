@@ -85,7 +85,7 @@ impl ConnectionClient {
         headers.insert("content-type", HeaderValue::from_static("application/json"));
         customize_headers(&mut headers, &provider.headers).map_err(local)?;
         let mut body = match &provider.kind {
-            ProviderKind::OpenaiResponses => json!({
+            ProviderKind::OpenaiResponses | ProviderKind::OpenResponses(_) => json!({
                 "model":provider.model, "store":false, "max_output_tokens":16,
                 "input":[{"role":"user","content":"Hi"}],
             }),
@@ -105,7 +105,7 @@ impl ConnectionClient {
             );
         }
         let url = match &provider.kind {
-            ProviderKind::OpenaiResponses => {
+            ProviderKind::OpenaiResponses | ProviderKind::OpenResponses(_) => {
                 let mut url =
                     reqwest::Url::parse(&provider.base_url).map_err(|_| local(Failure::Unknown))?;
                 let path = url.path().trim_end_matches('/');

@@ -18,6 +18,8 @@
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenResponses } from '@ai-sdk/open-responses';
+import { plaintextResponsesStream, responsesCompatibilityFetch } from './open-responses.js';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { compatibleFetch, compatibleEvents } from './compatible-transport.js';
@@ -39,6 +41,8 @@ export async function stream(request, emit, signal, requestId) {
     ...(codex ? { headers: codexHeaders(codex) } : {}),
   };
   const compatible = kind?.openai_compatible;
+  const plaintext = kind?.open_responses;
+  const isResponses = kind === 'openai_responses' || !!plaintext;
   const overlayKeys = Object.keys(bodyOverlay ?? {});
   if (Object.keys(headers ?? {}).length > 0 || overlayKeys.length > 0) {
     settings.fetch = async (input, init) => {
@@ -85,39 +89,51 @@ export async function stream(request, emit, signal, requestId) {
     };
   }
   if (compatible) settings.fetch = compatibleFetch(settings.fetch, requestId);
-  if (kind === 'openai_responses' && !Object.keys(headers ?? {}).length && !overlayKeys.length) {
+  if (isResponses && !Object.keys(headers ?? {}).length && !overlayKeys.length) {
     settings.fetch = responsesFetch(settings.fetch, requestId);
   }
-  const instance = compatible
-    ? createOpenAICompatible({ ...settings, name: compatible.name, includeUsage: true })(model)
-    : kind === 'anthropic'
-      ? createAnthropic({
-          ...settings,
-          headers: {
-            'anthropic-beta':
-              'interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
-          },
-        })(model)
-      : kind === 'openai_chat'
-        ? createOpenAI(settings).chat(model)
-        : createOpenAI(settings).responses(model);
-  const open = () =>
-    instance.doStream({
+  if (plaintext) settings.fetch = responsesCompatibilityFetch(settings.fetch, plaintext);
+  const instance = plaintext
+    ? createOpenResponses({
+        url: responsesUrl(baseUrl),
+        name: 'openResponses',
+        apiKey: settings.apiKey,
+        headers: settings.headers,
+        fetch: settings.fetch,
+      })(model)
+    : compatible
+      ? createOpenAICompatible({ ...settings, name: compatible.name, includeUsage: true })(model)
+      : kind === 'anthropic'
+        ? createAnthropic({
+            ...settings,
+            headers: {
+              'anthropic-beta':
+                'interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
+            },
+          })(model)
+        : kind === 'openai_chat'
+          ? createOpenAI(settings).chat(model)
+          : createOpenAI(settings).responses(model);
+  const open = async () => {
+    const result = await instance.doStream({
       abortSignal: signal,
-      prompt: kind === 'openai_responses' ? responsesPrompt(request.prompt) : request.prompt,
-      tools:
-        kind === 'openai_responses'
-          ? request.tools?.map((tool) => ({ ...tool, name: responsesToolName(tool.name) }))
-          : request.tools,
+      prompt: isResponses ? responsesPrompt(request.prompt) : request.prompt,
+      tools: isResponses
+        ? request.tools?.map((tool) => ({ ...tool, name: responsesToolName(tool.name) }))
+        : request.tools,
       providerOptions: request.providerOptions,
       maxOutputTokens: request.maxOutputTokens,
-      includeRawChunks: !!compatible,
+      includeRawChunks: !!compatible || !!plaintext,
       toolChoice: request.tools?.length ? { type: 'auto' } : undefined,
     });
+    return plaintext
+      ? { ...result, stream: plaintextResponsesStream(result.stream, plaintext) }
+      : result;
+  };
   const compatibleNormalize = compatible ? compatibleEvents() : (part) => part;
   const normalize = (part) => {
     const normalized = compatibleNormalize(part);
-    return kind === 'openai_responses' && normalized?.toolName === 'maka_tool_search'
+    return isResponses && normalized?.toolName === 'maka_tool_search'
       ? { ...normalized, toolName: 'tool_search' }
       : normalized;
   };
@@ -138,6 +154,11 @@ export async function stream(request, emit, signal, requestId) {
 // source keep their canonical names; rewriting their text would change content.
 function responsesToolName(name) {
   return name === 'tool_search' ? 'maka_tool_search' : name;
+}
+function responsesUrl(baseUrl) {
+  const url = new URL(baseUrl);
+  url.pathname = url.pathname.replace(/\/$/, '') + '/responses';
+  return url.href;
 }
 function responsesPrompt(prompt) {
   return prompt.map((message) => {

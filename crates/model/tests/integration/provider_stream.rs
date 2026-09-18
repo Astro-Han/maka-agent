@@ -115,7 +115,9 @@ fn fixtures(kind: ProviderKind, text: &str) -> (String, String) {
                 json!({"type":"message_stop"}),
             ]),
         ),
-        ProviderKind::OpenaiResponses | ProviderKind::OpenaiCompatible { .. } => {
+        ProviderKind::OpenaiResponses
+        | ProviderKind::OpenResponses(_)
+        | ProviderKind::OpenaiCompatible { .. } => {
             unreachable!("separate fixtures required")
         }
     }

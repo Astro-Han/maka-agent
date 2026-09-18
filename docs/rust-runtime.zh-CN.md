@@ -21,7 +21,7 @@
 
 [English](./rust-runtime.md)
 
-Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 159。
+Rust workspace 重写 Maka runtime 与 host，保留 TypeScript client 协议与交互。双方使用协议 epoch 163。
 重写尚未完成；未实现的操作明确返回错误。
 
 ## 构建与运行
@@ -179,6 +179,8 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
   V8 heap 限制不等于进程内存隔离。
 - 插件通过目录注册和有作用域的 Host 服务接入，复用日志、权限与排空机制，不替换 Engine。
 - Code Mode 限制累计 VM 执行时间，不计异步工具等待或收尾时间。
+- Responses reasoning 遵循声明的加密、明文正文或明文摘要契约。摘要重放保留 item 身份和
+  Unicode 安全的分段边界，不重复存储正文；无效元数据不参与重放。
 - 请求的代理策略同时覆盖 HTTP 与 Responses WebSocket。WS 握手失败后指数退避重试
   5 次，再经同一网络策略降级 HTTP。主模型请求另对已识别的临时 provider 或原生网络故障最多尝试
   10 次，使用冻结输入与可取消退避。Provider 工具活动或重放元数据阻止重试；未知/本地
@@ -268,9 +270,20 @@ WorkHub 已支持受限对话、候选发现、交互式目标选择、向已有
 等待确认或阻塞的任务仍可发现；发现不授予委派权限，准入时仍检查待决交互与未决副作用。
 待决交互驱动共用 Session 目录及变更通知，WorkHub 的“需要你”列表与候选发现保持一致，解决交互后及时清除。
 
-Skills 变更、更新预览及其事务恢复仍未完成。
-会话分支、删除、导入导出、回顾及其它 runtime policy 设置也未完成。
-编排、部分 capability 服务及其它协议域仍未完成；原生部署和更新能力不代表完整产品兼容。
+以下功能等价缺口以 main `f02ac9433`（2026-09-18）为对照。存在协议名称或能保存设置，不代表执行链路已接入。
+
+| 模块 | 剩余工作 |
+| --- | --- |
+| Skills | 创建、安装、删除、启用、固定、更新，以及更新预览、原子发布与恢复；发现和调用已实现。 |
+| Session／Turn | 分支／修订、删除及预览、recap、shared／todo 查询、重新生成、会话 bundle 和外部导入（Codex／Claude Code／OpenCode）；普通 resume 和崩溃恢复已实现。 |
+| 执行 | Plan、Goal、daily review、deep research、hosted execution、普通命名工具 profile；Graph／Swarm 与定时任务已实现。 |
+| 能力服务 | Recall 会话历史片段检索；内置 WebSearch／WebFetch；Usage／Pricing 一致版本视图与活动分页；后台任务进程／端点健康检查。 |
+| 配置 | shell、web-search、external-agent 设置的执行消费，凭据导出、external-agent setup；subagent preset、网络代理、个性化和新会话默认值已接入消费。 |
+| 跨 Host 协作 | principal 撤销、rotation prepare／revoke、邀请、grant、Turn request、Peer Mesh；配对、凭据替换／确认／撤销和认证远程传输已实现。 |
+| 模型接入 | Google／Cohere、Command Code GO 执行，其余 adapter 特殊鉴权／选项，运行中 models.dev 元数据刷新，Copilot／xAI 推理与真实凭证验证；OpenAI／Codex、Chat-compatible、Anthropic、明文 Responses 各自遵循明确契约，不代表所有 provider 全量兼容。 |
+| Host | `host.resources.query`；diagnostics、本地／SSH／WSL 部署和可恢复更新已实现。 |
+
+Recall 是会话历史检索，不属于排除的 Memory 子系统。原生部署和更新能力不代表完整产品兼容。
 插件平台支持静态链接 Rust 包、共享／独立 V8 的 JavaScript 包、作用域 Host 服务、外部 Executor，
 以及 Desktop Slot／Remote stream。Graph／Swarm 与定时任务是内置插件。
 Graph 实现类工作使用 Host 管理的 gix worktree，发布不可变补丁，不自动合并。

@@ -90,10 +90,12 @@ export async function verifyResourceLifecycle(connection, workspace, reopened, o
     const completed = await until(started.resource.ref, (r) => r.status === 'failed');
     assert.equal(completed.result.exitCode, 17);
     assert.equal(completed.result.output.stdout, 'ready done 中文');
-    const stopped = await request('runtime.resource.stop', {
+    const stopResult = await request('runtime.resource.stop', {
       sessionId,
       ref: started.resource.ref,
     });
+    assert.deepEqual(stopResult, {});
+    const stopped = { resource: (await get(started.resource.ref)).result };
     assert.deepEqual(stopped.resource, {
       ...completed.result,
       revision: completed.result.revision + 1,
@@ -102,7 +104,7 @@ export async function verifyResourceLifecycle(connection, workspace, reopened, o
     results.push(stopped.resource);
     assert.deepEqual(
       await request('runtime.resource.stop', { sessionId, ref: stopped.resource.ref }),
-      stopped,
+      {},
     );
     const terminal = await request('runtime.resource.start', {
       sessionId,
@@ -123,10 +125,12 @@ export async function verifyResourceLifecycle(connection, workspace, reopened, o
       sessionId,
       ref: terminal.resource.ref,
     });
-    assert.equal(closed.resource.mode, 'pty');
-    assert.equal(closed.resource.status, 'cancelled');
+    assert.deepEqual(closed, {});
+    const closedState = (await get(terminal.resource.ref)).result;
+    assert.equal(closedState.mode, 'pty');
+    assert.equal(closedState.status, 'cancelled');
     active.delete(terminal.resource.ref);
-    results.push(closed.resource);
+    results.push(closedState);
     await assert.rejects(
       request('runtime.resource.stop', {
         sessionId,

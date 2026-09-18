@@ -113,6 +113,8 @@ impl Transcript {
         if input.subscription_id != self.subscription_id
             || !(1..=SESSION_TRANSCRIPT_PAGE_MAX_BYTES).contains(&input.max_bytes)
             || (input.cursor.is_some() && input.anchor_sequence.is_some())
+            || (input.anchor_sequence.is_some()
+                && input.direction == SessionTranscriptPageDirection::Older)
             || input
                 .anchor_sequence
                 .is_some_and(|s| s > 9_007_199_254_740_991)

@@ -137,30 +137,26 @@ export async function completedTail(connection, sessionId, frames, startedAt) {
     const older = await subscription.decodeTranscriptPage(initial, decodeStoredMessage);
     assert.deepEqual(
       older.messages.map((entry) => entry.message),
-      rows,
-      'whole-turn older range',
+      rows.slice(-1),
+      'fragment continuation completes one row, not the entire turn',
     );
     const newer = await subscription.loadTranscriptPage({
       ...pageInput(subscription),
       direction: 'newer',
+      maxBytes: 192 * 1024,
     });
     const decoded = await subscription.decodeTranscriptPage(newer, decodeStoredMessage);
     assert.deepEqual(
       decoded.messages.map((entry) => entry.message),
       rows,
-      'whole-turn newer range',
+      'budgeted newer page',
     );
-    for (const [direction, anchorSequence] of [
-      ['older', older.messages[0].identity],
-      ['newer', older.messages.at(-1).identity],
-    ]) {
-      const outside = await subscription.loadTranscriptPage({
-        ...pageInput(subscription),
-        direction,
-        anchorSequence,
-      });
-      assert.deepEqual(outside.fragments, [], 'anchors exclude their own identity');
-    }
+    const outside = await subscription.loadTranscriptPage({
+      ...pageInput(subscription),
+      direction: 'newer',
+      anchorSequence: older.messages.at(-1).identity,
+    });
+    assert.deepEqual(outside.fragments, [], 'newer anchors exclude their own identity');
   });
 }
 

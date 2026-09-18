@@ -38,6 +38,7 @@ pub struct TurnsInput {
 pub struct LandmarksInput {
     pub session_id: String,
     pub max_landmarks: usize,
+    pub turn_id: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -81,11 +82,16 @@ pub fn decode_turns_input(value: &Value) -> Result<TurnsInput> {
 pub fn decode_landmarks_input(value: &Value) -> Result<LandmarksInput> {
     codec::exact(
         codec::record(value, "Turn landmarks query")?,
-        &["sessionId", "maxLandmarks"],
+        &["sessionId", "maxLandmarks", "turnId"],
     )?;
     Ok(LandmarksInput {
         session_id: entity(&value["sessionId"])?,
         max_landmarks: limit(&value["maxLandmarks"], MAX_LANDMARKS)?,
+        turn_id: if value["turnId"].is_null() {
+            None
+        } else {
+            Some(entity(&value["turnId"])?)
+        },
     })
 }
 pub fn decode_input(operation: Operation, value: &Value) -> Result<Value> {
@@ -166,10 +172,12 @@ pub fn decode_output(operation: Operation, value: &Value) -> Result<Value> {
             for row in rows {
                 codec::exact(
                     codec::record(row, "Turn landmark")?,
-                    &["turnId", "sequence", "label"],
+                    &["turnId", "sequence", "lastSequence", "label"],
                 )?;
                 entity(&row["turnId"])?;
                 row["sequence"] = serde_json::json!(codec::count(&row["sequence"], "sequence")?);
+                row["lastSequence"] =
+                    serde_json::json!(codec::count(&row["lastSequence"], "lastSequence")?);
                 utf8(&row["label"], 96)?;
             }
             let _: LandmarksResult =

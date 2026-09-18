@@ -18,6 +18,7 @@
  */
 
 use maka_runtime::configuration::ApiProtocol;
+use maka_runtime::model::PlaintextResponses;
 use serde::{Deserialize, Serialize};
 
 /// Source-owned execution contracts, including adapters not yet implemented by the host.
@@ -40,8 +41,11 @@ pub enum AdapterKind {
     Openai {
         #[serde(skip_serializing_if = "Option::is_none")]
         api_protocol: Option<ApiProtocol>,
+        responses: ResponsesContract,
     },
-    OpenaiCodex,
+    OpenaiCodex {
+        responses: ResponsesContract,
+    },
     OpenaiCompatible {
         name: AdapterName,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,8 +62,6 @@ pub enum AdapterKind {
         normalize_base_url: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
         responses: Option<ResponsesContract>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        runtime_profile: Option<RuntimeProfile>,
     },
     Anthropic {
         auth: AnthropicAuth,
@@ -72,6 +74,7 @@ pub enum AdapterKind {
         normalize_base_url: Option<bool>,
     },
     Cohere,
+    CommandcodeCli,
     Unavailable,
 }
 
@@ -98,35 +101,31 @@ pub enum ApplyPatchProtocol {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum RuntimeProfile {
-    AlibabaTokenPlan,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum ReasoningField {
     Reasoning,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResponsesContract {
-    pub adapter: ResponsesAdapter,
-    pub reasoning_replay: ReasoningReplay,
+#[serde(
+    tag = "adapter",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ResponsesContract {
+    Openai {
+        reasoning_replay: OpenaiReasoningReplay,
+    },
+    OpenResponses {
+        #[serde(flatten)]
+        contract: PlaintextResponses,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ResponsesAdapter {
-    Openai,
-    OpenResponses,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReasoningReplay {
+pub enum OpenaiReasoningReplay {
     EncryptedContent,
-    PlaintextContent,
+    None,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

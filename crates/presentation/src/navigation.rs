@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 pub struct TurnLandmark {
     pub turn_id: String,
     pub sequence: u64,
+    pub last_sequence: u64,
     pub label: String,
 }
 

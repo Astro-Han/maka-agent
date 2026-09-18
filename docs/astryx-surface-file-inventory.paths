@@ -21,6 +21,7 @@ apps/desktop/src/renderer/custom-pet-companion.tsx
 apps/desktop/src/renderer/error-boundary.tsx
 apps/desktop/src/renderer/features/app-update/services-context.tsx
 apps/desktop/src/renderer/features/app-update/ui/app-update-provider.tsx
+apps/desktop/src/renderer/features/connection-settings/commandcode-browser-login-section.tsx
 apps/desktop/src/renderer/features/connection-settings/generic-provider-mark.tsx
 apps/desktop/src/renderer/features/connection-settings/onboarding-step-form.tsx
 apps/desktop/src/renderer/features/connection-settings/provider-add-model-dialog.tsx
@@ -243,6 +244,7 @@ packages/ui/src/markdown-body.tsx
 packages/ui/src/markdown-math.tsx
 packages/ui/src/markdown.tsx
 packages/ui/src/mermaid-diagram.tsx
+packages/ui/src/model-picker-internals.tsx
 packages/ui/src/model-picker.tsx
 packages/ui/src/model-wheel-picker.tsx
 packages/ui/src/module-hub-selector.tsx

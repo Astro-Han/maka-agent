@@ -85,6 +85,7 @@ pub fn provider_default_base_url(provider: &str) -> Result<&'static str, String>
             Ok("https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1")
         }
         "commandcode" => Ok("https://api.commandcode.ai/provider/v1"),
+        "commandcode-go" => Ok("https://api.commandcode.ai"),
         "cloudflare-workers-ai" => Ok(""),
         "ollama-cloud" => Ok("https://ollama.com/v1"),
         "ollama" => Ok("http://127.0.0.1:11434/v1"),

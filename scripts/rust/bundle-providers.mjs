@@ -31,7 +31,12 @@ const output = process.argv[2];
 if (!output) throw new Error('Cargo output directory is required');
 const locked = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
 const entry = resolve(root, 'crates/js-runtime/trusted/adapter.js');
-for (const name of ['@ai-sdk/openai', '@ai-sdk/anthropic', '@ai-sdk/openai-compatible']) {
+for (const name of [
+  '@ai-sdk/openai',
+  '@ai-sdk/anthropic',
+  '@ai-sdk/openai-compatible',
+  '@ai-sdk/open-responses',
+]) {
   if (
     require(`${name}/package.json`).version !== locked.packages[`node_modules/${name}`]?.version
   ) {
@@ -51,11 +56,14 @@ await build({
     {
       name: 'locked-provider-dependencies',
       setup(build) {
-        build.onResolve({ filter: /^@ai-sdk\/(openai|anthropic|openai-compatible)$/ }, (args) => {
-          if (args.importer !== entry) return;
-          // Keep import conditions and transitive resolution, but start from the checked install.
-          return build.resolve(args.path, { resolveDir: dependencyRoot, kind: args.kind });
-        });
+        build.onResolve(
+          { filter: /^@ai-sdk\/(openai|anthropic|openai-compatible|open-responses)$/ },
+          (args) => {
+            if (args.importer !== entry) return;
+            // Keep import conditions and transitive resolution, but start from the checked install.
+            return build.resolve(args.path, { resolveDir: dependencyRoot, kind: args.kind });
+          },
+        );
       },
     },
   ],

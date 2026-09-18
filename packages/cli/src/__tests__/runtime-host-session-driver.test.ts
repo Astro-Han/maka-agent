@@ -744,6 +744,7 @@ describe('Runtime Host Maka Session driver', () => {
     });
     const command = await driver.runUserCommand!('sleep 3600');
     command.takeRacedUpdate();
+    assert.deepEqual(driver.getWorkspaceTarget(), { kind: 'host_path', path: '/repo' });
 
     await driver.switchSession('session-1');
 
@@ -756,6 +757,7 @@ describe('Runtime Host Maka Session driver', () => {
       ref: connection.userCommandResource.ref,
     });
     assert.equal(driver.getSessionId(), 'session-1');
+    assert.deepEqual(driver.getWorkspaceTarget(), { kind: 'host_path', path: '/tmp' });
   });
 
   test('a rejecting user-command stop aborts the switch before any durable relocation commits (#3210)', async () => {
@@ -2971,15 +2973,7 @@ class FakeConnection {
     }
     if (operation === 'runtime.resource.stop') {
       if (this.runtimeResourceStopFailure) throw this.runtimeResourceStopFailure;
-      return {
-        resource: {
-          ...this.userCommandResource,
-          status: 'cancelled',
-          updatedAt: 2,
-          completedAt: 2,
-          revision: 2,
-        },
-      } as OperationOutput<K>;
+      return {} as OperationOutput<K>;
     }
     if (operation === 'runtime.resource.query') {
       if (this.runtimeResourceQuery === undefined) {
