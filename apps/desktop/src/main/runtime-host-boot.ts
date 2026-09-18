@@ -1342,6 +1342,9 @@ const createLocalRuntimeHostManager = () => createRuntimeHostDesktopManager(
         });
       }
       if (state.readiness === "ready") {
+        if (state.target.profile.id === LOCAL_RUNTIME_HOST_PROFILE.id) {
+          registerDesktopWorkBoard();
+        }
         const scope = { hostId: state.candidate.client.hostId, targetEpoch: state.epoch };
         mainWindowController.send("projects:changed", scope);
         emitConnectionListChanged(scope);
@@ -1437,37 +1440,48 @@ runtimeHostManager.setDefaultProfile(runtimeHostStartup.preferences.defaultProfi
 wireLifecycle();
 sessionLocal.wake();
 windowsAppTray.start();
+// Runtime Host is the only schema-migration authority for its State Root.
+// Work Board remains a Desktop-owned table, but it opens only while a ready
+// Host has verified the schema — including a Local Host that only becomes
+// ready after a retry.
+const registerDesktopWorkBoard = (): void => {
+  if (workBoardIpc) return;
+  try {
+    workBoardIpc = registerWorkBoardIpc({
+      ipcMain,
+      workspaceRoot,
+      mainWindowController,
+      store: createWorkBoardStore(workspaceRoot, { schemaMigration: 'require_current' }),
+      validateLinkedSession: async (value, expectedProjectId) => {
+        const normalized = normalizeWorkBoardLinkedSession(value);
+        if (!normalized.ok) return false;
+        try {
+          const current = runtimeHostManager?.current(normalized.value.profileId);
+          if (!current?.candidate || current.hostId !== normalized.value.hostId) return false;
+          const sessions = await current.candidate.client.listSessions();
+          const session = sessions.find(
+            (candidate) => candidate.id === normalized.value.sessionId,
+          );
+          if (!session) return false;
+          if (expectedProjectId !== undefined) {
+            return (
+              session.workspace.target.kind === 'project' &&
+              session.workspace.target.projectId === expectedProjectId
+            );
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+  } catch (error) {
+    console.error('[work-board] IPC registration failed:', error);
+  }
+};
 void (async () => {
   await runtimeHostManager?.start();
-  // Runtime Host is the only schema-migration authority for its State Root.
-  // Work Board remains a Desktop-owned table, but it opens only after the Host is
-  // ready and verifies the schema instead of changing it behind a resident Host.
-  workBoardIpc = registerWorkBoardIpc({
-    ipcMain,
-    workspaceRoot,
-    mainWindowController,
-    store: createWorkBoardStore(workspaceRoot, { schemaMigration: 'require_current' }),
-    validateLinkedSession: async (value, expectedProjectId) => {
-      const normalized = normalizeWorkBoardLinkedSession(value);
-      if (!normalized.ok) return false;
-      try {
-        const current = runtimeHostManager?.current(normalized.value.profileId);
-        if (!current?.candidate || current.hostId !== normalized.value.hostId) return false;
-        const sessions = await current.candidate.client.listSessions();
-        const session = sessions.find((candidate) => candidate.id === normalized.value.sessionId);
-        if (!session) return false;
-        if (expectedProjectId !== undefined) {
-          return (
-            session.workspace.target.kind === 'project' &&
-            session.workspace.target.projectId === expectedProjectId
-          );
-        }
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  });
+  registerDesktopWorkBoard();
   await guestSessionMountService.start().catch((error: unknown) => {
     console.error('[runtime-host] shared Sessions could not be restored:', error);
   });

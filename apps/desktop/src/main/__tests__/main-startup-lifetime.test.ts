@@ -109,6 +109,10 @@ test('lets the Runtime Host migrate its State Root before Desktop opens shared t
     'await runtimeHostManager?.start()',
   );
   const workBoardOpen = bootSource.indexOf(
+    'registerDesktopWorkBoard();',
+    hostStart,
+  );
+  const workBoardStore = bootSource.indexOf(
     'store: createWorkBoardStore(workspaceRoot',
   );
   const sessionCopyOpen = bootSource.indexOf(
@@ -119,8 +123,9 @@ test('lets the Runtime Host migrate its State Root before Desktop opens shared t
   assert.notEqual(workBoardOpen, -1);
   assert.notEqual(sessionCopyOpen, -1);
   assert.ok(hostStart < workBoardOpen);
+  assert.notEqual(workBoardStore, -1);
   assert.match(
-    bootSource.slice(workBoardOpen, bootSource.indexOf('});', workBoardOpen)),
+    bootSource.slice(workBoardStore, bootSource.indexOf('});', workBoardStore)),
     /schemaMigration: 'require_current'/u,
   );
   assert.match(
