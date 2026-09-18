@@ -181,16 +181,16 @@ async function upgradeRuntimeHostRoot(
     );
     if (JSON.stringify(current) !== JSON.stringify(lockedDeployment))
       throw new Error('Legacy deployment changed while preparing its upgrade');
-    // A source recorded by the first inspection must still be there after
-    // admission; otherwise the durable plan would attest its absence and the
-    // commit would silently drop that data. A source that only appears now is
-    // recorded and copied by this second inspection — admission itself
-    // creates a missing data directory to hold its owner lock.
-    if (
-      (plan.data !== null && lockedSources.data !== plan.data) ||
-      (plan.deployment !== null && lockedSources.deployment !== plan.deployment)
-    )
-      throw new Error('Legacy sources changed while preparing the upgrade');
+    // Every source attested by the first inspection must still be there
+    // after admission; otherwise the durable plan would attest its absence
+    // and the commit would silently drop that data. A source that only
+    // appears now stays admissible — admission itself creates a missing
+    // data directory to hold its owner lock.
+    const locked = planSources(lockedSources);
+    for (const source of planSources(plan)) {
+      if (!locked.has(source))
+        throw new Error('Legacy sources changed while preparing the upgrade');
+    }
     plan = {
       ...lockedSources,
       ...(plan.targetDeployment ? { targetDeployment: plan.targetDeployment } : {}),

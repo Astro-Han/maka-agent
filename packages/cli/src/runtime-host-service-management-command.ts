@@ -30,7 +30,6 @@ import {
   RUNTIME_HOST_OPERATOR_PEER_WEBRTC_STUN_CAPABILITY,
   RUNTIME_HOST_OPERATOR_PROJECT_DIRECTORY_CONFIGURATION_REQUEST_ENV,
   RUNTIME_HOST_OPERATOR_PROCESS_LIFETIME_LOCK_CAPABILITY,
-  RUNTIME_HOST_SERVICE_ERROR_CODE_MAX_BYTES,
   RUNTIME_HOST_SERVICE_ERROR_MESSAGE_MAX_BYTES,
   resolveRuntimeHostNpmDeploymentLayout,
   type RuntimeHostManagedDeploymentConfig,
@@ -48,7 +47,7 @@ import {
   resolveRuntimeHostManagedServiceId,
   runtimeHostManagedServiceConfigFingerprint,
   RuntimeHostServiceManagerError,
-  managedRuntimeHostErrorCode,
+  runtimeHostServiceWireErrorCode,
   withRuntimeHostManagedServiceDeploymentLock,
   withRuntimeHostManagedServiceLifecycleLock,
   type RuntimeHostManagedServiceInput,
@@ -218,7 +217,7 @@ export async function runManagedRuntimeHostServiceCli(
     }
     return blocked ? 1 : 0;
   } catch (error) {
-    const code = managedRuntimeHostErrorCode(error) ?? 'internal_service_error';
+    const code = runtimeHostServiceWireErrorCode(error);
     const message = error instanceof Error ? error.message : String(error);
     if (options.framed) {
       deps.writeOutput(
@@ -227,9 +226,7 @@ export async function runManagedRuntimeHostServiceCli(
           kind: 'error',
           action: options.action,
           error: {
-            code:
-              truncateUtf8(code, RUNTIME_HOST_SERVICE_ERROR_CODE_MAX_BYTES) ||
-              'internal_service_error',
+            code,
             message:
               truncateUtf8(message, RUNTIME_HOST_SERVICE_ERROR_MESSAGE_MAX_BYTES) ||
               'Runtime Host service operation failed',

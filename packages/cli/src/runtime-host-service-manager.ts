@@ -76,7 +76,12 @@ import {
   RuntimeHostManagedDeploymentError,
 } from './runtime-host-managed-deployment.js';
 import { RuntimeHostLifecycleTransactionError } from './runtime-host-lifecycle-transaction.js';
-import { writeRuntimeHostManagedUpdatePolicy } from './runtime-host-update-policy-store.js';
+import { RuntimeHostUpdateDiscoveryError } from './runtime-host-registry-update.js';
+import { RuntimeHostUpdatePackageError } from './runtime-host-update-package.js';
+import {
+  RuntimeHostUpdatePolicyError,
+  writeRuntimeHostManagedUpdatePolicy,
+} from './runtime-host-update-policy-store.js';
 import { isTemporaryNpxInstallation } from './runtime-host-cli-installation.js';
 
 const SERVICE_CONFIG_FILE = 'runtime-host-service.json';
@@ -896,9 +901,9 @@ async function resolveExpectedServiceRoot(
 /** One mapping for every CLI boundary so admission errors keep their code. */
 export function storageRootErrorDetail(
   error: unknown,
-): { readonly code: string; readonly message: string } | undefined {
+): { readonly code: RuntimeHostServiceErrorCode; readonly message: string } | undefined {
   if (!(error instanceof StorageRootAuthorityError)) return undefined;
-  const code =
+  const code: RuntimeHostServiceErrorCode =
     error.code === 'legacy_root_requires_migration'
       ? 'root_requires_migration'
       : error.code === 'root_migration_busy'
@@ -923,7 +928,9 @@ const DEPLOYMENT_OWNERSHIP_CODES = new Set([
   'deployment_launch_mismatch',
 ]);
 
-export function managedRuntimeHostErrorCode(error: unknown): string | undefined {
+export function managedRuntimeHostErrorCode(
+  error: unknown,
+): RuntimeHostServiceErrorCode | undefined {
   if (error instanceof RuntimeHostServiceManagerError) return error.code;
   if (
     error instanceof RuntimeHostManagedDeploymentError ||
@@ -944,6 +951,25 @@ export function managedRuntimeHostErrorCode(error: unknown): string | undefined 
     return undefined;
   }
   return storageRootErrorDetail(error)?.code;
+}
+
+/**
+ * The committed wire code for any error reaching a service-management frame
+ * boundary. Returning the union type keeps classification compiler-checked:
+ * a boundary cannot emit a code that is not part of the wire contract.
+ */
+export function runtimeHostServiceWireErrorCode(
+  error: unknown,
+  fallback: RuntimeHostServiceErrorCode = 'service_manager_operation_failed',
+): RuntimeHostServiceErrorCode {
+  if (
+    error instanceof RuntimeHostUpdateDiscoveryError ||
+    error instanceof RuntimeHostUpdatePackageError ||
+    error instanceof RuntimeHostUpdatePolicyError
+  ) {
+    return error.code;
+  }
+  return managedRuntimeHostErrorCode(error) ?? fallback;
 }
 
 async function requireExpectedServiceRoot(identity: {

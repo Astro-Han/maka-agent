@@ -1081,11 +1081,9 @@ async function ensureRootMarker(
     if (!isNodeError(error, 'ENOENT')) throw error;
   }
 
-  // A formed state directory proves this root was marked and committed
-  // before: its marker was lost or removed, and minting a fresh rootId would
-  // orphan the durable state and every record bound to the old identity. A
-  // bare .maka-host is just bootstrap debris and may be marked normally.
-  if ((await lstatPathIfPresent(join(resolveRootOwnershipNamespace(root), 'state'))) !== undefined)
+  // Committed state without its marker means the marker was lost; a fresh
+  // rootId would orphan everything bound to the old identity.
+  if (await hasCommittedState(root))
     throw new StorageRootAuthorityError(
       'invalid_marker',
       `Storage root holds committed state but its marker is missing: ${root}; restore the marker from backup, or remove .maka-host to adopt the directory as a new root`,
@@ -1384,11 +1382,7 @@ export async function withStorageRootUpgrade(
   // legacy root: the original marker was lost and something re-marked the
   // root. Migrating it would stage empty sources and delete the committed
   // state.
-  if (
-    state.legacy &&
-    !state.upgrade &&
-    (await lstatPathIfPresent(join(resolveRootOwnershipNamespace(root), 'state'))) !== undefined
-  )
+  if (state.legacy && !state.upgrade && (await hasCommittedState(root)))
     throw new StorageRootAuthorityError(
       'invalid_marker',
       `Storage root holds committed state but its marker declares the legacy format: ${root}; the marker was likely lost and recreated — restore the original marker, or remove .maka-host to rebuild`,
@@ -1649,6 +1643,16 @@ async function statRootIfPresent(path: string): Promise<BigIntStats | undefined>
     if (isMissingPathError(error)) return undefined;
     throw error;
   }
+}
+
+// A formed state directory is the single witness that a root was marked and
+// committed: minting a fresh marker over it would orphan the durable state
+// and every record bound to the old identity. A bare .maka-host is just
+// bootstrap debris and may be marked normally.
+async function hasCommittedState(root: string): Promise<boolean> {
+  return (
+    (await lstatPathIfPresent(join(resolveRootOwnershipNamespace(root), 'state'))) !== undefined
+  );
 }
 
 async function lstatPathIfPresent(path: string): Promise<BigIntStats | undefined> {

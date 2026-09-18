@@ -35,7 +35,7 @@ import { hasPeerMeshIdentityObligations } from '@maka/runtime-host/peer-mesh';
 import {
   allocateRuntimeHostPeerPort,
   RuntimeHostServiceManagerError,
-  managedRuntimeHostErrorCode,
+  runtimeHostServiceWireErrorCode,
   withRuntimeHostManagedServiceDeploymentLock,
   withRuntimeHostManagedServiceLifecycleLock,
   type RuntimeHostManagedServiceTarget,
@@ -408,7 +408,7 @@ function writePeerError(
   error: unknown,
   deps: RuntimeHostPeerManagementCliDeps,
 ): void {
-  const code = managedRuntimeHostErrorCode(error) ?? 'internal_service_error';
+  const code = runtimeHostServiceWireErrorCode(error);
   const message = error instanceof Error ? error.message : String(error);
   writePeerFailure(options, code, message, deps);
 }

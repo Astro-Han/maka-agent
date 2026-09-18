@@ -24,19 +24,19 @@ import {
   encodeRuntimeHostServiceManagementFrame,
   RUNTIME_HOST_OPERATOR_CAPABILITY_REQUEST_ENV,
   RUNTIME_HOST_OPERATOR_UPDATE_SCHEDULER_CAPABILITY,
-  RUNTIME_HOST_SERVICE_ERROR_CODE_MAX_BYTES,
   RUNTIME_HOST_SERVICE_ERROR_MESSAGE_MAX_BYTES,
   resolveRuntimeHostManagedDeployment,
   type RuntimeHostManagedUpdatePolicy,
   type RuntimeHostManagedDeploymentConfig,
+  type RuntimeHostServiceErrorCode,
   type RuntimeHostServiceManagementFrame,
   type RuntimeHostUpdateSchedulerState,
 } from '@maka/runtime-host/operator';
 import {
-  managedRuntimeHostErrorCode,
   manageRuntimeHostService,
   resolveRuntimeHostManagedServiceId,
   RuntimeHostServiceManagerError,
+  runtimeHostServiceWireErrorCode,
   withRuntimeHostManagedServiceDeploymentLock,
   type RuntimeHostManagedServiceTarget,
   type RuntimeHostServiceBackend,
@@ -63,10 +63,7 @@ import {
   assertRuntimeHostManagedOperatorDeployment,
   resolveRuntimeHostManagedControlRoot,
 } from './runtime-host-managed-deployment.js';
-import {
-  resolveManagedRuntimeHostUpdateSelection,
-  RuntimeHostUpdateDiscoveryError,
-} from './runtime-host-update-discovery.js';
+import { resolveManagedRuntimeHostUpdateSelection } from './runtime-host-update-discovery.js';
 import type { RuntimeHostUpdateSelector } from './runtime-host-cli.js';
 
 type UpdatePolicyFrame = Extract<RuntimeHostServiceManagementFrame, { action: 'update_policy' }>;
@@ -570,20 +567,13 @@ function reconcileError(error: unknown): ReconcileUpdateFrame {
   };
 }
 
-function boundedError(error: unknown, fallback: string): { code: string; message: string } {
-  // The first three classes only carry committed wire codes; domain errors
-  // fold through the shared mapper so internal codes never reach the frame.
-  const code =
-    error instanceof RuntimeHostUpdatePolicyError ||
-    error instanceof RuntimeHostUpdateDiscoveryError ||
-    error instanceof RuntimeHostServiceManagerError
-      ? error.code
-      : (managedRuntimeHostErrorCode(error) ?? 'update_reconciliation_failed');
+function boundedError(
+  error: unknown,
+  fallback: string,
+): { code: RuntimeHostServiceErrorCode; message: string } {
   const message = error instanceof Error ? error.message : String(error);
   return {
-    code:
-      truncateUtf8(code, RUNTIME_HOST_SERVICE_ERROR_CODE_MAX_BYTES) ||
-      'update_reconciliation_failed',
+    code: runtimeHostServiceWireErrorCode(error),
     message: truncateUtf8(message, RUNTIME_HOST_SERVICE_ERROR_MESSAGE_MAX_BYTES) || fallback,
   };
 }
