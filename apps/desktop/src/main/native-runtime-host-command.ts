@@ -26,6 +26,8 @@ import {
   runtimeHostSshOperatorRemoteCommand,
 } from '@maka/runtime-host/client';
 import { runtimeHostOperatorInvocation, type RuntimeHostNativeOperatorCommand } from '@maka/runtime-host/operator';
+import { NativeHostBudget, NativeHostWaitError } from './native-runtime-host-operation.js';
+import { nativeHostProgressSchema } from '../shared/native-runtime-host-management.js';
 
 export type NativeRuntimeHostOperator =
   | { readonly kind: 'local'; readonly executable: string }
@@ -33,6 +35,13 @@ export type NativeRuntimeHostOperator =
       readonly operator: RuntimeHostNativeOperatorCommand }
   | { readonly kind: 'wsl'; readonly distribution: string;
       readonly operator: RuntimeHostNativeOperatorCommand<'posix'> };
+
+export class NativeHostBusyError extends Error {
+  readonly code = 'EAGAIN';
+  constructor() { super('Another Host operation still holds the executor. No authority was taken; refresh status or retry later.'); }
+}
+
+export class NativeHostCommandUnconfirmedError extends Error {}
 
 /** The path comes from an authenticated deployment receipt, never renderer input. */
 export function nativeOperatorAt(target: NativeRuntimeHostOperator, executable: string): NativeRuntimeHostOperator {
@@ -48,39 +57,105 @@ export function runNativeRuntimeHostCommand(
   target: NativeRuntimeHostOperator,
   args: readonly string[],
   readOnly = false,
+  budget = new NativeHostBudget(readOnly ? 15_000 : 120_000),
+  onProgress?: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void,
+  interactive?: (args: readonly string[], timeoutMs: number) => Promise<string>,
 ): Promise<string> {
-  const command = invocation(target, args);
-  return new Promise((resolve, reject) => {
+  const report = (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => {
+    try { onProgress?.(progress); } catch { /* Observers do not own the operation. */ }
+  };
+  const phase = args[0] ?? 'command';
+  const available = budget.remaining(phase, readOnly ? 15_000 : phase === 'fetch' ? 150_000 : 60_000);
+  // Reserve confirmation time inside, never after, the original deadline.
+  const remaining = readOnly || phase === 'fetch' ? available : Math.max(1, available - 2_000);
+  const boundedArgs = [...args, '--timeout-ms', String(remaining)];
+  if (interactive) {
+    report({ phase: phase === 'activate' ? 'activate' : 'stage' });
+    return budget.wait(interactive(boundedArgs, remaining), phase, remaining).catch((error) => {
+      report({ phase: 'confirmation_pending' });
+      throw error;
+    });
+  }
+  const command = invocation(target, boundedArgs);
+  const operation = new Promise<string>((resolve, reject) => {
     const child = spawn(command.executable, command.args, {
       windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     const output: Buffer[] = [];
     let bytes = 0;
     let errorText = '';
+    let busy = false;
     // Bound the caller's wait without killing an in-flight durable mutation.
     // Its listeners keep draining; later activation checks native authority.
-    const timer = setTimeout(() => {
-      if (readOnly) child.kill();
-      reject(new Error(readOnly
-        ? 'Native Host query timed out.'
-        : 'Native Host operation timed out; its outcome is unknown.'));
-    }, readOnly ? 15_000 : 120_000);
+    let progressLine = '';
+    const initial = nativeHostProgressSchema.safeParse({ phase });
+    report(initial.success ? initial.data : { phase: 'stage' });
+    let lastPhase = '';
+    let lastCompleted = -1;
+    let detached = false;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
     child.stdout.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
       if (bytes <= 256 * 1024) output.push(chunk);
     });
     child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => { errorText = (errorText + chunk).slice(-8192); });
+    child.stderr.on('data', (chunk: string) => {
+      errorText = (errorText + chunk).slice(-8192);
+      progressLine = (progressLine + chunk).slice(-16_384);
+      let newline: number;
+      while ((newline = progressLine.indexOf('\n')) >= 0) {
+        const line = progressLine.slice(0, newline);
+        progressLine = progressLine.slice(newline + 1);
+        if (line === 'MAKA_HOST_ERROR {"kind":"busy"}') busy = true;
+        if (!line.startsWith('MAKA_HOST_PROGRESS ')) continue;
+        try {
+          const value = JSON.parse(line.slice('MAKA_HOST_PROGRESS '.length));
+          const progress = nativeHostProgressSchema.safeParse(value);
+          if (!progress.success) continue;
+          if (detached) continue;
+          report(progress.data);
+          if (value.phase !== lastPhase || (value.completed !== undefined && value.completed > lastCompleted)) {
+            lastPhase = value.phase;
+            lastCompleted = value.completed ?? -1;
+            clearTimeout(stallTimer);
+            stallTimer = setTimeout(() => {
+              detach();
+              reject(new NativeHostWaitError(value.phase, 'stalled'));
+            }, value.phase === 'download' ? 20_000 : 60_000);
+          }
+        } catch { /* Diagnostics never alter a command's outcome. */ }
+      }
+    });
+    // Stop observing without killing a mutation or keeping Desktop alive. Pipes
+    // continue draining while this process exists; the CLI owns its durable work.
+    const detach = () => {
+      detached = true;
+      clearTimeout(stallTimer);
+      if (readOnly) child.kill();
+      child.unref();
+      (child.stdout as typeof child.stdout & { unref?: () => void }).unref?.();
+      (child.stderr as typeof child.stderr & { unref?: () => void }).unref?.();
+    };
+    const timer = setTimeout(detach, remaining);
+    budget.signal?.addEventListener('abort', detach, { once: true });
     child.once('error', (error) => {
       clearTimeout(timer);
+      clearTimeout(stallTimer);
+      budget.signal?.removeEventListener('abort', detach);
       reject(error);
     });
     child.once('close', (code) => {
       clearTimeout(timer);
+      clearTimeout(stallTimer);
+      budget.signal?.removeEventListener('abort', detach);
       if (code !== 0 || bytes > 256 * 1024) {
-        reject(new Error(`Native Host operation was not confirmed; refresh status before retrying. ${errorText.trim()}`));
+        reject(busy ? new NativeHostBusyError() : new NativeHostCommandUnconfirmedError(`Native Host operation was not confirmed; refresh status before retrying. ${errorText.trim()}`));
       } else resolve(Buffer.concat(output).toString('utf8'));
     });
+  });
+  return budget.wait(operation, phase, remaining).catch((error) => {
+    if (error instanceof NativeHostWaitError) report({ phase: 'confirmation_pending' });
+    throw error;
   });
 }
 

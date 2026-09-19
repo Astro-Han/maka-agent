@@ -20,6 +20,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createBootstrapSelectionLease } from '../../renderer/bootstrap-selection-lease.js';
+import { composerDraftStorage } from '../../renderer/composer-draft-storage.js';
 import {
   clearNewTaskReloadIntent,
   hasNewTaskReloadIntent,
@@ -181,7 +182,6 @@ describe('bootstrap selection lease', () => {
       setItem: (key: string, value: string) => void values.set(key, value),
       removeItem: (key: string) => void values.delete(key),
     };
-    markNewTaskReloadIntent(storage);
     const draftKey = '["new-task","office","host-office","project-docs"]';
     writeNewTaskReloadDraft(draftKey, 'unfinished prompt', storage);
     assert.deepEqual(readNewTaskReloadIntent(storage), {
@@ -196,5 +196,16 @@ describe('bootstrap selection lease', () => {
       draftKey,
     });
     assert.equal(readNewTaskReloadDraft('different-target', storage), undefined);
+    const drafts = composerDraftStorage(storage);
+    drafts.write('session:office:one', 'unsent message');
+    drafts.write('session:other:one', 'another Host');
+    const reopened = composerDraftStorage(storage);
+    assert.equal(reopened.read('session:office:one'), 'unsent message');
+    reopened.write('session:office:one', '');
+    assert.equal(drafts.read('session:office:one'), undefined);
+    assert.equal(drafts.read('session:other:one'), 'another Host');
+    const longDraft = 'x'.repeat(120_001);
+    reopened.write('session:office:long', longDraft);
+    assert.equal(drafts.read('session:office:long'), longDraft, 'persistence must not truncate an unsent draft');
   });
 });

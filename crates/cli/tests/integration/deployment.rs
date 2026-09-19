@@ -19,7 +19,7 @@
 
 use super::candidate::CandidateFixture;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use maka_event_log::root::{RootNamespaces, RootOwner};
+use maka_event_log::root::{FileLease, RootNamespaces, RootOwner};
 use serde_json::Value;
 use std::{
     io::{Read, Write},
@@ -73,6 +73,51 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
         let executable = installed["executable"].as_str().unwrap();
         assert_eq!(installed["rootId"], fixture.root_id);
         assert_eq!(installed["configRevision"], 1);
+        {
+            let executor = FileLease::acquire(&directory.join("executor.lock")).unwrap();
+            assert_eq!(query("status")["operation"], "in_progress");
+            let blocked = Command::new(executable)
+                .args([
+                    "host",
+                    "activate",
+                    "--root-id",
+                    &fixture.root_id,
+                    "--timeout-ms",
+                    "1000",
+                ])
+                .output()
+                .unwrap();
+            assert!(!blocked.status.success());
+            assert!(
+                String::from_utf8_lossy(&blocked.stderr)
+                    .contains("MAKA_HOST_ERROR {\"kind\":\"busy\"}")
+            );
+            executor.validate().unwrap();
+            assert_eq!(query("status")["deployment"], installed);
+        }
+        assert_eq!(query("status")["operation"], "idle");
+        {
+            // A live but unreachable writer is not a stale lock. The command
+            // must leave on its own deadline without taking over that Root.
+            let owner = RootOwner::open(&fixture.root, &namespaces).unwrap();
+            let started = Instant::now();
+            let waiting = Command::new(executable)
+                .args([
+                    "host",
+                    "activate",
+                    "--root-id",
+                    &fixture.root_id,
+                    "--timeout-ms",
+                    "100",
+                ])
+                .output()
+                .unwrap();
+            assert!(!waiting.status.success());
+            assert!(started.elapsed() < Duration::from_secs(3));
+            assert!(RootOwner::open(&fixture.root, &namespaces).is_err());
+            assert_eq!(query("status")["deployment"], installed);
+            drop(owner);
+        }
         // A fresh installation is offline/manual. A stale policy request and a
         // scheduled executor must not create intent, start Host, or access npm.
         assert_eq!(query("update-policy")["policy"], "manual");
@@ -490,10 +535,17 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
             })
             .to_string(),
         ]);
-        let changed = configure.output().unwrap();
-        assert!(changed.status.success(), "{changed:?}");
-        let changed: Value = serde_json::from_slice(&changed.stdout).unwrap();
-        assert_eq!(changed["kind"], "ready");
+        // The mutation commits but its reply is lost. Recovery must read the
+        // durable result; repeating the exact intent must not bump its revision.
+        let lost = configure.stdout(Stdio::null()).status().unwrap();
+        assert!(lost.success(), "{lost:?}");
+        let observed = query("status");
+        assert_eq!(observed["host"]["kind"], "connected");
+        assert!(observed["pendingUpdate"].is_null());
+        let changed = serde_json::json!({
+            "deployment": observed["deployment"],
+            "host": observed["host"]["identity"],
+        });
         assert_eq!(changed["deployment"]["configRevision"], 2);
         assert_eq!(changed["deployment"]["sha256"], reinstalled["sha256"]);
         assert_eq!(
@@ -502,7 +554,7 @@ fn managed_installation_pins_code_before_migration_and_preserves_live_authority(
                 {"label": "Projects", "path": projects.canonicalize().unwrap()}
             ])
         );
-        let repeated = configure.output().unwrap();
+        let repeated = configure.stdout(Stdio::piped()).output().unwrap();
         assert!(repeated.status.success(), "{repeated:?}");
         assert_eq!(
             serde_json::from_slice::<Value>(&repeated.stdout).unwrap()["deployment"],

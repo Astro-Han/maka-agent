@@ -214,6 +214,7 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
       }
     | undefined;
   let mainWindowShutdownSignal: AbortSignal | undefined;
+  const interactiveWindows = new WeakSet<Electron.WebContents>();
   const clearShowFallbackTimer = (): void => {
     if (showFallbackTimer) {
       clearTimeout(showFallbackTimer);
@@ -645,6 +646,10 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
     },
     notifyRendererReady(sender, senderFrame) {
       if (!mainWindow || mainWindow.isDestroyed() || sender !== mainWindow.webContents) return;
+      if (!interactiveWindows.has(sender)) {
+        interactiveWindows.add(sender);
+        console.info('[startup-metric]', { mainInteractiveMs: Math.round(process.uptime() * 1000) });
+      }
       const recovery = rendererRecoveryReadiness;
       if (recovery?.contents === sender) {
         // A failed attempt stays as a tombstone, and a retry accepts ready only

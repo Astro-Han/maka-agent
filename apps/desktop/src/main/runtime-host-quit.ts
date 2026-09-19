@@ -29,11 +29,14 @@ export interface RuntimeHostQuitPrompts {
 export async function prepareRuntimeHostQuit(
   owner: QuitOwner | undefined,
   prompts: RuntimeHostQuitPrompts,
+  signal?: AbortSignal,
 ): Promise<'ready' | 'cancelled'> {
   if (!owner) return 'ready';
   const result = await owner.prepareOwnedLocalHostQuit('refuse_active_work');
+  signal?.throwIfAborted();
   if (result === 'ready') return 'ready';
   if (!await prompts.confirmInterrupt()) return 'cancelled';
+  signal?.throwIfAborted();
   await owner.prepareOwnedLocalHostQuit('interrupt_active_work');
   return 'ready';
 }

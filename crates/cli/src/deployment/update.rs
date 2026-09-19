@@ -124,6 +124,13 @@ impl Expected {
     }
 
     async fn run(self, settings: Option<Settings>) -> Result<(), HostError> {
+        println!("{}", serde_json::to_string(&self.apply(settings).await?)?);
+        Ok(())
+    }
+
+    async fn apply(self, settings: Option<Settings>) -> Result<Outcome, HostError> {
+        crate::operation::check()?;
+        crate::operation::progress(crate::operation::Phase::Stage, None, None);
         let directory = directory(&self.root_id.0)?;
         if !directory.is_dir() {
             return Err("Host deployment is not installed".into());
@@ -200,14 +207,10 @@ impl Expected {
             let Some(owner) = retire(&current, self.expected_policy_revision.is_some()).await?
             else {
                 lease.validate()?;
-                println!(
-                    "{}",
-                    serde_json::to_string(&Outcome::ActiveTasks {
-                        deployment: current,
-                        target
-                    })?
-                );
-                return Ok(());
+                return Ok(Outcome::ActiveTasks {
+                    deployment: current,
+                    target,
+                });
             };
             let owner = Arc::new(owner);
             if current.mode == Mode::Supervised && target.mode == Mode::OnDemand {
@@ -225,23 +228,38 @@ impl Expected {
             // A scheduled updater must not parent an on-demand Host: systemd
             // would reap it with the updater's cgroup. Attached clients reconnect
             // through their ordinary launcher; a sleeping Host stays asleep.
-            println!(
-                "{}",
-                serde_json::to_string(&Outcome::Applied { deployment })?
-            );
-            return Ok(());
+            return Ok(Outcome::Applied { deployment });
         }
         // The executor is already held. Calling the public activate command here
         // would acquire it twice. A Ready failure never restores older code.
+        crate::operation::check()?;
+        crate::operation::progress(crate::operation::Phase::Activate, None, None);
         let (client, host) = activation::connect_or_launch(&deployment, lease.clone()).await?;
         lease.validate()?;
-        println!(
-            "{}",
-            serde_json::to_string(&Outcome::Ready { deployment, host })?
-        );
         drop(client);
-        Ok(())
+        Ok(Outcome::Ready { deployment, host })
     }
+}
+
+/// Reopening observes the existing intent; it never prepares a second update.
+/// The executor and revision checks in `apply` close races with another CLI.
+pub(super) async fn recover_pending(root_id: &RootId) -> Result<(), HostError> {
+    let directory = directory(&root_id.0)?;
+    let store::Installation::Installed(current) = store::read(&directory).await? else {
+        return Ok(());
+    };
+    if super::query::pending(&directory, &current).await?.is_none() {
+        return Ok(());
+    }
+    Expected {
+        root_id: RootId(current.root_id.clone()),
+        expected_deployment_id: current.deployment_id,
+        expected_revision: current.config_revision,
+        expected_policy_revision: None,
+    }
+    .apply(None)
+    .await?;
+    Ok(())
 }
 
 /// A prepared receipt is not proof of release: only acquiring RootOwner is.
@@ -249,36 +267,41 @@ pub(super) async fn retire(
     deployment: &Deployment,
     allow_idle_connections: bool,
 ) -> Result<Option<RootOwner>, HostError> {
-    tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            match RootOwner::open(
-                &deployment.root_path,
-                &RootNamespaces::for_current_account()?,
-            ) {
-                Ok(owner) => {
-                    if owner.root_id() != deployment.root_id
-                        || owner.canonical_path() != deployment.root_path
-                    {
-                        return Err("State Root changed during retirement".into());
+    crate::operation::check()?;
+    crate::operation::progress(crate::operation::Phase::Retire, None, None);
+    tokio::time::timeout(
+        crate::operation::remaining(Duration::from_secs(30)),
+        async {
+            loop {
+                match RootOwner::open(
+                    &deployment.root_path,
+                    &RootNamespaces::for_current_account()?,
+                ) {
+                    Ok(owner) => {
+                        if owner.root_id() != deployment.root_id
+                            || owner.canonical_path() != deployment.root_path
+                        {
+                            return Err("State Root changed during retirement".into());
+                        }
+                        return Ok(Some(owner));
                     }
-                    return Ok(Some(owner));
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(error) => return Err(error.into()),
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(error) => return Err(error.into()),
-            }
-            if let Ok(mut client) =
-                HostClient::connect(&deployment.root_path, Some(&deployment.generation())).await
-            {
-                match client
-                    .retire(None, false, None, allow_idle_connections)
-                    .await?
+                if let Ok(mut client) =
+                    HostClient::connect(&deployment.root_path, Some(&deployment.generation())).await
                 {
-                    RetirementResult::ActiveTasks => return Ok(None),
-                    RetirementResult::Prepared { .. } => {}
+                    match client
+                        .retire(None, false, None, allow_idle_connections)
+                        .await?
+                    {
+                        RetirementResult::ActiveTasks => return Ok(None),
+                        RetirementResult::Prepared { .. } => {}
+                    }
                 }
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
+        },
+    )
     .await?
 }

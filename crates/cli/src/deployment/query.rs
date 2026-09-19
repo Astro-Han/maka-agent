@@ -54,6 +54,15 @@ struct Installed {
     pending_update: Option<Deployment>,
     supervisor: service::Observation,
     host: HostObservation,
+    operation: OperationState,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum OperationState {
+    Idle,
+    InProgress,
+    Unknown,
 }
 
 #[derive(Serialize)]
@@ -124,6 +133,13 @@ async fn observe(id: &RootId) -> Result<Observation, HostError> {
                 _ => return Err("deployment changed during observation; query again".into()),
             }
             Observation::Installed(Box::new(Installed {
+                operation: match maka_event_log::root::FileLease::is_held(
+                    &directory.join("executor.lock"),
+                ) {
+                    Ok(true) => OperationState::InProgress,
+                    Ok(false) => OperationState::Idle,
+                    Err(_) => OperationState::Unknown,
+                },
                 deployment,
                 pending_update,
                 supervisor,

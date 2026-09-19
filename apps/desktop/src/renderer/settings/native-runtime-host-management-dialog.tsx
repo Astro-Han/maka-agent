@@ -27,6 +27,7 @@ import type {
   NativeRuntimeHostManagementRequest,
   NativeRuntimeHostManagementResult,
   NativeRuntimeHostSettings,
+  NativeHostProgress,
 } from '../../shared/native-runtime-host-management.js';
 import { getSettingsProjectsCopy } from '../locales/settings-projects-copy.js';
 import { RuntimeHostProjectDirectoryEditor } from './runtime-host-project-directory-editor.js';
@@ -81,37 +82,53 @@ export function NativeRuntimeHostManagementDialog(props: {
   const [result, setResult] = useState<NativeRuntimeHostManagementResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [progress, setProgress] = useState<NativeHostProgress>();
+  useEffect(() => window.maka.runtimeHostManagement.onNativeProgress(props.target.id, setProgress), [props.target.id]);
+  const phaseLabels: Record<NativeHostProgress['phase'], string> = {
+    status: zh ? '查询状态' : 'Checking status',
+    download: zh ? '下载' : 'Downloading', verify: zh ? '校验' : 'Verifying',
+    stage: zh ? '暂存' : 'Staging', retire: zh ? '等待退休' : 'Retiring',
+    activate: zh ? '激活' : 'Activating', cleanup: zh ? '清理' : 'Cleaning up',
+    confirming: zh ? '确认持久状态' : 'Confirming durable state',
+    confirmation_pending: zh ? '结果待确认' : 'Confirmation pending',
+  };
   const [confirmUninstall, setConfirmUninstall] = useState<NativeRuntimeHostExpected>();
   const [edit, setEdit] = useState<{
     expected: NativeRuntimeHostExpected;
     settings: NativeRuntimeHostSettings;
   }>();
-  const alive = useRef(true);
+  const generation = useRef(0);
   useEffect(() => {
-    alive.current = true;
+    const ticket = ++generation.current;
+    setResult(undefined);
+    setBusy(false);
+    setError(undefined);
+    setEdit(undefined);
     void window.maka.runtimeHostManagement.runNative({ action: 'status' }, props.target.id).then((value) => {
-      if (alive.current && value) setResult(value);
-    }, (cause: unknown) => { if (alive.current) setError(String(cause)); });
-    return () => { alive.current = false; };
+      if (ticket === generation.current && value) setResult(value);
+    }, (cause: unknown) => { if (ticket === generation.current) setError(String(cause)); });
+    return () => { generation.current++; };
   }, [props.target.id]);
 
   async function run(request: NativeRuntimeHostManagementRequest) {
+    const ticket = generation.current;
     setBusy(true);
+    setProgress(undefined);
     setError(undefined);
     try {
       const value = await window.maka.runtimeHostManagement.runNative(request, props.target.id);
-      if (!alive.current) return;
+      if (ticket !== generation.current) return;
       if (!value) throw new Error('Native Host management is unavailable');
       setResult(value);
       if (request.action !== 'status' && request.action !== 'logs' &&
-        value.outcome?.kind !== 'active_tasks') {
+        value.outcome?.kind !== 'active_tasks' && !value.confirmationPending) {
         setEdit(undefined);
         setConfirmUninstall(undefined);
       }
     } catch (cause) {
-      if (alive.current) setError(`${copy.unknown} ${String(cause)}`);
+      if (ticket === generation.current) setError(String(cause));
     } finally {
-      if (alive.current) setBusy(false);
+      if (ticket === generation.current) setBusy(false);
     }
   }
   const status = result?.status;
@@ -126,13 +143,18 @@ export function NativeRuntimeHostManagementDialog(props: {
     <Button variant="secondary" size="sm" label={label} isDisabled={busy} onClick={() => void run(request)} />
   );
   return (
-    <Dialog isOpen onOpenChange={(open) => { if (!open && !busy) props.onClose(); }}
+    <Dialog isOpen onOpenChange={(open) => { if (!open) props.onClose(); }}
       purpose="form" width={640} maxHeight="calc(100dvh - 64px)">
       <Layout header={<DialogHeader title={copy.title}
-        onOpenChange={(open) => { if (!open && !busy) props.onClose(); }} />}
+        onOpenChange={(open) => { if (!open) props.onClose(); }} />}
         content={<LayoutContent padding={4}>
           <div className="settingsRuntimeHostManagement">
             {error ? <Banner status="error" title={error} /> : null}
+            {busy ? <p role="status">{zh ? '操作进行中。可以关闭此窗口；关闭不会取消或回滚后台操作。' : 'Operation in progress. You can close this window; closing does not cancel or roll back the operation.'}</p> : null}
+            {progress ? <p role="status">{phaseLabels[progress.phase]}
+              {progress.completed === undefined ? '' : ` · ${progress.completed.toLocaleString()} / ${progress.total?.toLocaleString() ?? '?'} bytes`}
+            </p> : null}
+            {result?.confirmationPending ? <Banner status="warning" title={`${copy.unknown} ${result.confirmationPending}`} /> : null}
             {result?.schedulingError ? <Banner status="warning" title={copy.policySaved + result.schedulingError} /> : null}
             {result?.updatePolicy?.lastError ? <Banner status="warning" title={result.updatePolicy.lastError} /> : null}
             {result?.outcome?.kind === 'active_tasks' ? <Banner status="warning" title={copy.busy} /> : null}
@@ -145,6 +167,8 @@ export function NativeRuntimeHostManagementDialog(props: {
                 {' · r'}{status.deployment.configRevision}</p>
               <p><code>{status.deployment.rootPath}</code></p>
               {status.host.kind === 'unavailable' ? <p>{status.host.message}</p> : null}
+              {status.operation === 'in_progress' ? <p>{zh ? '部署操作仍在进行，不代表 Host 卡死。可刷新确认或关闭窗口。' : 'A deployment operation is still running. This does not mean Host is stuck. Refresh to confirm or close this window.'}</p> : null}
+              {status.operation === 'unknown' ? <p>{copy.unknown}</p> : null}
               {status.supervisor.kind === 'unavailable' ? <Banner status="warning" title={status.supervisor.message} /> : null}
               {status.deployment.admission === 'revoked' &&
                 (status.supervisor.kind === 'present' || status.supervisor.kind === 'unavailable')

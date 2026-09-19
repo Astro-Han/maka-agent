@@ -577,6 +577,7 @@ export function registerDesktopSessionLocalIpc(deps: {
     'session-local:submit',
     async (event, scope: unknown, sessionId: string, placement: unknown, value: unknown) => {
       const target = service.target(scope);
+      if (!target.client || !target.submit) throw new Error('Host is not ready; keep the draft and send again after connecting');
       requiredId(sessionId);
       if (placement !== 'current_turn' && placement !== 'next_turn')
         throw new Error('Invalid message placement');
@@ -622,7 +623,9 @@ export function registerDesktopSessionLocalIpc(deps: {
         throw error;
       }
       // Revalidate authority after asynchronous file reads and native resizing.
-      if (service.target(scope).partition !== target.partition)
+      const current = service.target(scope);
+      if (!current.client || !current.submit) throw new Error('Host disconnected while preparing the message; the draft was not queued');
+      if (current.partition !== target.partition)
         throw new Error('Host authority changed while saving the message');
       const displayText = command.displayText ?? command.text;
       const inlineReferences = mergeWorkspaceFileInlineReferences({

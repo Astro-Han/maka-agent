@@ -20,6 +20,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, open, readFile, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 import {
   createClientRuntimeHostCredentialStore,
   createClientRuntimeHostProfileCatalog,
@@ -326,12 +327,18 @@ export function createDesktopRuntimeHostProfileService(input: {
   let mutationTail = Promise.resolve();
 
   const mutate = <T>(operation: () => Promise<T>): Promise<T> => {
-    const pending = mutationTail.then(operation);
+    const budget = new NativeHostBudget(180_000);
+    const pending = mutationTail.then(() => {
+      budget.remaining('Host profile admission');
+      return operation();
+    });
     mutationTail = pending.then(
       () => undefined,
       () => undefined,
     );
-    return pending;
+    // Keep serialization until accepted work actually settles, not merely
+    // until its observer times out. Expired queued work is never started.
+    return budget.wait(pending, 'Host profile change');
   };
 
   const assertPreferencesWritable = (): void => {
@@ -783,7 +790,8 @@ export function createDesktopRuntimeHostProfileService(input: {
   };
 
   return {
-    getSnapshot: () => mutate(snapshot),
+    // Availability must remain observable during a connection or pairing.
+    getSnapshot: () => new NativeHostBudget(15_000).wait(snapshot(), 'Host profile status'),
     addAndEnable(value) {
       requireSaveInput(value);
       return mutateProfiles(async () => {
@@ -1269,6 +1277,7 @@ export function createDesktopRuntimeHostProfileService(input: {
       return mutateProfiles(async () => {
         if (profileId === LOCAL_RUNTIME_HOST_PROFILE.id) {
           if (!isEnabled) throw new Error("Local Runtime Host cannot be disabled");
+          await input.enable({ profile: LOCAL_RUNTIME_HOST_PROFILE }, 'batch');
           return snapshot();
         }
         if (isEnabled) {

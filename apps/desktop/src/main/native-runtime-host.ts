@@ -17,9 +17,8 @@
  * under the License.
  */
 
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { promisify } from 'node:util';
 import {
   connectOrSpawnRuntimeHostWithDependencies,
   createRuntimeHostCandidateLaunchBarrierWithDependencies,
@@ -27,8 +26,9 @@ import {
   type RuntimeHostCandidateLaunchBarrierDependencies,
 } from '@maka/runtime-host/client';
 import { createNativeRuntimeHostDeploymentConnector } from './native-runtime-host-deployment.js';
+import { runNativeRuntimeHostCommand } from './native-runtime-host-command.js';
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 
-const run = promisify(execFile);
 type Launch = RuntimeHostCandidateLaunchBarrierDependencies['launchCandidate'];
 type Exit = {
   code: number | null;
@@ -41,18 +41,15 @@ export async function initializeNativeRuntimeHost(
   executable: string,
   rootPath: string,
   signal?: AbortSignal,
+  budget = new NativeHostBudget(20_000, signal),
 ): Promise<void> {
-  await run(executable, ['host', 'init', '--root', rootPath], {
-    maxBuffer: 4096,
-    timeout: 20_000,
-    windowsHide: true,
-    signal,
-  });
+  await runNativeRuntimeHostCommand({ kind: 'local', executable }, ['init', '--root', rootPath], false, budget);
 }
 
 /** Only the process launcher changes; discovery, election and client protocol stay shared. */
 export function createNativeRuntimeHostCandidateLaunchBarrier(
   executable: string,
+  initialize?: (budget: NativeHostBudget) => Promise<unknown>,
 ): RuntimeHostCandidateLaunchBarrier {
   const candidates = createRuntimeHostCandidateLaunchBarrierWithDependencies({
     retireTimeoutMs: 1000,
@@ -71,17 +68,19 @@ export function createNativeRuntimeHostCandidateLaunchBarrier(
   const activations = new Map<string, Promise<string>>();
   const connect = createNativeRuntimeHostDeploymentConnector({
     executable,
+    initialize,
     connectUnmanaged: (input) => candidates.connect(input),
-    activate(rootId) {
+    activate(rootId, budget) {
       if (!launchesAllowed) throw new Error('Native Host launches are paused');
       const existing = activations.get(rootId);
       if (existing) return existing;
-      const activation = run(executable, ['host', 'activate', '--root-id', rootId, '--framed'], {
-        maxBuffer: 32 * 1024,
-        windowsHide: true,
-      }).then(({ stdout }) => stdout);
+      const activation = runNativeRuntimeHostCommand(
+        { kind: 'local', executable }, ['activate', '--root-id', rootId, '--framed'], false, budget,
+      );
       activations.set(rootId, activation);
-      void activation.finally(() => activations.delete(rootId)).catch(() => undefined);
+      void activation.finally(() => {
+        if (activations.get(rootId) === activation) activations.delete(rootId);
+      }).catch(() => undefined);
       return activation;
     },
   });
@@ -96,8 +95,9 @@ export function createNativeRuntimeHostCandidateLaunchBarrier(
     },
     async retireExcept(protectedPid) {
       if (launchesAllowed) throw new Error('Native Host launches must be paused before retirement');
-      await Promise.allSettled(activations.values());
-      await candidates.retireExcept(protectedPid);
+      const budget = new NativeHostBudget(5_000);
+      await budget.wait(Promise.allSettled(activations.values()), 'activation settlement');
+      await budget.wait(candidates.retireExcept(protectedPid), 'candidate retirement');
     },
     resume() {
       if (released) return;

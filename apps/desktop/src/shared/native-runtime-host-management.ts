@@ -26,6 +26,12 @@ import {
 } from './native-runtime-host-deployment.js';
 
 const expected = deployment.pick({ deploymentId: true, configRevision: true });
+export const nativeHostProgressSchema = z.object({
+  phase: z.enum(['status', 'download', 'verify', 'stage', 'retire', 'activate', 'cleanup', 'confirming', 'confirmation_pending']),
+  completed: z.number().int().nonnegative().safe().optional(),
+  total: z.number().int().nonnegative().safe().optional(),
+}).strict();
+export type NativeHostProgress = z.infer<typeof nativeHostProgressSchema>;
 const policy = z.enum(['manual', 'rust_preview']);
 export const nativeRuntimeHostUpdatePolicySchema = z.object({
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
@@ -92,6 +98,8 @@ export type NativeRuntimeHostExpected = z.infer<typeof expected>;
 export type NativeRuntimeHostSettings = z.infer<typeof settings>;
 
 export interface NativeRuntimeHostManagementResult {
+  /** Observation failed; this is neither cancellation nor rollback. */
+  readonly confirmationPending?: string;
   readonly status: NativeRuntimeHostDeploymentStatus;
   readonly outcome?: NativeRuntimeHostMutation | { readonly kind: 'active_tasks' };
   readonly logs?: NativeRuntimeHostLogs;

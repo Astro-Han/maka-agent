@@ -49,6 +49,21 @@ maka host status --root /absolute/path/to/new-root
 maka host retire --root /absolute/path/to/new-root
 ```
 
+Desktop opens its navigation and draft editor before Host readiness. An unavailable
+Host does not exit the app: retry, switch Host, copy diagnostics, or quit. Draft text
+is stored by Desktop, never in a send queue; an offline send is rejected and retains
+the draft. Startup reports `mainInteractiveMs` and `hostReadyMs` separately.
+
+Finite CLI commands accept `--timeout-ms` (1–600000): status/logs default to 15 seconds,
+other operations to 180 seconds. Desktop recovery has one 45-second budget and at most
+five attempts; quit has one 8-second budget including cleanup. Substeps use the remaining
+budget. Download progress reports bytes; unchanged heartbeats do not reset stall detection.
+Timeout ends observation, not accepted work or its locks. A one-shot command
+worker may finish afterward; it is not a resident controller. An unconfirmed result must
+be checked with `host status` before retrying. `operation: in_progress` denotes an executor
+lease, independently of normal Host activity. Pending updates are reconciled from their
+saved target; uncertain owners are never killed and locks are never deleted for recovery.
+
 Use `target/debug/maka` if the binary is not on PATH. Local transport is a Unix
 socket on Linux/macOS or a private named pipe on Windows. An optional
 `--websocket 127.0.0.1:0` listener requires authentication; TLS is not implemented.

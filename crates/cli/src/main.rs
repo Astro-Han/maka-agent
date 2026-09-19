@@ -26,6 +26,7 @@ mod deployment;
 mod distribution;
 mod endpoint;
 mod host_client;
+mod operation;
 mod serve;
 mod signals;
 mod stdio;

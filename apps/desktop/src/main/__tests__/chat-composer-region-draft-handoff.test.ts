@@ -22,7 +22,7 @@ import { afterEach, test } from 'node:test';
 import { act, createElement, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
-import { AstryxLocaleProvider, type ComposerHandle, LocaleProvider } from '@maka/ui';
+import { AstryxLocaleProvider, type ComposerHandle, LocaleProvider, ToastProvider } from '@maka/ui';
 import { ChatComposerRegion } from '../../renderer/chat-composer-region.js';
 import {
   markNewTaskReloadIntent,
@@ -39,7 +39,7 @@ const originalGlobals = {
   Element: globalThis.Element,
   Event: globalThis.Event,
   Node: globalThis.Node,
-  sessionStorage: globalThis.sessionStorage,
+  localStorage: globalThis.localStorage,
   matchMedia: globalThis.matchMedia,
   requestAnimationFrame: globalThis.requestAnimationFrame,
   cancelAnimationFrame: globalThis.cancelAnimationFrame,
@@ -105,7 +105,7 @@ async function mountRegion(): Promise<{
     Element: window.Element,
     Event: window.Event,
     Node: window.Node,
-    sessionStorage: {
+    localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => storage.set(key, value),
       removeItem: (key: string) => storage.delete(key),
@@ -133,7 +133,7 @@ async function mountRegion(): Promise<{
           {
             locale: 'en',
             children: createElement(AstryxLocaleProvider, {
-              children: createElement(ChatComposerRegion, {
+              children: createElement(ToastProvider, { children: createElement(ChatComposerRegion, {
               composerRef: composer,
               onOpenContextUsage: () => undefined,
               directoryComposerProps: {},
@@ -154,7 +154,7 @@ async function mountRegion(): Promise<{
               stop: () => {},
               onSend: () => {},
               onStop: () => {},
-            }),
+            }) }),
             }),
           },
         ),

@@ -35,6 +35,21 @@ pub struct FileLease {
 }
 
 impl FileLease {
+    /// Observe an existing executor lease without creating or deleting its file.
+    /// This is a point-in-time hint, never permission to steal an authority.
+    pub fn is_held(path: &Path) -> io::Result<bool> {
+        let file = open_regular(path, false)?;
+        match file.try_lock().map_err(io::Error::from) {
+            Ok(()) => {
+                let result = stable(&file, path);
+                file.unlock()?;
+                result.map(|()| false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(true),
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn acquire(path: &Path) -> io::Result<Self> {
         let file = open_regular(path, true)?;
         file.try_lock().map_err(io::Error::from)?;

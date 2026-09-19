@@ -61,7 +61,7 @@ pub(crate) struct Configure {
 
 impl Configure {
     pub async fn run(self) -> Result<(), HostError> {
-        arm_deadline()?;
+        crate::operation::check()?;
         let directory = directory(&self.root_id.0)?;
         let store::Installation::Installed(current) = store::read(&directory).await? else {
             return Err("Host deployment is absent or incomplete".into());
@@ -152,17 +152,4 @@ pub(super) fn now_ms() -> Result<i64, HostError> {
         .duration_since(std::time::UNIX_EPOCH)?
         .as_millis()
         .try_into()?)
-}
-
-/// A one-shot maintenance process must not retain the executor forever if an
-/// OS service manager or a blocking database task stops responding. Recovery
-/// reads committed authority; this exit makes no rollback promise.
-fn arm_deadline() -> Result<(), HostError> {
-    std::thread::Builder::new()
-        .name("update-deadline".into())
-        .spawn(|| {
-            std::thread::sleep(std::time::Duration::from_secs(600));
-            std::process::exit(70);
-        })?;
-    Ok(())
 }

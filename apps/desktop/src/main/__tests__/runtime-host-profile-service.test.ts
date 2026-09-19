@@ -1765,6 +1765,29 @@ test("disabling a startup compatibility handoff releases Host settings and permi
   }
 });
 
+test('Host choices remain observable while a connection mutation is waiting', { timeout: 2_000 }, async () => {
+  const root = await clientRoot();
+  const started = deferred<void>();
+  const finish = deferred<void>();
+  const service = createDesktopRuntimeHostProfileService({
+    clientDataRoot: root,
+    startup: await resolveDesktopRuntimeHostStartup(root),
+    states: () => [connectingLocal()],
+    enable: async () => { started.resolve(); await finish.promise; },
+    disable: async () => {},
+    setDefault: () => {},
+    finalizePairing: async () => {},
+  });
+  const retry = service.setEnabled('local', true);
+  try {
+    await started.promise;
+    assert.equal((await service.getSnapshot()).entries[0]?.readiness, 'connecting');
+  } finally {
+    finish.resolve();
+    await retry;
+  }
+});
+
 test("keeps enablement, default selection, and removal as separate states", async () => {
   const root = await clientRoot();
   await createClientRuntimeHostProfileCatalog(root).create(PROFILE, "token");

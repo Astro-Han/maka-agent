@@ -30,6 +30,11 @@ use crate::{candidate, code, serve};
 #[derive(Parser)]
 #[command(name = "maka", version, about = "Maka")]
 pub(super) struct Cli {
+    /// Total observation budget for a finite Host operation, including cleanup.
+    #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=600_000))]
+    timeout_ms: Option<u64>,
+    #[arg(long, hide = true)]
+    operation_worker: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -131,6 +136,38 @@ impl Cli {
     }
 
     pub(super) async fn run(self) -> Result<(), HostError> {
+        let finite = matches!(&self.command, Command::Host(command) if !matches!(command,
+            HostCommand::Candidate(_) | HostCommand::Serve { .. } | HostCommand::ServiceRun(_)
+            | HostCommand::Connect(_)));
+        if finite {
+            let default = if matches!(
+                &self.command,
+                Command::Host(HostCommand::Status(_) | HostCommand::Logs(_))
+            ) {
+                15_000
+            } else {
+                180_000
+            };
+            let timeout = std::time::Duration::from_millis(self.timeout_ms.unwrap_or(default));
+            if !self.operation_worker {
+                return crate::operation::observe(timeout).await;
+            }
+            let result = crate::operation::scope(timeout, self.execute()).await;
+            if let Err(error) = &result
+                && error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::WouldBlock)
+            {
+                // The executor did not admit this operation. Retrying must
+                // still re-read deployment authority, never remove its lock.
+                eprintln!("MAKA_HOST_ERROR {{\"kind\":\"busy\"}}");
+            }
+            return result;
+        }
+        self.execute().await
+    }
+
+    async fn execute(self) -> Result<(), HostError> {
         match self.command {
             Command::Host(HostCommand::Fetch(args)) => args.run().await,
             Command::Host(HostCommand::Access(args)) => args.run().await,

@@ -521,6 +521,32 @@ test('an unreachable Host never blocks quit', async () => {
   await owner.close();
 });
 
+test('a non-returning launcher cannot hold startup or shutdown; a late connection is closed', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const launch = deferred<DesktopRuntimeHostCandidateStartResult>();
+  const unavailable = deferred<void>();
+  const late = candidateHarness();
+  const owner = await startRuntimeHostDesktopManager({} as DesktopRuntimeHostCandidateStartInput, {
+    background: true,
+    startCandidate: () => launch.promise,
+    onTargetStateChanged: (state) => {
+      if (state.readiness === 'unavailable') unavailable.resolve();
+    },
+  });
+  assert.equal(owner.entries()[0]?.readiness, 'connecting');
+  t.mock.timers.tick(45_000);
+  await unavailable.promise;
+  assert.equal(owner.entries()[0]?.readiness, 'unavailable');
+  const closing = owner.close();
+  const ended = assert.rejects(closing, /cleanup.*deadline/);
+  t.mock.timers.tick(5_000);
+  await ended;
+  launch.resolve(ready(late.candidate));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(late.closeCalls, 1);
+  assert.notEqual(owner.current('local')?.readiness, 'ready');
+});
+
 test('replacement still waits for process exit after quit has prepared retirement', async () => {
   const current = candidateHarness({ disconnectOnPrepare: true });
   const exit = deferred<void>();
@@ -1389,6 +1415,7 @@ test('waits for an in-flight remote enable before closing', async () => {
   );
 
   const enabling = manager.enable(remoteTarget('office'));
+  const rejected = assert.rejects(enabling, /manager is closed/);
   await new Promise<void>((resolve) => setImmediate(resolve));
   let closed = false;
   const closing = manager.close().then(() => {
@@ -1397,7 +1424,7 @@ test('waits for an in-flight remote enable before closing', async () => {
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(closed, false);
   releaseRemote();
-  await assert.rejects(enabling, /manager is closed/);
+  await rejected;
   await closing;
   assert.equal(remote.closeCalls, 1);
 });
@@ -1410,18 +1437,18 @@ test('keeps Local explicitly usable without routing default work away from an un
     {} as DesktopRuntimeHostCandidateStartInput,
     {
       startCandidate: async () =>
-        starts++ === 0 ? ready(local.candidate) : { kind: 'failed', reason: 'host_unresponsive' },
+        starts++ === 0 ? ready(local.candidate) : { kind: 'failed', reason: 'internal_startup_failure' },
       onTargetRemoved: (state) => {
         removedDefaults.push(manager.defaultProfileId() === state.target.profile.id);
       },
     },
   );
 
-  await assert.rejects(manager.enable(remoteTarget('offline')), /did not become ready/);
+  await assert.rejects(manager.enable(remoteTarget('offline')), /failed while recovering/);
   manager.setDefaultProfile('offline');
   await assert.rejects(
     manager.handleBotIncomingMessage({ text: 'default' } as BotIncomingMessage),
-    /did not become ready/,
+    /failed while recovering/,
   );
 
   assert.equal(local.botMessages, 0);
@@ -1530,11 +1557,11 @@ test('repeated offline Guest failures preserve Local readiness without rebroadca
   const initialPublications = guestErrors.length;
   const initialWarnings = logCount();
   assert.equal(initialWarnings, 1);
-  for (let retry = 0; retry < 3; retry++) {
+  for (let retry = 0; retry < 1; retry++) {
     manager.wakePeerRecovery('offline-guest');
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  assert.ok(attempts >= 4, 'retries remain live');
+  assert.ok(attempts >= 2, 'known transient errors retry');
   assert.equal(guestErrors.length, initialPublications, 'identical errors are not Host transitions');
   assert.equal(logCount(), initialWarnings, 'an offline error is logged once');
   assert.equal(manager.defaultProfileId(), 'local');
@@ -1549,32 +1576,20 @@ test('repeated offline Guest failures preserve Local readiness without rebroadca
     manager.wakePeerRecovery('offline-guest');
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  assert.equal(logCount(), initialWarnings, 'changing dial errors do not append logs during one outage');
+  assert.equal(attempts, 5, 'one outage has at most five attempts');
   const diagnostic = manager.entries().find((state) => state.target.profile.id === 'offline-guest');
-  assert.equal(diagnostic?.reconnect?.failures, attempts, 'diagnostics retain every failed attempt');
+  assert.equal(diagnostic?.readiness, 'unavailable');
   assert.ok(diagnostic?.reconnect);
   assert.ok(diagnostic.reconnect.lastFailureAt >= diagnostic.reconnect.firstFailureAt);
   recovered = true;
-  manager.wakePeerRecovery('offline-guest');
+  await manager.mountGuest(peerTarget('offline-guest', 'session_guest'), () => {});
   await manager.waitUntilReady('offline-guest');
   assert.equal(manager.current('offline-guest')?.candidate, remote.candidate);
   assert.equal(manager.current('local')?.candidate, local.candidate);
-  assert.equal(logCount(), initialWarnings + 1, 'recovery logs one summary');
-  assert.equal(info.mock.calls.at(-1)?.arguments[1]?.failedAttempts, attempts - 1);
   assert.equal(
     manager.entries().find((state) => state.target.profile.id === 'offline-guest')?.reconnect,
     undefined,
     'a recovered target no longer has pending failures',
-  );
-  recovered = false;
-  remote.disconnect();
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  manager.wakePeerRecovery('offline-guest');
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(logCount(), initialWarnings + 2, 'a later outage is reported again');
-  assert.equal(
-    manager.entries().find((state) => state.target.profile.id === 'offline-guest')?.reconnect?.failures,
-    1,
   );
 });
 
@@ -1590,7 +1605,7 @@ test('marks a retrying Direct target unavailable on permanent failure', async ()
       startCandidate: async () => {
         starts += 1;
         if (starts === 1) return ready(local.candidate);
-        if (starts === 2) throw new Error('route is temporarily unavailable');
+        if (starts === 2) throw new RuntimeHostPeerError('coordination_unavailable', 'route is temporarily unavailable');
         throw permanent;
       },
       onFatalError: reportFatal,
@@ -1620,7 +1635,7 @@ test('keeps reconnecting through transient startup failures until the Desktop ad
     startCandidate: async (): Promise<DesktopRuntimeHostCandidateStartResult> => {
       starts += 1;
       if (starts === 1) return ready(first.candidate);
-      if (starts === 2) return { kind: 'failed', reason: 'internal_startup_failure' };
+      if (starts === 2) return { kind: 'failed', reason: 'startup_timeout' };
       if (starts < 4) return { kind: 'failed', reason: 'host_unresponsive' };
       resolveRestored();
       return ready(replacement.candidate);

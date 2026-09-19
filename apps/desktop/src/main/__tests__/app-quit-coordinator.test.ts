@@ -22,6 +22,34 @@ import { describe, it } from 'node:test';
 import { createAppQuitCoordinator } from '../app-quit-coordinator.js';
 
 describe('app quit coordinator', () => {
+  it('leaves on one deadline even when preparation and cleanup never finish, without claiming cleanup', async () => {
+    const errors: unknown[] = [];
+    let signal: AbortSignal | undefined;
+    let cleanupCalls = 0;
+    let quitCalls = 0;
+    let prepared!: (value: 'ready') => void;
+    let exited!: () => void;
+    const exit = new Promise<void>((resolve) => { exited = resolve; });
+    const coordinator = createAppQuitCoordinator({
+      timeoutMs: 20,
+      prepareToQuit: (value) => { signal = value; return new Promise((resolve) => { prepared = resolve; }); },
+      cleanup: () => { cleanupCalls++; return new Promise(() => {}); },
+      focusOrCreateWindow: () => assert.fail('quit must not reopen the window'),
+      onPreparationError: (error) => errors.push(error),
+      onCleanupError: (error) => errors.push(error),
+      onWindowCreationError: assert.fail,
+      resumeQuit: () => { quitCalls++; exited(); },
+    });
+    coordinator.handleBeforeQuit({ preventDefault() {} });
+    await exit;
+    assert.equal(signal?.aborted, true);
+    assert.equal(cleanupCalls, 1);
+    assert.equal(errors.length, 2, 'neither preparation nor cleanup was confirmed');
+    prepared('ready');
+    await flushQuitCoordinator();
+    assert.equal(quitCalls, 1, 'late completion cannot begin another quit');
+  });
+
   it('keeps quit prevented until it resumes in a fresh event-loop turn', async () => {
     let resumeQuitCount = 0;
     let preventedCount = 0;

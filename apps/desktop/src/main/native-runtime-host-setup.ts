@@ -17,11 +17,9 @@
  * under the License.
  */
 
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { join, posix, win32 } from 'node:path';
-import { promisify } from 'node:util';
 import { z } from 'zod';
 import {
   isProductReleaseVersion,
@@ -32,8 +30,9 @@ import {
   nativeRuntimeHostIdentitySchema,
 } from '../shared/native-runtime-host-deployment.js';
 import type { RuntimeHostTargetIdentity } from './runtime-host-target.js';
+import { runNativeRuntimeHostCommand } from './native-runtime-host-command.js';
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 
-const run = promisify(execFile);
 
 /** The application version and the native package version have independent release channels. */
 export async function nativeRuntimeHostVersion(input: {
@@ -194,12 +193,14 @@ export async function resolveNativeRuntimeHostPackage(input: {
   /** Development only: cache directories previously populated by host fetch. */
   readonly sourceCache?: string;
   readonly signal?: AbortSignal;
+  readonly budget?: NativeHostBudget;
+  readonly onProgress?: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void;
 }): Promise<NativeRuntimeHostPackage> {
+  const budget = input.budget ?? new NativeHostBudget(180_000, input.signal);
   if (!isProductReleaseVersion(input.version))
     throw new Error('Native CLI requires an exact release version');
   const target = nativeRuntimeHostTarget(input.identity);
   const args = [
-    'host',
     'fetch',
     '--target',
     target,
@@ -210,20 +211,17 @@ export async function resolveNativeRuntimeHostPackage(input: {
   ];
   if (input.sourceCache) {
     const directory = join(input.sourceCache, `${target}@${input.version}`);
-    args.push('--directory', directory, '--receipt-sha256', await receiptDigest(directory));
+    args.push('--directory', directory, '--receipt-sha256', await budget.wait(receiptDigest(directory), 'source receipt'));
   }
-  const result = await run(input.executable, args, {
-    timeout: 190_000,
-    maxBuffer: 256 * 1024,
-    windowsHide: true,
-    signal: input.signal,
-  });
+  const result = await runNativeRuntimeHostCommand(
+    { kind: 'local', executable: input.executable }, args, false, budget, input.onProgress,
+  );
   const artifact = decodeNativeArtifact(
-    JSON.parse(result.stdout),
+    JSON.parse(result),
     { target, version: input.version },
     process.platform === 'win32' ? 'win32' : 'posix',
   );
-  return { artifact, receiptSha256: await receiptDigest(artifact.directory) };
+  return budget.wait(receiptDigest(artifact.directory).then((receiptSha256) => ({ artifact, receiptSha256 })), 'verify receipt');
 }
 
 async function receiptDigest(directory: string): Promise<string> {

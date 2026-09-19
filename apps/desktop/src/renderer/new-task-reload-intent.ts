@@ -29,16 +29,15 @@ export interface NewTaskReloadIntent {
 
 function rendererSessionStorage(): SessionStorageLike | undefined {
   try {
-    return typeof sessionStorage === 'undefined' ? undefined : sessionStorage;
+    return typeof localStorage === 'undefined' ? undefined : localStorage;
   } catch {
     return undefined;
   }
 }
 
 /**
- * A renderer-reload lease for the explicit empty new-task surface.
- * sessionStorage survives HMR/navigation reloads but not a new application
- * window, so ordinary cold-start history restoration remains unchanged.
+ * Desktop-local intent keeps an unfinished new task selected across restarts.
+ * It never authorizes submission to a Host.
  */
 export function hasNewTaskReloadIntent(
   storage: SessionStorageLike | undefined = rendererSessionStorage(),
@@ -91,19 +90,21 @@ export function writeNewTaskReloadDraft(
   draftKey: string,
   draft: string,
   storage: SessionStorageLike | undefined = rendererSessionStorage(),
-): void {
+): boolean {
   try {
+    if (!storage) return false;
     const intent = readNewTaskReloadIntent(storage);
-    if (!intent) return;
+    if (!intent && !draft) return true;
     const persistedKey = draftKey === UNRESOLVED_NEW_TASK_DRAFT_KEY
-      ? intent.draftKey ?? draftKey
+      ? intent?.draftKey ?? draftKey
       : draftKey;
-    storage?.setItem(
+    storage.setItem(
       NEW_TASK_RELOAD_INTENT_KEY,
       JSON.stringify({ draft, draftKey: persistedKey }),
     );
+    return true;
   } catch {
-    // Restricted renderer contexts may not expose web storage.
+    return false;
   }
 }
 

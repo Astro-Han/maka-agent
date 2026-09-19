@@ -37,6 +37,8 @@ import {
   type NativeRuntimeHostSettings,
 } from '../shared/native-runtime-host-management.js';
 import { nativeOperatorAt, runNativeRuntimeHostCommand, type NativeRuntimeHostOperator } from './native-runtime-host-command.js';
+import { NativeHostBudget, NativeHostWaitError } from './native-runtime-host-operation.js';
+import { NativeHostBusyError, NativeHostCommandUnconfirmedError } from './native-runtime-host-command.js';
 
 export interface NativeRuntimeHostChangeScope {
   /** Retain the pause for stop/uninstall, including an unconfirmed outcome. */
@@ -47,14 +49,28 @@ export interface NativeRuntimeHostChangeScope {
   resumeOnSettled(): void;
 }
 
-export function createNativeRuntimeHostManagement(input: {
+interface ManagementInput {
   readonly operator: NativeRuntimeHostOperator;
   readonly rootId: string;
   readonly rootPath?: string;
-  readonly prepareUpdate?: () => Promise<NativeRuntimeHostOperator>;
-  readonly change: <T>(run: (scope: NativeRuntimeHostChangeScope) => Promise<T>) => Promise<T>;
-}) {
-  const execute = (args: string[], readOnly = false) => runNativeRuntimeHostCommand(input.operator, args, readOnly);
+  readonly prepareUpdate?: (budget: NativeHostBudget) => Promise<NativeRuntimeHostOperator>;
+  readonly change: <T>(run: (scope: NativeRuntimeHostChangeScope) => Promise<T>, budget: NativeHostBudget) => Promise<T>;
+  readonly onProgress?: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void;
+}
+
+export function createNativeRuntimeHostManagement(input: ManagementInput) {
+  return {
+    run(value: unknown, sharedBudget?: NativeHostBudget): Promise<NativeRuntimeHostManagementResult> {
+      const request = nativeRuntimeHostManagementRequestSchema.parse(value);
+      const budget = sharedBudget ?? new NativeHostBudget(request.action === 'status' ? 15_000 : 180_000);
+      return budget.wait(createOperation(input, budget).run(request), request.action);
+    },
+  };
+}
+
+function createOperation(input: ManagementInput, budget: NativeHostBudget) {
+  const execute = (args: string[], readOnly = false) =>
+    runNativeRuntimeHostCommand(input.operator, args, readOnly, budget, input.onProgress);
   const rooted = (action: string) => [action, '--root-id', input.rootId];
   const read = async () => decodeNativeRuntimeHostDeploymentStatus(
     JSON.parse(await execute(rooted('status'), true)), input.rootId,
@@ -105,7 +121,7 @@ export function createNativeRuntimeHostManagement(input: {
       '--expected-deployment-id', current.deploymentId,
       '--expected-revision', String(current.configRevision),
       ...settingsArguments(settings),
-    ]);
+    ], false, budget, input.onProgress);
     const result = nativeRuntimeHostMutationSchema.parse(JSON.parse(raw));
     validateMutation(action, current, result);
     return result;
@@ -190,7 +206,7 @@ export function createNativeRuntimeHostManagement(input: {
         if (request.action === 'set_update_policy') args.push('--policy', request.policy === 'manual' ? 'manual' : 'rust-preview',
           '--expected-deployment-id', observed.deployment.deploymentId,
           '--expected-policy-revision', String(request.expectedPolicyRevision));
-        const value: unknown = JSON.parse(await runNativeRuntimeHostCommand(operator, args, request.action === 'update_policy'));
+        const value: unknown = JSON.parse(await runNativeRuntimeHostCommand(operator, args, request.action === 'update_policy', budget, input.onProgress));
         if (request.action === 'update_policy') return { status: await read(), updatePolicy: nativeRuntimeHostUpdatePolicySchema.parse(value) };
         const saved = z.object({ policy: nativeRuntimeHostUpdatePolicySchema, schedulingError: z.string().nullable() }).strict().parse(value);
         return { status: await read(), updatePolicy: saved.policy, ...(saved.schedulingError ? { schedulingError: saved.schedulingError } : {}) };
@@ -201,12 +217,40 @@ export function createNativeRuntimeHostManagement(input: {
       if (request.action === 'upgrade') {
         await requireCurrent(request.expected);
         if (!input.prepareUpdate) throw new Error('Native package updates are unavailable');
-        updateOperator = await input.prepareUpdate();
+        updateOperator = await budget.wait(input.prepareUpdate(budget), 'download and stage');
       }
       return input.change(async (scope) => {
-        const outcome = await change(request, scope, updateOperator);
-        return { status: await read(), outcome };
-      });
+        try {
+          budget.remaining('deployment change');
+          const outcome = await change(request, scope, updateOperator);
+          return { status: await read(), outcome };
+        } catch (error) {
+          if (!(error instanceof NativeHostWaitError || error instanceof NativeHostBusyError || error instanceof NativeHostCommandUnconfirmedError)) throw error;
+          // Never replay a mutation just because its reply was lost. The native
+          // record and pending target are the only recovery authority.
+          input.onProgress?.({ phase: 'confirming' });
+          try {
+            const status = await read();
+            if (status.kind === 'installed' && status.operation === 'idle') {
+              if (request.action === 'start' && status.host.kind === 'connected' && !status.deployment.admission) {
+                return { status, outcome: { kind: 'ready' as const, deployment: status.deployment, host: status.host.identity } };
+              }
+              if (request.action === 'reconcile' && status.pendingUpdate &&
+                status.deployment.deploymentId === request.expected.deploymentId &&
+                status.deployment.configRevision === request.expected.configRevision) {
+                // Continue exactly the durable target, never reconstruct a
+                // mutation from a lost response. Native CAS and leases recheck it.
+                const outcome = await mutate('reconcile', status.deployment, undefined,
+                  nativeOperatorAt(input.operator, status.pendingUpdate.executable));
+                return { status: await read(), outcome };
+              }
+            }
+            return { status, confirmationPending: error instanceof Error ? error.message : String(error) };
+          } catch {
+            throw error;
+          }
+        }
+      }, budget);
     },
   };
 }

@@ -40,7 +40,7 @@ const REGISTRY: &str = "https://registry.npmjs.org/";
 const MAX_ARCHIVE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_METADATA_BYTES: usize = 1024 * 1024;
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub(super) struct Fetch {
     /// Target OS and architecture, not the machine performing the download.
     #[arg(long, value_enum)]
@@ -94,14 +94,35 @@ pub(crate) struct Artifact {
 }
 
 impl Fetch {
+    async fn resolve_with_retry(
+        self,
+        client: Client,
+        registry: Url,
+    ) -> Result<Artifact, HostError> {
+        for attempt in 0..3 {
+            crate::operation::check()?;
+            match self.clone().resolve(client.clone(), registry.clone()).await {
+                Ok(artifact) => return Ok(artifact),
+                Err(error) if attempt < 2 && transient_download_error(&error) => {
+                    tokio::time::sleep(crate::operation::remaining(Duration::from_millis(
+                        250 << attempt,
+                    )))
+                    .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!()
+    }
+
     pub async fn run(self) -> Result<(), HostError> {
         let framed = self.framed;
         // Honor the CLI environment's HTTP(S)/ALL_PROXY and NO_PROXY. No npm,
         // lifecycle scripts, registry credentials, or running Host are involved.
         let client = client()?;
         let artifact = tokio::time::timeout(
-            Duration::from_secs(180),
-            self.resolve(client, Url::parse(REGISTRY)?),
+            crate::operation::remaining(Duration::from_secs(180)),
+            self.resolve_with_retry(client, Url::parse(REGISTRY)?),
         )
         .await
         .map_err(|_| "native package download timed out")??;
@@ -115,6 +136,9 @@ impl Fetch {
     }
 
     async fn resolve(self, client: Client, registry: Url) -> Result<Artifact, HostError> {
+        use crate::operation::{Phase, progress};
+        crate::operation::check()?;
+        progress(Phase::Verify, None, None);
         let target = self.target;
         let version = self.version.to_string();
         if let Some(integrity) = &self.integrity {
@@ -216,12 +240,18 @@ impl Fetch {
         }
 
         let url = registry.join(&format!("{name}/{version}"))?;
-        let mut response = client.get(url).send().await?.error_for_status()?;
+        progress(Phase::Download, Some(0), None);
+        let mut response = download_response(client.get(url)).await?;
         if !response.status().is_success() {
             return Err("native package registry redirect is not allowed".into());
         }
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await? {
+        while let Some(chunk) = tokio::time::timeout(
+            crate::operation::remaining(Duration::from_secs(15)),
+            response.chunk(),
+        )
+        .await??
+        {
             if bytes.len().saturating_add(chunk.len()) > MAX_METADATA_BYTES {
                 return Err("native package metadata exceeds the size limit".into());
             }
@@ -242,11 +272,7 @@ impl Fetch {
         {
             return Err("native package tarball must belong to the npm registry origin".into());
         }
-        let mut response = client
-            .get(package.dist.tarball)
-            .send()
-            .await?
-            .error_for_status()?;
+        let mut response = download_response(client.get(package.dist.tarball)).await?;
         if !response.status().is_success()
             || response
                 .content_length()
@@ -258,19 +284,34 @@ impl Fetch {
         let mut output = tokio::fs::File::from_std(temporary.reopen()?);
         let mut hash = Sha512::new();
         let mut size = 0_u64;
-        while let Some(chunk) = response.chunk().await? {
+        let total = response.content_length();
+        let mut reported = tokio::time::Instant::now();
+        progress(Phase::Download, Some(0), total);
+        while let Some(chunk) = tokio::time::timeout(
+            crate::operation::remaining(Duration::from_secs(15)),
+            response.chunk(),
+        )
+        .await??
+        {
             size += chunk.len() as u64;
             if size > MAX_ARCHIVE_BYTES {
                 return Err("native package archive exceeds the size limit".into());
             }
             hash.update(&chunk);
             output.write_all(&chunk).await?;
+            if reported.elapsed() >= Duration::from_millis(250) {
+                progress(Phase::Download, Some(size), total);
+                reported = tokio::time::Instant::now();
+            }
         }
         output.flush().await?;
         drop(output);
+        progress(Phase::Verify, Some(size), total);
         if hash.finalize().as_slice() != expected {
             return Err("native package archive integrity mismatch".into());
         }
+        crate::operation::check()?;
+        progress(Phase::Stage, None, None);
         tokio::task::spawn_blocking({
             let version = version.clone();
             let integrity = integrity.clone();
@@ -289,6 +330,28 @@ impl Fetch {
         .await??;
         Ok(artifact(destination, target, version, integrity))
     }
+}
+
+async fn download_response(
+    request: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, HostError> {
+    Ok(tokio::time::timeout(
+        crate::operation::remaining(Duration::from_secs(15)),
+        request.send(),
+    )
+    .await??
+    .error_for_status()?)
+}
+
+fn transient_download_error(error: &HostError) -> bool {
+    error.is::<tokio::time::error::Elapsed>()
+        || error.downcast_ref::<reqwest::Error>().is_some_and(|error| {
+            error.is_connect()
+                || error.is_timeout()
+                || error.status().is_some_and(|status| {
+                    matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504)
+                })
+        })
 }
 
 fn client() -> Result<Client, HostError> {
@@ -347,8 +410,8 @@ pub(crate) async fn fetch(version: Version) -> Result<Artifact, HostError> {
         framed: false,
     };
     tokio::time::timeout(
-        Duration::from_secs(180),
-        fetch.resolve(client()?, Url::parse(REGISTRY)?),
+        crate::operation::remaining(Duration::from_secs(180)),
+        fetch.resolve_with_retry(client()?, Url::parse(REGISTRY)?),
     )
     .await
     .map_err(|_| "native package download timed out")?
@@ -405,6 +468,36 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
     use std::io::Write;
     use tokio::{io::AsyncReadExt, net::TcpListener};
+
+    #[tokio::test]
+    async fn stalled_registry_exhausts_one_deadline_without_publishing_or_retrying_forever() {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let started = tokio::time::Instant::now();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut byte = [0; 1];
+            socket.read_exact(&mut byte).await.unwrap();
+            // Headers arrive, but the declared body never completes.
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 999\r\n\r\n{")
+                .await
+                .unwrap();
+            std::future::pending::<()>().await;
+        });
+        let result = crate::operation::scope(
+            Duration::from_millis(100),
+            request(Target::current().unwrap(), root.path())
+                .resolve_with_retry(client().unwrap(), origin),
+        )
+        .await;
+        server.abort();
+        let _ = server.await;
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(!root.path().join("receipt.json").exists());
+    }
 
     fn package(target: Target, extra: Option<&str>) -> Vec<u8> {
         let manifest = serde_json::json!({

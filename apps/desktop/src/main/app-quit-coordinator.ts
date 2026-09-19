@@ -17,6 +17,8 @@
  * under the License.
  */
 
+import { NativeHostBudget, NativeHostWaitError } from './native-runtime-host-operation.js';
+
 export interface AppQuitEvent {
   preventDefault(): void;
 }
@@ -27,7 +29,8 @@ export interface AppQuitCoordinator {
 }
 
 export interface AppQuitCoordinatorDeps {
-  prepareToQuit(): Promise<'ready' | 'cancelled'>;
+  prepareToQuit(signal: AbortSignal): Promise<'ready' | 'cancelled'>;
+  readonly timeoutMs?: number;
   cleanup(): Promise<void>;
   focusOrCreateWindow(signal: AbortSignal): void | Promise<void>;
   onPreparationError(error: unknown): void;
@@ -62,6 +65,8 @@ export function createAppQuitCoordinator(deps: AppQuitCoordinatorDeps): AppQuitC
       if (phase !== 'running') return;
       phase = 'preparing';
       windowCreationAbort.abort();
+      const quitAbort = new AbortController();
+      const budget = new NativeHostBudget(deps.timeoutMs ?? 8_000);
       const finishCleanup = () => {
         // `before-quit` was cancelled inside Electron's native quit transaction.
         // Resuming from the cleanup Promise's microtask re-enters that transaction:
@@ -74,7 +79,14 @@ export function createAppQuitCoordinator(deps: AppQuitCoordinatorDeps): AppQuitC
         });
       };
       void Promise.resolve()
-        .then(() => deps.prepareToQuit())
+        .then(() => budget.wait(deps.prepareToQuit(quitAbort.signal), 'quit preparation'))
+        .catch((error) => {
+          if (!(error instanceof NativeHostWaitError)) throw error;
+          quitAbort.abort(error);
+          deps.onPreparationError(error);
+          // Leaving Desktop does not authorize killing Host or releasing its lock.
+          return 'ready' as const;
+        })
         .then(
           (preparation) => {
             if (preparation === 'cancelled') {
@@ -85,7 +97,7 @@ export function createAppQuitCoordinator(deps: AppQuitCoordinatorDeps): AppQuitC
             }
             phase = 'cleaning';
             return Promise.resolve()
-              .then(() => deps.cleanup())
+              .then(() => budget.wait(deps.cleanup(), 'quit cleanup'))
               .then(finishCleanup, (error) => {
                 deps.onCleanupError(error);
                 finishCleanup();

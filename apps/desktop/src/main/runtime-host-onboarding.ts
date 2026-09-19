@@ -44,6 +44,7 @@ import type {
 import { requireProjectDirectoryRoots } from '../shared/runtime-host-project-directory-policy.js';
 import type { NativeRuntimeHostPackage } from './native-runtime-host-setup.js';
 import type { NativeSetupInput, NativeSetupResult } from './native-runtime-host-installer.js';
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 
 type OnboardingState = DesktopRuntimeHostOnboardingSnapshot extends infer Snapshot
   ? Snapshot extends DesktopRuntimeHostOnboardingSnapshot
@@ -54,7 +55,7 @@ type OnboardingState = DesktopRuntimeHostOnboardingSnapshot extends infer Snapsh
 export function createDesktopRuntimeHostOnboarding(input: {
   /** Production uses native packages; the legacy route remains for TS fixtures. */
   readonly nativeSetup?: {
-    resolvePackage(identity: RuntimeHostTargetIdentity, signal?: AbortSignal): Promise<NativeRuntimeHostPackage>;
+    resolvePackage(identity: RuntimeHostTargetIdentity, signal?: AbortSignal, budget?: NativeHostBudget, onProgress?: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void): Promise<NativeRuntimeHostPackage>;
     ssh(input: NativeSetupInput & { readonly destination: string; readonly sshPort?: number }, onCommit: () => void): Promise<NativeSetupResult>;
     wsl(input: NativeSetupInput & { readonly distribution: string }, onCommit: () => void): Promise<NativeSetupResult>;
   };
@@ -149,7 +150,10 @@ export function createDesktopRuntimeHostOnboarding(input: {
     signal: AbortSignal,
   ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
     try {
-      if (input.nativeSetup) return await runNative(request, signal, input.nativeSetup);
+      if (input.nativeSetup) {
+        const budget = new NativeHostBudget(180_000, signal);
+        return await budget.wait(runNative(request, signal, input.nativeSetup, budget), 'Host setup');
+      }
       if (request.kind === 'wsl') {
         publish({ kind: 'running', phase: 'connecting_wsl' });
         const target = await input.resolveWslTargetIdentity({ distribution: request.distribution, signal });
@@ -260,22 +264,29 @@ export function createDesktopRuntimeHostOnboarding(input: {
     request: DesktopRuntimeHostOnboardingInput,
     signal: AbortSignal,
     native: NonNullable<typeof input.nativeSetup>,
+    budget: NativeHostBudget,
   ): Promise<DesktopRuntimeHostOnboardingSnapshot> => {
     publish({ kind: 'running', phase: request.kind === 'wsl' ? 'connecting_wsl' : 'connecting_ssh' });
-    const identity = request.kind === 'wsl'
-      ? await input.resolveWslTargetIdentity({ distribution: request.distribution, signal })
-      : await input.resolveSshTargetIdentity({ destination: request.destination, sshPort: request.sshPort, signal });
+    const identity = await budget.wait(request.kind === 'wsl'
+      ? input.resolveWslTargetIdentity({ distribution: request.distribution, signal })
+      : input.resolveSshTargetIdentity({ destination: request.destination, sshPort: request.sshPort, signal }), 'target identity');
     publish({ kind: 'running', phase: 'preparing_cli' });
-    const pkg = await native.resolvePackage(identity, signal);
+    const onProgress = (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => {
+      if (signal.aborted || performance.now() >= budget.deadline) return;
+      publish({ kind: 'running', phase: 'preparing_cli', progress });
+    };
+    const pkg = await budget.wait(native.resolvePackage(identity, signal, budget, onProgress), 'package download');
     signal.throwIfAborted();
     publish({ kind: 'running', phase: 'installing_service' });
-    const setup = { package: pkg, projectDirectoryRoots: request.projectDirectoryRoots, signal };
+    const setup = { package: pkg, projectDirectoryRoots: request.projectDirectoryRoots, signal, budget, onProgress };
     const commit = () => {
       if (active) active.cancellable = false;
       publish({ kind: 'running', phase: 'connecting_host' });
     };
     if (request.kind === 'wsl') {
       const complete = await native.wsl({ ...setup, distribution: request.distribution }, commit);
+      // Installation is committed. Preserve its receipt even when the caller
+      // has stopped observing; the profile journal owns subsequent recovery.
       if (complete.operator.platform !== 'posix') throw new Error('WSL setup did not return a Linux operator');
       const result = await input.profiles.addEnvironmentAndEnable({
         profile: {
@@ -285,10 +296,12 @@ export function createDesktopRuntimeHostOnboarding(input: {
           operator: { ...complete.operator, platform: 'posix' },
         },
       });
+      budget.remaining('profile confirmation');
       return publish({ kind: 'complete', profileId: result.profileId });
     }
     const complete = await native.ssh({ ...setup, destination: request.destination,
       sshPort: request.sshPort, principalId: `desktop:${input.clientInstanceId}` }, commit);
+    // Do not discard an accepted pairing credential at the observation deadline.
     if (!complete.receipt.pairing) throw new Error('SSH setup did not return a pairing credential');
     const result = await input.profiles.addAndEnableVerified({
       profile: {
@@ -299,6 +312,7 @@ export function createDesktopRuntimeHostOnboarding(input: {
       },
       credential: complete.receipt.pairing.credential,
     });
+    budget.remaining('profile confirmation');
     return publish({ kind: 'complete', profileId: result.profileId });
   };
 

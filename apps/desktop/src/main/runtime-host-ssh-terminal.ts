@@ -18,6 +18,8 @@
  */
 
 import { homedir } from 'node:os';
+import { runNativeRuntimeHostCommand } from './native-runtime-host-command.js';
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { IpcMain } from 'electron';
 import type { IPty } from 'node-pty';
@@ -675,6 +677,27 @@ export function createDesktopRuntimeHostSshTerminal(input: {
 
   return {
     activateSshOperator: async (activationInput) => {
+      if (activationInput.operator.kind === 'native') {
+        const operator = activationInput.operator;
+        const output = await runNativeRuntimeHostCommand({
+          kind: 'ssh', destination: activationInput.destination,
+          sshPort: activationInput.sshPort, operator,
+        }, ['activate', '--root-id', activationInput.rootId, '--framed'], false,
+        new NativeHostBudget(activationInput.timeoutMs ?? 45_000, activationInput.signal), undefined,
+        activationInput.interaction === 'terminal' ? (args, timeoutMs) => runFramedManagement({
+          ...activationInput, timeoutMs,
+          remoteCommand: runtimeHostSshOperatorRemoteCommand(operator, args),
+          prefix: RUNTIME_HOST_ACTIVATION_FRAME_PREFIX,
+          pendingMaxBytes: RUNTIME_HOST_ACTIVATION_FRAME_MAX_BYTES,
+          decode: (line) => line, action: 'activate', frameAction: () => 'activate',
+          label: 'Native Host activation; query status if confirmation is lost',
+        }) : undefined);
+        const frame = decodeRuntimeHostActivationFrame(output.trim());
+        if (!frame || frame.kind !== 'result' || frame.rootId !== activationInput.rootId) {
+          throw new Error('Native Host activation is unconfirmed; refresh deployment status');
+        }
+        return frame;
+      }
       if (activationInput.interaction !== 'terminal') {
         return (input.activateSshOperator ?? activateRuntimeHostSshOperator)(activationInput);
       }

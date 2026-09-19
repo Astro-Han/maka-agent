@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { useLayoutEffect, useRef, type ComponentProps, type ComponentType, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useMemo, useRef, type ComponentProps, type ComponentType, type ReactNode, type RefObject } from 'react';
 import {
   Banner,
   Button,
@@ -28,10 +28,12 @@ import {
   FormInteractionPrompt,
   SandboxBoundaryPrompt,
   UserQuestionPrompt,
+  useToast,
 } from '@maka/ui';
 import type { ComposerHandle } from '@maka/ui';
 export { selectLatestRequestUsage } from './application/contracts/session-inspector/latest-request-usage.js';
 import { useComposerMentionsContext } from './composer-mentions.js';
+import { composerDraftStorage } from './composer-draft-storage.js';
 import {
   readNewTaskReloadDraft,
   readNewTaskReloadIntent,
@@ -41,13 +43,24 @@ import {
 
 const newTaskDraftPersistence = {
   read(key: string | undefined): string | undefined {
-    return key ? readNewTaskReloadDraft(key) : undefined;
+    if (!key) return undefined;
+    if (isNewTaskDraft(key)) return readNewTaskReloadDraft(key);
+    try { return composerDraftStorage(localStorage).read(key); }
+    catch { return undefined; }
   },
   write(key: string | undefined, value: string): void {
-    if (!key?.startsWith('new-task:') && !key?.startsWith('["new-task"')) return;
-    writeNewTaskReloadDraft(key, value);
+    if (!key) return;
+    if (isNewTaskDraft(key)) {
+      if (!writeNewTaskReloadDraft(key, value)) {
+        throw new Error('Copy this draft before closing the window; Desktop storage is unavailable.');
+      }
+    } else composerDraftStorage(localStorage).write(key, value);
   },
 };
+
+function isNewTaskDraft(key: string): boolean {
+  return key.startsWith('new-task:') || key.startsWith('["new-task"');
+}
 
 /**
  * #1629: what the composer's slot shows when the active session's boundary
@@ -177,6 +190,20 @@ export function ChatComposerRegion({
   directoryPickerEnabled,
   ...composerRest
 }: ChatComposerRegionProps) {
+  const toast = useToast();
+  const draftStorageFailed = useRef(false);
+  const draftPersistence = useMemo(() => ({
+    read: newTaskDraftPersistence.read,
+    write(key: string | undefined, value: string) {
+      try {
+        newTaskDraftPersistence.write(key, value);
+        draftStorageFailed.current = false;
+      } catch (error) {
+        if (!draftStorageFailed.current) toast.error('Draft could not be saved', String(error));
+        draftStorageFailed.current = true;
+      }
+    },
+  }), [toast]);
   const mentions = useComposerMentionsContext();
   const activeSandboxBoundary =
     activeInteraction?.type === 'sandbox_boundary_request' ? activeInteraction : undefined;
@@ -288,7 +315,7 @@ export function ChatComposerRegion({
           }
           hidden={!active || onboardingComposerHidden || Boolean(activeInteraction)}
           draftKey={activeId ?? newTaskDraftKey}
-          draftPersistence={newTaskDraftPersistence}
+          draftPersistence={draftPersistence}
           stopPending={activeId ? stopPendingBySession[activeId] === true : false}
           goalActive={goalProjection.goalActive}
           onSetGoal={goalProjection.onSetGoal}

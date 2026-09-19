@@ -248,9 +248,11 @@ import {
 } from './runtime-host-peer-client.js';
 import { createDesktopRuntimeHostLocalOperator } from './runtime-host-local-operator.js';
 import { createDesktopLocalRuntimeHostRemoteAccess } from './runtime-host-local-remote-access.js';
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 import { createDesktopRuntimeHostOnboarding } from "./runtime-host-onboarding.js";
 import { createDesktopRuntimeHostManagement } from "./runtime-host-management.js";
 import { createNativeRuntimeHostManagement } from './native-runtime-host-management.js';
+import { nativeRuntimeHostManagementRequestSchema } from '../shared/native-runtime-host-management.js';
 import type { NativeRuntimeHostOperator } from './native-runtime-host-command.js';
 import { createDesktopRuntimeHostLocalManagement } from './runtime-host-local-management.js';
 import { createDesktopRuntimeHostPeerMeshManagement } from './runtime-host-peer-mesh-management.js';
@@ -357,7 +359,7 @@ const nativeHostExecutable = app.isPackaged
   : fileURLToPath(new URL(`../../../../target/debug/${nativeHostBinaryName}`, import.meta.url));
 const runtimeHostCandidateLaunchBarrier = isE2e
   ? createRuntimeHostCandidateLaunchBarrier()
-  : createNativeRuntimeHostCandidateLaunchBarrier(nativeHostExecutable);
+  : createNativeRuntimeHostCandidateLaunchBarrier(nativeHostExecutable, ensureLocalStorageRoot);
 const runtimeHostCredentialStore = createClientRuntimeHostCredentialStore(userDataDir);
 const runtimeHostProfileCatalog = createClientRuntimeHostProfileCatalog(
   userDataDir,
@@ -468,9 +470,22 @@ const resolveLocalStorageRoot = async () => {
   );
 };
 updateDesktopStartupProgress('storage');
-const startupLocalStorageRoot =
-  await resolveLocalStorageRoot();
-if (!startupLocalStorageRoot) {
+let startupLocalStorageRoot = isE2e ? await resolveLocalStorageRoot() : undefined;
+let rootInitialization: Promise<NonNullable<typeof startupLocalStorageRoot>> | undefined;
+function ensureLocalStorageRoot(budget: import('./native-runtime-host-operation.js').NativeHostBudget) {
+  if (startupLocalStorageRoot) return Promise.resolve(startupLocalStorageRoot);
+  if (rootInitialization) return budget.wait(rootInitialization, 'root initialization');
+  const pending = budget.wait((async () => {
+    await initializeNativeRuntimeHost(nativeHostExecutable, localHostRoot, budget.signal, budget);
+    const root = await resolveStorageRoot({ path: localHostRoot, kind: 'interactive' });
+    startupLocalStorageRoot = root;
+    return root;
+  })(), 'root initialization');
+  rootInitialization = pending;
+  void pending.finally(() => { if (rootInitialization === pending) rootInitialization = undefined; }).catch(() => undefined);
+  return pending;
+}
+if (isE2e && !startupLocalStorageRoot) {
   app.quit();
   await new Promise<never>(() => {});
   throw new Error("Desktop storage root resolution did not complete");
@@ -581,8 +596,11 @@ const localRuntimeHostOperator = createDesktopRuntimeHostLocalOperator();
 const localRuntimeHostRemoteAccess = createDesktopLocalRuntimeHostRemoteAccess({
   ipcMain,
   clientDataRoot: userDataDir,
-  rootPath: startupLocalStorageRoot.canonicalPath,
-  rootId: startupLocalStorageRoot.rootId,
+  rootPath: localHostRoot,
+  get rootId() {
+    if (!startupLocalStorageRoot) throw new Error('Local Host identity is not available yet; retry after connecting');
+    return startupLocalStorageRoot.rootId;
+  },
   directPeerAvailable: runtimeHostDirectPeerAvailable,
   manager: () => runtimeHostManager,
   resolveSetupPackage: async (signal) => {
@@ -654,10 +672,12 @@ registerDesktopSessionLocalIpc({
 function localSessionTarget(state: RuntimeHostDesktopTargetState): DesktopSessionLocalTarget | undefined {
   if (runtimeHostProfileAccess(state.target.profile) !== 'owner') return undefined;
   const hostId = state.readiness === 'ready' ? state.candidate.client.hostId
-    : state.hostId ?? (state.target.profile.kind === 'local' ? startupLocalStorageRoot!.rootId : state.target.profile.rootId);
+    : state.hostId ?? (state.target.profile.kind === 'local' ? startupLocalStorageRoot?.rootId : state.target.profile.rootId);
+  if (!hostId) return undefined;
   const partition = desktopSessionLocalPartition({ profileId: state.target.profile.id, hostId, incarnation: state.target.profileIncarnationId, credential: state.target.credential });
   return { partition, scope: { hostId, targetEpoch: state.epoch }, profileId: state.target.profile.id,
-    ...(state.readiness === 'ready' ? { client: state.candidate.client, submit: (input) => state.candidate.submitLocalMessage(input) } : {}) };
+    ...(state.readiness === 'ready' && state.candidate.client.lifecycleState === 'ready'
+      ? { client: state.candidate.client, submit: (input) => state.candidate.submitLocalMessage(input) } : {}) };
 }
 const oauthPresentation = new RuntimeHostOAuthPresentation((url) => shell.openExternal(url));
 // Desktop-local by construction: the Studio page posts the key to a loopback
@@ -673,7 +693,8 @@ const runtimeHostProfileService = createDesktopRuntimeHostProfileService({
   states: () => runtimeHostManager?.entries() ?? [],
   enable: async (target, sshInteraction, onPeerEndpoint) => {
     if (target.profile.kind === 'local') {
-      throw new Error('A resolved non-local Runtime Host profile is required');
+      if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');
+      return runtimeHostManager.enable(undefined);
     }
     if (target.profile.kind === 'remote' && !target.credential) {
       throw new Error('A remote Runtime Host profile requires an access credential');
@@ -764,11 +785,11 @@ const guestSessionMountService = createDesktopGuestSessionMountService({
     await runtimeHostManager.unmountGuest(mountId);
   },
 });
-const resolveNativePackage = async (identity: import('./runtime-host-target.js').RuntimeHostTargetIdentity, signal?: AbortSignal) =>
+const resolveNativePackage = async (identity: import('./runtime-host-target.js').RuntimeHostTargetIdentity, signal?: AbortSignal, budget?: NativeHostBudget, onProgress?: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void) =>
   resolveNativeRuntimeHostPackage({
     executable: nativeHostExecutable, cache: join(userDataDir, 'native-cli'),
     version: await nativeRuntimeHostVersion({ isPackaged: app.isPackaged, appPath: app.getAppPath(), environment: process.env }),
-    identity, signal, sourceCache: app.isPackaged ? undefined : process.env.MAKA_NATIVE_CLI_PACKAGES,
+    identity, signal, budget, onProgress, sourceCache: app.isPackaged ? undefined : process.env.MAKA_NATIVE_CLI_PACKAGES,
   });
 const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
   ipcMain,
@@ -789,22 +810,29 @@ const runtimeHostOnboarding = createDesktopRuntimeHostOnboarding({
   send: (snapshot) =>
     mainWindowController.send("runtime-host-onboarding:changed", snapshot),
 });
-const nativeRuntimeHostManagement = isE2e ? undefined : createNativeRuntimeHostManagement({
-  operator: { kind: 'local', executable: nativeHostExecutable },
-  prepareUpdate: async () => ({ kind: 'local', executable: nativeHostExecutable }),
-  rootId: startupLocalStorageRoot.rootId,
-  rootPath: startupLocalStorageRoot.canonicalPath,
-  change: (run) => {
-    if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');
-    return runtimeHostManager.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, run);
-  },
-});
+const nativeRuntimeHostManagement = async (request: unknown, budget: NativeHostBudget) => {
+  if (isE2e) return null;
+  const root = await ensureLocalStorageRoot(budget);
+  return createNativeRuntimeHostManagement({
+    onProgress: (progress) => mainWindowController.send('runtime-host-management:native-progress', 'local', progress),
+    operator: { kind: 'local', executable: nativeHostExecutable },
+    prepareUpdate: async () => ({ kind: 'local', executable: nativeHostExecutable }),
+    rootId: root.rootId,
+    rootPath: root.canonicalPath,
+    change: (run, budget) => {
+      if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');
+      return runtimeHostManager.runNativeHostChange({ profile: LOCAL_RUNTIME_HOST_PROFILE }, run, budget);
+    },
+  }).run(request, budget);
+};
 ipcMain.handle('runtime-host-management:native', async (_event, request: unknown, profileId: unknown = 'local') => {
   if (typeof profileId !== 'string' || !profileId || profileId.length > 128) {
     throw new Error('Invalid native Host profile ID');
   }
-  if (profileId === 'local') return nativeRuntimeHostManagement?.run(request) ?? null;
-  const target = await runtimeHostProfileCatalog.resolve(profileId);
+  const parsed = nativeRuntimeHostManagementRequestSchema.parse(request);
+  const budget = new NativeHostBudget(parsed.action === 'status' ? 15_000 : 180_000);
+  if (profileId === 'local') return nativeRuntimeHostManagement(parsed, budget);
+  const target = await budget.wait(runtimeHostProfileCatalog.resolve(profileId), 'resolve Host profile');
   const profile = target.profile;
   let operator: NativeRuntimeHostOperator;
   if (profile.kind === 'environment' && profile.operator.kind === 'native') {
@@ -820,21 +848,23 @@ ipcMain.handle('runtime-host-management:native', async (_event, request: unknown
     throw new Error('This profile has no native Host operator');
   }
   return createNativeRuntimeHostManagement({
+    onProgress: (progress) => mainWindowController.send('runtime-host-management:native-progress', profileId, progress),
     operator,
-    prepareUpdate: async () => {
+    prepareUpdate: async (budget) => {
+      const progress = (value: import('../shared/native-runtime-host-management.js').NativeHostProgress) => mainWindowController.send('runtime-host-management:native-progress', profileId, value);
       if (operator.kind === 'ssh') {
         const target = { destination: operator.destination, sshPort: operator.sshPort };
-        const identity = await runtimeHostSshTerminal.resolveTargetIdentity(target);
+        const identity = await budget.wait(runtimeHostSshTerminal.resolveTargetIdentity(target), 'target identity');
         const prepared = await runtimeHostSshTerminal.prepareNativePackage({
-          ...target, package: await resolveNativePackage(identity),
+          ...target, budget, package: await resolveNativePackage(identity, undefined, budget, progress),
         });
         return { ...operator, operator: prepared };
       }
       if (operator.kind === 'wsl') {
         const target = { distribution: operator.distribution };
-        const identity = await resolveDesktopRuntimeHostWslTarget(target);
+        const identity = await budget.wait(resolveDesktopRuntimeHostWslTarget(target), 'target identity');
         const prepared = await prepareNativeRuntimeHostWslPackage({
-          ...target, package: await resolveNativePackage(identity),
+          ...target, budget, package: await resolveNativePackage(identity, undefined, budget, progress),
         });
         if (prepared.platform !== 'posix') throw new Error('WSL requires a POSIX native operator');
         return { ...operator, operator: { ...prepared, platform: 'posix' } };
@@ -842,17 +872,17 @@ ipcMain.handle('runtime-host-management:native', async (_event, request: unknown
       return operator;
     },
     rootId: profile.rootId,
-    change: (run) => {
+    change: (run, budget) => {
       if (!runtimeHostManager) throw new Error('Runtime Host manager is unavailable');
-      return runtimeHostManager.runNativeHostChange(target, run);
+      return runtimeHostManager.runNativeHostChange(target, run, budget);
     },
-  }).run(request);
+  }).run(parsed, budget);
 });
 
 const localRuntimeHostManagement = createDesktopRuntimeHostLocalManagement({
   remoteAccess: localRuntimeHostRemoteAccess,
   operator: localRuntimeHostOperator,
-  rootPath: startupLocalStorageRoot.canonicalPath,
+  rootPath: localHostRoot,
   resolveUpdatePackage: () => runtimeHostSetupPackage.resolveForThisDesktop(),
   currentHostEpoch: () =>
     runtimeHostManager?.current('local')?.candidate?.client.hostEpoch,
@@ -1396,8 +1426,12 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
       runtimeHostProfileService.resolveCollaborationConnectionTarget(profile),
   },
   {
+    background: true,
     handoffSurface: createDesktopHostHandoffSurface(() => desktopLocale.resolve()),
     onTargetStateChanged: (state) => {
+      if (state.readiness === 'ready') console.info('[startup-metric]', {
+        hostReadyMs: Math.round(process.uptime() * 1000), profileId: state.target.profile.id,
+      });
       const localTarget = localSessionTarget(state);
       if (localTarget) {
         sessionLocalStore.bindAuthority(localTarget.profileId, localTarget.partition);
@@ -1515,15 +1549,8 @@ const startLocalRuntimeHostManager = () => startRuntimeHostDesktopManager(
         ? localRuntimeHostRemoteAccess.resolveConflictingHostReplacement(registration, signal)
         : Promise.resolve(undefined),
     onFatalError: (error, target) => {
-      // Initial failure is handled after manager.start() has closed its own
-      // observations. Do not quit before startup-owned resources are drained.
-      if (!runtimeHostManager) return;
-      if (error instanceof RuntimeHostUpgradeCancelledError) {
-        if (target.profile.kind === "local") app.quit();
-        return;
-      }
-      console.error("[runtime-host] fatal:", error);
-      if (target.profile.kind === "local") app.quit();
+      // Host availability never owns the Desktop lifetime.
+      console.error("[runtime-host] unavailable:", target.profile.id, error);
     },
   },
 );
@@ -1550,14 +1577,7 @@ const quitCoordinator = createAppQuitCoordinator({
 });
 app.on("before-quit", quitCoordinator.handleBeforeQuit);
 updateDesktopStartupProgress('connect');
-runtimeHostManager = await startLocalRuntimeHostManager().catch(async (error: unknown) => {
-  await closeRuntimeHostDesktop();
-  if (error instanceof RuntimeHostUpgradeCancelledError) {
-    app.quit();
-    return new Promise<never>(() => undefined);
-  }
-  throw error;
-});
+runtimeHostManager = await startLocalRuntimeHostManager();
 // Desktop owns these tables in its own directory. The TS E2E composition retains
 // its existing shared-database migration authority.
 workBoardIpc = registerWorkBoardIpc({
@@ -2286,7 +2306,7 @@ function wireLifecycle(): void {
   quitCoordinator.focusOrCreateWindow();
 }
 
-async function prepareRuntimeHostDesktopQuit(): Promise<'ready' | 'cancelled'> {
+async function prepareRuntimeHostDesktopQuit(signal?: AbortSignal): Promise<'ready' | 'cancelled'> {
   const preparation = await prepareRuntimeHostQuit(runtimeHostManager, {
     confirmInterrupt: async () => {
       const locale = await desktopLocale.resolve();
@@ -2294,7 +2314,7 @@ async function prepareRuntimeHostDesktopQuit(): Promise<'ready' | 'cancelled'> {
       const { response } = await showDesktopMessageBox(dialog.options, { locale });
       return dialog.decisions[response] === 'quit';
     },
-  });
+  }, signal);
   if (preparation === 'ready') mainWindowController.browserWindow()?.destroy();
   return preparation;
 }

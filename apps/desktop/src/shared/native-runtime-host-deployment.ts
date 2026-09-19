@@ -55,6 +55,7 @@ const status = z.discriminatedUnion('kind', [
     kind: z.literal('installed'),
     deployment,
     pendingUpdate: deployment.nullable(),
+    operation: z.enum(['idle', 'in_progress', 'unknown']).optional(),
     supervisor: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('on_demand') }).strict(),
       z.object({ kind: z.literal('missing') }).strict(),

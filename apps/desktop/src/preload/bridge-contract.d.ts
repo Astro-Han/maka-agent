@@ -601,6 +601,7 @@ export type DesktopRuntimeHostOnboardingSnapshot =
       readonly kind: 'running';
       readonly revision: number;
       readonly phase: DesktopRuntimeHostOnboardingPhase;
+      readonly progress?: import('../shared/native-runtime-host-management.js').NativeHostProgress;
     }
   | {
       readonly kind: 'failed';
@@ -921,6 +922,7 @@ export interface MakaBridge {
   };
 
   runtimeHostManagement: {
+    onNativeProgress(profileId: string, handler: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void): () => void;
     runNative(
       request: import('../shared/native-runtime-host-management.js').NativeRuntimeHostManagementRequest,
       profileId?: string,
@@ -1808,6 +1810,7 @@ export interface MakaBridge {
      */
   };
   appWindow: {
+    quit(): Promise<void>;
     popupMenu(input: import('../shared/native-menu.js').NativeMenuRequest): Promise<string | null>;
     setTitlebarControlsVisible(visible: boolean): Promise<void>;
     setThemeSource(themePref: ThemePreference): Promise<void>;

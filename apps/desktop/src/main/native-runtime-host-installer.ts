@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { posix, win32 } from 'node:path';
 import { runtimeHostSshOperatorRemoteCommand } from '@maka/runtime-host/client';
 import type { RuntimeHostNativeOperatorCommand } from '@maka/runtime-host/operator';
+import { NativeHostBudget } from './native-runtime-host-operation.js';
 import {
   decodeNativeArtifact,
   decodeNativeSetup,
@@ -49,6 +50,8 @@ export interface NativeSetupTransport {
   upload(source: string, destination: string, signal?: AbortSignal): Promise<void>;
 }
 export interface NativeSetupInput {
+  readonly budget?: NativeHostBudget;
+  readonly onProgress?: (progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => void;
   readonly package: NativeRuntimeHostPackage;
   /** Explicit native root for trusted operator callers; never forwarded from renderer input. */
   readonly rootPath?: string;
@@ -64,12 +67,16 @@ export interface NativeSetupResult {
 /** Transfer and verify code before starting any State Root mutation. */
 export async function prepareNativeRuntimeHost(
   transport: NativeSetupTransport,
-  input: Pick<NativeSetupInput, 'package' | 'signal'>,
+  input: Pick<NativeSetupInput, 'package' | 'signal' | 'budget' | 'onProgress'>,
 ): Promise<RuntimeHostNativeOperatorCommand> {
   input.signal?.throwIfAborted();
+  const budget = input.budget ?? new NativeHostBudget(180_000, input.signal);
+  const execute = async <T>(command: NativeSetupCommand<T>) =>
+    budget.wait(transport.execute({ ...command, timeoutMs: budget.remaining('staging', command.timeoutMs) }), 'staging');
   const paths = transport.platform === 'win32' ? win32 : posix;
   const name = `maka-native-${randomUUID().replaceAll('-', '')}`;
-  const stage = await transport.execute({
+  input.onProgress?.({ phase: 'stage' });
+  const stage = await execute({
     command: stageCommand(transport.platform, name),
     prefix: STAGE_PREFIX,
     timeoutMs: 30_000,
@@ -89,7 +96,10 @@ export async function prepareNativeRuntimeHost(
   let artifact;
   try {
     const source = paths.join(stage, 'package');
-    await transport.upload(input.package.artifact.directory, source, input.signal);
+    const transferSignal = AbortSignal.any([
+      ...(input.signal ? [input.signal] : []), AbortSignal.timeout(budget.remaining('upload')),
+    ]);
+    await budget.wait(transport.upload(input.package.artifact.directory, source, transferSignal), 'upload');
     const bootstrap: RuntimeHostNativeOperatorCommand = {
       kind: 'native',
       platform: transport.platform,
@@ -101,9 +111,10 @@ export async function prepareNativeRuntimeHost(
     };
     const importCommand = runtimeHostSshOperatorRemoteCommand(
       bootstrap,
-      nativeImportArguments(input.package, source),
+      [...nativeImportArguments(input.package, source), '--timeout-ms', String(budget.remaining('package verification'))],
     );
-    artifact = await transport.execute({
+    input.onProgress?.({ phase: 'verify' });
+    artifact = await execute({
       // A Windows downloader cannot preserve POSIX executable mode through SCP.
       command:
         transport.platform === 'win32'
@@ -125,19 +136,27 @@ export async function prepareNativeRuntimeHost(
     if (artifact.integrity !== input.package.artifact.integrity) {
       throw new Error('Transferred native artifact identity changed');
     }
+  } catch (error) {
+    if (artifact) throw error;
+    throw new Error(`Staging did not confirm completion at ${stage}. The directory was preserved because transfer or verification may still be running; inspect it before cleanup.`, { cause: error });
   } finally {
-    // This exact nonce directory is owned by this attempt. Do not bind cleanup
-    // to the cancelled caller, or let a cleanup failure look like a rollback.
-    await transport.execute({
-      command: cleanupCommand(transport.platform, stage),
-      prefix: CLEAN_PREFIX,
-      timeoutMs: 30_000,
-      decode: (line) => {
-        if (line.slice(CLEAN_PREFIX.length).trim() !== 'ok')
-          throw new Error('Native setup cleanup was not confirmed');
-        return true;
-      },
-    });
+    if (artifact) {
+      input.onProgress?.({ phase: 'cleanup' });
+      // This exact nonce directory is owned by this attempt. Do not bind cleanup
+      // to the cancelled caller, or let a cleanup failure look like a rollback.
+      await execute({
+        command: cleanupCommand(transport.platform, stage),
+        prefix: CLEAN_PREFIX,
+        timeoutMs: 30_000,
+        decode: (line) => {
+          if (line.slice(CLEAN_PREFIX.length).trim() !== 'ok')
+            throw new Error('Native setup cleanup was not confirmed');
+          return true;
+        },
+      }).catch((cause: unknown) => {
+        throw new Error(`Staging cleanup is unconfirmed at ${stage}; refresh deployment status before removing this directory. No rollback was requested.`, { cause });
+      });
+    }
   }
   input.signal?.throwIfAborted();
   return nativeArtifactOperator(artifact);
@@ -148,14 +167,17 @@ export async function installNativeRuntimeHost(
   input: NativeSetupInput,
   onCommit: () => void,
 ): Promise<NativeSetupResult> {
-  const operator = await prepareNativeRuntimeHost(transport, input);
+  const budget = input.budget ?? new NativeHostBudget(180_000, input.signal);
+  const operator = await prepareNativeRuntimeHost(transport, { ...input, budget });
   // After this point cancellation cannot promise to undo installation. Finish
   // reading its bounded receipt, then let the existing pairing journal take over.
+  const remaining = budget.remaining('install and activate');
   onCommit();
-  const receipt = await transport.execute({
-    command: runtimeHostSshOperatorRemoteCommand(operator, nativeSetupArguments(input)),
+  input.onProgress?.({ phase: 'activate' });
+  const receipt = await budget.wait(transport.execute({
+    command: runtimeHostSshOperatorRemoteCommand(operator, [...nativeSetupArguments(input), '--timeout-ms', String(remaining)]),
     prefix: NATIVE_SETUP_PREFIX,
-    timeoutMs: 120_000,
+    timeoutMs: Math.min(remaining, 120_000),
     decode: (line) => {
       try {
         return decodeNativeSetup(
@@ -166,7 +188,7 @@ export async function installNativeRuntimeHost(
         throw new Error('Native setup returned an invalid receipt');
       }
     },
-  });
+  }), 'install and activate');
   return { receipt, operator };
 }
 

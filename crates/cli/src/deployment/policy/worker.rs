@@ -36,7 +36,7 @@ pub(crate) struct Reconcile {
 
 impl Reconcile {
     pub async fn run(self) -> Result<(), HostError> {
-        super::arm_deadline()?;
+        crate::operation::check()?;
         let directory = directory(&self.root_id.0)?;
         let store::Installation::Installed(current) = store::read(&directory).await? else {
             return Ok(());
@@ -137,10 +137,20 @@ pub(in crate::deployment) async fn execute(
     args: &[String],
 ) -> Result<(), HostError> {
     let mut command = tokio::process::Command::new(executable);
-    command.args(args).stdin(Stdio::null());
+    crate::operation::check()?;
+    let remaining = crate::operation::remaining(std::time::Duration::from_secs(180));
+    command
+        .args(args)
+        .args(["--timeout-ms", &remaining.as_millis().max(1).to_string()])
+        .stdin(Stdio::null())
+        .kill_on_drop(false);
     #[cfg(windows)]
     command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
-    let status = command.status().await?;
+    let status = tokio::time::timeout(remaining, command.status())
+        .await
+        .map_err(
+            |_| "update executor outcome is unconfirmed; query deployment status before recovery",
+        )??;
     if !status.success() {
         return Err(format!("native update executor failed: {status}").into());
     }
@@ -158,7 +168,7 @@ pub(crate) struct Upgrade {
 
 impl Upgrade {
     pub async fn run(self) -> Result<(), HostError> {
-        super::arm_deadline()?;
+        crate::operation::check()?;
         let version = match self.version {
             Some(version) => version,
             None => distribution::preview_version().await?,

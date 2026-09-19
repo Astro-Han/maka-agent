@@ -46,6 +46,17 @@ maka host status --root /absolute/path/to/new-root
 maka host retire --root /absolute/path/to/new-root
 ```
 
+Desktop 在 Host 就绪前开放导航和草稿编辑。Host 不可用不会退出应用，可以重试、切换 Host、
+复制诊断或退出。草稿文本由 Desktop 保存，不进入发送队列；离线发送会被拒绝并保留草稿。
+启动分别记录 `mainInteractiveMs`（主界面可交互）与 `hostReadyMs`（Host 就绪）。
+
+有限 CLI 命令接受 `--timeout-ms`（1–600000）：status/logs 默认 15 秒，其余操作默认 180 秒。
+Desktop 每次恢复共享 45 秒预算、最多尝试五次；退出包含清理，共享 8 秒预算。子阶段使用剩余
+时间。下载报告实际字节进度，重复心跳不会重置停滞检测。超时只结束观察，不取消已接受的工作
+或释放其锁；一次性独立命令进程可能继续收尾，它不是常驻控制进程。结果待确认时先查询
+`host status` 再决定是否重试。`operation: in_progress` 表示执行锁被持有，与 Host 正常活动
+分开报告。恢复使用原有 pending update 的冻结目标，不强杀归属不明的进程，也不删锁接管。
+
 二进制未加入 PATH 时使用 `target/debug/maka`。Linux/macOS 使用 Unix socket，
 Windows 使用私有 named pipe。可选 `--websocket 127.0.0.1:0` 监听需要认证，尚不支持 TLS。
 对运行中的 Host 执行 `host access prepare --root <目录> --principal <id>` 可获得配对 JSON，

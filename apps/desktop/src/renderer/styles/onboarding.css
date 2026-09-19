@@ -72,13 +72,6 @@
   display: none;
 }
 
-/* ChatLayout always paints its frosted composer dock, even when the Composer
-   itself is hidden. Onboarding owns the whole empty surface, so that dock has
-   no content to support and would blur the card actions behind it. */
-.maka-chat-layout[data-maka-onboarding='true'] > :last-child {
-  display: none;
-}
-
 /* The snapshot slot blocks the ordinary empty-chat hero while main resolves
    onboarding state. The frame keeps the ready card's geometry; the bars inside
    are Astryx Skeletons (DESIGN.md §10) rather than hand-drawn statics. */

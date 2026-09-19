@@ -18,6 +18,7 @@
  */
 
 import { WorkHubControlOverlay, WorkHubDock, WorkHubMainNavigation, WorkHubReturnButton } from './features/workhub';
+import { RuntimeHostAvailabilityNotice, useRuntimeHostAvailability } from './runtime-host-availability.js';
 import {
   useCallback,
   useEffect,
@@ -683,6 +684,7 @@ function AppShellContent({
   const activeMessageQueue = activeId ? messageQueueBySession[activeId] : undefined;
   const activeMessageSubmitting = transientMessages.length > 0;
   const activeDesktopSession = activeSession;
+  const hostAvailability = useRuntimeHostAvailability(activeDesktopSession?.profileId ?? newTaskHost?.profileId);
   // The shell's reading of the active live turn: streaming/settled flags, the
   // in-flight tool signal, and the #646 turn-wait cues, all derived from the
   // semantic snapshot rather than the projection (#1985).
@@ -1086,11 +1088,10 @@ function AppShellContent({
     activeSessionId: activeId,
     showOnboardingHero,
   });
-  const onboardingComposerHidden = isOnboardingLoading || (showOnboardingHero && onboardingState !== undefined);
-  // #1629: hiding the composer because the boundary is unknown is right, but
-  // hiding it silently and forever is not. Once the read has spent its retries
-  // the slot says so and hands the user another attempt; while it is still
-  // reading, or while onboarding owns the surface, there is nothing to say.
+  // Catalog readiness must not make an already editable draft disappear.
+  const onboardingComposerHidden = false;
+  // An unreadable boundary blocks sending, not drafting. Keep its retry notice
+  // visible alongside the editor after the boundary read exhausts its retries.
   const boundaryUnreadableNotice =
     activeId && activeExecutionBoundaryUnreadable && !onboardingComposerHidden
       ? {
@@ -1555,6 +1556,11 @@ function AppShellContent({
     text: string,
     metadata?: ComposerSendMetadata,
   ): Promise<boolean | void> {
+    // Returning false retains the draft; readiness never queues a future send.
+    if (hostAvailability.entry?.readiness !== 'ready') {
+      toastApi.info(uiLocale === 'zh-CN' ? 'Host 尚未就绪，草稿已保留' : 'Host is not ready; your draft is retained');
+      return false;
+    }
     const revision = revisionDraftRef.current;
     const revisionSend = Boolean(
       revision && activeIdRef.current === revision.draftSessionId,
@@ -2378,6 +2384,8 @@ function AppShellContent({
         }
       >
         <AppShellDetailPanel agentsView={agentsView}>
+          <RuntimeHostAvailabilityNotice key={hostAvailability.profileId} availability={hostAvailability} chinese={uiLocale === 'zh-CN'}
+            manage={() => openSettingsSection('projects')} />
           {/* PR-UI-RENDER-2: install the internal-URI dispatcher
               for any Markdown rendered inside ChatView (assistant
               answers, thinking panels, streaming bubbles). Wrapping

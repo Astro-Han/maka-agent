@@ -117,9 +117,9 @@ export function RuntimeHostOnboardingDialog(props: {
 
   function close(): void {
     if (running) {
-      void window.maka.runtimeHostOnboarding.cancel().then((cancelled) => {
-        if (cancelled) props.onClose();
-      });
+      props.onClose();
+      // Closing the surface ends observation, not an accepted installation.
+      void window.maka.runtimeHostOnboarding.cancel().catch(console.error);
       return;
     }
     void window.maka.runtimeHostOnboarding.reset();
@@ -165,6 +165,10 @@ export function RuntimeHostOnboardingDialog(props: {
                 <div role="status" aria-live="polite" className="settingsRuntimeHostSetupProgress">
                   <Spinner size="sm" />
                   <Text type="body">{copy.setupPhase[snapshot.phase]}</Text>
+                  {snapshot.progress ? <Text type="body">
+                    {locale === 'zh-CN' ? ({ status: '查询状态', download: '下载', verify: '校验', stage: '暂存', retire: '退休', activate: '激活', cleanup: '清理', confirming: '确认结果', confirmation_pending: '结果待确认' }[snapshot.progress.phase]) : snapshot.progress.phase.replaceAll('_', ' ')}
+                    {snapshot.progress.completed === undefined ? '' : ` · ${snapshot.progress.completed.toLocaleString()}${snapshot.progress.total === undefined ? '' : ` / ${snapshot.progress.total.toLocaleString()}`} bytes`}
+                  </Text> : null}
                 </div>
               ) : snapshot.kind !== 'complete' ? (
                 <>

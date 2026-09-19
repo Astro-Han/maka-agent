@@ -1729,6 +1729,13 @@ const makaBridge = {
     },
   },
   runtimeHostManagement: {
+    onNativeProgress(profileId, handler) {
+      const listener = (_event: Electron.IpcRendererEvent, owner: string, progress: import('../shared/native-runtime-host-management.js').NativeHostProgress) => {
+        if (owner === profileId) handler(progress);
+      };
+      ipcRenderer.on('runtime-host-management:native-progress', listener);
+      return () => ipcRenderer.off('runtime-host-management:native-progress', listener);
+    },
     runNative(request, profileId = 'local') {
       return ipcRenderer.invoke('runtime-host-management:native', request, profileId);
     },
@@ -3640,6 +3647,7 @@ const makaBridge = {
     },
   },
   appWindow: {
+    quit(): Promise<void> { return ipcRenderer.invoke('window:quit'); },
     popupMenu(input: import('../shared/native-menu.js').NativeMenuRequest): Promise<string | null> {
       return ipcRenderer.invoke('window:popupMenu', input);
     },

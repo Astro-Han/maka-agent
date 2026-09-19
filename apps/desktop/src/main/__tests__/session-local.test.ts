@@ -683,10 +683,13 @@ test('local submit preserves picked-file approvals until durable admission succe
   await writeFile(file, 'x');
   const approvals = createAttachmentApprovalRegistry();
   const [picked] = approvals.issueApprovals(7, [{ path: file, name: 'picked.txt', size: 1 }]);
+  let connected = false;
   const target: DesktopSessionLocalTarget = {
     partition: 'authority',
     profileId: 'profile',
     scope: { hostId: 'root', targetEpoch: 'target' },
+    get client() { return connected ? client('epoch') : undefined; },
+    get submit() { return connected ? async () => accepted : undefined; },
   };
   const service = new DesktopSessionLocalService(store, {
     targets: () => [target],
@@ -694,6 +697,7 @@ test('local submit preserves picked-file approvals until durable admission succe
     onError: (error) => assert.fail(String(error)),
   });
   beforeClose.push(() => service.close());
+  t.mock.method(service, 'wake', () => {}); // Delivery has separate recovery tests.
   type Ipc = Parameters<typeof registerDesktopSessionLocalIpc>[0]['ipcMain'];
   let submit!: Parameters<Ipc['handle']>[1];
   let resizeCalls = 0;
@@ -714,8 +718,6 @@ test('local submit preserves picked-file approvals until durable admission succe
     },
     changed() {},
   });
-  for (let index = 0; index < 256; index++)
-    store.enqueue('authority', { ...intent(`full-${index}`), staged: [] });
   const draft = { messageId: 'picked-message', text: 'hello', attachmentItems: [picked] };
   const send = () =>
     submit(
@@ -725,6 +727,17 @@ test('local submit preserves picked-file approvals until durable admission succe
       'current_turn',
       draft,
     );
+  await assert.rejects(send, /Host is not ready/);
+  assert.equal(store.get('authority', 'picked-message'), undefined);
+  connected = true;
+  const interrupted = send();
+  connected = false;
+  await assert.rejects(interrupted, /Host disconnected/);
+  assert.equal(store.get('authority', 'picked-message'), undefined);
+  assert.ok(approvals.peekApproval(7, picked!.approvalId));
+  connected = true;
+  for (let index = 0; index < 256; index++)
+    store.enqueue('authority', { ...intent(`full-${index}`), staged: [] });
   await assert.rejects(send, /Local message storage is full/);
   store.cancel('authority', 'full-0');
   await send();
