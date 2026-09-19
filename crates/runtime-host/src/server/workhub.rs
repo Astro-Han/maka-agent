@@ -28,7 +28,6 @@ use serde_json::Value;
 
 mod action;
 mod candidates;
-mod selection;
 pub(super) use action::ERRORS as ACTION_ERRORS;
 pub(super) use candidates::ERRORS as CANDIDATE_ERRORS;
 
@@ -111,7 +110,10 @@ pub(super) async fn execute(
             {
                 return Ok(Outcome::failure(error));
             }
-            selection::select(host, input).await.and_then(serialize)
+            match control(host) {
+                Ok(control) => control.value.select(input).await.and_then(serialize),
+                Err(error) => Err(error),
+            }
         }
         Operation::WorkhubCoordinationCandidates => candidates::query(host)
             .await

@@ -47,7 +47,7 @@ impl Interactions {
 
     /// Caller holds the shared admission gate through publication. A retried
     /// control request reuses the original offer and outcome.
-    pub(in crate::server) async fn admit_stable_request(
+    pub(crate) async fn admit_stable_request(
         &self,
         invocation: Invocation,
         request_id: String,

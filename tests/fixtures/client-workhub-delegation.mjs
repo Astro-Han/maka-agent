@@ -385,7 +385,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
               await toggleWorkhub(false);
             }
             receipt = selectTarget
-              ? await chooseTarget(request, act, sourceObserver, input, workspace)
+              ? await chooseTarget(request, act, sourceObserver, input, workspace, toggleWorkhub)
               : await act(input);
             assert.equal(receipt.disposition, createNew ? 'create_new' : 'delegate_existing');
             assert.equal(receipt.targetSessionId, targetSessionId);

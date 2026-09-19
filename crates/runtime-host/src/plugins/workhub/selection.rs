@@ -21,15 +21,76 @@ use super::control::failure;
 use maka_protocol::{
     OperationError, OperationErrorCode as Code,
     session::WorkspaceProjection,
-    workhub::{ActInput, Proposal, RoutingProposal, SelectionInput},
+    workhub::{ActInput, Proposal, RoutingProposal, SelectionInput, SelectionResult},
 };
 use maka_runtime::{
     artifact::content_digest,
     capability::{FormResult, FormValue},
     event::Invocation,
-    interaction::InteractionOutcome,
+    interaction::{InteractionOutcome, InteractionRecord},
 };
 pub(crate) mod offer;
+
+pub(crate) struct Source {
+    pub invocation: Invocation,
+    pub request_id: String,
+    pub form: Option<InteractionRecord>,
+}
+
+impl super::Control {
+    pub(crate) async fn select(
+        &self,
+        input: SelectionInput,
+    ) -> Result<SelectionResult, OperationError> {
+        let _call = self
+            .caller
+            .admit()
+            .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
+        let stopping = self
+            .caller
+            .stopping()
+            .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
+        let source = self
+            .commands
+            .selection(self.caller.clone(), input.clone())
+            .await?;
+        let form = match source.form {
+            Some(form) => form,
+            None => {
+                let page = self.candidates().await?.result;
+                let request = offer::build(&page, &input)?;
+                self.commands
+                    .offer_selection(
+                        self.caller.clone(),
+                        input.clone(),
+                        source.invocation.clone(),
+                        request,
+                    )
+                    .await?
+            }
+        };
+        let outcome = self
+            .commands
+            .wait_selection(form.request_id, stopping)
+            .await?;
+        let Some(selection) = interpret(input, source.invocation, form.created_at, outcome)? else {
+            return Ok(SelectionResult::Cancelled);
+        };
+        let result = self
+            .delegate(selection.input, Some(selection.target))
+            .await?;
+        Ok(SelectionResult::Delegated { result })
+    }
+}
+
+pub(crate) fn request_id(
+    input: &SelectionInput,
+    invocation: &Invocation,
+) -> Result<String, OperationError> {
+    let bytes = serde_json::to_vec(&("workhub.selection.v1", input, invocation))
+        .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
+    Ok(format!("whf_{}", &content_digest(&bytes)[7..]))
+}
 
 #[derive(Clone)]
 pub(crate) struct SelectedTarget {

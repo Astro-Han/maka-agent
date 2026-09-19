@@ -23,10 +23,7 @@ use crate::session::SessionConfiguration;
 use futures_util::future::BoxFuture;
 use maka_event_log::{
     StoreError,
-    workhub::{
-        Candidate,
-        stop::{StopRecord, StopRequest},
-    },
+    workhub::{Candidate, stop::StopRecord},
 };
 use maka_plugins::fiber::Context;
 use maka_protocol::OperationErrorCode as Code;
@@ -72,6 +69,36 @@ impl WorkHubCommands {
     }
 }
 impl Commands for WorkHubCommands {
+    fn selection(
+        &self,
+        caller: Context,
+        input: maka_protocol::workhub::SelectionInput,
+    ) -> BoxFuture<'_, Result<crate::plugins::workhub::selection::Source>> {
+        Box::pin(async move { super::selection::inspect(&self.executions()?, caller, input).await })
+    }
+    fn offer_selection(
+        &self,
+        caller: Context,
+        input: maka_protocol::workhub::SelectionInput,
+        invocation: maka_runtime::event::Invocation,
+        request: maka_runtime::interaction::InteractionRequest,
+    ) -> BoxFuture<'_, Result<maka_runtime::interaction::InteractionRecord>> {
+        Box::pin(async move {
+            super::selection::offer(&self.executions()?, caller, input, invocation, request).await
+        })
+    }
+    fn wait_selection(
+        &self,
+        request_id: String,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> BoxFuture<'_, Result<maka_runtime::interaction::InteractionOutcome>> {
+        Box::pin(async move {
+            self.executions()?
+                .interactions
+                .wait_for_outcome(&request_id, &cancellation)
+                .await
+        })
+    }
     fn correction(
         &self,
         caller: Context,
@@ -168,84 +195,7 @@ impl Commands for WorkHubCommands {
         })
     }
     fn stop(&self, caller: Context, request: Stop) -> BoxFuture<'_, Result<StopRecord>> {
-        Box::pin(async move {
-            let executions = self.executions()?;
-            let (record, completed, _call) = {
-                let _gate = executions.lock_admission().await;
-                let call = caller
-                    .admit()
-                    .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
-                let record = if let Some(record) = executions
-                    .log
-                    .workhub_stop(&request.action_id)
-                    .await
-                    .map_err(|error| stored(&executions, error))?
-                {
-                    if record.intent.request.source.turn_id != request.turn_id
-                        || record.intent.request.request_fingerprint != request.request_fingerprint
-                        || record.intent.request.target_session_id != request.target_session_id
-                    {
-                        return Err(failure(
-                            Code::OperationConflict,
-                            "WorkHub stop belongs to another request",
-                        ));
-                    }
-                    record
-                } else {
-                    if executions.shutdown.is_cancelled() {
-                        return Err(failure(Code::HostDraining, "Host is draining"));
-                    }
-                    let source = executions.workhub_source(&request.turn_id).await?;
-                    executions
-                        .log
-                        .request_workhub_stop(StopRequest {
-                            action_id: request.action_id,
-                            request_fingerprint: request.request_fingerprint,
-                            source: source.invocation,
-                            target_session_id: request.target_session_id,
-                        })
-                        .await
-                        .map_err(|error| stored(&executions, error))?
-                };
-                if record.resolution.is_some() {
-                    return Ok(record);
-                }
-                if executions.shutdown.is_cancelled() {
-                    return Err(failure(Code::HostDraining, "Host is draining"));
-                }
-                let completed = executions
-                    .stop_workhub_owner(
-                        record.intent.owner.as_ref().ok_or_else(|| {
-                            failure(Code::InternalFailure, "Stop intent has no owner")
-                        })?,
-                        &record.intent.request.action_id,
-                    )
-                    .await?;
-                (record, completed, call)
-            };
-            if let Some(completed) = completed {
-                completed.cancelled().await;
-            }
-            let resolved = executions
-                .log
-                .resolve_workhub_stop(&record.intent.request.action_id)
-                .await
-                .map_err(|error| {
-                    if matches!(error, StoreError::SessionBusy) {
-                        failure(
-                            Code::OperationUnavailable,
-                            "WorkHub stop owner is still recovering",
-                        )
-                    } else {
-                        stored(&executions, error)
-                    }
-                })?;
-            let mut admission = Some(executions.lock_admission().await);
-            executions
-                .dispatch_pending(&record.intent.request.target_session_id, &mut admission)
-                .await?;
-            Ok(resolved)
-        })
+        Box::pin(async move { super::stop::execute(&self.executions()?, caller, request).await })
     }
 }
 

@@ -34,7 +34,7 @@ export async function setupSelection(request, workspace) {
   }
 }
 
-export async function chooseTarget(request, act, observer, input, workspace) {
+export async function chooseTarget(request, act, observer, input, workspace, toggleWorkhub) {
   const offer = async (actionId) => {
     const frame = await observer.waitFor(
       (frame) =>
@@ -58,6 +58,21 @@ export async function chooseTarget(request, act, observer, input, workspace) {
   await answer(dismissed, { action: 'cancel' });
   assert.deepEqual(await cancelled, { kind: 'cancelled' });
   assert.deepEqual(await act(cancelledInput), { kind: 'cancelled' });
+  const retiredInput = { ...input, actionId: 'retired-selection' };
+  const retiring = act(retiredInput);
+  retiring.catch(() => {});
+  const retiredForm = await offer(retiredInput.actionId);
+  await toggleWorkhub(true);
+  assert.deepEqual(await retiring, { kind: 'cancelled' });
+  await assert.rejects(
+    answer(retiredForm, {
+      action: 'accept',
+      values: { target: retiredForm.request.fields[0].options[0].value },
+    }),
+    (error) => error.code === 'already_resolved',
+  );
+  await toggleWorkhub(false);
+  assert.deepEqual(await act(retiredInput), { kind: 'cancelled' });
   const pending = act(input);
   pending.catch(() => {});
   const form = await offer(input.actionId);

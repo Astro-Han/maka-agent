@@ -50,6 +50,23 @@ pub(crate) struct Stop {
 /// Commands own admission, durable receipts and settlement. No locks, arbitrary
 /// log writes or Host handles are exposed to the business implementation.
 pub(crate) trait Commands: Send + Sync {
+    fn selection(
+        &self,
+        caller: Context,
+        input: maka_protocol::workhub::SelectionInput,
+    ) -> BoxFuture<'_, Result<super::selection::Source>>;
+    fn offer_selection(
+        &self,
+        caller: Context,
+        input: maka_protocol::workhub::SelectionInput,
+        invocation: maka_runtime::event::Invocation,
+        request: maka_runtime::interaction::InteractionRequest,
+    ) -> BoxFuture<'_, Result<maka_runtime::interaction::InteractionRecord>>;
+    fn wait_selection(
+        &self,
+        request_id: String,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> BoxFuture<'_, Result<maka_runtime::interaction::InteractionOutcome>>;
     fn delegation(
         &self,
         caller: Context,

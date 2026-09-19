@@ -61,14 +61,3 @@ pub(super) async fn act(
         }
     }
 }
-
-pub(super) async fn selected(
-    host: &Arc<Host>,
-    input: ActInput,
-    selected: &super::selection::SelectedTarget,
-) -> Result<ActResult, OperationError> {
-    super::control(host)?
-        .value
-        .delegate(input, Some(selected.clone()))
-        .await
-}

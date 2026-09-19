@@ -25,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 impl Interactions {
     /// Execution/broker owns the waiter through cancellation and withdrawal.
     /// A prior user answer or whole-Run closure remains the canonical winner.
-    pub(in crate::server) async fn wait_for_outcome(
+    pub(crate) async fn wait_for_outcome(
         &self,
         request_id: &str,
         cancellation: &CancellationToken,
