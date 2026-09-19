@@ -261,13 +261,14 @@ impl Host {
             crate::execution::GraphSessions::new(&executions, root.root_id().into()),
             executions.plugin_catalog.clone(),
         )?;
+        let workhub_commands = Arc::new(crate::execution::WorkHubCommands::new(
+            &executions,
+            project_usage.clone(),
+        ));
         crate::plugins::workhub::install(
             &mut setup,
             &executions.plugin_catalog,
-            Arc::new(crate::execution::WorkHubCommands::new(
-                &executions,
-                project_usage.clone(),
-            )),
+            workhub_commands.clone(),
         )?;
         crate::plugins::scheduler::install(
             &mut setup,
@@ -352,7 +353,7 @@ impl Host {
             diagnostic_log: Mutex::default(),
         });
         let recovery = async {
-            workhub::recover(&host).await?;
+            workhub_commands.recover().await?;
             host.executions.recover_messages().await
         }
         .await;

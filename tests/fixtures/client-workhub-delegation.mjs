@@ -451,6 +451,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
             if (correctTarget) {
               await targetReady.promise;
               correction = await correctDelegation({
+                toggleWorkhub,
                 connection,
                 request,
                 act,

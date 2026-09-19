@@ -31,6 +31,13 @@ use std::sync::Arc;
 pub(crate) type Result<T> = std::result::Result<T, OperationError>;
 pub(crate) type CandidateFilter = fn(&str, &SessionConfiguration) -> bool;
 
+#[derive(Clone)]
+pub(crate) struct Identity {
+    pub action_id: ActionId,
+    pub turn_id: String,
+    pub fingerprint: String,
+}
+
 /// A logical control request, never a request to stop whichever Run is current.
 /// Host resolves the canonical delegation and atomically captures its exact owner.
 pub(crate) struct Stop {
@@ -46,13 +53,29 @@ pub(crate) trait Commands: Send + Sync {
     fn delegation(
         &self,
         caller: Context,
-        identity: super::delegation::Identity,
+        identity: Identity,
     ) -> BoxFuture<'_, Result<Option<maka_runtime::workhub::Delegation>>>;
     fn delegate(
         &self,
         caller: Context,
         request: super::delegation::Request,
     ) -> BoxFuture<'_, Result<maka_runtime::workhub::Delegation>>;
+    fn correction(
+        &self,
+        caller: Context,
+        action_id: ActionId,
+        turn_id: String,
+    ) -> BoxFuture<'_, Result<Option<maka_event_log::workhub::correction::CorrectionRecord>>>;
+    fn correct(
+        &self,
+        caller: Context,
+        request: super::correction::Request,
+    ) -> BoxFuture<'_, Result<maka_event_log::workhub::correction::CorrectionRecord>>;
+    /// Only an already accepted, exactly identified intent can be settled.
+    fn settle_correction(
+        &self,
+        identity: Identity,
+    ) -> BoxFuture<'_, Result<maka_event_log::workhub::correction::CorrectionRecord>>;
     /// Apply the domain predicate inside one bounded read snapshot, before its limit.
     fn candidates(
         &self,

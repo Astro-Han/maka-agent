@@ -20,10 +20,7 @@
 mod receipt;
 use super::super::{Executions, Result, failure};
 use super::commands::WorkHubCommands;
-use crate::plugins::workhub::{
-    delegation::{Identity, Request},
-    target::Target,
-};
+use crate::plugins::workhub::{control::Identity, delegation::Request, target::Target};
 use maka_plugins::fiber::Context;
 use maka_protocol::OperationErrorCode as Code;
 use maka_runtime::{
@@ -92,13 +89,7 @@ pub(super) async fn execute(
         ));
     };
     let target = request.target;
-    if let Target::Created { creation, .. } = &target {
-        executions.validate_creation(creation).await?;
-        commands
-            .project_usage
-            .record(&creation.configuration.workspace)
-            .await?;
-    }
+    commands.validate_target(executions, &target).await?;
     let owner = executions.active_session_owner(target.id());
     let delivery = match (&target, &owner) {
         (

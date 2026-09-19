@@ -50,7 +50,7 @@
 | 领域／当前耦合 | 目标与完成条件 |
 | --- | --- |
 | **Skills：**`maka.skills` 拥有发现、输入准备、每步工具／上下文快照、治理、偏好 CAS、预览、导入及 workspace／user 发布；已发布的 Client Contribution 拥有 Session／新工作区选择器、管理页与草稿建议。 | Desktop 提供目标绑定的 Slot、通用 Remote 传输及授权的原生文件操作；旧扫描、导入、控制器和 Skills IPC／preload 门面已删除。Host 仅保留薄外部协议适配、准入与不可变回执，不再解析 Skill。 |
-| **WorkHub：**`maka.workhub` 拥有提示词／客户端工具策略、普通委派、Stop／Resume 请求／结果、候选筛选／引用、选择表单／答案及目标／默认值决策。目标准备在准入锁外运行；Host 命令在原子投递前复查实例及 canonical source。 | 纠正／恢复、协调会话流程、原生工具、Remote 及实际 Desktop UI 迁入内置领域。Host 保留精确消息定位、规范表单、原子准入／取消／回执及结算；不能把纠正拆成插件和 Host 各自写入。 |
+| **WorkHub：**`maka.workhub` 拥有提示词／客户端工具策略、委派／纠正流程、Stop／Resume 请求／结果、候选筛选／引用、选择表单／答案、目标／默认值决策及冻结纠正意图的恢复策略。Host 命令保留原子投递与已接受操作的结算，插件停用也不阻止结算。 | 协调会话流程、规范表单编排、原生工具、Remote 及实际 Desktop UI 迁入内置领域。保留精确消息定位与原子准入／取消／回执；不能把纠正拆成插件和 Host 各自写入。 |
 | **默认助手行为：**`maka.assistant` 发布默认 behavior、persona、个性化和工作区指令。 | 每逻辑模型步骤冻结来源；停用后不保留隐藏 persona。显式 Session／子任务指令独立于可替换的提示词 Contribution；执行／压缩不变量仍由 Host 维护。 |
 | **Graph／Swarm 与 Scheduler：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用原子激活／停止／空闲退休命令及只读偏好，不接收 `Executions`、配置写入器或 Host 锁。 | 保持已有编排与唤醒行为；语义相同时复用这些窄命令，按同一归属规则复核 Scheduler。类型化领域 repository 可以保留。 |
 | **Code Mode：**模式选择、嵌套派发及历史投影跨越多个 crate。 | 首批领域迁移后，在有实际 Contribution 边界收益时迁移面向用户的工具和模式策略；V8 所有权、嵌套调用权限、派发／结算及规范历史保留 runtime。不为搬迁 `exec` 发明万能执行 hook。 |
@@ -151,6 +151,6 @@ Memory、脱敏排除；OS 沙箱后置。Copilot／xAI 凭证实测按既有约
 
 - [Host 注册](../crates/runtime-host/src/server/operations.rs)、[dispatch](../crates/runtime-host/src/server/dispatch.rs)、[协议词汇](../crates/protocol/src/operation.rs)。
 - [执行准备](../crates/runtime-host/src/execution/prepare/environment.rs)、[工具装配](../crates/runtime-host/src/execution/tools.rs)、[设置消费](../crates/runtime-host/src/server/configuration/policy.rs)、[provider 路由](../crates/runtime-host/src/provider_route.rs)。
-- [Skills 领域](../crates/skills/src/lib.rs)、[输入准备](../crates/runtime-host/src/execution/input/prepared.rs)、[WorkHub 命令](../crates/runtime-host/src/server/workhub/action/correction.rs)、[纠正事务](../crates/event-log/src/workhub/correction.rs)、[默认 Prompt](../crates/runtime-host/src/plugins/assistant/prompt.rs)、[Graph 接线](../crates/runtime-host/src/plugins/graph.rs)。
+- [Skills 领域](../crates/skills/src/lib.rs)、[输入准备](../crates/runtime-host/src/execution/input/prepared.rs)、[WorkHub 流程](../crates/runtime-host/src/plugins/workhub/correction.rs)、[Host 命令](../crates/runtime-host/src/execution/workhub/commands.rs)、[纠正事务](../crates/event-log/src/workhub/correction.rs)、[默认 Prompt](../crates/runtime-host/src/plugins/assistant/prompt.rs)、[Graph 接线](../crates/runtime-host/src/plugins/graph.rs)。
 - [SDK](../packages/plugin-sdk/README.zh-CN.md)、[执行服务](../crates/plugins/src/execution.rs)、[Session behavior](../crates/plugins/src/session.rs)、[Scheduler 路由](../crates/runtime-host/src/server/scheduler.rs)。
 - TS [composition](../packages/runtime-host/src/server/execution-composition.ts)、[交互工具](../packages/runtime-host/src/server/interactive-run-composer.ts)、[执行检查](../packages/runtime-host/src/server/execution-inspect-coordinator.ts)、[外部导入](architecture/external-session-import-design.zh-CN.md)。

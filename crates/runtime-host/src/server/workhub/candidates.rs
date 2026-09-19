@@ -18,9 +18,6 @@
  */
 
 use super::Host;
-use crate::plugins::workhub::candidates::eligible;
-use crate::session::SessionConfiguration;
-use maka_event_log::sessions::SessionRecord;
 use maka_protocol::{OperationError, OperationErrorCode as Code};
 use std::sync::Arc;
 
@@ -36,11 +33,4 @@ pub(super) async fn query(
     host: &Arc<Host>,
 ) -> Result<crate::plugins::workhub::candidates::Candidates, OperationError> {
     super::control(host)?.value.candidates().await
-}
-
-pub(super) async fn target(
-    host: &Arc<Host>,
-    id: &str,
-) -> Result<Option<SessionRecord<SessionConfiguration>>, OperationError> {
-    host.executions.workhub_target(id, eligible).await
 }

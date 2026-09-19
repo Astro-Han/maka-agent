@@ -19,7 +19,7 @@
 
 use super::super::commands;
 use super::super::{Executions, Result, failure};
-use crate::plugins::workhub::delegation::Identity;
+use crate::plugins::workhub::control::Identity;
 use maka_protocol::OperationErrorCode as Code;
 use maka_runtime::{
     event::Fact,

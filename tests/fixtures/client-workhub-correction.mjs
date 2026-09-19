@@ -36,6 +36,7 @@ export async function correctDelegation({
   readRecord,
   ready,
   release,
+  toggleWorkhub,
 }) {
   const actionId = 'correction-action';
   if (!createNew) await request('session.create', createInput(workspace, 'replacement', 'bypass'));
@@ -57,7 +58,11 @@ export async function correctDelegation({
     delegationText: 'Corrected replacement task',
   };
   const before = sourceObserver.frames.at(-1)?.sequence ?? 0;
-  const result = await act(correction);
+  await toggleWorkhub(true);
+  await assert.rejects(act(correction), (error) => error.code === 'operation_unavailable');
+  await toggleWorkhub(false);
+  const [result, concurrentReceipt] = await Promise.all([act(correction), act(correction)]);
+  assert.deepEqual(concurrentReceipt, result);
   assert.equal(result.disposition, 'replace');
   assert.equal(result.replacementDisposition, createNew ? 'create_new' : 'delegate_existing');
   const targetId = createNew ? createdTarget(actionId) : 'replacement';
@@ -94,6 +99,8 @@ export async function correctDelegation({
       title: correction.proposal.target.title,
       workspace: correction.create.workspace,
     });
+  await toggleWorkhub(true);
+  await toggleWorkhub(false);
   assert.deepEqual(await act(correction), result);
   await assert.rejects(
     act({ ...correction, delegationText: 'different correction' }),

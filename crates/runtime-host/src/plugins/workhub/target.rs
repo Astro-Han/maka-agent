@@ -48,6 +48,26 @@ pub(crate) enum Target {
     },
 }
 impl Target {
+    pub(crate) fn correction(&self) -> maka_runtime::workhub::CorrectionTarget {
+        use maka_runtime::workhub::CorrectionTarget;
+        match self {
+            Self::Existing {
+                id,
+                name,
+                workspace_digest,
+                ..
+            } => CorrectionTarget::Existing {
+                session_id: id.clone(),
+                name: name.clone(),
+                workspace_digest: workspace_digest.clone(),
+            },
+            Self::Created { id, creation, spec } => CorrectionTarget::Created {
+                session_id: id.clone(),
+                name: creation.configuration.name.clone(),
+                spec: spec.clone(),
+            },
+        }
+    }
     pub(crate) fn description(&self) -> DelegationDescription {
         match self {
             Self::Existing { name, .. } => DelegationDescription::Existing { name: name.clone() },

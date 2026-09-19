@@ -27,7 +27,7 @@ use maka_runtime::{
 };
 use std::sync::Arc;
 
-pub(super) use crate::plugins::workhub::selection::{SelectedTarget, workspace_digest};
+pub(super) use crate::plugins::workhub::selection::SelectedTarget;
 
 pub(super) async fn select(
     host: &Arc<Host>,

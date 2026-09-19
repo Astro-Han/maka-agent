@@ -30,7 +30,6 @@ mod action;
 mod candidates;
 mod selection;
 pub(super) use action::ERRORS as ACTION_ERRORS;
-pub(super) use action::recover;
 pub(super) use candidates::ERRORS as CANDIDATE_ERRORS;
 
 pub(super) const ERRORS: &[Code] = &[

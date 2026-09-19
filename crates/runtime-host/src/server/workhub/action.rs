@@ -17,17 +17,13 @@
  * under the License.
  */
 
-use super::{Host, failure, sessions};
+use super::Host;
 use maka_protocol::{
     OperationError, OperationErrorCode as Code,
     workhub::{ActInput, ActResult},
 };
 use std::sync::Arc;
 use uuid::Uuid;
-
-mod correction;
-pub(in crate::server) use correction::recover;
-mod target;
 
 pub(in crate::server) const ERRORS: &[Code] = &[
     Code::HostNotReady,
@@ -51,7 +47,7 @@ pub(super) async fn act(
     match &input.proposal {
         maka_protocol::workhub::Proposal::Linked(proposal) => match proposal {
             maka_protocol::workhub::LinkedProposal::Correct { .. } => {
-                correction::act(host, input).await
+                super::control(host)?.value.correct(input).await
             }
             maka_protocol::workhub::LinkedProposal::Resume { .. } => {
                 super::control(host)?.value.resume(input, connection).await
@@ -75,16 +71,4 @@ pub(super) async fn selected(
         .value
         .delegate(input, Some(selected.clone()))
         .await
-}
-
-fn stored(host: &Host, error: maka_event_log::StoreError) -> OperationError {
-    use maka_event_log::StoreError;
-    match error {
-        StoreError::InvalidTransition(reason) => failure(Code::OperationConflict, reason),
-        StoreError::CommitUnknown(_) | StoreError::OperationUnknown => {
-            host.executions.begin_drain();
-            failure(Code::CommitOutcomeUnknown, error.to_string())
-        }
-        other => sessions::stored(other),
-    }
 }

@@ -18,7 +18,7 @@
  */
 
 use super::{
-    control::{Result, failure, fingerprint},
+    control::{Identity, Result, failure, fingerprint},
     selection::SelectedTarget,
     target::Target,
 };
@@ -26,14 +26,7 @@ use maka_protocol::{
     OperationErrorCode as Code,
     workhub::{ActInput, ActResult, Proposal},
 };
-use maka_runtime::workhub::{ActionId, Delegation, DelegationKind};
-
-#[derive(Clone)]
-pub(crate) struct Identity {
-    pub action_id: ActionId,
-    pub turn_id: String,
-    pub fingerprint: String,
-}
+use maka_runtime::workhub::{Delegation, DelegationKind};
 pub(crate) struct Request {
     pub identity: Identity,
     pub target: Target,

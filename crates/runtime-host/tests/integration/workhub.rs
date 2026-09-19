@@ -120,9 +120,30 @@ async fn correction_recovery_aborts_unresolvable_creation_without_blocking_host_
     .await
     .unwrap();
     log.close().await.unwrap();
-    // The intent survives, but no default model is available at either restart.
+    // Disable the domain before restart: accepted Host settlement must not wait
+    // for a live plugin. No default model is available at either restart.
+    let log = fixture.log().await;
+    let mut ledger = log.plugin_composition().await.unwrap();
+    ledger.extend(&[maka_plugins::composition::Operation::Update {
+        entry_id: "maka.workhub".into(),
+        patch: maka_plugins::composition::EntryPatch {
+            disabled: Some(true),
+            ..Default::default()
+        },
+    }]);
+    log.commit_plugin_state(ledger, None).await.unwrap();
+    log.close().await.unwrap();
     for _ in 0..2 {
         let host = Host::open(fixture.owner()).await.unwrap();
+        let mut peer = super::support::peer::Peer::new(host.clone(), "disabled-workhub").await;
+        let candidates = peer
+            .rpc("workhub.coordination.candidates", serde_json::json!({}))
+            .await;
+        assert_eq!(
+            candidates["error"]["code"], "operation_unavailable",
+            "{candidates}"
+        );
+        peer.close().await;
         #[cfg(unix)]
         let endpoint = fixture.workspace.parent().unwrap().join("recovery.sock");
         #[cfg(windows)]
