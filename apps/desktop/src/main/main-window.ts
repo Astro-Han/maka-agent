@@ -415,12 +415,10 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
       minHeight: SAFE_MIN_HEIGHT,
       backgroundColor: initialBg,
       // PR-SHOW-AFTER-FIRST-COMMIT: create hidden on every run so the OS never
-      // flashes the index.html `.maka-preload` skeleton before React paints.
-      // The renderer signals `window:notifyRendererReady` after its first
-      // commit (app.tsx) and a fallback timer below reveals the window if that
-      // signal never arrives; the reveal gate (showWindowOnceReady) keeps the
-      // window hidden until the first real content can paint, so the app
-      // never flashes the `.maka-preload` skeleton past it.
+      // shows an unpainted window; `ready-to-show` reveals it on the first
+      // painted frame (the `.maka-preload` loading surface), and the reveal
+      // gate (showWindowOnceReady) routes that plus the renderer-ready IPC,
+      // the fallback timer, and deferred focus/maximize through the mode.
       show: false,
       // Native sidebar vibrancy lets the CSS-side sidebar render
       // transparent and inherit the system's blurred window material
@@ -446,6 +444,15 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
     });
     mainWindowShutdownSignal = signal;
     observeRendererProcess(mainWindow, signal);
+    // The designed `.maka-preload` surface is the loading UI: reveal on the
+    // first painted frame instead of waiting out the whole React mount.
+    // markReady is mode-suppressed (hidden/inactive) and idempotent, so the
+    // later `window:notifyRendererReady` signal and the fallback timer stay
+    // as no-op backstops.
+    mainWindow.once('ready-to-show', () => {
+      clearShowFallbackTimer();
+      revealGate.markReady(mainWindow);
+    });
     installMainWindowPermissionPolicy(mainWindow.webContents, rendererEntry.url);
 
     // Two-layer external-link hygiene: assistant markdown often emits `<a href>`
@@ -726,10 +733,10 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
     },
     focus() {
       // ChatGPT Pro review P2: second-instance / activate must not show() the
-      // still-hidden window ahead of the renderer's first commit — that would
-      // flash the `.maka-preload` skeleton past the reveal gate. The gate
-      // defers the request and flushes it (restore+show+focus) on markReady;
-      // after that, focus behaves exactly as before.
+      // still-hidden window before it has painted — that would flash an
+      // unpainted frame past the reveal gate. The gate defers the request
+      // and flushes it (restore+show+focus) on markReady; after that, focus
+      // behaves exactly as before.
       revealGate.requestFocus(mainWindow);
     },
     isFocused() {
