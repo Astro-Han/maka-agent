@@ -197,9 +197,13 @@ if (!app.requestSingleInstanceLock()) {
   // store/db write".
   app
     .whenReady()
-    .then(() => {
+    .then(async () => {
       console.log('[startup] app ready');
       installDesktopStartupBranding(revealMode);
+      // early-window holds the light slice (storage root, settings, window
+      // controller) and fires the renderer load; the heavy Runtime Host
+      // module graph evaluates while the window is already loading.
+      await import('./early-window.js');
       return import('./runtime-host-boot.js');
     })
     .catch(async (error: unknown) => {

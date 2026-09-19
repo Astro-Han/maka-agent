@@ -30,8 +30,8 @@ const bootSource = readFileSync(
   fileURLToPath(new URL('../../../src/main/runtime-host-boot.ts', import.meta.url)),
   'utf8',
 );
-const appIpcSource = readFileSync(
-  fileURLToPath(new URL('../../../src/main/app-ipc-main.ts', import.meta.url)),
+const earlyWindowSource = readFileSync(
+  fileURLToPath(new URL('../../../src/main/early-window.ts', import.meta.url)),
   'utf8',
 );
 const mainWindowSource = readFileSync(
@@ -73,14 +73,18 @@ test('retains process lifetime before a standalone startup dialog can close', ()
 });
 
 test('registers one shared quit cleanup before the initial Host handoff', () => {
+  const earlyWindowImport = mainSource.indexOf("import('./early-window.js')");
+  const bootImport = mainSource.indexOf("import('./runtime-host-boot.js')");
   const hostStart = bootSource.indexOf('await runtimeHostManager?.start()');
-  const quitRegistration = bootSource.indexOf('app.on("before-quit", quitCoordinator.handleBeforeQuit)');
-  const workBoardDeclaration = bootSource.indexOf('let workBoardIpc:');
-  assert.ok(workBoardDeclaration >= 0 && workBoardDeclaration < quitRegistration);
-  assert.ok(quitRegistration >= 0 && quitRegistration < hostStart);
-  assert.equal(bootSource.match(/createAppQuitCoordinator\(\{/gu)?.length, 1);
-  assert.equal(bootSource.match(/app\.on\("before-quit"/gu)?.length, 1);
-  assert.match(bootSource, /cleanup: closeRuntimeHostDesktop/u);
+  const quitRegistration = earlyWindowSource.indexOf(
+    'app.on("before-quit", quitCoordinator.handleBeforeQuit)',
+  );
+  assert.ok(earlyWindowImport >= 0 && earlyWindowImport < bootImport);
+  assert.ok(quitRegistration >= 0);
+  assert.ok(hostStart >= 0);
+  assert.equal(earlyWindowSource.match(/createAppQuitCoordinator\(\{/gu)?.length, 1);
+  assert.equal(earlyWindowSource.match(/app\.on\("before-quit"/gu)?.length, 1);
+  assert.match(bootSource, /bootContext\.cleanup = closeRuntimeHostDesktop/u);
   assert.match(bootSource, /return runtimeHostDesktopShutdown \?\?= disposeRuntimeHostDesktop\(\)/u);
   assert.match(bootSource, /workBoardIpc\?\.close\(\)/u);
 });
@@ -100,14 +104,15 @@ test('creates the main window before starting Local Host reconciliation', () => 
   const hostStart = bootSource.indexOf('await runtimeHostManager?.start()', managerCreate);
   assert.ok(managerCreate >= 0);
   assert.ok(lifecycleWire > managerCreate && hostStart > lifecycleWire);
+  assert.match(earlyWindowSource, /void quitCoordinator\.focusOrCreateWindow\(\)/u);
   assert.doesNotMatch(mainSource, /startup-presentation/u);
 });
 
 test('resolves persisted locale before first post-settings recovery prompt', () => {
-  const rendererRecoveryStart = bootSource.indexOf('onRendererProcessGone: async');
-  const rendererRecovery = bootSource.slice(
+  const rendererRecoveryStart = earlyWindowSource.indexOf('onRendererProcessGone: async');
+  const rendererRecovery = earlyWindowSource.slice(
     rendererRecoveryStart,
-    bootSource.indexOf('resolveBrowserDialogParent =', rendererRecoveryStart),
+    earlyWindowSource.indexOf('mainWindowDelegates.resolveBrowserDialogParent =', rendererRecoveryStart),
   );
   const defaultHostRecoveryStart = bootSource.indexOf(
     'async function promptForDefaultRuntimeHostRecovery',
@@ -152,12 +157,12 @@ test('lets the Runtime Host migrate its State Root before Desktop opens shared t
 });
 
 test('routes the first-paint IPC only to the active Renderer recovery listener', () => {
-  const ipcHandlerStart = appIpcSource.indexOf(
-    "targetIpc.handle('window:notifyRendererReady'",
+  const ipcHandlerStart = earlyWindowSource.indexOf(
+    'ipcMain.handle("window:notifyRendererReady"',
   );
-  const ipcHandler = appIpcSource.slice(
+  const ipcHandler = earlyWindowSource.slice(
     ipcHandlerStart,
-    appIpcSource.indexOf("targetIpc.handle('window:setThemeSource'", ipcHandlerStart),
+    earlyWindowSource.indexOf('void quitCoordinator.focusOrCreateWindow()', ipcHandlerStart),
   );
   const readyHandlerStart = mainWindowSource.indexOf(
     'notifyRendererReady(sender, senderFrame)',
