@@ -26,7 +26,7 @@ import { useAstryxThemeMode } from './astryx-theme-mode';
 export function App() {
   // PR-SHOW-AFTER-FIRST-COMMIT: the BrowserWindow is created hidden
   // (main-window.ts show: false) so the OS never flashes the index.html
-  // `.maka-preload` skeleton before React paints. A layout effect is too early
+  // `.maka-preload` surface before React paints. A layout effect is too early
   // for this signal: it runs after the DOM commit but before Chromium paints,
   // so the main process can show the BrowserWindow while its last composited
   // frame is still the preload skeleton. Two animation frames put the signal
