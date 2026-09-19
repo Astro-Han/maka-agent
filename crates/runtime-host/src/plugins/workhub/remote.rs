@@ -38,6 +38,7 @@ pub(super) fn publish(
         ("resolve", Action::Resolve),
         ("query", Action::Query),
         ("answer", Action::Answer),
+        ("answer-receipt", Action::AnswerReceipt),
         ("configure-model", Action::ConfigureModel),
         ("feedback", Action::Feedback),
     ] {
@@ -62,6 +63,7 @@ enum Action {
     Resolve,
     Query,
     Answer,
+    AnswerReceipt,
     ConfigureModel,
     Feedback,
 }
@@ -100,6 +102,15 @@ impl Method for Call {
                     let references = serde_json::from_value(input).map_err(invalid)?;
                     control
                         .feedback(references, caller.cancellation)
+                        .await
+                        .and_then(encode)
+                }
+                Action::AnswerReceipt => {
+                    let input = workhub::decode_answer_input(&input).map_err(invalid)?;
+                    let request = Request::new(input).map_err(|error| invalid(error.message))?;
+                    control
+                        .commands
+                        .answer_receipt(&request)
                         .await
                         .and_then(encode)
                 }

@@ -18,6 +18,7 @@
  */
 
 import type {} from '@maka-agent/plugin-sdk/client';
+import type { WorkHubRootProps } from './surface.js';
 
 export type DelegationReference = {
   readonly id: string;
@@ -50,5 +51,9 @@ export interface FeedbackInput {
 declare module '@maka-agent/plugin-sdk/client' {
   interface ClientSlots {
     'workhub.feedback': FeedbackInput;
+    'workhub.surface': WorkHubRootProps & {
+      readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+      readonly contextRevision?: number;
+    };
   }
 }

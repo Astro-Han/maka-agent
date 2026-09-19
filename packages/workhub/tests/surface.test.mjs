@@ -34,7 +34,7 @@ test('the bundled WorkHub surface uses the application UI and locale without a s
   const source = await buildClient(
     {
       packageId: 'maka.workhub',
-      entryPoint: fileURLToPath(new URL('../src/surface.ts', import.meta.url)),
+      entryPoint: fileURLToPath(new URL('../src/client.tsx', import.meta.url)),
     },
     async (options) => {
       const result = await build({ ...options, metafile: true });
@@ -57,13 +57,28 @@ test('the bundled WorkHub surface uses the application UI and locale without a s
     },
   });
   const modules = { react: React, 'react/jsx-runtime': JsxRuntime, '@maka/ui/plugin': ClientUi };
-  const { WorkHubRoot } = bundle.factory((name) => {
+  const { default: plugin } = bundle.factory((name) => {
     assert.ok(Object.hasOwn(modules, name), 'unsupported shared module: ' + name);
     return modules[name];
   });
   const never = () => {
     throw new Error('Server rendering cannot invoke native operations');
   };
+  const slots = new Map();
+  const styles = [];
+  const lifetime = new AbortController();
+  await plugin.activate({
+    hostEpoch: 'origin',
+    signal: lifetime.signal,
+    remote: { method: () => never },
+    slots: { register: (name, _key, component) => slots.set(name, component) },
+    style: (css) => styles.push(css),
+  });
+  const WorkHubRoot = slots.get('workhub.surface');
+  assert.ok(WorkHubRoot, 'the actual Client entry must publish its surface');
+  assert.equal(styles.length, 1);
+  assert.ok(styles[0].startsWith('@layer components {'));
+  assert.ok(styles[0].includes('.workHubLive'));
   const ports = new Proxy({}, { get: () => never });
   const markup = renderToString(
     React.createElement(

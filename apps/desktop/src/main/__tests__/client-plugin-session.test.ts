@@ -162,6 +162,7 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
     await act(async () => changedHost());
     const expected = desktopSessionKey({ hostId: 'second', sessionId: 'coordinator' });
     await until(() => latest!.sessionId === expected);
+    assert.equal(document.querySelectorAll('style').length, 1);
     await act(async () => lateProjection.resolve(desktopSessionKey({ hostId: 'first', sessionId: 'coordinator' })));
     assert.equal(latest!.sessionId, expected, 'a retired observation cannot publish through another Host');
     assert(closed.includes('first'));
@@ -191,11 +192,13 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
     await act(async () => changedCatalog());
     await until(() => latest!.sessionId === undefined);
     assert.equal(feedback.length, 0);
+    assert.equal(document.querySelectorAll('style').length, 0, 'retirement removes the Client stylesheet');
     assert(closed.includes('second'));
     enabled = true; revision++;
     await act(async () => changedCatalog());
     await until(() => latest!.sessionId === expected);
     await until(() => feedback.length === 65 && feedback.every((item) => item.state === 'completed'));
+    assert.equal(document.querySelectorAll('style').length, 1);
     assert.deepEqual(calls, ['first', 'first', 'second', 'second', 'second', 'second']);
     await act(async () => render(false));
     await until(() => subscriptions === 0);

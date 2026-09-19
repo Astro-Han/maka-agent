@@ -43,6 +43,7 @@ export async function buildClient(
     format: 'cjs',
     target: 'es2022',
     jsx: 'automatic',
+    loader: { '.css': 'text' },
     legalComments: 'inline',
     external: [
       'react',

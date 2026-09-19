@@ -24,7 +24,10 @@ import type { ThinkingLevel } from '@maka/core/model-thinking';
 import type { StoredMessage, SessionSummary } from '@maka/core/session';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, within, waitFor } from 'storybook/test';
-import { WorkHubRoot, WorkHubServicesProvider, type WorkHubServices, type WorkHubTranscriptSnapshot } from '../src/renderer/features/workhub/index.js';
+import type { WorkHubServices, WorkHubTranscriptSnapshot } from '../src/renderer/features/workhub/index.js';
+import { WorkHubRoot } from '@maka/workhub/surface';
+import '@maka/workhub/styles.css';
+import { getDesktopConversationCopy } from '../src/renderer/locales/conversation-copy.js';
 import { WorkHubConversation, WorkHubHighlightContext } from '@maka/workhub/conversation';
 import { desktopSessionKey } from '../src/shared/runtime-host-identity.js';
 
@@ -164,7 +167,11 @@ function Surface({ failFirst = false, history = false, colors = false, selectTar
     if (progress) services.presentation.resizeProgress = async (_request, height) => { setProgressHeight(height); };
     return services;
   });
-  return <LocaleProvider locale="zh-CN"><AstryxLocaleProvider><ToastProvider><WorkHubServicesProvider services={services}><div style={{ height: progress ? progressHeight : '100dvh', width: progress ? 360 : undefined, maxWidth: '100%' }}><WorkHubRoot sessionId={sessionId} feedback={(input) => <StoryFeedback {...input} colors={colors} />} /></div></WorkHubServicesProvider></ToastProvider></AstryxLocaleProvider></LocaleProvider>;
+  return <LocaleProvider locale="zh-CN"><AstryxLocaleProvider><ToastProvider><div style={{ height: progress ? progressHeight : '100dvh', width: progress ? 360 : undefined, maxWidth: '100%' }}><WorkHubRoot sessionId={sessionId}
+    sessions={services} native={services} contextUsage={services.inspector} attachments={{
+      staging: services.attachments, read: services.readAttachmentBytes, prepare: services.prepareAttachments,
+      copy: (locale) => getDesktopConversationCopy(locale).actions, formatError: (error) => String(error),
+    }} feedback={(input) => <StoryFeedback {...input} colors={colors} />} /></div></ToastProvider></AstryxLocaleProvider></LocaleProvider>;
 }
 function StoryFeedback({ references, onFeedback, colors }: FeedbackInput & { colors: boolean }) {
   useEffect(() => {

@@ -315,6 +315,9 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     const remote = await workhubRemote(connection);
     remotes.push(remote);
     const answer = remote.method('answer');
+    const receipt = remote.method('answer-receipt');
+    assert.equal(await receipt(input), null);
+    assert.equal(requests.length, 0, 'A receipt lookup cannot dispatch a model');
     observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
     assert.deepEqual(
       await Promise.all([request('workhub.coordination.answer', input), answer(input)]),
@@ -329,6 +332,11 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     if (failure) throw failure;
     const terminal = await request('turn.query', { sessionId, turnId });
     assert.equal(terminal.status, 'completed');
+    assert.deepEqual(await receipt(input), { turnId });
+    await assert.rejects(
+      receipt({ ...input, text: 'changed' }),
+      (error) => error.code === 'operation_conflict',
+    );
     assert.equal(requests.length, 7);
     assert.equal(calls, 1);
     assert.equal(contextCalls, 1);
@@ -440,6 +448,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     await togglePolicy(false);
     const restored = await workhubRemote(connection);
     remotes.push(restored);
+    assert.deepEqual(await restored.method('answer-receipt')(input), { turnId });
     assert.deepEqual(await restored.method('answer')(input), { turnId });
     await assert.rejects(
       request('workhub.coordination.answer', { ...input, text: 'changed' }),

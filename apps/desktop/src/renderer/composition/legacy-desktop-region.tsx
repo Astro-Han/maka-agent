@@ -29,8 +29,8 @@ export function AppShell(props: ComponentProps<typeof LegacyAppShell>) {
 }
 function WorkHubConversation() {
   const binding = usePluginSession('maka.workhub.ui', true, useUiLocale());
-  return <>{binding.resolver}<WorkHubRoot key={binding.sessionId} sessionId={binding.sessionId}
-    feedback={(input) => binding.host ? <WorkHubFeedback host={binding.host} input={input} /> : null} /></>;
+  return <>{binding.resolver}{binding.host ? <WorkHubRoot host={binding.host} key={binding.sessionId} sessionId={binding.sessionId}
+    feedback={(input) => <WorkHubFeedback host={binding.host!} input={input} />} /> : null}</>;
 }
 
 function WorkHubFeedback({ host, input }: { host: ClientHostRef; input: FeedbackInput }) {

@@ -17,13 +17,16 @@
  * under the License.
  */
 
-import { useMemo, type ComponentProps } from 'react';
-import { WorkHubRoot as Conversation, type WorkHubAttachmentServices, type WorkHubWindowServices } from '@maka/workhub/surface';
+import { useMemo } from 'react';
+import type { WorkHubRootProps, WorkHubAttachmentServices, WorkHubWindowServices } from '@maka/workhub/surface';
+import { useUiLocale } from '@maka/ui';
+import { ClientPluginSlot, type ClientHostRef } from '../../client-plugins/index.js';
 import { getDesktopConversationCopy } from '../../../locales/conversation-copy.js';
 import { localizedShellErrorMessage } from '../../../locales/shell-copy.js';
 import { useWorkHubServices } from '../services.js';
 
-export function WorkHubRoot(props: Pick<ComponentProps<typeof Conversation>, 'sessionId' | 'feedback'>) {
+export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionId' | 'feedback'> & { host: ClientHostRef }) {
+  const locale = useUiLocale();
   const services = useWorkHubServices();
   const native = useMemo<WorkHubWindowServices>(() => ({
     presentation: services.presentation,
@@ -37,5 +40,6 @@ export function WorkHubRoot(props: Pick<ComponentProps<typeof Conversation>, 'se
     copy: (locale) => getDesktopConversationCopy(locale).actions,
     formatError: localizedShellErrorMessage,
   }), [services]);
-  return <Conversation {...props} sessions={services} native={native} attachments={attachments} contextUsage={services.inspector} />;
+  return <ClientPluginSlot host={host} entryId="maka.workhub.ui" name="workhub.surface" className="workHubPluginSurface"
+    input={{ ...props, locale, sessions: services, native, attachments, contextUsage: services.inspector }} />;
 }

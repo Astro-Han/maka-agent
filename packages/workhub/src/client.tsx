@@ -17,10 +17,14 @@
  * under the License.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@maka/ui/plugin';
 import type { ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 import { registerFeedback } from './feedback.js';
+import { WorkHubRoot } from './surface.js';
+import { coordinationCommands } from './client-session.js';
+import { bindSurface } from './client-surface.js';
+import styles from './styles.css';
 
 type Resolution =
   | { ok: true; result: { sessionId: string } }
@@ -28,7 +32,16 @@ type Resolution =
 
 const plugin: ClientPlugin = {
   activate(context) {
+    context.style(`@layer components {\n${styles}\n}`);
     registerFeedback(context);
+    const commands = coordinationCommands(context);
+    context.slots.register('workhub.surface', 'conversation', function Surface(props) {
+      const bound = useMemo(
+        () => bindSurface(props, commands, context.signal),
+        [props.sessions, props.native, props.attachments, props.contextUsage],
+      );
+      return <WorkHubRoot {...props} {...bound} signal={context.signal} />;
+    });
     const resolve = context.remote.method<null, Resolution>('resolve');
     context.slots.register(
       'session.resolve',

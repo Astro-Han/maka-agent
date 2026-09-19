@@ -45,6 +45,7 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
   readonly host: ClientHostRef;
   readonly name: K;
   readonly entryId?: string;
+  readonly className?: string;
   readonly input: ClientSdk.ClientSlots[K];
 }): React.ReactNode {
   const { services, hosts } = useServices();
@@ -81,7 +82,7 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
       void session(sessionId).then(open.onOpenSession).catch((error: unknown) => report({ error }));
     },
   } : composerInput;
-  return <div className={props.name.endsWith('.composer.before') ? 'maka-composer-plugin-slot' : undefined}>
+  return <div className={props.className ?? (props.name.endsWith('.composer.before') ? 'maka-composer-plugin-slot' : undefined)}>
     {failure ? <div role="status" className="clientPluginFailure">
       {props.input.locale === 'zh-CN' ? '部分扩展未能加载。' :
         props.input.locale === 'zh-TW' ? '部分擴充功能未能載入。' : 'Some extensions could not load.'}

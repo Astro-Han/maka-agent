@@ -53,6 +53,7 @@ const config: StorybookConfig = {
           // browser boundary explicit and fail closed if a story ever tries
           // to hash runtime state.
           { find: 'node:crypto', replacement: STORYBOOK_NODE_CRYPTO_BOUNDARY },
+          { find: '@maka/ui/plugin', replacement: resolve(UI_SRC, 'plugin.ts') },
           { find: '@maka/ui/icons', replacement: resolve(UI_SRC, 'icons.tsx') },
           { find: '@maka/ui/artifact-preview-registry', replacement: resolve(UI_SRC, 'artifact-preview-registry.ts') },
           { find: '@maka/ui/assistant-stream', replacement: resolve(UI_SRC, 'assistant-stream.ts') },

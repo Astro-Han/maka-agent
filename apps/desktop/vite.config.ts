@@ -54,6 +54,7 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: [
+      { find: '@maka/ui/plugin', replacement: resolve(UI_SRC, 'plugin.ts') },
       { find: '@maka/ui/icons', replacement: resolve(UI_SRC, 'icons.tsx') },
       { find: '@maka/ui/artifact-preview-registry', replacement: resolve(UI_SRC, 'artifact-preview-registry.ts') },
       { find: '@maka/ui/assistant-stream', replacement: resolve(UI_SRC, 'assistant-stream.ts') },

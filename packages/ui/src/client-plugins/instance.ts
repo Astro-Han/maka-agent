@@ -42,7 +42,7 @@ export class ClientInstance {
   readonly #identity: ClientIdentity;
   readonly #files?: ClientLocalFiles;
 
-  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory, files?: ClientFilesFactory) {
+  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory, files?: ClientFilesFactory, readonly hostEpoch?: string) {
     this.#onError = onError;
     this.#identity = Object.freeze({
       entryId: descriptor.entryId, extensionId: descriptor.extensionId,
@@ -61,6 +61,7 @@ export class ClientInstance {
   async #initialize(plugin: ClientPlugin, document: Document): Promise<void> {
     const context: ClientContext = {
       identity: this.#identity,
+      hostEpoch: this.hostEpoch,
       signal: this.lifetime.signal,
       localFiles: this.#files ? {
         pick: async () => {

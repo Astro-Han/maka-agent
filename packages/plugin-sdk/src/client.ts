@@ -95,6 +95,8 @@ export interface ComposerPublication {
 
 export interface ClientContext {
   readonly identity: ClientIdentity;
+  /** Originating Host epoch. Changes retire this instance; retries never follow a new Host. */
+  readonly hostEpoch?: string;
   readonly signal: AbortSignal;
   readonly remote: ClientRemote;
   /** Optional desktop-local paths; never interpreted as paths on a remote Host. */

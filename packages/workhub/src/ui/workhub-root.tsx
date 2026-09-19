@@ -99,6 +99,7 @@ function revealWordmark(element: HTMLDivElement | null, content: HTMLDivElement 
 
 export interface WorkHubRootProps {
   sessionId: string | undefined;
+  signal?: AbortSignal;
   sessions: CoordinationSessionServices;
   native: WorkHubWindowServices;
   attachments: WorkHubAttachmentServices;
@@ -108,6 +109,7 @@ export interface WorkHubRootProps {
 
 export function WorkHubRoot({
   sessionId,
+  signal,
   sessions,
   native,
   attachments,
@@ -537,6 +539,7 @@ export function WorkHubRoot({
                       hidden={Boolean(controller.activeQuestion || controller.activeForm)}
                     >
                       <WorkHubComposer
+                        signal={signal}
                         attachments={attachments}
                         pendingMessages={controller.transientMessages}
                         queuedMessages={controller.messageQueue.entries}

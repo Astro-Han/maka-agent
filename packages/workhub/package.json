@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./styles.css": "./src/styles.css",
     "./surface": "./dist/surface.js",
     "./native": "./dist/native.js",
     "./controller": "./dist/controller.js",

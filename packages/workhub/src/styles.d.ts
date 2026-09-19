@@ -17,6 +17,7 @@
  * under the License.
  */
 
-.workHubPluginSurface, .workHubDock { width: 100%; height: 100%; min-width: 0; min-height: 0; }
-.workHubDockPlaceholder { display: grid; justify-items: center; align-content: center; gap: var(--space-3); padding: var(--space-6); min-height: 220px; height: 100%; text-align: center; }
-.workHubDockBackdrop { display: block; width: 100%; height: 100%; object-fit: fill; }
+declare module '*.css' {
+  const css: string;
+  export default css;
+}

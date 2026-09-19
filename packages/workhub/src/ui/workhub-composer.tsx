@@ -27,6 +27,7 @@ import {
 } from '@maka/ui/plugin';
 import { useComposerAttachments } from '@maka/ui/plugin';
 import { toComposerIngestItems } from '@maka/ui/plugin';
+import { useMountedRef } from '@maka/ui/plugin';
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from '@maka/core/attachments';
 import type { AttachmentRef, FollowUpMode } from '@maka/core/events';
 import type { WorkHubAttachmentServices } from './ports.js';
@@ -34,13 +35,15 @@ import { workHubLiveCopy } from '../locales.js';
 
 export type WorkHubComposerProps = Omit<ComposerProps, 'onSend' | 'draftKey'> & {
   sessionId?: string;
+  signal?: AbortSignal;
   attachments: WorkHubAttachmentServices;
   onSend(text: string, attachments: AttachmentRef[], followUpMode?: FollowUpMode): Promise<boolean>;
 };
 
 /** The shared Composer and attachment lifecycle belong to the persistent coordination Session. */
 export const WorkHubComposer = forwardRef<ComposerHandle, WorkHubComposerProps>(
-  function WorkHubComposer({ sessionId, attachments: service, onSend, ...composer }, ref) {
+  function WorkHubComposer({ sessionId, signal, attachments: service, onSend, ...composer }, ref) {
+    const mounted = useMountedRef();
     const locale = useUiLocale();
     const t = workHubLiveCopy[locale];
     const toast = useToast();
@@ -76,7 +79,10 @@ export const WorkHubComposer = forwardRef<ComposerHandle, WorkHubComposerProps>(
         onAttachFilePaths={staged.attachFilePaths}
         onRemoveAttachment={staged.removeAttachment}
         onSend={async (text, metadata) => {
-          if (!sessionId || submittingRef.current || composer.sendBlocked) return false;
+          const current = () =>
+            mounted.current && !signal?.aborted && currentSessionId.current === sessionId;
+          if (!current() || !sessionId || submittingRef.current || composer.sendBlocked)
+            return false;
           const snapshot = [...staged.pendingAttachments];
           submittingRef.current = true;
           setSubmitting(true);
@@ -93,29 +99,31 @@ export const WorkHubComposer = forwardRef<ComposerHandle, WorkHubComposerProps>(
               let attachment = uploaded.current.get(key);
               if (!attachment) {
                 [attachment] = await service.prepare(sessionId, toComposerIngestItems([item]));
+                if (!current()) return false;
                 if (!attachment) throw new Error(t.attachmentUploadFailed);
                 uploaded.current.set(key, attachment);
               }
               attachments.push(attachment);
             }
             // A Host switch during an upload must never submit the old draft into its successor.
-            if (currentSessionId.current !== sessionId) return false;
+            if (!current()) return false;
             const accepted = await onSend(
               text.trim() || t.reviewAttachments,
               attachments,
               metadata?.followUpMode,
             );
+            if (!current()) return false;
             if (accepted) {
               staged.clearSubmittedAttachments(snapshot);
               for (const item of snapshot) uploaded.current.delete(`${scope}:${item.stagingKey}`);
             }
             return accepted;
           } catch (error) {
-            toast.error(t.sendFailed, service.formatError(error, t.retry, locale));
+            if (current()) toast.error(t.sendFailed, service.formatError(error, t.retry, locale));
             return false;
           } finally {
             submittingRef.current = false;
-            setSubmitting(false);
+            if (mounted.current) setSubmitting(false);
           }
         }}
       />

@@ -31,3 +31,4 @@ export {
 export { useComposerAttachments } from './use-composer-attachments.js';
 export { toComposerIngestItems } from './composer-attachments.js';
 export { WorkbarEdgeToggle } from './workbar-edge-toggle.js';
+export { useMountedRef } from './use-mounted-ref.js';

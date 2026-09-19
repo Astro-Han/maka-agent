@@ -17,6 +17,7 @@
     "../../crates/runtime-host/tests/fixtures/remote-plugin.mjs",
     "../../crates/runtime-host/src/plugins/graph/client.tsx",
     "../workhub/src/client.tsx",
+    "../workhub/src/styles.d.ts",
     "../../crates/skills/src/client.tsx"
   ]
 }
