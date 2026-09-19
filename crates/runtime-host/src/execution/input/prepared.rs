@@ -19,7 +19,7 @@
 
 use crate::execution::{Executions, Result, failure, internal, skills::SkillPreparation};
 use crate::session::SessionConfiguration;
-use maka_client_capability::{BindingMode, PreparedBindings};
+use maka_client_capability::BindingMode;
 use maka_event_log::sessions::SessionRecord;
 use maka_protocol::OperationErrorCode as Code;
 use maka_runtime::input::MessageInput;
@@ -29,9 +29,15 @@ use std::{collections::HashSet, sync::Arc};
 pub(crate) struct PreparedMessageInput {
     digest: String,
     prepared: Option<maka_plugins::input::Prepared>,
-    bindings: Option<PreparedBindings>,
+    environment: Option<crate::execution::prepare::Environment>,
     pub content: MessageInput,
     pub selection: SkillPreparation,
+}
+
+#[derive(Default)]
+pub(crate) struct MessageAdmission {
+    _input: Option<maka_plugins::input::Admission>,
+    _environment: Option<crate::execution::prepare::Admission>,
 }
 
 impl Executions {
@@ -47,7 +53,7 @@ impl Executions {
             return Ok(PreparedMessageInput {
                 digest: session.configuration_digest,
                 prepared: None,
-                bindings: None,
+                environment: None,
                 content,
                 selection: SkillPreparation::Ready {
                     skill_invocation: Default::default(),
@@ -55,57 +61,29 @@ impl Executions {
                 },
             });
         }
-        let cwd = &session.configuration.workspace.host_cwd;
-        let (bindings, tools) = match active_tools {
-            Some(tools) => (None, tools.iter().cloned().collect()),
-            None => {
-                let (bindings, mut additional) = self
-                    .capabilities
-                    .prepare_tools(
-                        &session.id,
-                        Some(connection),
-                        BindingMode::Strict,
-                        cwd.clone(),
-                        self.interactions.clone(),
-                    )
-                    .map_err(|error| failure(Code::OperationConflict, &error.to_string()))?;
-                additional.push(self.interactions.question_tool());
-                let native = self.native_tools(cwd, session.configuration.tool_profile);
-                let mode = session.configuration.permission_mode;
-                let ceiling = session.configuration.bound_tools.clone();
-                let native_ceiling = ceiling.clone();
-                let tools = tokio::task::spawn_blocking(move || {
-                    crate::execution::tools::catalog(
-                        native,
-                        mode,
-                        additional,
-                        native_ceiling.as_ref(),
-                    )
-                })
-                .await
-                .map_err(internal)??;
-                let tools = tools
-                    .with_plugins(
-                        self.plugin_catalog.clone(),
-                        maka_plugins::composition::Scope::Session(session.id.clone()),
-                        ceiling,
-                    )
-                    .map_err(internal)?
-                    .resolve_plugins()
-                    .map_err(internal)?
-                    .names()
-                    .into_iter()
-                    .collect();
-                (Some(bindings), tools)
-            }
+        let Some(tools) = active_tools else {
+            let digest = session.configuration_digest.clone();
+            let (environment, content, selection) = self
+                .prepare_environment_for(session, Some(connection), BindingMode::Strict, None)
+                .await?
+                .expand(content, Vec::new())
+                .await?;
+            return Ok(PreparedMessageInput {
+                digest,
+                environment: Some(environment),
+                prepared: None,
+                content,
+                selection,
+            });
         };
+        let cwd = &session.configuration.workspace.host_cwd;
         let (prepared, selection) = super::prepare(
             &self.plugin_catalog,
             maka_plugins::input::Request {
                 session_id: session.id,
                 cwd: cwd.clone(),
                 content,
-                tools,
+                tools: tools.iter().cloned().collect(),
                 selections: Default::default(),
                 cancellation: self.shutdown.child_token(),
             },
@@ -115,7 +93,7 @@ impl Executions {
             digest: session.configuration_digest,
             content: prepared.content.clone(),
             prepared: Some(prepared),
-            bindings,
+            environment: None,
             selection,
         })
     }
@@ -125,7 +103,7 @@ impl PreparedMessageInput {
         mut self,
         executions: &Executions,
         session: &str,
-    ) -> Result<Option<(Self, Option<maka_plugins::input::Admission>)>> {
+    ) -> Result<Option<(Self, Option<MessageAdmission>)>> {
         let record = executions
             .log
             .get_session::<SessionConfiguration>(session)
@@ -141,22 +119,19 @@ impl PreparedMessageInput {
         if executions.shutdown.is_cancelled() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
-        let admission = if let Some(prepared) = &self.prepared {
+        let mut admission = MessageAdmission::default();
+        if let Some(prepared) = &self.prepared {
             let Some(admitted) = prepared.admit().map_err(internal)? else {
                 return Ok(None);
             };
-            Some(admitted)
-        } else {
-            None
-        };
-        if let Some(bindings) = self.bindings.take()
-            && !executions
-                .capabilities
-                .commit_tools(bindings)
-                .map_err(|error| failure(Code::OperationConflict, &error.to_string()))?
-        {
-            return Ok(None);
+            admission._input = Some(admitted);
         }
-        Ok(Some((self, admission)))
+        if let Some(environment) = self.environment.take() {
+            let Some((_, admitted)) = environment.commit(executions, session).await? else {
+                return Ok(None);
+            };
+            admission._environment = Some(admitted);
+        }
+        Ok(Some((self, Some(admission))))
     }
 }

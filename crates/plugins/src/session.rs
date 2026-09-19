@@ -31,12 +31,42 @@ pub struct SessionBehavior(pub Arc<dyn Behavior>);
 #[derive(Default)]
 pub struct Preparation {
     pub instructions: String,
+    pub native_tools: maka_runtime::execution::NativeToolSet,
+    pub required_clients: Option<ClientTools>,
     pub tool_ceiling: Option<BTreeSet<String>>,
     /// A business epoch may close after preparation but before Host admission.
     pub admission: Option<tokio_util::sync::CancellationToken>,
 }
+
+/// Required tools must share one Session-bound provider. Optional tools are
+/// exposed only when available; neither list can grant a Client capability.
+pub struct ClientTools {
+    pub required: Vec<String>,
+    pub optional: Vec<String>,
+    pub private: BTreeSet<String>,
+}
 impl Preparation {
     pub fn validate(&self) -> Result<(), crate::Error> {
+        if let Some(clients) = &self.required_clients {
+            if clients.required.is_empty() || clients.required.len() + clients.optional.len() > 128
+            {
+                return Err(crate::Error::Invalid(
+                    "Invalid required Client tool selection".into(),
+                ));
+            }
+            for name in clients.required.iter().chain(&clients.optional) {
+                crate::name(name)?;
+            }
+            if clients
+                .private
+                .iter()
+                .any(|name| !clients.required.contains(name) && !clients.optional.contains(name))
+            {
+                return Err(crate::Error::Invalid(
+                    "Private Client tools must be bound by the behavior".into(),
+                ));
+            }
+        }
         if self.instructions.len() > 16 * 1024
             || self
                 .tool_ceiling

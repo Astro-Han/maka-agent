@@ -34,11 +34,12 @@ pub struct PreparedBindings {
     previous: Option<SessionBindings>,
     selected: SessionBindings,
     snapshot: super::Snapshot,
+    composition: maka_runtime::capability::ClientComposition,
 }
 
 impl PreparedBindings {
     pub fn composition(&self) -> maka_runtime::capability::ClientComposition {
-        composition(&self.selected, &self.snapshot)
+        self.composition.clone()
     }
 }
 
@@ -72,6 +73,7 @@ impl Registry {
                 initiating,
                 mode,
                 previous,
+                composition: composition(&selected, &snapshot),
                 selected,
                 snapshot: snapshot.clone(),
             },
@@ -101,23 +103,21 @@ impl Registry {
         Ok(true)
     }
 
-    /// Required tools must share one Session-affinity owner. Selection and
-    /// snapshot validation finish before any binding becomes visible.
-    pub fn bind_required_tools(
-        &mut self,
+    /// Required tools share one Session-affinity owner. Preparation has no
+    /// binding effect; commit validates the complete publication basis, including
+    /// offers omitted from the model-facing composition.
+    pub fn prepare_required_tools(
+        &self,
         session_id: &str,
-        initiating: Uuid,
+        initiating: Option<Uuid>,
         required: &[&str],
         optional: &[&str],
-    ) -> Result<(super::Snapshot, maka_runtime::capability::ClientComposition), BindingError> {
-        let next = self.select_bindings(
-            self.sessions.get(session_id),
-            Some(initiating),
-            BindingMode::Strict,
-        )?;
+    ) -> Result<(PreparedBindings, super::Snapshot), BindingError> {
+        let (mut prepared, mut snapshot) =
+            self.prepare_bindings(session_id, initiating, BindingMode::Strict)?;
         let mut missing: HashSet<_> = required.iter().copied().collect();
         let mut selected = None;
-        for (contract, binding) in &next.session {
+        for (contract, binding) in &prepared.selected.session {
             let Binding::Bound(provider) = binding else {
                 continue;
             };
@@ -144,16 +144,30 @@ impl Registry {
         if selected.is_none() || !missing.is_empty() {
             return Err(BindingError::RequiredProvider);
         }
-        let mut snapshot = self.snapshot_bindings(Some(&next))?;
         snapshot.offers.retain(|entry| {
             entry.offer().tools.iter().any(|tool| {
                 let name = crate::proxy_tool_name(&tool.server_id, &tool.name);
                 required.contains(&name.as_str()) || optional.contains(&name.as_str())
             })
         });
-        let composition = composition(&next, &snapshot);
-        self.sessions.insert(session_id.into(), next);
-        self.prune_sessions();
+        prepared.composition = composition(&prepared.selected, &snapshot);
+        Ok((prepared, snapshot))
+    }
+
+    pub fn bind_required_tools(
+        &mut self,
+        session_id: &str,
+        initiating: Uuid,
+        required: &[&str],
+        optional: &[&str],
+    ) -> Result<(super::Snapshot, maka_runtime::capability::ClientComposition), BindingError> {
+        let (prepared, snapshot) =
+            self.prepare_required_tools(session_id, Some(initiating), required, optional)?;
+        let composition = prepared.composition();
+        // No publication can change between preparation and commit under &mut self.
+        if !self.commit_bindings(prepared)? {
+            return Err(BindingError::InvalidComposition);
+        }
         Ok((snapshot, composition))
     }
 

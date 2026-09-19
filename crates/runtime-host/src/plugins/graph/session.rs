@@ -90,6 +90,7 @@ impl Manager {
                     "You are the Agent Graph supervisor. Prefer delegation when it materially improves the work; handle small or indivisible requests directly. Discover agent_list, view_agent_graph, update_agent_graph and yield_agent_graph with tool_search. Delegate bounded work using exact available agent/preset IDs, inspect durable results and schedule dependent work using record IDs. Avoid overlapping writes. When waiting, yield_agent_graph rather than poll; durable outcomes will wake you. Finish the graph by selecting result record IDs, then answer the user. A tool error is observable state: inspect before retrying a scheduling decision."
                 }.into(),
                 tool_ceiling: None,
+                ..Default::default()
             })
         })
     }

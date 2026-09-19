@@ -75,6 +75,7 @@ pub(super) fn catalog(
     ceiling: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<ToolCatalog, OperationError> {
     let mut registrations = native.registrations(mode)?;
+    let set = native.set;
     let live = Arc::new(live::LiveTools::new(native, &registrations, mode));
     for registration in &mut registrations {
         registration.handler = ToolHandler::Prepared(live.clone());
@@ -84,7 +85,13 @@ pub(super) fn catalog(
         registrations.retain(|tool| ceiling.contains(&tool.definition.name));
     }
     ToolCatalog::new(registrations)
-        .map(ToolCatalog::with_discovery)
+        .map(|catalog| {
+            if set == maka_runtime::execution::NativeToolSet::Workspace {
+                catalog.with_discovery()
+            } else {
+                catalog
+            }
+        })
         .map_err(unavailable)
 }
 
@@ -92,6 +99,18 @@ fn registrations(
     native: &NativeTools,
     mode: PermissionMode,
 ) -> Result<Vec<ToolRegistration>, OperationError> {
+    if native.set == maka_runtime::execution::NativeToolSet::Attachments {
+        return Ok(vec![ToolRegistration {
+            definition: ToolDefinition {
+                name: READ_NAME.into(),
+                description: "Read a supplied user attachment from this conversation. Filesystem paths and archives are unavailable. Follow next to continue a bounded page.".into(),
+                input_schema: read::schema(),
+            },
+            handler: ToolHandler::Prepared(Arc::new(read::SessionRead::attachments(native.log.clone()))),
+            nesting: ToolNesting::Nestable,
+            semantics: ToolSemantics::Parallel,
+        }]);
+    }
     if native.profile.is_some() {
         return Err(unavailable(
             "Named Session tool profiles are not implemented",

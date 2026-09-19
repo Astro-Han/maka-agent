@@ -172,7 +172,6 @@ pub(crate) struct Control {
     pub(super) commands: Arc<dyn Commands>,
     pub(super) caller: Context,
     pub(super) workspace: std::path::PathBuf,
-    pub(crate) policy: Arc<super::Policy>,
 }
 
 pub(crate) fn check_request(cancellation: &tokio_util::sync::CancellationToken) -> Result<()> {

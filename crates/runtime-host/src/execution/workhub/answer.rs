@@ -17,10 +17,7 @@
  * under the License.
  */
 
-use super::{
-    super::{Executions, Result, failure, internal, provider},
-    profile,
-};
+use super::super::{Executions, Result, failure, internal, provider};
 use crate::{
     plugins::workhub::answer::{Plan, Request},
     session::SessionConfiguration,
@@ -90,7 +87,15 @@ pub(super) async fn execute(
             .invocation_configuration()
             .await
             .map_err(internal)?;
-        Ok::<_, maka_protocol::OperationError>((provider, configuration))
+        let environment = executions
+            .prepare_environment_for(
+                session.clone(),
+                Some(connection),
+                maka_client_capability::BindingMode::Strict,
+                None,
+            )
+            .await?;
+        Ok::<_, maka_protocol::OperationError>((provider, configuration, environment))
     }
     .await;
     let _gate = executions.lock_admission().await;
@@ -101,21 +106,27 @@ pub(super) async fn execute(
         .admit()
         .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
     current(executions, &plan).await?;
-    let (provider, mut configuration) = prepared?;
+    let (provider, mut configuration, environment) = prepared?;
+    let Some((environment, _admission)) = environment
+        .commit(executions, COORDINATION_SESSION_ID)
+        .await?
+    else {
+        return Err(failure(
+            Code::OperationConflict,
+            "Prepared coordination environment changed",
+        ));
+    };
+    let crate::execution::prepare::Backend::Model(model) = environment.backend else {
+        return Err(failure(Code::OperationConflict, "WorkHub requires a model"));
+    };
     let content = plan.request.input.content();
     executions
         .validate_message_content(COORDINATION_SESSION_ID, &content, root_id)
         .await?;
-    let (tools, composition) = profile::tools(
-        executions,
-        &session.configuration,
-        connection,
-        &plan.control,
-    )?;
     let provider = provider.admit(&executions.oauth)?;
     configuration.tool_mode = plan.tool_mode;
-    configuration.system_prompt = Some(plan.control.policy.prompt.clone());
-    configuration.tool_composition = Some(composition);
+    configuration.system_prompt = environment.prompt;
+    configuration.tool_composition = Some(environment.composition);
     crate::plugins::workhub::control::check_request(&plan.cancellation)?;
     executions
         .launch(RunInput {
@@ -129,7 +140,7 @@ pub(super) async fn execute(
                 source_messages: Vec::new(),
                 skill_invocation: None,
                 message: content.into(),
-                tools,
+                tools: model.tools,
                 max_steps: plan.max_steps,
             },
             request_fingerprint: Some(plan.request.fingerprint),

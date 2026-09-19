@@ -18,8 +18,6 @@
  */
 
 use super::{Host, HostError};
-use crate::session::SessionConfiguration;
-use maka_event_log::sessions::SessionRecord;
 use maka_protocol::{Operation, OperationError, OperationErrorCode as Code, Outcome, workhub};
 use maka_runtime::workhub::COORDINATION_SESSION_ID;
 use serde_json::Value;
@@ -175,12 +173,6 @@ async fn answer(
 
 fn serialize(value: impl serde::Serialize) -> Result<Value, OperationError> {
     serde_json::to_value(value).map_err(|e| failure(Code::InternalFailure, e.to_string()))
-}
-
-pub(super) async fn record(
-    host: &Host,
-) -> Result<Option<SessionRecord<SessionConfiguration>>, OperationError> {
-    host.executions.workhub_coordinator().await
 }
 
 /// Ordinary RPC residency pins this check through the eventual reply. During

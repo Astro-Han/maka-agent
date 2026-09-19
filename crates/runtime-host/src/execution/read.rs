@@ -138,7 +138,7 @@ impl ToolPreparer for SessionRead {
                             .await
                         }
                         (_, Access::Attachments) => Err(failed(
-                            "WorkHub Read accepts only this conversation's attachment references",
+                            "Read accepts only this conversation's attachment references",
                         )),
                     }
                 })

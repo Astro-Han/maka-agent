@@ -27,7 +27,7 @@ use uuid::Uuid;
 mod attachments;
 mod environment;
 pub(crate) use environment::executor_skills;
-pub(crate) use environment::{Backend, Environment};
+pub(crate) use environment::{Admission, Backend, Environment};
 
 pub(super) enum PreparedRun {
     Model(Box<RunInput>),
@@ -92,6 +92,7 @@ impl Executions {
         tools::NativeTools {
             cwd: cwd.into(),
             profile,
+            set: Default::default(),
             log: self.log.clone(),
             writes: self.writes.clone(),
             shells: self.shells.clone(),

@@ -74,6 +74,9 @@ impl Executions {
         if self.shutdown.is_cancelled() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
+        if !tools.contains("Skill") {
+            return Ok(FrozenSkills::empty());
+        }
         match self.skills() {
             Some(skills) => skills.value.capture(cwd, tools).await.map_err(skill_error),
             None => Ok(FrozenSkills::empty()),

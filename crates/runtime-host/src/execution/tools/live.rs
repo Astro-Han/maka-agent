@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 pub(in crate::execution) struct NativeTools {
     pub cwd: String,
     pub profile: Option<maka_protocol::session::SessionToolProfile>,
+    pub set: maka_runtime::execution::NativeToolSet,
     pub log: Arc<EventLog>,
     pub writes: Arc<WriteCoordinator>,
     pub shells: Arc<crate::shell::ShellResources>,

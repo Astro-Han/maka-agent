@@ -113,10 +113,25 @@ pub struct InvocationConfiguration {
 #[serde(deny_unknown_fields)]
 pub struct ToolComposition {
     pub clients: crate::capability::ClientComposition,
+    #[serde(default)]
+    pub native_tools: NativeToolSet,
+    /// Frozen Client capabilities usable by Host services, not advertised to the model.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub private_clients: std::collections::BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound_tools: Option<std::collections::BTreeSet<String>>,
     /// None for fixed profiles without Skill / SkillSearch handlers.
     pub skills_digest: Option<String>,
+}
+
+/// Host-owned handlers retain their access boundary across recovery. A plugin
+/// may narrow the baseline, but cannot replace a core handler with its own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeToolSet {
+    #[default]
+    Workspace,
+    Attachments,
 }
 
 /// User-selected workspace locator, before Host path resolution.

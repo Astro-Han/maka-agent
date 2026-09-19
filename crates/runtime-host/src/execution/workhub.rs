@@ -30,7 +30,6 @@ mod commands;
 mod coordinator;
 mod correction;
 mod delegation;
-pub(super) mod profile;
 mod resume;
 mod selection;
 mod stop;

@@ -49,7 +49,6 @@ impl Request {
 pub(crate) struct Plan {
     pub request: Request,
     pub configuration_digest: String,
-    pub control: super::Control,
     pub tool_mode: ToolMode,
     pub max_steps: usize,
     pub cancellation: tokio_util::sync::CancellationToken,
@@ -82,7 +81,6 @@ impl super::Control {
                 Plan {
                     request,
                     configuration_digest: session.configuration_digest,
-                    control: self.clone(),
                     tool_mode: if defaults.code_mode_enabled {
                         ToolMode::CodeMode
                     } else {

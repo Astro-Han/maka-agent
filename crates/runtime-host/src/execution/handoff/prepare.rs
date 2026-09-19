@@ -27,7 +27,6 @@ use maka_runtime::{
     event::{Fact, InvocationOutcome},
     execution::InvocationConfiguration,
     handoff::HandoffPause,
-    workhub::COORDINATION_SESSION_ID,
 };
 use std::{path::Path, sync::Arc};
 
@@ -113,33 +112,32 @@ impl Executions {
             self.interactions.clone(),
         )
         .registrations();
-        let tools = if source.session_id == COORDINATION_SESSION_ID {
-            super::super::workhub::profile::catalog(self, additional)?
-        } else {
-            additional.push(self.interactions.question_tool());
-            let native = self.native_tools(&configuration.cwd, record.configuration.tool_profile);
-            let mode = configuration.permission_mode;
-            let ceiling = proof.bound_tools.clone();
-            tokio::task::spawn_blocking(move || {
-                super::super::tools::catalog(native, mode, additional, ceiling.as_ref())
-            })
-            .await
-            .map_err(internal)??
-        };
+        for name in &proof.private_clients {
+            self.plugin_catalog
+                .reserve::<maka_tools::plugins::PluginTool>(name)
+                .map_err(internal)?;
+        }
+        additional.retain(|tool| !proof.private_clients.contains(&tool.definition.name));
+        additional.push(self.interactions.question_tool());
+        let mut native = self.native_tools(&configuration.cwd, record.configuration.tool_profile);
+        native.set = proof.native_tools;
+        let mode = configuration.permission_mode;
+        let ceiling = proof.bound_tools.clone();
+        let tools = tokio::task::spawn_blocking(move || {
+            super::super::tools::catalog(native, mode, additional, ceiling.as_ref())
+        })
+        .await
+        .map_err(internal)??;
         if tools.digest() != pause.execution.tools.catalog_digest {
             return Err(unavailable("Handoff tool catalog changed"));
         }
-        let tools = if source.session_id == COORDINATION_SESSION_ID {
-            tools
-        } else {
-            tools
-                .with_plugins(
-                    self.plugin_catalog.clone(),
-                    maka_plugins::composition::Scope::Session(source.session_id.clone()),
-                    proof.bound_tools.clone(),
-                )
-                .map_err(internal)?
-        };
+        let tools = tools
+            .with_plugins(
+                self.plugin_catalog.clone(),
+                maka_plugins::composition::Scope::Session(source.session_id.clone()),
+                proof.bound_tools.clone(),
+            )
+            .map_err(internal)?;
         let cwd = configuration.cwd.clone();
         let expected = configuration.workspace_identity.clone();
         let directory = tokio::task::spawn_blocking(move || {

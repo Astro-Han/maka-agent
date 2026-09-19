@@ -136,7 +136,8 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       assert.equal(input.model, 'fixture-model');
       assert.deepEqual(input.tools.map((tool) => tool.function.name).sort(), names);
       assert(!body.includes(forbidden), 'No filesystem or AGENTS content may reach this model');
-      if (step === 1 || step === 2) assert(body.includes('WorkHub Read accepts only'));
+      if (step === 1 || step === 2)
+        assert(body.includes("Read accepts only this conversation's attachment references"));
       if (step === 3) assert(body.includes('ATTACHMENT_EVIDENCE'));
       if (step === 4) assert(body.includes('DESKTOP_CONTROL_VERIFIED'));
       if (step === 5) assert(body.includes('candidateSetId'));

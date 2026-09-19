@@ -361,6 +361,16 @@ fn required_tools_commit_only_one_session_owner_and_failed_selection_leaves_no_b
     registry
         .replace(second, offers("complete", "session", &["control", "tasks"]))
         .unwrap();
+    let (prepared, preview) = registry
+        .prepare_required_tools("fresh", Some(second), &required, &optional)
+        .unwrap();
+    assert_eq!(preview.offers().len(), 2);
+    assert!(registry.snapshot("fresh").unwrap().offers().is_empty());
+    registry
+        .replace(second, offers("renewed", "session", &["control", "tasks"]))
+        .unwrap();
+    assert!(!registry.commit_bindings(prepared).unwrap());
+    assert!(registry.snapshot("fresh").unwrap().offers().is_empty());
     let (snapshot, _) = registry
         .bind_required_tools("fresh", second, &required, &optional)
         .unwrap();

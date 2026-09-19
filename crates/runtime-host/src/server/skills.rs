@@ -18,7 +18,7 @@
  */
 
 use super::{Host, HostError};
-use crate::{execution::skills::FrozenSkills, session::SessionConfiguration};
+use crate::session::SessionConfiguration;
 use maka_protocol::{OperationError, OperationErrorCode as Code, Outcome, skills::*};
 use serde_json::Value;
 use uuid::Uuid;
@@ -73,22 +73,6 @@ async fn query(
                 .ok_or_else(|| failure(Code::NotFound, "Session does not exist"))?;
             if session.archived {
                 return Err(failure(Code::SessionArchived, "Session is archived"));
-            }
-            if session_id == maka_runtime::workhub::COORDINATION_SESSION_ID {
-                // WorkHub never loads Skills. Its invocable catalog is empty by
-                // execution policy, not by filesystem discovery or preferences.
-                super::workhub::record(host)
-                    .await
-                    .map_err(|mut error| {
-                        if error.code == Code::OperationConflict {
-                            error.code = Code::OperationUnavailable;
-                        }
-                        error
-                    })?
-                    .ok_or_else(|| failure(Code::NotFound, "WorkHub Session does not exist"))?;
-                return FrozenSkills::empty()
-                    .invocable(input, &session.configuration.workspace.host_cwd)
-                    .map_err(crate::execution::skills::skill_error);
             }
             let config = session.configuration;
             require_agent(config.collaboration_mode)?;

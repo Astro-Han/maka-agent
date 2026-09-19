@@ -99,17 +99,17 @@ impl Executions {
                 "Plan execution is not installed",
             ));
         }
-        let (bindings, mut additional) = self
-            .capabilities
-            .prepare_tools(
-                session_id,
-                connection,
-                mode,
-                session.workspace.host_cwd.clone(),
-                self.interactions.clone(),
-            )
-            .map_err(binding_error)?;
         if let crate::session::SessionTarget::Executor { executor_id } = &session.target {
+            let (bindings, _) = self
+                .capabilities
+                .prepare_tools(
+                    session_id,
+                    connection,
+                    mode,
+                    session.workspace.host_cwd.clone(),
+                    self.interactions.clone(),
+                )
+                .map_err(binding_error)?;
             if orchestration.is_some() {
                 return Err(failure(
                     Code::OperationUnavailable,
@@ -159,6 +159,8 @@ impl Executions {
                 session_id: session_id.clone(),
                 composition: maka_runtime::execution::ToolComposition {
                     clients: bindings.composition(),
+                    native_tools: Default::default(),
+                    private_clients: Default::default(),
                     bound_tools: session.bound_tools.clone(),
                     skills_digest: None,
                 },
@@ -202,11 +204,49 @@ impl Executions {
             };
             (preparation, Some(basis))
         };
+        let (bindings, mut additional) = match &behavior.required_clients {
+            Some(clients) => self.capabilities.prepare_required_tools(
+                session_id,
+                connection,
+                &clients
+                    .required
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                &clients
+                    .optional
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                session.workspace.host_cwd.clone(),
+                self.interactions.clone(),
+            ),
+            None => self.capabilities.prepare_tools(
+                session_id,
+                connection,
+                mode,
+                session.workspace.host_cwd.clone(),
+                self.interactions.clone(),
+            ),
+        }
+        .map_err(binding_error)?;
+        let private_clients = behavior
+            .required_clients
+            .as_ref()
+            .map(|clients| clients.private.clone())
+            .unwrap_or_default();
+        for name in &private_clients {
+            self.plugin_catalog
+                .reserve::<maka_tools::plugins::PluginTool>(name)
+                .map_err(internal)?;
+        }
+        additional.retain(|tool| !private_clients.contains(&tool.definition.name));
         additional.push(self.interactions.question_tool());
         let prompt = session
             .initial_prompt(&behavior.instructions)
             .map_err(internal)?;
-        let native = self.native_tools(&session.workspace.host_cwd, session.tool_profile);
+        let mut native = self.native_tools(&session.workspace.host_cwd, session.tool_profile);
+        native.set = behavior.native_tools;
         let ceiling = session.tool_ceiling(behavior.tool_ceiling);
         let native_ceiling = ceiling.clone();
         let mode = session.permission_mode;
@@ -231,6 +271,8 @@ impl Executions {
             session_id: session_id.clone(),
             composition: maka_runtime::execution::ToolComposition {
                 clients: bindings.composition(),
+                native_tools: behavior.native_tools,
+                private_clients,
                 bound_tools: ceiling,
                 skills_digest: None,
             },
@@ -409,6 +451,11 @@ fn binding_error(error: maka_client_capability::BindingError) -> maka_protocol::
     failure(
         if matches!(error, maka_client_capability::BindingError::Draining) {
             Code::HostDraining
+        } else if matches!(
+            error,
+            maka_client_capability::BindingError::RequiredProvider
+        ) {
+            Code::OperationUnavailable
         } else {
             Code::OperationConflict
         },

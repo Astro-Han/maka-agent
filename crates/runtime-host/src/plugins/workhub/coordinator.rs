@@ -75,10 +75,10 @@ impl super::Control {
                     name: Some("WorkHub".into()),
                     labels: None,
                     thinking_level: None,
-                    tool_profile: Some(SessionToolProfile::WorkhubCoordinationV2),
+                    tool_profile: None,
                     permission_mode: Some(PermissionMode::Bypass),
                     collaboration_mode: Some(CollaborationMode::Agent),
-                    orchestration_mode: Some(BehaviorId::default()),
+                    orchestration_mode: Some(behavior()),
                 })
                 .await
                 .map_err(|error| {
@@ -92,6 +92,7 @@ impl super::Control {
                     }
                 })?;
             creation.configuration.tool_mode = ToolMode::Direct;
+            creation.configuration.bound_tools = Some(super::session::tool_ceiling());
             creation.configuration.title_is_manual = false;
             Some(Box::new(creation))
         } else {
@@ -143,10 +144,13 @@ pub(crate) fn validate_workspace(workspace: &WorkspaceProjection) -> Result<()> 
 pub(crate) fn validate_configuration(config: &SessionConfiguration) -> Result<()> {
     validate_workspace(&config.workspace)?;
     if config.target.model().is_none()
-        || config.tool_profile != Some(SessionToolProfile::WorkhubCoordinationV2)
+        || !((config.tool_profile.is_none()
+            && config.orchestration_mode == behavior()
+            && config.bound_tools.as_ref() == Some(&super::session::tool_ceiling()))
+            || (config.tool_profile == Some(SessionToolProfile::WorkhubCoordinationV2)
+                && config.orchestration_mode == BehaviorId::default()))
         || config.permission_mode != PermissionMode::Bypass
         || config.collaboration_mode != CollaborationMode::Agent
-        || config.orchestration_mode != BehaviorId::default()
         || config.tool_mode != ToolMode::Direct
     {
         return Err(failure(
@@ -155,4 +159,19 @@ pub(crate) fn validate_configuration(config: &SessionConfiguration) -> Result<()
         ));
     }
     Ok(())
+}
+
+pub(crate) fn behavior() -> BehaviorId {
+    super::ID
+        .to_owned()
+        .try_into()
+        .expect("built-in behavior ID")
+}
+
+/// Upgrade only the previously validated, idle coordinator. Existing execution
+/// openings keep their original facts; this does not reinterpret a live Run.
+pub(crate) fn upgrade(config: &mut SessionConfiguration) {
+    config.tool_profile = None;
+    config.orchestration_mode = behavior();
+    config.bound_tools = Some(super::session::tool_ceiling());
 }

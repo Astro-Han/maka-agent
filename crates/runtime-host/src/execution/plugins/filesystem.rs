@@ -82,7 +82,12 @@ impl Executions {
             (PermissionMode::Ask, _) | (_, PermissionMode::Ask) => PermissionMode::Ask,
             _ => PermissionMode::Bypass,
         };
-        let native = self.native_tools(&frozen.cwd, current.configuration.tool_profile);
+        let mut native = self.native_tools(&frozen.cwd, current.configuration.tool_profile);
+        native.set = frozen
+            .tool_composition
+            .as_ref()
+            .map(|composition| composition.native_tools)
+            .unwrap_or_default();
         let registration = tokio::task::spawn_blocking(move || {
             let identity =
                 maka_fs_tools::workspace::read_identity(std::path::Path::new(&native.cwd))

@@ -69,7 +69,10 @@ pub(super) async fn resolve(
     }
     validate_workspace(&resolution.workspace)?;
     if let Some(record) = executions.workhub_coordinator().await? {
-        if record.configuration.workspace == resolution.workspace {
+        let mut desired = record.configuration.clone();
+        desired.workspace = resolution.workspace;
+        crate::plugins::workhub::coordinator::upgrade(&mut desired);
+        if record.configuration == desired {
             return Ok(false);
         }
         if executions
@@ -92,7 +95,7 @@ pub(super) async fn resolve(
                 COORDINATION_SESSION_ID,
                 record.revision,
                 move |configuration: &mut SessionConfiguration| {
-                    configuration.workspace = resolution.workspace;
+                    *configuration = desired;
                     Ok(())
                 },
             )

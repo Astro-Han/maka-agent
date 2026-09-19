@@ -262,22 +262,25 @@ async fn original_client_workhub_answer_scopes_read_and_desktop_calls_without_re
     let log = fixture.log().await;
     let before = log.prefix(256, 512 * 1024).await.unwrap();
     use maka_runtime::event::Fact;
-    let prompt = before
+    let configuration = before
         .events
         .iter()
         .find_map(|row| match &row.event.fact {
             Fact::InvocationOpened {
                 configuration: Some(configuration),
                 ..
-            } => configuration.system_prompt.as_ref(),
+            } => Some(configuration),
             _ => None,
         })
-        .expect("WorkHub must freeze its plugin-owned policy");
-    assert!(
-        prompt
-            .sources
-            .iter()
-            .any(|source| source.package_id == "maka.workhub" && !source.activation.is_empty())
+        .expect("WorkHub must freeze its execution policy");
+    assert_eq!(configuration.orchestration_mode.as_str(), "maka.workhub");
+    assert_eq!(
+        configuration
+            .tool_composition
+            .as_ref()
+            .unwrap()
+            .native_tools,
+        maka_runtime::execution::NativeToolSet::Attachments
     );
     for row in &before.events {
         if row.event.invocation.session_id == COORDINATION_SESSION_ID
@@ -289,11 +292,12 @@ async fn original_client_workhub_answer_scopes_read_and_desktop_calls_without_re
                 .unwrap()
                 .expect("model request composition");
             assert!(
-                prompt
+                surface
                     .sources
                     .iter()
-                    .all(|source| surface.sources.contains(source)),
-                "each request must retain the admitted policy provenance"
+                    .any(|source| source.package_id == "maka.workhub"
+                        && !source.activation.is_empty()),
+                "each request must retain its frozen plugin prompt provenance"
             );
         }
     }
@@ -362,12 +366,26 @@ async fn original_client_workhub_identity_model_cas_and_readonly_query_survive_r
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(before.configuration.tool_profile, None);
     assert_eq!(
-        before.configuration.tool_profile,
-        Some(maka_protocol::session::SessionToolProfile::WorkhubCoordinationV2)
+        before.configuration.orchestration_mode.as_str(),
+        "maka.workhub"
     );
     assert_eq!(before.configuration.tool_mode, ToolMode::Direct);
     assert!(!before.archived);
+    log.update_session_metadata(
+        COORDINATION_SESSION_ID,
+        before.revision,
+        |config: &mut SessionConfiguration| {
+            config.orchestration_mode = Default::default();
+            config.tool_profile =
+                Some(maka_protocol::session::SessionToolProfile::WorkhubCoordinationV2);
+            config.bound_tools = None;
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
     assert!(
         log.prefix(8, 4096).await.unwrap().events.is_empty(),
         "WorkHub control state is not fabricated execution history"
@@ -377,13 +395,16 @@ async fn original_client_workhub_identity_model_cas_and_readonly_query_survive_r
         .run("--workhub-workspace", true, "workhub-reopened")
         .await;
     let log = fixture.log().await;
-    assert_eq!(
-        log.get_session::<SessionConfiguration>(COORDINATION_SESSION_ID)
-            .await
-            .unwrap()
-            .unwrap(),
-        before
-    );
+    let after = log
+        .get_session::<SessionConfiguration>(COORDINATION_SESSION_ID)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.configuration, before.configuration);
+    assert_eq!(after.revision, before.revision + 2);
+    assert_eq!(after.id, before.id);
+    assert_eq!(after.created_at, before.created_at);
+    assert_eq!(after.configuration_digest, before.configuration_digest);
     assert!(log.prefix(8, 4096).await.unwrap().events.is_empty());
     log.close().await.unwrap();
 }

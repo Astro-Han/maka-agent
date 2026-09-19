@@ -116,27 +116,28 @@ impl Capabilities {
         .registrations())
     }
 
-    pub(crate) fn bind_required_tools(
+    pub(crate) fn prepare_required_tools(
         &self,
         session_id: &str,
-        connection_id: Uuid,
+        connection_id: Option<Uuid>,
         required: &[&str],
         optional: &[&str],
         cwd: String,
         interactions: Arc<dyn maka_tools::ClientInteractions>,
     ) -> Result<
         (
+            maka_client_capability::PreparedBindings,
             Vec<ToolRegistration>,
-            maka_runtime::capability::ClientComposition,
         ),
         BindingError,
     > {
-        let (snapshot, composition) = self
+        let (prepared, snapshot) = self
             .registry
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .bind_required_tools(session_id, connection_id, required, optional)?;
+            .prepare_required_tools(session_id, connection_id, required, optional)?;
         Ok((
+            prepared,
             ClientTools::new(
                 snapshot,
                 self.registry.clone(),
@@ -145,7 +146,6 @@ impl Capabilities {
                 interactions,
             )
             .registrations(),
-            composition,
         ))
     }
 

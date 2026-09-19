@@ -129,9 +129,19 @@ try {
     const file = join(values['workhub-workspace'], 'workhub.json');
     if (values.reopened) {
       const saved = JSON.parse(await readFile(file, 'utf8'));
-      assert.deepEqual(await query(), saved);
+      const legacy = await query();
+      assert.deepEqual(legacy, {
+        ...saved,
+        orchestrationMode: 'default',
+        revision: legacy.revision,
+      });
+      assert.deepEqual(await query(), legacy, 'query cannot upgrade persisted configuration');
+      assert.deepEqual(await observed(() => resolve()), { sessionId });
+      const upgraded = await query();
+      assert(upgraded.revision > legacy.revision);
+      assert.deepEqual(upgraded, { ...saved, revision: upgraded.revision });
       assert.deepEqual(await resolve(), { sessionId });
-      assert.deepEqual(await query(), saved, 'resolve does not rebind a removed default model');
+      assert.deepEqual(await query(), upgraded, 'resolve does not rebind a removed default model');
       console.log('workhub-reopened');
     } else {
       await assert.rejects(query(), (e) => e.code === 'persistence_failed');
@@ -155,7 +165,7 @@ try {
       assert.equal(initial.name, 'WorkHub');
       assert.equal(initial.permissionMode, 'bypass');
       assert.equal(initial.collaborationMode, 'agent');
-      assert.equal(initial.orchestrationMode, 'default');
+      assert.equal(initial.orchestrationMode, 'maka.workhub');
       assert.deepEqual(await resolve(), { sessionId });
       assert.deepEqual(await query(), initial);
       const input = {
