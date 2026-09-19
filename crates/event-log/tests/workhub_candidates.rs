@@ -18,6 +18,8 @@
  */
 
 use maka_event_log::EventLog;
+use maka_event_log::sessions::ManagedSession;
+use maka_plugins::{composition::Scope, storage::Namespace};
 use maka_runtime::event::{
     EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent,
 };
@@ -49,6 +51,26 @@ async fn candidates_rank_all_pages_by_canonical_activity_including_blocked_work(
     log.set_session_archived::<Configuration>("session-38", true, 100)
         .await
         .unwrap();
+    // Enough newer managed Sessions to fill the entire visible window must
+    // not displace ordinary targets, even when their configuration is eligible.
+    for index in 0..32 {
+        let session_id = format!("managed-{index}");
+        log.create_session(
+            &session_id,
+            "create",
+            &Configuration { eligible: true },
+            300_000,
+        )
+        .await
+        .unwrap();
+        log.reserve_managed_session(&ManagedSession {
+            session_id,
+            manager: Namespace::new("example.workflow", Scope::Profile).unwrap(),
+            fingerprint: "create".into(),
+        })
+        .await
+        .unwrap();
+    }
     // An old Session becomes most recent through a real message, not metadata edits.
     for index in [0, 36, 37] {
         let invocation = Invocation {
@@ -105,6 +127,12 @@ async fn candidates_rank_all_pages_by_canonical_activity_including_blocked_work(
         .workhub_candidates(|_, config: &Configuration| config.eligible)
         .await
         .unwrap();
+    assert!(
+        log.workhub_candidate("managed-0", eligible)
+            .await
+            .unwrap()
+            .is_none()
+    );
     let expected = ["session-37", "session-36", "session-00"]
         .map(str::to_string)
         .into_iter()

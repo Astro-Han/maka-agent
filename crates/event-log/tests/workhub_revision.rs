@@ -18,6 +18,8 @@
  */
 
 use maka_event_log::EventLog;
+use maka_event_log::sessions::ManagedSession;
+use maka_plugins::{composition::Scope, storage::Namespace};
 use maka_runtime::{
     artifact::content_digest,
     event::{CommitError, EventWrite, Fact, Invocation, RuntimeEvent},
@@ -116,7 +118,7 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
     delegation.description = Some(DelegationDescription::Existing {
         name: "changed after candidate selection".into(),
     });
-    let action = write(delegation);
+    let action = write(delegation.clone());
     let receipt = log.append(&action).await.unwrap();
     log.update_session_metadata("target", 2, |config: &mut Value| {
         config["name"] = json!("changed after commit");
@@ -125,6 +127,40 @@ async fn target_metadata_change_invalidates_uncommitted_delegation_but_not_its_d
     .await
     .unwrap();
     assert_eq!(log.append(&action).await.unwrap(), receipt);
+    log.reserve_managed_session(&ManagedSession {
+        session_id: "target".into(),
+        manager: Namespace::new("example.workflow", Scope::Profile).unwrap(),
+        fingerprint: "create".into(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        log.append(&action).await.unwrap(),
+        receipt,
+        "a new manager cannot erase or re-execute an accepted receipt"
+    );
+    // The authority can change after discovery; the write transaction must
+    // reject a new action independently of its fresh revision and configuration.
+    delegation.action_id = "after-manager".parse().unwrap();
+    delegation.request_fingerprint = content_digest(b"after-manager");
+    delegation.target.turn_id = "after-manager-turn".into();
+    delegation.target.run_id = "after-manager-run".into();
+    delegation.target.invocation_id = "after-manager-invocation".into();
+    delegation.target_revision = 3;
+    delegation.description = Some(DelegationDescription::Existing {
+        name: "changed after commit".into(),
+    });
+    let rejected = log.append(&write(delegation)).await;
+    assert!(
+        matches!(&rejected, Err(CommitError::Rejected(reason)) if reason.contains("Session manager")),
+        "{rejected:?}"
+    );
+    assert!(
+        log.workhub_action(&"after-manager".parse().unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(log.pending_messages("target").await.unwrap().len(), 1);
     assert!(
         log.prepare_transcript(COORDINATION_SESSION_ID, receipt, 32)

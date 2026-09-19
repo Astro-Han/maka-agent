@@ -89,6 +89,8 @@ impl EventLog {
                                AND json_extract(event_json, '$.invocation.session_id') = session.id
                              ORDER BY sequence DESC LIMIT 1)
                          WHERE session.archived = 0
+                           AND NOT EXISTS (SELECT 1 FROM session_managers manager
+                               WHERE manager.session_id = session.id)
                          ORDER BY CASE WHEN opening.sequence IS NULL THEN session.created_at
                            ELSE COALESCE(
                              (SELECT message_at FROM catalog_messages INDEXED BY catalog_latest_message
@@ -182,6 +184,16 @@ pub(super) async fn require_available(
     session: &str,
     owner: Option<&Invocation>,
 ) -> Result<(), StoreError> {
+    let managed: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_managers WHERE session_id = ?)")
+            .bind(session)
+            .fetch_one(&mut *tx)
+            .await?;
+    if managed {
+        return Err(super::invalid(
+            "WorkHub target requires its Session manager",
+        ));
+    }
     if !crate::interactions::pending(tx, session).await?.is_empty() {
         return Err(super::invalid("WorkHub target is waiting for user input"));
     }
