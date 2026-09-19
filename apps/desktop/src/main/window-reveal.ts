@@ -20,13 +20,15 @@
 /**
  * PR-SHOW-AFTER-FIRST-COMMIT: shared reveal gate for the hidden main window.
  *
- * The BrowserWindow is created with `show: false` (main-window.ts) so the OS
- * never flashes the index.html `.maka-preload` skeleton before React paints.
- * Two callers reveal it: the `window:notifyRendererReady` IPC (fired from the
- * renderer's first React commit) and a fallback timer for a wedged renderer.
- * Both route through here so the show() decision lives in one place — and so
- * it stays unit-testable without an Electron runtime (main-window.ts itself
- * can't be imported under plain `node --test` because it pulls in `electron`).
+ * The BrowserWindow is created with `show: false` (main-window.ts); the
+ * `ready-to-show` event reveals it on the first painted frame, which is the
+ * index.html launch surface by design. Two further callers exist as
+ * backstops: the `window:notifyRendererReady` IPC (fired after the
+ * renderer's first React commit paints) and a fallback timer for a wedged
+ * renderer. Both route through here so the show() decision lives in one
+ * place — and so it stays unit-testable without an Electron runtime
+ * (main-window.ts itself can't be imported under plain `node --test`
+ * because it pulls in `electron`).
  */
 
 /**

@@ -24,17 +24,13 @@ import { AppShell } from './composition/legacy-desktop-region';
 import { useAstryxThemeMode } from './astryx-theme-mode';
 
 export function App() {
-  // PR-SHOW-AFTER-FIRST-COMMIT: the BrowserWindow is created hidden
-  // (main-window.ts show: false) so the OS never flashes the index.html
-  // `.maka-preload` surface before React paints. A layout effect is too early
-  // for this signal: it runs after the DOM commit but before Chromium paints,
-  // so the main process can show the BrowserWindow while its last composited
-  // frame is still the preload skeleton. Two animation frames put the signal
-  // after at least one paint of the committed AppShell. This remains
-  // unconditional: even when the onboarding snapshot is null and AppShell
-  // mounts its fail-soft loading state, the window should still appear. The
-  // main-process fallback handles a renderer that never reaches either frame.
-  // `window.maka` is undefined outside Electron (storybook), so guard it.
+  // The launch overlay (`#maka-preload` in index.html) stays visible until
+  // AppShell reports a usable frame; this signal is only a backstop for the
+  // main-process reveal gate — `ready-to-show` normally beats it. A layout
+  // effect is too early: it runs after the DOM commit but before Chromium
+  // paints, so two animation frames put the signal after at least one paint
+  // of the committed AppShell. `window.maka` is undefined outside Electron
+  // (storybook), so guard it.
   useEffect(() => {
     let secondFrame = 0;
     const firstFrame = requestAnimationFrame(() => {

@@ -206,8 +206,9 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
   const revealMode: WindowRevealMode = deps.revealMode;
   // ChatGPT Pro review P2: focus() (second-instance / activate) used to call
   // mainWindow.show() directly, bypassing the reveal gate — re-launching or
-  // clicking the dock icon during the pre-commit window would flash the
-  // skeleton anyway. The gate defers those focus requests until markReady.
+  // clicking the dock icon before the first paint would flash the bare
+  // vibrancy window anyway. The gate defers those focus requests until
+  // markReady.
   const revealGate = createWindowRevealGate(revealMode);
   let showFallbackTimer: NodeJS.Timeout | undefined;
   let rendererRecoveryReadiness:
@@ -413,12 +414,10 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
       // drift apart (locked by app-region-hygiene-contract.test.ts).
       minHeight: SAFE_MIN_HEIGHT,
       backgroundColor: initialBg,
-      // Active runs show the native window immediately: the theme-matched
-      // backgroundColor reads as a launch surface while the skeleton paints
-      // (~200ms earlier than waiting for `ready-to-show`). E2E modes stay
-      // hidden so the reveal gate keeps its inactive/hidden semantics;
-      // `ready-to-show` still marks ready to flush deferred focus/maximize.
-      show: revealMode === 'active',
+      // The window stays hidden until `ready-to-show`, so the first visible
+      // frame is already the launch surface — showing it at construction
+      // would expose the translucent vibrancy material before the DOM paints.
+      show: false,
       // Native sidebar vibrancy lets the CSS-side sidebar render
       // transparent and inherit the system's blurred window material
       // (Big Sur+). Renderer CSS gates the transparency on
@@ -513,14 +512,10 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
 
     // Restore maximized state after construction (BrowserWindow constructor
     // doesn't accept it directly). ChatGPT Pro review P2 (round 2): a direct
-    // maximize() reveals a still-hidden window (verified on macOS), so hidden
-    // and inactive runs defer it to markReady and the first visible frame is
-    // already maximized. An active run is shown at construction, so it
-    // maximizes now — the window appears already animating to full size.
-    if (bounds.isMaximized) {
-      if (revealMode === 'active') mainWindow.maximize();
-      else revealGate.requestMaximize(mainWindow);
-    }
+    // maximize() reveals a still-hidden window (verified on macOS), so all
+    // reveal modes defer it to markReady and the first visible frame is
+    // already maximized.
+    if (bounds.isMaximized) revealGate.requestMaximize(mainWindow);
 
     // Persist bounds across launches. Debounce so a continuous resize drag
     // doesn't write the file on every frame; flush on close.

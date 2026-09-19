@@ -210,13 +210,11 @@ export const mainWindowController = createMainWindowController({
   settingsStore,
   revealMode,
   onWindowConstructed: () => {
-    // Active runs show at construction: 'show' is the moment the native window
-    // is on screen — that is the point after which the Runtime Host module
-    // graph may evaluate without starving the display itself. Hidden/inactive
-    // windows never emit it, so those runs resolve at construction instead.
-    const win = mainWindowController.browserWindow();
-    if (revealMode === 'active' && win) win.once('show', resolveFirstWindowConstructed);
-    else resolveFirstWindowConstructed();
+    // 'show' is the moment the native window is on screen — the point after
+    // which the Runtime Host module graph may evaluate without starving the
+    // display itself. Hidden runs never emit it; the launch-settle fallback
+    // resolves the boundary for them instead.
+    mainWindowController.browserWindow()?.once('show', resolveFirstWindowConstructed);
   },
   onClose: () => mainWindowDelegates.onMainWindowClose(),
   onClosed: () => mainWindowDelegates.onMainWindowClosed(),

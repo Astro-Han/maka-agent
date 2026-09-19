@@ -93,6 +93,7 @@ import { useNewTaskChoice } from './use-new-task-choice';
 import { SessionCollaborationDialog } from './session-collaboration-dialog';
 import * as SessionCollaboration from './features/session-collaboration';
 import { NEW_TASK_PENDING_KEY } from './pending-items';
+import { dismissLaunchSurface } from './launch-surface';
 import {
   desktopSlashCommandAvailability,
   parseDesktopSlashCommand,
@@ -1075,6 +1076,19 @@ function AppShellContent({
           onRetry: () => reloadActiveExecutionBoundary(activeId),
         }
       : undefined;
+  // The index.html launch overlay covers the window until the first usable
+  // frame exists — suppressing the partial-shell and skeleton beats in
+  // between. "Usable" means the bootstrap snapshot resolved (or failed into
+  // its own surface) and no session view or transcript read is still in
+  // flight. main.tsx arms a failsafe timer so a wedged read can never strand
+  // the logo.
+  const launchSurfaceReady =
+    (onboarding.snapshot !== null || onboarding.error !== null) &&
+    !switchingSession &&
+    !activeMessageLoading;
+  useEffect(() => {
+    if (launchSurfaceReady) dismissLaunchSurface();
+  }, [launchSurfaceReady]);
   const desktopSlashCommands = useMemo<readonly ComposerSlashCommandOption[]>(
     () => {
       const availableCommands = slashCommandsForSurface('desktop').filter(

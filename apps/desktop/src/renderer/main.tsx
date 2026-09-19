@@ -21,6 +21,7 @@ import { createRoot } from 'react-dom/client';
 import { syncUiLocaleDocument } from '@maka/ui';
 import { App } from './app';
 import { applyCachedThemeBeforeMount } from './cached-theme-bootstrap';
+import { armLaunchSurfaceFailsafe } from './launch-surface';
 import './styles.css';
 import { readSystemUiLocale } from './use-system-ui-locale';
 import {
@@ -30,6 +31,7 @@ import {
 
 syncUiLocaleDocument(readSystemUiLocale());
 applyCachedThemeBeforeMount();
+armLaunchSurfaceFailsafe();
 const desktopFeatureServices = createDesktopFeatureServices();
 
 createRoot(document.getElementById('root')!).render(
