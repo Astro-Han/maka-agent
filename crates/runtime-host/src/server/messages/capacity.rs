@@ -44,7 +44,6 @@ pub(super) fn check(
         QueueEdit::Update {
             message_id,
             content,
-            submitted_content_digest,
             skill_invocation,
             required_tools,
         } => {
@@ -54,7 +53,6 @@ pub(super) fn check(
                 .find(|e| &e.source.message.message_id == message_id)
                 .expect("validated entry");
             entry.source.message.content = (**content).clone();
-            entry.source.message.submitted_content_digest = submitted_content_digest.clone();
             entry.source.skill_invocation = skill_invocation.clone();
             entry.required_tools = required_tools.clone();
         }
@@ -295,7 +293,6 @@ mod tests {
             let edit = QueueEdit::Update {
                 message_id: "queued".into(),
                 content: Box::new("x".repeat(bytes).into()),
-                submitted_content_digest: format!("sha256:{}", "b".repeat(64)),
                 skill_invocation: Default::default(),
                 required_tools: Default::default(),
             };

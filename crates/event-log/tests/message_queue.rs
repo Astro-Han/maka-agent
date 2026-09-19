@@ -148,7 +148,6 @@ async fn queue_edits_cancel_or_deliver_once_with_atomic_revision_and_original_ow
             QueueEdit::Update {
                 message_id: "two".into(),
                 content: Box::new("edited 😀".into()),
-                submitted_content_digest: format!("sha256:{}", "d".repeat(64)),
                 skill_invocation: skills.clone(),
                 required_tools: ["Read".into()].into(),
             },

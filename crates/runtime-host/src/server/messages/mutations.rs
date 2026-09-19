@@ -158,8 +158,6 @@ pub(super) async fn execute(
                 let mut source = entry.source.clone();
                 let required_tools;
                 source.message.content = super::update::content(source.message.content, &i.text)?;
-                source.message.submitted_content_digest =
-                    super::update::digest(&source.message.content)?;
                 source.skill_invocation = Default::default();
                 if let Some(references) = &mut source.message.content.inline_references {
                     references.retain(|reference| {
@@ -226,7 +224,6 @@ pub(super) async fn execute(
                 QueueEdit::Update {
                     required_tools,
                     message_id: i.entry_id.clone(),
-                    submitted_content_digest: source.message.submitted_content_digest,
                     content: Box::new(source.message.content),
                     skill_invocation: source.skill_invocation,
                 }

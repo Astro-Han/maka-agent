@@ -83,7 +83,6 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
             QueueEdit::Update {
                 message_id: "queued".into(),
                 content: Box::new("edited".into()),
-                submitted_content_digest: format!("sha256:{}", "d".repeat(64)),
                 skill_invocation: Default::default(),
                 required_tools: Default::default(),
             },
@@ -116,6 +115,11 @@ async fn submit_receipt_is_atomic_and_survives_edit_delivery_cancellation_and_ep
         .unwrap()
         .unwrap();
     assert_eq!(edited.source.message.content.text, "edited");
+    assert_eq!(
+        edited.source.message.submitted_content_digest,
+        pending.source.message.submitted_content_digest,
+        "queue edits preserve canonical proof of the original submission"
+    );
     append(
         &log,
         &owner,

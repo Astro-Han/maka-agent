@@ -20,11 +20,6 @@
 use super::{Code, OperationError, failure};
 use maka_runtime::input::MessageInput;
 
-pub(super) fn digest(content: &MessageInput) -> Result<String, OperationError> {
-    content
-        .content_digest()
-        .map_err(|e| failure(Code::InternalFailure, &e.to_string()))
-}
 pub(super) fn content(
     mut content: MessageInput,
     text: &str,

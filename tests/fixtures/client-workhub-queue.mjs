@@ -160,6 +160,55 @@ export async function verifyWorkhubQueue(connection) {
       enqueue({ ...input, content: { text: 'CHANGED' } }),
       (error) => error.code === 'operation_conflict',
     );
+    // Retraction/order control accepted work; editing must prepare new content
+    // against an active behavior and promotion must retain the frozen policy.
+    await enqueue({ ...input, messageId: 'promoted', content: { text: 'PROMOTED' } });
+    await enqueue({ ...input, messageId: 'discarded', content: { text: 'DISCARDED' } });
+    await toggleWorkhub(connection, true);
+    const scope = { sessionId, originHostEpoch: connection.hostEpoch };
+    const reordered = await request('queue.entries.reorder', {
+      ...scope,
+      reorderId: 'reorder',
+      entryIds: ['discarded', 'followup', 'promoted'],
+    });
+    const edit = {
+      ...scope,
+      updateId: 'edit',
+      entryId: 'followup',
+      expectedQueueRevision: reordered.queueRevision,
+      text: 'EDITED_FOLLOWUP',
+    };
+    await assert.rejects(
+      request('queue.entry.update', edit),
+      (error) => error.code === 'operation_unavailable',
+    );
+    await toggleWorkhub(connection, false);
+    await request('queue.entry.update', edit);
+    await request('queue.entry.promote', { ...scope, promoteId: 'promote', entryId: 'promoted' });
+    await toggleWorkhub(connection, true);
+    const retract = { ...scope, retractId: 'discard', entryId: 'discarded' };
+    assert.deepEqual(
+      await request('queue.entry.retract', retract),
+      await request('queue.entry.retract', retract),
+    );
+    assert.deepEqual(
+      (
+        await request('turn.message.execution.query', {
+          sessionId,
+          messageIds: ['discarded'],
+        })
+      ).resolutions,
+      [{ messageId: 'discarded', state: 'cancelled' }],
+    );
+    await toggleWorkhub(connection, false);
+    remote = await workhubRemote(connection);
+    remotes.push(remote);
+    const replay = remote.method('enqueue');
+    assert.deepEqual(
+      await replay(input),
+      receipt,
+      'editing cannot change the original admission receipt',
+    );
     release.resolve();
     const deadline = Date.now() + 8000;
     let resolutions;
@@ -167,10 +216,10 @@ export async function verifyWorkhubQueue(connection) {
       if (failure) throw failure;
       const page = await request('turn.message.execution.query', {
         sessionId,
-        messageIds: ['steering', 'followup'],
+        messageIds: ['steering', 'promoted', 'followup'],
       });
       resolutions = page.resolutions;
-      if (resolutions.length === 2 && resolutions.every((item) => item.state === 'owned')) {
+      if (resolutions.length === 3 && resolutions.every((item) => item.state === 'owned')) {
         const turns = await Promise.all(
           resolutions.map((item) => request('turn.query', { sessionId, turnId: item.turnId })),
         );
@@ -180,21 +229,24 @@ export async function verifyWorkhubQueue(connection) {
       await delay(10);
     }
     assert.equal(resolutions.find((item) => item.messageId === 'steering').turnId, turnId);
+    assert.equal(resolutions.find((item) => item.messageId === 'promoted').turnId, turnId);
     assert.notEqual(resolutions.find((item) => item.messageId === 'followup').turnId, turnId);
     assert.equal(requests.length, 3);
     assert(JSON.stringify(requests[1].messages).includes('STEERING'));
-    assert(JSON.stringify(requests[2].messages).includes('FOLLOWUP'));
+    assert(JSON.stringify(requests[1].messages).includes('PROMOTED'));
+    assert(JSON.stringify(requests[2].messages).includes('EDITED_FOLLOWUP'));
+    assert(!JSON.stringify(requests).includes('DISCARDED'));
     await assert.rejects(
-      enqueue({ ...input, messageId: 'late' }),
+      replay({ ...input, messageId: 'late' }),
       (error) => error.code === 'operation_conflict',
     );
     assert.equal(
-      (await enqueue(input)).disposition,
+      (await replay(input)).disposition,
       'followup',
       'exact replay precedes active-Turn checks',
     );
     await toggleWorkhub(connection, true);
-    await assert.rejects(enqueue({ ...input, messageId: 'retired' }));
+    await assert.rejects(replay({ ...input, messageId: 'retired' }));
     await toggleWorkhub(connection, false);
     remote = await workhubRemote(connection);
     remotes.push(remote);
