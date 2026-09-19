@@ -195,10 +195,10 @@ resolveBrowserDialogAppearance = async () => {
   }
 };
 
-// Resolves when the first window's BrowserWindow exists — main.ts holds the
-// heavy Runtime Host module graph until then so its evaluation cannot starve
-// the window's async prelude. Also resolves if creation settles without a
-// window (abort/failure), so the Host boot is never held hostage by it.
+// Resolves on the first window's painted frame — main.ts holds the heavy
+// Runtime Host module graph until then so its evaluation cannot starve the
+// window's prelude or first paint. The launch-settle promise is the fallback
+// resolver so a wedged load never holds the Host boot hostage.
 let resolveFirstWindowConstructed!: () => void;
 export const firstWindowConstructed = new Promise<void>((resolve) => {
   resolveFirstWindowConstructed = resolve;
@@ -210,11 +210,11 @@ export const mainWindowController = createMainWindowController({
   settingsStore,
   revealMode,
   onWindowConstructed: () => {
-    // 'show' is the moment the native window is on screen — the point after
-    // which the Runtime Host module graph may evaluate without starving the
-    // display itself. Hidden runs never emit it; the launch-settle fallback
-    // resolves the boundary for them instead.
-    mainWindowController.browserWindow()?.once('show', resolveFirstWindowConstructed);
+    // `ready-to-show` is the first painted frame — the point after which the
+    // Runtime Host module graph may evaluate without starving the paint.
+    mainWindowController
+      .browserWindow()
+      ?.once('ready-to-show', resolveFirstWindowConstructed);
   },
   onClose: () => mainWindowDelegates.onMainWindowClose(),
   onClosed: () => mainWindowDelegates.onMainWindowClosed(),
