@@ -17,7 +17,10 @@
  * under the License.
  */
 
-export { useWorkHubController } from './controller/use-workhub-controller.js';
+export {
+  useWorkHubController,
+  type WorkHubContinuation,
+} from './controller/use-workhub-controller.js';
 export { coordinationCommands } from './client-session.js';
 export type {
   CoordinationCommands,

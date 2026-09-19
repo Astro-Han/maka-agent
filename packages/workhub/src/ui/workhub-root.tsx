@@ -43,6 +43,7 @@ import {
 } from '../conversation.js';
 import { getWorkHubRailCopy } from '../locales.js';
 import { useWorkHubController } from '../controller.js';
+import type { WorkHubContinuation } from '../controller/use-workhub-controller.js';
 import type { CoordinationSessionServices } from '../controller.js';
 import type { ContextUsageService } from '@maka/ui/context-usage';
 import type { WorkHubAttachmentServices, WorkHubWindowServices } from './ports.js';
@@ -98,6 +99,7 @@ function revealWordmark(element: HTMLDivElement | null, content: HTMLDivElement 
 }
 
 export interface WorkHubRootProps {
+  continuation?: WorkHubContinuation;
   sessionId: string | undefined;
   signal?: AbortSignal;
   sessions: CoordinationSessionServices;
@@ -108,6 +110,7 @@ export interface WorkHubRootProps {
 }
 
 export function WorkHubRoot({
+  continuation,
   sessionId,
   signal,
   sessions,
@@ -118,8 +121,11 @@ export function WorkHubRoot({
 }: WorkHubRootProps) {
   const highlight = useWorkHubHighlightState();
   const locale = useUiLocale();
-  const controller = useWorkHubController(sessionId, sessions, () =>
-    highlight.selectWork(undefined),
+  const controller = useWorkHubController(
+    sessionId,
+    sessions,
+    () => highlight.selectWork(undefined),
+    continuation,
   );
   const { session, transcript, busy } = controller;
   useEffect(() => {

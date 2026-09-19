@@ -53,7 +53,7 @@ export interface WorkHubTranscript {
 /** The conversation controller has no native-window, browser or local-file access. */
 export type CoordinationCommands = Pick<
   CoordinationSessionServices,
-  'answer' | 'configureModel' | 'enqueueMessage'
+  'hostEpoch' | 'answer' | 'configureModel' | 'enqueueMessage'
 >;
 export type CoordinationSessionAdapter = Omit<
   CoordinationSessionServices,
@@ -61,6 +61,7 @@ export type CoordinationSessionAdapter = Omit<
 >;
 
 export interface CoordinationSessionServices {
+  readonly hostEpoch?: string;
   subscribeAvailability(handler: () => void): () => void;
   getSession(sessionId: string): Promise<SessionSummary & { revision: number }>;
   subscribeSessions(handler: () => void): () => void;
@@ -80,6 +81,7 @@ export interface CoordinationSessionServices {
     attachments: AttachmentRef[],
     placement: MessageQueuePlacement,
     expectedTurnId: string,
+    originHostEpoch?: string,
   ): Promise<'admitted' | 'unknown' | 'rejected'>;
   retractQueueEntry(sessionId: string, entryId: string): Promise<void>;
   promoteQueueEntry(sessionId: string, entryId: string): Promise<void>;

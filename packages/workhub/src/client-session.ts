@@ -54,13 +54,22 @@ export function coordinationCommands(
   const configure = context.remote.method<ModelInput, Outcome<ModelResult>>('configure-model');
   const enqueue = context.remote.method<Enqueue, Outcome<Queued>>('enqueue');
   return {
-    async enqueueMessage(sessionId, messageId, text, attachments, placement, expectedTurnId) {
+    hostEpoch: context.hostEpoch,
+    async enqueueMessage(
+      sessionId,
+      messageId,
+      text,
+      attachments,
+      placement,
+      expectedTurnId,
+      originHostEpoch,
+    ) {
       context.signal.throwIfAborted();
       if (!context.hostEpoch) throw new Error('WorkHub has no originating Host epoch');
       const content = { text, attachments: toHost(sessionId, attachments) };
       try {
         const outcome = await enqueue({
-          originHostEpoch: context.hostEpoch,
+          originHostEpoch: originHostEpoch ?? context.hostEpoch,
           expectedTurnId,
           messageId,
           content,

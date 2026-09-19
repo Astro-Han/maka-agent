@@ -28,12 +28,12 @@ import type { IpcHandler } from '../ipc-reconnect-policy.js';
 import type { DesktopSessionStopResult } from '../../preload/bridge-contract.js';
 import type { AttachmentRef } from '@maka/core/events';
 import type { StoredMessage } from '@maka/core/session';
-import { coordinationCommands, useWorkHubController, type CoordinationSessionServices as WorkHubServices, type WorkHubTranscriptSnapshot } from '@maka/workhub/controller';
+import { coordinationCommands, useWorkHubController, type WorkHubContinuation, type CoordinationSessionServices as WorkHubServices, type WorkHubTranscriptSnapshot } from '@maka/workhub/controller';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 
 afterEach(cleanupFakeDom);
 
-async function mountController(failFirstRead = false, overrides: Partial<WorkHubServices> = {}) {
+async function mountController(failFirstRead = false, overrides: Partial<WorkHubServices> = {}, continuation?: WorkHubContinuation) {
   let hostEpoch = 'host-epoch-1';
   let openCount = 0;
   let onPhase!: (phase: 'pending' | 'ready') => void;
@@ -90,6 +90,7 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
         ...(rootTurn.status === 'running' ? { status: 'running' as const } : { status: rootTurn.status, terminalEventId: 'terminal', abortSource: 'user_stop' }) } : null });
   }
   const services = {
+    get hostEpoch() { return hostEpoch; },
     getSession: async () => ({ id: sessionId, runningTurnIds: [] }),
     listSessions: async () => [],
     modelChoices: async () => [],
@@ -124,7 +125,7 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
     ...overrides,
   } as unknown as WorkHubServices;
   let submissions = 0;
-  function Probe() { controller = useWorkHubController(sessionId, services, () => { submissions++; }); return null; }
+  function Probe() { controller = useWorkHubController(sessionId, services, () => { submissions++; }, continuation); return null; }
   await act(async () => {
     root.render(createElement(LocaleProvider, { locale: 'en', children:
       createElement(Probe),
@@ -474,6 +475,46 @@ test('an unknown WorkHub submission converges through the original Host admissio
   }
 });
 
+test('Client replacement retains uncertain identities and cannot clear a newer submission with a late reply', async () => {
+  const continuation: WorkHubContinuation = {};
+  const first = await mountController(false, {}, continuation);
+  let sending!: Promise<boolean>;
+  await act(async () => { sending = first.controller.send('original', []); });
+  const original = first.requests[0]!;
+  assert.equal(continuation.answer?.input.turnId, original.turnId);
+  assert.equal(continuation.answer?.input.originHostEpoch, 'host-epoch-1');
+  cleanupFakeDom();
+
+  const next = await mountController(false, {}, continuation);
+  assert.equal(next.controller.busy, true);
+  await act(async () => next.reconnect('host-epoch-2'));
+  assert.equal(next.controller.busy, false);
+  assert.equal(next.requests.length, 0, 'an absent cross-epoch receipt cannot dispatch');
+  let newer!: Promise<boolean>;
+  await act(async () => { newer = next.controller.send('new request', []); });
+  const fresh = next.requests[0]!;
+  await act(async () => { first.admission.resolve({ turnId: original.turnId }); await sending; });
+  assert.equal(continuation.answer?.input.turnId, fresh.turnId, 'retired completion cannot erase a newer identity');
+  await act(async () => { next.admission.resolve({ turnId: fresh.turnId }); await newer; });
+  assert.equal(continuation.answer, undefined);
+  await act(async () => { next.admit(fresh.turnId); });
+  await act(async () => {
+    next.setSteerResult('unknown');
+    assert.equal(await next.controller.send('queued', []), false);
+  });
+  const queued = next.steers[0]!;
+  assert.equal(continuation.queued?.messageId, queued[1]);
+  cleanupFakeDom();
+
+  const last = await mountController(false, {}, continuation);
+  assert.equal(last.controller.canRetry, true);
+  assert.equal(last.controller.transientMessages[0]?.text, 'queued');
+  await act(async () => { last.reconnect('host-epoch-3'); last.controller.retry(); });
+  assert.deepEqual(last.steers[0], queued, 'queue retries retain the original Turn, message, payload and Host epoch');
+  assert.equal(last.requests.length, 0);
+  assert.equal(continuation.queued, undefined);
+});
+
 test('Retry reopens a failed initial WorkHub read after Session resolution', async () => {
   const h = await mountController(true);
   assert.ok(h.controller.sessionId);
@@ -504,7 +545,7 @@ test('WorkHub steering keeps the current Turn and Stop authority and reconciles 
   await act(async () => { assert.equal(await h.controller.send('change direction', attachments, 'steer'), true); });
   assert.equal(h.requests.length, 1, 'steering must not start or queue another answer');
   assert.equal(h.controller.liveTurn?.turnId, turnId);
-  assert.deepEqual(h.steers[0]!.slice(2), ['change direction', attachments, 'current_turn', turnId]);
+  assert.deepEqual(h.steers[0]!.slice(2), ['change direction', attachments, 'current_turn', turnId, 'host-epoch-1']);
   const messageId = h.steers[0]![1];
   const original: StoredMessage = { type: 'user', id: 'original-canonical-id', turnId, text: 'original request', ts: 1 };
   await act(() => h.publish([original]));
@@ -629,7 +670,7 @@ test('WorkHub defaults to follow-up and moves each message into its admitted suc
     assert.equal(await h.controller.send('second follow-up', []), true);
   });
   assert.deepEqual(h.steers.map((input) => input.slice(2)), [
-    ['first follow-up', attachments, 'next_turn', 'active-turn'], ['second follow-up', [], 'next_turn', 'active-turn'],
+    ['first follow-up', attachments, 'next_turn', 'active-turn', 'host-epoch-1'], ['second follow-up', [], 'next_turn', 'active-turn', 'host-epoch-1'],
   ]);
   assert.equal(h.requests.length, 0);
   assert.equal(h.controller.liveTurn?.turnId, 'active-turn');

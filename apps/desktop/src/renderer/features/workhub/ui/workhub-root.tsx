@@ -31,6 +31,7 @@ import { parseDesktopSessionKey } from '../../../../shared/runtime-host-identity
 export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionId' | 'feedback'> & { host: ClientHostRef }) {
   const locale = useUiLocale();
   const services = useWorkHubServices();
+  const continuation = useMemo<NonNullable<WorkHubRootProps['continuation']>>(() => ({}), [host.hostId]);
   const native = useMemo<WorkHubWindowServices>(() => ({
     presentation: services.presentation,
     control: services.control,
@@ -49,5 +50,5 @@ export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionI
     return hostAttachmentRefs({ scope: host, sessionId: session.sessionId }, refs);
   }, [host.hostId]);
   return <ClientPluginSlot host={host} entryId="maka.workhub.ui" name="workhub.surface" className="workHubPluginSurface"
-    input={{ ...props, locale, sessions: services, native, attachments, hostAttachments, contextUsage: services.inspector }} />;
+    input={{ ...props, locale, continuation, sessions: services, native, attachments, hostAttachments, contextUsage: services.inspector }} />;
 }
