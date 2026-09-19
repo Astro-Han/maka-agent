@@ -249,4 +249,30 @@ describe('createOnboardingSnapshotPoller', () => {
     await poller.pull();
     assert.deepEqual(events, [{ type: 'snap', payload: READY_SNAPSHOT }]);
   });
+
+  it('shouldDeferError holds backend-pending rejections out of the error slot', async () => {
+    const events: Array<{ type: 'snap' | 'err'; payload: unknown }> = [];
+    let backendUp = false;
+    const poller = createOnboardingSnapshotPoller(
+      {
+        getSnapshot: async () => {
+          if (!backendUp) throw new Error('identity is unavailable');
+          return READY_SNAPSHOT;
+        },
+        shouldDeferError: async () => !backendUp,
+      },
+      {
+        onSnapshot: (s) => events.push({ type: 'snap', payload: s }),
+        onError: (m) => events.push({ type: 'err', payload: m }),
+      },
+      () => 'zh-CN',
+    );
+
+    await poller.pull();
+    assert.deepEqual(events, [], 'a not-up backend must not surface an error');
+
+    backendUp = true;
+    await poller.pull();
+    assert.deepEqual(events, [{ type: 'snap', payload: READY_SNAPSHOT }]);
+  });
 });

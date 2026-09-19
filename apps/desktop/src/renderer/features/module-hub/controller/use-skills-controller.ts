@@ -36,6 +36,7 @@ import {
   defaultRuntimeHostDiagnosticTarget,
   defaultRuntimeHostOperationHost,
   isDefaultRuntimeHostCurrent,
+  isDefaultRuntimeHostResolvable,
   runIfDefaultRuntimeHostCurrent,
   runOnDefaultRuntimeHost,
 } from "./default-runtime-host.js";
@@ -149,10 +150,18 @@ export function useSkillsController(
     async (options: RefreshOptions, error: unknown): Promise<boolean> => {
       const shouldShowError = options.shouldShowError;
       if (shouldShowError && !shouldShowError()) return false;
+      // A refresh that never reached a Host is pending, not failed — the
+      // ready transition re-fires it.
+      if (
+        !defaultRuntimeHostOperationHost(error) &&
+        !(await isDefaultRuntimeHostResolvable(services.runtimeHosts))
+      ) {
+        return false;
+      }
       if (!(await isOperationHostCurrent(error))) return false;
       return shouldShowError?.() ?? true;
     },
-    [isOperationHostCurrent],
+    [isOperationHostCurrent, services.runtimeHosts],
   );
 
   const reportRuntimeHostError = useCallback(

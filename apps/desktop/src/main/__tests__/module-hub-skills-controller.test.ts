@@ -462,3 +462,36 @@ test("stale Skills refresh errors do not outlive a newer successful generation",
   await act(async () => staleRefresh);
   assert.deepEqual(records, []);
 });
+
+test("Skills refresh failures stay silent while the default Host is unavailable", async () => {
+  const { root } = installReactRenderer();
+  const records: ToastRecord[] = [];
+  const host = { profileId: "profile-a", hostId: "host-a" };
+  let defaultHost: typeof host | undefined;
+  const defaults = createFakeModuleHubServices();
+  const services = createFakeModuleHubServices({
+    runtimeHosts: {
+      ...defaults.runtimeHosts,
+      getDefault: async () => {
+        if (!defaultHost) throw new Error("identity is unavailable");
+        return defaultHost;
+      },
+    },
+  });
+
+  await act(async () => renderController(root, services, input(records)));
+  await act(async () => controller().refreshProjectSkills());
+  assert.deepEqual(records, []);
+  assert.deepEqual(controller().host.skills, []);
+
+  defaultHost = host;
+  await act(async () => controller().refreshProjectSkills());
+  assert.equal(controller().revision, 1);
+  assert.deepEqual(records, []);
+
+  services.skills.list = async () => {
+    throw new Error("list failed");
+  };
+  await act(async () => controller().host.onRefreshSkills());
+  assert.equal(records.filter(({ kind }) => kind === "error").length, 1);
+});

@@ -58,6 +58,12 @@ export interface UseOnboardingSnapshotDeps {
   /** Fetch the current snapshot. */
   getSnapshot: () => Promise<OnboardingSnapshot>;
   /**
+   * Optional: a rejection that means "the backend is not up yet" rather than
+   * a real failure — the pull stays pending (no error surface) until an
+   * invalidation refires it.
+   */
+  shouldDeferError?: (error: unknown) => Promise<boolean>;
+  /**
    * Subscribe to invalidation signals. The handler is fired
    * (debounced internally by the caller if needed) whenever an
    * upstream event suggests the snapshot may be stale. Return value
@@ -166,7 +172,7 @@ export interface OnboardingSnapshotPoller {
 }
 
 export function createOnboardingSnapshotPoller(
-  deps: Pick<UseOnboardingSnapshotDeps, 'getSnapshot'>,
+  deps: Pick<UseOnboardingSnapshotDeps, 'getSnapshot' | 'shouldDeferError'>,
   callbacks: OnboardingSnapshotPollerCallbacks,
   getLocale: () => UiLocale,
 ): OnboardingSnapshotPoller {
@@ -195,6 +201,8 @@ export function createOnboardingSnapshotPoller(
         if (!active || ticket !== inflightTicket) return; // newer pull won or unmounted
         emitSnapshot(next);
       } catch (err) {
+        if (!active || ticket !== inflightTicket) return;
+        if (await deps.shouldDeferError?.(err)) return;
         if (!active || ticket !== inflightTicket) return;
         emitError(onboardingSnapshotErrorMessage(err, getLocale()));
       }
@@ -234,6 +242,10 @@ export function useOnboardingSnapshot(): UseOnboardingSnapshotResult {
 
 const LIVE_DEPS: UseOnboardingSnapshotDeps = {
   getSnapshot: () => window.maka.onboarding.getSnapshot(),
+  // The snapshot read goes through the default Host; while it is still
+  // connecting the pull is pending, not failed.
+  shouldDeferError: async (error) =>
+    error instanceof Error && error.message.includes('identity is unavailable'),
   subscribeInvalidations(onInvalidate) {
     const unsubscribeSessions = window.maka.sessions.subscribeChanges(() => onInvalidate());
     const unsubscribeConnections = window.maka.connections.subscribeEvents(() => onInvalidate());

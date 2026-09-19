@@ -175,14 +175,12 @@ export function useAppShellBootstrapSubscriptions(options: {
     options.handleConnectionEvent(event);
   });
   const handleRuntimeHostChange = useEffectEvent((event: DesktopRuntimeHostProfileChangedEvent) => {
-    void options.refreshSessions().then((sessions) => {
-      options.retiredSessionIds(sessions).forEach(options.retireSession);
-    });
-    if (event.readiness !== 'ready') return;
-    if (!event.isDefault) return;
+    void options.refreshSessions().then((sessions) => options.retiredSessionIds(sessions).forEach(options.retireSession));
+    if (event.readiness !== 'ready' || !event.isDefault) return;
     void options.refreshProjects();
     void options.refreshConnections();
     void options.refreshMemoryActive('load');
+    void options.refreshShellSettings();
   });
   // PR-2088: the macOS application menu routes New Task / Settings / Keyboard
   // Shortcuts here through one channel. The renderer already owns these
@@ -200,25 +198,23 @@ export function useAppShellBootstrapSubscriptions(options: {
     (event: SessionChangedEvent) => {
       const refreshedSessions = options.refreshSessions();
       if (event.reason === 'archived' && event.sessionId) options.retireSession(event.sessionId);
-      if (event.reason === 'created' || event.reason === 'migrated') {
-        void options.refreshProjects();
+      if (event.reason === 'created' || event.reason === 'migrated') void options.refreshProjects();
+      if (event.sessionId) {
+        options.setSessionEventHealthBySession((current) => {
+          const previous = current[event.sessionId!];
+          if (!previous) return current;
+          return {
+            ...current,
+            [event.sessionId!]: recordSessionEventStreamChange(previous, event.ts),
+          };
+        });
       }
-    if (event.sessionId) {
-      options.setSessionEventHealthBySession((current) => {
-        const previous = current[event.sessionId!];
-        if (!previous) return current;
-        return {
-          ...current,
-          [event.sessionId!]: recordSessionEventStreamChange(previous, event.ts),
-        };
-      });
-    }
-    if (
-      event.sessionId &&
-      (event.reason === 'turn-status-change' || event.reason === 'message-appended' || event.reason === 'deleted')
-    ) {
-      options.clearPendingTurnActionsForSession(event.sessionId);
-    }
+      if (
+        event.sessionId &&
+        (event.reason === 'turn-status-change' || event.reason === 'message-appended' || event.reason === 'deleted')
+      ) {
+        options.clearPendingTurnActionsForSession(event.sessionId);
+      }
     const changedSessionId = event.sessionId;
     if (event.reason === 'message-appended' && changedSessionId && changedSessionId === options.activeIdRef.current) {
       void options.refreshMessages(changedSessionId);
