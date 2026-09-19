@@ -115,6 +115,29 @@ test('raises the window once per attention revision, never for progress', async 
   assert.equal(focuses(), 2);
 });
 
+test('a publication superseded by close cannot resurrect the stale view', async () => {
+  const pending: Array<() => void> = [];
+  const sent: Array<DesktopHostHandoffPayload | null> = [];
+  const surface = createDesktopHostHandoffSurface({
+    ipcMain: { handle() {} } as never,
+    send: (payload) => sent.push(payload),
+    focus: () => {},
+    resolveLocale: () =>
+      new Promise((resolve) => pending.push(() => resolve('en' as const))),
+  });
+  const handoff = surface(() => {});
+
+  handoff.update(attentionView('a1'));
+  handoff.close();
+  // The newer close publishes first; the older attention payload resolves
+  // afterwards and must be dropped instead of resurrecting the modal.
+  pending[1]?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  pending[0]?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sent, [null]);
+});
+
 test('decide routes only a live attention revision and advertised action', async () => {
   const { surface, handlers } = harness();
   const decisions: Array<[string, HostHandoffAction]> = [];

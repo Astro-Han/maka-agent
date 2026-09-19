@@ -67,8 +67,13 @@ export function createDesktopHostHandoffSurface(input: {
           ),
         }
       : null;
+  let publication = 0;
   const publish = (): void => {
+    const ticket = ++publication;
     void payloadFor(currentEntry()).then((payload) => {
+      // Locale resolution is asynchronous; a close or a newer update that
+      // landed while it ran must not be overwritten by this stale payload.
+      if (ticket !== publication) return;
       input.send(payload);
       const revision =
         payload?.view.state === 'attention' ? payload.view.revision : undefined;
