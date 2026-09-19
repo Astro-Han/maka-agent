@@ -156,13 +156,11 @@ async fn answer(
     input: workhub::AnswerInput,
     connection_id: uuid::Uuid,
 ) -> Result<workhub::TurnResult, OperationError> {
-    let _admission = host.executions.lock_admission().await;
-    let session = record(host)
-        .await?
-        .ok_or_else(|| failure(Code::NotFound, "WorkHub Session has not been resolved"))?;
-    host.executions
-        .answer_workhub(input, session, connection_id, host.root_id())
-        .await
+    let request = crate::plugins::workhub::answer::Request::new(input)?;
+    if let Some(receipt) = host.executions.workhub_answer_receipt(&request).await? {
+        return Ok(receipt);
+    }
+    control(host)?.value.answer(request, connection_id).await
 }
 
 fn serialize(value: impl serde::Serialize) -> Result<Value, OperationError> {

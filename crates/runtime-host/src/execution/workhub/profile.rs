@@ -19,7 +19,7 @@
 
 use super::{Executions, Result, SessionConfiguration, failure};
 use crate::execution::read;
-use crate::plugins::workhub::{ID, Policy};
+use crate::plugins::workhub::{Control, ID, Policy};
 use maka_client_capability::BindingError;
 use maka_plugins::{composition::Scope, contributions::Contribution};
 use maka_protocol::OperationErrorCode as Code;
@@ -76,13 +76,13 @@ pub(in crate::execution) fn catalog(
     let _admission = policy
         .admit()
         .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
-    bound_catalog(executions, tools, &policy.value)
+    bound_catalog(executions, tools, &policy.value.policy)
 }
 
-pub(super) fn resolve(executions: &Executions) -> Result<Contribution<Policy>> {
+fn resolve(executions: &Executions) -> Result<Contribution<Control>> {
     executions
         .plugin_catalog
-        .snapshot::<Policy>(&Scope::Profile)
+        .snapshot::<Control>(&Scope::Profile)
         .entries
         .remove(ID)
         .ok_or_else(|| failure(Code::OperationUnavailable, "WorkHub policy is unavailable"))

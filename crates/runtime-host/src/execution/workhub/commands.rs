@@ -32,6 +32,7 @@ use std::sync::{Arc, Weak};
 pub(crate) struct WorkHubCommands {
     executions: Weak<Executions>,
     pub(super) project_usage: crate::server::ProjectUsage,
+    root_id: String,
 }
 impl WorkHubCommands {
     fn executions(&self) -> Result<Arc<Executions>> {
@@ -61,14 +62,39 @@ impl WorkHubCommands {
     pub(crate) fn new(
         executions: &Arc<Executions>,
         project_usage: crate::server::ProjectUsage,
+        root_id: String,
     ) -> Self {
         Self {
             executions: Arc::downgrade(executions),
             project_usage,
+            root_id,
         }
     }
 }
 impl Commands for WorkHubCommands {
+    fn chat_defaults(
+        &self,
+    ) -> BoxFuture<'_, Result<maka_runtime::configuration::policy::ChatDefaults>> {
+        Box::pin(async move {
+            self.executions()?
+                .configuration
+                .runtime_policy()
+                .await
+                .map(|snapshot| snapshot.policy.chat_defaults)
+                .map_err(super::super::internal)
+        })
+    }
+    fn answer(
+        &self,
+        caller: Context,
+        plan: crate::plugins::workhub::answer::Plan,
+        connection: uuid::Uuid,
+    ) -> BoxFuture<'_, Result<maka_protocol::workhub::TurnResult>> {
+        Box::pin(async move {
+            super::answer::execute(&self.executions()?, caller, plan, connection, &self.root_id)
+                .await
+        })
+    }
     fn resolve_model(
         &self,
         target: maka_protocol::session::SessionModelTarget,

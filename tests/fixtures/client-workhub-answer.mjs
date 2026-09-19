@@ -227,7 +227,13 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     assert.equal(requests.length, 0, 'A disabled policy must fail before model dispatch');
     await togglePolicy(false);
     observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
-    assert.deepEqual(await request('workhub.coordination.answer', input), { turnId });
+    assert.deepEqual(
+      await Promise.all([
+        request('workhub.coordination.answer', input),
+        request('workhub.coordination.answer', input),
+      ]),
+      [{ turnId }, { turnId }],
+    );
     await observer.waitFor(
       (frame) =>
         frame.kind === 'subscription.session_projection' &&

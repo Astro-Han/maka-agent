@@ -50,7 +50,7 @@
 | 领域／当前耦合 | 目标与完成条件 |
 | --- | --- |
 | **Skills：**`maka.skills` 拥有发现、输入准备、每步工具／上下文快照、治理、偏好 CAS、预览、导入及 workspace／user 发布；已发布的 Client Contribution 拥有 Session／新工作区选择器、管理页与草稿建议。 | Desktop 提供目标绑定的 Slot、通用 Remote 传输及授权的原生文件操作；旧扫描、导入、控制器和 Skills IPC／preload 门面已删除。Host 仅保留薄外部协议适配、准入与不可变回执，不再解析 Skill。 |
-| **WorkHub：**`maka.workhub` 拥有协调会话解析／模型配置、提示词／客户端工具策略、委派／纠正／选择流程、Stop／Resume 请求／结果、候选筛选／引用、目标／默认值决策及冻结纠正意图的恢复策略。退休关闭待答选择表单；Host 保留规范结果、原子投递与已接受操作的结算。 | 回答组合、原生工具、Remote 及实际 Desktop UI 迁入内置领域。保留精确消息定位与原子准入／取消／回执；不能把纠正拆成插件和 Host 各自写入。 |
+| **WorkHub：**`maka.workhub` 拥有协调会话解析／模型配置、回答组合、提示词／客户端工具策略、委派／纠正／选择流程、Stop／Resume 请求／结果、候选筛选／引用、目标／默认值决策及冻结纠正意图的恢复策略。退休关闭待答选择表单；Host 保留规范结果、原子投递与已接受操作的结算。 | 原生工具、Remote 及实际 Desktop UI 迁入内置领域。保留精确消息定位与原子准入／取消／回执；不能把纠正拆成插件和 Host 各自写入。 |
 | **默认助手行为：**`maka.assistant` 发布默认 behavior、persona、个性化和工作区指令。 | 每逻辑模型步骤冻结来源；停用后不保留隐藏 persona。显式 Session／子任务指令独立于可替换的提示词 Contribution；执行／压缩不变量仍由 Host 维护。 |
 | **Graph／Swarm 与 Scheduler：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用原子激活／停止／空闲退休命令及只读偏好，不接收 `Executions`、配置写入器或 Host 锁。 | 保持已有编排与唤醒行为；语义相同时复用这些窄命令，按同一归属规则复核 Scheduler。类型化领域 repository 可以保留。 |
 | **Code Mode：**模式选择、嵌套派发及历史投影跨越多个 crate。 | 首批领域迁移后，在有实际 Contribution 边界收益时迁移面向用户的工具和模式策略；V8 所有权、嵌套调用权限、派发／结算及规范历史保留 runtime。不为搬迁 `exec` 发明万能执行 hook。 |

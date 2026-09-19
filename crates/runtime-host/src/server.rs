@@ -264,6 +264,7 @@ impl Host {
         let workhub_commands = Arc::new(crate::execution::WorkHubCommands::new(
             &executions,
             project_usage.clone(),
+            root.root_id().into(),
         ));
         crate::plugins::workhub::install(
             &mut setup,

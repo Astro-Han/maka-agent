@@ -30,6 +30,7 @@ use maka_runtime::{
 };
 use serde_json::Value;
 use std::sync::Arc;
+pub(crate) mod answer;
 pub(crate) mod candidates;
 pub(crate) mod control;
 pub(crate) mod coordinator;
@@ -67,8 +68,6 @@ pub(crate) fn install(
             "built-in WorkHub identity is reserved".into(),
         ));
     }
-    catalog.host_only::<Policy>()?;
-    catalog.reserve_for::<Policy>(ID, ID)?;
     catalog.host_only::<Control>()?;
     catalog.reserve_for::<Control>(ID, ID)?;
     setup.builtins.insert(
@@ -127,6 +126,23 @@ impl Plugin for WorkHub {
                 .identity()
                 .map_err(|error| error.to_string())?;
             let mut staged = Staged::default();
+            let policy = Policy {
+                required_clients: &CLIENT_TOOLS,
+                optional_clients: &BROWSER_TOOLS,
+                attachment_description: ATTACHMENT_DESCRIPTION,
+                prompt: SystemPrompt {
+                    text: PROMPT.into(),
+                    policy_revision: 0,
+                    sources: vec![SourceRevision {
+                        kind: SourceKind::PromptSection,
+                        name: ID.into(),
+                        package_id: identity.package_id,
+                        entry_id: identity.entry_id,
+                        activation: identity.activation,
+                        revision: content_digest(PROMPT.as_bytes()),
+                    }],
+                },
+            };
             staged
                 .insert(
                     ID,
@@ -134,26 +150,16 @@ impl Plugin for WorkHub {
                         commands,
                         caller: context.lifecycle.clone(),
                         workspace,
+                        policy: Arc::new(policy),
                     },
                 )
                 .map_err(|error| error.to_string())?;
-            staged.insert(ID, Policy {
-                required_clients: &CLIENT_TOOLS,
-                optional_clients: &BROWSER_TOOLS,
-                attachment_description: "Read a user attachment belonging to this WorkHub conversation. Only supplied attachment references are accepted. Follow next to continue a bounded page.",
-                prompt: SystemPrompt {
-                    text: PROMPT.into(), policy_revision: 0,
-                    sources: vec![SourceRevision {
-                        kind: SourceKind::PromptSection, name: ID.into(),
-                        package_id: identity.package_id, entry_id: identity.entry_id,
-                        activation: identity.activation, revision: content_digest(PROMPT.as_bytes()),
-                    }],
-                },
-            }).map_err(|error| error.to_string())?;
             Ok(staged)
         })
     }
 }
+
+const ATTACHMENT_DESCRIPTION: &str = "Read a user attachment belonging to this WorkHub conversation. Only supplied attachment references are accepted. Follow next to continue a bounded page.";
 
 const CLIENT_TOOLS: [&str; 2] = [
     "mcp__desktop_workhub__control",
