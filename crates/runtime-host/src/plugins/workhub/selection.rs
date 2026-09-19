@@ -31,6 +31,7 @@ use maka_runtime::{
 };
 pub(crate) mod offer;
 
+#[derive(Clone)]
 pub(crate) struct SelectedTarget {
     pub invocation: Invocation,
     pub candidate_ref: String,

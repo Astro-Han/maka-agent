@@ -32,6 +32,7 @@ use serde_json::Value;
 use std::sync::Arc;
 pub(crate) mod candidates;
 pub(crate) mod control;
+pub(crate) mod delegation;
 pub(crate) mod resume;
 pub(crate) mod selection;
 pub(crate) mod target;

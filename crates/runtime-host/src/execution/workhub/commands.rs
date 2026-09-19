@@ -30,10 +30,50 @@ use maka_event_log::{
 };
 use maka_plugins::fiber::Context;
 use maka_protocol::OperationErrorCode as Code;
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
-pub(crate) struct WorkHubCommands(pub Weak<Executions>);
+pub(crate) struct WorkHubCommands {
+    executions: Weak<Executions>,
+    pub(super) project_usage: crate::server::ProjectUsage,
+}
+impl WorkHubCommands {
+    pub(crate) fn new(
+        executions: &Arc<Executions>,
+        project_usage: crate::server::ProjectUsage,
+    ) -> Self {
+        Self {
+            executions: Arc::downgrade(executions),
+            project_usage,
+        }
+    }
+}
 impl Commands for WorkHubCommands {
+    fn delegation(
+        &self,
+        caller: Context,
+        identity: crate::plugins::workhub::delegation::Identity,
+    ) -> BoxFuture<'_, Result<Option<maka_runtime::workhub::Delegation>>> {
+        Box::pin(async move {
+            let executions = self
+                .executions
+                .upgrade()
+                .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
+            super::delegation::probe(&executions, caller, identity).await
+        })
+    }
+    fn delegate(
+        &self,
+        caller: Context,
+        request: crate::plugins::workhub::delegation::Request,
+    ) -> BoxFuture<'_, Result<maka_runtime::workhub::Delegation>> {
+        Box::pin(async move {
+            let executions = self
+                .executions
+                .upgrade()
+                .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
+            super::delegation::execute(self, &executions, caller, request).await
+        })
+    }
     fn target(
         &self,
         session: String,
@@ -42,7 +82,7 @@ impl Commands for WorkHubCommands {
     {
         Box::pin(async move {
             let executions = self
-                .0
+                .executions
                 .upgrade()
                 .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
             executions.workhub_target(&session, eligible).await
@@ -54,7 +94,7 @@ impl Commands for WorkHubCommands {
     ) -> BoxFuture<'_, Result<crate::execution::Creation>> {
         Box::pin(async move {
             let executions = self
-                .0
+                .executions
                 .upgrade()
                 .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
             executions.prepare_session(request).await
@@ -69,7 +109,7 @@ impl Commands for WorkHubCommands {
     ) -> BoxFuture<'_, Result<crate::plugins::workhub::resume::Receipt>> {
         Box::pin(async move {
             let executions = self
-                .0
+                .executions
                 .upgrade()
                 .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
             super::resume::execute(&executions, caller, request, connection, eligible).await
@@ -81,7 +121,7 @@ impl Commands for WorkHubCommands {
     ) -> BoxFuture<'_, Result<Vec<Candidate<SessionConfiguration>>>> {
         Box::pin(async move {
             let executions = self
-                .0
+                .executions
                 .upgrade()
                 .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
             if executions.shutdown.is_cancelled() {
@@ -97,7 +137,7 @@ impl Commands for WorkHubCommands {
     fn stop(&self, caller: Context, request: Stop) -> BoxFuture<'_, Result<StopRecord>> {
         Box::pin(async move {
             let executions = self
-                .0
+                .executions
                 .upgrade()
                 .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
             let (record, completed, _call) = {

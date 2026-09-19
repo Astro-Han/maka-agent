@@ -19,6 +19,7 @@
 
 mod directories;
 mod projection;
+mod usage;
 use super::{Host, HostError};
 use crate::session::SessionConfiguration;
 pub(super) use directories::Directories;
@@ -32,6 +33,7 @@ use maka_protocol::session::{WorkspaceProjection, WorkspaceTarget};
 use maka_protocol::{Operation, OperationError, OperationErrorCode as Code, Outcome, project::*};
 use serde_json::{Value, json};
 use std::{path::Path, sync::atomic::Ordering};
+pub(crate) use usage::Usage;
 
 type Result<T> = std::result::Result<T, OperationError>;
 
@@ -235,18 +237,7 @@ pub(crate) async fn resolve_record(
 }
 
 pub(super) async fn record_usage(host: &Host, workspace: &WorkspaceProjection) -> Result<()> {
-    if let WorkspaceTarget::Project { project_id } = &workspace.target {
-        host.log
-            .touch_project(
-                project_id,
-                &workspace.host_cwd,
-                super::configuration::now().map_err(internal)?,
-            )
-            .await
-            .map_err(stored)?;
-        publish(host);
-    }
-    Ok(())
+    host.project_usage.record(workspace).await
 }
 
 fn publish(host: &Host) {

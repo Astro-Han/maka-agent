@@ -31,6 +31,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod commands;
+mod delegation;
 pub(super) mod profile;
 mod resume;
 pub(crate) use commands::WorkHubCommands;

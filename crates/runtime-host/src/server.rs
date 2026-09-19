@@ -43,6 +43,7 @@ mod outbound;
 mod plugin_remote;
 mod projects;
 mod scheduler;
+pub(crate) use projects::Usage as ProjectUsage;
 pub(crate) use projects::resolve_record as resolve_project_workspace;
 mod registration;
 mod resources;
@@ -124,13 +125,14 @@ pub struct Host {
     interactions: Arc<interactions::Interactions>,
     uploads: artifacts::Uploads,
     project_directories: projects::Directories,
+    project_usage: ProjectUsage,
     // Log connections close before root authority is released.
     log: Arc<EventLog>,
     configuration: Arc<ConfigurationStore>,
     connection_effects: connection_effects::ConnectionEffects,
     oauth: oauth::Coordinator,
     changes: broadcast::Sender<serde_json::Value>,
-    change_revision: AtomicU64,
+    change_revision: Arc<AtomicU64>,
     access_revocations: broadcast::Sender<String>,
     access_changed: tokio::sync::Notify,
     session_catalog: Arc<catalog_feed::CatalogFeed>,
@@ -214,6 +216,9 @@ impl Host {
         let epoch = Uuid::new_v4().to_string();
         log.begin_message_epoch(&epoch).await?;
         let changes = broadcast::channel(64).0;
+        let change_revision = Arc::new(AtomicU64::new(0));
+        let project_usage =
+            ProjectUsage::new(log.clone(), changes.clone(), change_revision.clone());
         let session_catalog = Arc::new(catalog_feed::CatalogFeed::new(
             *log.subscribe_commits().borrow(),
         ));
@@ -259,9 +264,10 @@ impl Host {
         crate::plugins::workhub::install(
             &mut setup,
             &executions.plugin_catalog,
-            Arc::new(crate::execution::WorkHubCommands(Arc::downgrade(
+            Arc::new(crate::execution::WorkHubCommands::new(
                 &executions,
-            ))),
+                project_usage.clone(),
+            )),
         )?;
         crate::plugins::scheduler::install(
             &mut setup,
@@ -326,12 +332,13 @@ impl Host {
             interactions,
             uploads: Default::default(),
             project_directories,
+            project_usage,
             log,
             configuration,
             connection_effects: connection_effects::ConnectionEffects::default(),
             oauth: oauth::Coordinator::default(),
             changes,
-            change_revision: AtomicU64::new(0),
+            change_revision,
             access_revocations: broadcast::channel(64).0,
             access_changed: tokio::sync::Notify::new(),
             session_catalog,

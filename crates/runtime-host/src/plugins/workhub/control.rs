@@ -43,6 +43,16 @@ pub(crate) struct Stop {
 /// Commands own admission, durable receipts and settlement. No locks, arbitrary
 /// log writes or Host handles are exposed to the business implementation.
 pub(crate) trait Commands: Send + Sync {
+    fn delegation(
+        &self,
+        caller: Context,
+        identity: super::delegation::Identity,
+    ) -> BoxFuture<'_, Result<Option<maka_runtime::workhub::Delegation>>>;
+    fn delegate(
+        &self,
+        caller: Context,
+        request: super::delegation::Request,
+    ) -> BoxFuture<'_, Result<maka_runtime::workhub::Delegation>>;
     /// Apply the domain predicate inside one bounded read snapshot, before its limit.
     fn candidates(
         &self,
