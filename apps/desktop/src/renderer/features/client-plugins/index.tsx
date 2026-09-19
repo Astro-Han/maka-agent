@@ -135,6 +135,7 @@ export function usePluginSession(entryId: string, enabled: boolean, locale: 'en'
   const current = enabled && resolved?.host === host ? resolved : undefined;
   const error = origin?.error ?? current?.error;
   return {
+    host: current?.sessionId ? host : undefined,
     sessionId: current?.sessionId,
     resolver: enabled ? <>
       {host ? <ClientPluginSlot host={host} entryId={entryId} name="session.resolve"

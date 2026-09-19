@@ -17,9 +17,11 @@
  * under the License.
  */
 
-import type { ComponentProps } from 'react';
+import { useEffect, useMemo, type ComponentProps } from 'react';
+import type { FeedbackInput } from '@maka/workhub/slots';
 import { useUiLocale } from '@maka/ui';
-import { usePluginSession } from '../features/client-plugins/index.js';
+import { ClientPluginSlot, usePluginSession, type ClientHostRef } from '../features/client-plugins/index.js';
+import { parseDesktopSessionKey } from '../../shared/runtime-host-identity.js';
 import { AppShell as LegacyAppShell } from '../app-shell';
 import { WorkHubRoot, WorkHubSurfaceSwitch } from '../features/workhub';
 export function AppShell(props: ComponentProps<typeof LegacyAppShell>) {
@@ -27,5 +29,23 @@ export function AppShell(props: ComponentProps<typeof LegacyAppShell>) {
 }
 function WorkHubConversation() {
   const binding = usePluginSession('maka.workhub.ui', true, useUiLocale());
-  return <>{binding.resolver}<WorkHubRoot key={binding.sessionId} sessionId={binding.sessionId} /></>;
+  return <>{binding.resolver}<WorkHubRoot key={binding.sessionId} sessionId={binding.sessionId}
+    feedback={(input) => binding.host ? <WorkHubFeedback host={binding.host} input={input} /> : null} /></>;
+}
+
+function WorkHubFeedback({ host, input }: { host: ClientHostRef; input: FeedbackInput }) {
+  const converted = useMemo(() => {
+    try {
+      return { references: input.references.map((reference) => {
+        const target = parseDesktopSessionKey(reference.targetSessionId);
+        if (target.hostId !== host.hostId) throw new Error('Delegation belongs to another Host');
+        return { ...reference, targetSessionId: target.sessionId };
+      }) };
+    } catch (error) { return { error }; }
+  }, [host.hostId, input.references]);
+  useEffect(() => {
+    if ('error' in converted) { input.onFeedback([]); input.onError(converted.error); }
+  }, [converted, input.onFeedback, input.onError]);
+  return converted.references ? <ClientPluginSlot host={host} entryId="maka.workhub.ui"
+    name="workhub.feedback" input={{ ...input, references: converted.references }} /> : null;
 }

@@ -28,7 +28,6 @@ import {
   MAX_WORKHUB_ANCHORS,
   WorkHubNavigationRail,
   workHubLinkedWork,
-  workHubTurnResultPreview,
 } from "../../renderer/features/workhub/index.js";
 import { ChatSurfaceLayout, LocaleProvider } from '@maka/ui';
 import { WorkHubConversation, WorkHubDelegationStatus } from '../../renderer/features/workhub/testing.js';
@@ -73,17 +72,6 @@ test('a completed delegation renders only its status beside the prompt timestamp
 
   assert.match(markup, /Completed/u);
   assert.doesNotMatch(markup, /All release checks|Open result/u);
-});
-
-test('delegated result previews select the exact Turn and stay character-bounded', () => {
-  const preview = workHubTurnResultPreview([
-    { type: 'assistant', id: 'other-answer', turnId: 'other-turn', ts: 1, modelId: 'model', text: 'wrong result' },
-    { type: 'assistant', id: 'target-answer', turnId: 'target-turn', ts: 2, modelId: 'model', text: `  ${'界'.repeat(700)}  ` },
-  ], 'target-turn');
-
-  assert.equal(Array.from(preview ?? '').length, 600);
-  assert.equal(preview?.endsWith('…'), true);
-  assert.doesNotMatch(preview ?? '', /wrong result/u);
 });
 
 function session(

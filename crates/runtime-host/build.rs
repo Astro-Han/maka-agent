@@ -21,7 +21,7 @@ fn main() {
     for path in [
         "src/plugins/graph/client.tsx",
         "src/plugins/graph/client",
-        "src/plugins/workhub/client.tsx",
+        "../../packages/workhub/src",
         "../skills/src/client",
         "../skills/src/client.tsx",
         "../../packages/plugin-sdk/src",

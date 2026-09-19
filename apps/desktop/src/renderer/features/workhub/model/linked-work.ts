@@ -22,27 +22,9 @@ import { workspaceNameFromCwd } from './workspace-name.js';
 
 import type { StoredMessage } from '@maka/core/session';
 
-export type WorkHubDelegationState =
-  | 'accepted'
-  | 'running'
-  | 'waiting_for_user'
-  | 'completed'
-  | 'failed'
-  | 'aborted'
-  | 'recovering';
-
-export interface WorkHubDelegationReference {
-  readonly id: string;
-  readonly targetSessionId: string;
-  readonly targetMessageId: string;
-  readonly targetTurnId: string;
-}
-
-export interface WorkHubDelegationFeedback {
-  readonly id: string;
-  readonly state: WorkHubDelegationState;
-  readonly resultPreview?: string;
-}
+import type { DelegationFeedback as WorkHubDelegationFeedback } from '@maka/workhub/slots';
+export type { DelegationFeedback as WorkHubDelegationFeedback } from '@maka/workhub/slots';
+export type WorkHubDelegationState = WorkHubDelegationFeedback['state'];
 
 export interface WorkHubLinkedWork {
   readonly id: string;

@@ -23,19 +23,20 @@ import { runInNewContext } from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
-import { act, createElement } from 'react';
+import { act, createElement, Fragment } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { buildClient } from '@maka-agent/plugin-sdk/build';
 import type { ClientRemote } from '@maka-agent/plugin-sdk/client';
 import { deferred } from '@maka/core/test-only/async-primitives';
 import { desktopSessionKey } from '../../shared/runtime-host-identity.js';
-import { ClientPluginServicesProvider, usePluginSession, type ClientPluginServices } from '../../renderer/features/client-plugins/index.js';
+import { ClientPluginServicesProvider, ClientPluginSlot, usePluginSession, type ClientPluginServices } from '../../renderer/features/client-plugins/index.js';
+import type { DelegationReference, DelegationFeedback } from '@maka/workhub/slots';
 
 test('the WorkHub Client resolves main panels through its origin and withdraws stale or unloaded bindings', { timeout: 10_000 }, async () => {
   const source = await buildClient({
     packageId: 'maka.workhub',
-    entryPoint: fileURLToPath(new URL('../../../../../crates/runtime-host/src/plugins/workhub/client.tsx', import.meta.url)),
+    entryPoint: fileURLToPath(new URL('../../../../../packages/workhub/src/client.tsx', import.meta.url)),
   });
   const entry = {
     entryId: 'maka.workhub.ui', extensionId: 'maka.workhub', activation: 'same-activation',
@@ -79,6 +80,16 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
   let unavailable = true;
   const closed: string[] = [];
   const lateProjection = deferred<string>();
+  const references = Array.from({ length: 65 }, (_, index) => ({
+    id: `assignment-${index}`, targetSessionId: 'target', targetMessageId: `message-${index}`,
+  }));
+  const feedbackBatches: number[] = [];
+  let feedback: readonly DelegationFeedback[] = [];
+  let feedbackRead: ReturnType<typeof deferred<void>> | undefined;
+  let feedbackError = false;
+  const feedbackErrors: unknown[] = [];
+  const acceptFeedback = (next: readonly DelegationFeedback[]) => { feedback = next; };
+  const reportFeedback = (error: unknown) => { feedbackErrors.push(error); };
   const services: ClientPluginServices = {
     async defaultHost() { defaultCalls++; return selected; },
     subscribeDefaultHost(listener) { changedHost = listener; return () => {}; },
@@ -92,8 +103,16 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
           return host.hostId === first.hostId ? lateProjection.promise : desktopSessionKey({ hostId: host.hostId, sessionId: id });
         },
         remote(_identity, signal) {
-          const method = (() => async () => {
+          const method = ((name: string) => async (input: DelegationReference[]) => {
             signal.throwIfAborted();
+            if (name === 'feedback') {
+              assert.equal(host.hostId, 'second');
+              feedbackBatches.push(input.length);
+              assert(input.every((reference) => reference.targetSessionId === 'target' && !('targetTurnId' in reference)));
+              await feedbackRead?.promise;
+              if (feedbackError) throw new Error('Temporarily disconnected');
+              return { ok: true, result: input.map(({ id }) => ({ id, state: 'completed', resultPreview: 'Exact delegated result' })) };
+            }
             calls.push(host.hostId);
             if (unavailable) return { ok: false, error: { code: 'operation_conflict', message: 'Choose a model' } };
             await refreshing?.promise;
@@ -113,7 +132,10 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
   let latest: ReturnType<typeof usePluginSession>;
   function Probe({ active }: { active: boolean }) {
     latest = usePluginSession('maka.workhub.ui', active, 'en');
-    return latest.resolver;
+    return createElement(Fragment, null, latest.resolver, latest.host ? createElement(ClientPluginSlot, {
+      host: latest.host, entryId: entry.entryId, name: 'workhub.feedback',
+      input: { locale: 'en', references, onFeedback: acceptFeedback, onError: reportFeedback },
+    }) : null);
   }
   const render = (active: boolean) => root.render(createElement(ClientPluginServicesProvider, {
     services, children: createElement(Probe, { active }),
@@ -143,21 +165,38 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
     await act(async () => lateProjection.resolve(desktopSessionKey({ hostId: 'first', sessionId: 'coordinator' })));
     assert.equal(latest!.sessionId, expected, 'a retired observation cannot publish through another Host');
     assert(closed.includes('first'));
+    await until(() => feedback.length === 65);
+    assert.deepEqual(feedbackBatches, [64, 1]);
+    assert(feedback.every((item) => item.state === 'completed' && item.resultPreview === 'Exact delegated result'));
 
     refreshing = deferred<void>();
+    feedbackRead = deferred<void>();
+    const pendingFeedback = feedbackRead;
     await act(async () => changedContext());
     assert.equal(latest!.sessionId, expected, 'refreshing context must not unbind an existing panel');
     await act(async () => refreshing!.resolve());
     refreshing = undefined;
+    // A newer failed read revokes the live projection; an older successful
+    // response must not republish completion after it has been superseded.
+    feedbackRead = undefined;
+    feedbackError = true;
+    await act(async () => changedContext());
+    await until(() => feedbackErrors.length === 1);
+    assert(feedback.every((item) => item.state === 'recovering'));
+    feedbackError = false;
+    await act(async () => pendingFeedback.resolve());
+    assert(feedback.every((item) => item.state === 'recovering'));
 
     enabled = false; revision++;
     await act(async () => changedCatalog());
     await until(() => latest!.sessionId === undefined);
+    assert.equal(feedback.length, 0);
     assert(closed.includes('second'));
     enabled = true; revision++;
     await act(async () => changedCatalog());
     await until(() => latest!.sessionId === expected);
-    assert.deepEqual(calls, ['first', 'first', 'second', 'second', 'second']);
+    await until(() => feedback.length === 65 && feedback.every((item) => item.state === 'completed'));
+    assert.deepEqual(calls, ['first', 'first', 'second', 'second', 'second', 'second']);
     await act(async () => render(false));
     await until(() => subscriptions === 0);
     assert.equal(latest!.sessionId, undefined);

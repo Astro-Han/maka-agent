@@ -17,7 +17,8 @@
  * under the License.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { FeedbackInput } from '@maka/workhub/slots';
 import { ChatSurfaceLayout, UserQuestionPrompt, MakaWordmark, useUiLocale, type ComposerHandle } from '@maka/ui';
 import { Button, IconButton } from '@astryxdesign/core';
 import { ChevronDown, PictureInPicture2, Undo2, X } from '@maka/ui/icons';
@@ -37,7 +38,7 @@ import type { WorkHubControlSnapshot } from '../../../../shared/workhub-control.
 import type { WorkHubPresentationSnapshot } from '../../../../shared/workhub-presentation.js';
 import { workHubLiveCopy } from '../locales/workhub-live-copy.js';
 import { applyWorkHubDelegationFeedback, workHubLinkedWork } from '../model/linked-work.js';
-import type { WorkHubDelegationFeedback, WorkHubDelegationReference } from '../model/linked-work.js';
+import type { WorkHubDelegationFeedback } from '../model/linked-work.js';
 
 function cancelReveal(element: HTMLDivElement | null, content: HTMLDivElement | null) {
   for (const target of [element, content]) for (const animation of target?.getAnimations() ?? []) animation.cancel();
@@ -70,7 +71,10 @@ function revealWordmark(element: HTMLDivElement | null, content: HTMLDivElement 
   }
 }
 
-export function WorkHubRoot({ sessionId }: { sessionId: string | undefined }) {
+export function WorkHubRoot({ sessionId, feedback }: {
+  sessionId: string | undefined;
+  feedback?: (input: FeedbackInput) => ReactNode;
+}) {
   const highlight = useWorkHubHighlightState();
   const locale = useUiLocale();
   const controller = useWorkHubController(sessionId, () => highlight.selectWork(undefined));
@@ -247,25 +251,13 @@ export function WorkHubRoot({ sessionId }: { sessionId: string | undefined }) {
   }));
   const links = useMemo(() => workHubLinkedWork(transcript.messages, controller.sessions, getWorkHubRailCopy(locale).work), [transcript.messages, controller.sessions, locale]);
   const [delegationFeedback, setDelegationFeedback] = useState<readonly WorkHubDelegationFeedback[]>([]);
-  useEffect(() => {
-    let current = true;
-    const references: WorkHubDelegationReference[] = links.flatMap((link) =>
-      link.targetMessageId && link.targetTurnId ? [{
+  const references = useMemo(() => links.flatMap((link) =>
+      link.targetMessageId ? [{
         id: link.id,
         targetSessionId: link.targetSessionId,
         targetMessageId: link.targetMessageId,
-        targetTurnId: link.targetTurnId,
       }] : [],
-    );
-    if (references.length === 0) {
-      setDelegationFeedback([]);
-      return () => { current = false; };
-    }
-    void services.delegationFeedback(references).then((feedback) => {
-      if (current) setDelegationFeedback(feedback);
-    }).catch(controller.report);
-    return () => { current = false; };
-  }, [services, links]);
+    ), [links]);
   const linksWithFeedback = useMemo(
     () => applyWorkHubDelegationFeedback(links, delegationFeedback),
     [links, delegationFeedback],
@@ -276,6 +268,7 @@ export function WorkHubRoot({ sessionId }: { sessionId: string | undefined }) {
   };
   return (
     <WorkHubHighlightContext.Provider value={highlight}>
+    {feedback?.({ locale, references, onFeedback: setDelegationFeedback, onError: controller.report })}
     <WorkHubHueProvider sessionIds={[...tasks.map((task) => task.target.sessionId), ...delegatedSessionIds]}>
     <section ref={surface} data-progress={progress} data-progress-editing={editingProgress} className="workHubLive workhub-surface" data-placement={presentation?.placement ?? 'docked'} data-conversation-expanded={showConversation} aria-label={t.title}>
       {!floating && presentation?.workbar && <WorkbarEdgeToggle label={getShellCopy(locale).chrome[presentation.workbar.collapsed ? 'expandWorkbar' : 'collapseWorkbar']} {...presentation.workbar} onToggle={() => call(services.presentation.toggleWorkbar())} />}

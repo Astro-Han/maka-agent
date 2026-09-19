@@ -18,7 +18,7 @@
  */
 
 import { activeHostTurn, chatTurnActivity, type SessionExecutionProjection } from '../../../application/contracts/session-execution.js';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   applyLiveTurnBufferEvent,
   retainLiveTurn,
@@ -97,8 +97,8 @@ export function useWorkHubController(sessionId: string | undefined, onSubmit?: (
   const sendingRef = useRef(false);
   const pendingSend = useRef<SendAttempt | undefined>(undefined);
   const pendingQueued = useRef<{ sessionId: string; turnId: string; messageId: string; text: string; attachments: AttachmentRef[]; placement: MessageQueuePlacement; observed: boolean }>(undefined);
-  const report = (reason: unknown) =>
-    setError(reason instanceof Error ? reason.message : String(reason));
+  const report = useCallback((reason: unknown) =>
+    setError(reason instanceof Error ? reason.message : String(reason)), []);
 
   async function stopTurn(target: string, turnId: string): Promise<boolean> {
     const retracted = await services.stop(target, turnId);

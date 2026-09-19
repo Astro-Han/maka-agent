@@ -17,7 +17,8 @@
  * under the License.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { FeedbackInput } from '@maka/workhub/slots';
 import { ToastProvider, LocaleProvider, AstryxLocaleProvider, ChatSurfaceLayout } from '@maka/ui';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import type { StoredMessage, SessionSummary } from '@maka/core/session';
@@ -98,11 +99,6 @@ function makeServices(failFirst: boolean, withHistory: boolean | 'usage', colore
     subscribeAvailability: () => () => {},
     getSession: async () => session,
     listSessions: async () => coloredHistory ? [target, secondTarget] : [target], subscribeSessions: (handler) => { updateSessions = handler; return () => { updateSessions = undefined; }; }, modelChoices: async () => choices,
-    delegationFeedback: async (references) => references.map(({ id }) => ({
-      id,
-      state: coloredHistory && id === 'link-1' ? 'waiting_for_user' as const : coloredHistory && id === 'link-2' ? 'running' as const : 'completed' as const,
-      resultPreview: '重复投递测试已通过，支付回调保持同一响应。',
-    })),
     attachments: { pickFiles: async () => ({ ok: true, files: [{ approvalId: 'file-1', name: 'requirements.txt', size: 12, mimeType: 'text/plain' }] }), previewApproval: async () => ({ ok: false, reason: 'not-image' }) },
     readAttachmentBytes: async () => { throw new Error('Not an image'); },
     prepareAttachments: async (id, items) => { writes.upload(id, items); return [{ name: 'requirements.txt', kind: 'other', mimeType: 'text/plain', bytes: 12, ref: { kind: 'session_file', sessionId: 'maka_workhub_coordination', relativePath: 'artifact-1' } }]; },
@@ -168,7 +164,16 @@ function Surface({ failFirst = false, history = false, colors = false, selectTar
     if (progress) services.presentation.resizeProgress = async (_request, height) => { setProgressHeight(height); };
     return services;
   });
-  return <LocaleProvider locale="zh-CN"><AstryxLocaleProvider><ToastProvider><WorkHubServicesProvider services={services}><div style={{ height: progress ? progressHeight : '100dvh', width: progress ? 360 : undefined, maxWidth: '100%' }}><WorkHubRoot sessionId={sessionId} /></div></WorkHubServicesProvider></ToastProvider></AstryxLocaleProvider></LocaleProvider>;
+  return <LocaleProvider locale="zh-CN"><AstryxLocaleProvider><ToastProvider><WorkHubServicesProvider services={services}><div style={{ height: progress ? progressHeight : '100dvh', width: progress ? 360 : undefined, maxWidth: '100%' }}><WorkHubRoot sessionId={sessionId} feedback={(input) => <StoryFeedback {...input} colors={colors} />} /></div></WorkHubServicesProvider></ToastProvider></AstryxLocaleProvider></LocaleProvider>;
+}
+function StoryFeedback({ references, onFeedback, colors }: FeedbackInput & { colors: boolean }) {
+  useEffect(() => {
+    onFeedback(references.map(({ id }) => ({ id,
+      state: colors && id === 'link-1' ? 'waiting_for_user' : colors && id === 'link-2' ? 'running' : 'completed',
+      resultPreview: '重复投递测试已通过，支付回调保持同一响应。',
+    })));
+  }, [references, onFeedback, colors]);
+  return null;
 }
 const meta = { title: 'Product/WorkHub', parameters: { layout: 'fullscreen' }, beforeEach: () => {
   Object.values(writes).forEach((spy) => spy.mockClear());

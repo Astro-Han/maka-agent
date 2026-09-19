@@ -27,10 +27,6 @@ import type { OperationInput, OperationOutput } from '@maka/runtime-host/protoco
 import type { WorkHubAnswerInput, WorkHubAnswerResult } from '../../../shared/workhub-conversation.js';
 import type { WorkHubControlBridge } from '../../../shared/workhub-control.js';
 import type { WorkHubPresentationBridge } from '../../../shared/workhub-presentation.js';
-import type {
-  WorkHubDelegationFeedback,
-  WorkHubDelegationReference,
-} from './model/linked-work.js';
 
 export interface WorkHubTranscriptSnapshot {
   readonly messages: readonly StoredMessage[];
@@ -54,9 +50,6 @@ export interface WorkHubServices {
   getSession(sessionId: string): Promise<SessionSummary & { revision: number }>;
   subscribeSessions(handler: () => void): () => void;
   listSessions(): Promise<(SessionSummary & { revision: number })[]>;
-  delegationFeedback(
-    references: readonly WorkHubDelegationReference[],
-  ): Promise<readonly WorkHubDelegationFeedback[]>;
   modelChoices(sessionId: string): Promise<ChatModelChoice[]>;
   readonly attachments: ComposerAttachmentService;
   readAttachmentBytes(sessionId: string, artifactId: string): Promise<ArtifactBinaryReadResult>;

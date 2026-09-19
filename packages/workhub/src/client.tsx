@@ -20,6 +20,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@maka/ui/plugin';
 import type { ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
+import { registerFeedback } from './feedback.js';
 
 type Resolution =
   | { ok: true; result: { sessionId: string } }
@@ -27,6 +28,7 @@ type Resolution =
 
 const plugin: ClientPlugin = {
   activate(context) {
+    registerFeedback(context);
     const resolve = context.remote.method<null, Resolution>('resolve');
     context.slots.register(
       'session.resolve',
