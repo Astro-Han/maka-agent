@@ -104,7 +104,7 @@ test('creates the main window before starting Local Host reconciliation', () => 
   const hostStart = bootSource.indexOf('await runtimeHostManager?.start()', managerCreate);
   assert.ok(managerCreate >= 0);
   assert.ok(lifecycleWire > managerCreate && hostStart > lifecycleWire);
-  assert.match(earlyWindowSource, /void quitCoordinator\.focusOrCreateWindow\(\)/u);
+  assert.match(earlyWindowSource, /quitCoordinator\.focusOrCreateWindow\(\)/u);
   assert.doesNotMatch(mainSource, /startup-presentation/u);
 });
 
@@ -112,7 +112,7 @@ test('resolves persisted locale before first post-settings recovery prompt', () 
   const rendererRecoveryStart = earlyWindowSource.indexOf('onRendererProcessGone: async');
   const rendererRecovery = earlyWindowSource.slice(
     rendererRecoveryStart,
-    earlyWindowSource.indexOf('mainWindowDelegates.resolveBrowserDialogParent =', rendererRecoveryStart),
+    earlyWindowSource.indexOf('resolveBrowserDialogParent = () =>', rendererRecoveryStart),
   );
   const defaultHostRecoveryStart = bootSource.indexOf(
     'async function promptForDefaultRuntimeHostRecovery',
@@ -162,7 +162,7 @@ test('routes the first-paint IPC only to the active Renderer recovery listener',
   );
   const ipcHandler = earlyWindowSource.slice(
     ipcHandlerStart,
-    earlyWindowSource.indexOf('void quitCoordinator.focusOrCreateWindow()', ipcHandlerStart),
+    earlyWindowSource.indexOf('const firstWindowLaunch = quitCoordinator.focusOrCreateWindow()', ipcHandlerStart),
   );
   const readyHandlerStart = mainWindowSource.indexOf(
     'notifyRendererReady(sender, senderFrame)',

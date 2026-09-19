@@ -195,11 +195,29 @@ resolveBrowserDialogAppearance = async () => {
   }
 };
 
+// Resolves when the first window's BrowserWindow exists — main.ts holds the
+// heavy Runtime Host module graph until then so its evaluation cannot starve
+// the window's async prelude. Also resolves if creation settles without a
+// window (abort/failure), so the Host boot is never held hostage by it.
+let resolveFirstWindowConstructed!: () => void;
+export const firstWindowConstructed = new Promise<void>((resolve) => {
+  resolveFirstWindowConstructed = resolve;
+});
+
 export const mainWindowController = createMainWindowController({
   workspaceRoot,
   e2eFixture,
   settingsStore,
   revealMode,
+  onWindowConstructed: () => {
+    // Active runs show at construction: 'show' is the moment the native window
+    // is on screen — that is the point after which the Runtime Host module
+    // graph may evaluate without starving the display itself. Hidden/inactive
+    // windows never emit it, so those runs resolve at construction instead.
+    const win = mainWindowController.browserWindow();
+    if (revealMode === 'active' && win) win.once('show', resolveFirstWindowConstructed);
+    else resolveFirstWindowConstructed();
+  },
   onClose: () => mainWindowDelegates.onMainWindowClose(),
   onClosed: () => mainWindowDelegates.onMainWindowClosed(),
   onRendererProcessGone: async (details) => {
@@ -257,7 +275,8 @@ ipcMain.handle("window:notifyRendererReady", (event): void => {
 });
 // The window loads the renderer while the Runtime Host services assemble;
 // `ready-to-show` reveals the loading surface on the first painted frame.
-void quitCoordinator.focusOrCreateWindow();
+const firstWindowLaunch = quitCoordinator.focusOrCreateWindow();
+void firstWindowLaunch.then(resolveFirstWindowConstructed, resolveFirstWindowConstructed);
 
 async function confirmDesktopStorageRootRepair(
   workspaceRoot: string,

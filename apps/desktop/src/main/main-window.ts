@@ -108,6 +108,10 @@ interface MainWindowControllerDeps {
   onClose?: () => void;
   onClosed?: () => void;
   onRendererProcessGone: (details: Electron.RenderProcessGoneDetails) => void | Promise<void>;
+  // Fires right after `new BrowserWindow` — main.ts defers the heavy Runtime
+  // Host module graph until this point so its evaluation cannot starve the
+  // window's async prelude (mkdir/bounds/settings) on the shared main thread.
+  onWindowConstructed?: () => void;
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -298,28 +302,23 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
 
   async function createWindow(signal: AbortSignal): Promise<void> {
     if (signal.aborted) return;
-    await mkdir(workspaceRoot, { recursive: true });
     // Restore previously-saved bounds when available; first launch and
     // legacy installs both fall back to the default 1240x820 frame. After
     // load, validate the saved x/y against the current display layout — if
     // the previous external monitor is gone, drop x/y so Electron centers
     // the window on the primary display instead of opening it off-screen.
     const defaults = e2eFixtureWindowBounds(e2eFixture, { width: 1240, height: 820 });
-    const savedBounds = e2eFixture
-      ? defaults
-      : await readSavedBounds(workspaceRoot, defaults);
+    // mkdir, saved-bounds and the persisted appearance are independent reads —
+    // serialized they cost ~200ms ahead of the window constructor, so run them
+    // together. The FOUC fix below needs the appearance to pick the right
+    // backgroundColor (PR103 / PR-IR-01b: e2e-fixture theme wins over the
+    // persisted pref), which is why it cannot leave the critical path.
+    const [, savedBounds, persistedAppearance] = await Promise.all([
+      mkdir(workspaceRoot, { recursive: true }),
+      e2eFixture ? Promise.resolve(defaults) : readSavedBounds(workspaceRoot, defaults),
+      settingsStore.get().then((settings) => settings.appearance),
+    ]);
     const bounds = clampBoundsToVisibleDisplay(savedBounds);
-
-    // @kenji PR103 follow-up: complete the FOUC fix at the window-chrome layer.
-    // The renderer applies `.dark` synchronously before React mounts (PR103),
-    // but the BrowserWindow's `backgroundColor` shows during the first frame
-    // before the renderer paints. Pick the right initial bg by reading the
-    // persisted theme + system preference.
-    // PR-IR-01b: e2e-fixture theme override wins over the persisted user
-    // pref. This guarantees the BrowserWindow backgroundColor matches the
-    // theme variant we're about to screenshot, so the very first frame
-    // doesn't capture a light-on-dark or dark-on-light flash.
-    const persistedAppearance = (await settingsStore.get()).appearance;
     const persistedTheme = persistedAppearance?.theme ?? 'auto';
     // Quit cleanup permanently closes process-scoped stores. Re-check after
     // asynchronous preparation so an in-flight request cannot attach a new
@@ -414,12 +413,12 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
       // drift apart (locked by app-region-hygiene-contract.test.ts).
       minHeight: SAFE_MIN_HEIGHT,
       backgroundColor: initialBg,
-      // PR-SHOW-AFTER-FIRST-COMMIT: create hidden on every run so the OS never
-      // shows an unpainted window; `ready-to-show` reveals it on the first
-      // painted frame (the `.maka-preload` loading surface), and the reveal
-      // gate (showWindowOnceReady) routes that plus the renderer-ready IPC,
-      // the fallback timer, and deferred focus/maximize through the mode.
-      show: false,
+      // Active runs show the native window immediately: the theme-matched
+      // backgroundColor reads as a launch surface while the skeleton paints
+      // (~200ms earlier than waiting for `ready-to-show`). E2E modes stay
+      // hidden so the reveal gate keeps its inactive/hidden semantics;
+      // `ready-to-show` still marks ready to flush deferred focus/maximize.
+      show: revealMode === 'active',
       // Native sidebar vibrancy lets the CSS-side sidebar render
       // transparent and inherit the system's blurred window material
       // (Big Sur+). Renderer CSS gates the transparency on
@@ -444,6 +443,7 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
     });
     mainWindowShutdownSignal = signal;
     observeRendererProcess(mainWindow, signal);
+    deps.onWindowConstructed?.();
     // The designed `.maka-preload` surface is the loading UI: reveal on the
     // first painted frame instead of waiting out the whole React mount.
     // markReady is mode-suppressed (hidden/inactive) and idempotent, so the
@@ -513,11 +513,13 @@ export function createMainWindowController(deps: MainWindowControllerDeps): Main
 
     // Restore maximized state after construction (BrowserWindow constructor
     // doesn't accept it directly). ChatGPT Pro review P2 (round 2): a direct
-    // maximize() here reveals the still-hidden window (verified on macOS),
-    // bypassing the reveal gate — defer it so markReady applies it right
-    // before the reveal and the first visible frame is already maximized.
+    // maximize() reveals a still-hidden window (verified on macOS), so hidden
+    // and inactive runs defer it to markReady and the first visible frame is
+    // already maximized. An active run is shown at construction, so it
+    // maximizes now — the window appears already animating to full size.
     if (bounds.isMaximized) {
-      revealGate.requestMaximize(mainWindow);
+      if (revealMode === 'active') mainWindow.maximize();
+      else revealGate.requestMaximize(mainWindow);
     }
 
     // Persist bounds across launches. Debounce so a continuous resize drag

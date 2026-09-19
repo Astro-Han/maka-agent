@@ -202,8 +202,11 @@ if (!app.requestSingleInstanceLock()) {
       installDesktopStartupBranding(revealMode);
       // early-window holds the light slice (storage root, settings, window
       // controller) and fires the renderer load; the heavy Runtime Host
-      // module graph evaluates while the window is already loading.
-      await import('./early-window.js');
+      // module graph starts only once the window exists — evaluating ~1100
+      // files on the shared main thread would otherwise starve the window's
+      // async prelude and Chromium plumbing.
+      const earlyWindow = await import('./early-window.js');
+      await earlyWindow.firstWindowConstructed;
       return import('./runtime-host-boot.js');
     })
     .catch(async (error: unknown) => {
