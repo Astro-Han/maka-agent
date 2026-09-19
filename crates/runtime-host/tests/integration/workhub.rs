@@ -23,9 +23,14 @@ use maka_runtime_host::session::SessionConfiguration;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn managed_coordination_queue_preserves_turns_policy_and_exact_receipts() {
-    ClientFixture::new("maka-workhub-queue-")
-        .run("--workhub-queue-workspace", false, "workhub-queue-passed")
-        .await;
+    for flag in [
+        "--workhub-queue-workspace",
+        "--workhub-code-queue-workspace",
+    ] {
+        ClientFixture::new("maka-workhub-queue-")
+            .run(flag, false, "workhub-queue-passed")
+            .await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

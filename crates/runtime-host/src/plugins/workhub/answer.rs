@@ -22,7 +22,7 @@ use maka_protocol::{
     OperationErrorCode as Code,
     workhub::{AnswerInput, TurnResult},
 };
-use maka_runtime::{artifact::content_digest, execution::ToolMode};
+use maka_runtime::artifact::content_digest;
 
 /// Stable user request, independent of current model or plugin availability.
 pub(crate) struct Request {
@@ -49,7 +49,6 @@ impl Request {
 pub(crate) struct Plan {
     pub request: Request,
     pub configuration_digest: String,
-    pub tool_mode: ToolMode,
     pub max_steps: usize,
     pub cancellation: tokio_util::sync::CancellationToken,
 }
@@ -76,18 +75,12 @@ impl super::Control {
             .coordinator(self.caller.clone())
             .await?
             .ok_or_else(|| failure(Code::NotFound, "WorkHub Session has not been resolved"))?;
-        let defaults = self.commands.chat_defaults().await?;
         self.commands
             .answer(
                 self.caller.clone(),
                 Plan {
                     request,
                     configuration_digest: session.configuration_digest,
-                    tool_mode: if defaults.code_mode_enabled {
-                        ToolMode::CodeMode
-                    } else {
-                        ToolMode::Direct
-                    },
                     max_steps: 64,
                     cancellation,
                 },

@@ -31,6 +31,8 @@ pub struct SessionBehavior(pub Arc<dyn Behavior>);
 #[derive(Default)]
 pub struct Preparation {
     pub instructions: String,
+    /// A behavior may select its invocation presentation; it never widens tools.
+    pub tool_mode: Option<maka_runtime::execution::ToolMode>,
     pub native_tools: maka_runtime::execution::NativeToolSet,
     pub required_clients: Option<ClientTools>,
     pub tool_ceiling: Option<BTreeSet<String>>,

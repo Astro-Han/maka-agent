@@ -34,7 +34,7 @@ const turnId = 'workhub-answer';
 const names = ['AskUserQuestion', 'Read', 'mcp__desktop_workhub__control', 'workhub_tasks'];
 const forbidden = 'WORKHUB_SCOPE_ESCAPED';
 
-export async function verifyWorkhubAnswer(connection, workspace, reopened) {
+export async function verifyWorkhubAnswer(connection, workspace, reopened, openConnection) {
   const request = (operation, input) => connection.request(operation, input, 5000);
   const file = join(workspace, 'answer.json');
   if (reopened) {
@@ -259,6 +259,44 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       (e) => e.code === 'operation_unavailable',
     );
     assert.equal(requests.length, 0);
+    // Rejecting input must not pin a Session to the rejected caller's desktop.
+    // Disconnect it before the real caller publishes the same capability.
+    const rejected = await openConnection();
+    try {
+      await rejected.replaceClientCapabilities(
+        {
+          offers: () => [
+            {
+              offerId: 'workhub',
+              version: '1',
+              affinity: 'session',
+              hostPathAccess: 'none',
+              label: 'Rejected caller',
+              tools: ['control', 'context'].map((name) => ({
+                serverId: 'desktop_workhub',
+                name,
+                inputSchema: { type: 'object' },
+              })),
+            },
+          ],
+          call() {
+            throw new Error('Rejected input cannot invoke a Client');
+          },
+          close() {},
+        },
+        3000,
+      );
+      await assert.rejects(
+        rejected.request('workhub.coordination.answer', {
+          ...input,
+          turnId: 'invalid-attachment',
+          attachments: [{ ...attachment, ref: { ...attachment.ref, sessionId: 'foreign' } }],
+        }),
+        (error) => error.code === 'operation_conflict',
+      );
+    } finally {
+      await rejected.close();
+    }
     let calls = 0;
     await connection.replaceClientCapabilities(
       {

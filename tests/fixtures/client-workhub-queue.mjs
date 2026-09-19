@@ -24,7 +24,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { configureModel } from './client-runtime-policy-fixture.mjs';
 import { workhubRemote, toggleWorkhub } from './client-workhub-plugin.mjs';
 
-export async function verifyWorkhubQueue(connection) {
+export async function verifyWorkhubQueue(connection, codeMode) {
   const sessionId = 'maka_workhub_coordination';
   const request = (op, input) => connection.request(op, input, 5000);
   const first = Promise.withResolvers();
@@ -39,7 +39,20 @@ export async function verifyWorkhubQueue(connection) {
       const input = JSON.parse(body);
       requests.push(input);
       assert(requests.length <= 3, 'queues must not duplicate model effects');
-      assert.deepEqual(input.tools.map((tool) => tool.function.name).sort(), [
+      const definitions = input.tools.map((tool) => tool.function);
+      const exec = definitions.find((tool) => tool.name === 'exec');
+      if (codeMode)
+        assert(
+          exec,
+          `request ${requests.length} lost Code Mode: ${definitions.map((tool) => tool.name)}`,
+        );
+      const names = codeMode
+        ? [
+            ...JSON.parse(exec.description.split('Available nested functions:\n')[1]),
+            ...definitions.filter((tool) => tool.name !== 'exec'),
+          ].map((tool) => tool.name)
+        : definitions.map((tool) => tool.name);
+      assert.deepEqual(names.sort(), [
         'AskUserQuestion',
         'Read',
         'mcp__desktop_workhub__control',
@@ -74,8 +87,14 @@ export async function verifyWorkhubQueue(connection) {
                             id: 'discover',
                             type: 'function',
                             function: {
-                              name: 'workhub_tasks',
-                              arguments: JSON.stringify({ request: { operation: 'candidates' } }),
+                              name: codeMode ? 'exec' : 'workhub_tasks',
+                              arguments: JSON.stringify(
+                                codeMode
+                                  ? {
+                                      code: 'return await tools.workhub_tasks({request:{operation:"candidates"}});',
+                                    }
+                                  : { request: { operation: 'candidates' } },
+                              ),
                             },
                           },
                         ],
@@ -98,6 +117,17 @@ export async function verifyWorkhubQueue(connection) {
   await once(server, 'listening');
   try {
     await configureModel(request, `http://127.0.0.1:${server.address().port}/v1`);
+    if (codeMode) {
+      const { revision, policy } = await request('runtime.policy.query', {});
+      const configured = await request('runtime.policy.mutate', {
+        expectedRevision: revision,
+        operation: {
+          kind: 'set_chat_defaults',
+          value: { ...policy.chatDefaults, codeModeEnabled: true },
+        },
+      });
+      assert.equal(configured.kind, 'committed');
+    }
     await connection.replaceClientCapabilities(
       {
         offers: () => [

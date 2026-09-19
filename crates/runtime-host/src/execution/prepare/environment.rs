@@ -204,6 +204,9 @@ impl Executions {
             };
             (preparation, Some(basis))
         };
+        if let Some(mode) = behavior.tool_mode {
+            session.tool_mode = mode;
+        }
         let (bindings, mut additional) = match &behavior.required_clients {
             Some(clients) => self.capabilities.prepare_required_tools(
                 session_id,

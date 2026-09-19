@@ -82,11 +82,6 @@ pub(super) async fn execute(
             &session.configuration,
         )
         .await?;
-        let configuration = session
-            .configuration
-            .invocation_configuration()
-            .await
-            .map_err(internal)?;
         let environment = executions
             .prepare_environment_for(
                 session.clone(),
@@ -95,6 +90,11 @@ pub(super) async fn execute(
                 None,
             )
             .await?;
+        let configuration = environment
+            .session
+            .invocation_configuration()
+            .await
+            .map_err(internal)?;
         Ok::<_, maka_protocol::OperationError>((provider, configuration, environment))
     }
     .await;
@@ -109,6 +109,12 @@ pub(super) async fn execute(
         .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
     current(executions, &plan).await?;
     let (provider, mut configuration, environment) = prepared?;
+    let content = plan.request.input.content();
+    executions
+        .validate_message_content(COORDINATION_SESSION_ID, &content, root_id)
+        .await?;
+    let provider = provider.admit(&executions.oauth)?;
+    crate::plugins::workhub::control::check_request(&plan.cancellation)?;
     let Some((environment, _admission)) = environment
         .commit(executions, COORDINATION_SESSION_ID)
         .await?
@@ -121,12 +127,6 @@ pub(super) async fn execute(
     let crate::execution::prepare::Backend::Model(model) = environment.backend else {
         return Err(failure(Code::OperationConflict, "WorkHub requires a model"));
     };
-    let content = plan.request.input.content();
-    executions
-        .validate_message_content(COORDINATION_SESSION_ID, &content, root_id)
-        .await?;
-    let provider = provider.admit(&executions.oauth)?;
-    configuration.tool_mode = plan.tool_mode;
     configuration.system_prompt = environment.prompt;
     configuration.tool_composition = Some(environment.composition);
     crate::plugins::workhub::control::check_request(&plan.cancellation)?;

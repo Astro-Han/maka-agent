@@ -39,6 +39,7 @@ const { values } = parseArgs({
     'workhub-workspace': { type: 'string' },
     'workhub-answer-workspace': { type: 'string' },
     'workhub-queue-workspace': { type: 'string' },
+    'workhub-code-queue-workspace': { type: 'string' },
     'workhub-delegation-workspace': { type: 'string' },
     'workhub-creation-workspace': { type: 'string' },
     'workhub-selection-workspace': { type: 'string' },
@@ -50,11 +51,9 @@ const { values } = parseArgs({
     reopened: { type: 'boolean' },
   },
 });
-const socket = connect(values.socket);
-const transport = new FramedTransport(socket);
-let connection;
-const remotes = [];
-try {
+async function openConnection() {
+  const socket = connect(values.socket);
+  const transport = new FramedTransport(socket);
   await once(socket, 'connect');
   const connected = await connectRuntimeHostMessageTransport({
     transport,
@@ -65,7 +64,11 @@ try {
     livenessIntervalMs: 60000,
   });
   assert.equal(connected.kind, 'connected');
-  connection = connected.connection;
+  return connected.connection;
+}
+const connection = await openConnection();
+const remotes = [];
+try {
   if (
     values['workhub-delegation-workspace'] ||
     values['workhub-creation-workspace'] ||
@@ -104,11 +107,16 @@ try {
                     : 'existing',
     );
     console.log(values.reopened ? 'workhub-delegation-reopened' : 'workhub-delegation-passed');
-  } else if (values['workhub-queue-workspace']) {
-    await verifyWorkhubQueue(connection);
+  } else if (values['workhub-queue-workspace'] || values['workhub-code-queue-workspace']) {
+    await verifyWorkhubQueue(connection, Boolean(values['workhub-code-queue-workspace']));
     console.log('workhub-queue-passed');
   } else if (values['workhub-answer-workspace']) {
-    await verifyWorkhubAnswer(connection, values['workhub-answer-workspace'], values.reopened);
+    await verifyWorkhubAnswer(
+      connection,
+      values['workhub-answer-workspace'],
+      values.reopened,
+      openConnection,
+    );
     console.log(values.reopened ? 'workhub-answer-reopened' : 'workhub-answer-passed');
   } else {
     const request = (operation, input) => connection.request(operation, input, 5000);
@@ -322,6 +330,5 @@ try {
   }
 } finally {
   await Promise.all(remotes.map((remote) => remote.close()));
-  transport.abort();
-  await connection?.close();
+  await connection.close();
 }

@@ -65,6 +65,19 @@ impl Behavior for Control {
                 .map_err(|error| error.message)?
                 .ok_or("WorkHub Session is unavailable")?;
             Ok(Preparation {
+                tool_mode: Some(
+                    if self
+                        .commands
+                        .chat_defaults()
+                        .await
+                        .map_err(|error| error.message)?
+                        .code_mode_enabled
+                    {
+                        maka_runtime::execution::ToolMode::CodeMode
+                    } else {
+                        maka_runtime::execution::ToolMode::Direct
+                    },
+                ),
                 native_tools: NativeToolSet::Attachments,
                 required_clients: Some(ClientTools {
                     required: CLIENT_TOOLS.iter().map(|name| (*name).into()).collect(),
