@@ -22,6 +22,8 @@ mod constraints;
 mod metadata;
 pub(crate) mod model;
 mod name;
+mod projection;
+pub use projection::catalog_projection;
 
 pub use metadata::apply_metadata_patch;
 

@@ -17,8 +17,9 @@
  * under the License.
  */
 
+use crate::session::SessionConfiguration;
 use futures_util::future::BoxFuture;
-use maka_event_log::workhub::stop::StopRecord;
+use maka_event_log::workhub::{Candidate, stop::StopRecord};
 use maka_plugins::fiber::Context;
 use maka_protocol::{
     OperationError, OperationErrorCode as Code,
@@ -41,6 +42,11 @@ pub(crate) struct Stop {
 /// Commands own admission, durable receipts and settlement. No locks, arbitrary
 /// log writes or Host handles are exposed to the business implementation.
 pub(crate) trait Commands: Send + Sync {
+    /// Apply the domain predicate inside one bounded read snapshot, before its limit.
+    fn candidates(
+        &self,
+        eligible: fn(&str, &SessionConfiguration) -> bool,
+    ) -> BoxFuture<'_, Result<Vec<Candidate<SessionConfiguration>>>>;
     fn stop(&self, caller: Context, request: Stop) -> BoxFuture<'_, Result<StopRecord>>;
 }
 

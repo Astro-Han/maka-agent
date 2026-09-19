@@ -30,9 +30,9 @@ use maka_runtime::{artifact::content_digest, event::Invocation, workhub::COORDIN
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod commands;
 pub(super) mod profile;
-mod stop;
-pub(crate) use stop::WorkHubCommands;
+pub(crate) use commands::WorkHubCommands;
 
 impl Executions {
     /// Caller owns admission; waiting for cleanup must happen after releasing it.

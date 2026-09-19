@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::super::{Host, HostError, sessions};
+use super::super::{Host, HostError};
 use super::streams::Streams;
 use super::transcript::{PreparedTranscript, TranscriptAccess};
 use crate::{execution::snapshot, session::SessionConfiguration};
@@ -205,7 +205,7 @@ pub(crate) fn project(
         &observation.pending_interactions,
         &observation.session.id,
     )?;
-    let session = sessions::projection::project(observation.session);
+    let session = crate::session::catalog_projection(observation.session);
     Ok(SessionObservationSnapshot::new(
         SessionObservationIdentity {
             session_id: session.id,

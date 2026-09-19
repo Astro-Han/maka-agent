@@ -21,7 +21,6 @@ pub(super) mod configuration;
 pub(super) mod create;
 pub(super) use crate::session::model;
 pub(super) mod mutation;
-pub(super) mod projection;
 pub(super) mod workspace;
 
 use crate::session::SessionConfiguration;
@@ -233,7 +232,7 @@ async fn query(
 }
 
 fn item(record: SessionRecord<SessionConfiguration>) -> SessionCatalogItem {
-    SessionCatalogItem::Projection(Box::new(projection::project(record)))
+    SessionCatalogItem::Projection(Box::new(crate::session::catalog_projection(record)))
 }
 
 fn invalid(error: ProtocolError) -> OperationError {

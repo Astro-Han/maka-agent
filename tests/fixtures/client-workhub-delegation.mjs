@@ -379,6 +379,11 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
               (error) => error.code === 'operation_conflict',
             );
             const beforeAssignment = sourceObserver.frames.at(-1)?.sequence ?? 0;
+            if (createNew) {
+              await toggleWorkhub(true);
+              await assert.rejects(act(input), (error) => error.code === 'operation_unavailable');
+              await toggleWorkhub(false);
+            }
             receipt = selectTarget
               ? await chooseTarget(request, act, sourceObserver, input, workspace)
               : await act(input);
@@ -499,6 +504,10 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
               };
               const sourceSequence = sourceObserver.frames.at(-1)?.sequence ?? 0;
               await toggleWorkhub(true);
+              await assert.rejects(
+                request('workhub.coordination.candidates', {}),
+                (error) => error.code === 'operation_unavailable',
+              );
               await assert.rejects(
                 act(stopInput),
                 (error) => error.code === 'operation_unavailable',

@@ -22,7 +22,9 @@ use maka_event_log::sessions::{SessionExecutionState, SessionRecord};
 use maka_protocol::session::*;
 use maka_runtime::event::TerminalStatus;
 
-pub(crate) fn project(mut record: SessionRecord<SessionConfiguration>) -> SessionCatalogProjection {
+pub fn catalog_projection(
+    mut record: SessionRecord<SessionConfiguration>,
+) -> SessionCatalogProjection {
     let execution = record.execution.take();
     let pending_since = record.pending_interaction_since;
     let mut projection = metadata_projection(record);

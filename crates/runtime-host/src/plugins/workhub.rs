@@ -30,7 +30,10 @@ use maka_runtime::{
 };
 use serde_json::Value;
 use std::sync::Arc;
+pub(crate) mod candidates;
 pub(crate) mod control;
+pub(crate) mod selection;
+pub(crate) mod target;
 pub(crate) use control::Control;
 
 pub(crate) const ID: &str = "maka.workhub";

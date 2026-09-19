@@ -19,10 +19,14 @@
 
 use super::super::{Executions, failure};
 use crate::plugins::workhub::control::{Commands, Result, Stop};
+use crate::session::SessionConfiguration;
 use futures_util::future::BoxFuture;
 use maka_event_log::{
     StoreError,
-    workhub::stop::{StopRecord, StopRequest},
+    workhub::{
+        Candidate,
+        stop::{StopRecord, StopRequest},
+    },
 };
 use maka_plugins::fiber::Context;
 use maka_protocol::OperationErrorCode as Code;
@@ -30,6 +34,25 @@ use std::sync::Weak;
 
 pub(crate) struct WorkHubCommands(pub Weak<Executions>);
 impl Commands for WorkHubCommands {
+    fn candidates(
+        &self,
+        eligible: fn(&str, &SessionConfiguration) -> bool,
+    ) -> BoxFuture<'_, Result<Vec<Candidate<SessionConfiguration>>>> {
+        Box::pin(async move {
+            let executions = self
+                .0
+                .upgrade()
+                .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
+            if executions.shutdown.is_cancelled() {
+                return Err(failure(Code::HostDraining, "Host is draining"));
+            }
+            executions
+                .log
+                .workhub_candidates(eligible)
+                .await
+                .map_err(|error| stored(&executions, error))
+        })
+    }
     fn stop(&self, caller: Context, request: Stop) -> BoxFuture<'_, Result<StopRecord>> {
         Box::pin(async move {
             let executions = self

@@ -18,142 +18,28 @@
  */
 
 use super::{Code, Host, OperationError, failure, sessions};
-use crate::session::{PreparedSession, SessionConfiguration};
+use crate::{plugins::workhub::target as policy, session::PreparedSession};
 use maka_protocol::{
-    session::*,
-    workhub::{ActInput, Proposal, RoutingProposal},
+    session::SessionCreateTarget,
+    workhub::{ActInput, RoutingProposal},
 };
-use maka_runtime::workhub::{
-    CreateSpec, DelegationDescription, DelegationKind, created_session_id,
-};
-
-pub(super) enum Target {
-    Existing {
-        id: String,
-        name: String,
-        revision: u64,
-        configuration_digest: String,
-        workspace_digest: String,
-    },
-    Created {
-        id: String,
-        configuration: Box<SessionConfiguration>,
-        spec: CreateSpec,
-    },
-}
-impl Target {
-    pub(super) fn description(&self) -> DelegationDescription {
-        match self {
-            Self::Existing { name, .. } => DelegationDescription::Existing { name: name.clone() },
-            Self::Created {
-                spec,
-                configuration,
-                ..
-            } => DelegationDescription::Created {
-                name: configuration.name.clone(),
-                spec: spec.clone(),
-            },
-        }
-    }
-    pub(super) fn id(&self) -> &str {
-        match self {
-            Self::Existing { id, .. } | Self::Created { id, .. } => id,
-        }
-    }
-    pub(super) fn revision(&self) -> u64 {
-        match self {
-            Self::Existing { revision, .. } => *revision,
-            Self::Created { .. } => 1,
-        }
-    }
-    pub(super) fn kind(&self) -> DelegationKind {
-        match self {
-            Self::Existing { .. } => DelegationKind::Existing,
-            Self::Created { .. } => DelegationKind::Created,
-        }
-    }
-}
+pub(super) use policy::Target;
 
 pub(super) async fn prepare(
     host: &std::sync::Arc<Host>,
     input: &ActInput,
     selected: Option<&super::super::selection::SelectedTarget>,
 ) -> Result<Target, OperationError> {
-    let route = match &input.proposal {
-        Proposal::Route(route) => route,
-        Proposal::Linked(maka_protocol::workhub::LinkedProposal::Correct { target, .. }) => target,
-        _ => {
-            return Err(failure(
-                Code::OperationConflict,
-                "WorkHub operation has no routing target",
-            ));
-        }
-    };
-    match route {
+    match policy::route(input)? {
         RoutingProposal::DelegateExisting { candidate_ref } => {
             if let Some(selected) = selected {
                 let now = crate::server::configuration::now()
                     .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
-                if now.saturating_sub(selected.created_at) > 600_000 {
-                    return Err(failure(
-                        Code::CandidateSetStale,
-                        "Target choice expired; discover candidates and ask again",
-                    ));
-                }
-                let record = super::super::candidates::target(host, &selected.session_id)
-                    .await?
-                    .filter(|record| {
-                        selected.candidate_ref == *candidate_ref
-                            && selected.workspace_digest
-                                == super::super::selection::workspace_digest(
-                                    &record.configuration.workspace,
-                                )
-                    })
-                    .ok_or_else(|| {
-                        failure(
-                            Code::CandidateSetStale,
-                            "Selected target is no longer eligible in its offered workspace",
-                        )
-                    })?;
-                return Ok(Target::Existing {
-                    workspace_digest: super::super::selection::workspace_digest(
-                        &record.configuration.workspace,
-                    ),
-                    id: record.id,
-                    name: record.configuration.name,
-                    revision: record.revision,
-                    configuration_digest: record.configuration_digest,
-                });
+                let record = super::super::candidates::target(host, &selected.session_id).await?;
+                return policy::chosen(selected, candidate_ref, record, now);
             }
             let candidates = super::super::candidates::query(host).await?;
-            if input.candidate_set_id.as_ref() != Some(&candidates.result.candidate_set_id) {
-                return Err(failure(
-                    Code::CandidateSetStale,
-                    "WorkHub candidate set changed",
-                ));
-            }
-            let target = candidates
-                .result
-                .candidates
-                .iter()
-                .zip(candidates.records)
-                .find_map(|(candidate, record)| {
-                    (&candidate.candidate_ref == candidate_ref).then_some(Target::Existing {
-                        workspace_digest: super::super::selection::workspace_digest(
-                            &record.configuration.workspace,
-                        ),
-                        id: record.id,
-                        name: record.configuration.name,
-                        revision: record.revision,
-                        configuration_digest: record.configuration_digest,
-                    })
-                })
-                .ok_or_else(|| {
-                    failure(
-                        Code::CandidateSetStale,
-                        "WorkHub candidate is no longer eligible",
-                    )
-                })?;
+            let target = policy::offered(input, candidate_ref, candidates)?;
             if super::super::candidates::target(host, target.id())
                 .await?
                 .is_none()
@@ -166,54 +52,13 @@ pub(super) async fn prepare(
             Ok(target)
         }
         RoutingProposal::CreateNew { title } => {
-            let id = created_session_id(&input.action_id);
-            let context = input.create.as_ref().ok_or_else(|| {
-                failure(
-                    Code::OperationConflict,
-                    "WorkHub creation context is missing",
-                )
-            })?;
-            let model_target = input
-                .new_work_defaults
-                .as_ref()
-                .and_then(|defaults| defaults.model())
-                .map_or(SessionModelTarget::Default, |model| {
-                    SessionModelTarget::Explicit {
-                        connection_id: model.llm_connection_id.clone(),
-                        connection_slug: model.llm_connection_slug.clone(),
-                        model: model.model.clone(),
-                    }
-                });
-            let target = match input
-                .new_work_defaults
-                .as_ref()
-                .and_then(|defaults| defaults.execution.as_ref())
-            {
-                Some(maka_runtime::workhub::CreateExecution::Executor(executor_id)) => {
-                    host.executions.executor_binding(&id, executor_id)?;
-                    SessionCreateTarget::Executor {
-                        executor_id: executor_id.clone(),
-                    }
-                }
-                _ => SessionCreateTarget::Model { model_target },
-            };
-            let prepared = PreparedSession::new(SessionCreateInput {
-                session_id: id.clone(),
-                workspace: context.workspace.clone(),
-                target,
-                mode: None,
-                name: Some(title.clone()),
-                labels: None,
-                thinking_level: None,
-                tool_profile: None,
-                permission_mode: input
-                    .new_work_defaults
-                    .as_ref()
-                    .and_then(|defaults| defaults.permission_mode),
-                collaboration_mode: Some(CollaborationMode::Agent),
-                orchestration_mode: Some(BehaviorId::default()),
-            })
-            .map_err(|error| failure(Code::OperationConflict, error.to_string()))?;
+            let (request, spec) = policy::creation(input, title)?;
+            let id = request.session_id.clone();
+            if let SessionCreateTarget::Executor { executor_id } = &request.target {
+                host.executions.executor_binding(&id, executor_id)?;
+            }
+            let prepared = PreparedSession::new(request)
+                .map_err(|error| failure(Code::OperationConflict, error.to_string()))?;
             let workspace = sessions::workspace::resolve(host, prepared.workspace())
                 .await
                 .map_err(context_error)?;
@@ -225,11 +70,7 @@ pub(super) async fn prepare(
             Ok(Target::Created {
                 id,
                 configuration: Box::new(configuration),
-                spec: CreateSpec {
-                    title: title.clone(),
-                    workspace: context.workspace.clone(),
-                    defaults: input.new_work_defaults.clone(),
-                },
+                spec,
             })
         }
     }

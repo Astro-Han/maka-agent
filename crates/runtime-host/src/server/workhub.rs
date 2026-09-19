@@ -44,6 +44,20 @@ pub(super) const ERRORS: &[Code] = &[
 ];
 const WORKSPACE: &str = "workhub-coordination";
 
+fn control(
+    host: &Host,
+) -> Result<
+    maka_plugins::contributions::Contribution<crate::plugins::workhub::Control>,
+    OperationError,
+> {
+    host.executions
+        .plugin_catalog
+        .snapshot::<crate::plugins::workhub::Control>(&maka_plugins::composition::Scope::Profile)
+        .entries
+        .remove(crate::plugins::workhub::ID)
+        .ok_or_else(|| failure(Code::OperationUnavailable, "WorkHub is unavailable"))
+}
+
 pub(super) const TURN_ERRORS: &[Code] = &[
     Code::HostNotReady,
     Code::HostDraining,
@@ -196,7 +210,7 @@ async fn query(host: &Host) -> Result<SessionCatalogItem, OperationError> {
         )
     })?;
     Ok(SessionCatalogItem::Projection(Box::new(
-        sessions::projection::project(record),
+        crate::session::catalog_projection(record),
     )))
 }
 

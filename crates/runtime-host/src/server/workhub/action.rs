@@ -76,16 +76,7 @@ pub(super) async fn act(
             maka_protocol::workhub::LinkedProposal::Stop { .. }
         )
     ) {
-        let control = host
-            .executions
-            .plugin_catalog
-            .snapshot::<crate::plugins::workhub::Control>(
-                &maka_plugins::composition::Scope::Profile,
-            )
-            .entries
-            .remove(crate::plugins::workhub::ID)
-            .ok_or_else(|| failure(Code::OperationUnavailable, "WorkHub is unavailable"))?;
-        return control.value.stop(input).await;
+        return super::control(host)?.value.stop(input).await;
     }
     admit(host, input, None).await
 }
@@ -147,6 +138,9 @@ async fn admit(
         }
         return Ok(receipt(&delegation));
     }
+    let _call = super::control(host)?
+        .admit()
+        .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
     if host.draining.is_cancelled() {
         return Err(failure(Code::HostDraining, "Host is draining"));
     }

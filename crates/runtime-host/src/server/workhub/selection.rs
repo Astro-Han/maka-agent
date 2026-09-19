@@ -20,32 +20,14 @@
 use super::{Host, action, failure, record, sessions};
 use maka_protocol::{
     OperationError, OperationErrorCode as Code,
-    session::WorkspaceProjection,
-    workhub::{ActInput, Proposal, RoutingProposal, SelectionInput, SelectionResult},
+    workhub::{SelectionInput, SelectionResult},
 };
 use maka_runtime::{
-    artifact::content_digest,
-    capability::{FormResult, FormValue},
-    event::Invocation,
-    interaction::{InteractionOutcome, InteractionRequest},
-    workhub::COORDINATION_SESSION_ID,
+    artifact::content_digest, interaction::InteractionRequest, workhub::COORDINATION_SESSION_ID,
 };
 use std::sync::Arc;
 
-mod offer;
-
-pub(super) struct SelectedTarget {
-    pub invocation: Invocation,
-    pub candidate_ref: String,
-    pub session_id: String,
-    pub workspace_digest: String,
-    pub created_at: u64,
-}
-
-pub(super) fn workspace_digest(workspace: &WorkspaceProjection) -> String {
-    // This closed struct contains only strings and serializable enum variants.
-    content_digest(&serde_json::to_vec(workspace).expect("workspace serialization"))
-}
+pub(super) use crate::plugins::workhub::selection::{SelectedTarget, workspace_digest};
 
 pub(super) async fn select(
     host: &Arc<Host>,
@@ -107,7 +89,8 @@ pub(super) async fn select(
                 {
                     return Err(conflict("The selecting Run is no longer active"));
                 }
-                let request = offer::build(host, &input).await?;
+                let page = super::candidates::query(host).await?.result;
+                let request = crate::plugins::workhub::selection::offer::build(&page, &input)?;
                 host.interactions
                     .admit_stable_request(invocation.clone(), request_id, request, &host.draining)
                     .await
@@ -132,51 +115,12 @@ pub(super) async fn select(
         .interactions
         .wait_for_outcome(&form.request_id, &host.draining)
         .await?;
-    let values = match outcome {
-        InteractionOutcome::FormAnswer {
-            result: FormResult::Accept { values },
-            ..
-        } => values,
-        InteractionOutcome::FormAnswer { .. } | InteractionOutcome::Closure { .. } => {
-            return Ok(SelectionResult::Cancelled);
-        }
-        _ => {
-            return Err(failure(
-                Code::InternalFailure,
-                "Target choice has an invalid outcome",
-            ));
-        }
+    let Some(selection) =
+        crate::plugins::workhub::selection::interpret(input, invocation, form.created_at, outcome)?
+    else {
+        return Ok(SelectionResult::Cancelled);
     };
-    let Some(FormValue::String(value)) = values.get("target") else {
-        return Err(conflict("Target choice has no selected target"));
-    };
-    let (candidate_ref, session_id, workspace_digest): (String, String, String) =
-        serde_json::from_str(value)
-            .map_err(|_| conflict("Target choice has an invalid binding"))?;
-    if !input.candidate_refs.contains(&candidate_ref) {
-        return Err(conflict("Target choice was not offered by this request"));
-    }
-    let selected = SelectedTarget {
-        invocation,
-        candidate_ref: candidate_ref.clone(),
-        session_id,
-        workspace_digest,
-        created_at: form.created_at,
-    };
-    let result = action::selected(
-        host,
-        ActInput {
-            turn_id: input.turn_id,
-            action_id: input.action_id,
-            proposal: Proposal::Route(RoutingProposal::DelegateExisting { candidate_ref }),
-            candidate_set_id: Some(input.candidate_set_id),
-            create: None,
-            new_work_defaults: None,
-            delegation_text: Some(input.delegation_text),
-        },
-        &selected,
-    )
-    .await?;
+    let result = action::selected(host, selection.input, &selection.target).await?;
     Ok(SelectionResult::Delegated { result })
 }
 

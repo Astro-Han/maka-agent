@@ -17,20 +17,20 @@
  * under the License.
  */
 
-use super::{Code, Host, OperationError, SelectionInput, workspace_digest};
+use super::{Code, OperationError, SelectionInput, workspace_digest};
+use crate::plugins::workhub::control::failure;
+use maka_protocol::workhub::CandidatesResult;
 use maka_runtime::{
     capability::{FormField, FormFieldSpec, FormOption, FormRequester},
     interaction::InteractionRequest,
 };
-use std::sync::Arc;
 
-pub(super) async fn build(
-    host: &Arc<Host>,
+pub(crate) fn build(
+    page: &CandidatesResult,
     input: &SelectionInput,
 ) -> Result<InteractionRequest, OperationError> {
-    let page = super::super::candidates::query(host).await?.result;
     if page.candidate_set_id != input.candidate_set_id {
-        return Err(super::super::failure(
+        return Err(failure(
             Code::CandidateSetStale,
             "Discover fresh candidates before requesting a target choice",
         ));
@@ -63,7 +63,7 @@ pub(super) async fn build(
                 &candidate.session_id,
                 workspace_digest(&candidate.workspace),
             ))
-            .map_err(|error| super::super::failure(Code::InternalFailure, error.to_string()))?;
+            .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
             Ok(FormOption { value, label })
         })
         .collect::<Result<Vec<_>, OperationError>>()?;
