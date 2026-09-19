@@ -34,6 +34,32 @@ use std::sync::Weak;
 
 pub(crate) struct WorkHubCommands(pub Weak<Executions>);
 impl Commands for WorkHubCommands {
+    fn target(
+        &self,
+        session: String,
+        eligible: CandidateFilter,
+    ) -> BoxFuture<'_, Result<Option<maka_event_log::sessions::SessionRecord<SessionConfiguration>>>>
+    {
+        Box::pin(async move {
+            let executions = self
+                .0
+                .upgrade()
+                .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
+            executions.workhub_target(&session, eligible).await
+        })
+    }
+    fn prepare_session(
+        &self,
+        request: maka_protocol::session::SessionCreateInput,
+    ) -> BoxFuture<'_, Result<crate::execution::Creation>> {
+        Box::pin(async move {
+            let executions = self
+                .0
+                .upgrade()
+                .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
+            executions.prepare_session(request).await
+        })
+    }
     fn resume(
         &self,
         caller: Context,

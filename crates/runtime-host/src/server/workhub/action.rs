@@ -53,31 +53,20 @@ pub(super) async fn act(
     input: ActInput,
     connection: Uuid,
 ) -> Result<ActResult, OperationError> {
-    if matches!(
-        &input.proposal,
-        maka_protocol::workhub::Proposal::Linked(
-            maka_protocol::workhub::LinkedProposal::Correct { .. }
-        )
-    ) {
-        return correction::act(host, input).await;
+    match &input.proposal {
+        maka_protocol::workhub::Proposal::Linked(proposal) => match proposal {
+            maka_protocol::workhub::LinkedProposal::Correct { .. } => {
+                correction::act(host, input).await
+            }
+            maka_protocol::workhub::LinkedProposal::Resume { .. } => {
+                super::control(host)?.value.resume(input, connection).await
+            }
+            maka_protocol::workhub::LinkedProposal::Stop { .. } => {
+                super::control(host)?.value.stop(input).await
+            }
+        },
+        maka_protocol::workhub::Proposal::Route(_) => admit(host, input, None).await,
     }
-    if matches!(
-        &input.proposal,
-        maka_protocol::workhub::Proposal::Linked(
-            maka_protocol::workhub::LinkedProposal::Resume { .. }
-        )
-    ) {
-        return super::control(host)?.value.resume(input, connection).await;
-    }
-    if matches!(
-        &input.proposal,
-        maka_protocol::workhub::Proposal::Linked(
-            maka_protocol::workhub::LinkedProposal::Stop { .. }
-        )
-    ) {
-        return super::control(host)?.value.stop(input).await;
-    }
-    admit(host, input, None).await
 }
 
 pub(super) async fn selected(
@@ -93,166 +82,182 @@ async fn admit(
     input: ActInput,
     selected: Option<&super::selection::SelectedTarget>,
 ) -> Result<ActResult, OperationError> {
-    let mut admission = Some(host.executions.lock_admission().await);
     let fingerprint = fingerprint(&input)?;
-    if host
-        .log
-        .workhub_stop(&input.action_id)
-        .await
-        .map_err(sessions::stored)?
-        .is_some()
-        || host
+    let mut prepared = None;
+    let mut provider = None;
+    loop {
+        let mut admission = Some(host.executions.lock_admission().await);
+        if host
             .log
-            .workhub_correction(&input.action_id)
+            .workhub_stop(&input.action_id)
             .await
             .map_err(sessions::stored)?
             .is_some()
-    {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub action already belongs to a control operation",
-        ));
-    }
-    // Receipt authority survives source termination, model removal and target changes.
-    if let Some(stored) = host
-        .log
-        .workhub_action(&input.action_id)
-        .await
-        .map_err(sessions::stored)?
-    {
-        let Fact::WorkhubDelegated { delegation } = stored.event.fact else {
-            return Err(failure(
-                Code::OperationConflict,
-                "WorkHub action belongs to another operation",
-            ));
-        };
-        if stored.event.invocation.session_id != COORDINATION_SESSION_ID
-            || stored.event.invocation.turn_id != input.turn_id
-            || delegation.request_fingerprint != fingerprint
+            || host
+                .log
+                .workhub_correction(&input.action_id)
+                .await
+                .map_err(sessions::stored)?
+                .is_some()
         {
             return Err(failure(
                 Code::OperationConflict,
-                "WorkHub action belongs to another request",
+                "WorkHub action already belongs to a control operation",
             ));
         }
-        return Ok(receipt(&delegation));
-    }
-    let _call = super::control(host)?
-        .admit()
-        .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
-    if host.draining.is_cancelled() {
-        return Err(failure(Code::HostDraining, "Host is draining"));
-    }
-    record(host)
-        .await?
-        .ok_or_else(|| failure(Code::NotFound, "WorkHub Session has not been resolved"))?;
-    let source = host.executions.workhub_source(&input.turn_id).await?;
-    if selected.is_some_and(|selected| selected.invocation != source.invocation) {
-        return Err(failure(
-            Code::OperationConflict,
-            "The selecting Run is no longer active",
-        ));
-    }
-    let InvocationInput::Message { content, .. } = source.root_input() else {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub action requires a user message",
-        ));
-    };
-    let target = target::prepare(host, &input, selected).await?;
-    let owner = host.executions.active_session_owner(target.id());
-    let delivery = match (&target, &owner) {
-        (
-            target::Target::Existing {
-                configuration_digest,
-                ..
-            },
-            Some(_),
-        ) => DelegationDelivery::Steering {
-            configuration_digest: configuration_digest.clone(),
-        },
-        (_, None) => DelegationDelivery::NewTurn,
-        (target::Target::Created { .. }, Some(_)) => {
+        // Receipt authority survives source termination, model removal and target changes.
+        if let Some(stored) = host
+            .log
+            .workhub_action(&input.action_id)
+            .await
+            .map_err(sessions::stored)?
+        {
+            let Fact::WorkhubDelegated { delegation } = stored.event.fact else {
+                return Err(failure(
+                    Code::OperationConflict,
+                    "WorkHub action belongs to another operation",
+                ));
+            };
+            if stored.event.invocation.session_id != COORDINATION_SESSION_ID
+                || stored.event.invocation.turn_id != input.turn_id
+                || delegation.request_fingerprint != fingerprint
+            {
+                return Err(failure(
+                    Code::OperationConflict,
+                    "WorkHub action belongs to another request",
+                ));
+            }
+            return Ok(receipt(&delegation));
+        }
+        let control = match &provider {
+            Some(control) => control,
+            None => provider.insert(super::control(host)?),
+        };
+        let _call = control
+            .admit()
+            .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
+        if host.draining.is_cancelled() {
+            return Err(failure(Code::HostDraining, "Host is draining"));
+        }
+        record(host)
+            .await?
+            .ok_or_else(|| failure(Code::NotFound, "WorkHub Session has not been resolved"))?;
+        let source = host.executions.workhub_source(&input.turn_id).await?;
+        if selected.is_some_and(|selected| selected.invocation != source.invocation) {
             return Err(failure(
                 Code::OperationConflict,
-                "Created target already has an execution owner",
+                "The selecting Run is no longer active",
             ));
         }
-    };
-    let delegation = Delegation {
-        kind: target.kind(),
-        description: Some(target.description()),
-        delivery,
-        action_id: input.action_id,
-        request_fingerprint: fingerprint,
-        source_message_event_id: source.root_opening_event_id().to_owned(),
-        target: owner.unwrap_or_else(|| Invocation {
-            session_id: target.id().to_owned(),
-            turn_id: Uuid::new_v4().to_string(),
-            run_id: Uuid::new_v4().to_string(),
-            invocation_id: Uuid::new_v4().to_string(),
-        }),
-        target_revision: target.revision(),
-        delegation_text: input
-            .delegation_text
-            .unwrap_or_else(|| content.text.clone()),
-    };
-    delegation
-        .message(content)
-        .map_err(|reason| failure(Code::OperationUnavailable, reason))?;
-    let result = receipt(&delegation);
-    let action = EventWrite::plain(RuntimeEvent::new(
-        source.invocation,
-        Fact::WorkhubDelegated {
-            delegation: Box::new(delegation),
-        },
-    ))
-    .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
-    let committed = match &target {
-        target::Target::Created { configuration, .. } => host
-            .log
-            .create_workhub_session(&action, configuration)
-            .await
-            .map_err(|error| match error {
-                maka_event_log::StoreError::CommitUnknown(_)
-                | maka_event_log::StoreError::OperationUnknown => {
-                    CommitError::OutcomeUnknown(error.to_string())
-                }
-                other => CommitError::Rejected(other.to_string()),
-            }),
-        target::Target::Existing { .. } => host.log.append(&action).await,
-    };
-    if let Err(error) = committed {
-        return Err(match error {
-            CommitError::OutcomeUnknown(reason) => {
-                host.executions.begin_drain();
-                failure(Code::CommitOutcomeUnknown, reason)
-            }
-            CommitError::Rejected(reason) => {
-                let current = host
-                    .log
-                    .get_session::<crate::session::SessionConfiguration>(target.id())
-                    .await
-                    .map_err(sessions::stored)?;
-                let code = if let target::Target::Existing {
+        let InvocationInput::Message { content, .. } = source.root_input() else {
+            return Err(failure(
+                Code::OperationConflict,
+                "WorkHub action requires a user message",
+            ));
+        };
+        let Some(target) = prepared.take() else {
+            drop(admission.take());
+            prepared = Some(control.value.prepare_target(&input, selected).await?);
+            continue;
+        };
+        target::validate(host, &target).await?;
+        if let Some(selected) = selected {
+            crate::plugins::workhub::target::validate_selection(selected)?;
+        }
+        let owner = host.executions.active_session_owner(target.id());
+        let delivery = match (&target, &owner) {
+            (
+                target::Target::Existing {
                     configuration_digest,
                     ..
-                } = &target
-                    && current.is_none_or(|record| {
-                        record.archived || record.configuration_digest != *configuration_digest
-                    }) {
-                    Code::CandidateSetStale
-                } else {
-                    Code::OperationConflict
-                };
-                failure(code, reason)
+                },
+                Some(_),
+            ) => DelegationDelivery::Steering {
+                configuration_digest: configuration_digest.clone(),
+            },
+            (_, None) => DelegationDelivery::NewTurn,
+            (target::Target::Created { .. }, Some(_)) => {
+                return Err(failure(
+                    Code::OperationConflict,
+                    "Created target already has an execution owner",
+                ));
             }
-        });
+        };
+        let delegation = Delegation {
+            kind: target.kind(),
+            description: Some(target.description()),
+            delivery,
+            action_id: input.action_id,
+            request_fingerprint: fingerprint,
+            source_message_event_id: source.root_opening_event_id().to_owned(),
+            target: owner.unwrap_or_else(|| Invocation {
+                session_id: target.id().to_owned(),
+                turn_id: Uuid::new_v4().to_string(),
+                run_id: Uuid::new_v4().to_string(),
+                invocation_id: Uuid::new_v4().to_string(),
+            }),
+            target_revision: target.revision(),
+            delegation_text: input
+                .delegation_text
+                .unwrap_or_else(|| content.text.clone()),
+        };
+        delegation
+            .message(content)
+            .map_err(|reason| failure(Code::OperationUnavailable, reason))?;
+        let result = receipt(&delegation);
+        let action = EventWrite::plain(RuntimeEvent::new(
+            source.invocation,
+            Fact::WorkhubDelegated {
+                delegation: Box::new(delegation),
+            },
+        ))
+        .map_err(|error| failure(Code::InternalFailure, error.to_string()))?;
+        let committed = match &target {
+            target::Target::Created { creation, .. } => host
+                .log
+                .create_workhub_session(&action, &creation.configuration)
+                .await
+                .map_err(|error| match error {
+                    maka_event_log::StoreError::CommitUnknown(_)
+                    | maka_event_log::StoreError::OperationUnknown => {
+                        CommitError::OutcomeUnknown(error.to_string())
+                    }
+                    other => CommitError::Rejected(other.to_string()),
+                }),
+            target::Target::Existing { .. } => host.log.append(&action).await,
+        };
+        if let Err(error) = committed {
+            return Err(match error {
+                CommitError::OutcomeUnknown(reason) => {
+                    host.executions.begin_drain();
+                    failure(Code::CommitOutcomeUnknown, reason)
+                }
+                CommitError::Rejected(reason) => {
+                    let current = host
+                        .log
+                        .get_session::<crate::session::SessionConfiguration>(target.id())
+                        .await
+                        .map_err(sessions::stored)?;
+                    let code = if let target::Target::Existing {
+                        configuration_digest,
+                        ..
+                    } = &target
+                        && current.is_none_or(|record| {
+                            record.archived || record.configuration_digest != *configuration_digest
+                        }) {
+                        Code::CandidateSetStale
+                    } else {
+                        Code::OperationConflict
+                    };
+                    failure(code, reason)
+                }
+            });
+        }
+        host.executions
+            .dispatch_pending(target.id(), &mut admission)
+            .await?;
+        return Ok(result);
     }
-    host.executions
-        .dispatch_pending(target.id(), &mut admission)
-        .await?;
-    Ok(result)
 }
 
 fn receipt(delegation: &Delegation) -> ActResult {

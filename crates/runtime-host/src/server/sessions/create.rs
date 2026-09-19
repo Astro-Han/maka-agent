@@ -108,7 +108,7 @@ pub(super) async fn create(
     }
 }
 
-pub(in crate::server) async fn resolve(
+pub(crate) async fn resolve(
     configuration: &ConfigurationStore,
     prepared: PreparedSession,
     thinking: Option<ThinkingLevel>,

@@ -34,8 +34,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, OperationError> {
-    let (record, completed) = {
-        let _gate = host.executions.lock_admission().await;
+    let mut preparation = None;
+    let mut provider = None;
+    let (record, completed) = loop {
+        let gate = host.executions.lock_admission().await;
         let record = if let Some(record) = host
             .log
             .workhub_correction(&input.action_id)
@@ -74,6 +76,13 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
             if host.draining.is_cancelled() {
                 return Err(failure(Code::HostDraining, "Host is draining"));
             }
+            let control = match &provider {
+                Some(control) => control,
+                None => provider.insert(super::super::control(host)?),
+            };
+            let _call = control
+                .admit()
+                .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
             let source = host.executions.workhub_source(&input.turn_id).await?;
             let InvocationInput::Message { content, .. } = source.root_input() else {
                 return Err(failure(
@@ -81,7 +90,12 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
                     "WorkHub correction requires a user message",
                 ));
             };
-            let prepared = target::prepare(host, &input, None).await?;
+            let Some(prepared) = preparation.take() else {
+                drop(gate);
+                preparation = Some(control.value.prepare_target(&input, None).await?);
+                continue;
+            };
+            target::validate(host, &prepared).await?;
             let target = match &prepared {
                 target::Target::Existing {
                     id,
@@ -93,13 +107,9 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
                     name: name.clone(),
                     workspace_digest: workspace_digest.clone(),
                 },
-                target::Target::Created {
-                    id,
-                    configuration,
-                    spec,
-                } => CorrectionTarget::Created {
+                target::Target::Created { id, creation, spec } => CorrectionTarget::Created {
                     session_id: id.clone(),
-                    name: configuration.name.clone(),
+                    name: creation.configuration.name.clone(),
                     spec: spec.clone(),
                 },
             };
@@ -153,7 +163,7 @@ pub(super) async fn act(host: &Arc<Host>, input: ActInput) -> Result<ActResult, 
         } else {
             None
         };
-        (record, completed)
+        break (record, completed);
     };
     if let Some(completed) = completed {
         completed.cancelled().await;
@@ -259,7 +269,7 @@ async fn finish(
         Err(error) => return Err(error),
     };
     let configuration = match &prepared {
-        target::Target::Created { configuration, .. } => Some(configuration.as_ref()),
+        target::Target::Created { creation, .. } => Some(&creation.configuration),
         _ => None,
     };
     host.log
@@ -277,7 +287,7 @@ async fn prepare_frozen(
     request: &CorrectionRequest,
 ) -> Result<target::Target, OperationError> {
     if let Some(spec) = request.target.create() {
-        return target::prepare(
+        return target::recreate(
             host,
             &ActInput {
                 turn_id: request.source.turn_id.clone(),
@@ -292,7 +302,7 @@ async fn prepare_frozen(
                 new_work_defaults: spec.defaults.clone(),
                 delegation_text: None,
             },
-            None,
+            &spec.title,
         )
         .await;
     }

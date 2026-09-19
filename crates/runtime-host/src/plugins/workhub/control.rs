@@ -49,6 +49,15 @@ pub(crate) trait Commands: Send + Sync {
         eligible: CandidateFilter,
     ) -> BoxFuture<'_, Result<Vec<Candidate<SessionConfiguration>>>>;
     fn stop(&self, caller: Context, request: Stop) -> BoxFuture<'_, Result<StopRecord>>;
+    fn target(
+        &self,
+        session: String,
+        eligible: CandidateFilter,
+    ) -> BoxFuture<'_, Result<Option<maka_event_log::sessions::SessionRecord<SessionConfiguration>>>>;
+    fn prepare_session(
+        &self,
+        request: maka_protocol::session::SessionCreateInput,
+    ) -> BoxFuture<'_, Result<crate::execution::Creation>>;
     fn resume(
         &self,
         caller: Context,

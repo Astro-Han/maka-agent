@@ -48,6 +48,7 @@ mod registration;
 mod resources;
 pub(crate) mod retirement;
 mod sessions;
+pub(crate) use sessions::create::resolve as resolve_session_configuration;
 pub(crate) use sessions::workspace::resolve_path as resolve_workspace_path;
 mod skills;
 mod subscriptions;

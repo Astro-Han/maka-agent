@@ -43,7 +43,7 @@ pub(crate) enum Target {
     },
     Created {
         id: String,
-        configuration: Box<SessionConfiguration>,
+        creation: Box<crate::execution::Creation>,
         spec: CreateSpec,
     },
 }
@@ -51,12 +51,8 @@ impl Target {
     pub(crate) fn description(&self) -> DelegationDescription {
         match self {
             Self::Existing { name, .. } => DelegationDescription::Existing { name: name.clone() },
-            Self::Created {
-                spec,
-                configuration,
-                ..
-            } => DelegationDescription::Created {
-                name: configuration.name.clone(),
+            Self::Created { spec, creation, .. } => DelegationDescription::Created {
+                name: creation.configuration.name.clone(),
                 spec: spec.clone(),
             },
         }
@@ -132,12 +128,7 @@ pub(crate) fn chosen(
     record: Option<SessionRecord<SessionConfiguration>>,
     now: u64,
 ) -> Result<Target> {
-    if now.saturating_sub(selected.created_at) > 600_000 {
-        return Err(failure(
-            Code::CandidateSetStale,
-            "Target choice expired; discover candidates and ask again",
-        ));
-    }
+    check_selection_age(selected, now)?;
     record
         .filter(|record| {
             selected.candidate_ref == reference
@@ -150,6 +141,20 @@ pub(crate) fn chosen(
                 "Selected target is no longer eligible in its offered workspace",
             )
         })
+}
+
+pub(crate) fn validate_selection(selected: &SelectedTarget) -> Result<()> {
+    check_selection_age(selected, now()?)
+}
+
+fn check_selection_age(selected: &SelectedTarget, now: u64) -> Result<()> {
+    if now.saturating_sub(selected.created_at) > 600_000 {
+        return Err(failure(
+            Code::CandidateSetStale,
+            "Target choice expired; discover candidates and ask again",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn creation(input: &ActInput, title: &str) -> Result<(SessionCreateInput, CreateSpec)> {
@@ -205,4 +210,75 @@ pub(crate) fn creation(input: &ActInput, title: &str) -> Result<(SessionCreateIn
             defaults: input.new_work_defaults.clone(),
         },
     ))
+}
+
+impl super::Control {
+    pub(crate) async fn prepare_target(
+        &self,
+        input: &ActInput,
+        selected: Option<&SelectedTarget>,
+    ) -> Result<Target> {
+        let _call = self
+            .caller
+            .admit()
+            .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
+        match route(input)? {
+            RoutingProposal::DelegateExisting { candidate_ref } => {
+                if let Some(selected) = selected {
+                    let now = now()?;
+                    let record = self
+                        .commands
+                        .target(selected.session_id.clone(), super::candidates::eligible)
+                        .await?;
+                    return chosen(selected, candidate_ref, record, now);
+                }
+                let candidates = self.candidates().await?;
+                let target = offered(input, candidate_ref, candidates)?;
+                if self
+                    .commands
+                    .target(target.id().into(), super::candidates::eligible)
+                    .await?
+                    .is_none()
+                {
+                    return Err(failure(
+                        Code::OperationConflict,
+                        "WorkHub target cannot accept a delegation in its current state",
+                    ));
+                }
+                Ok(target)
+            }
+            RoutingProposal::CreateNew { title } => {
+                let (request, spec) = creation(input, title)?;
+                let id = request.session_id.clone();
+                let creation = self
+                    .commands
+                    .prepare_session(request)
+                    .await
+                    .map_err(context_error)?;
+                Ok(Target::Created {
+                    id,
+                    creation: Box::new(creation),
+                    spec,
+                })
+            }
+        }
+    }
+}
+
+pub(crate) fn context_error(
+    mut error: maka_protocol::OperationError,
+) -> maka_protocol::OperationError {
+    if error.code == Code::InvalidRequest {
+        error.code = Code::OperationConflict;
+    }
+    error
+}
+
+fn now() -> Result<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| failure(Code::InternalFailure, error.to_string()))?
+        .as_millis()
+        .try_into()
+        .map_err(|_| failure(Code::InternalFailure, "clock overflow"))
 }
