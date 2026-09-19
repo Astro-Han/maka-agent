@@ -35,7 +35,6 @@ export function createDesktopWorkHubServices(
     MakaBridge,
     | 'browser'
     | 'inspector'
-    | 'workHub'
     | 'workHubControl'
     | 'workHubPresentation'
     | 'sessions'
@@ -73,7 +72,7 @@ export function createDesktopWorkHubServices(
     },
     presentation: bridge.workHubPresentation,
     control: bridge.workHubControl,
-    getSession: (sessionId) => bridge.workHub.getSession(sessionId),
+    getSession: (sessionId) => bridge.sessions.get(sessionId),
     subscribeAvailability: (handler) => bridge.connections.subscribeEvents(() => handler()),
     listSessions: () => bridge.sessions.list(),
     subscribeSessions: (handler) => bridge.sessions.subscribeChanges(handler),
@@ -82,7 +81,7 @@ export function createDesktopWorkHubServices(
     attachments: bridge.attachments,
     readAttachmentBytes: bridge.attachments.readBytes,
     prepareAttachments: async (sessionId, items) => {
-      const result = await bridge.workHub.prepareAttachments(sessionId, items);
+      const result = await bridge.attachments.prepare(sessionId, items);
       if (!result.ok) throw new AttachmentIngestBlockedError(result.code);
       return result.attachments;
     },

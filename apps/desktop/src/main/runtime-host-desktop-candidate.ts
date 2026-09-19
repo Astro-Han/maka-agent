@@ -25,7 +25,6 @@ import { redactSecrets } from '@maka/core/redaction';
 import type { CreateSessionRequestInput } from '@maka/core/runtime-inputs';
 import { isSideConversationSession } from '@maka/core/side-conversation';
 import {
-  isWorkHubCoordinationSessionId,
   type SessionChangedEvent,
   type SessionChangedReason,
 } from '@maka/core/session';
@@ -79,13 +78,12 @@ import {
 import {
   registerRuntimeHostSessionCatalogIpc,
 } from "./runtime-host-session-catalog-ipc-main.js";
-import { registerRuntimeHostWorkHubIpc } from "./runtime-host-workhub-ipc-main.js";
 import { registerRuntimeHostExternalSessionsIpc } from "./runtime-host-external-sessions-ipc-main.js";
 import { registerRuntimeHostSessionBundleIpc } from "./runtime-host-session-bundle-ipc-main.js";
 import { registerRuntimeHostCollaborationIpc } from './runtime-host-collaboration-ipc-main.js';
 import { TerminalCloseIntents } from './terminal-close-intents.js';
 import type { DesktopCollaborationConnectionTarget } from './runtime-host-collaboration-invitation.js';
-import { registerRuntimeHostAttachmentPreviewIpc } from './runtime-host-artifacts-ipc-main.js';
+import { registerRuntimeHostAttachmentPreviewIpc, registerRuntimeHostAttachmentIngestIpc } from './runtime-host-artifacts-ipc-main.js';
 import {
   registerRuntimeHostSessionDomainsIpc,
   type RuntimeHostSessionDomainsIpcDeps,
@@ -732,9 +730,7 @@ export async function createDesktopRuntimeHostCandidate(
         observations: sessionObservations,
         resolveSideConversation: async (sessionId) => {
           if (target.access === 'session_guest') return false;
-          const session = isWorkHubCoordinationSessionId(sessionId)
-            ? await client.getWorkHubSession()
-            : await client.getSession(sessionId);
+          const session = await client.getSession(sessionId);
           if (!session) throw new Error(`Runtime Host Session not found: ${sessionId}`);
           return isSideConversationSession(session.labels);
         },
@@ -904,7 +900,7 @@ export async function createDesktopRuntimeHostCandidate(
       throw new Error('This Runtime Host does not have a shareable connection target');
     });
     if (target.access === 'owner') {
-      registerRuntimeHostWorkHubIpc(client, ipc, {
+      registerRuntimeHostAttachmentIngestIpc({ client, ipcMain: ipc,
         attachmentIngest: { approvals: deps.attachmentApprovals, stat: deps.stat, resizeImage: deps.resizeImage },
       });
       registerRuntimeHostExternalSessionsIpc(

@@ -927,30 +927,6 @@ export class DesktopRuntimeHostClient {
     );
   }
 
-  async getWorkHubSession(): Promise<SessionCatalogProjection> {
-    return requireSessionProjection(await this.request('workhub.coordination.query', {}));
-  }
-
-  answerWorkHubCoordination(input: OperationInput<'workhub.coordination.answer'>) {
-    return this.request('workhub.coordination.answer', input);
-  }
-
-  configureWorkHubModel(input: OperationInput<'workhub.coordination.configureModel'>) {
-    return this.request('workhub.coordination.configureModel', input);
-  }
-
-  listWorkHubCoordinationCandidates() {
-    return this.request("workhub.coordination.candidates", {});
-  }
-
-  selectAndDelegateWorkHubTarget(input: OperationInput<'workhub.coordination.selectAndDelegate'>) {
-    return this.request('workhub.coordination.selectAndDelegate', input);
-  }
-
-  actWorkHubCoordinationFromTurn(input: OperationInput<'workhub.coordination.actFromTurn'>) {
-    return this.request('workhub.coordination.actFromTurn', input);
-  }
-
   listExternalSessionSources(): Promise<ExternalSessionSourceQueryResult> {
     return this.request("external-session.source.query", {});
   }

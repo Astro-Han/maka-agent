@@ -19,8 +19,8 @@
 
 import type { ClientIdentity, ClientFileRequest } from '@maka-agent/plugin-sdk/client';
 import type {
-  WorkHubPrepareAttachmentsResult,
-} from '../shared/workhub-conversation.js';
+  PrepareAttachmentsResult,
+} from '../shared/attachment-ingest-result.js';
 import type { ConnectionEvent } from '@maka/core/connections';
 import type {
   ConnectionTestResult,
@@ -1104,11 +1104,8 @@ export interface MakaBridge {
       handler: () => void,
     ): () => void;
   };
-  workHub: {
-    getSession(coordinationSessionId: string): Promise<DesktopSessionSummary>;
-    prepareAttachments(coordinationSessionId: string, items: RendererIngestInput[]): Promise<WorkHubPrepareAttachmentsResult>;
-  };
   sessions: {
+    get(sessionId: string): Promise<DesktopSessionSummary>;
     list(filter?: SessionListFilter): Promise<DesktopSessionSummary[]>;
     listWithCoverage(): Promise<{
       sessions: DesktopSessionSummary[];
@@ -1618,6 +1615,7 @@ export interface MakaBridge {
     openBackup(kind: 'save' | 'reset' | 'restore', host?: DesktopRuntimeHostRef): Promise<{ ok: true } | { ok: false; code: string }>;
   };
   attachments: {
+    prepare(sessionId: string, items: RendererIngestInput[]): Promise<PrepareAttachmentsResult>;
     pickDirectory(): Promise<{ ok: true; reference: import('@maka/core/events').DirectoryReference } | { ok: false; reason: 'cancelled' }>;
     pickFiles(): Promise<
       | {

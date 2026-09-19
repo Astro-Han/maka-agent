@@ -36,6 +36,34 @@ import {
 import type { createMainWindowController } from "./main-window.js";
 import type { DesktopRuntimeHostClient } from "./runtime-host-client.js";
 import type { ManagedArtifactPreview } from './managed-artifact-preview.js';
+import { AttachmentIngestBlockedError } from '@maka/core/attachments';
+import { prepareIngestItems, resolveAttachmentRefs } from './attachment-ingest.js';
+import type { PrepareAttachmentsResult } from '../shared/attachment-ingest-result.js';
+
+/** File approval belongs to the Renderer; the explicit Session belongs to this Host. */
+export function registerRuntimeHostAttachmentIngestIpc(deps: {
+  ipcMain: ReconnectableReadIpcMain;
+  client: Pick<DesktopRuntimeHostClient, 'getSession' | 'ingestAttachment'>;
+  attachmentIngest: Pick<Parameters<typeof prepareIngestItems>[0], 'approvals' | 'stat'> & {
+    resizeImage?: (bytes: Uint8Array) => Promise<Uint8Array>;
+  };
+}): void {
+  deps.ipcMain.handle('attachments:prepare', async (event, sessionId: string, items: unknown): Promise<PrepareAttachmentsResult> => {
+    if (!await deps.client.getSession(sessionId)) throw new Error('Attachment Session is unavailable');
+    try {
+      const prepared = await prepareIngestItems({ ...deps.attachmentIngest, senderId: event.sender.id, items });
+      const refs = await resolveAttachmentRefs({
+        files: prepared.files,
+        resizeImage: deps.attachmentIngest.resizeImage,
+        snapshot: ({ name, mimeType, content }) => deps.client.ingestAttachment({ sessionId, name, mimeType, content }),
+      });
+      return { ok: true, attachments: prepared.commit(() => refs) };
+    } catch (error) {
+      if (error instanceof AttachmentIngestBlockedError) return { ok: false, code: error.code };
+      throw error;
+    }
+  });
+}
 
 interface RuntimeHostArtifactsIpcDeps {
   uiLocale(): UiLocale;

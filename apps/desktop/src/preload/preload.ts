@@ -23,8 +23,8 @@ import type {
 } from './bridge-contract.js';
 
 import type {
-  WorkHubPrepareAttachmentsResult,
-} from '../shared/workhub-conversation.js';
+  PrepareAttachmentsResult,
+} from '../shared/attachment-ingest-result.js';
 import type { SessionObservationMessage } from '../shared/session-execution-projection.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import { HOST_OPERATION_SPECS } from '@maka/runtime-host/protocol';
@@ -38,9 +38,6 @@ import { AttachmentIngestBlockedError } from '@maka/core/attachments';
 import { encodeIngestItems } from './attachment-ingest-payload.js';
 import { createThreadSearchClient } from './multi-host-thread-search.js';
 import { releaseSessionObservation } from './session-observation-release.js';
-import {
-  resolveDesktopWorkHubCoordinationCreateScope,
-} from './workhub-coordination-session.js';
 import type {
   MakaBridge,
   OnboardingSnapshot,
@@ -2094,30 +2091,6 @@ const makaBridge = {
       };
     },
   },
-  workHub: {
-    async getSession(coordinationSessionId: string) {
-      const scope = await resolveDesktopWorkHubCoordinationCreateScope(coordinationSessionId, runtimeHostSessionRef);
-      return projectSessionSummary(scope, await ipcRenderer.invoke('workhub:getSession', scope));
-    },
-    async prepareAttachments(coordinationSessionId: string, items: Parameters<MakaBridge['workHub']['prepareAttachments']>[1]) {
-      const scope = await resolveDesktopWorkHubCoordinationCreateScope(coordinationSessionId, runtimeHostSessionRef);
-      let encoded: Awaited<ReturnType<typeof encodeIngestItems>>;
-      try {
-        encoded = await encodeIngestItems(items);
-      } catch (error) {
-        if (error instanceof AttachmentIngestBlockedError) return { ok: false, code: error.code };
-        throw error;
-      }
-      const result = await ipcRenderer.invoke(
-        'workhub:prepareAttachments',
-        scope,
-        encoded,
-      ) as WorkHubPrepareAttachmentsResult;
-      return result.ok
-        ? { ok: true, attachments: projectDesktopAttachmentRefs(scope, result.attachments) }
-        : result;
-    },
-  },
   sessionLocal: {
     async listMessages(sessionId) {
       const session = await runtimeHostSessionRef(sessionId);
@@ -2143,6 +2116,10 @@ const makaBridge = {
     },
   } satisfies import('../shared/session-local-contract.js').DesktopSessionLocalBridge,
   sessions: {
+    async get(sessionId: string) {
+      const session = await runtimeHostSessionRef(sessionId);
+      return projectSessionSummary(session.scope, await ipcRenderer.invoke('sessions:get', session.scope, session.sessionId));
+    },
     list(filter?: SessionListFilter): Promise<DesktopSessionSummary[]> {
       return listDesktopSessions(filter);
     },
@@ -3178,6 +3155,17 @@ const makaBridge = {
     },
   },
   attachments: {
+    async prepare(sessionId: string, items: RendererIngestInput[]) {
+      const session = await runtimeHostSessionRef(sessionId);
+      let encoded: Awaited<ReturnType<typeof encodeIngestItems>>;
+      try { encoded = await encodeIngestItems(items); }
+      catch (error) {
+        if (error instanceof AttachmentIngestBlockedError) return { ok: false, code: error.code };
+        throw error;
+      }
+      const result = await ipcRenderer.invoke('attachments:prepare', session.scope, session.sessionId, encoded) as PrepareAttachmentsResult;
+      return result.ok ? { ok: true, attachments: projectDesktopAttachmentRefs(session.scope, result.attachments) } : result;
+    },
     pickDirectory: () => ipcRenderer.invoke('directories:pick'),
     pickFiles(): Promise<
       | {

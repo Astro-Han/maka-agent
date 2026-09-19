@@ -56,6 +56,7 @@ type RuntimeHostSessionCatalogClient = Pick<
   DesktopRuntimeHostClient,
   | 'createSession'
   | 'listSessions'
+  | 'getSession'
   | 'previewSessionRemoval'
   | 'removeSession'
   | 'setSessionLifecycle'
@@ -115,6 +116,13 @@ export function registerRuntimeHostSessionCatalogIpc(
   handleReconnectableRead(ipcMain, 'sessions:list', (_event, filter?: unknown) =>
     listSessions(normalizeSessionListFilter(filter)),
   );
+  handleReconnectableRead(ipcMain, 'sessions:get', async (_event, sessionId: string) => {
+    await recoveryTask;
+    if (pendingCleanup.has(sessionId)) throw new Error('Session copy cleanup is pending');
+    const session = await deps.client.getSession(sessionId);
+    if (!session) throw new Error(`Runtime Host Session not found: ${sessionId}`);
+    return toDesktopHostSessionListSummary(session, deps.runningTurnIds(sessionId));
+  });
   ipcMain.handle('sessions:cleanupSessionCopy', async (_event, sessionId: string) => {
     await deps.sessionCopyCleanup.cleanup(sessionId);
     pendingCleanup.delete(sessionId);

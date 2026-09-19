@@ -17,19 +17,9 @@
  * under the License.
  */
 
-import { WORKHUB_COORDINATION_SESSION_ID } from '@maka/core/session';
-import type { DesktopTargetScope } from '../shared/runtime-host-identity.js';
+import type { AttachmentIngestBlockedCode } from '@maka/core/attachments';
+import type { AttachmentRef } from '@maka/core/events';
 
-/** Resolves an exact Host scope from the durable Coordination identity, never from UI focus. */
-export async function resolveDesktopWorkHubCoordinationCreateScope(
-  coordinationSessionId: string,
-  resolveSession: (
-    sessionId: string,
-  ) => Promise<{ readonly scope: DesktopTargetScope; readonly sessionId: string }>,
-): Promise<DesktopTargetScope> {
-  const coordination = await resolveSession(coordinationSessionId);
-  if (coordination.sessionId !== WORKHUB_COORDINATION_SESSION_ID) {
-    throw new Error('Invalid WorkHub Coordination Session identity');
-  }
-  return coordination.scope;
-}
+export type PrepareAttachmentsResult =
+  | { readonly ok: true; readonly attachments: AttachmentRef[] }
+  | { readonly ok: false; readonly code: AttachmentIngestBlockedCode };

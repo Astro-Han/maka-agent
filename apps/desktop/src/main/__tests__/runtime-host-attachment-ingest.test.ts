@@ -20,30 +20,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { IpcHandler } from '../ipc-reconnect-policy.js';
-import { registerRuntimeHostWorkHubIpc } from '../runtime-host-workhub-ipc-main.js';
+import { registerRuntimeHostAttachmentIngestIpc } from '../runtime-host-artifacts-ipc-main.js';
 
-test('returns a structured WorkHub attachment rejection across IPC', async () => {
+test('attachment ingestion checks the explicit Session before reading files and preserves structured rejections', async () => {
   const handlers = new Map<string, IpcHandler>();
-  registerRuntimeHostWorkHubIpc(
-    {} as Parameters<typeof registerRuntimeHostWorkHubIpc>[0],
-    {
+  let available = true;
+  registerRuntimeHostAttachmentIngestIpc({
+    client: { async getSession(id) { assert.equal(id, 'target'); return available ? {} as never : null; },
+      async ingestAttachment() { throw new Error('No file may be uploaded'); } },
+    ipcMain: {
       handle(channel, handler) {
         handlers.set(channel, handler);
       },
     },
-    {
-      attachmentIngest: {
-        approvals: {} as never,
-        stat: async () => ({ size: 0 }),
-      },
+    attachmentIngest: {
+      approvals: {} as never,
+      stat: async () => ({ size: 0 }),
     },
-  );
+  });
 
-  const prepareAttachments = handlers.get('workhub:prepareAttachments');
+  const prepareAttachments = handlers.get('attachments:prepare');
   assert.ok(prepareAttachments);
   const result = await prepareAttachments(
     { sender: { id: 7 } } as Parameters<IpcHandler>[0],
+    'target',
     Array.from({ length: 9 }, () => ({})),
   );
   assert.deepEqual(result, { ok: false, code: 'count_limit' });
+  available = false;
+  await assert.rejects(prepareAttachments({ sender: { id: 7 } } as Parameters<IpcHandler>[0], 'target', []), /Session is unavailable/);
 });

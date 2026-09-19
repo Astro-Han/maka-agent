@@ -124,6 +124,8 @@ export async function verifyWorkhubQueue(connection) {
     let remote = await workhubRemote(connection);
     remotes.push(remote);
     await remote.method('resolve')();
+    const lookup = await request('session.catalog.query', { kind: 'get', sessionId });
+    assert.deepEqual(lookup.session, await remote.method('query')());
     const turnId = 'queue-root';
     await remote.method('answer')({ turnId, text: 'INITIAL' });
     await first.promise;

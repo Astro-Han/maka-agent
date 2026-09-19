@@ -41,8 +41,22 @@ test('maps Runtime Host live run state without collapsing unknown and known-empt
   assert.deepEqual(running.runningTurnIds, ['turn-live']);
 });
 
-test('preserves the Session revision in Owner Desktop Host summaries', () => {
-  assert.equal(toDesktopHostSessionSummary(projection({ revision: 7 })).revision, 7);
+test('exact Session reads retain revision and live execution without depending on list visibility', async () => {
+  const ipc = ipcHarness();
+  const deps = createDeps([]);
+  let present = true;
+  deps.client.getSession = async (id) => {
+    assert.equal(id, 'managed');
+    return present ? projection({ id, revision: 7 }) : null;
+  };
+  deps.runningTurnIds = (id) => { assert.equal(id, 'managed'); return ['live']; };
+  registerRuntimeHostSessionCatalogIpc(deps, ipc as unknown as IpcMain);
+  const result = await ipc.invoke('sessions:get', 'managed') as { id: string; revision: number; runningTurnIds: string[] };
+  assert.equal(result.id, 'managed');
+  assert.equal(result.revision, 7);
+  assert.deepEqual(result.runningTurnIds, ['live']);
+  present = false;
+  await assert.rejects(ipc.invoke('sessions:get', 'managed'), /not found/);
 });
 
 test('session creation forwards the caller name for a mode that carries none', async () => {

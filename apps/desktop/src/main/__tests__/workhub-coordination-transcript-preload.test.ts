@@ -30,7 +30,7 @@ import type { MakaBridge } from '../../preload/bridge-contract.js';
 import type { DesktopTranscriptBatch } from '../../preload/transcript-contract.js';
 import { createDesktopWorkHubServices } from '../../renderer/platform/desktop/create-workhub-services.js';
 import { desktopSessionKey } from '../../shared/runtime-host-identity.js';
-import type { WorkHubPrepareAttachmentsResult } from '../../shared/workhub-conversation.js';
+import type { PrepareAttachmentsResult } from '../../shared/attachment-ingest-result.js';
 import { encodeDesktopTranscriptBatches, encodeDesktopTranscriptSnapshot } from '../desktop-transcript-ipc.js';
 import { AttachmentIngestBlockedError } from '@maka/core/attachments';
 import type { AttachmentRef } from '@maka/core/events';
@@ -48,7 +48,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
     kind: 'doc', name: 'brief.txt', mimeType: 'text/plain', bytes: 5,
     ref: { kind: 'session_file', sessionId: nativeSessionId, relativePath: 'brief.txt' },
   };
-  let preparationResult: WorkHubPrepareAttachmentsResult = {
+  let preparationResult: PrepareAttachmentsResult = {
     ok: true,
     attachments: [uploaded],
   };
@@ -69,8 +69,9 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
           if (channel === 'runtime-host:identities') return [owner];
           assert.equal((args[0] as typeof owner).hostId, owner.hostId);
           if (channel === 'plugins:connection') return { hostEpoch: 'host-process-epoch' };
-          if (channel === 'workhub:prepareAttachments') {
-            assert.deepEqual(structuredClone(args[1]), [{ name: 'brief.txt', mimeType: 'text/plain', base64: 'aGVsbG8=' }]);
+          if (channel === 'attachments:prepare') {
+            assert.equal(args[1], nativeSessionId);
+            assert.deepEqual(structuredClone(args[2]), [{ name: 'brief.txt', mimeType: 'text/plain', base64: 'aGVsbG8=' }]);
             return preparationResult;
           }
           assert.equal(args[1], nativeSessionId);
