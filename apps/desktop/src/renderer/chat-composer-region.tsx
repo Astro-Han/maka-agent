@@ -31,7 +31,6 @@ import {
   useToast,
 } from '@maka/ui';
 import type { ComposerHandle } from '@maka/ui';
-export { selectLatestRequestUsage } from './application/contracts/session-inspector/latest-request-usage.js';
 import { useComposerMentionsContext } from './composer-mentions.js';
 import { composerDraftStorage } from './composer-draft-storage.js';
 import {

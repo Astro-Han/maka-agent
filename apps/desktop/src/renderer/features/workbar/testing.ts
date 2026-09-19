@@ -41,8 +41,6 @@ export {
   usageRingArcs,
 } from '../../application/contracts/session-inspector/session-inspector-panel.js';
 export * from '../../application/contracts/session-inspector/session-inspector-overview-model.js';
-export * from '../../application/contracts/session-inspector/session-trace-refresh.js';
-export * from '../../application/contracts/session-inspector/live-context-usage.js';
 export * from './tools/side-chat/quote-companion-panel-state.js';
 export * from './tools/side-chat/quote-companion-core.js';
 export * from './tools/side-chat/quote-companion-context-compaction.js';

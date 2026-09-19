@@ -34,7 +34,7 @@ import {
   createRefreshCoalescer,
   createTraceRefreshCoalescer,
   TRACE_REFRESH_DEBOUNCE_MS,
-} from './session-trace-refresh.js';
+} from '@maka/ui/context-usage';
 
 interface SessionTraceState {
   sessionId?: string;

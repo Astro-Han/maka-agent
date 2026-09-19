@@ -17,27 +17,8 @@
  * under the License.
  */
 
-/**
- * The session's latest provider-counted request, or nothing.
- *
- * A token count belongs to one request on one route: it is a number in that
- * model's tokenizer, and it is only the session's latest if nothing newer
- * exists. The runtime enforces both when it reads an anchor back, refusing one
- * whose run header names another model or connection. A control that shows the
- * number has to enforce the same two facts or it will display a precise-looking
- * figure about a request the user is not making — model A's tokens against
- * model B's window, or a historical range's usage presented as current.
- *
- * So this refuses rather than approximates, and the three refusals are the
- * three normal states that break the pairing:
- *
- * - the loaded transcript range is not the session tail, so a newer request may
- *   exist that this range cannot see;
- * - the newest usage row carries no anchor, which is what manual `/compact`
- *   writes, so the scan continues past it exactly as the runtime's does;
- * - the anchor names a different route than the active one, or names none at
- *   all because it was written before anchors carried their route.
- */
+/** Read the latest provider-counted request in a tail transcript. Skip records
+ * without anchors; reject the newest anchor if its model or connection differs. */
 export interface LatestRequestUsageAnchor {
   inputTokens: number;
   outputTokens?: number;

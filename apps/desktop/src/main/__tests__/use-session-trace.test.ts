@@ -18,6 +18,7 @@
  */
 
 import { strict as assert } from 'node:assert';
+import { TRACE_REFRESH_DEBOUNCE_MS } from '@maka/ui/context-usage';
 import { afterEach, describe, it } from 'node:test';
 import { act, createElement } from 'react';
 import {
@@ -29,7 +30,6 @@ import type { Result } from '@maka/core/result';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 import {
   createFakeWorkbarServices,
-  TRACE_REFRESH_DEBOUNCE_MS,
   useSessionTrace,
   type SessionTracePage,
   type SessionUsageSummary,

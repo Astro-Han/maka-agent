@@ -18,27 +18,24 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { SessionInspectorService } from './service.js';
+import type { Result } from '@maka/core/result';
+import type { SessionEvent } from '@maka/core/events';
 import {
   createLiveContextUsageTracker,
   type LiveContextUsage,
-} from './live-context-usage.js';
-import { TRACE_REFRESH_DEBOUNCE_MS } from './session-trace-refresh.js';
+  type ContextUsageSnapshot,
+} from './tracker.js';
+import { TRACE_REFRESH_DEBOUNCE_MS } from './refresh.js';
 
-/**
- * The composer gauge's live reading (#4717).
- *
- * The gauge used to wait for the turn-end `token_usage` record, so a long
- * agentic turn — exactly when context grows fastest — showed the previous
- * turn's number throughout. The Host seals a latest-context snapshot at every
- * settled provider request, and this hook keeps the gauge on that snapshot:
- * an immediate read when the target changes, then a debounced re-read on each
- * trace-relevant live event, the same signal the inspector's context bar
- * follows. When the snapshot cannot vouch for the composer's active route the
- * hook says nothing, and the caller falls back to the per-turn anchor.
- */
+export interface ContextUsageService {
+  context(sessionId: string): Promise<Result<ContextUsageSnapshot>>;
+  subscribeSessionEvents(sessionId: string, handler: (event: SessionEvent) => void): () => void;
+}
+
+/** Read settled provider-request usage immediately on target changes and
+ * refresh on coalesced execution events, not on every streamed token. */
 export function useLiveContextUsage(input: {
-  readonly inspector: SessionInspectorService;
+  readonly inspector: ContextUsageService;
   readonly sessionId: string | undefined;
   readonly model: string | undefined;
   readonly providerType: string | undefined;

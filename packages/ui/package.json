@@ -7,6 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./context-usage": "./dist/context-usage.js",
     "./session-execution": "./dist/session-execution.js",
     "./plugin": "./dist/plugin.js",
     "./client-plugins": "./dist/client-plugins/index.js",
