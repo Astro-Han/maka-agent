@@ -42,7 +42,6 @@ import { createThreadSearchClient } from './multi-host-thread-search.js';
 import { releaseSessionObservation } from './session-observation-release.js';
 import {
   resolveDesktopWorkHubCoordinationCreateScope,
-  resolveDesktopWorkHubCoordinationSession,
 } from './workhub-coordination-session.js';
 import type {
   MakaBridge,
@@ -2143,12 +2142,6 @@ const makaBridge = {
     async configureModel(coordinationSessionId: string, input: OperationInput<'workhub.coordination.configureModel'>) {
       const scope = await resolveDesktopWorkHubCoordinationCreateScope(coordinationSessionId, runtimeHostSessionRef);
       return ipcRenderer.invoke('workhub:configureModel', scope, input) as Promise<OperationOutput<'workhub.coordination.configureModel'>>;
-    },
-    resolveCoordinationSession(): Promise<string> {
-      return resolveDesktopWorkHubCoordinationSession(
-        activeRuntimeHostRef,
-        (scope) => ipcRenderer.invoke('workhub:resolveCoordinationSession', scope),
-      );
     },
 
   },

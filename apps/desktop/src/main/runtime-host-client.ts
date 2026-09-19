@@ -927,10 +927,6 @@ export class DesktopRuntimeHostClient {
     );
   }
 
-  resolveWorkHubCoordinationSession() {
-    return this.request("workhub.coordination.resolve", {});
-  }
-
   async getWorkHubSession(): Promise<SessionCatalogProjection> {
     return requireSessionProjection(await this.request('workhub.coordination.query', {}));
   }

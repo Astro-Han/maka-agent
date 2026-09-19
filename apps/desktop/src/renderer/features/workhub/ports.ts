@@ -27,7 +27,6 @@ import type { OperationInput, OperationOutput } from '@maka/runtime-host/protoco
 import type { WorkHubAnswerInput, WorkHubAnswerResult } from '../../../shared/workhub-conversation.js';
 import type { WorkHubControlBridge } from '../../../shared/workhub-control.js';
 import type { WorkHubPresentationBridge } from '../../../shared/workhub-presentation.js';
-import type { WorkHubCoordinationHostChange } from '../../application/contracts/workhub-workspace/coordination-lifecycle.js';
 import type {
   WorkHubDelegationFeedback,
   WorkHubDelegationReference,
@@ -44,8 +43,6 @@ export interface WorkHubTranscript {
   close(): Promise<void>;
 }
 export interface WorkHubServices {
-  resolve(): Promise<string>;
-  subscribeHosts(handler: (event: WorkHubCoordinationHostChange) => void): () => void;
   subscribeAvailability(handler: () => void): () => void;
   readonly inspector: import('../../application/contracts/session-inspector/service.js').SessionInspectorService;
   readonly surface: 'main' | 'workhub';

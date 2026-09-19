@@ -95,25 +95,6 @@ test('restarts a paginated catalog read instead of mixing revisions', async () =
   ]);
 });
 
-test('resolves WorkHub coordination through the dedicated Host operation', async () => {
-  const { client, requests } = clientWithResponses([
-    { sessionId: 'maka_workhub_coordination' },
-    { candidateSetId: `sha256:${'a'.repeat(64)}`, candidates: [] },
-  ]);
-
-  assert.deepEqual(await client.resolveWorkHubCoordinationSession(), {
-    sessionId: 'maka_workhub_coordination',
-  });
-  assert.deepEqual(await client.listWorkHubCoordinationCandidates(), {
-    candidateSetId: `sha256:${'a'.repeat(64)}`,
-    candidates: [],
-  });
-  assert.deepEqual(requests, [
-    { operation: 'workhub.coordination.resolve', input: {} },
-    { operation: 'workhub.coordination.candidates', input: {} },
-  ]);
-});
-
 test('re-reads the Session revision before retrying a product update', async () => {
   const { client, requests } = clientWithResponses([
     { kind: 'session', session: session('session-1', 4) },

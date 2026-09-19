@@ -70,9 +70,10 @@ function revealWordmark(element: HTMLDivElement | null, content: HTMLDivElement 
   }
 }
 
-export function WorkHubRoot() {
+export function WorkHubRoot({ sessionId }: { sessionId: string | undefined }) {
   const highlight = useWorkHubHighlightState();
-  const controller = useWorkHubController(() => highlight.selectWork(undefined));
+  const locale = useUiLocale();
+  const controller = useWorkHubController(sessionId, () => highlight.selectWork(undefined));
   const { services, session, transcript, busy } = controller;
   useEffect(() => {
     services.bindBrowserSession(controller.sessionId ?? null);
@@ -84,7 +85,6 @@ export function WorkHubRoot() {
   const thinkingLevels = modelChoice?.thinkingLevels ?? [];
   const liveContextUsage = useLiveContextUsage({ inspector: services.inspector, sessionId: controller.sessionId, model: session?.model, providerType: modelChoice?.providerType });
   const thinkingLevel = session?.thinkingLevel && thinkingLevels.includes(session.thinkingLevel) ? session.thinkingLevel : undefined;
-  const locale = useUiLocale();
   const t = workHubLiveCopy[locale];
   const shortcutLabel = navigator.platform.toLowerCase().includes('mac') ? '⌘⇧K' : 'Ctrl+Shift+K';
   const composer = useRef<ComposerHandle>(null);

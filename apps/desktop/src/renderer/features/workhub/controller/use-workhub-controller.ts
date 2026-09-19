@@ -36,7 +36,6 @@ import type { WorkHubAnswerInput, WorkHubAnswerResult } from '../../../../shared
 import type { AttachmentRef, FollowUpMode, MessageQueueEntryProjection, MessageQueuePlacement } from '@maka/core/events';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
-import { startWorkHubCoordinationLifecycle } from '../../../application/contracts/workhub-workspace/coordination-lifecycle.js';
 import { useWorkHubServices } from '../services.js';
 import { workHubLiveCopy } from '../locales/workhub-live-copy.js';
 import type { WorkHubServices, WorkHubTranscript, WorkHubTranscriptSnapshot } from '../ports.js';
@@ -57,12 +56,11 @@ interface MessagePresentation {
   transientMessages: TransientUserMessageProjection[];
   messageQueue: { entries: MessageQueueEntryProjection[]; revision?: number };
 }
-export function useWorkHubController(onSubmit?: () => void) {
+export function useWorkHubController(sessionId: string | undefined, onSubmit?: () => void) {
   const services = useWorkHubServices();
   const locale = useUiLocale();
   const localeRef = useRef(locale);
   localeRef.current = locale;
-  const [sessionId, setSessionId] = useState<string>();
   const [sessions, setSessions] = useState<Awaited<ReturnType<WorkHubServices['listSessions']>>>(
     [],
   );
@@ -92,7 +90,6 @@ export function useWorkHubController(onSubmit?: () => void) {
   const [error, setError] = useState<string>();
   const [readError, setReadError] = useState<string>();
   const [readRevision, setReadRevision] = useState(0);
-  const retryResolution = useRef<() => void>(() => undefined);
   const refreshSessions = useRef<() => void>(() => undefined);
   const range = useRef<WorkHubTranscript | undefined>(undefined);
   const currentSessionId = useRef(sessionId);
@@ -205,26 +202,10 @@ export function useWorkHubController(onSubmit?: () => void) {
     }
   }
 
-  useEffect(
-    () =>
-      startWorkHubCoordinationLifecycle({
-        resolve: services.resolve,
-        subscribeHostChanges: services.subscribeHosts,
-        subscribeAvailabilityChanges: services.subscribeAvailability,
-        onResolving: () => {
-          currentSessionId.current = undefined;
-          setSessionId(undefined);
-          setStopPending(false);
-          setError(undefined);
-        },
-        onResolved: setSessionId,
-        reportFailure: (reason, action) => {
-          report(reason);
-          retryResolution.current = action;
-        },
-      }),
-    [services],
-  );
+  useEffect(() => {
+    setStopPending(false);
+    setError(undefined);
+  }, [sessionId]);
 
   useEffect(() => {
     let disposed = false;
@@ -616,7 +597,7 @@ export function useWorkHubController(onSubmit?: () => void) {
     sending,
     stopPending,
     error: readError ?? error,
-    canRetry: Boolean(readError || (!sessionId && error) || (error && (pendingSend.current?.admission === 'unknown' || pendingSend.current?.admission === 'rejected'))),
+    canRetry: Boolean(readError || (error && (pendingSend.current?.admission === 'unknown' || pendingSend.current?.admission === 'rejected'))),
     send,
     stop,
     changeModel,
@@ -634,7 +615,7 @@ export function useWorkHubController(onSubmit?: () => void) {
         void recoverSend();
       } else if (attempt && attempt.sessionId === sessionId && attempt.admission === 'rejected') {
         void send(attempt.input.text, attempt.input.attachments ?? []);
-      } else retryResolution.current();
+      }
     },
     loadEarlier: () => range.current?.loadEarlier(),
     report,

@@ -44,7 +44,13 @@ export async function buildClient(
     target: 'es2022',
     jsx: 'automatic',
     legalComments: 'inline',
-    external: ['react', 'react/jsx-runtime', '@maka-agent/plugin-sdk/client', ...dependencies],
+    external: [
+      'react',
+      'react/jsx-runtime',
+      '@maka-agent/plugin-sdk/client',
+      '@maka/ui/plugin',
+      ...dependencies,
+    ],
     banner: {
       js:
         'window.__MakaClientBundle__({id:' +

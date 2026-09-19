@@ -35,7 +35,6 @@ type RuntimeHostWorkHubClient = Pick<
   | 'ingestAttachment'
   | 'answerWorkHubCoordination'
   | 'configureWorkHubModel'
-  | 'resolveWorkHubCoordinationSession'
   | 'getWorkHubSession'
   | 'queryTurn'
   | 'hostEpoch'
@@ -52,9 +51,6 @@ export function registerRuntimeHostWorkHubIpc(
   options: RuntimeHostWorkHubIpcOptions,
 ): void {
   ipcMain.handle('workhub:getSession', async () => toDesktopHostSessionSummary(await client.getWorkHubSession()));
-  ipcMain.handle('workhub:resolveCoordinationSession', () =>
-    client.resolveWorkHubCoordinationSession(),
-  );
   type Attempt = WorkHubAnswerInput & { readonly originHostEpoch: string };
   const unknown = (attempt: Attempt): WorkHubAnswerResult => ({
     kind: 'unknown', originHostEpoch: attempt.originHostEpoch,

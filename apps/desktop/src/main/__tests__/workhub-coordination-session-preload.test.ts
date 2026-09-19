@@ -19,42 +19,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseDesktopSessionKey } from '../../shared/runtime-host-identity.js';
 import {
   resolveDesktopWorkHubCoordinationCreateScope,
-  resolveDesktopWorkHubCoordinationSession,
 } from '../../preload/workhub-coordination-session.js';
-
-test('resolves the Coordination Session through the currently active Runtime Host scope', async () => {
-  const scopes = [
-    { hostId: 'host-a', targetEpoch: 'epoch-a' },
-    { hostId: 'host-b', targetEpoch: 'epoch-b' },
-  ];
-  let active = 0;
-  const seen: typeof scopes = [];
-  const resolve = () =>
-    resolveDesktopWorkHubCoordinationSession(
-      async () => scopes[active]!,
-      async (scope) => {
-        seen.push(scope);
-        return { sessionId: 'maka_workhub_coordination' };
-      },
-    );
-
-  const first = await resolve();
-  active = 1;
-  const second = await resolve();
-
-  assert.deepEqual(seen, scopes);
-  assert.deepEqual(parseDesktopSessionKey(first), {
-    hostId: 'host-a',
-    sessionId: 'maka_workhub_coordination',
-  });
-  assert.deepEqual(parseDesktopSessionKey(second), {
-    hostId: 'host-b',
-    sessionId: 'maka_workhub_coordination',
-  });
-});
 
 test('creates against the Coordination Session Host instead of later UI focus', async () => {
   const coordination = JSON.stringify(['host-a', 'maka_workhub_coordination']);

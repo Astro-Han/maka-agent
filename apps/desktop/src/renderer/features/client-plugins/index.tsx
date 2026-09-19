@@ -20,6 +20,7 @@
 import * as React from 'react';
 import * as JsxRuntime from 'react/jsx-runtime';
 import * as ClientSdk from '@maka-agent/plugin-sdk/client';
+import * as ClientUi from '@maka/ui/plugin';
 import { ClientSlot } from '@maka/ui/client-plugins';
 import { createServicesContext } from '../../application/contracts/feature-services.js';
 import type { ClientHostRef, ClientPluginServices } from './ports.js';
@@ -37,7 +38,7 @@ export function ClientPluginServicesProvider(props: { services: ClientPluginServ
   const value = React.useMemo(() => ({ services: props.services, hosts: new Map<string, ClientHostRuntime>() }), [props.services]);
   return <Provider services={value}>{props.children}</Provider>;
 }
-const modules = { react: React, 'react/jsx-runtime': JsxRuntime, '@maka-agent/plugin-sdk/client': ClientSdk };
+const modules = { react: React, 'react/jsx-runtime': JsxRuntime, '@maka-agent/plugin-sdk/client': ClientSdk, '@maka/ui/plugin': ClientUi };
 
 /** Bound to an originating Host, never the currently selected default Host. */
 export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {

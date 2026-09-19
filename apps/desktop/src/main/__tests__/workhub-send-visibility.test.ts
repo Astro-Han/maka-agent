@@ -87,11 +87,9 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
         ...(rootTurn.status === 'running' ? { status: 'running' as const } : { status: rootTurn.status, terminalEventId: 'terminal', abortSource: 'user_stop' }) } : null });
   }
   const services = {
-    resolve: async () => sessionId,
     getSession: async () => ({ id: sessionId, runningTurnIds: [] }),
     listSessions: async () => [],
     modelChoices: async () => [],
-    subscribeHosts: () => () => {},
     subscribeAvailability: () => () => {},
     subscribeSessions: () => () => {},
     observe: (_id: string, handler: typeof observe, _onError: unknown, phase: typeof onPhase, execution: typeof onExecution) => { observe = handler; onPhase = phase; onExecution = execution; return () => {}; },
@@ -123,7 +121,7 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
     ...overrides,
   } as unknown as WorkHubServices;
   let submissions = 0;
-  function Probe() { controller = useWorkHubController(() => { submissions++; }); return null; }
+  function Probe() { controller = useWorkHubController(sessionId, () => { submissions++; }); return null; }
   await act(async () => {
     root.render(createElement(LocaleProvider, { locale: 'en', children:
       createElement(WorkHubServicesProvider, { services }, createElement(Probe)),
@@ -321,7 +319,7 @@ test('WorkHub carries Stop through deferred or uncertain admission for the origi
     await act(async () => { sent = h.controller.send('stop this attempt', []); });
     const turnId = h.requests[0]!.turnId;
     if (order === 'stop-after-response') {
-      h.admit(turnId);
+      await act(async () => h.admit(turnId));
       await act(async () => { h.admission.resolve({ turnId }); await sent; });
     } else if (order === 'lost-response') {
       await act(async () => {
@@ -348,7 +346,7 @@ test('WorkHub carries Stop through deferred or uncertain admission for the origi
       let retried!: Promise<boolean>;
       await act(async () => { retried = h.controller.send('stop this attempt', []); });
       assert.equal(h.requests[1]!.turnId, turnId);
-      h.admit(turnId);
+      await act(async () => h.admit(turnId));
       await act(async () => {
         h.emit({ type: 'text_delta', id: 'retry-output', turnId, messageId: 'retry-answer', ts: 2, text: 'Retrying' });
         h.admission.resolve({ turnId });
@@ -368,10 +366,10 @@ test('WorkHub carries Stop through deferred or uncertain admission for the origi
       }
       if (order === 'stop-before-response' || order === 'lost-response' || order === 'response-before-observation') {
         assert.deepEqual(h.interrupts, []);
-        h.admit('different-turn');
+        await act(async () => h.admit('different-turn'));
         await act(async () => h.emit({ type: 'text_delta', id: 'other', turnId: 'different-turn', messageId: 'other-answer', ts: 1, text: 'Other work' }));
         assert.deepEqual(h.interrupts, []);
-        h.admit(turnId);
+        await act(async () => h.admit(turnId));
         if (order !== 'stop-before-response')
           await act(async () => h.emit({ type: 'text_delta', id: 'first-output', turnId, messageId: 'answer', ts: 2, text: 'Working' }));
       }
@@ -380,7 +378,7 @@ test('WorkHub carries Stop through deferred or uncertain admission for the origi
       }
       assert.deepEqual(h.interrupts, [{ sessionId: h.sessionId, turnId, runId: `run:${turnId}` }], order);
       assert.equal(h.controller.stopPending, false);
-      h.admit('later-turn');
+      await act(async () => h.admit('later-turn'));
       await act(async () => h.emit({ type: 'text_delta', id: 'later', turnId: 'later-turn', messageId: 'later-answer', ts: 3, text: 'Later work' }));
       assert.equal(h.interrupts.length, 1, 'the intent cannot transfer to a later Turn');
     }
@@ -412,8 +410,10 @@ test('an unknown WorkHub submission converges through the original Host admissio
     assert.equal(h.controller.canRetry, true);
     const submitted = h.requests.length;
     const submissions = h.submissions;
-    if (outcome === 'running') h.admit(original.turnId);
-    if (outcome === 'completed') h.complete(original.turnId);
+    await act(async () => {
+      if (outcome === 'running') h.admit(original.turnId);
+      if (outcome === 'completed') h.complete(original.turnId);
+    });
     if (outcome === 'replay') h.resetAdmission();
     await act(async () => h.reconnect(outcome === 'replay' ? undefined : 'host-epoch-2'));
     if (outcome === 'replay') {
@@ -479,7 +479,7 @@ test('WorkHub steering keeps the current Turn and Stop authority and reconciles 
   let sent!: Promise<boolean>;
   await act(async () => { sent = h.controller.send('original request', []); });
   const turnId = h.requests[0]!.turnId;
-  h.admit(turnId);
+  await act(async () => h.admit(turnId));
   await act(async () => { h.admission.resolve({ turnId }); await sent; });
   const attachments: AttachmentRef[] = [{ kind: 'doc', name: 'brief.txt', mimeType: 'text/plain', bytes: 4, ref: { kind: 'workspace_file', relativePath: 'brief.txt' } }];
   await act(async () => { assert.equal(await h.controller.send('change direction', attachments, 'steer'), true); });
@@ -617,7 +617,7 @@ test('WorkHub defaults to follow-up and moves each message into its admitted suc
   const first = h.steers[0]![1];
   const second = h.steers[1]![1];
   assert.deepEqual(h.controller.transientMessages.map((message) => message.id), [first, second]);
-  await act(() => h.reconnect());
+  await act(async () => h.reconnect());
   assert.deepEqual(h.controller.transientMessages.map((message) => message.id), [first, second],
     'disconnecting before canonical evidence cannot hide accepted messages');
   const entries = h.steers.map(([, messageId, text, attachments]) => ({
@@ -717,10 +717,10 @@ test('Stop retires only Host-confirmed queued messages even without retraction e
       let sent!: Promise<boolean>;
       await act(async () => { sent = h.controller.send('original request', []); });
       turnId = h.requests[0]!.turnId;
-      h.admit(turnId);
+      await act(async () => h.admit(turnId));
       await act(async () => { h.admission.resolve({ turnId }); await sent; });
     } else {
-      h.admit(turnId);
+      await act(async () => h.admit(turnId));
       await act(() => h.emit({ type: 'text_delta', id: 'live', turnId, messageId: 'answer', ts: 1, text: 'Working' }));
     }
     const entries = ['steering', 'followup', 'retained'].map((messageId) => ({

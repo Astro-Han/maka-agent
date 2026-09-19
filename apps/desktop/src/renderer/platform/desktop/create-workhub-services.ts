@@ -50,7 +50,6 @@ export function createDesktopWorkHubServices(
     | 'sessions'
     | 'transcripts'
     | 'connections'
-    | 'runtimeHostProfiles'
     | 'settings'
     | 'attachments'
   > = window.maka,
@@ -84,9 +83,7 @@ export function createDesktopWorkHubServices(
     },
     presentation: bridge.workHubPresentation,
     control: bridge.workHubControl,
-    resolve: () => bridge.workHub.resolveCoordinationSession(),
     getSession: (sessionId) => bridge.workHub.getSession(sessionId),
-    subscribeHosts: (handler) => bridge.runtimeHostProfiles.subscribeChanges(handler),
     subscribeAvailability: (handler) => bridge.connections.subscribeEvents(() => handler()),
     listSessions: () => bridge.sessions.list(),
     subscribeSessions: (handler) => bridge.sessions.subscribeChanges(handler),

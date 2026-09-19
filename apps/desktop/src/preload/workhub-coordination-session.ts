@@ -18,21 +18,7 @@
  */
 
 import { WORKHUB_COORDINATION_SESSION_ID } from '@maka/core/session';
-import {
-  desktopSessionKey,
-  type DesktopTargetScope,
-} from '../shared/runtime-host-identity.js';
-
-export async function resolveDesktopWorkHubCoordinationSession(
-  activeRuntimeHost: () => Promise<DesktopTargetScope>,
-  resolveOnHost: (
-    scope: DesktopTargetScope,
-  ) => Promise<{ readonly sessionId: string }>,
-): Promise<string> {
-  const scope = await activeRuntimeHost();
-  const result = await resolveOnHost(scope);
-  return desktopSessionKey({ hostId: scope.hostId, sessionId: result.sessionId });
-}
+import type { DesktopTargetScope } from '../shared/runtime-host-identity.js';
 
 /** Resolves an exact Host scope from the durable Coordination identity, never from UI focus. */
 export async function resolveDesktopWorkHubCoordinationCreateScope(

@@ -17,15 +17,5 @@
  * under the License.
  */
 
-import type { ComponentProps } from 'react';
-import { useUiLocale } from '@maka/ui';
-import { usePluginSession } from '../features/client-plugins/index.js';
-import { AppShell as LegacyAppShell } from '../app-shell';
-import { WorkHubRoot, WorkHubSurfaceSwitch } from '../features/workhub';
-export function AppShell(props: ComponentProps<typeof LegacyAppShell>) {
-  return <WorkHubSurfaceSwitch main={<LegacyAppShell {...props} />} workhub={<WorkHubConversation />} />;
-}
-function WorkHubConversation() {
-  const binding = usePluginSession('maka.workhub.ui', true, useUiLocale());
-  return <>{binding.resolver}<WorkHubRoot key={binding.sessionId} sessionId={binding.sessionId} /></>;
-}
+/** Shared Renderer components supported for trusted Client bundles. */
+export { Button } from '@astryxdesign/core/Button';

@@ -76,6 +76,7 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
   let subscriptions = 0;
   const projections: string[] = [];
   const calls: string[] = [];
+  let unavailable = true;
   const closed: string[] = [];
   const lateProjection = deferred<string>();
   const services: ClientPluginServices = {
@@ -94,6 +95,7 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
           const method = (() => async () => {
             signal.throwIfAborted();
             calls.push(host.hostId);
+            if (unavailable) return { ok: false, error: { code: 'operation_conflict', message: 'Choose a model' } };
             await refreshing?.promise;
             return { ok: true, result: { sessionId: 'coordinator' } };
           }) as ClientRemote['method'];
@@ -127,6 +129,11 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
     await act(async () => render(false));
     assert.equal(defaultCalls, 0);
     await act(async () => render(true));
+    await until(() => document.body.textContent!.includes('Choose a model'));
+    const retry = document.querySelector('button');
+    assert.equal(retry?.textContent, 'Retry');
+    unavailable = false;
+    await act(async () => retry!.dispatchEvent(new window.Event('click', { bubbles: true })));
     await until(() => projections.includes('first'));
     assert.equal(latest!.sessionId, undefined);
     selected = second;
@@ -150,7 +157,7 @@ test('the WorkHub Client resolves main panels through its origin and withdraws s
     enabled = true; revision++;
     await act(async () => changedCatalog());
     await until(() => latest!.sessionId === expected);
-    assert.deepEqual(calls, ['first', 'second', 'second', 'second']);
+    assert.deepEqual(calls, ['first', 'first', 'second', 'second', 'second']);
     await act(async () => render(false));
     await until(() => subscriptions === 0);
     assert.equal(latest!.sessionId, undefined);

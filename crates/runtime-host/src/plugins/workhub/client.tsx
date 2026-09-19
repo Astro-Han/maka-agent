@@ -17,7 +17,8 @@
  * under the License.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Button } from '@maka/ui/plugin';
 import type { ClientPlugin, ClientSlots } from '@maka-agent/plugin-sdk/client';
 
 type Resolution =
@@ -31,12 +32,15 @@ const plugin: ClientPlugin = {
       'session.resolve',
       'coordinator',
       function Coordinator(props: ClientSlots['session.resolve']) {
+        const [failed, setFailed] = useState(false);
+        const [retry, setRetry] = useState(0);
         useEffect(() => {
           props.onResolving();
           return props.onResolving;
         }, [props.onResolving]);
         useEffect(() => {
           const observation = new AbortController();
+          setFailed(false);
           void resolve(null)
             .then((outcome) => {
               if (observation.signal.aborted) return;
@@ -44,14 +48,24 @@ const plugin: ClientPlugin = {
               props.onResolved(outcome.result.sessionId, observation.signal);
             })
             .catch((error: unknown) => {
-              if (!observation.signal.aborted)
+              if (!observation.signal.aborted) {
+                setFailed(true);
                 props.onError(error instanceof Error ? error.message : String(error));
+              }
             });
           return () => {
             observation.abort();
           };
-        }, [props.contextRevision, props.onResolved, props.onError]);
-        return null;
+        }, [props.contextRevision, props.onResolved, props.onError, retry]);
+        return failed ? (
+          <Button
+            label={props.locale === 'en' ? 'Retry' : props.locale === 'zh-TW' ? '重試' : '重试'}
+            onClick={() => {
+              props.onResolving();
+              setRetry((current) => current + 1);
+            }}
+          />
+        ) : null;
       },
     );
   },
