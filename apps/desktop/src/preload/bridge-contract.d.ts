@@ -857,7 +857,7 @@ export interface MakaBridge {
 
   clientPlugins: {
     file(host: DesktopRuntimeHostRef, targetEpoch: string, identity: ClientIdentity, input: ClientFileRequest): Promise<string | null>;
-    connection(host: DesktopRuntimeHostRef): Promise<{ epoch: string; localFiles: boolean }>;
+    connection(host: DesktopRuntimeHostRef): Promise<{ epoch: string; hostEpoch: string; localFiles: boolean }>;
     session(host: DesktopRuntimeHostRef, targetEpoch: string, sessionId: string): Promise<string>;
     remote(host: DesktopRuntimeHostRef, targetEpoch: string, input: OperationInput<'plugin.remote'>): Promise<OperationOutput<'plugin.remote'> | { kind: 'connection_retired' }>;
     query(host: DesktopRuntimeHostRef, input: OperationInput<'plugin.client.query'>): Promise<OperationOutput<'plugin.client.query'>>;

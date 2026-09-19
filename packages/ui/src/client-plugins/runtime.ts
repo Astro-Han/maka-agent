@@ -31,6 +31,8 @@ export interface ClientSnapshot {
   readonly revision: string;
   /** New transport identity revokes handles even when package bytes did not change. */
   readonly connection?: string;
+  /** Host process epoch, distinct from the Client's transport/target identity. */
+  readonly hostEpoch?: string;
   readonly entries: readonly ClientDescriptor[];
 }
 export interface ClientDiagnostic { readonly identity?: ClientIdentity; readonly error: unknown }
@@ -52,6 +54,7 @@ export class ClientRuntime {
   #active: ClientInstance[] = [];
   #revision?: string;
   #connection?: string;
+  #hostEpoch?: string;
   #pending?: AbortController;
   #work: Promise<void> = Promise.resolve();
   #closed = false;
@@ -69,7 +72,7 @@ export class ClientRuntime {
     this.#pending = request;
     this.#work = this.#work.catch(() => {}).then(async () => {
       request.signal.throwIfAborted();
-      if (this.#revision === snapshot.revision && this.#connection === snapshot.connection) return;
+      if (this.#revision === snapshot.revision && this.#connection === snapshot.connection && this.#hostEpoch === snapshot.hostEpoch) return;
       this.#revision = undefined;
       const timeout = setTimeout(() => request.abort(new Error('Client initialization timed out')), 30_000);
       try { await this.#replace(snapshot, request.signal); }
@@ -96,10 +99,11 @@ export class ClientRuntime {
     const staged: ClientInstance[] = [];
     // Withdraw stale UI before any asynchronous loading, including failed candidates.
     const changed = changedPackages(this.#active.map((instance) => instance.descriptor), snapshot.entries);
-    if (snapshot.connection !== this.#connection) {
+    if (snapshot.connection !== this.#connection || snapshot.hostEpoch !== this.#hostEpoch) {
       for (const instance of this.#active) changed.add(instance.descriptor.extensionId);
     }
     this.#connection = snapshot.connection;
+    this.#hostEpoch = snapshot.hostEpoch;
     const stale = this.#active.filter((instance) => changed.has(instance.descriptor.extensionId));
     this.#active = this.#active.filter((instance) => !changed.has(instance.descriptor.extensionId));
     for (const id of changed) this.#modules.delete(id);
@@ -145,7 +149,7 @@ export class ClientRuntime {
         signal.throwIfAborted();
         if (this.#active.some((instance) => instance.descriptor.entryId === descriptor.entryId)) continue;
         if (this.#fenced.has(descriptor.entryId)) throw new Error('Client cleanup unconfirmed; reload the document');
-        const instance = new ClientInstance(descriptor, (error) => this.#options.report({ identity: descriptor, error }), this.#options.remote, this.#options.localFiles, snapshot.connection);
+        const instance = new ClientInstance(descriptor, (error) => this.#options.report({ identity: descriptor, error }), this.#options.remote, this.#options.localFiles, snapshot.hostEpoch);
         staged.push(instance);
         await interruptible(instance.initialize(materialize(descriptor.extensionId).default, this.#options.document), signal);
       }

@@ -201,7 +201,7 @@ test('unrelated catalog changes preserve UI state; dependency replacement and co
     const generation=fixture.generations[${JSON.stringify(id)}]=(fixture.generations[${JSON.stringify(id)}]||0)+1;
     const dependency=${dependency ? `require(${JSON.stringify(dependency)}).generation` : 'null'};
     return {generation,default:{activate(ctx){
-      fixture.observed[${JSON.stringify(id)}]={generation,dependency,signal:ctx.signal};
+      fixture.observed[${JSON.stringify(id)}]={generation,dependency,signal:ctx.signal,hostEpoch:ctx.hostEpoch};
       ctx.slots.register('session.composer.before','panel',()=>null);
       ctx.style('.owned-by-${id} {}');
     }}};
@@ -219,9 +219,10 @@ test('unrelated catalog changes preserve UI state; dependency replacement and co
     document, modules: { fixture: { generations, observed } }, report() {},
     source: async (descriptor) => sources.get(descriptor.extensionId),
   });
-  const snapshot = { revision: 'initial', connection: 'connection-one', entries };
+  const snapshot = { revision: 'initial', connection: 'connection-one', hostEpoch: 'host-one', entries };
   try {
     await runtime.reconcile(snapshot);
+    assert.equal(observed.base.hostEpoch, 'host-one');
     const independent = runtime.slots.snapshot().find((entry) => entry.owner.extensionId === 'independent');
     const originalBase = observed.base;
     await runtime.reconcile({ ...snapshot, revision: 'unrelated-control-change' });
@@ -246,9 +247,15 @@ test('unrelated catalog changes preserve UI state; dependency replacement and co
     assert.equal(observed.dependent.dependency, 3, 'dependent must import the replacement module');
     assert.equal(runtime.slots.snapshot().find((entry) => entry.owner.extensionId === 'independent'), independent);
     const beforeReconnect = observed.independent;
-    await runtime.reconcile({ revision: 'updated', connection: 'connection-two', entries: replaced });
+    const reconnected = { revision: 'updated', connection: 'connection-two', hostEpoch: 'host-one', entries: replaced };
+    await runtime.reconcile(reconnected);
     assert.equal(beforeReconnect.signal.aborted, true);
     assert.deepEqual(generations, { base: 4, dependent: 4, independent: 2 });
+    const beforeRestart = observed.independent;
+    await runtime.reconcile({ ...reconnected, hostEpoch: 'host-two' });
+    assert.equal(beforeRestart.signal.aborted, true);
+    assert.equal(observed.independent.hostEpoch, 'host-two');
+    assert.deepEqual(generations, { base: 5, dependent: 5, independent: 3 });
     assert.equal(document.querySelectorAll('style').length, 3);
   } finally { await runtime.close(); }
   assert.equal(document.querySelectorAll('style,script').length, 0);

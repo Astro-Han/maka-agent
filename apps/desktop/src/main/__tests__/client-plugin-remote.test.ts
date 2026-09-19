@@ -43,6 +43,7 @@ function deferred<T>() {
 test('Remote documents belong to one Renderer and drain navigation, late opens and crashes without replay', async () => {
   let handler!: IpcHandler;
   let files!: IpcHandler;
+  let connection!: IpcHandler;
   const one = renderer();
   const two = renderer();
   const allowed = new Set([one.emitter, two.emitter]);
@@ -51,10 +52,10 @@ test('Remote documents belong to one Renderer and drain navigation, late opens a
   let late: ReturnType<typeof deferred<string>> | undefined;
   let attempts = 0;
   const dispose = registerClientPluginRemoteIpc({
-    ipcMain: { handle: (channel, listener) => { if (channel === 'plugins:remote') handler = listener; else files = listener; } },
+    ipcMain: { handle: (channel, listener) => { if (channel === 'plugins:remote') handler = listener; else if (channel === 'plugins:files') files = listener; else connection = listener; } },
     ownsRenderer: (contents: WebContents) => allowed.has(contents as unknown as typeof one.emitter),
     report: (error) => errors.push(error),
-    client: { async request(_operation, input) {
+    client: { hostEpoch: 'host-process', async request(_operation, input) {
       if (input.kind === 'open_document') return { kind: 'document', document: late ? await late.promise : randomUUID() };
       if (input.kind === 'close_document') { closed.push(input.document); return { kind: 'closed' }; }
       attempts++;
@@ -64,6 +65,8 @@ test('Remote documents belong to one Renderer and drain navigation, late opens a
   const nonce = randomUUID();
   const invoke = (event: IpcMainInvokeEvent, input: unknown) => handler(event, nonce, input);
   try {
+    assert.deepEqual(await connection(one.event, nonce), { hostEpoch: 'host-process' });
+    await assert.rejects(async () => connection({ ...one.event, senderFrame: two.event.senderFrame }, nonce), /live Desktop/);
     await assert.rejects(files(one.event, nonce, {}, {kind:'pick'}), /unavailable for this Host/);
     const opened = await invoke(one.event, { kind: 'open_document' });
     await assert.rejects(invoke(two.event, { kind: 'next', document: opened.document, stream: randomUUID() }), /belong/);
@@ -107,7 +110,7 @@ test('local file actions require a published Client and reject a selection retur
     ipcMain: {handle(channel, listener) { if (channel === 'plugins:files') files = listener; }},
     ownsRenderer: contents => contents === owner.emitter as unknown as WebContents,
     report: assert.ifError,
-    client: {async request() { throw new Error('Unexpected Remote command'); }},
+    client: {hostEpoch: 'host-process', async request() { throw new Error('Unexpected Remote command'); }},
     files: {
       async validate(input) {
         assert.equal(input.kind, 'bundle');

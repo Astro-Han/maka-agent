@@ -35,6 +35,7 @@ interface DocumentOwner {
 export function registerClientPluginRemoteIpc(input: {
   readonly ipcMain: Pick<IpcMain, 'handle'>;
   readonly client: {
+    readonly hostEpoch: string;
     request(operation: 'plugin.remote', input: PluginRemoteInput, timeoutMs?: number): Promise<PluginRemoteResult>;
   };
   readonly ownsRenderer: (contents: WebContents) => boolean;
@@ -91,6 +92,11 @@ export function registerClientPluginRemoteIpc(input: {
     owners.set(sender, state);
     return state;
   };
+
+  input.ipcMain.handle('plugins:connection', (event, nonce: unknown) => {
+    ownerFor(event, nonce);
+    return { hostEpoch: input.client.hostEpoch };
+  });
 
   input.ipcMain.handle('plugins:remote', async (event, nonce: unknown, raw: unknown): Promise<PluginRemoteResult> => {
     const value = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(raw);

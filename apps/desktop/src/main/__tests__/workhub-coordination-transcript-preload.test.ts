@@ -68,6 +68,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
           if (channel === 'runtime-host:activeIdentity') return owner;
           if (channel === 'runtime-host:identities') return [owner];
           assert.equal((args[0] as typeof owner).hostId, owner.hostId);
+          if (channel === 'plugins:connection') return { hostEpoch: 'host-process-epoch' };
           if (channel === 'workhub:prepareAttachments') {
             assert.deepEqual(structuredClone(args[1]), [{ name: 'brief.txt', mimeType: 'text/plain', base64: 'aGVsbG8=' }]);
             return preparationResult;
@@ -88,9 +89,13 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
     else Reflect.deleteProperty(globalThis, 'window');
   });
   const services = createDesktopWorkHubServices(bridge);
+  const connection = await bridge.clientPlugins.connection(owner);
+  assert.equal(connection.epoch, owner.targetEpoch);
+  assert.equal(connection.hostEpoch, 'host-process-epoch');
   const commands = coordinationCommands({
-    hostEpoch: 'epoch', signal: new AbortController().signal,
-    remote: { method: (name: string) => async (input: { turnId?: string; attachments?: AttachmentRef[]; placement?: string; content?: { attachments: AttachmentRef[] } }) => {
+    hostEpoch: connection.hostEpoch, signal: new AbortController().signal,
+    remote: { method: (name: string) => async (input: { originHostEpoch?: string; turnId?: string; attachments?: AttachmentRef[]; placement?: string; content?: { attachments: AttachmentRef[] } }) => {
+      if (name === 'enqueue') assert.equal(input.originHostEpoch, 'host-process-epoch');
       sent.push({ channel: name, attachments: input.attachments ?? input.content!.attachments });
       return { ok: true, result: name === 'answer' ? { turnId: input.turnId } : { disposition: input.placement === 'current_turn' ? 'steering' : 'followup' } };
     } } as unknown as Parameters<typeof coordinationCommands>[0]['remote'],

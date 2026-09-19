@@ -1430,7 +1430,8 @@ const makaBridge = {
     },
     async connection(host) {
       const scope = await runtimeHostScope(host);
-      return { epoch: scope.targetEpoch, localFiles: runtimeHostMetadataFor(scope)?.profileKind === 'local' };
+      const connection = await ipcRenderer.invoke('plugins:connection', scope, browserDocumentId) as { hostEpoch: string };
+      return { epoch: scope.targetEpoch, hostEpoch: connection.hostEpoch, localFiles: runtimeHostMetadataFor(scope)?.profileKind === 'local' };
     },
     async session(host, targetEpoch, sessionId) {
       const scope = await runtimeHostScope(host);

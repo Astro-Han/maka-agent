@@ -86,11 +86,12 @@ export function createDesktopClientPluginServices(
             cursor = page.nextCursor;
           } while (cursor);
           if (revision === undefined) throw new Error('Client snapshot has no revision');
-          if (epoch !== (await bounded(bridge.clientPlugins.connection(host), signal)).epoch)
+          const current = await bounded(bridge.clientPlugins.connection(host), signal);
+          if (epoch !== current.epoch || connection.hostEpoch !== current.hostEpoch)
             throw new Error('Client connection changed during snapshot');
           targetEpoch = epoch;
           localFiles = connection.localFiles;
-          return { revision, connection: epoch, entries };
+          return { revision, connection: epoch, hostEpoch: connection.hostEpoch, entries };
         },
         async source(descriptor, signal) {
           const parts: string[] = [];
