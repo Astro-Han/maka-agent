@@ -30,7 +30,9 @@ import {
   RUNTIME_HOST_SERVICE_ERROR_MESSAGE_MAX_BYTES,
   RUNTIME_HOST_OPERATOR_ACCESS_MANAGEMENT_CAPABILITY,
   RUNTIME_HOST_OPERATOR_CAPABILITY_REQUEST_ENV,
+  RUNTIME_HOST_OPERATOR_PROCESS_LIFETIME_LOCK_CAPABILITY,
   runtimeHostOperatorInvocation,
+  type RuntimeHostOperatorCapability,
   type RuntimeHostOperatorCommand,
   type RuntimeHostServiceManagementFrame,
   type RuntimeHostServiceUpdatePhase,
@@ -139,6 +141,7 @@ interface RuntimeHostUpdateCliDeps {
   readonly runOperator: (
     operator: RuntimeHostOperatorCommand,
     args: readonly string[],
+    invocation?: RuntimeHostOperatorInvocation,
   ) => Promise<RuntimeHostServiceManagementFrame>;
   readonly canonical: {
     readonly createLifecycleDeps: (rootId: string) => RuntimeHostLifecycleTransactionDeps;
@@ -187,6 +190,10 @@ function runtimeHostPackageUpdateOperation(input: {
     return 'update';
   }
   return input.replaceExpectedHost ? 'replace_current' : 'already_current';
+}
+
+interface RuntimeHostOperatorInvocation {
+  readonly capabilityRequest?: RuntimeHostOperatorCapability;
 }
 
 interface RuntimeHostUpdateSelectionRejection {
@@ -358,11 +365,13 @@ export async function runManagedRuntimeHostUpdateCli(
         let currentOperatorUnavailable = false;
         if (status.service.active) {
           try {
-            const probe = await deps.runOperator(currentOperator, [
-              'status',
-              '--framed',
-              ...expectedTargetArgs(options.expectedTarget),
-            ]);
+            const probe = await deps.runOperator(
+              currentOperator,
+              ['status', '--framed', ...expectedTargetArgs(options.expectedTarget)],
+              {
+                capabilityRequest: RUNTIME_HOST_OPERATOR_PROCESS_LIFETIME_LOCK_CAPABILITY,
+              },
+            );
             if (probe.kind === 'error') {
               throw new RuntimeHostServiceManagerError(
                 'service_manager_operation_failed',
@@ -372,6 +381,19 @@ export async function runManagedRuntimeHostUpdateCli(
             if (probe.action !== 'status') {
               throw new Error(
                 'The current Runtime Host operator returned an invalid status result',
+              );
+            }
+            // An operator that cannot echo the requested capability predates
+            // the lifetime-lock protocol; retiring it would race unmanaged
+            // service state, so it must be removed before updating.
+            if (
+              !probe.operatorCapabilities?.includes(
+                RUNTIME_HOST_OPERATOR_PROCESS_LIFETIME_LOCK_CAPABILITY,
+              )
+            ) {
+              throw new RuntimeHostServiceManagerError(
+                'service_manager_operation_failed',
+                'The active Runtime Host operator predates capability reporting and cannot be safely retired; uninstall it before updating',
               );
             }
           } catch (error) {
@@ -1144,6 +1166,7 @@ function operatorCapabilities(): {
 async function runManagedRuntimeHostOperator(
   operator: RuntimeHostOperatorCommand,
   args: readonly string[],
+  invocation?: RuntimeHostOperatorInvocation,
 ): Promise<RuntimeHostServiceManagementFrame> {
   return new Promise((resolve, reject) => {
     const command = runtimeHostOperatorInvocation(operator, args);
@@ -1151,7 +1174,12 @@ async function runManagedRuntimeHostOperator(
       // A detached operator can finish a retirement already in progress even
       // if this updater exits, so an exact retry never steals active work.
       detached: process.platform !== 'win32',
-      env: process.env,
+      env: invocation?.capabilityRequest
+        ? {
+            ...process.env,
+            [RUNTIME_HOST_OPERATOR_CAPABILITY_REQUEST_ENV]: invocation.capabilityRequest,
+          }
+        : process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
