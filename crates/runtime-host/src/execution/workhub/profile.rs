@@ -19,7 +19,7 @@
 
 use super::{Executions, Result, SessionConfiguration, failure};
 use crate::execution::read;
-use crate::plugins::workhub::{Control, ID, Policy};
+use crate::plugins::workhub::{Control, ID};
 use maka_client_capability::BindingError;
 use maka_plugins::{composition::Scope, contributions::Contribution};
 use maka_protocol::OperationErrorCode as Code;
@@ -34,15 +34,15 @@ pub(super) fn tools(
     executions: &Executions,
     session: &SessionConfiguration,
     connection_id: Uuid,
-    policy: &Policy,
+    control: &Control,
 ) -> Result<(ToolCatalog, maka_runtime::execution::ToolComposition)> {
     let (tools, clients) = executions
         .capabilities
         .bind_required_tools(
             COORDINATION_SESSION_ID,
             connection_id,
-            policy.required_clients,
-            policy.optional_clients,
+            control.policy.required_clients,
+            control.policy.optional_clients,
             session.workspace.host_cwd.clone(),
             executions.interactions.clone(),
         )
@@ -59,7 +59,7 @@ pub(super) fn tools(
             )
         })?;
     Ok((
-        bound_catalog(executions, tools, policy)?,
+        bound_catalog(executions, tools, control)?,
         maka_runtime::execution::ToolComposition {
             clients,
             bound_tools: None,
@@ -76,7 +76,7 @@ pub(in crate::execution) fn catalog(
     let _admission = policy
         .admit()
         .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
-    bound_catalog(executions, tools, &policy.value.policy)
+    bound_catalog(executions, tools, &policy.value)
 }
 
 fn resolve(executions: &Executions) -> Result<Contribution<Control>> {
@@ -91,14 +91,17 @@ fn resolve(executions: &Executions) -> Result<Contribution<Control>> {
 fn bound_catalog(
     executions: &Executions,
     mut tools: Vec<ToolRegistration>,
-    policy: &Policy,
+    control: &Control,
 ) -> Result<ToolCatalog> {
-    tools.retain(|tool| policy.allows_client(&tool.definition.name));
+    tools.retain(|tool| control.policy.allows_client(&tool.definition.name));
+    tools.push(crate::plugins::workhub::tools::registration(
+        control.clone(),
+    ));
     tools.push(executions.interactions.question_tool());
     tools.push(ToolRegistration {
         definition: ToolDefinition {
             name: maka_fs_tools::READ_NAME.into(),
-            description: policy.attachment_description.into(),
+            description: control.policy.attachment_description.into(),
             input_schema: read::schema(),
         },
         handler: ToolHandler::Prepared(Arc::new(read::SessionRead::attachments(

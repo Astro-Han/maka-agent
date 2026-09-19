@@ -30,6 +30,45 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 impl Executions {
+    /// Resolve the transport behind an already frozen tool, never whichever
+    /// Desktop window happens to be current when the request resumes.
+    pub(crate) async fn plugin_client_connection(
+        &self,
+        owner: Context,
+        invocation: Invocation,
+        tool: &str,
+    ) -> Result<uuid::Uuid, Error> {
+        let _lease = owner.admit().map_err(|_| Error::Revoked)?;
+        let configuration = self
+            .log
+            .invocation_configuration(&invocation)
+            .await
+            .map_err(storage)?
+            .ok_or(Error::Denied)?;
+        let proof = configuration.tool_composition.ok_or(Error::Denied)?;
+        let registry = self
+            .capabilities
+            .registry
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let (_, snapshot) = registry
+            .restore_bindings(&invocation.session_id, &proof.clients)
+            .map_err(|error| Error::Host(error.to_string()))?;
+        let offer = snapshot
+            .offers()
+            .iter()
+            .find(|offer| {
+                offer.offer().tools.iter().any(|item| {
+                    maka_client_capability::proxy_tool_name(&item.server_id, &item.name) == tool
+                })
+            })
+            .ok_or(Error::NotFound)?;
+        offer
+            .resolve(&registry)
+            .map(|registration| registration.connection_id())
+            .map_err(|error| Error::Host(error.to_string()))
+    }
+
     async fn plugin_client_tools(
         &self,
         invocation: &Invocation,

@@ -22,7 +22,8 @@ import { z } from "zod";
 import type { IpcMain, WebContents } from "electron";
 import { redactSecrets } from '@maka/core/redaction';
 import type { AppSettings } from "@maka/core/settings";
-import { WORKHUB_COORDINATION_SESSION_ID } from "@maka/core/session";
+import { WORKHUB_COORDINATION_SESSION_ID, type WorkHubCreateDefaults } from "@maka/core/session";
+import type { WorkspaceTarget } from "@maka/runtime-host/protocol";
 import type { MakaTool } from "@maka/runtime/tool-runtime";
 import type { DesktopRuntimeHostClient } from "./runtime-host-client.js";
 import type { DesktopCapabilityGroup } from "./runtime-host-native-capabilities.js";
@@ -33,9 +34,7 @@ import {
 } from "../shared/runtime-host-identity.js";
 import {
   workHubControlSchema,
-  workHubTasksSchema,
   type WorkHubAction,
-  type WorkHubTasksInput,
 } from "../shared/workhub-tool-schema.js";
 import type { WorkHubControlSnapshot } from '../shared/workhub-control.js';
 
@@ -45,7 +44,7 @@ const controlParameters = z.object({
   status: z.string().trim().min(1).max(80).regex(/^[^\r\n]+$/).describe('A short user-facing description of the current action, in the user\'s language. Match the language of the user\'s current request: Chinese for Chinese requests, English for English requests. Do not default to the language of these tool instructions. For example: Opening project settings. Describe the action, not reasoning or a claim of completion.'),
   request: workHubControlSchema,
 }).strict();
-const tasksParameters = z.object({ request: workHubTasksSchema }).strict();
+const contextParameters = z.object({}).strict();
 
 interface WorkHubControlDeps {
   ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
@@ -59,12 +58,7 @@ interface WorkHubControlDeps {
   isCurrent(scope: DesktopTargetScope): boolean;
   assertTurn(scope: DesktopTargetScope, turnId: string): Promise<void>;
   interrupt(scope: DesktopTargetScope, turnId: string): Promise<void>;
-  actTasks(
-    scope: DesktopTargetScope,
-    turnId: string,
-    toolCallId: string,
-    input: WorkHubTasksInput,
-  ): Promise<unknown>;
+  createContext(scope: DesktopTargetScope): Promise<{ workspace: WorkspaceTarget; defaults: WorkHubCreateDefaults }>;
 }
 interface Owner {
   readonly scope: DesktopTargetScope;
@@ -278,34 +272,27 @@ export function createWorkHubControl(deps: WorkHubControlDeps) {
         return { type: "text", value: JSON.stringify(output) };
       },
     };
-    const tasks: MakaTool = {
-      name: "tasks",
-      description:
-        "Discover or coordinate Host tasks through the WorkHub action gate. Delegate actual work with text; original user intent and destructive authorization are checked by the Host. Use candidates before choosing an existing task. Never invent a candidate or delegation identity.",
-      parameters: tasksParameters,
+    const context: MakaTool = {
+      name: "context",
+      description: "Read this Desktop window's selected workspace and new-task preferences. Does not create or control tasks.",
+      parameters: contextParameters,
       impl: async (input, ctx) => {
-        if (busy)
-          throw new Error("Another WorkHub control call is still running");
-        busy = true;
-        try {
-          const active = await claim(scope, ctx);
-          active.controller.signal.throwIfAborted();
-          return await deps.actTasks(
-            scope,
-            active.turnId,
-            ctx.toolCallId,
-            tasksParameters.parse(input).request,
-          );
-        } finally {
-          busy = false;
-        }
+        contextParameters.parse(input);
+        const active = await claim(scope, ctx);
+        active.controller.signal.throwIfAborted();
+        const context = await deps.createContext(scope);
+        active.controller.signal.throwIfAborted();
+        ctx.abortSignal.throwIfAborted();
+        requireCurrent(scope);
+        await deps.assertTurn(scope, active.turnId);
+        return context;
       },
     };
     return {
       offerId: "desktop_workhub",
       label: "WorkHub",
-      description: "Operate Maka and coordinate its tasks.",
-      tools: [control, tasks],
+      description: "Operate Maka and read this window’s workspace context.",
+      tools: [control, context],
     };
   };
   const complete = (resourceKey: string) => {

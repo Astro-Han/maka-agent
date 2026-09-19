@@ -17,16 +17,12 @@
  * under the License.
  */
 
-use super::{
-    Policy,
-    control::{Result, failure},
-};
+use super::control::{Result, failure};
 use maka_protocol::{
     OperationErrorCode as Code,
     workhub::{AnswerInput, TurnResult},
 };
 use maka_runtime::{artifact::content_digest, execution::ToolMode};
-use std::sync::Arc;
 
 /// Stable user request, independent of current model or plugin availability.
 pub(crate) struct Request {
@@ -53,7 +49,7 @@ impl Request {
 pub(crate) struct Plan {
     pub request: Request,
     pub configuration_digest: String,
-    pub policy: Arc<Policy>,
+    pub control: super::Control,
     pub tool_mode: ToolMode,
     pub max_steps: usize,
 }
@@ -80,7 +76,7 @@ impl super::Control {
                 Plan {
                     request,
                     configuration_digest: session.configuration_digest,
-                    policy: self.policy.clone(),
+                    control: self.clone(),
                     tool_mode: if defaults.code_mode_enabled {
                         ToolMode::CodeMode
                     } else {

@@ -42,6 +42,15 @@ impl super::Control {
         &self,
         input: SelectionInput,
     ) -> Result<SelectionResult, OperationError> {
+        self.select_cancellable(input, tokio_util::sync::CancellationToken::new())
+            .await
+    }
+
+    pub(crate) async fn select_cancellable(
+        &self,
+        input: SelectionInput,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<SelectionResult, OperationError> {
         let _call = self
             .caller
             .admit()
@@ -49,7 +58,8 @@ impl super::Control {
         let stopping = self
             .caller
             .stopping()
-            .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?;
+            .map_err(|error| failure(Code::OperationUnavailable, error.to_string()))?
+            .child_token();
         let source = self
             .commands
             .selection(self.caller.clone(), input.clone())
@@ -69,10 +79,14 @@ impl super::Control {
                     .await?
             }
         };
-        let outcome = self
+        let wait = self
             .commands
-            .wait_selection(form.request_id, stopping)
-            .await?;
+            .wait_selection(form.request_id, stopping.clone());
+        tokio::pin!(wait);
+        let outcome = tokio::select! {
+            result = &mut wait => result?,
+            _ = cancellation.cancelled() => { stopping.cancel(); wait.await? }
+        };
         let Some(selection) = interpret(input, source.invocation, form.created_at, outcome)? else {
             return Ok(SelectionResult::Cancelled);
         };

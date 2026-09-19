@@ -233,7 +233,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                   id: 'delegate-call',
                   type: 'function',
                   function: {
-                    name: target || bootstrap ? 'Read' : 'mcp__desktop_workhub__tasks',
+                    name: target || bootstrap ? 'Read' : 'mcp__desktop_workhub__control',
                     arguments: JSON.stringify(
                       target ? { path } : bootstrap ? { path: join(workspace, 'seed.txt') } : {},
                     ),
@@ -351,7 +351,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
             version: '1',
             affinity: 'session',
             hostPathAccess: 'none',
-            tools: ['control', 'tasks'].map((name) => ({
+            tools: ['control', 'context'].map((name) => ({
               serverId: 'desktop_workhub',
               name,
               inputSchema: { type: 'object' },
@@ -362,7 +362,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
           try {
             assert.equal(frame.sessionId, sessionId);
             assert.equal(frame.turnId, turnId);
-            assert.equal(frame.toolName, 'tasks');
+            assert.equal(frame.toolName, 'control');
             await accept({ kind: 'none' });
             input = await prepareRouting({
               request,

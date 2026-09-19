@@ -50,6 +50,19 @@ pub(crate) struct Stop {
 /// Commands own admission, durable receipts and settlement. No locks, arbitrary
 /// log writes or Host handles are exposed to the business implementation.
 pub(crate) trait Commands: Send + Sync {
+    fn client_call(
+        &self,
+        caller: Context,
+        context: maka_runtime::tools::ToolCallContext,
+        input: maka_plugins::client_capability::Call,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> BoxFuture<'_, std::result::Result<serde_json::Value, maka_runtime::tools::ToolError>>;
+    fn client_connection(
+        &self,
+        caller: Context,
+        invocation: maka_runtime::event::Invocation,
+        tool: &'static str,
+    ) -> BoxFuture<'_, Result<uuid::Uuid>>;
     fn chat_defaults(
         &self,
     ) -> BoxFuture<'_, Result<maka_runtime::configuration::policy::ChatDefaults>>;
@@ -145,6 +158,7 @@ pub(crate) trait Commands: Send + Sync {
     ) -> BoxFuture<'_, Result<super::resume::Receipt>>;
 }
 
+#[derive(Clone)]
 pub(crate) struct Control {
     pub(super) commands: Arc<dyn Commands>,
     pub(super) caller: Context,

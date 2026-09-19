@@ -280,7 +280,9 @@ async fn original_client_workhub_answer_scopes_read_and_desktop_calls_without_re
             .any(|source| source.package_id == "maka.workhub" && !source.activation.is_empty())
     );
     for row in &before.events {
-        if matches!(row.event.fact, Fact::ModelRequested { .. }) {
+        if row.event.invocation.session_id == COORDINATION_SESSION_ID
+            && matches!(row.event.fact, Fact::ModelRequested { .. })
+        {
             let surface = log
                 .request_composition(COORDINATION_SESSION_ID, &row.event.id)
                 .await
@@ -324,7 +326,7 @@ async fn original_client_workhub_answer_scopes_read_and_desktop_calls_without_re
             .iter()
             .filter(|row| matches!(row.event.fact, Fact::InvocationOpened { .. }))
             .count(),
-        1
+        3
     );
     assert!(
         before

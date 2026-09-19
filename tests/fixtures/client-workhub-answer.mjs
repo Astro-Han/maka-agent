@@ -29,12 +29,7 @@ import { watchSession } from './client-subscription.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'workhub-answer';
-const names = [
-  'AskUserQuestion',
-  'Read',
-  'mcp__desktop_workhub__control',
-  'mcp__desktop_workhub__tasks',
-];
+const names = ['AskUserQuestion', 'Read', 'mcp__desktop_workhub__control', 'workhub_tasks'];
 const forbidden = 'WORKHUB_SCOPE_ESCAPED';
 
 export async function verifyWorkhubAnswer(connection, workspace, reopened) {
@@ -52,7 +47,9 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     }
     return;
   }
-  let failure, attachmentPath;
+  let failure, attachmentPath, nativeReceipt, selectionTask;
+  let contextCalls = 0,
+    targetRequests = 0;
   const requests = [];
   const source = join(workspace, 'forbidden.txt');
   await writeFile(source, forbidden);
@@ -63,8 +60,66 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
         body += chunk;
         assert(Buffer.byteLength(body) <= 128 * 1024);
       }
-      const input = JSON.parse(body),
-        step = requests.length;
+      const input = JSON.parse(body);
+      if (
+        selectionTask &&
+        input.messages.some((message) => message.content === 'NATIVE_SELECTION_CANCEL')
+      ) {
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        response.end(
+          'data: ' +
+            JSON.stringify({
+              id: 'native-selection',
+              object: 'chat.completion.chunk',
+              created: 1,
+              model: 'fixture-model',
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: 'selection',
+                        type: 'function',
+                        function: {
+                          name: 'workhub_tasks',
+                          arguments: JSON.stringify({ request: selectionTask }),
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: 'tool_calls',
+                },
+              ],
+            }) +
+            '\n\ndata: [DONE]\n\n',
+        );
+        return;
+      }
+      if (!input.tools.some((tool) => tool.function.name === 'workhub_tasks')) {
+        assert(body.includes('Create a verification task'));
+        assert(
+          !input.tools.some((tool) => tool.function.name.startsWith('mcp__desktop_workhub__')),
+        );
+        targetRequests++;
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        response.end(
+          'data: ' +
+            JSON.stringify({
+              id: 'native-task',
+              object: 'chat.completion.chunk',
+              created: 1,
+              model: 'fixture-model',
+              choices: [
+                { index: 0, delta: { content: 'native task completed' }, finish_reason: 'stop' },
+              ],
+            }) +
+            '\n\ndata: [DONE]\n\n',
+        );
+        return;
+      }
+      const step = requests.length;
       requests.push(input);
       assert.equal(request.url, '/v1/chat/completions');
       assert.equal(input.model, 'fixture-model');
@@ -73,6 +128,12 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       if (step === 1 || step === 2) assert(body.includes('WorkHub Read accepts only'));
       if (step === 3) assert(body.includes('ATTACHMENT_EVIDENCE'));
       if (step === 4) assert(body.includes('DESKTOP_CONTROL_VERIFIED'));
+      if (step === 5) assert(body.includes('candidateSetId'));
+      if (step === 6) {
+        nativeReceipt = JSON.parse(input.messages.at(-1).content);
+        assert.equal(nativeReceipt.disposition, 'create_new');
+        assert.match(nativeReceipt.actionId, /^tool_[a-f0-9]{64}$/);
+      }
       const actions = [
         ['Read', { path: source }],
         [
@@ -87,6 +148,17 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
         ],
         ['Read', { path: attachmentPath }],
         ['mcp__desktop_workhub__control', { status: '正在检查 WorkHub' }],
+        ['workhub_tasks', { request: { operation: 'candidates' } }],
+        [
+          'workhub_tasks',
+          {
+            request: {
+              operation: 'create_new',
+              title: 'Native verification',
+              text: 'Create a verification task',
+            },
+          },
+        ],
       ];
       assert(step <= actions.length, 'Unexpected model retry or extra step');
       const delta =
@@ -165,7 +237,11 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       'text/plain',
     );
     attachmentPath = 'maka://runtime/attachments/' + attachment.ref.relativePath;
-    const input = { turnId, text: '请检查附件并确认 WorkHub', attachments: [attachment] };
+    const input = {
+      turnId,
+      text: '请检查附件并确认 WorkHub，然后新建一个验证任务。',
+      attachments: [attachment],
+    };
     await assert.rejects(
       request('workhub.coordination.answer', input),
       (e) => e.code === 'operation_unavailable',
@@ -181,7 +257,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
             affinity: 'session',
             hostPathAccess: 'none',
             label: 'Desktop WorkHub',
-            tools: ['control', 'tasks', 'not_allowed'].map((name) => ({
+            tools: ['control', 'context', 'not_allowed'].map((name) => ({
               serverId: 'desktop_workhub',
               name,
               inputSchema: { type: 'object' },
@@ -192,9 +268,19 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
           try {
             assert.equal(frame.sessionId, sessionId);
             assert.equal(frame.turnId, turnId);
-            assert.equal(frame.toolName, 'control');
             assert.equal(Object.hasOwn(frame, 'cwd'), false);
             await accept({ kind: 'none' });
+            if (frame.toolName === 'context') {
+              contextCalls++;
+              return {
+                content: [],
+                structuredContent: {
+                  workspace: { kind: 'host_path', path: workspace },
+                  defaults: { permissionMode: 'bypass' },
+                },
+              };
+            }
+            assert.equal(frame.toolName, 'control');
             assert.equal((await request('workhub.coordination.query', {})).id, sessionId);
             calls++;
             return { content: [{ type: 'text', text: 'DESKTOP_CONTROL_VERIFIED' }] };
@@ -243,8 +329,61 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     if (failure) throw failure;
     const terminal = await request('turn.query', { sessionId, turnId });
     assert.equal(terminal.status, 'completed');
-    assert.equal(requests.length, 5);
+    assert.equal(requests.length, 7);
     assert.equal(calls, 1);
+    assert.equal(contextCalls, 1);
+    assert(nativeReceipt);
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const target = await request('turn.query', {
+        sessionId: nativeReceipt.targetSessionId,
+        turnId: nativeReceipt.targetTurnId,
+      });
+      if (target.status === 'completed') break;
+      assert(Date.now() < deadline && target.status !== 'failed', 'native task did not complete');
+      await delay(10);
+    }
+    assert.equal(targetRequests, 1);
+    const candidates = await request('workhub.coordination.candidates', {});
+    selectionTask = {
+      operation: 'select_and_delegate',
+      candidateSetId: candidates.candidateSetId,
+      candidateRefs: candidates.candidates.map((item) => item.candidateRef),
+      text: 'Do not deliver this cancelled selection',
+    };
+    await request('workhub.coordination.answer', {
+      turnId: 'native-selection',
+      text: 'NATIVE_SELECTION_CANCEL',
+    });
+    const offered = await observer.waitFor(
+      (frame) =>
+        frame.kind === 'subscription.session_projection' &&
+        frame.snapshot.rootTurn?.turnId === 'native-selection' &&
+        frame.snapshot.interactions.pending.some((form) => form.request.kind === 'form'),
+    );
+    const form = offered.snapshot.interactions.pending.find((form) => form.request.kind === 'form');
+    const selecting = await request('turn.query', { sessionId, turnId: 'native-selection' });
+    await request('turn.stop', { sessionId, turnId: selecting.turnId, runId: selecting.runId });
+    await observer.waitFor(
+      (frame) =>
+        frame.kind === 'subscription.session_projection' &&
+        frame.snapshot.rootTurn?.turnId === 'native-selection' &&
+        frame.snapshot.rootTurn.status === 'cancelled' &&
+        frame.snapshot.interactions.pending.length === 0,
+    );
+    await assert.rejects(
+      request('interaction.answer', {
+        sessionId,
+        interactionId: form.interactionId,
+        answer: {
+          kind: 'form',
+          action: 'accept',
+          values: { target: form.request.fields[0].options[0].value },
+        },
+      }),
+      (error) => error.code === 'already_resolved',
+    );
+    assert.equal(targetRequests, 1, 'cancelled native selection must not delegate');
     // Transcript pages use the subscription's captured high-water, not live deltas.
     await observer.close();
     observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
@@ -260,7 +399,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       request('workhub.coordination.answer', { ...input, text: 'changed' }),
       (e) => e.code === 'operation_conflict',
     );
-    assert.equal(requests.length, 5);
+    assert.equal(requests.length, 7);
     await writeFile(file, JSON.stringify({ input, terminal, rows }));
   } finally {
     await observer?.close();

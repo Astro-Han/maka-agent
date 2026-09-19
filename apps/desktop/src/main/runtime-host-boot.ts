@@ -1038,7 +1038,6 @@ const workHubRuntime = createWorkHubRuntime({
     workspace: await currentDesktopWorkspaceTarget(requireWorkHubTarget(scope).policy),
     defaults: { permissionMode: (await settingsStore.get()).chatDefaults.permissionMode },
   }),
-  changed: emitSessionsChanged,
 });
 const workHubControl = createWorkHubControl({
   ipcMain,

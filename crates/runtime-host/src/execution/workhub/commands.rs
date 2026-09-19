@@ -72,6 +72,42 @@ impl WorkHubCommands {
     }
 }
 impl Commands for WorkHubCommands {
+    fn client_call(
+        &self,
+        caller: Context,
+        context: maka_runtime::tools::ToolCallContext,
+        input: maka_plugins::client_capability::Call,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> BoxFuture<'_, std::result::Result<serde_json::Value, maka_runtime::tools::ToolError>> {
+        Box::pin(async move {
+            let failed = |error: String| maka_runtime::tools::ToolError::Failed(error);
+            self.executions()
+                .map_err(|error| failed(error.message))?
+                .plugin_client_call(
+                    caller,
+                    context.invocation,
+                    Some(context.operation_id),
+                    input,
+                    cancellation,
+                )
+                .await
+                .map_err(|error| failed(error.to_string()))?
+                .await
+        })
+    }
+    fn client_connection(
+        &self,
+        caller: Context,
+        invocation: maka_runtime::event::Invocation,
+        tool: &'static str,
+    ) -> BoxFuture<'_, Result<uuid::Uuid>> {
+        Box::pin(async move {
+            self.executions()?
+                .plugin_client_connection(caller, invocation, tool)
+                .await
+                .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))
+        })
+    }
     fn chat_defaults(
         &self,
     ) -> BoxFuture<'_, Result<maka_runtime::configuration::policy::ChatDefaults>> {

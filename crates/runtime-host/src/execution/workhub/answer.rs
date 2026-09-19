@@ -106,11 +106,15 @@ pub(super) async fn execute(
     executions
         .validate_message_content(COORDINATION_SESSION_ID, &content, root_id)
         .await?;
-    let (tools, composition) =
-        profile::tools(executions, &session.configuration, connection, &plan.policy)?;
+    let (tools, composition) = profile::tools(
+        executions,
+        &session.configuration,
+        connection,
+        &plan.control,
+    )?;
     let provider = provider.admit(&executions.oauth)?;
     configuration.tool_mode = plan.tool_mode;
-    configuration.system_prompt = Some(plan.policy.prompt.clone());
+    configuration.system_prompt = Some(plan.control.policy.prompt.clone());
     configuration.tool_composition = Some(composition);
     executions
         .launch(RunInput {

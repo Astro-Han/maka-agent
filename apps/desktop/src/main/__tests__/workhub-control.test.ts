@@ -60,10 +60,9 @@ function harness(prepareWindow: () => Promise<void> = async () => {}) {
     interrupt: async (_scope, turnId) => {
       interrupted.push(turnId);
     },
-    actTasks: async (_scope, turnId, callId, input) => ({
-      turnId,
-      callId,
-      input,
+    createContext: async () => ({
+      workspace: { kind: "project", projectId: "selected-project" },
+      defaults: { permissionMode: "ask" },
     }),
   });
   const tool = control.group(scope).tools[0] as MakaTool;
@@ -436,16 +435,15 @@ test("window preparation cannot admit input after takeover or a Host switch", as
   );
 });
 
-test("task coordination does not open or focus the controlled main window", async (t) => {
+test("reading workspace context does not open or focus the controlled main window", async (t) => {
   const h = harness(async () => {
     throw new Error("Must not prepare the window");
   });
   t.after(() => h.control.close());
-  const tasks = h.control.group(scope).tools[1] as MakaTool;
-  assert.deepEqual(await tasks.impl({ request: { operation: "candidates" } }, h.ctx()), {
-    turnId: "turn",
-    callId: "call",
-    input: { operation: "candidates" },
+  const context = h.control.group(scope).tools[1] as MakaTool;
+  assert.deepEqual(await context.impl({}, h.ctx()), {
+    workspace: { kind: "project", projectId: "selected-project" },
+    defaults: { permissionMode: "ask" },
   });
 });
 
