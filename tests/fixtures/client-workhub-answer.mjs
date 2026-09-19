@@ -26,6 +26,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
+import { toggleWorkhub, workhubRemote } from './client-workhub-plugin.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'workhub-answer';
@@ -48,6 +49,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     return;
   }
   let failure, attachmentPath, nativeReceipt, selectionTask;
+  const remotes = [];
   let contextCalls = 0,
     targetRequests = 0;
   const requests = [];
@@ -293,18 +295,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       },
       3000,
     );
-    const togglePolicy = async (disabled) => {
-      await request('plugin.composition.apply', {
-        operations: [{ type: 'update', entryId: 'maka.workhub', patch: { disabled } }],
-      });
-      const deadline = Date.now() + 5000;
-      while (
-        (await request('plugin.platform.query', { view: 'status' })).convergence !== 'converged'
-      ) {
-        assert(Date.now() < deadline, 'WorkHub policy did not converge');
-        await delay(10);
-      }
-    };
+    const togglePolicy = (disabled) => toggleWorkhub(connection, disabled);
     await togglePolicy(true);
     await assert.rejects(
       request('workhub.coordination.answer', input),
@@ -312,12 +303,12 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     );
     assert.equal(requests.length, 0, 'A disabled policy must fail before model dispatch');
     await togglePolicy(false);
+    const remote = await workhubRemote(connection);
+    remotes.push(remote);
+    const answer = remote.method('answer');
     observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
     assert.deepEqual(
-      await Promise.all([
-        request('workhub.coordination.answer', input),
-        request('workhub.coordination.answer', input),
-      ]),
+      await Promise.all([request('workhub.coordination.answer', input), answer(input)]),
       [{ turnId }, { turnId }],
     );
     await observer.waitFor(
@@ -351,7 +342,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       candidateRefs: candidates.candidates.map((item) => item.candidateRef),
       text: 'Do not deliver this cancelled selection',
     };
-    await request('workhub.coordination.answer', {
+    await answer({
       turnId: 'native-selection',
       text: 'NATIVE_SELECTION_CANCEL',
     });
@@ -395,6 +386,11 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       expected: { connectionId: basis.connectionId, revision: basis.revision },
     });
     assert.deepEqual(await request('workhub.coordination.answer', input), { turnId });
+    await assert.rejects(answer(input), (error) => error.code === 'operation_conflict');
+    await togglePolicy(false);
+    const restored = await workhubRemote(connection);
+    remotes.push(restored);
+    assert.deepEqual(await restored.method('answer')(input), { turnId });
     await assert.rejects(
       request('workhub.coordination.answer', { ...input, text: 'changed' }),
       (e) => e.code === 'operation_conflict',
@@ -402,6 +398,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     assert.equal(requests.length, 7);
     await writeFile(file, JSON.stringify({ input, terminal, rows }));
   } finally {
+    await Promise.all(remotes.map((remote) => remote.close()));
     await observer?.close();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));

@@ -32,13 +32,16 @@ pub(crate) struct Prepared {
     pub model: SessionModel,
     pub thinking: Option<ThinkingLevel>,
     pub lock_connection: bool,
+    pub cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl super::super::Control {
     pub(crate) async fn configure_model(
         &self,
         input: SessionConfigurationUpdateInput,
+        cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<SessionUpdateResult> {
+        super::super::control::check_request(&cancellation)?;
         if input.session_id != COORDINATION_SESSION_ID
             || input.patch.permission_mode.is_some()
             || input.patch.collaboration_mode.is_some()
@@ -94,6 +97,7 @@ impl super::super::Control {
                     model,
                     thinking,
                     lock_connection,
+                    cancellation,
                 },
             )
             .await

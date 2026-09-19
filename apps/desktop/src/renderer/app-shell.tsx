@@ -71,7 +71,7 @@ import { useTaskSubmissionReadiness } from './use-task-submission-readiness';
 import { useAppShellSessionUiReads } from './use-app-shell-session-ui-reads';
 import * as Conversation from './features/conversation';
 import { deriveWorkspaceReadinessRecovery } from './workspace-readiness-recovery';
-import { ClientPluginComposerSlot, ClientPluginSlot } from './features/client-plugins/index.js';
+import { ClientPluginComposerSlot, ClientPluginSlot, usePluginSession } from './features/client-plugins/index.js';
 import type { ClientWorkspace } from '@maka-agent/plugin-sdk/client';
 import { ChatComposerRegion, selectLatestRequestUsage } from './chat-composer-region';
 import { WorkbarHost, useWorkbarController } from './features/workbar';
@@ -430,6 +430,7 @@ function AppShellContent({
   const navSelectionRef = useRef<NavSelection>(navSelection);
   const [workHubEnabled, setWorkHubEnabled] = useState(false);
   const [workHubActive, setWorkHubActive] = useState(false);
+  const workHubSession = usePluginSession('maka.workhub.ui', workHubEnabled, uiLocale);
   const workHubEnabledRef = useRef(false);
   useEffect(() => {
     let disposed = false;
@@ -1277,7 +1278,7 @@ function AppShellContent({
     [toastApi],
   );
   const workbar = useWorkbarController({
-    workHub: { enabled: workHubEnabled, active: workHubActive },
+    workHub: { enabled: workHubEnabled, active: workHubActive, sessionId: workHubSession.sessionId },
     available: sessionsSelected && (workHubActive || Boolean(activeHostSession)),
     layoutSessionId: activeId,
     activeSession: activeHostSession,
@@ -2377,6 +2378,7 @@ function AppShellContent({
               <WorkHubMainNavigation workbarReady={workHubActive && Boolean(workbar.host.activeId)}
                 onOpenUsage={() => commands.toggleTool('inspector')} onToggleWorkbar={commands.toggleRight}
                 onOpenWorkHub={openWorkHub} onOpenSession={(sessionId) => { closeSettings(); openSession(sessionId); }} />
+              {workHubSession.resolver}
               <WorkHubDock workbarCollapsed={selectors.rightCollapsed} enabled={workHubEnabled} visible={workHubActive && sessionsSelected && !shellObscured} />
               <ChatSurfaceLayout
                 // ChatView positions this transcript: switching conversations,

@@ -32,6 +32,7 @@ import { createdTarget, prepareRouting } from './client-workhub-routing.mjs';
 import { chooseTarget, setupSelection } from './client-workhub-selection.mjs';
 import { resumeDelegation } from './client-workhub-resume.mjs';
 import { correctDelegation } from './client-workhub-correction.mjs';
+import { toggleWorkhub as togglePlugin } from './client-workhub-plugin.mjs';
 
 const sessionId = 'maka_workhub_coordination';
 const turnId = 'delegate-request';
@@ -79,18 +80,7 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
   const finishTarget = Promise.withResolvers();
   const targetSessionId = createNew ? createdTarget('delegation-action') : 'target';
   const request = (operation, input) => connection.request(operation, input, 5000);
-  const toggleWorkhub = async (disabled) => {
-    await request('plugin.composition.apply', {
-      operations: [{ type: 'update', entryId: 'maka.workhub', patch: { disabled } }],
-    });
-    const deadline = Date.now() + 5000;
-    while (
-      (await request('plugin.platform.query', { view: 'status' })).convergence !== 'converged'
-    ) {
-      assert(Date.now() < deadline, 'WorkHub did not converge');
-      await delay(10);
-    }
-  };
+  const toggleWorkhub = (disabled) => togglePlugin(connection, disabled);
   const file = join(workspace, 'delegation.json');
   const act = async (input) => {
     const result = await request(

@@ -43,6 +43,7 @@ const modules = { react: React, 'react/jsx-runtime': JsxRuntime, '@maka-agent/pl
 export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
   readonly host: ClientHostRef;
   readonly name: K;
+  readonly entryId?: string;
   readonly input: ClientSdk.ClientSlots[K];
 }): React.ReactNode {
   const { services, hosts } = useServices();
@@ -58,8 +59,19 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
   }
   const { runtime, failure, contextRevision, session } = React.useSyncExternalStore(owner.subscribe, owner.snapshot, owner.snapshot);
   const report = owner.report;
+  const resolving = 'onResolved' in props.input ? props.input.onResolved : undefined;
+  const resolutionError = 'onError' in props.input ? props.input.onError : undefined;
+  const onResolved = React.useCallback((id: string, signal: AbortSignal) => {
+    if (!session || signal.aborted) return;
+    void session(id).then((projected) => {
+      if (!signal.aborted) resolving?.(projected, signal);
+    }).catch((error: unknown) => {
+      if (!signal.aborted) resolutionError?.(error instanceof Error ? error.message : String(error));
+    });
+  }, [session, resolving, resolutionError]);
   const composerInput = {...props.input, contextRevision,
-    ...(props.name === 'workspace.manage' ? {} : {publishSuggestions})};
+    ...(props.name === 'session.resolve' ? {onResolved} :
+      props.name === 'workspace.manage' ? {} : {publishSuggestions})};
   const input = 'onOpenSession' in composerInput ? {
     ...composerInput,
     onOpenSession(sessionId: string) {
@@ -68,12 +80,12 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
       void session(sessionId).then(open.onOpenSession).catch((error: unknown) => report({ error }));
     },
   } : composerInput;
-  return <div className={props.name === 'workspace.manage' ? undefined : 'maka-composer-plugin-slot'}>
+  return <div className={props.name.endsWith('.composer.before') ? 'maka-composer-plugin-slot' : undefined}>
     {failure ? <div role="status" className="clientPluginFailure">
       {props.input.locale === 'zh-CN' ? '部分扩展未能加载。' :
         props.input.locale === 'zh-TW' ? '部分擴充功能未能載入。' : 'Some extensions could not load.'}
     </div> : null}
-    {runtime ? <ClientSlot store={runtime.slots} name={props.name} input={input}
+    {runtime ? <ClientSlot store={runtime.slots} name={props.name} entryId={props.entryId} input={input}
       onError={(identity, error) => report({ identity, error })} /> : null}
   </div>;
 }
@@ -83,4 +95,50 @@ export function ClientPluginComposerSlot(props: {
   readonly input: ClientSdk.ClientSlots['session.composer.before'];
 }) {
   return <ClientPluginSlot {...props} name="session.composer.before" />;
+}
+
+/** A workspace consumes one configured Client Entry, not a private feature RPC. */
+export function usePluginSession(entryId: string, enabled: boolean, locale: 'en' | 'zh-CN' | 'zh-TW') {
+  const { services } = useServices();
+  const [origin, setOrigin] = React.useState<{ host?: ClientHostRef; error?: string }>();
+  const [resolved, setResolved] = React.useState<{ host: ClientHostRef; sessionId?: string; error?: string }>();
+  React.useEffect(() => {
+    if (!enabled) { setOrigin(undefined); return; }
+    const lifetime = new AbortController();
+    let request: AbortController | undefined;
+    const refresh = () => {
+      request?.abort();
+      const pending = new AbortController();
+      request = pending;
+      const signal = AbortSignal.any([lifetime.signal, pending.signal, AbortSignal.timeout(30_000)]);
+      setOrigin(undefined);
+      void services.defaultHost(signal).then((host) => {
+        if (!signal.aborted) setOrigin({ host });
+      }).catch((error: unknown) => {
+        if (!lifetime.signal.aborted && !pending.signal.aborted)
+          setOrigin({ error: error instanceof Error ? error.message : String(error) });
+      });
+    };
+    const unsubscribe = services.subscribeDefaultHost(refresh);
+    refresh();
+    return () => { lifetime.abort(); request?.abort(); unsubscribe(); };
+  }, [services, enabled]);
+  const host = origin?.host;
+  const onResolving = React.useCallback(() => { setResolved(undefined); }, []);
+  const onResolved = React.useCallback((sessionId: string) => {
+    if (host) setResolved({ host, sessionId });
+  }, [host]);
+  const onError = React.useCallback((error: string) => {
+    if (host) setResolved({ host, error });
+  }, [host]);
+  const current = enabled && resolved?.host === host ? resolved : undefined;
+  const error = origin?.error ?? current?.error;
+  return {
+    sessionId: current?.sessionId,
+    resolver: enabled ? <>
+      {host ? <ClientPluginSlot host={host} entryId={entryId} name="session.resolve"
+        input={{ locale, onResolving, onResolved, onError }} /> : null}
+      {error ? <div role="status" className="clientPluginFailure">{error}</div> : null}
+    </> : null,
+  };
 }

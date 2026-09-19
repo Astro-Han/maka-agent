@@ -22,6 +22,8 @@ import type { ClientSnapshot, ClientRemoteFactory, ClientFilesFactory } from '@m
 
 export interface ClientHostRef { readonly profileId: string; readonly hostId: string }
 export interface ClientPluginServices {
+  defaultHost(signal: AbortSignal): Promise<ClientHostRef>;
+  subscribeDefaultHost(listener: () => void): () => void;
   connect(host: ClientHostRef): {
     readonly remote: ClientRemoteFactory;
     readonly localFiles?: ClientFilesFactory;

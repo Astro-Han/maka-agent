@@ -19,7 +19,8 @@
 use super::Setup;
 use futures_util::future::BoxFuture;
 use maka_plugins::{
-    composition::{Entry, Operation, Scope},
+    client::{Bundle, Client},
+    composition::{Entry, Injection, Operation, Scope},
     contributions::{Catalog, Staged},
     kernel::{Definition, Plugin, PluginContext},
 };
@@ -36,6 +37,7 @@ pub(crate) mod control;
 pub(crate) mod coordinator;
 pub(crate) mod correction;
 pub(crate) mod delegation;
+mod remote;
 pub(crate) mod resume;
 pub(crate) mod selection;
 pub(crate) mod target;
@@ -43,6 +45,10 @@ pub(crate) mod tools;
 pub(crate) use control::Control;
 
 pub(crate) const ID: &str = "maka.workhub";
+const CLIENT_SERVICE: &str = "maka.workhub.client";
+struct ClientSupport {
+    bundle: Arc<Bundle>,
+}
 
 /// Immutable admission policy. An accepted Run retains this baseline in its
 /// canonical opening; disabling the provider closes new WorkHub admissions.
@@ -82,29 +88,46 @@ pub(crate) fn install(
             plugin: Arc::new(WorkHub {
                 commands,
                 workspace: state_root.join("workhub-coordination"),
+                bundle: Bundle::builtin(
+                    ID,
+                    env!("CARGO_PKG_VERSION"),
+                    include_str!(concat!(env!("OUT_DIR"), "/workhub-client.js")),
+                )?,
             }),
         }),
     );
     let mut entry = Entry::new(ID)?;
     entry.package_id = Some(ID.into());
+    let mut client = Entry::new("maka.workhub.ui")?;
+    client.package_id = Some(ID.into());
+    client.inject = Injection::Names(vec![CLIENT_SERVICE.into()]);
     setup.layers.insert(
         ID.into(),
-        vec![Operation::Insert {
-            root_id: Some(Scope::Profile),
-            parent_id: None,
-            position: None,
-            entry,
-        }],
+        vec![
+            Operation::Insert {
+                root_id: Some(Scope::Profile),
+                parent_id: None,
+                position: None,
+                entry,
+            },
+            Operation::Insert {
+                root_id: Some(Scope::DesktopUi),
+                parent_id: None,
+                position: None,
+                entry: client,
+            },
+        ],
     );
     Ok(())
 }
 struct WorkHub {
     commands: Arc<dyn control::Commands>,
     workspace: std::path::PathBuf,
+    bundle: Arc<Bundle>,
 }
 impl Plugin for WorkHub {
     fn supports_scope(&self, scope: &Scope) -> bool {
-        *scope == Scope::Profile
+        matches!(scope, Scope::Profile | Scope::DesktopUi)
     }
     fn validate(&self, _: &Scope, config: &Value) -> Result<(), maka_plugins::Error> {
         if config.is_null() || config.as_object().is_some_and(|value| value.is_empty()) {
@@ -118,10 +141,40 @@ impl Plugin for WorkHub {
     fn activate(
         &self,
         context: PluginContext,
-        _: Value,
+        config: Value,
     ) -> BoxFuture<'static, Result<Staged, String>> {
+        if context
+            .lifecycle
+            .identity()
+            .is_ok_and(|identity| identity.scope == Scope::DesktopUi)
+        {
+            return Box::pin(async move {
+                let provider = context
+                    .services
+                    .get::<ClientSupport>(CLIENT_SERVICE)
+                    .map_err(|error| error.to_string())?
+                    .ok_or("WorkHub backend is not active")?;
+                let support = provider.acquire().map_err(|error| error.to_string())?;
+                let identity = context
+                    .lifecycle
+                    .identity()
+                    .map_err(|error| error.to_string())?;
+                let mut staged = Staged::default();
+                staged
+                    .insert(
+                        identity.entry_id,
+                        Client {
+                            bundle: support.bundle.clone(),
+                            config,
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+                Ok(staged)
+            });
+        }
         let commands = self.commands.clone();
         let workspace = self.workspace.clone();
+        let bundle = self.bundle.clone();
         Box::pin(async move {
             let identity = context
                 .lifecycle
@@ -145,16 +198,23 @@ impl Plugin for WorkHub {
                     }],
                 },
             };
-            staged
-                .insert(
-                    ID,
-                    Control {
-                        commands,
-                        caller: context.lifecycle.clone(),
-                        workspace,
-                        policy: Arc::new(policy),
-                    },
+            let control = Control {
+                commands,
+                caller: context.lifecycle.clone(),
+                workspace,
+                policy: Arc::new(policy),
+            };
+            remote::publish(&mut staged, &control, &bundle.content_digest)?;
+            context
+                .services
+                .provide(
+                    &context.lifecycle,
+                    CLIENT_SERVICE,
+                    Arc::new(ClientSupport { bundle }),
                 )
+                .map_err(|error| error.to_string())?;
+            staged
+                .insert(ID, control)
                 .map_err(|error| error.to_string())?;
             Ok(staged)
         })

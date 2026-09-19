@@ -38,7 +38,6 @@ import { getDesktopConversationCopy } from '../../../locales/conversation-copy.j
 import { getShellCopy, localizedShellErrorMessage } from '../../../locales/shell-copy.js';
 import { sideChatTitleFromPrompt } from '../../../side-chat-command.js';
 import { desktopSessionKey, parseDesktopSessionKey } from '../../../../shared/runtime-host-identity.js';
-import { useWorkHubWorkspace } from '../../../application/contracts/workhub-workspace/use-workhub-workspace.js';
 import { useWorkbarServices } from '../services-context.js';
 import type { WorkbarHostModel } from '../ui/workbar-host.js';
 import { SKIP_SIDE_CHAT_CLOSE_CONFIRMATION_KEY } from '../ui/side-chat-close-confirmation.js';
@@ -99,7 +98,7 @@ export interface WorkbarControllerSelectors {
 }
 
 export interface UseWorkbarControllerInput {
-  workHub?: { enabled: boolean; active: boolean };
+  workHub?: { enabled: boolean; active: boolean; sessionId?: string };
   /** Whether the Session workspace (rather than a module page) owns the shell. */
   available: boolean;
   /** Local selection owns layout even while Host creation is pending. */
@@ -158,9 +157,12 @@ function nextOrdinal(
 export function useWorkbarController(
   requested: UseWorkbarControllerInput,
 ): WorkbarController {
-  const coordination = useWorkHubWorkspace(requested.workHub?.enabled ?? false, requested.authoritativeSessionIds);
+  const coordinationSessionId = requested.workHub?.enabled ? requested.workHub.sessionId : undefined;
+  const authoritativeSessionIds = useMemo(() => requested.authoritativeSessionIds && new Set([
+    ...requested.authoritativeSessionIds, ...(coordinationSessionId ? [coordinationSessionId] : []),
+  ]), [requested.authoritativeSessionIds, coordinationSessionId]);
   const workspace = requested.workHub?.active ? 'workhub' : 'session';
-  const activeSessionId = requested.workHub?.active ? coordination.sessionId : requested.activeSession?.id;
+  const activeSessionId = requested.workHub?.active ? coordinationSessionId : requested.activeSession?.id;
   const input: UseWorkbarControllerInput = requested.workHub?.active ? {
     ...requested,
     available: requested.available && Boolean(activeSessionId),
@@ -168,8 +170,8 @@ export function useWorkbarController(
     activeSession: undefined,
     projectId: null,
     projectAliases: [],
-    authoritativeSessionIds: coordination.authoritativeSessionIds,
-  } : { ...requested, authoritativeSessionIds: coordination.authoritativeSessionIds };
+    authoritativeSessionIds,
+  } : { ...requested, authoritativeSessionIds };
   const locale = useUiLocale();
   // Enforce development-only: the experimental Start-task path must never be
   // reachable in a production build even if the flag is set, so the gate

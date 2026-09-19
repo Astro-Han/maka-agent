@@ -33,6 +33,8 @@ pub(crate) struct WorkHubCommands {
     executions: Weak<Executions>,
     pub(super) project_usage: crate::server::ProjectUsage,
     root_id: String,
+    catalog: Arc<crate::server::CatalogFeed>,
+    changes: tokio::sync::broadcast::Sender<serde_json::Value>,
 }
 impl WorkHubCommands {
     fn executions(&self) -> Result<Arc<Executions>> {
@@ -63,15 +65,35 @@ impl WorkHubCommands {
         executions: &Arc<Executions>,
         project_usage: crate::server::ProjectUsage,
         root_id: String,
+        catalog: Arc<crate::server::CatalogFeed>,
+        changes: tokio::sync::broadcast::Sender<serde_json::Value>,
     ) -> Self {
         Self {
             executions: Arc::downgrade(executions),
             project_usage,
             root_id,
+            catalog,
+            changes,
         }
+    }
+
+    async fn coordinator_changed(&self) -> Result<()> {
+        self.catalog
+            .publish_session(
+                &self.changes,
+                maka_runtime::workhub::COORDINATION_SESSION_ID,
+            )
+            .await
+            .map_err(super::super::internal)
     }
 }
 impl Commands for WorkHubCommands {
+    fn answer_receipt<'a>(
+        &'a self,
+        request: &'a crate::plugins::workhub::answer::Request,
+    ) -> BoxFuture<'a, Result<Option<maka_protocol::workhub::TurnResult>>> {
+        Box::pin(async move { self.executions()?.workhub_answer_receipt(request).await })
+    }
     fn client_call(
         &self,
         caller: Context,
@@ -147,9 +169,17 @@ impl Commands for WorkHubCommands {
         model: crate::plugins::workhub::coordinator::model::Prepared,
     ) -> BoxFuture<'_, Result<maka_event_log::sessions::SessionMutation<SessionConfiguration>>>
     {
-        Box::pin(
-            async move { super::coordinator::configure(&self.executions()?, caller, model).await },
-        )
+        Box::pin(async move {
+            let expected = model.expected_revision;
+            let result = super::coordinator::configure(&self.executions()?, caller, model).await?;
+            if matches!(
+                &result,
+                maka_event_log::sessions::SessionMutation::Committed(record) if record.revision != expected
+            ) {
+                self.coordinator_changed().await?;
+            }
+            Ok(result)
+        })
     }
     fn coordinator(
         &self,
@@ -169,7 +199,10 @@ impl Commands for WorkHubCommands {
         resolution: crate::plugins::workhub::coordinator::Resolution,
     ) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
-            super::coordinator::resolve(&self.executions()?, caller, resolution).await
+            if super::coordinator::resolve(&self.executions()?, caller, resolution).await? {
+                self.coordinator_changed().await?;
+            }
+            Ok(())
         })
     }
     fn selection(

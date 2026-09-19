@@ -29,6 +29,7 @@ import { FramedTransport } from '../../packages/runtime-host/src/transport/frame
 import { configureModel } from './client-runtime-policy-fixture.mjs';
 import { verifyWorkhubAnswer } from './client-workhub-answer.mjs';
 import { verifyWorkhubDelegation } from './client-workhub-delegation.mjs';
+import { toggleWorkhub, workhubRemote } from './client-workhub-plugin.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -50,6 +51,7 @@ const { values } = parseArgs({
 const socket = connect(values.socket);
 const transport = new FramedTransport(socket);
 let connection;
+const remotes = [];
 try {
   await once(socket, 'connect');
   const connected = await connectRuntimeHostMessageTransport({
@@ -105,9 +107,24 @@ try {
     console.log(values.reopened ? 'workhub-answer-reopened' : 'workhub-answer-passed');
   } else {
     const request = (operation, input) => connection.request(operation, input, 5000);
-    const resolve = () => request('workhub.coordination.resolve', {});
-    const query = () => request('workhub.coordination.query', {});
-    const configure = (input) => request('workhub.coordination.configureModel', input);
+    let remote = await workhubRemote(connection);
+    remotes.push(remote);
+    const resolve = () => remote.method('resolve')();
+    const query = () => remote.method('query')();
+    const configure = (input) => remote.method('configure-model')(input);
+    const notices = [];
+    connection.subscribeSessionCatalogChanges((notice) => notices.push(notice));
+    const observed = async (action) => {
+      const count = notices.length;
+      const result = await action();
+      const deadline = Date.now() + 3000;
+      while (notices.length === count) {
+        assert(Date.now() < deadline, 'Remote mutation must publish a Session notice');
+        await delay(10);
+      }
+      assert.equal(notices.at(-1).sessionId, 'maka_workhub_coordination');
+      return result;
+    };
     const sessionId = 'maka_workhub_coordination';
     const file = join(values['workhub-workspace'], 'workhub.json');
     if (values.reopened) {
@@ -121,7 +138,18 @@ try {
       await assert.rejects(resolve(), (e) => e.code === 'operation_conflict');
       await assert.rejects(query(), (e) => e.code === 'persistence_failed');
       const { connection: model } = await configureModel(request);
-      assert.deepEqual(await Promise.all([resolve(), resolve()]), [{ sessionId }, { sessionId }]);
+      assert.deepEqual(await observed(() => Promise.all([resolve(), resolve()])), [
+        { sessionId },
+        { sessionId },
+      ]);
+      await assert.rejects(
+        remote.method('query', 'unrelated')(),
+        (error) => error.code === 'invalid_request',
+      );
+      await assert.rejects(
+        remote.method('resolve')({ connectionId: 'forged' }),
+        (error) => error.code === 'invalid_request',
+      );
       const initial = await query();
       assert.equal(initial.id, sessionId);
       assert.equal(initial.name, 'WorkHub');
@@ -149,7 +177,7 @@ try {
         initial,
         'unsupported thinking cannot partially change the model',
       );
-      const configured = await configure(input);
+      const configured = await observed(() => configure(input));
       assert.equal(configured.kind, 'committed');
       assert.equal(configured.session.connectionLocked, true);
       assert.equal(configured.session.thinkingLevel, undefined);
@@ -202,25 +230,32 @@ try {
       await rmdir(initial.workspace.hostCwd);
       assert.deepEqual(await query(), configured.session);
       await assert.rejects(access(initial.workspace.hostCwd), (e) => e.code === 'ENOENT');
+      const staleQuery = remote.method('query');
+      await staleQuery();
       for (const disabled of [true, false]) {
-        await request('plugin.composition.apply', {
-          operations: [{ type: 'update', entryId: 'maka.workhub', patch: { disabled } }],
-        });
-        const deadline = Date.now() + 5000;
-        while (
-          (await request('plugin.platform.query', { view: 'status' })).convergence !== 'converged'
-        ) {
-          assert(Date.now() < deadline, 'WorkHub did not converge');
-          await delay(10);
-        }
+        await toggleWorkhub(connection, disabled);
+        await assert.rejects(staleQuery(), (error) => error.code === 'operation_conflict');
         if (disabled) {
-          await assert.rejects(query(), (error) => error.code === 'operation_unavailable');
-          await assert.rejects(resolve(), (error) => error.code === 'operation_unavailable');
+          const page = await request('plugin.client.query', { kind: 'snapshot' });
+          assert(!page.entries.some((entry) => entry.extensionId === 'maka.workhub'));
           await assert.rejects(
-            configure({ ...input, expectedRevision: configured.session.revision }),
+            request('workhub.coordination.query', {}),
+            (error) => error.code === 'operation_unavailable',
+          );
+          await assert.rejects(
+            request('workhub.coordination.resolve', {}),
+            (error) => error.code === 'operation_unavailable',
+          );
+          await assert.rejects(
+            request('workhub.coordination.configureModel', {
+              ...input,
+              expectedRevision: configured.session.revision,
+            }),
             (error) => error.code === 'operation_unavailable',
           );
         } else {
+          remote = await workhubRemote(connection);
+          remotes.push(remote);
           assert.deepEqual(await query(), configured.session);
         }
         await assert.rejects(access(initial.workspace.hostCwd), (error) => error.code === 'ENOENT');
@@ -271,6 +306,7 @@ try {
     }
   }
 } finally {
+  await Promise.all(remotes.map((remote) => remote.close()));
   transport.abort();
   await connection?.close();
 }

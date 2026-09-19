@@ -116,6 +116,7 @@ pub(super) async fn execute(
     configuration.tool_mode = plan.tool_mode;
     configuration.system_prompt = Some(plan.control.policy.prompt.clone());
     configuration.tool_composition = Some(composition);
+    crate::plugins::workhub::control::check_request(&plan.cancellation)?;
     executions
         .launch(RunInput {
             invocation: Invocation {
@@ -149,6 +150,7 @@ async fn current(
     executions: &Executions,
     plan: &Plan,
 ) -> Result<SessionRecord<SessionConfiguration>> {
+    crate::plugins::workhub::control::check_request(&plan.cancellation)?;
     if executions.shutdown.is_cancelled() {
         return Err(failure(Code::HostDraining, "Host is draining"));
     }

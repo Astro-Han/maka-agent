@@ -32,6 +32,7 @@ if (require('esbuild/package.json').version !== lock.packages['node_modules/esbu
 for (const [name, entryPoint] of [
   ['agent-graph', 'crates/runtime-host/src/plugins/graph/client.tsx'],
   ['skills', 'crates/skills/src/client.tsx'],
+  ['workhub', 'crates/runtime-host/src/plugins/workhub/client.tsx'],
 ]) {
   const source = await buildClient(
     {

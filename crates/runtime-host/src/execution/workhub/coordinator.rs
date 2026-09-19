@@ -58,8 +58,9 @@ pub(super) async fn resolve(
     executions: &Arc<Executions>,
     caller: Context,
     resolution: Resolution,
-) -> Result<()> {
+) -> Result<bool> {
     let _gate = executions.lock_admission().await;
+    crate::plugins::workhub::control::check_request(&resolution.cancellation)?;
     let _call = caller
         .admit()
         .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
@@ -69,7 +70,7 @@ pub(super) async fn resolve(
     validate_workspace(&resolution.workspace)?;
     if let Some(record) = executions.workhub_coordinator().await? {
         if record.configuration.workspace == resolution.workspace {
-            return Ok(());
+            return Ok(false);
         }
         if executions
             .has_session_work(COORDINATION_SESSION_ID)
@@ -84,6 +85,7 @@ pub(super) async fn resolve(
                 "WorkHub workspace cannot change while executing",
             ));
         }
+        crate::plugins::workhub::control::check_request(&resolution.cancellation)?;
         let result = executions
             .log
             .update_session_metadata(
@@ -102,7 +104,7 @@ pub(super) async fn resolve(
                 "WorkHub Session changed during resolution",
             ));
         }
-        return Ok(());
+        return Ok(true);
     }
     let creation = resolution.creation.ok_or_else(|| {
         failure(
@@ -124,6 +126,7 @@ pub(super) async fn resolve(
         .as_millis()
         .try_into()
         .map_err(internal)?;
+    crate::plugins::workhub::control::check_request(&resolution.cancellation)?;
     let record = executions
         .log
         .create_session(
@@ -134,5 +137,6 @@ pub(super) async fn resolve(
         )
         .await
         .map_err(|error| stored(executions, error))?;
-    validate(&record)
+    validate(&record)?;
+    Ok(true)
 }

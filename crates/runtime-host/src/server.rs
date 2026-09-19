@@ -23,6 +23,7 @@ mod authority;
 mod bootstrap;
 pub(crate) mod capabilities;
 mod catalog_feed;
+pub(crate) use catalog_feed::CatalogFeed;
 pub(crate) mod configuration;
 mod connection;
 mod connection_effects;
@@ -265,6 +266,8 @@ impl Host {
             &executions,
             project_usage.clone(),
             root.root_id().into(),
+            session_catalog.clone(),
+            changes.clone(),
         ));
         crate::plugins::workhub::install(
             &mut setup,

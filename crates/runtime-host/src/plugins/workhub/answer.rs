@@ -52,6 +52,7 @@ pub(crate) struct Plan {
     pub control: super::Control,
     pub tool_mode: ToolMode,
     pub max_steps: usize,
+    pub cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl super::Control {
@@ -59,7 +60,12 @@ impl super::Control {
         &self,
         request: Request,
         connection: uuid::Uuid,
+        cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<TurnResult> {
+        if let Some(receipt) = self.commands.answer_receipt(&request).await? {
+            return Ok(receipt);
+        }
+        super::control::check_request(&cancellation)?;
         let _call = self
             .caller
             .admit()
@@ -83,6 +89,7 @@ impl super::Control {
                         ToolMode::Direct
                     },
                     max_steps: 64,
+                    cancellation,
                 },
                 connection,
             )

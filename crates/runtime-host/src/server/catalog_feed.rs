@@ -31,7 +31,7 @@ const MAX_NOTICE_REVISION: u64 = 9_007_199_254_740_991;
 
 /// Disposable delivery state; the log remains the source of execution changes.
 /// One lock orders both cursor advancement and all session notice publication.
-pub(super) struct CatalogFeed(Mutex<Cursor>);
+pub(crate) struct CatalogFeed(Mutex<Cursor>);
 
 struct Cursor {
     after: u64,
@@ -43,7 +43,7 @@ impl CatalogFeed {
         Self(Mutex::new(Cursor { after, revision: 0 }))
     }
 
-    pub(super) async fn publish_session(
+    pub(crate) async fn publish_session(
         &self,
         changes: &broadcast::Sender<Value>,
         session_id: &str,

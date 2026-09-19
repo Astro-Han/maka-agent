@@ -50,6 +50,10 @@ pub(crate) struct Stop {
 /// Commands own admission, durable receipts and settlement. No locks, arbitrary
 /// log writes or Host handles are exposed to the business implementation.
 pub(crate) trait Commands: Send + Sync {
+    fn answer_receipt<'a>(
+        &'a self,
+        request: &'a super::answer::Request,
+    ) -> BoxFuture<'a, Result<Option<maka_protocol::workhub::TurnResult>>>;
     fn client_call(
         &self,
         caller: Context,
@@ -164,6 +168,17 @@ pub(crate) struct Control {
     pub(super) caller: Context,
     pub(super) workspace: std::path::PathBuf,
     pub(crate) policy: Arc<super::Policy>,
+}
+
+pub(crate) fn check_request(cancellation: &tokio_util::sync::CancellationToken) -> Result<()> {
+    if cancellation.is_cancelled() {
+        Err(failure(
+            Code::OperationConflict,
+            "WorkHub request was cancelled",
+        ))
+    } else {
+        Ok(())
+    }
 }
 impl Control {
     pub async fn stop(&self, input: ActInput) -> Result<ActResult> {

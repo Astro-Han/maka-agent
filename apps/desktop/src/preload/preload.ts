@@ -1430,6 +1430,7 @@ const makaBridge = {
   clientPlugins: {
     subscribeContext(host, handler) {
       const disposers = [
+        subscribeSelectedRuntimeHostEvent('connections:event', host, handler),
         subscribeSelectedRuntimeHostEvent('mcp:changed', host, handler),
         subscribeSelectedRuntimeHostEvent('projects:changed', host, handler),
         subscribeSelectedRuntimeHostEvent<[SessionChangedEvent]>('sessions:changed', host, (event) => {

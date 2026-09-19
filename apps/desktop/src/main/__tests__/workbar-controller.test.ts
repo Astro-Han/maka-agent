@@ -17,7 +17,6 @@
  * under the License.
  */
 
-import { WorkHubWorkspaceServicesProvider, type WorkHubWorkspaceServices } from '../../renderer/application/contracts/workhub-workspace/use-workhub-workspace.js';
 import { deferred } from '@maka/core/test-only/async-primitives';
 import { strict as assert } from 'node:assert';
 import { afterEach, describe, it } from 'node:test';
@@ -505,17 +504,11 @@ describe('useWorkbarController', () => {
     const { root } = installReactRenderer();
     const services = createFakeWorkbarServices();
     const coordinationId = desktopSessionKey({ hostId: 'local', sessionId: 'maka_workhub_coordination' });
-    const coordination: WorkHubWorkspaceServices = {
-      resolve: async () => coordinationId,
-      subscribeHosts: () => () => {},
-      subscribeAvailability: () => () => {},
-    };
     const ordinary = input(session('ordinary'));
     const render = (active: boolean) => root.render(createElement(LocaleProvider, {
       locale: 'en',
       children: createElement(WorkbarServicesProvider, { services },
-        createElement(WorkHubWorkspaceServicesProvider, { value: coordination },
-          createElement(ControllerProbe, { ...ordinary, workHub: { enabled: true, active } }))),
+        createElement(ControllerProbe, { ...ordinary, workHub: { enabled: true, active, sessionId: coordinationId } })),
     }));
     await act(async () => render(true));
     assert.equal(controller().host.activeId, coordinationId);

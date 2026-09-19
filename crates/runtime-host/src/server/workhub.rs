@@ -74,7 +74,11 @@ pub(super) async fn execute(
 ) -> Result<Outcome, HostError> {
     let result = match operation {
         Operation::WorkhubCoordinationResolve => match control(host) {
-            Ok(control) => control.value.resolve().await.and_then(serialize),
+            Ok(control) => control
+                .value
+                .resolve(Default::default())
+                .await
+                .and_then(serialize),
             Err(error) => Err(error),
         },
         Operation::WorkhubCoordinationQuery => match control(host) {
@@ -126,7 +130,7 @@ pub(super) async fn execute(
             match control(host) {
                 Ok(control) => control
                     .value
-                    .configure_model(input)
+                    .configure_model(input, Default::default())
                     .await
                     .and_then(serialize),
                 Err(error) => Err(error),
@@ -139,7 +143,10 @@ pub(super) async fn execute(
             workhub::decode_output(operation, &value)?;
             if !matches!(
                 operation,
-                Operation::WorkhubCoordinationQuery | Operation::WorkhubCoordinationCandidates
+                Operation::WorkhubCoordinationQuery
+                    | Operation::WorkhubCoordinationCandidates
+                    | Operation::WorkhubCoordinationResolve
+                    | Operation::WorkhubCoordinationConfigureModel
             ) {
                 host.session_catalog
                     .publish_session(&host.changes, COORDINATION_SESSION_ID)
@@ -160,7 +167,10 @@ async fn answer(
     if let Some(receipt) = host.executions.workhub_answer_receipt(&request).await? {
         return Ok(receipt);
     }
-    control(host)?.value.answer(request, connection_id).await
+    control(host)?
+        .value
+        .answer(request, connection_id, Default::default())
+        .await
 }
 
 fn serialize(value: impl serde::Serialize) -> Result<Value, OperationError> {

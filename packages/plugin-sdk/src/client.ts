@@ -40,6 +40,14 @@ export interface ClientDescriptor extends ClientIdentity {
 
 /** Augment this interface for slots agreed upon by a product and its plugins. */
 export interface ClientSlots {
+  /** Resolve a plugin-owned Session for an explicitly selected workspace provider. */
+  'session.resolve': {
+    readonly contextRevision?: number;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly onResolving: () => void;
+    readonly onResolved: (sessionId: string, signal: AbortSignal) => void;
+    readonly onError: (message: string) => void;
+  };
   'workspace.composer.before': ClientWorkspace & {
     readonly contextRevision?: number;
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';

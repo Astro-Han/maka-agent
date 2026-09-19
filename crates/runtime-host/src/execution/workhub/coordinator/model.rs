@@ -26,6 +26,7 @@ pub(in crate::execution::workhub) async fn configure(
     model: Prepared,
 ) -> Result<SessionMutation<SessionConfiguration>> {
     let _gate = executions.lock_admission().await;
+    crate::plugins::workhub::control::check_request(&model.cancellation)?;
     let _call = caller
         .admit()
         .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
@@ -73,6 +74,7 @@ pub(in crate::execution::workhub) async fn configure(
             ));
         }
     }
+    crate::plugins::workhub::control::check_request(&model.cancellation)?;
     executions
         .log
         .update_session_metadata(

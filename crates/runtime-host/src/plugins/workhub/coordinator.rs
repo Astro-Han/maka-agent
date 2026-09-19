@@ -31,6 +31,7 @@ mod workspace;
 pub(crate) struct Resolution {
     pub workspace: WorkspaceProjection,
     pub creation: Option<Box<Creation>>,
+    pub cancellation: tokio_util::sync::CancellationToken,
 }
 
 impl super::Control {
@@ -50,7 +51,11 @@ impl super::Control {
         )))
     }
 
-    pub(crate) async fn resolve(&self) -> Result<ResolveResult> {
+    pub(crate) async fn resolve(
+        &self,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<ResolveResult> {
+        super::control::check_request(&cancellation)?;
         let _call = self
             .caller
             .admit()
@@ -98,6 +103,7 @@ impl super::Control {
                 Resolution {
                     workspace,
                     creation,
+                    cancellation,
                 },
             )
             .await?;

@@ -28,7 +28,19 @@ import { clientPluginRemote } from './client-plugin-remote.js';
 export function createDesktopClientPluginServices(
   bridge: Pick<MakaBridge, 'clientPlugins' | 'runtimeHostProfiles'> = window.maka,
 ): ClientPluginServices {
+  let defaultProfile: string | undefined;
   return {
+    async defaultHost(signal) {
+      const host = await bounded(bridge.runtimeHostProfiles.getDefaultHost(), signal);
+      signal.throwIfAborted();
+      defaultProfile = host.profileId;
+      return host;
+    },
+    subscribeDefaultHost(listener) {
+      return bridge.runtimeHostProfiles.subscribeChanges((event) => {
+        if (event.isDefault || event.profileId === defaultProfile) listener();
+      });
+    },
     connect(host) {
       const query: typeof bridge.clientPlugins.query = async (origin, input) => bridge.clientPlugins.query(origin, input);
       let targetEpoch: string | undefined;
