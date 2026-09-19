@@ -156,6 +156,7 @@ import { registerNotificationsIpc } from "./notifications-ipc-main.js";
 import { registerMarkdownSaveIpc } from "./markdown-save-ipc-main.js";
 import { registerPetPackIpc } from "./pet-pack-import.js";
 import { registerWorkBoardIpc } from "./work-board-ipc-main.js";
+import type { WorkBoardChangedEvent } from "../shared/work-board-ipc.js";
 import {
   createPermissionOverlayMain,
   registerPermissionOverlayIpc,
@@ -1309,6 +1310,12 @@ const registerDesktopWorkBoard = (): void => {
         }
       },
     });
+    // A panel that loaded before registration rejected with "No handler
+    // registered"; the changed event pokes it to reload.
+    mainWindowController.send('workBoard:changed', {
+      type: 'work_board_changed',
+      ts: Date.now(),
+    } satisfies WorkBoardChangedEvent);
   } catch (error) {
     console.error('[work-board] IPC registration failed:', error);
   }
