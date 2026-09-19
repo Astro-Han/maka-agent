@@ -19,3 +19,15 @@
 
 /** Shared Renderer components supported for trusted Client bundles. */
 export { Button } from '@astryxdesign/core/Button';
+export { IconButton, Link, List, ListItem, StatusDot, Text } from '@astryxdesign/core';
+export {
+  ChatSurfaceLayout, ChatView, Composer, type ComposerHandle, type ComposerProps,
+  UserQuestionPrompt, FormInteractionPrompt, MakaWordmark, useUiLocale, useToast,
+  dotForStatus, presentSessionStatus, applyLiveTurnBufferEvent, retainLiveTurn,
+  activeInteractionFor, reduceInteractionQueues, reconcileInteractions, clearInteractions,
+  armLiveTurn, createTranscriptViewportNavigation, reconcileLiveTurnBuffer, settleLiveTurnBufferStep,
+  type LiveTurnBuffer, type InteractionQueues, type LiveTurnProjection, type TransientUserMessageProjection,
+} from './index.js';
+export { useComposerAttachments } from './use-composer-attachments.js';
+export { toComposerIngestItems } from './composer-attachments.js';
+export { WorkbarEdgeToggle } from './workbar-edge-toggle.js';

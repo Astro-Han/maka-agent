@@ -18,8 +18,8 @@
  */
 
 import { useEffect, type Ref } from 'react';
-import { IconButton } from '@astryxdesign/core';
-import { MakaWordmark, useUiLocale, type LiveTurnProjection } from '@maka/ui';
+import { IconButton } from '@maka/ui/plugin';
+import { MakaWordmark, useUiLocale, type LiveTurnProjection } from '@maka/ui/plugin';
 import { ArrowRight, X } from '@maka/ui/icons';
 import type { StoredMessage } from '@maka/core/session';
 import type { WorkHubControlSnapshot } from '../native.js';

@@ -20,8 +20,8 @@
 import { useContext, useRef, useState, type CSSProperties } from 'react';
 import type { WorkHubRailCopy } from '../locales/workhub-copy.js';
 import type { UiLocale } from '@maka/core/ui-locale';
-import { Button, dotForStatus, presentSessionStatus } from '@maka/ui';
-import { List, ListItem, StatusDot } from '@astryxdesign/core';
+import { Button, dotForStatus, presentSessionStatus } from '@maka/ui/plugin';
+import { List, ListItem, StatusDot } from '@maka/ui/plugin';
 import {
   deriveWorkHubAnchors,
   matchesWorkHubFilter,

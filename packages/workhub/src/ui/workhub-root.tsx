@@ -25,16 +25,16 @@ import {
   MakaWordmark,
   useUiLocale,
   type ComposerHandle,
-} from '@maka/ui';
-import { Button, IconButton } from '@astryxdesign/core';
+} from '@maka/ui/plugin';
+import { Button, IconButton } from '@maka/ui/plugin';
 import { ChevronDown, PictureInPicture2, Undo2, X } from '@maka/ui/icons';
 import { useLiveContextUsage } from '@maka/ui/context-usage';
 import { selectLatestRequestUsage } from '@maka/ui/context-usage';
 import { WorkHubProgressCard } from './workhub-progress-card.js';
 import { WorkHubComposer } from './workhub-composer.js';
 import { WorkHubConversation } from '../conversation.js';
-import { FormInteractionPrompt } from '@maka/ui';
-import { WorkbarEdgeToggle } from '@maka/ui/workbar-edge-toggle';
+import { FormInteractionPrompt } from '@maka/ui/plugin';
+import { WorkbarEdgeToggle } from '@maka/ui/plugin';
 import { WorkHubNavigationRail } from '../conversation.js';
 import {
   useWorkHubHighlightState,

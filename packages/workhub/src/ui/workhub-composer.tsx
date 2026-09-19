@@ -18,9 +18,15 @@
  */
 
 import { forwardRef, useRef, useState } from 'react';
-import { Composer, useToast, useUiLocale, type ComposerHandle, type ComposerProps } from '@maka/ui';
-import { useComposerAttachments } from '@maka/ui/use-composer-attachments';
-import { toComposerIngestItems } from '@maka/ui/composer-attachments';
+import {
+  Composer,
+  useToast,
+  useUiLocale,
+  type ComposerHandle,
+  type ComposerProps,
+} from '@maka/ui/plugin';
+import { useComposerAttachments } from '@maka/ui/plugin';
+import { toComposerIngestItems } from '@maka/ui/plugin';
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT } from '@maka/core/attachments';
 import type { AttachmentRef, FollowUpMode } from '@maka/core/events';
 import type { WorkHubAttachmentServices } from './ports.js';

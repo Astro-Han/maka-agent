@@ -18,9 +18,9 @@
  */
 
 import { useContext, useMemo, type ComponentProps, type CSSProperties } from 'react';
-import { ChatView, useUiLocale } from '@maka/ui';
+import { ChatView, useUiLocale } from '@maka/ui/plugin';
 import type { UiLocale } from '@maka/core/ui-locale';
-import { Button, Link, Text } from '@astryxdesign/core';
+import { Button, Link, Text } from '@maka/ui/plugin';
 import { WorkHubHighlightContext, useWorkHubIdentityHue } from './workhub-work-identity.js';
 import type { WorkHubDelegationState, WorkHubLinkedWork } from '../model/linked-work.js';
 import { workHubLiveCopy } from '../locales/workhub-live-copy.js';

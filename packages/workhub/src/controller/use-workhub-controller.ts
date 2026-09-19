@@ -39,7 +39,7 @@ import {
   useUiLocale,
   type LiveTurnProjection,
   type TransientUserMessageProjection,
-} from '@maka/ui';
+} from '@maka/ui/plugin';
 import type { WorkHubAnswerInput, WorkHubAnswerResult } from './ports.js';
 import type {
   AttachmentRef,

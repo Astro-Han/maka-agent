@@ -17,17 +17,19 @@
   "scripts": {
     "clean": "node ../../scripts/clean-paths.mjs dist tsconfig.tsbuildinfo",
     "build": "tsc -p tsconfig.json",
+    "test:dist": "node --test tests/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@maka/runtime-host": "0.1.0",
-    "@astryxdesign/core": "0.6.1",
     "@maka/core": "0.1.0",
     "@maka-agent/plugin-sdk": "1.0.0",
     "@maka/ui": "0.1.0",
     "react": "^19.3.0"
   },
   "devDependencies": {
+    "esbuild": "^0.28.1",
+    "react-dom": "^19.3.0",
     "@types/react": "^19.3.0"
   }
 }
