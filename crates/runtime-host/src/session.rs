@@ -28,6 +28,29 @@ pub(crate) use projection::mutation_projection;
 
 pub use metadata::apply_metadata_patch;
 
+/// Persistent manager ownership survives unload, disabled entries and restart.
+pub(crate) async fn require_unmanaged(
+    log: &maka_event_log::EventLog,
+    session_id: &str,
+    code: maka_protocol::OperationErrorCode,
+) -> std::result::Result<(), maka_protocol::OperationError> {
+    if log
+        .session_manager(session_id)
+        .await
+        .map_err(|error| maka_protocol::OperationError {
+            code: maka_protocol::OperationErrorCode::PersistenceFailed,
+            message: error.to_string(),
+        })?
+        .is_some()
+    {
+        return Err(maka_protocol::OperationError {
+            code,
+            message: "Session operation requires its manager".into(),
+        });
+    }
+    Ok(())
+}
+
 use maka_event_log::sessions::SessionRecord;
 use maka_protocol::session::*;
 use maka_protocol::{ProtocolError, Result};

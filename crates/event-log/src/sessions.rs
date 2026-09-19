@@ -21,7 +21,9 @@
 
 mod activity;
 mod execution;
+mod manager;
 mod metadata;
+pub use manager::ManagedSession;
 pub(crate) mod read_state;
 pub(crate) use activity::{initialize_execution, project_execution, register_functions};
 pub(crate) use execution::advance_revision;
@@ -219,6 +221,14 @@ pub(crate) async fn insert(
     validate_time(now)?;
     if configuration.len() > MAX_CONFIGURATION_BYTES {
         return Err(invalid("session configuration exceeds 64 KiB"));
+    }
+    let reserved: Option<String> =
+        sqlx::query_scalar("SELECT fingerprint FROM session_managers WHERE session_id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if reserved.is_some_and(|reserved| reserved != fingerprint) {
+        return Err(StoreError::SessionConflict);
     }
     let inserted = sqlx::query(
         "INSERT INTO session_control SELECT ?, ?, 1, ?, ?, 0, ?

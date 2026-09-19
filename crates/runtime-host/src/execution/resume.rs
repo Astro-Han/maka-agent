@@ -45,7 +45,8 @@ impl Executions {
         input: TurnResumeQueryInput,
         connection: Uuid,
     ) -> Result<TurnResumePlan> {
-        super::ordinary_session(&input.session_id)
+        self.ordinary_session(&input.session_id)
+            .await
             .map_err(|error| failure(Code::OperationUnavailable, &error.message))?;
         let session = self.resume_session(&input.session_id).await?;
         if self
@@ -98,7 +99,7 @@ impl Executions {
         input: TurnResumeStartInput,
         connection: Uuid,
     ) -> Result<TurnResumeStartResult> {
-        super::ordinary_session(&input.session_id)?;
+        self.ordinary_session(&input.session_id).await?;
         let mut prepared = None;
         loop {
             let admission = self.lock_admission().await;

@@ -29,12 +29,12 @@ pub(super) async fn create(
     input: SessionCreateInput,
 ) -> Result<SessionCatalogItem> {
     let log = &host.log;
-    if input.session_id == "maka_workhub_coordination" {
-        return Err(failure(
-            OperationErrorCode::OperationConflict,
-            "Session identity is reserved for WorkHub coordination",
-        ));
-    }
+    crate::session::require_unmanaged(
+        log,
+        &input.session_id,
+        OperationErrorCode::OperationConflict,
+    )
+    .await?;
     let thinking = input.thinking_level;
     let prepared = PreparedSession::new(input).map_err(invalid)?;
     let fingerprint = prepared.fingerprint();

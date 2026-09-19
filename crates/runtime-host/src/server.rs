@@ -290,6 +290,15 @@ impl Host {
                 root.root_id().into(),
             )?));
         }
+        for claim in &setup.managed_sessions {
+            if !setup.builtins.contains_key(claim.manager.package()) {
+                return Err(maka_plugins::Error::Invalid(
+                    "Session manager is not a linked plugin".into(),
+                )
+                .into());
+            }
+            log.reserve_managed_session(claim).await?;
+        }
         let data_root = root.canonical_path().to_owned();
         let data = tokio::task::spawn_blocking(move || {
             maka_plugins::storage::Directories::open(&data_root)

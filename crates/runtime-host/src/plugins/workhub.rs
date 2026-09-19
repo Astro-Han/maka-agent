@@ -79,6 +79,13 @@ pub(crate) fn install(
     }
     catalog.host_only::<Control>()?;
     catalog.reserve_for::<Control>(ID, ID)?;
+    setup
+        .managed_sessions
+        .push(maka_event_log::sessions::ManagedSession {
+            session_id: maka_runtime::workhub::COORDINATION_SESSION_ID.into(),
+            manager: maka_plugins::storage::Namespace::new(ID, Scope::Profile)?,
+            fingerprint: coordinator::fingerprint(),
+        });
     setup.builtins.insert(
         ID.into(),
         Arc::new(Definition {

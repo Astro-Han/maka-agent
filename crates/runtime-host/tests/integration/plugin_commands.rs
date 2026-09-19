@@ -464,7 +464,7 @@ fn native_plugin() -> maka_runtime_host::plugins::Setup {
                 .unwrap(),
             ],
         )]),
-        loader: None,
+        ..Default::default()
     }
 }
 

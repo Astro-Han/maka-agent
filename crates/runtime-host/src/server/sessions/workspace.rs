@@ -26,12 +26,8 @@ use std::path::{Component, Path, PathBuf};
 
 pub(super) async fn relocate(host: &Host, value: &Value) -> Result<SessionUpdateResult> {
     let input = decode_session_workspace_relocate_input(value).map_err(invalid)?;
-    if input.session_id == "maka_workhub_coordination" {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub workspace requires WorkHub authority",
-        ));
-    }
+    crate::session::require_unmanaged(&host.log, &input.session_id, Code::OperationConflict)
+        .await?;
     let _admission = host.executions.lock_admission().await;
     if host.draining.is_cancelled() {
         return Err(failure(Code::HostDraining, "Host is draining"));

@@ -234,6 +234,15 @@ impl BoundCommands {
 
     async fn authorize(&self, host: &Executions, session: &str) -> Result<(), Error> {
         self.authorize_origin(host).await?;
+        if host
+            .log
+            .session_manager(session)
+            .await
+            .map_err(storage)?
+            .is_some_and(|manager| manager != self.namespace)
+        {
+            return Err(Error::Denied);
+        }
         let grant = self
             .grants
             .lock()

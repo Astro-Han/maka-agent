@@ -36,6 +36,15 @@ impl BoundCommands {
         else {
             return Ok(());
         };
+        if host
+            .log
+            .session_manager(&source.session_id)
+            .await
+            .map_err(storage)?
+            .is_some_and(|manager| manager != self.namespace)
+        {
+            return Err(Error::Denied);
+        }
         let current = host
             .log
             .get_session::<SessionConfiguration>(&source.session_id)

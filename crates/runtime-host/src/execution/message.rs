@@ -39,7 +39,7 @@ impl Executions {
         root_id: &str,
         epoch: &str,
     ) -> Result<SubmitResult> {
-        super::ordinary_session(&input.session_id)?;
+        self.ordinary_session(&input.session_id).await?;
         let mut prepared = None;
         let mut queued: Option<(
             maka_runtime::event::Invocation,

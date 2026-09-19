@@ -29,7 +29,7 @@ impl Executions {
         connection_id: Uuid,
         root_id: &str,
     ) -> Result<TurnStartResult> {
-        super::ordinary_session(&input.session_id)?;
+        self.ordinary_session(&input.session_id).await?;
         let fingerprint = format!(
             "sha256:{:x}",
             Sha256::digest(serde_json::to_vec(&input).map_err(internal)?)

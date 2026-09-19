@@ -26,12 +26,8 @@ use serde_json::Value;
 
 pub(super) async fn update(host: &Host, value: &Value) -> Result<SessionUpdateResult> {
     let input = decode_session_configuration_update_input(value).map_err(invalid)?;
-    if input.session_id == "maka_workhub_coordination" {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub configuration requires WorkHub authority",
-        ));
-    }
+    crate::session::require_unmanaged(&host.log, &input.session_id, Code::OperationConflict)
+        .await?;
     apply(host, input).await
 }
 

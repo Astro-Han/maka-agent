@@ -26,12 +26,7 @@ use serde_json::Value;
 
 pub(super) async fn metadata(log: &EventLog, value: &Value) -> Result<SessionUpdateResult> {
     let input = decode_session_metadata_update_input(value).map_err(invalid)?;
-    if input.session_id == "maka_workhub_coordination" {
-        return Err(failure(
-            Code::OperationUnavailable,
-            "WorkHub metadata requires WorkHub authority",
-        ));
-    }
+    crate::session::require_unmanaged(log, &input.session_id, Code::OperationUnavailable).await?;
     let patch = input.patch.clone();
     let mutation = log
         .update_session_metadata(
@@ -56,12 +51,7 @@ pub(in crate::server) use crate::session::mutation_projection as result;
 
 pub(super) async fn read_marker(log: &EventLog, value: &Value) -> Result<SessionCatalogItem> {
     let input = decode_session_read_marker_set_input(value).map_err(invalid)?;
-    if input.session_id == "maka_workhub_coordination" {
-        return Err(failure(
-            Code::OperationConflict,
-            "WorkHub read state requires WorkHub authority",
-        ));
-    }
+    crate::session::require_unmanaged(log, &input.session_id, Code::OperationConflict).await?;
     let record = log
         .set_session_read_marker(&input.session_id, &input.read_through_message_id)
         .await

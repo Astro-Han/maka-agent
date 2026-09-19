@@ -298,14 +298,10 @@ fn execution_error(error: RunError) -> OperationError {
     };
     failure(code, &error.to_string())
 }
-fn ordinary_session(session: &str) -> Result<()> {
-    if session == maka_runtime::workhub::COORDINATION_SESSION_ID {
-        return Err(failure(
-            Code::OperationConflict,
-            "Use the WorkHub execution entry point",
-        ));
+impl Executions {
+    async fn ordinary_session(&self, session: &str) -> Result<()> {
+        crate::session::require_unmanaged(&self.log, session, Code::OperationConflict).await
     }
-    Ok(())
 }
 
 fn internal(error: impl std::fmt::Display) -> OperationError {
