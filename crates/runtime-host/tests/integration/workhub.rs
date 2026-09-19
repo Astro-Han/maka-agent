@@ -326,7 +326,7 @@ async fn original_client_workhub_answer_scopes_read_and_desktop_calls_without_re
             .iter()
             .filter(|row| matches!(row.event.fact, Fact::InvocationOpened { .. }))
             .count(),
-        3
+        4
     );
     assert!(
         before

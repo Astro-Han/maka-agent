@@ -88,6 +88,20 @@ impl WorkHubCommands {
     }
 }
 impl Commands for WorkHubCommands {
+    fn message_observation(
+        &self,
+        session: String,
+        message: String,
+    ) -> BoxFuture<'_, Result<maka_event_log::observation::MessageObservation>> {
+        Box::pin(async move {
+            let executions = self.executions()?;
+            executions
+                .log
+                .message_observation(&session, &message)
+                .await
+                .map_err(|error| stored(&executions, error))
+        })
+    }
     fn answer_receipt<'a>(
         &'a self,
         request: &'a crate::plugins::workhub::answer::Request,

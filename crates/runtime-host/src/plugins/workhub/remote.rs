@@ -39,6 +39,7 @@ pub(super) fn publish(
         ("query", Action::Query),
         ("answer", Action::Answer),
         ("configure-model", Action::ConfigureModel),
+        ("feedback", Action::Feedback),
     ] {
         staged
             .insert(
@@ -62,6 +63,7 @@ enum Action {
     Query,
     Answer,
     ConfigureModel,
+    Feedback,
 }
 struct Call {
     control: Control,
@@ -93,6 +95,13 @@ impl Method for Call {
                 Action::Query => {
                     empty(&input)?;
                     control.query().await.and_then(encode)
+                }
+                Action::Feedback => {
+                    let references = serde_json::from_value(input).map_err(invalid)?;
+                    control
+                        .feedback(references, caller.cancellation)
+                        .await
+                        .and_then(encode)
                 }
                 Action::Answer => {
                     let input = workhub::decode_answer_input(&input).map_err(invalid)?;

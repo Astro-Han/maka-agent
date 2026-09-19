@@ -37,6 +37,7 @@ pub(crate) mod control;
 pub(crate) mod coordinator;
 pub(crate) mod correction;
 pub(crate) mod delegation;
+mod feedback;
 mod remote;
 pub(crate) mod resume;
 pub(crate) mod selection;

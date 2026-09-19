@@ -18,6 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { upload } from './client-artifact-upload.mjs';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -114,7 +115,15 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
               created: 1,
               model: 'fixture-model',
               choices: [
-                { index: 0, delta: { content: 'native task completed' }, finish_reason: 'stop' },
+                {
+                  index: 0,
+                  delta: {
+                    content: body.includes('UNRELATED_TASK')
+                      ? 'unrelated output'
+                      : 'native \n task\tcompleted',
+                  },
+                  finish_reason: 'stop',
+                },
               ],
             }) +
             '\n\ndata: [DONE]\n\n',
@@ -335,6 +344,47 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       await delay(10);
     }
     assert.equal(targetRequests, 1);
+    const reference = {
+      id: 'assignment',
+      targetSessionId: nativeReceipt.targetSessionId,
+      targetMessageId:
+        'workhub_' + createHash('sha256').update(nativeReceipt.actionId).digest('hex'),
+    };
+    const feedback = remote.method('feedback');
+    const expectedFeedback = [
+      { id: 'assignment', state: 'completed', resultPreview: 'native task completed' },
+    ];
+    assert.deepEqual(await feedback([reference]), expectedFeedback);
+    assert.deepEqual(await feedback([{ ...reference, targetMessageId: 'missing' }]), [
+      { id: 'assignment', state: 'recovering' },
+    ]);
+    await assert.rejects(
+      feedback([reference, reference]),
+      (error) => error.code === 'invalid_request',
+    );
+    await request('turn.start', {
+      sessionId: reference.targetSessionId,
+      turnId: 'unrelated-task',
+      content: { text: 'UNRELATED_TASK' },
+    });
+    const unrelatedDeadline = Date.now() + 5000;
+    for (;;) {
+      const turn = await request('turn.query', {
+        sessionId: reference.targetSessionId,
+        turnId: 'unrelated-task',
+      });
+      if (turn.status === 'completed') break;
+      assert(
+        Date.now() < unrelatedDeadline && turn.status !== 'failed',
+        'unrelated task did not finish',
+      );
+      await delay(10);
+    }
+    assert.deepEqual(
+      await feedback([reference]),
+      expectedFeedback,
+      'feedback follows the accepted message, not the latest Session output',
+    );
     const candidates = await request('workhub.coordination.candidates', {});
     selectionTask = {
       operation: 'select_and_delegate',
@@ -374,7 +424,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       }),
       (error) => error.code === 'already_resolved',
     );
-    assert.equal(targetRequests, 1, 'cancelled native selection must not delegate');
+    assert.equal(targetRequests, 2, 'cancelled native selection must not delegate');
     // Transcript pages use the subscription's captured high-water, not live deltas.
     await observer.close();
     observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
