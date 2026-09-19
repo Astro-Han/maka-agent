@@ -32,9 +32,25 @@ use uuid::Uuid;
 
 mod commands;
 pub(super) mod profile;
+mod resume;
 pub(crate) use commands::WorkHubCommands;
 
 impl Executions {
+    pub(crate) async fn workhub_target(
+        self: &Arc<Self>,
+        id: &str,
+        eligible: crate::plugins::workhub::control::CandidateFilter,
+    ) -> Result<Option<SessionRecord<SessionConfiguration>>> {
+        let executions = self.clone();
+        self.log
+            .workhub_candidate(id, move |record| {
+                eligible(&record.id, &record.configuration)
+                    && execution_available(&executions, record)
+            })
+            .await
+            .map_err(|error| commands::stored(self, error))
+    }
+
     /// Caller owns admission; waiting for cleanup must happen after releasing it.
     pub(crate) async fn stop_workhub_owner(
         &self,
@@ -186,5 +202,30 @@ impl Executions {
         Ok(TurnResult {
             turn_id: input.turn_id,
         })
+    }
+}
+
+fn execution_available(
+    executions: &Executions,
+    record: &SessionRecord<SessionConfiguration>,
+) -> bool {
+    if let Some(execution) = &record.execution
+        && matches!(
+            execution.state,
+            maka_event_log::sessions::SessionExecutionState::Live { .. }
+        )
+    {
+        // External adapters have no native model-step steering boundary.
+        if matches!(
+            record.configuration.target,
+            crate::session::SessionTarget::Executor { .. }
+        ) {
+            return false;
+        }
+        executions
+            .active_session_owner(&record.id)
+            .is_some_and(|owner| owner.turn_id == execution.turn_id)
+    } else {
+        !executions.has_active_session(&record.id)
     }
 }

@@ -29,6 +29,7 @@ use maka_runtime::{artifact::content_digest, workhub::ActionId};
 use std::sync::Arc;
 
 pub(crate) type Result<T> = std::result::Result<T, OperationError>;
+pub(crate) type CandidateFilter = fn(&str, &SessionConfiguration) -> bool;
 
 /// A logical control request, never a request to stop whichever Run is current.
 /// Host resolves the canonical delegation and atomically captures its exact owner.
@@ -45,9 +46,16 @@ pub(crate) trait Commands: Send + Sync {
     /// Apply the domain predicate inside one bounded read snapshot, before its limit.
     fn candidates(
         &self,
-        eligible: fn(&str, &SessionConfiguration) -> bool,
+        eligible: CandidateFilter,
     ) -> BoxFuture<'_, Result<Vec<Candidate<SessionConfiguration>>>>;
     fn stop(&self, caller: Context, request: Stop) -> BoxFuture<'_, Result<StopRecord>>;
+    fn resume(
+        &self,
+        caller: Context,
+        request: super::resume::Request,
+        connection: uuid::Uuid,
+        eligible: CandidateFilter,
+    ) -> BoxFuture<'_, Result<super::resume::Receipt>>;
 }
 
 pub(crate) struct Control {

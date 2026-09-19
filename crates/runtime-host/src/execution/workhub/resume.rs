@@ -17,12 +17,14 @@
  * under the License.
  */
 
-use super::{ActInput, ActResult, Code, Host, OperationError, failure};
-use maka_event_log::{message_resolution::MessageExecution, turns::InvocationState};
-use maka_protocol::{
-    turn::TurnResumeStartResult,
-    workhub::{LinkedProposal, Proposal, ResumeOutcome},
+use super::super::{Executions, Result, failure};
+use crate::plugins::workhub::{
+    control::CandidateFilter,
+    resume::{Receipt, Request},
 };
+use maka_event_log::{message_resolution::MessageExecution, turns::InvocationState};
+use maka_plugins::fiber::Context;
+use maka_protocol::{OperationErrorCode as Code, turn::TurnResumeStartResult};
 use maka_runtime::{
     event::{CommitError, EventWrite, Fact, InvocationOutcome, RuntimeEvent},
     input::InvocationInput,
@@ -30,41 +32,38 @@ use maka_runtime::{
 };
 use std::sync::Arc;
 
-pub(super) async fn act(
-    host: &Arc<Host>,
-    input: ActInput,
+pub(super) async fn execute(
+    executions: &Arc<Executions>,
+    caller: Context,
+    request: Request,
     connection: uuid::Uuid,
-) -> Result<ActResult, OperationError> {
-    let Proposal::Linked(LinkedProposal::Resume {
-        resumes_action_id,
-        expects,
-    }) = &input.proposal
-    else {
-        unreachable!()
-    };
-    let fingerprint = super::fingerprint(&input)?;
+    eligible: CandidateFilter,
+) -> Result<Receipt> {
     let mut prepared = None;
     loop {
-        let gate = host.executions.lock_admission().await;
-        if let Some(stored) = host
+        let gate = executions.lock_admission().await;
+        let _call = caller
+            .admit()
+            .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
+        if let Some(stored) = executions
             .log
-            .workhub_action(&input.action_id)
+            .workhub_action(&request.action_id)
             .await
-            .map_err(|e| super::stored(host, e))?
+            .map_err(|e| super::commands::stored(executions, e))?
         {
-            return receipt(&stored.event, &input, &fingerprint);
+            return receipt(&stored.event, &request);
         }
-        if host
+        if executions
             .log
-            .workhub_stop(&input.action_id)
+            .workhub_stop(&request.action_id)
             .await
-            .map_err(|e| super::stored(host, e))?
+            .map_err(|e| super::commands::stored(executions, e))?
             .is_some()
-            || host
+            || executions
                 .log
-                .workhub_correction(&input.action_id)
+                .workhub_correction(&request.action_id)
                 .await
-                .map_err(|e| super::stored(host, e))?
+                .map_err(|e| super::commands::stored(executions, e))?
                 .is_some()
         {
             return Err(failure(
@@ -72,11 +71,12 @@ pub(super) async fn act(
                 "WorkHub action already belongs to a control operation",
             ));
         }
-        if host.draining.is_cancelled() {
+        if executions.shutdown.is_cancelled() {
             return Err(failure(Code::HostDraining, "Host is draining"));
         }
-        let source = host.executions.workhub_source(&input.turn_id).await?;
-        super::super::candidates::target(host, &expects.target_session_id)
+        let source = executions.workhub_source(&request.turn_id).await?;
+        executions
+            .workhub_target(&request.target_session_id, eligible)
             .await?
             .ok_or_else(|| {
                 failure(
@@ -84,11 +84,11 @@ pub(super) async fn act(
                     "WorkHub resume target is unavailable",
                 )
             })?;
-        let delegated = host
+        let delegated = executions
             .log
-            .workhub_assignment(resumes_action_id)
+            .workhub_assignment(&request.delegation_action_id)
             .await
-            .map_err(|e| super::stored(host, e))?
+            .map_err(|e| super::commands::stored(executions, e))?
             .ok_or_else(|| {
                 failure(
                     Code::OperationConflict,
@@ -96,17 +96,17 @@ pub(super) async fn act(
                 )
             })?;
         let delegation = delegated.delegation;
-        if delegation.target.session_id != expects.target_session_id {
+        if delegation.target.session_id != request.target_session_id {
             return Err(failure(
                 Code::OperationConflict,
                 "WorkHub resume target changed",
             ));
         }
-        let work = host
+        let work = executions
             .log
-            .message_execution(&expects.target_session_id, &delegation.target_message_id())
+            .message_execution(&request.target_session_id, &delegation.target_message_id())
             .await
-            .map_err(|e| super::stored(host, e))?;
+            .map_err(|e| super::commands::stored(executions, e))?;
         let MessageExecution::Owned(owner) = work else {
             return Err(failure(
                 Code::OperationConflict,
@@ -114,15 +114,14 @@ pub(super) async fn act(
             ));
         };
         let origin = ResumeOrigin {
-            action_id: input.action_id.clone(),
-            request_fingerprint: fingerprint.clone(),
+            action_id: request.action_id.clone(),
+            request_fingerprint: request.request_fingerprint.clone(),
             coordinator: source.invocation.clone(),
-            delegation_action_id: resumes_action_id.clone(),
+            delegation_action_id: request.delegation_action_id.clone(),
         };
         return match owner.state {
             InvocationState::Admitted | InvocationState::Running => {
-                if host
-                    .executions
+                if executions
                     .active_session_owner(&owner.invocation.session_id)
                     .as_ref()
                     != Some(&owner.invocation)
@@ -140,15 +139,19 @@ pub(super) async fn act(
                     },
                 );
                 let write = EventWrite::plain(event)
-                    .map_err(|e| failure(Code::OperationConflict, e.to_string()))?;
-                host.log.append(&write).await.map_err(|error| match error {
-                    CommitError::OutcomeUnknown(reason) => {
-                        host.executions.begin_drain();
-                        failure(Code::CommitOutcomeUnknown, reason)
-                    }
-                    CommitError::Rejected(reason) => failure(Code::OperationConflict, reason),
-                })?;
-                receipt(write.event(), &input, &fingerprint)
+                    .map_err(|e| failure(Code::OperationConflict, &e.to_string()))?;
+                executions
+                    .log
+                    .append(&write)
+                    .await
+                    .map_err(|error| match error {
+                        CommitError::OutcomeUnknown(reason) => {
+                            executions.begin_drain();
+                            failure(Code::CommitOutcomeUnknown, &reason)
+                        }
+                        CommitError::Rejected(reason) => failure(Code::OperationConflict, &reason),
+                    })?;
+                receipt(write.event(), &request)
             }
             InvocationState::Ended {
                 outcome: InvocationOutcome::Failed { .. } | InvocationOutcome::Cancelled { .. },
@@ -157,15 +160,16 @@ pub(super) async fn act(
                 let Some(candidate) = prepared.take() else {
                     drop(gate);
                     prepared = Some(
-                        host.executions
+                        executions
                             .prepare_environment(
                                 &owner.invocation.session_id,
                                 Some(connection),
                                 maka_client_capability::BindingMode::Strict,
-                                host.log
+                                executions
+                                    .log
                                     .invocation_configuration(&owner.invocation)
                                     .await
-                                    .map_err(|error| super::stored(host, error))?
+                                    .map_err(|error| super::commands::stored(executions, error))?
                                     .map(|configuration| configuration.orchestration_mode),
                             )
                             .await,
@@ -173,20 +177,18 @@ pub(super) async fn act(
                     continue;
                 };
                 let Some((environment, _input_admission)) = candidate?
-                    .commit(&host.executions, &owner.invocation.session_id)
+                    .commit(executions, &owner.invocation.session_id)
                     .await?
                 else {
                     continue;
                 };
-                match host
-                    .executions
+                match executions
                     .resume_workhub(origin, owner.invocation, environment)
                     .await?
                 {
-                    TurnResumeStartResult::Started { turn } => Ok(ActResult::ResumeWork {
-                        outcome: ResumeOutcome::ResumeStarted,
-                        target_session_id: turn.session_id,
-                        target_turn_id: Some(turn.turn_id),
+                    TurnResumeStartResult::Started { turn } => Ok(Receipt::Started {
+                        session_id: turn.session_id,
+                        turn_id: turn.turn_id,
                     }),
                     TurnResumeStartResult::Parked { .. } => Err(failure(
                         Code::OperationConflict,
@@ -202,15 +204,15 @@ pub(super) async fn act(
     }
 }
 
-fn receipt(
-    event: &RuntimeEvent,
-    input: &ActInput,
-    fingerprint: &str,
-) -> Result<ActResult, OperationError> {
-    let (origin, target, outcome) = match &event.fact {
-        Fact::WorkhubResumeObserved { resume, target } => {
-            (resume.as_ref(), target, ResumeOutcome::AlreadyRunning)
-        }
+fn receipt(event: &RuntimeEvent, request: &Request) -> Result<Receipt> {
+    let (origin, target, receipt) = match &event.fact {
+        Fact::WorkhubResumeObserved { resume, target } => (
+            resume.as_ref(),
+            target,
+            Receipt::Running {
+                session_id: target.session_id.clone(),
+            },
+        ),
         Fact::InvocationOpened {
             input:
                 InvocationInput::Continuation {
@@ -218,7 +220,14 @@ fn receipt(
                     ..
                 },
             ..
-        } => (origin, &event.invocation, ResumeOutcome::ResumeStarted),
+        } => (
+            origin,
+            &event.invocation,
+            Receipt::Started {
+                session_id: event.invocation.session_id.clone(),
+                turn_id: event.invocation.turn_id.clone(),
+            },
+        ),
         _ => {
             return Err(failure(
                 Code::OperationConflict,
@@ -226,26 +235,15 @@ fn receipt(
             ));
         }
     };
-    let Proposal::Linked(LinkedProposal::Resume {
-        resumes_action_id,
-        expects,
-    }) = &input.proposal
-    else {
-        unreachable!()
-    };
-    if origin.request_fingerprint != fingerprint
-        || origin.coordinator.turn_id != input.turn_id
-        || origin.delegation_action_id != *resumes_action_id
-        || target.session_id != expects.target_session_id
+    if origin.request_fingerprint != request.request_fingerprint
+        || origin.coordinator.turn_id != request.turn_id
+        || origin.delegation_action_id != request.delegation_action_id
+        || target.session_id != request.target_session_id
     {
         return Err(failure(
             Code::OperationConflict,
             "WorkHub resume belongs to another request",
         ));
     }
-    Ok(ActResult::ResumeWork {
-        outcome,
-        target_session_id: target.session_id.clone(),
-        target_turn_id: (outcome == ResumeOutcome::ResumeStarted).then(|| target.turn_id.clone()),
-    })
+    Ok(receipt)
 }

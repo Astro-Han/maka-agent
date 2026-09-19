@@ -31,7 +31,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod correction;
-mod resume;
 pub(in crate::server) use correction::recover;
 mod target;
 
@@ -68,7 +67,7 @@ pub(super) async fn act(
             maka_protocol::workhub::LinkedProposal::Resume { .. }
         )
     ) {
-        return resume::act(host, input, connection).await;
+        return super::control(host)?.value.resume(input, connection).await;
     }
     if matches!(
         &input.proposal,

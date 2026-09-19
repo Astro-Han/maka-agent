@@ -17,10 +17,10 @@
  * under the License.
  */
 
-use super::{Host, sessions};
+use super::Host;
 use crate::plugins::workhub::candidates::eligible;
 use crate::session::SessionConfiguration;
-use maka_event_log::sessions::{SessionExecutionState, SessionRecord};
+use maka_event_log::sessions::SessionRecord;
 use maka_protocol::{OperationError, OperationErrorCode as Code};
 use std::sync::Arc;
 
@@ -42,33 +42,5 @@ pub(super) async fn target(
     host: &Arc<Host>,
     id: &str,
 ) -> Result<Option<SessionRecord<SessionConfiguration>>, OperationError> {
-    let executions = host.executions.clone();
-    host.log
-        .workhub_candidate(id, move |record| {
-            eligible(&record.id, &record.configuration) && execution_available(&executions, record)
-        })
-        .await
-        .map_err(sessions::stored)
-}
-
-fn execution_available(
-    executions: &crate::execution::Executions,
-    record: &SessionRecord<SessionConfiguration>,
-) -> bool {
-    if let Some(execution) = &record.execution
-        && matches!(execution.state, SessionExecutionState::Live { .. })
-    {
-        // External adapters have no native model-step steering boundary.
-        if matches!(
-            record.configuration.target,
-            crate::session::SessionTarget::Executor { .. }
-        ) {
-            return false;
-        }
-        executions
-            .active_session_owner(&record.id)
-            .is_some_and(|owner| owner.turn_id == execution.turn_id)
-    } else {
-        !executions.has_active_session(&record.id)
-    }
+    host.executions.workhub_target(id, eligible).await
 }

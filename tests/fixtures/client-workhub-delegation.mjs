@@ -419,6 +419,20 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
             }
             if (resumeTarget) {
               await targetReady.promise;
+              await toggleWorkhub(true);
+              await assert.rejects(
+                act({
+                  turnId,
+                  actionId: 'disabled-resume',
+                  proposal: {
+                    operation: 'resume',
+                    resumesActionId: input.actionId,
+                    expects: { targetSessionId },
+                  },
+                }),
+                (error) => error.code === 'operation_unavailable',
+              );
+              await toggleWorkhub(false);
               resumeReceipts = await resumeDelegation(
                 request,
                 act,
@@ -429,6 +443,10 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                   resumed = true;
                 },
               );
+              await toggleWorkhub(true);
+              await toggleWorkhub(false);
+              for (const saved of resumeReceipts)
+                assert.deepEqual(await act(saved.input), saved.receipt);
             }
             if (correctTarget) {
               await targetReady.promise;

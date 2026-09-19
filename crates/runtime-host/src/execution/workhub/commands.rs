@@ -18,7 +18,7 @@
  */
 
 use super::super::{Executions, failure};
-use crate::plugins::workhub::control::{Commands, Result, Stop};
+use crate::plugins::workhub::control::{CandidateFilter, Commands, Result, Stop};
 use crate::session::SessionConfiguration;
 use futures_util::future::BoxFuture;
 use maka_event_log::{
@@ -34,9 +34,24 @@ use std::sync::Weak;
 
 pub(crate) struct WorkHubCommands(pub Weak<Executions>);
 impl Commands for WorkHubCommands {
+    fn resume(
+        &self,
+        caller: Context,
+        request: crate::plugins::workhub::resume::Request,
+        connection: uuid::Uuid,
+        eligible: CandidateFilter,
+    ) -> BoxFuture<'_, Result<crate::plugins::workhub::resume::Receipt>> {
+        Box::pin(async move {
+            let executions = self
+                .0
+                .upgrade()
+                .ok_or_else(|| failure(Code::HostDraining, "Host is closed"))?;
+            super::resume::execute(&executions, caller, request, connection, eligible).await
+        })
+    }
     fn candidates(
         &self,
-        eligible: fn(&str, &SessionConfiguration) -> bool,
+        eligible: CandidateFilter,
     ) -> BoxFuture<'_, Result<Vec<Candidate<SessionConfiguration>>>> {
         Box::pin(async move {
             let executions = self
@@ -138,7 +153,7 @@ impl Commands for WorkHubCommands {
     }
 }
 
-fn stored(executions: &Executions, error: StoreError) -> maka_protocol::OperationError {
+pub(super) fn stored(executions: &Executions, error: StoreError) -> maka_protocol::OperationError {
     let code = match &error {
         StoreError::InvalidTransition(_) | StoreError::SessionConflict => Code::OperationConflict,
         StoreError::SessionNotFound => Code::NotFound,
