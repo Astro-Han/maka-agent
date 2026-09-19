@@ -20,6 +20,8 @@
 import type { UiCatalog } from '@maka/core/ui-locale';
 export const workHubLiveCopy = {
   en: {
+    expandWorkbar: 'Expand task workbar',
+    collapseWorkbar: 'Collapse task workbar',
     filterConversation: 'Filter conversation by Work',
     clearConversationFilter: 'Show all conversations',
     noWorkConversation: 'No conversations for this Work in this part of history.',
@@ -70,6 +72,8 @@ export const workHubLiveCopy = {
     openResult: 'Open result',
   },
   'zh-CN': {
+    expandWorkbar: '展开任务工作栏',
+    collapseWorkbar: '收起任务工作栏',
     filterConversation: '筛选此 Work 的对话',
     clearConversationFilter: '显示全部对话',
     noWorkConversation: '这段历史中没有此 Work 的对话。',
@@ -117,6 +121,8 @@ export const workHubLiveCopy = {
     openResult: '打开结果',
   },
   'zh-TW': {
+    expandWorkbar: '展開任務工作欄',
+    collapseWorkbar: '收起任務工作欄',
     filterConversation: '篩選此 Work 的對話',
     clearConversationFilter: '顯示全部對話',
     noWorkConversation: '這段歷史中沒有此 Work 的對話。',

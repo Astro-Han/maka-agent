@@ -5,6 +5,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./surface": "./dist/surface.js",
+    "./native": "./dist/native.js",
     "./controller": "./dist/controller.js",
     "./conversation": "./dist/conversation.js",
     "./model": "./dist/model.js",

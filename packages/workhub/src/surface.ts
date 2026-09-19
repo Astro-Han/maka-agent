@@ -17,15 +17,5 @@
  * under the License.
  */
 
-import { Button } from '@astryxdesign/core/Button';
-import { ChevronLeft, ChevronRight } from '@maka/ui/icons';
-
-/** An edge affordance shared by the collapsed and expanded workspace. */
-export function WorkbarEdgeToggle(props: { collapsed: boolean; label: string; placement?: 'right' | 'bottom'; onToggle(): void }) {
-  const Arrow = props.collapsed ? ChevronLeft : ChevronRight;
-  return (
-    <Button variant="ghost" type="button" className="maka-workbar-edge" data-collapsed={props.collapsed || undefined} data-placement={props.placement}
-      label={props.label} isIconOnly aria-expanded={!props.collapsed} onClick={props.onToggle}
-      icon={<span className="maka-workbar-edge-glass" aria-hidden="true"><Arrow size={10} strokeWidth={1.25} /></span>} />
-  );
-}
+export { WorkHubRoot, type WorkHubRootProps } from './ui/workhub-root.js';
+export type { WorkHubAttachmentServices, WorkHubWindowServices } from './ui/ports.js';

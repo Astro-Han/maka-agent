@@ -17,23 +17,4 @@
  * under the License.
  */
 
-export interface WorkHubControlSnapshot {
-  readonly revision: number;
-  readonly phase: 'idle' | 'acting' | 'paused' | 'error';
-  readonly canUndo: boolean;
-  readonly status?: string;
-  readonly error?: string;
-  readonly cursor?: {
-    readonly x: number;
-    readonly y: number;
-    readonly clicking: boolean;
-    readonly durationMs?: number;
-  };
-}
-
-export interface WorkHubControlBridge {
-  getSnapshot(): Promise<WorkHubControlSnapshot>;
-  stop(): Promise<void>;
-  undo(): Promise<void>;
-  subscribe(handler: (snapshot: WorkHubControlSnapshot) => void): () => void;
-}
+export type { WorkHubControlSnapshot, WorkHubControlBridge } from '@maka/workhub/native';

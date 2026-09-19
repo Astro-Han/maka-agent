@@ -60,7 +60,7 @@ import {
   workbarToolDefinition,
   type WorkbarToolDefinition,
 } from '../model/workbar-tool-definitions';
-import { WorkbarEdgeToggle } from '../../../application/contracts/workbar-edge-toggle.js';
+import { WorkbarEdgeToggle } from '@maka/ui/workbar-edge-toggle';
 import { WorkBoardPanel } from '../../../work-board-panel.js';
 import { getShellCopy } from '../../../locales/shell-copy.js';
 import { getDesktopConversationCopy } from '../../../locales/conversation-copy.js';
