@@ -29,6 +29,8 @@ import { ClientSlotStore } from './slots.js';
 
 export interface ClientSnapshot {
   readonly revision: string;
+  /** New transport identity revokes handles even when package bytes did not change. */
+  readonly connection?: string;
   readonly entries: readonly ClientDescriptor[];
 }
 export interface ClientDiagnostic { readonly identity?: ClientIdentity; readonly error: unknown }
@@ -46,8 +48,10 @@ export class ClientRuntime {
   readonly #options: ClientRuntimeOptions;
   readonly #fenced = new Set<string>();
   readonly #factories = new Map<string, ClientBundle['factory']>();
+  readonly #modules = new Map<string, ReturnType<ClientBundle['factory']>>();
   #active: ClientInstance[] = [];
   #revision?: string;
+  #connection?: string;
   #pending?: AbortController;
   #work: Promise<void> = Promise.resolve();
   #closed = false;
@@ -65,7 +69,8 @@ export class ClientRuntime {
     this.#pending = request;
     this.#work = this.#work.catch(() => {}).then(async () => {
       request.signal.throwIfAborted();
-      if (this.#revision === snapshot.revision) return;
+      if (this.#revision === snapshot.revision && this.#connection === snapshot.connection) return;
+      this.#revision = undefined;
       const timeout = setTimeout(() => request.abort(new Error('Client initialization timed out')), 30_000);
       try { await this.#replace(snapshot, request.signal); }
       finally { clearTimeout(timeout); }
@@ -82,6 +87,7 @@ export class ClientRuntime {
     const retired = this.#active;
     this.#active = [];
     this.#factories.clear();
+    this.#modules.clear();
     await this.#retire(retired);
   }
 
@@ -89,9 +95,14 @@ export class ClientRuntime {
     const descriptors = index(snapshot.entries);
     const staged: ClientInstance[] = [];
     // Withdraw stale UI before any asynchronous loading, including failed candidates.
-    const retained = new Set(snapshot.entries.map(binding));
-    const stale = this.#active.filter((instance) => !retained.has(binding(instance.descriptor)));
-    this.#active = this.#active.filter((instance) => retained.has(binding(instance.descriptor)));
+    const changed = changedPackages(this.#active.map((instance) => instance.descriptor), snapshot.entries);
+    if (snapshot.connection !== this.#connection) {
+      for (const instance of this.#active) changed.add(instance.descriptor.extensionId);
+    }
+    this.#connection = snapshot.connection;
+    const stale = this.#active.filter((instance) => changed.has(instance.descriptor.extensionId));
+    this.#active = this.#active.filter((instance) => !changed.has(instance.descriptor.extensionId));
+    for (const id of changed) this.#modules.delete(id);
     this.slots.replace(this.#active.flatMap((instance) => instance.slots));
     try {
       await this.#retire(stale);
@@ -107,7 +118,7 @@ export class ClientRuntime {
           this.#factories.set(moduleKey(descriptor), factory);
         }
       }
-      const modules = new Map<string, ReturnType<ClientBundle['factory']>>();
+      const modules = this.#modules;
       const visiting = new Set<string>();
       const materialize = (id: string): ReturnType<ClientBundle['factory']> => {
         const cached = modules.get(id);
@@ -132,19 +143,16 @@ export class ClientRuntime {
       };
       for (const descriptor of snapshot.entries) {
         signal.throwIfAborted();
+        if (this.#active.some((instance) => instance.descriptor.entryId === descriptor.entryId)) continue;
         if (this.#fenced.has(descriptor.entryId)) throw new Error('Client cleanup unconfirmed; reload the document');
         const instance = new ClientInstance(descriptor, (error) => this.#options.report({ identity: descriptor, error }), this.#options.remote, this.#options.localFiles);
         staged.push(instance);
         await interruptible(instance.initialize(materialize(descriptor.extensionId).default, this.#options.document), signal);
       }
-      const retired = this.#active;
-      this.#active = [];
-      this.slots.replace([]);
-      await this.#retire(retired);
       signal.throwIfAborted();
       for (const instance of staged) instance.publish();
-      this.#active = staged;
-      this.slots.replace(staged.flatMap((instance) => instance.slots));
+      this.#active.push(...staged);
+      this.slots.replace(this.#active.flatMap((instance) => instance.slots));
       this.#revision = snapshot.revision;
     } catch (error) {
       await this.#retire(staged).catch(() => {});
@@ -153,6 +161,8 @@ export class ClientRuntime {
     } finally {
       const used = new Set(this.#active.map((instance) => moduleKey(instance.descriptor)));
       for (const key of this.#factories.keys()) if (!used.has(key)) this.#factories.delete(key);
+      const packages = new Set(this.#active.map((instance) => instance.descriptor.extensionId));
+      for (const id of this.#modules.keys()) if (!packages.has(id)) this.#modules.delete(id);
     }
   }
 
@@ -171,7 +181,29 @@ export class ClientRuntime {
 }
 
 function binding(descriptor: ClientDescriptor): string {
-  return descriptor.entryId + '/' + descriptor.activation + '/' + descriptor.clientDigest;
+  return JSON.stringify([descriptor.entryId, descriptor.extensionId, descriptor.activation, descriptor.contentDigest,
+    descriptor.clientDigest, descriptor.totalBytes, descriptor.sdkVersion, descriptor.dependencies, descriptor.config]);
+}
+
+/** Module exports share a package lifetime; imported exports share its invalidation. */
+function changedPackages(previous: readonly ClientDescriptor[], next: readonly ClientDescriptor[]): Set<string> {
+  const before = new Set(previous.map(binding));
+  const after = new Set(next.map(binding));
+  const changed = new Set([
+    ...previous.filter((entry) => !after.has(binding(entry))),
+    ...next.filter((entry) => !before.has(binding(entry))),
+  ].map((entry) => entry.extensionId));
+  let expanded: boolean;
+  do {
+    expanded = false;
+    for (const entry of next) {
+      if (!changed.has(entry.extensionId) && entry.dependencies.some((id) => changed.has(id))) {
+        changed.add(entry.extensionId);
+        expanded = true;
+      }
+    }
+  } while (expanded);
+  return changed;
 }
 
 function moduleKey(descriptor: ClientDescriptor): string {

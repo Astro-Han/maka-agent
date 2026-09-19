@@ -183,11 +183,73 @@ test('Remote calls require publication and failed cleanup withdraws UI before fe
   assert.equal(calls, 0);
   const call = fixture.context.remote.method('echo');
   assert.equal(await call('active'), 'active');
-  await assert.rejects(runtime.reconcile({ revision: 'two', entries: [entry] }), /cleanup unconfirmed/);
+  await assert.rejects(runtime.reconcile({ revision: 'two', entries: [descriptor(source, 'two')] }), /cleanup unconfirmed/);
   assert.deepEqual(runtime.slots.snapshot(), []);
   await assert.rejects(call('retired'), /not effective/);
   assert.equal(calls, 1);
-  assert.equal(closed, 2);
+  assert.equal(closed, 1);
   await assert.rejects(runtime.reconcile({ revision: 'three', entries: [descriptor(source, 'new')] }), /reload the document/);
   await runtime.close();
+});
+
+test('unrelated catalog changes preserve UI state; dependency replacement and connection changes revoke exact modules', async () => {
+  const document = documentHarness();
+  const generations = {};
+  const observed = {};
+  const source = (id, dependency) => `window.__MakaClientBundle__({id:${JSON.stringify(id)},factory(require){
+    const fixture=require('fixture');
+    const generation=fixture.generations[${JSON.stringify(id)}]=(fixture.generations[${JSON.stringify(id)}]||0)+1;
+    const dependency=${dependency ? `require(${JSON.stringify(dependency)}).generation` : 'null'};
+    return {generation,default:{activate(ctx){
+      fixture.observed[${JSON.stringify(id)}]={generation,dependency,signal:ctx.signal};
+      ctx.slots.register('session.composer.before','panel',()=>null);
+      ctx.style('.owned-by-${id} {}');
+    }}};
+  }});`;
+  const sources = new Map([
+    ['base', source('base')],
+    ['dependent', source('dependent', 'base')],
+    ['independent', source('independent')],
+  ]);
+  const entries = [...sources].map(([id, source]) => ({
+    ...descriptor(source, id + '-one'), entryId: id + '.ui', extensionId: id,
+    dependencies: id === 'dependent' ? ['base'] : [],
+  }));
+  const runtime = new ClientRuntime({
+    document, modules: { fixture: { generations, observed } }, report() {},
+    source: async (descriptor) => sources.get(descriptor.extensionId),
+  });
+  const snapshot = { revision: 'initial', connection: 'connection-one', entries };
+  try {
+    await runtime.reconcile(snapshot);
+    const independent = runtime.slots.snapshot().find((entry) => entry.owner.extensionId === 'independent');
+    const originalBase = observed.base;
+    await runtime.reconcile({ ...snapshot, revision: 'unrelated-control-change' });
+    assert.deepEqual(generations, { base: 1, dependent: 1, independent: 1 });
+    assert.equal(runtime.slots.snapshot().find((entry) => entry.owner.extensionId === 'independent'), independent);
+    assert.equal(originalBase.signal.aborted, false);
+
+    const invalid = [{ ...entries[0], activation: 'replacement', sdkVersion: 999 }, ...entries.slice(1)];
+    await assert.rejects(runtime.reconcile({ ...snapshot, revision: 'broken', entries: invalid }), /Incompatible/);
+    assert.equal(originalBase.signal.aborted, true);
+    assert.equal(observed.dependent.signal.aborted, true);
+    assert.equal(observed.independent.signal.aborted, false);
+    assert.deepEqual(runtime.slots.snapshot(), [independent]);
+    // A failed reconcile cannot make the last successful revision a false no-op.
+    await runtime.reconcile(snapshot);
+    assert.deepEqual(generations, { base: 2, dependent: 2, independent: 1 });
+    assert.equal(observed.dependent.dependency, 2);
+
+    const replaced = [{ ...entries[0], activation: 'replacement' }, ...entries.slice(1)];
+    await runtime.reconcile({ ...snapshot, revision: 'updated', entries: replaced });
+    assert.deepEqual(generations, { base: 3, dependent: 3, independent: 1 });
+    assert.equal(observed.dependent.dependency, 3, 'dependent must import the replacement module');
+    assert.equal(runtime.slots.snapshot().find((entry) => entry.owner.extensionId === 'independent'), independent);
+    const beforeReconnect = observed.independent;
+    await runtime.reconcile({ revision: 'updated', connection: 'connection-two', entries: replaced });
+    assert.equal(beforeReconnect.signal.aborted, true);
+    assert.deepEqual(generations, { base: 4, dependent: 4, independent: 2 });
+    assert.equal(document.querySelectorAll('style').length, 3);
+  } finally { await runtime.close(); }
+  assert.equal(document.querySelectorAll('style,script').length, 0);
 });

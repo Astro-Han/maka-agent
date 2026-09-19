@@ -78,7 +78,7 @@ export function createDesktopClientPluginServices(
             throw new Error('Client connection changed during snapshot');
           targetEpoch = epoch;
           localFiles = connection.localFiles;
-          return { revision: JSON.stringify([epoch, revision]), entries };
+          return { revision, connection: epoch, entries };
         },
         async source(descriptor, signal) {
           const parts: string[] = [];
