@@ -34,6 +34,8 @@ import type { WorkHubPrepareAttachmentsResult } from '../../shared/workhub-conve
 import { encodeDesktopTranscriptBatches, encodeDesktopTranscriptSnapshot } from '../desktop-transcript-ipc.js';
 import { AttachmentIngestBlockedError } from '@maka/core/attachments';
 import type { AttachmentRef } from '@maka/core/events';
+import { coordinationCommands } from '@maka/workhub/controller';
+import { hostAttachmentRefs } from '../../shared/desktop-session-projection.js';
 
 test('WorkHub upload references round-trip through idle answers, both queue modes and attachment reads', async (t) => {
   const owner = {
@@ -70,17 +72,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
             assert.deepEqual(structuredClone(args[1]), [{ name: 'brief.txt', mimeType: 'text/plain', base64: 'aGVsbG8=' }]);
             return preparationResult;
           }
-          if (channel === 'workhub:answer') {
-            const input = args[1] as { attachments: AttachmentRef[]; turnId: string };
-            sent.push({ channel, attachments: input.attachments });
-            return { kind: 'admitted', turnId: input.turnId };
-          }
           assert.equal(args[1], nativeSessionId);
-          if (channel === 'sessions:submitMessage') {
-            const command = args[3] as { retainedAttachments: AttachmentRef[] };
-            sent.push({ channel, attachments: command.retainedAttachments });
-            return { ok: true, disposition: args[2] === 'current_turn' ? 'steering' : 'followup', attachments: [uploaded] };
-          }
           if (channel === 'attachments:readBytes') return { ok: true, base64: 'aGVsbG8=' };
           throw new Error(`Unexpected channel: ${channel}`);
         },
@@ -96,14 +88,21 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
     else Reflect.deleteProperty(globalThis, 'window');
   });
   const services = createDesktopWorkHubServices(bridge);
+  const commands = coordinationCommands({
+    hostEpoch: 'epoch', signal: new AbortController().signal,
+    remote: { method: (name: string) => async (input: { turnId?: string; attachments?: AttachmentRef[]; placement?: string; content?: { attachments: AttachmentRef[] } }) => {
+      sent.push({ channel: name, attachments: input.attachments ?? input.content!.attachments });
+      return { ok: true, result: name === 'answer' ? { turnId: input.turnId } : { disposition: input.placement === 'current_turn' ? 'steering' : 'followup' } };
+    } } as unknown as Parameters<typeof coordinationCommands>[0]['remote'],
+  }, (_sessionId, refs) => hostAttachmentRefs({ scope: owner, sessionId: nativeSessionId }, refs));
   const attachments = await services.prepareAttachments(sessionId, [
     { file: new File(['hello'], 'brief.txt', { type: 'text/plain' }) },
   ]);
   assert.equal(attachments[0]!.ref.kind, 'session_file');
   assert.equal(attachments[0]!.ref.kind === 'session_file' && attachments[0]!.ref.sessionId, sessionId);
-  assert.equal((await services.answer(sessionId, { turnId: 'idle-answer', text: 'read this', attachments })).kind, 'admitted');
+  assert.equal((await commands.answer(sessionId, { turnId: 'idle-answer', text: 'read this', attachments })).kind, 'admitted');
   for (const placement of ['next_turn', 'current_turn'] as const) {
-    assert.equal(await services.enqueueMessage(sessionId, `message-${placement}`, 'read this', attachments, placement, 'active-turn'), 'admitted');
+    assert.equal(await commands.enqueueMessage(sessionId, `message-${placement}`, 'read this', attachments, placement, 'active-turn'), 'admitted');
   }
   assert.deepEqual(structuredClone(sent.map(({ attachments }) => attachments)), [[uploaded], [uploaded], [uploaded]]);
   assert.equal((await services.readAttachmentBytes(sessionId, 'brief.txt')).ok, true);
@@ -119,8 +118,8 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
     },
   );
   const foreign = [{ ...uploaded, ref: { ...uploaded.ref, kind: 'session_file' as const, sessionId: desktopSessionKey({ hostId: 'foreign-host', sessionId: nativeSessionId }), relativePath: 'brief.txt' } }];
-  await assert.rejects(services.answer(sessionId, { turnId: 'foreign', text: 'read this', attachments: foreign }), /another Host or Session/);
-  await assert.rejects(services.enqueueMessage(sessionId, 'foreign', 'read this', foreign, 'next_turn', 'active-turn'), /another Host or Session/);
+  await assert.rejects(commands.answer(sessionId, { turnId: 'foreign', text: 'read this', attachments: foreign }), /another Host or Session/);
+  await assert.rejects(commands.enqueueMessage(sessionId, 'foreign', 'read this', foreign, 'next_turn', 'active-turn'), /another Host or Session/);
 });
 
 

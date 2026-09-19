@@ -21,7 +21,7 @@ import type { ClientContext } from '@maka-agent/plugin-sdk/client';
 import type { OperationInput, OperationOutput } from '@maka/runtime-host/protocol';
 import type { HostAttachments } from './slots.js';
 import type {
-  CoordinationSessionServices,
+  CoordinationCommands,
   WorkHubAnswerInput,
   WorkHubAnswerResult,
 } from './controller/ports.js';
@@ -45,9 +45,12 @@ type Queued = Wire<OperationOutput<'turn.message.submit'>>;
 export function coordinationCommands(
   context: Pick<ClientContext, 'remote' | 'hostEpoch' | 'signal'>,
   toHost: HostAttachments,
-): Pick<CoordinationSessionServices, 'answer' | 'configureModel' | 'enqueueMessage'> {
+): CoordinationCommands {
   const submit = context.remote.method<Answer, Outcome<Receipt>>('answer');
-  const receipt = context.remote.method<Answer, Outcome<Receipt | null>>('answer-receipt');
+  const receipt = context.remote.method<
+    Answer,
+    Outcome<Wire<OperationOutput<'turn.query'>> | null>
+  >('answer-receipt');
   const configure = context.remote.method<ModelInput, Outcome<ModelResult>>('configure-model');
   const enqueue = context.remote.method<Enqueue, Outcome<Queued>>('enqueue');
   return {
@@ -89,7 +92,8 @@ export function coordinationCommands(
             if (proof.error.code === 'operation_conflict') throw new DomainError(proof.error);
             return unknown();
           }
-          if (proof.result) return { kind: 'admitted', ...proof.result };
+          if (proof.result)
+            return { kind: 'admitted', turnId: proof.result.turnId, status: proof.result.status };
           if (epoch !== context.hostEpoch) return { kind: 'not_admitted' };
         }
         context.signal.throwIfAborted();

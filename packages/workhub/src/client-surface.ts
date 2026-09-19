@@ -19,11 +19,14 @@
 
 import type { WorkHubRootProps } from './surface.js';
 import type { coordinationCommands } from './client-session.js';
+import type { CoordinationSessionAdapter } from './controller/ports.js';
 
 /** Retirement closes new adapter calls; returned subscription cleanups remain usable.
  * These are Client lifecycle guards, not Host execution authority. */
 export function bindSurface(
-  ports: Pick<WorkHubRootProps, 'sessions' | 'native' | 'attachments' | 'contextUsage'>,
+  ports: Pick<WorkHubRootProps, 'native' | 'attachments' | 'contextUsage'> & {
+    sessions: CoordinationSessionAdapter;
+  },
   commands: ReturnType<typeof coordinationCommands>,
   signal: AbortSignal,
 ): Pick<WorkHubRootProps, 'sessions' | 'native' | 'attachments' | 'contextUsage'> {
@@ -49,11 +52,15 @@ export function bindSurface(
   };
 }
 
-function methods<T extends object>(api: T, signal: AbortSignal, overrides?: Partial<T>): T {
+function methods<T extends object, Overrides extends object = object>(
+  api: T,
+  signal: AbortSignal,
+  overrides?: Overrides,
+): T & Overrides {
   const cache = new Map<PropertyKey, { source: unknown; call: (...args: unknown[]) => unknown }>();
   // Electron bridges are frozen. A separate target permits wrapping methods
   // without violating the source object's non-configurable property invariants.
-  return new Proxy(Object.create(api) as T, {
+  return new Proxy(Object.create(api) as T & Overrides, {
     get(_target, key) {
       const owner = overrides && Object.hasOwn(overrides, key) ? overrides : api;
       const source = Reflect.get(owner, key, owner);

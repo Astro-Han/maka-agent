@@ -70,10 +70,11 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
     kind: 'not_admitted',
   });
   assert.deepEqual(calls, [['answer-receipt', request]]);
-  replies.set('answer-receipt', { ok: true, result: { turnId: 'turn' } });
+  replies.set('answer-receipt', { ok: true, result: { turnId: 'turn', status: 'completed' } });
   assert.deepEqual(await commands.answer('session', { ...request, originHostEpoch: 'old' }), {
     kind: 'admitted',
     turnId: 'turn',
+    status: 'completed',
   });
   replies.set('answer-receipt', new Error('receipt unavailable'));
   assert.deepEqual(await commands.answer('session', { ...request, originHostEpoch: 'old' }), {

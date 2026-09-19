@@ -51,6 +51,15 @@ export interface WorkHubTranscript {
 }
 
 /** The conversation controller has no native-window, browser or local-file access. */
+export type CoordinationCommands = Pick<
+  CoordinationSessionServices,
+  'answer' | 'configureModel' | 'enqueueMessage'
+>;
+export type CoordinationSessionAdapter = Omit<
+  CoordinationSessionServices,
+  keyof CoordinationCommands
+>;
+
 export interface CoordinationSessionServices {
   subscribeAvailability(handler: () => void): () => void;
   getSession(sessionId: string): Promise<SessionSummary & { revision: number }>;

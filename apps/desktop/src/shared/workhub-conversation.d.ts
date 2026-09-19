@@ -20,8 +20,6 @@
 import type { AttachmentIngestBlockedCode } from '@maka/core/attachments';
 import type { AttachmentRef } from '@maka/core/events';
 
-export type { WorkHubAnswerInput, WorkHubAnswerResult } from '@maka/workhub/controller';
-
 export type WorkHubPrepareAttachmentsResult =
   | { readonly ok: true; readonly attachments: AttachmentRef[] }
   | { readonly ok: false; readonly code: AttachmentIngestBlockedCode };

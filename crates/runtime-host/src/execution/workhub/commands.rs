@@ -132,7 +132,7 @@ impl Commands for WorkHubCommands {
     fn answer_receipt<'a>(
         &'a self,
         request: &'a crate::plugins::workhub::answer::Request,
-    ) -> BoxFuture<'a, Result<Option<maka_protocol::workhub::TurnResult>>> {
+    ) -> BoxFuture<'a, Result<Option<maka_protocol::turn::TurnSnapshot>>> {
         Box::pin(async move { self.executions()?.workhub_answer_receipt(request).await })
     }
     fn client_call(

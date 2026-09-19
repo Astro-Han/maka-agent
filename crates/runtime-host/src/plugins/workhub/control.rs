@@ -66,7 +66,7 @@ pub(crate) trait Commands: Send + Sync {
     fn answer_receipt<'a>(
         &'a self,
         request: &'a super::answer::Request,
-    ) -> BoxFuture<'a, Result<Option<maka_protocol::workhub::TurnResult>>>;
+    ) -> BoxFuture<'a, Result<Option<maka_protocol::turn::TurnSnapshot>>>;
     fn client_call(
         &self,
         caller: Context,

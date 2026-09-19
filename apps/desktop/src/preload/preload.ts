@@ -23,8 +23,6 @@ import type {
 } from './bridge-contract.js';
 
 import type {
-  WorkHubAnswerInput,
-  WorkHubAnswerResult,
   WorkHubPrepareAttachmentsResult,
 } from '../shared/workhub-conversation.js';
 import type { SessionObservationMessage } from '../shared/session-execution-projection.js';
@@ -2118,19 +2116,6 @@ const makaBridge = {
         ? { ok: true, attachments: projectDesktopAttachmentRefs(scope, result.attachments) }
         : result;
     },
-    async answer(coordinationSessionId: string, input: WorkHubAnswerInput) {
-      const scope = await resolveDesktopWorkHubCoordinationCreateScope(coordinationSessionId, runtimeHostSessionRef);
-      const result = await ipcRenderer.invoke('workhub:answer', scope, {
-        ...input,
-        ...(input.attachments ? { attachments: hostAttachmentRefs({ scope, sessionId: parseDesktopSessionKey(coordinationSessionId).sessionId }, input.attachments) } : {}),
-      }) as WorkHubAnswerResult;
-      return result;
-    },
-    async configureModel(coordinationSessionId: string, input: OperationInput<'workhub.coordination.configureModel'>) {
-      const scope = await resolveDesktopWorkHubCoordinationCreateScope(coordinationSessionId, runtimeHostSessionRef);
-      return ipcRenderer.invoke('workhub:configureModel', scope, input) as Promise<OperationOutput<'workhub.coordination.configureModel'>>;
-    },
-
   },
   sessionLocal: {
     async listMessages(sessionId) {

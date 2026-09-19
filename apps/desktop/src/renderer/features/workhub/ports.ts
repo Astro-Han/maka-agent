@@ -21,14 +21,14 @@ import type { ArtifactBinaryReadResult } from '@maka/core/artifacts';
 import type { UiLocale } from '@maka/core/ui-locale';
 import type { ComposerAttachmentService } from '@maka/ui/use-composer-attachments';
 import type { AttachmentRef } from '@maka/core/events';
-import type { CoordinationSessionServices } from '@maka/workhub/controller';
+import type { CoordinationSessionAdapter } from '@maka/workhub/controller';
 import type { WorkHubControlBridge } from '../../../shared/workhub-control.js';
 import type { WorkHubPresentationBridge } from '../../../shared/workhub-presentation.js';
 
 export type { WorkHubTranscriptSnapshot } from '@maka/workhub/controller';
 
 /** Desktop adapters; not the plugin SDK. */
-export interface WorkHubServices extends CoordinationSessionServices {
+export interface WorkHubServices extends CoordinationSessionAdapter {
   readonly inspector: import('../../application/contracts/session-inspector/service.js').SessionInspectorService;
   readonly surface: 'main' | 'workhub';
   readonly initialLocale: UiLocale;

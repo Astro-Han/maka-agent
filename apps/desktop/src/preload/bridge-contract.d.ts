@@ -19,8 +19,6 @@
 
 import type { ClientIdentity, ClientFileRequest } from '@maka-agent/plugin-sdk/client';
 import type {
-  WorkHubAnswerInput,
-  WorkHubAnswerResult,
   WorkHubPrepareAttachmentsResult,
 } from '../shared/workhub-conversation.js';
 import type { ConnectionEvent } from '@maka/core/connections';
@@ -1109,9 +1107,6 @@ export interface MakaBridge {
   workHub: {
     getSession(coordinationSessionId: string): Promise<DesktopSessionSummary>;
     prepareAttachments(coordinationSessionId: string, items: RendererIngestInput[]): Promise<WorkHubPrepareAttachmentsResult>;
-    answer(coordinationSessionId: string, input: WorkHubAnswerInput): Promise<WorkHubAnswerResult>;
-    configureModel(coordinationSessionId: string, input: OperationInput<'workhub.coordination.configureModel'>): Promise<OperationOutput<'workhub.coordination.configureModel'>>;
-
   };
   sessions: {
     list(filter?: SessionListFilter): Promise<DesktopSessionSummary[]>;

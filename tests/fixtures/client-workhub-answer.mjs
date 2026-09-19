@@ -333,7 +333,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     if (failure) throw failure;
     const terminal = await request('turn.query', { sessionId, turnId });
     assert.equal(terminal.status, 'completed');
-    assert.deepEqual(await receipt(input), { turnId });
+    assert.deepEqual(await receipt(input), terminal);
     await assert.rejects(
       receipt({ ...input, text: 'changed' }),
       (error) => error.code === 'operation_conflict',
@@ -449,7 +449,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     await togglePolicy(false);
     const restored = await workhubRemote(connection);
     remotes.push(restored);
-    assert.deepEqual(await restored.method('answer-receipt')(input), { turnId });
+    assert.deepEqual(await restored.method('answer-receipt')(input), terminal);
     assert.deepEqual(await restored.method('answer')(input), { turnId });
     await assert.rejects(
       request('workhub.coordination.answer', { ...input, text: 'changed' }),

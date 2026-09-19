@@ -18,7 +18,10 @@
  */
 
 export { useWorkHubController } from './controller/use-workhub-controller.js';
+export { coordinationCommands } from './client-session.js';
 export type {
+  CoordinationCommands,
+  CoordinationSessionAdapter,
   CoordinationSessionServices,
   WorkHubAnswerInput,
   WorkHubAnswerResult,

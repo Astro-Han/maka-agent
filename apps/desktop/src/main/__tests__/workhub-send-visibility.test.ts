@@ -22,14 +22,13 @@ import { afterEach, test } from 'node:test';
 import { act, createElement } from 'react';
 import { LocaleProvider } from '@maka/ui';
 import { deferred } from '@maka/core/test-only/async-primitives';
-import { RuntimeHostRequestInterruptedError, RuntimeHostOperationError } from '@maka/runtime-host/client';
+import { RuntimeHostRequestInterruptedError } from '@maka/runtime-host/client';
 import { registerRuntimeHostSessionExecutionIpc, type RuntimeHostSessionExecutionIpcDeps } from '../runtime-host-session-execution-ipc-main.js';
-import { registerRuntimeHostWorkHubIpc } from '../runtime-host-workhub-ipc-main.js';
 import type { IpcHandler } from '../ipc-reconnect-policy.js';
 import type { DesktopSessionStopResult } from '../../preload/bridge-contract.js';
 import type { AttachmentRef } from '@maka/core/events';
 import type { StoredMessage } from '@maka/core/session';
-import { useWorkHubController, type CoordinationSessionServices as WorkHubServices, type WorkHubTranscriptSnapshot } from '@maka/workhub/controller';
+import { coordinationCommands, useWorkHubController, type CoordinationSessionServices as WorkHubServices, type WorkHubTranscriptSnapshot } from '@maka/workhub/controller';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 
 afterEach(cleanupFakeDom);
@@ -66,17 +65,22 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
       return { retracted: stopRetractions.map((messageId) => ({ messageId })) };
     } },
   } as unknown as RuntimeHostSessionExecutionIpcDeps, ipc);
-  registerRuntimeHostWorkHubIpc({
+  const commands = coordinationCommands({
     get hostEpoch() { return hostEpoch; },
-    queryTurn: async () => {
-      if (!rootTurn) throw new RuntimeHostOperationError('turn.query', 'not_found', 'Turn was not admitted');
-      return { ...rootTurn, sessionId: 'workhub-coordination' };
-    },
-    answerWorkHubCoordination: async (input: Parameters<WorkHubServices['answer']>[1]) => {
-      requests.push(input);
-      return admission.promise;
-    },
-  } as unknown as Parameters<typeof registerRuntimeHostWorkHubIpc>[0], ipc, {});
+    signal: new AbortController().signal,
+    remote: {
+      method: (name: string) => async (input: Parameters<WorkHubServices['answer']>[1]) => {
+        if (name === 'answer-receipt') return { ok: true, result: rootTurn?.turnId === input.turnId ? rootTurn : null };
+        assert.equal(name, 'answer');
+        requests.push(input);
+        try { return { ok: true, result: await admission.promise }; }
+        catch (error) {
+          if (error instanceof RuntimeHostRequestInterruptedError) throw error;
+          return { ok: false, error: { code: 'operation_conflict', message: String((error as Error).message) } };
+        }
+      },
+    } as unknown as Parameters<typeof coordinationCommands>[0]['remote'],
+  }, (_sessionId, refs) => [...refs]);
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!({} as Parameters<IpcHandler>[0], ...args);
 
   const sessionId = JSON.stringify(['host-1', 'workhub-coordination']);
@@ -112,7 +116,7 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
     subscribeActiveInteractions: () => () => {},
     respondToUserForm: async () => {},
     respondToUserQuestion: async () => {},
-    answer: (_id: string, input: Parameters<WorkHubServices['answer']>[1]) => invoke('workhub:answer', input),
+    answer: commands.answer,
     stop: async (target: string, turnId: string) => {
       const result = await invoke('sessions:stop', target, { source: 'stop_button', expectedTurnId: turnId }) as DesktopSessionStopResult;
       return result?.kind === 'interrupted' ? result.retractedMessageIds : undefined;

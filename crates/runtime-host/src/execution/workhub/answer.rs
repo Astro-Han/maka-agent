@@ -36,7 +36,7 @@ impl Executions {
     pub(crate) async fn workhub_answer_receipt(
         &self,
         request: &Request,
-    ) -> Result<Option<TurnResult>> {
+    ) -> Result<Option<maka_protocol::turn::TurnSnapshot>> {
         let Some(record) = self
             .recorded(COORDINATION_SESSION_ID, &request.input.turn_id)
             .await?
@@ -49,9 +49,7 @@ impl Executions {
                 "WorkHub Turn belongs to another request",
             ));
         }
-        Ok(Some(TurnResult {
-            turn_id: request.input.turn_id.clone(),
-        }))
+        Ok(Some(record.snapshot))
     }
 }
 
@@ -65,7 +63,9 @@ pub(super) async fn execute(
     let session = {
         let _gate = executions.lock_admission().await;
         if let Some(receipt) = executions.workhub_answer_receipt(&plan.request).await? {
-            return Ok(receipt);
+            return Ok(TurnResult {
+                turn_id: receipt.turn_id,
+            });
         }
         let _call = caller
             .admit()
@@ -100,7 +100,9 @@ pub(super) async fn execute(
     .await;
     let _gate = executions.lock_admission().await;
     if let Some(receipt) = executions.workhub_answer_receipt(&plan.request).await? {
-        return Ok(receipt);
+        return Ok(TurnResult {
+            turn_id: receipt.turn_id,
+        });
     }
     let _call = caller
         .admit()

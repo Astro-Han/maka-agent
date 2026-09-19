@@ -163,7 +163,9 @@ async fn answer(
 ) -> Result<workhub::TurnResult, OperationError> {
     let request = crate::plugins::workhub::answer::Request::new(input)?;
     if let Some(receipt) = host.executions.workhub_answer_receipt(&request).await? {
-        return Ok(receipt);
+        return Ok(workhub::TurnResult {
+            turn_id: receipt.turn_id,
+        });
     }
     control(host)?
         .value

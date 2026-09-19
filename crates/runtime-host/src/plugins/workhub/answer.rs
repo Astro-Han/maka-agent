@@ -62,7 +62,9 @@ impl super::Control {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<TurnResult> {
         if let Some(receipt) = self.commands.answer_receipt(&request).await? {
-            return Ok(receipt);
+            return Ok(TurnResult {
+                turn_id: receipt.turn_id,
+            });
         }
         super::control::check_request(&cancellation)?;
         let _call = self

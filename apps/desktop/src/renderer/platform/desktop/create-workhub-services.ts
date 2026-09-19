@@ -90,19 +90,10 @@ export function createDesktopWorkHubServices(
     subscribeActiveInteractions: (handler) => bridge.sessions.subscribeActiveInteractions(handler),
     respondToUserForm: (sessionId, response) => bridge.sessions.respondToUserForm(sessionId, response),
     respondToUserQuestion: (sessionId, response) => bridge.sessions.respondToUserQuestion(sessionId, response),
-    answer: (sessionId, input) => bridge.workHub.answer(sessionId, input),
-    enqueueMessage: async (sessionId, messageId, text, attachments, placement) => {
-      const result = await bridge.sessions.submitMessage(sessionId, placement, {
-        messageId, text, retainedAttachments: attachments,
-      }, { waitForHostAdmission: true });
-      if (result.ok) return result.disposition === (placement === 'current_turn' ? 'steering' : 'followup') ? 'admitted' : 'rejected';
-      return result.reason === 'outcome_unknown' ? 'unknown' : 'rejected';
-    },
     retractQueueEntry: (sessionId, entryId) => bridge.sessions.retractQueueEntry(sessionId, entryId),
     promoteQueueEntry: (sessionId, entryId) => bridge.sessions.promoteQueueEntry(sessionId, entryId),
     updateQueueEntry: (sessionId, entryId, revision, text) => bridge.sessions.updateQueueEntry(sessionId, entryId, revision, text),
     reorderQueueEntries: (sessionId, entryIds) => bridge.sessions.reorderQueueEntries(sessionId, entryIds),
-    configureModel: (sessionId, input) => bridge.workHub.configureModel(sessionId, input),
     observe: (sessionId, handler, onError, onPhase, onExecution) =>
       bridge.sessions.subscribeEvents(sessionId, handler, onPhase, onError, onExecution),
     stop: async (sessionId, turnId) => {
