@@ -31,6 +31,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub(super) mod profile;
+mod stop;
+pub(crate) use stop::WorkHubCommands;
 
 impl Executions {
     /// Caller owns admission; waiting for cleanup must happen after releasing it.

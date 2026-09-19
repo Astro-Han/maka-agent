@@ -23,6 +23,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { decodeStoredMessage } from '../../packages/core/src/session.ts';
 import { watchSession } from './client-subscription.mjs';
 import { createInput, querySession } from './client-runtime-policy-fixture.mjs';
@@ -78,6 +79,18 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
   const finishTarget = Promise.withResolvers();
   const targetSessionId = createNew ? createdTarget('delegation-action') : 'target';
   const request = (operation, input) => connection.request(operation, input, 5000);
+  const toggleWorkhub = async (disabled) => {
+    await request('plugin.composition.apply', {
+      operations: [{ type: 'update', entryId: 'maka.workhub', patch: { disabled } }],
+    });
+    const deadline = Date.now() + 5000;
+    while (
+      (await request('plugin.platform.query', { view: 'status' })).convergence !== 'converged'
+    ) {
+      assert(Date.now() < deadline, 'WorkHub did not converge');
+      await delay(10);
+    }
+  };
   const file = join(workspace, 'delegation.json');
   const act = async (input) => {
     const result = await request(
@@ -485,6 +498,12 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                 },
               };
               const sourceSequence = sourceObserver.frames.at(-1)?.sequence ?? 0;
+              await toggleWorkhub(true);
+              await assert.rejects(
+                act(stopInput),
+                (error) => error.code === 'operation_unavailable',
+              );
+              await toggleWorkhub(false);
               stopReceipt = await act(stopInput);
               // The coordinator stays inside this tool call: no subsequent
               // Invocation boundary or reconnect can hide a missed control wakeup.
@@ -500,6 +519,10 @@ export async function verifyWorkhubDelegation(connection, workspace, reopened, m
                 targetSessionId,
                 targetTurnId: receipt.targetTurnId,
               });
+              assert.deepEqual(await act(stopInput), stopReceipt);
+              // Reactivation cannot replay cancellation or reinterpret the old target.
+              await toggleWorkhub(true);
+              await toggleWorkhub(false);
               assert.deepEqual(await act(stopInput), stopReceipt);
               await assert.rejects(
                 act({

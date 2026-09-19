@@ -44,6 +44,7 @@ pub(crate) mod snapshot;
 mod successor;
 mod tools;
 mod workhub;
+pub(crate) use workhub::WorkHubCommands;
 mod workspaces;
 
 use crate::server::capabilities::Capabilities;

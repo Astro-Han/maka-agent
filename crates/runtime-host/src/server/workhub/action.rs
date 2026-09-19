@@ -23,7 +23,6 @@ use maka_protocol::{
     workhub::{ActInput, ActResult},
 };
 use maka_runtime::{
-    artifact::content_digest,
     event::{CommitError, EventWrite, Fact, Invocation, RuntimeEvent},
     input::InvocationInput,
     workhub::{COORDINATION_SESSION_ID, Delegation, DelegationDelivery, DelegationKind},
@@ -34,7 +33,6 @@ use uuid::Uuid;
 mod correction;
 mod resume;
 pub(in crate::server) use correction::recover;
-mod stop;
 mod target;
 
 pub(in crate::server) const ERRORS: &[Code] = &[
@@ -78,7 +76,16 @@ pub(super) async fn act(
             maka_protocol::workhub::LinkedProposal::Stop { .. }
         )
     ) {
-        return stop::act(host, input).await;
+        let control = host
+            .executions
+            .plugin_catalog
+            .snapshot::<crate::plugins::workhub::Control>(
+                &maka_plugins::composition::Scope::Profile,
+            )
+            .entries
+            .remove(crate::plugins::workhub::ID)
+            .ok_or_else(|| failure(Code::OperationUnavailable, "WorkHub is unavailable"))?;
+        return control.value.stop(input).await;
     }
     admit(host, input, None).await
 }
@@ -272,9 +279,7 @@ fn receipt(delegation: &Delegation) -> ActResult {
 }
 
 fn fingerprint(input: &ActInput) -> Result<String, OperationError> {
-    Ok(content_digest(&serde_json::to_vec(input).map_err(
-        |error| failure(Code::InternalFailure, error.to_string()),
-    )?))
+    crate::plugins::workhub::control::fingerprint(input)
 }
 
 fn stored(host: &Host, error: maka_event_log::StoreError) -> OperationError {

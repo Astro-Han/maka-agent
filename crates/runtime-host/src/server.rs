@@ -255,7 +255,13 @@ impl Host {
             crate::execution::GraphSessions::new(&executions, root.root_id().into()),
             executions.plugin_catalog.clone(),
         )?;
-        crate::plugins::workhub::install(&mut setup, &executions.plugin_catalog)?;
+        crate::plugins::workhub::install(
+            &mut setup,
+            &executions.plugin_catalog,
+            Arc::new(crate::execution::WorkHubCommands(Arc::downgrade(
+                &executions,
+            ))),
+        )?;
         crate::plugins::scheduler::install(
             &mut setup,
             log.clone(),

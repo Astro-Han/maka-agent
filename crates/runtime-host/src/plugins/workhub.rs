@@ -30,6 +30,8 @@ use maka_runtime::{
 };
 use serde_json::Value;
 use std::sync::Arc;
+pub(crate) mod control;
+pub(crate) use control::Control;
 
 pub(crate) const ID: &str = "maka.workhub";
 
@@ -47,7 +49,11 @@ impl Policy {
     }
 }
 
-pub(crate) fn install(setup: &mut Setup, catalog: &Catalog) -> Result<(), maka_plugins::Error> {
+pub(crate) fn install(
+    setup: &mut Setup,
+    catalog: &Catalog,
+    commands: Arc<dyn control::Commands>,
+) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
             "built-in WorkHub identity is reserved".into(),
@@ -55,6 +61,8 @@ pub(crate) fn install(setup: &mut Setup, catalog: &Catalog) -> Result<(), maka_p
     }
     catalog.host_only::<Policy>()?;
     catalog.reserve_for::<Policy>(ID, ID)?;
+    catalog.host_only::<Control>()?;
+    catalog.reserve_for::<Control>(ID, ID)?;
     setup.builtins.insert(
         ID.into(),
         Arc::new(Definition {
@@ -62,7 +70,7 @@ pub(crate) fn install(setup: &mut Setup, catalog: &Catalog) -> Result<(), maka_p
             revision: env!("CARGO_PKG_VERSION").into(),
             dependencies: vec![],
             inject: vec![],
-            plugin: Arc::new(WorkHub),
+            plugin: Arc::new(WorkHub { commands }),
         }),
     );
     let mut entry = Entry::new(ID)?;
@@ -78,7 +86,9 @@ pub(crate) fn install(setup: &mut Setup, catalog: &Catalog) -> Result<(), maka_p
     );
     Ok(())
 }
-struct WorkHub;
+struct WorkHub {
+    commands: Arc<dyn control::Commands>,
+}
 impl Plugin for WorkHub {
     fn supports_scope(&self, scope: &Scope) -> bool {
         *scope == Scope::Profile
@@ -97,12 +107,22 @@ impl Plugin for WorkHub {
         context: PluginContext,
         _: Value,
     ) -> BoxFuture<'static, Result<Staged, String>> {
+        let commands = self.commands.clone();
         Box::pin(async move {
             let identity = context
                 .lifecycle
                 .identity()
                 .map_err(|error| error.to_string())?;
             let mut staged = Staged::default();
+            staged
+                .insert(
+                    ID,
+                    Control {
+                        commands,
+                        caller: context.lifecycle.clone(),
+                    },
+                )
+                .map_err(|error| error.to_string())?;
             staged.insert(ID, Policy {
                 required_clients: &CLIENT_TOOLS,
                 optional_clients: &BROWSER_TOOLS,
