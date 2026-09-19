@@ -43,22 +43,22 @@ export function createDesktopClientPluginServices(
     },
     connect(host) {
       const query: typeof bridge.clientPlugins.query = async (origin, input) => bridge.clientPlugins.query(origin, input);
-      let targetEpoch: string | undefined;
+      let connectionEpoch: string | undefined;
       let localFiles = false;
       return {
         subscribeContext: (listener) => bridge.clientPlugins.subscribeContext(host, listener),
         async session(sessionId) {
-          if (!targetEpoch) throw new Error('Client catalog has no connection identity');
-          return bridge.clientPlugins.session(host, targetEpoch, sessionId);
+          if (!connectionEpoch) throw new Error('Client catalog has no connection identity');
+          return bridge.clientPlugins.session(host, connectionEpoch, sessionId);
         },
         remote(identity, signal) {
-          if (!targetEpoch) throw new Error('Client catalog has no connection identity');
-          return clientPluginRemote(bridge.clientPlugins.remote, host, targetEpoch)(identity, signal);
+          if (!connectionEpoch) throw new Error('Client catalog has no connection identity');
+          return clientPluginRemote(bridge.clientPlugins.remote, host, connectionEpoch)(identity, signal);
         },
         localFiles(identity, signal) {
-          if (!targetEpoch) throw new Error('Client catalog has no connection identity');
+          if (!connectionEpoch) throw new Error('Client catalog has no connection identity');
           if (!localFiles) return undefined;
-          const epoch = targetEpoch;
+          const epoch = connectionEpoch;
           return {
             pick: () => bounded(bridge.clientPlugins.file(host, epoch, identity, {kind:'pick'}), signal),
             async open(path) {
@@ -89,7 +89,7 @@ export function createDesktopClientPluginServices(
           const current = await bounded(bridge.clientPlugins.connection(host), signal);
           if (epoch !== current.epoch || connection.hostEpoch !== current.hostEpoch)
             throw new Error('Client connection changed during snapshot');
-          targetEpoch = epoch;
+          connectionEpoch = epoch;
           localFiles = connection.localFiles;
           return { revision, connection: epoch, hostEpoch: connection.hostEpoch, entries };
         },

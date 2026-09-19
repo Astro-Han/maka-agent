@@ -20,6 +20,7 @@
 import { HOST_OPERATION_SPECS, type PluginRemoteInput, type PluginRemoteResult } from '@maka/runtime-host/protocol';
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from 'electron';
 import { isAbsolute } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { PluginClientQueryInput } from '@maka/runtime-host/protocol';
 
 interface DocumentOwner {
@@ -47,6 +48,8 @@ export function registerClientPluginRemoteIpc(input: {
   };
 }): () => Promise<void> {
   const owners = new Map<WebContents, DocumentOwner>();
+  // A reconnect to the same Host still replaces its connection-owned handles.
+  const epoch = randomUUID();
   const draining = new Set<Promise<unknown>>();
   let closed = false;
   const request = (value: PluginRemoteInput) => input.client.request('plugin.remote', value, 40_000);
@@ -95,12 +98,13 @@ export function registerClientPluginRemoteIpc(input: {
 
   input.ipcMain.handle('plugins:connection', (event, nonce: unknown) => {
     ownerFor(event, nonce);
-    return { hostEpoch: input.client.hostEpoch };
+    return { epoch, hostEpoch: input.client.hostEpoch };
   });
 
-  input.ipcMain.handle('plugins:remote', async (event, nonce: unknown, raw: unknown): Promise<PluginRemoteResult> => {
+  input.ipcMain.handle('plugins:remote', async (event, nonce: unknown, expectedEpoch: unknown, raw: unknown): Promise<PluginRemoteResult | { kind: 'connection_retired' }> => {
     const value = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(raw);
     const owner = ownerFor(event, nonce);
+    if (expectedEpoch !== epoch) return { kind: 'connection_retired' };
     if (value.kind === 'open_document') {
       if (owner.documents.size + owner.pendingOpens >= 32) throw new Error('Remote document limit exceeded');
       owner.pendingOpens++;
@@ -124,8 +128,9 @@ export function registerClientPluginRemoteIpc(input: {
     return track(owner.pending, request(value));
   });
 
-  input.ipcMain.handle('plugins:files', async (event, nonce: unknown, rawClient: unknown, raw: unknown) => {
+  input.ipcMain.handle('plugins:files', async (event, nonce: unknown, expectedEpoch: unknown, rawClient: unknown, raw: unknown) => {
     const owner = ownerFor(event, nonce);
+    if (expectedEpoch !== epoch) throw new Error('Client connection has retired');
     const files = input.files;
     if (!files) throw new Error('Desktop-local files are unavailable for this Host');
     if (!rawClient || typeof rawClient !== 'object' || !raw || typeof raw !== 'object')

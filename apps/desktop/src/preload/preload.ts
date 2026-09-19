@@ -1420,24 +1420,23 @@ const makaBridge = {
       ];
       return () => { for (const dispose of disposers) dispose(); };
     },
-    async file(host, targetEpoch, identity, input) {
+    async file(host, connectionEpoch, identity, input) {
       const scope = await runtimeHostScope(host);
-      if (scope.targetEpoch !== targetEpoch) throw new Error('Client connection has retired');
-      return ipcRenderer.invoke('plugins:files', scope, browserDocumentId, identity, input);
+      return ipcRenderer.invoke('plugins:files', scope, browserDocumentId, connectionEpoch, identity, input);
     },
     async connection(host) {
       const scope = await runtimeHostScope(host);
-      const connection = await ipcRenderer.invoke('plugins:connection', scope, browserDocumentId) as { hostEpoch: string };
-      return { epoch: scope.targetEpoch, hostEpoch: connection.hostEpoch, localFiles: runtimeHostMetadataFor(scope)?.profileKind === 'local' };
+      const connection = await ipcRenderer.invoke('plugins:connection', scope, browserDocumentId) as { epoch: string; hostEpoch: string };
+      return { ...connection, localFiles: runtimeHostMetadataFor(scope)?.profileKind === 'local' };
     },
-    async session(host, targetEpoch, sessionId) {
+    async session(host, connectionEpoch, sessionId) {
       const scope = await runtimeHostScope(host);
-      if (scope.targetEpoch !== targetEpoch) throw new Error('Client connection has retired');
+      const connection = await ipcRenderer.invoke('plugins:connection', scope, browserDocumentId) as { epoch: string };
+      if (connection.epoch !== connectionEpoch) throw new Error('Client connection has retired');
       return recordRuntimeHostSessionScope(scope, sessionId);
     },
-    async remote(host, targetEpoch, input) {
+    async remote(host, connectionEpoch, input) {
       const scope = await runtimeHostScope(host);
-      if (scope.targetEpoch !== targetEpoch) return { kind: 'connection_retired' };
       let value = HOST_OPERATION_SPECS['plugin.remote'].decodeInput(input);
       if ('binding' in value && value.binding.sessionId !== null) {
         const session = await runtimeHostSessionRef(value.binding.sessionId);
@@ -1445,9 +1444,9 @@ const makaBridge = {
           throw new Error('Remote Session belongs to another Host');
         value = { ...value, binding: { ...value.binding, sessionId: session.sessionId } };
       }
-      return HOST_OPERATION_SPECS['plugin.remote'].decodeOutput(
-        await ipcRenderer.invoke('plugins:remote', scope, browserDocumentId, value),
-      );
+      const result = await ipcRenderer.invoke('plugins:remote', scope, browserDocumentId, connectionEpoch, value);
+      if (result?.kind === 'connection_retired') return { kind: 'connection_retired' };
+      return HOST_OPERATION_SPECS['plugin.remote'].decodeOutput(result);
     },
     async query(host, input) {
       const scope = await runtimeHostScope(host);

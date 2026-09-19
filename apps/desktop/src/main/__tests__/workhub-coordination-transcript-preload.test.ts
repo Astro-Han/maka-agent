@@ -68,7 +68,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
           if (channel === 'runtime-host:activeIdentity') return owner;
           if (channel === 'runtime-host:identities') return [owner];
           assert.equal((args[0] as typeof owner).hostId, owner.hostId);
-          if (channel === 'plugins:connection') return { hostEpoch: 'host-process-epoch' };
+          if (channel === 'plugins:connection') return { epoch: 'remote-connection-epoch', hostEpoch: 'host-process-epoch' };
           if (channel === 'attachments:prepare') {
             assert.equal(args[1], nativeSessionId);
             assert.deepEqual(structuredClone(args[2]), [{ name: 'brief.txt', mimeType: 'text/plain', base64: 'aGVsbG8=' }]);
@@ -91,7 +91,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
   });
   const services = createDesktopWorkHubServices(bridge);
   const connection = await bridge.clientPlugins.connection(owner);
-  assert.equal(connection.epoch, owner.targetEpoch);
+  assert.equal(connection.epoch, 'remote-connection-epoch');
   assert.equal(connection.hostEpoch, 'host-process-epoch');
   const commands = coordinationCommands({
     hostEpoch: connection.hostEpoch, signal: new AbortController().signal,

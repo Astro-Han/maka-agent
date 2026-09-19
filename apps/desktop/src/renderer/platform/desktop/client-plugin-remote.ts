@@ -28,12 +28,12 @@ import type { ClientHostRef } from '../../features/client-plugins/index.js';
 export function clientPluginRemote(
   transport: MakaBridge['clientPlugins']['remote'],
   host: ClientHostRef,
-  targetEpoch: string,
+  connectionEpoch: string,
 ): ClientRemoteFactory {
   return (identity: ClientIdentity, signal: AbortSignal) => {
     let document: Promise<string> | undefined;
     let closing: Promise<void> | undefined;
-    const request = (input: Parameters<typeof transport>[2]) => transport(host, targetEpoch, input);
+    const request = (input: Parameters<typeof transport>[2]) => transport(host, connectionEpoch, input);
     const assertLive = () => {
       signal.throwIfAborted();
       if (closing) throw new Error('Client Remote is closed');

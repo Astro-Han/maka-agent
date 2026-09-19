@@ -25,6 +25,7 @@ import test from 'node:test';
 import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import type { IpcHandler } from '../ipc-reconnect-policy.js';
 import { registerClientPluginRemoteIpc } from '../client-plugin-remote-ipc.js';
+import { clientPluginRemote } from '../../renderer/platform/desktop/client-plugin-remote.js';
 
 function renderer() {
   const emitter = Object.assign(new EventEmitter(), {
@@ -39,6 +40,54 @@ function deferred<T>() {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { resolve, promise };
 }
+
+test('reconnecting to the same Host revokes old Remote leases without fencing the replacement Client', async () => {
+  const owner = renderer();
+  const nonce = randomUUID();
+  const handlers = new Map<string, IpcHandler>();
+  const calls: unknown[] = [];
+  const closes: string[] = [];
+  const register = () => registerClientPluginRemoteIpc({
+    ipcMain: { handle: (name, handler) => { handlers.set(name, handler); } },
+    ownsRenderer: contents => contents === owner.emitter as unknown as WebContents,
+    report: assert.ifError,
+    client: { hostEpoch: 'same-host', async request(_operation, input) {
+      switch (input.kind) {
+        case 'open_document': return { kind: 'document', document: randomUUID() };
+        case 'bind': return { kind: 'bound', handler: 'method', target: {
+          entryId: 'backend', activation: randomUUID(), registration: randomUUID(),
+        } };
+        case 'call': calls.push(input.input); return { kind: 'value', value: input.input };
+        case 'close_document': closes.push(input.document); return { kind: 'closed' };
+        default: assert.fail('unexpected request');
+      }
+    } },
+  });
+  const identity = { entryId: 'view', extensionId: 'demo', activation: randomUUID(), contentDigest: 'sha256-' + 'a'.repeat(64), clientDigest: 'sha256-' + 'b'.repeat(64) };
+  const remote = (epoch: string) => clientPluginRemote(
+    (_host, expected, input) => handlers.get('plugins:remote')!(owner.event, nonce, expected, input),
+    { profileId: 'origin', hostId: 'host' }, epoch,
+  )(identity, new AbortController().signal);
+  let dispose = register();
+  try {
+    const before = await handlers.get('plugins:connection')!(owner.event, nonce);
+    const old = remote(before.epoch);
+    const call = old.api.method<string, string>('echo');
+    assert.equal(await call('before reconnect'), 'before reconnect');
+    await dispose();
+    dispose = register();
+    const after = await handlers.get('plugins:connection')!(owner.event, nonce);
+    assert.equal(before.hostEpoch, after.hostEpoch);
+    assert.notEqual(before.epoch, after.epoch);
+    await assert.rejects(call('never replay'));
+    await old.close();
+    const next = remote(after.epoch);
+    assert.equal(await next.api.method<string, string>('echo')('after reconnect'), 'after reconnect');
+    await next.close();
+    assert.deepEqual(calls, ['before reconnect', 'after reconnect']);
+    assert.equal(closes.length, 2);
+  } finally { await dispose(); }
+});
 
 test('Remote documents belong to one Renderer and drain navigation, late opens and crashes without replay', async () => {
   let handler!: IpcHandler;
@@ -63,11 +112,12 @@ test('Remote documents belong to one Renderer and drain navigation, late opens a
     } },
   });
   const nonce = randomUUID();
-  const invoke = (event: IpcMainInvokeEvent, input: unknown) => handler(event, nonce, input);
+  const { epoch, hostEpoch } = await connection(one.event, nonce);
+  const invoke = (event: IpcMainInvokeEvent, input: unknown) => handler(event, nonce, epoch, input);
   try {
-    assert.deepEqual(await connection(one.event, nonce), { hostEpoch: 'host-process' });
+    assert.equal(hostEpoch, 'host-process');
     await assert.rejects(async () => connection({ ...one.event, senderFrame: two.event.senderFrame }, nonce), /live Desktop/);
-    await assert.rejects(files(one.event, nonce, {}, {kind:'pick'}), /unavailable for this Host/);
+    await assert.rejects(files(one.event, nonce, epoch, {}, {kind:'pick'}), /unavailable for this Host/);
     const opened = await invoke(one.event, { kind: 'open_document' });
     await assert.rejects(invoke(two.event, { kind: 'next', document: opened.document, stream: randomUUID() }), /belong/);
     await assert.rejects(invoke({ ...one.event, senderFrame: two.event.senderFrame }, { kind: 'open_document' }), /live Desktop/);
@@ -100,6 +150,7 @@ test('Remote documents belong to one Renderer and drain navigation, late opens a
 
 test('local file actions require a published Client and reject a selection returned after navigation', {timeout: 1000}, async () => {
   let files!: IpcHandler;
+  let connection!: IpcHandler;
   const owner = renderer();
   const selection = deferred<string | null>();
   const picking = deferred<void>();
@@ -107,7 +158,7 @@ test('local file actions require a published Client and reject a selection retur
   let published = true;
   const identity = {entryId:'view', activation:randomUUID(), clientDigest:'sha256-'+'a'.repeat(64)};
   const dispose = registerClientPluginRemoteIpc({
-    ipcMain: {handle(channel, listener) { if (channel === 'plugins:files') files = listener; }},
+    ipcMain: {handle(channel, listener) { if (channel === 'plugins:files') files = listener; else if (channel === 'plugins:connection') connection = listener; }},
     ownsRenderer: contents => contents === owner.emitter as unknown as WebContents,
     report: assert.ifError,
     client: {hostEpoch: 'host-process', async request() { throw new Error('Unexpected Remote command'); }},
@@ -121,14 +172,15 @@ test('local file actions require a published Client and reject a selection retur
     },
   });
   const nonce = randomUUID();
+  const { epoch } = await connection(owner.event, nonce);
   const path = resolve('SKILL.md');
   try {
-    await files(owner.event, nonce, identity, {kind:'open',path});
+    await files(owner.event, nonce, epoch, identity, {kind:'open',path});
     published = false;
-    await assert.rejects(files(owner.event, nonce, identity, {kind:'open',path}), /publication retired/);
+    await assert.rejects(files(owner.event, nonce, epoch, identity, {kind:'open',path}), /publication retired/);
     assert.deepEqual(opened,[path]);
     published = true;
-    const rejected = assert.rejects(files(owner.event, nonce, identity, {kind:'pick'}), /retired during file selection/);
+    const rejected = assert.rejects(files(owner.event, nonce, epoch, identity, {kind:'pick'}), /retired during file selection/);
     await picking.promise;
     owner.emitter.emit('did-start-navigation', {}, 'new-page', false, true);
     selection.resolve(path);
