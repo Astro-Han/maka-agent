@@ -17,12 +17,15 @@
  * under the License.
  */
 
+pub mod api;
 mod catalog;
 mod context;
 mod discovery;
 mod document;
 mod fields;
 mod invocation;
+pub mod plugin;
+pub mod publication;
 mod yaml;
 
 pub use catalog::{Catalog, HostCapabilities, LoadedInstructions, Preference, Preferences};

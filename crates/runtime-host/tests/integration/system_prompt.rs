@@ -22,7 +22,7 @@ use maka_runtime::event::Fact;
 use serde_json::Value;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn original_client_prompt_sources_are_committed_before_http_and_frozen_across_steps() {
+async fn original_client_prompt_sources_are_frozen_per_step_and_preserved_across_reopen() {
     let fixture = ClientFixture::new("maka-system-prompt-");
     let mut original = None;
     for reopened in [false, true] {
@@ -44,23 +44,17 @@ async fn original_client_prompt_sources_are_committed_before_http_and_frozen_acr
         let log = fixture.log().await;
         let prefix = log.prefix(200, 1024 * 1024).await.unwrap();
         let mut openings = Vec::new();
+        let mut model_steps = 0;
         for stored in &prefix.events {
             if let Fact::InvocationOpened {
                 configuration: Some(configuration),
                 ..
             } = &stored.event.fact
             {
-                let prompt = configuration.system_prompt.as_ref().unwrap();
-                prompt.validate().unwrap();
-                let (revision, index) = match stored.event.invocation.turn_id.as_str() {
-                    "PROMPT_FROZEN" => (1, 0),
-                    "PROMPT_NEXT" => (2, 2),
-                    "PROMPT_DISABLED" => (3, 3),
-                    "PROMPT_REOPEN" => (4, 2),
-                    other => panic!("unexpected Turn {other}"),
-                };
-                assert_eq!(prompt.policy_revision, revision);
-                assert_eq!(prompt.text, saved["prompts"][index].as_str().unwrap());
+                assert!(
+                    configuration.system_prompt.is_none(),
+                    "default persona is not a hidden Run baseline"
+                );
                 openings.push(stored.sequence);
             }
             if matches!(stored.event.fact, Fact::ModelRequested { .. }) {
@@ -69,9 +63,27 @@ async fn original_client_prompt_sources_are_committed_before_http_and_frozen_acr
                         .last()
                         .is_some_and(|sequence| *sequence < stored.sequence)
                 );
+                let composition = log
+                    .request_composition(&stored.event.invocation.session_id, &stored.event.id)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let index = if model_steps == 4 { 2 } else { model_steps };
+                assert_eq!(
+                    composition.system_prompt.as_deref(),
+                    saved["prompts"][index].as_str()
+                );
+                assert!(
+                    composition
+                        .sources
+                        .iter()
+                        .any(|source| source.package_id == "maka.assistant")
+                );
+                model_steps += 1;
             }
         }
         assert_eq!(openings.len(), if reopened { 4 } else { 3 });
+        assert_eq!(model_steps, if reopened { 5 } else { 4 });
         let facts = serde_json::to_value(&prefix.events).unwrap();
         if let Some(original) = &original {
             let original: &Vec<Value> = original;

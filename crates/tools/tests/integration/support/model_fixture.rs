@@ -41,7 +41,7 @@ pub async fn record_model_call(
 ) {
     let facts = [
         Fact::InvocationOpened {
-            configuration: Some(configuration.clone()),
+            configuration: Some(Box::new(configuration.clone())),
             input: InvocationInput::Message {
                 skill_invocation: Default::default(),
                 source_messages: Vec::new(),

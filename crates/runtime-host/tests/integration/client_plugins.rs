@@ -76,7 +76,11 @@ async fn client_bundles_follow_publication_not_disk_or_intent_and_fence_reload_a
             let page = success(peer.rpc("plugin.client.query", json!({"kind":"snapshot"})).await);
             assert_eq!(page["entries"].as_array().unwrap().len(), 32);
             let second = success(peer.rpc("plugin.client.query", json!({"kind":"snapshot","cursor":page["nextCursor"]})).await);
-            assert_eq!(second["entries"].as_array().unwrap().len(), 9);
+            let entries: Vec<_> = page["entries"].as_array().unwrap().iter()
+                .chain(second["entries"].as_array().unwrap())
+                .filter(|entry| entry["extensionId"] == "example.client")
+                .map(|entry| entry["entryId"].as_str().unwrap().to_owned()).collect();
+            assert_eq!(entries, (0..40).map(|index| format!("view-{index:02}")).collect::<Vec<_>>());
             assert!(second["nextCursor"].is_null());
             assert_eq!(page["revision"], second["revision"]);
             let entry = page["entries"].as_array().unwrap().iter().find(|entry| entry["entryId"] == "view-00").unwrap().clone();

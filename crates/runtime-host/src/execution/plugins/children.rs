@@ -21,7 +21,7 @@ use super::{
     BoundCommands, ChildSession, CreateChild, Error, Grant, PermissionMode, SessionConfiguration,
     storage,
 };
-use maka_runtime::execution::{CollaborationMode, OrchestrationMode};
+use maka_runtime::execution::{BehaviorId, CollaborationMode};
 use sha2::{Digest, Sha256};
 
 mod workspace;
@@ -170,7 +170,7 @@ impl BoundCommands {
                         child.title_is_manual = true;
                         child.boundary_revision = 0;
                         child.collaboration_mode = CollaborationMode::Agent;
-                        child.orchestration_mode = OrchestrationMode::Default;
+                        child.orchestration_mode = BehaviorId::default();
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map_err(|e| Error::Host(e.to_string()))?

@@ -141,7 +141,7 @@ impl Executions {
                 .submitted_intent
                 .as_ref()
                 .and_then(|intent| intent.turn_orchestration.as_ref())
-                .map(|intent| intent.mode);
+                .map(|intent| intent.mode.clone());
             let Some((basis, candidate_mode, candidate)) = environment.take() else {
                 let record = self
                     .log
@@ -156,7 +156,7 @@ impl Executions {
                         record,
                         None,
                         maka_client_capability::BindingMode::Degrade,
-                        requested_mode,
+                        requested_mode.clone(),
                     )
                     .await;
                 *admission = Some(self.lock_admission().await);
@@ -196,9 +196,11 @@ impl Executions {
                 }
             };
             let intent = sources[0].submitted_intent.as_ref();
+            let mut _input_admission = None;
             let prepared = match candidate {
                 Err(error) => Err(error),
-                Ok(environment) => {
+                Ok((environment, admission)) => {
+                    _input_admission = Some(admission);
                     self.prepare_message(
                         TurnStartInput {
                             session_id: session.into(),
@@ -225,7 +227,7 @@ impl Executions {
                 }
             };
             let prepared = prepared.and_then(|input| {
-                super::skills::validate_pending_tools(&input, &queue, &sources)?;
+                super::tools::validate_pending_tools(&input, &queue, &sources)?;
                 Ok(input)
             });
             let cancellation = self.shutdown.child_token();

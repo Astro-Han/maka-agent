@@ -18,7 +18,8 @@
  */
 
 pub use maka_runtime::execution::{
-    CollaborationMode, OrchestrationMode, PermissionMode, ThinkingLevel, WorkspaceTarget,
+    BehaviorId, CollaborationMode, PermissionMode, ThinkingLevel, WorkspaceProjection,
+    WorkspaceTarget,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,12 +38,6 @@ wire_enum!(RevisionState { Preparing=>"preparing", Committed=>"committed" });
 wire_enum!(SessionLifecycleState { Active=>"active", Archived=>"archived" });
 wire_enum!(UnsupportedReason { NotWireRepresentable=>"not_wire_representable" });
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkspaceProjection {
-    pub target: WorkspaceTarget,
-    pub host_cwd: String,
-}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -99,7 +94,7 @@ pub struct SessionCatalogProjection {
     pub model: String,
     pub permission_mode: PermissionMode,
     pub collaboration_mode: CollaborationMode,
-    pub orchestration_mode: OrchestrationMode,
+    pub orchestration_mode: BehaviorId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_message_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

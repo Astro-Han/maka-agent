@@ -210,7 +210,8 @@ async fn check_boundary(boundary: Boundary) {
             CodeExecutor::new(1, CellLimits::default()).unwrap(),
         );
         let result = run
-            .capture()
+            .capture(".", tokio_util::sync::CancellationToken::new())
+            .await
             .unwrap()
             .into_step("step")
             .invoke(&call, CancellationToken::new())
@@ -293,7 +294,8 @@ async fn check_boundary(boundary: Boundary) {
         CodeExecutor::new(1, CellLimits::default()).unwrap(),
     );
     assert!(matches!(
-        run.capture()
+        run.capture(".", tokio_util::sync::CancellationToken::new())
+            .await
             .unwrap()
             .into_step("step")
             .invoke(&call, CancellationToken::new())

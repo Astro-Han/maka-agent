@@ -44,7 +44,7 @@ struct Record {
 #[derive(Default)]
 struct State {
     records: HashMap<Key, Record>,
-    reserved: HashSet<(TypeId, String)>,
+    reserved: HashMap<(TypeId, String), Option<String>>,
     host_only: HashSet<TypeId>,
     revision: u64,
 }
@@ -118,9 +118,36 @@ impl Catalog {
 
     /// Host core names are reserved before activating any plugin.
     pub fn reserve<T: Send + Sync + 'static>(&self, name: &str) -> Result<(), Error> {
+        self.reserve_name::<T>(name, None)
+    }
+
+    /// Transfer a reserved contribution to one designated package, not to every
+    /// built-in. Publication and revocation still use the normal Fiber lifecycle.
+    pub fn reserve_for<T: Send + Sync + 'static>(
+        &self,
+        name: &str,
+        package: &str,
+    ) -> Result<(), Error> {
+        crate::name(package)?;
+        self.reserve_name::<T>(name, Some(package))
+    }
+
+    fn reserve_name<T: Send + Sync + 'static>(
+        &self,
+        name: &str,
+        package: Option<&str>,
+    ) -> Result<(), Error> {
         crate::name(name)?;
         let kind = TypeId::of::<T>();
         let mut state = self.0.state.lock().unwrap();
+        let key = (kind, name.to_owned());
+        if let Some(existing) = state.reserved.get(&key) {
+            return if existing.as_deref() == package {
+                Ok(())
+            } else {
+                Err(Error::ContributionConflict(name.into()))
+            };
+        }
         if state
             .records
             .keys()
@@ -128,7 +155,7 @@ impl Catalog {
         {
             return Err(Error::ContributionConflict(name.into()));
         }
-        state.reserved.insert((kind, name.into()));
+        state.reserved.insert(key, package.map(str::to_owned));
         Ok(())
     }
 
@@ -191,7 +218,8 @@ impl Catalog {
     }
 
     fn commit_registration(&self, owner: &Context, staged: Staged) -> Result<Registration, Error> {
-        let scope = owner.identity()?.scope;
+        let identity = owner.identity()?;
+        let scope = identity.scope;
         let batch = uuid::Uuid::new_v4();
         let registry = Arc::downgrade(&self.0);
         let revoke = Effect::new(
@@ -224,7 +252,10 @@ impl Catalog {
                     "desktop-ui cannot publish Host capabilities".into(),
                 ));
             }
-            if state.reserved.contains(&(*kind, name.clone()))
+            if state
+                .reserved
+                .get(&(*kind, name.clone()))
+                .is_some_and(|package| package.as_deref() != Some(identity.package_id.as_str()))
                 || state
                     .records
                     .contains_key(&(*kind, scope.clone(), name.clone()))

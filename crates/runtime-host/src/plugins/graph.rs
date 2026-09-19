@@ -18,6 +18,7 @@
  */
 
 mod definitions;
+pub(crate) mod host;
 mod operators;
 mod read;
 mod remote;
@@ -25,7 +26,6 @@ mod session;
 mod tools;
 
 use super::Setup;
-use crate::execution::Executions;
 use futures_util::future::BoxFuture;
 use maka_event_log::EventLog;
 use maka_graph::{Mode, owner::Handle};
@@ -41,7 +41,7 @@ use serde_json::Value;
 use std::{
     collections::BTreeMap,
     sync::{
-        Arc, Mutex, Weak,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -52,9 +52,8 @@ pub(crate) const ID: &str = "maka.agent-graph";
 pub(crate) fn install(
     setup: &mut Setup,
     log: Arc<EventLog>,
-    configuration: Arc<maka_config::ConfigurationStore>,
-    executions: &Arc<Executions>,
-    root: String,
+    sessions: Arc<dyn host::Sessions>,
+    catalog: Catalog,
 ) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
@@ -76,10 +75,8 @@ pub(crate) fn install(
             plugin: Arc::new(GraphPlugin {
                 bundle,
                 log,
-                configuration,
-                executions: Arc::downgrade(executions),
-                root,
-                catalog: executions.plugin_catalog.clone(),
+                sessions,
+                catalog,
             }),
         }),
     );
@@ -110,9 +107,7 @@ pub(crate) fn install(
 struct GraphPlugin {
     bundle: Arc<Bundle>,
     log: Arc<EventLog>,
-    configuration: Arc<maka_config::ConfigurationStore>,
-    executions: Weak<Executions>,
-    root: String,
+    sessions: Arc<dyn host::Sessions>,
     catalog: Catalog,
 }
 impl Plugin for GraphPlugin {
@@ -151,9 +146,7 @@ impl Plugin for GraphPlugin {
         let manager = Arc::new(Manager {
             parent: context.lifecycle,
             log: self.log.clone(),
-            configuration: self.configuration.clone(),
-            executions: self.executions.clone(),
-            root: self.root.clone(),
+            sessions: self.sessions.clone(),
             catalog: self.catalog.clone(),
             roots: Mutex::default(),
             recovering: AtomicBool::new(true),
@@ -178,7 +171,7 @@ impl Plugin for GraphPlugin {
             remote::register(
                 &mut staged,
                 manager.log.clone(),
-                manager.executions.clone(),
+                manager.sessions.clone(),
                 manager.catalog.clone(),
                 &bundle.content_digest,
             )?;
@@ -188,9 +181,17 @@ impl Plugin for GraphPlugin {
                     manager.clone() as Arc<dyn maka_plugins::background::BackgroundWork>,
                 )
                 .map_err(error)?;
-            staged
-                .insert("agent-graph", SessionBehavior(manager))
-                .map_err(|error| error.to_string())?;
+            for (id, mode) in [("graph", Mode::Graph), ("swarm", Mode::Swarm)] {
+                staged
+                    .insert(
+                        id,
+                        SessionBehavior(Arc::new(session::GraphBehavior {
+                            manager: manager.clone(),
+                            mode,
+                        })),
+                    )
+                    .map_err(error)?;
+            }
             Ok(staged)
         })
     }
@@ -200,9 +201,7 @@ type Slot = Arc<tokio::sync::Mutex<Option<Root>>>;
 struct Manager {
     parent: Context,
     log: Arc<EventLog>,
-    configuration: Arc<maka_config::ConfigurationStore>,
-    executions: Weak<Executions>,
-    root: String,
+    sessions: Arc<dyn host::Sessions>,
     catalog: Catalog,
     roots: Mutex<BTreeMap<String, Slot>>,
     recovering: AtomicBool,
@@ -223,16 +222,16 @@ impl maka_plugins::background::BackgroundWork for Manager {
         })
     }
 }
-struct Root {
-    lifecycle: Context,
-    handle: Handle,
-    mode: Mode,
+pub(crate) struct Root {
+    pub(crate) lifecycle: Context,
+    pub(crate) handle: Handle,
+    pub(crate) mode: Mode,
 }
 
 /// Closing submission does not revoke reads or cancellation of already-owned work.
-struct Submission {
-    graph_id: maka_graph::GraphId,
-    stop: tokio_util::sync::CancellationToken,
+pub(crate) struct Submission {
+    pub(crate) graph_id: maka_graph::GraphId,
+    pub(crate) stop: tokio_util::sync::CancellationToken,
 }
 
 struct NativeOperators {
@@ -247,7 +246,7 @@ struct NativeOperators {
 fn error(error: impl ToString) -> String {
     error.to_string()
 }
-fn now() -> Result<u64, String> {
+pub(crate) fn now() -> Result<u64, String> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(error)?

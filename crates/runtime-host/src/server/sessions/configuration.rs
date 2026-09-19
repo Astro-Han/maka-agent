@@ -155,7 +155,8 @@ async fn merge(
             || !patch.thinking_level.is_keep()
             || patch
                 .orchestration_mode
-                .is_some_and(|mode| mode != OrchestrationMode::Default)
+                .as_ref()
+                .is_some_and(|mode| mode != &BehaviorId::default())
             || patch
                 .collaboration_mode
                 .is_some_and(|mode| mode != CollaborationMode::Agent))

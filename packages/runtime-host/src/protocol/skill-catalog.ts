@@ -132,6 +132,7 @@ export interface SkillCatalogInvocableItem {
 }
 
 export interface SkillCatalogGovernanceItem {
+  readonly path?: string;
   readonly kind: SkillCatalogEntryKind;
   readonly ref: string;
   readonly id: string;
@@ -349,6 +350,37 @@ export interface SkillCatalogRevisionConflict {
 }
 
 export const SKILL_CATALOG_OPERATION_SPECS = {
+  'skill.source.import': defineHostPathOperation<
+    SkillSourceImportInput,
+    SkillSourceImportResult,
+    (typeof MUTATION_ERRORS)[number]
+  >(
+    {
+      mode: 'command',
+      availability: 'ready',
+      errors: MUTATION_ERRORS,
+      decodeInput: (value) => {
+        const record = requireExactRecord(value, 'Skill source import', ['sourcePath']);
+        return { sourcePath: hostPath(record.sourcePath) };
+      },
+      decodeOutput: decodeImportSourceResult,
+    },
+    () => true,
+  ),
+  'skill.catalog.resolve-path': defineHostPathOperation<
+    SkillCatalogResolvePathInput,
+    SkillCatalogResolvePathResult,
+    (typeof QUERY_ERRORS)[number]
+  >(
+    {
+      mode: 'query',
+      availability: 'ready',
+      errors: QUERY_ERRORS,
+      decodeInput: decodeResolvePathInput,
+      decodeOutput: decodeResolvePathResult,
+    },
+    usesWorkspaceHostPath,
+  ),
   'skill.catalog.query': defineHostPathOperation<
     SkillCatalogQueryInput,
     SkillCatalogQueryResult,
@@ -407,6 +439,102 @@ export const SKILL_CATALOG_OPERATION_SPECS = {
     usesWorkspaceHostPath,
   ),
 } as const;
+
+export interface SkillCatalogResolvePathInput {
+  readonly context: SkillCatalogWorkspaceContext;
+  readonly ref: string;
+  readonly target: 'file' | 'directory';
+}
+export interface SkillSourceImportInput {
+  readonly sourcePath: string;
+}
+export type SkillSourceImportResult =
+  | {
+      readonly kind: 'imported';
+      readonly source: Pick<
+        SkillCatalogManagedSourceItem,
+        'id' | 'name' | 'description' | 'category' | 'sourceType'
+      >;
+    }
+  | {
+      readonly kind: 'rejected';
+      readonly reason: 'invalid_skill' | 'already_exists' | 'blocked_path';
+    };
+function decodeImportSourceResult(value: unknown): SkillSourceImportResult {
+  const record = requireRecord(value, 'Skill source import result');
+  if (record.kind === 'imported') {
+    requireExactRecord(record, 'Skill source import result', ['kind', 'source']);
+    const source = requireExactRecord(record.source, 'imported Skill source', [
+      'id',
+      'name',
+      'description',
+      'category',
+      'sourceType',
+    ]);
+    if (source.sourceType !== 'local') throw invalidProtocolFrame('Invalid Skill source type');
+    return {
+      kind: 'imported',
+      source: {
+        id: id(source.id, 'imported Skill id'),
+        name: utf8String(source.name, 'imported Skill name', 256),
+        description: utf8String(source.description, 'imported Skill description', 4096),
+        category: utf8String(source.category, 'imported Skill category', 128),
+        sourceType: 'local',
+      },
+    };
+  }
+  requireExactRecord(record, 'Skill source import rejection', ['kind', 'reason']);
+  if (
+    record.kind === 'rejected' &&
+    (record.reason === 'invalid_skill' ||
+      record.reason === 'already_exists' ||
+      record.reason === 'blocked_path')
+  ) {
+    return { kind: 'rejected', reason: record.reason };
+  }
+  throw invalidProtocolFrame('Invalid Skill source import result');
+}
+export type SkillCatalogResolvePathResult =
+  | { readonly kind: 'resolved'; readonly path: string; readonly target: 'file' | 'directory' }
+  | {
+      readonly kind: 'rejected';
+      readonly reason: 'missing' | 'blocked_path' | 'not_file' | 'not_directory';
+    };
+
+function pathTarget(value: unknown): 'file' | 'directory' {
+  if (value === 'file' || value === 'directory') return value;
+  throw invalidProtocolFrame('Invalid Skill path target');
+}
+function hostPath(value: unknown): string {
+  const target = decodeWorkspaceTarget({ kind: 'host_path', path: value });
+  if (target.kind !== 'host_path') throw invalidProtocolFrame('Invalid Skill path');
+  return target.path;
+}
+function decodeResolvePathInput(value: unknown): SkillCatalogResolvePathInput {
+  const record = requireExactRecord(value, 'Skill path input', ['context', 'ref', 'target']);
+  return {
+    context: localContext(record.context),
+    ref: ref(record.ref),
+    target: pathTarget(record.target),
+  };
+}
+function decodeResolvePathResult(value: unknown): SkillCatalogResolvePathResult {
+  const record = requireRecord(value, 'Skill path result');
+  if (record.kind === 'resolved') {
+    requireExactRecord(record, 'Skill path result', ['kind', 'path', 'target']);
+    return { kind: 'resolved', path: hostPath(record.path), target: pathTarget(record.target) };
+  }
+  requireExactRecord(record, 'Skill path rejection', ['kind', 'reason']);
+  if (
+    record.kind === 'rejected' &&
+    (record.reason === 'missing' ||
+      record.reason === 'blocked_path' ||
+      record.reason === 'not_file' ||
+      record.reason === 'not_directory')
+  )
+    return { kind: 'rejected', reason: record.reason };
+  throw invalidProtocolFrame('Invalid Skill path rejection');
+}
 
 function usesWorkspaceHostPath(input: { readonly context: SkillCatalogWorkspaceContext }): boolean {
   return input.context.workspace.kind === 'host_path';
@@ -558,7 +686,9 @@ function pageItem(value: unknown, view: SkillCatalogView): SkillCatalogPageItem 
 }
 
 function governanceItem(value: unknown): SkillCatalogGovernanceItem {
+  const hasPath = Object.hasOwn(requireRecord(value, 'skill catalog governance item'), 'path');
   const record = requireExactRecord(value, 'skill catalog governance item', [
+    ...(hasPath ? ['path'] : []),
     'kind',
     'ref',
     'id',
@@ -583,6 +713,7 @@ function governanceItem(value: unknown): SkillCatalogGovernanceItem {
     'manageable',
   ]);
   return {
+    ...(hasPath ? { path: hostPath(record.path) } : {}),
     kind: entryKind(record.kind),
     ref: ref(record.ref),
     id: displayId(record.id),

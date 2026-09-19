@@ -30,6 +30,14 @@ pub struct Operations;
 
 impl OperationRegistry for Operations {
     fn decode_input(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if operation == Operation::SkillSourceImport {
+            maka_protocol::skills::decode_import_input(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::SkillCatalogResolvePath {
+            maka_protocol::skills::decode_path_input(value)?;
+            return Ok(value.clone());
+        }
         if super::scheduler::supports(operation) {
             return super::scheduler::decode_input(operation, value);
         }
@@ -42,6 +50,14 @@ impl OperationRegistry for Operations {
         }
         if operation == Operation::SkillCatalogQuery {
             maka_protocol::skills::decode_catalog_input(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::SkillCatalogPreviewUpdate {
+            maka_protocol::skills::decode_preview_input(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::SkillCatalogMutate {
+            maka_protocol::skills::decode_mutate_input(value)?;
             return Ok(value.clone());
         }
         if operation == Operation::SkillCatalogInvocableQuery {
@@ -121,6 +137,14 @@ impl OperationRegistry for Operations {
         }
     }
     fn decode_output(&self, operation: Operation, value: &Value) -> Result<Value> {
+        if operation == Operation::SkillSourceImport {
+            maka_protocol::skills::decode_import_output(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::SkillCatalogResolvePath {
+            maka_protocol::skills::decode_path_output(value)?;
+            return Ok(value.clone());
+        }
         if super::scheduler::supports(operation) {
             return super::scheduler::decode_output(operation, value);
         }
@@ -132,6 +156,14 @@ impl OperationRegistry for Operations {
         }
         if operation == Operation::SkillCatalogQuery {
             maka_protocol::skills::decode_catalog_output(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::SkillCatalogPreviewUpdate {
+            maka_protocol::skills::decode_preview_output(value)?;
+            return Ok(value.clone());
+        }
+        if operation == Operation::SkillCatalogMutate {
+            maka_protocol::skills::decode_mutate_output(value)?;
             return Ok(value.clone());
         }
         if operation == Operation::SkillCatalogInvocableQuery {
@@ -239,7 +271,14 @@ impl OperationRegistry for Operations {
                 },
             );
         }
-        if operation == Operation::SkillCatalogQuery {
+        if matches!(
+            operation,
+            Operation::SkillCatalogQuery
+                | Operation::SkillCatalogPreviewUpdate
+                | Operation::SkillCatalogResolvePath
+                | Operation::SkillSourceImport
+                | Operation::SkillCatalogMutate
+        ) {
             return Some(super::skills::sources::ERRORS);
         }
         if operation == Operation::SkillCatalogInvocableQuery {

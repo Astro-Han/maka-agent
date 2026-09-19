@@ -130,7 +130,7 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
   assert.equal(installed.managedUpdateStatus, 'local_modified');
   assert.equal(installed.contextStatus, 'unknown');
   assert.equal(installed.contextRank, null);
-  assert.equal(installed.manageable, false, 'query support does not imply mutation support');
+  assert.equal(installed.manageable, true, 'the built-in Skills domain owns workspace mutations');
   const empty = governance.items.find((item) => item.id === 'computer-use');
   assert.equal(empty.ref, 'workspace:legacy:computer-use');
   assert.equal(empty.validationStatus, 'metadata_error');
@@ -231,13 +231,14 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
     if (index === 5) {
       assert(
         input.messages.some(
-          (message) =>
-            message.role === 'system' && message.content.includes('project:maka:archival'),
+          (message) => message.role === 'user' && message.content.includes('project:maka:archival'),
         ),
       );
+      const path = join(workspace, '.maka/skills/archival/SKILL.md');
+      const document = await readFile(path, 'utf8');
       await writeFile(
-        join(workspace, '.maka/skills/archival/SKILL.md'),
-        'invalid changed after Run opening',
+        path,
+        document.replace(/^description:.*$/m, 'description: refreshed archival'),
       );
       return call('SkillSearch', { query: 'archival', limit: 1 });
     }
@@ -249,6 +250,16 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       assert.equal(search.matchedCount, 1);
       assert.equal(search.truncated, false);
       assert(!JSON.stringify(search).includes('Frozen archival line'));
+      assert(
+        input.messages.some(
+          (message) => message.role === 'user' && message.content.includes('refreshed archival'),
+        ),
+        'the next logical step refreshes the Skill inventory',
+      );
+      await writeFile(
+        join(workspace, '.maka/skills/archival/SKILL.md'),
+        'invalid changed after request capture',
+      );
       return call('Skill', { name: search.matches[0].ref });
     }
     if (index === 7) {
@@ -265,7 +276,7 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
       const page = lastTool();
       assert.equal(page.returnedLines, 5);
       assert(page.content.includes('Frozen archival line'));
-      assert(!page.content.includes('changed after Run opening'));
+      assert(!page.content.includes('changed after request capture'));
     }
   });
   try {
@@ -516,14 +527,8 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
     assert.equal((await waitTerminal(request, sessionId, lateOwner.turnId)).status, 'completed');
     assert.equal((await waitTerminal(request, sessionId, nextOwner.turnId)).status, 'completed');
     assert.equal(model.requests.length, 4);
-    assert.equal(
-      model.requests[2].messages.filter((m) => m.role === 'user').at(-1).content,
-      preparedText('late steering input'),
-    );
-    assert.equal(
-      model.requests[3].messages.filter((m) => m.role === 'user').at(-1).content,
-      preparedText('edited next input', true),
-    );
+    assertPreparedInput(model.requests[2], preparedText('late steering input'));
+    assertPreparedInput(model.requests[3], preparedText('edited next input', true));
     assert(model.requests[3].tools.some((tool) => tool.function.name === 'Bash'));
     assert.deepEqual(
       await submit(followup),
@@ -560,8 +565,8 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
     assert.equal(legacyTerminal.status, 'completed');
     const legacyResult = { ...legacyStarted, turn: legacyTerminal };
     assert.equal(model.requests.length, 8);
-    assert.equal(
-      model.requests[4].messages.filter((m) => m.role === 'user').at(-1).content,
+    assertPreparedInput(
+      model.requests[4],
       composeSkillInvocationMessage({
         userText: 'legacy input',
         skills: [{ id: 'legacy', name: 'Legacy', instructions: 'Frozen legacy instructions.' }],
@@ -583,6 +588,13 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
     assert.deepEqual(await submit(first), result);
     assert.deepEqual(await submit(second), active);
     assert.deepEqual(await request('turn.start', legacy), legacyResult);
+    const finalSources = await request('skill.catalog.query', sourceQuery);
+    assert.deepEqual(finalSources.items, sourceResult.items);
+    assert.notEqual(
+      finalSources.revision,
+      sourceResult.revision,
+      'catalog revisions cover all Skill mutation inputs, not just the selected view',
+    );
     await writeFile(
       saved,
       JSON.stringify({
@@ -591,7 +603,7 @@ export async function verifyMessageSubmit(connection, workspace, reopened, openC
         legacy,
         legacyResult,
         sourceQuery,
-        sourceResult,
+        sourceResult: finalSources,
         rows: await rows(),
       }),
     );
@@ -699,4 +711,13 @@ async function verifyInvocableCatalog(request, workspace) {
   } finally {
     for (const directory of directories) await rm(directory, { recursive: true, force: true });
   }
+}
+
+function assertPreparedInput(request, expected) {
+  assert.equal(
+    request.messages.filter((message) => message.role === 'user' && message.content === expected)
+      .length,
+    1,
+    'accepted instructions are delivered exactly once, independently of ephemeral plugin context',
+  );
 }

@@ -73,7 +73,10 @@ async fn request_capture_refreshes_plugins_without_retargeting_old_handlers_or_w
         ToolMode::Direct,
         CodeExecutor::new(1, CellLimits::default()).unwrap(),
     );
-    let empty = run.capture().unwrap();
+    let empty = run
+        .capture(".", tokio_util::sync::CancellationToken::new())
+        .await
+        .unwrap();
     let first_effect = Arc::new(preflight::Effect::default());
     let first = Fiber::new("example", "example", Scope::Profile).unwrap();
     first.begin_loading().unwrap();
@@ -86,7 +89,10 @@ async fn request_capture_refreshes_plugins_without_retargeting_old_handlers_or_w
         )
         .unwrap();
     catalog.publish(&first, staged).unwrap();
-    let original = run.capture().unwrap();
+    let original = run
+        .capture(".", tokio_util::sync::CancellationToken::new())
+        .await
+        .unwrap();
     let original_handlers = core.resolve_plugins().unwrap();
     assert!(empty.definitions().is_empty());
     assert_eq!(original.definitions()[0].input_schema["type"], "string");
@@ -113,7 +119,10 @@ async fn request_capture_refreshes_plugins_without_retargeting_old_handlers_or_w
         .unwrap();
     catalog.publish(&second, staged).unwrap();
     assert_eq!(original.definitions()[0].input_schema["type"], "string");
-    let current = run.capture().unwrap();
+    let current = run
+        .capture(".", tokio_util::sync::CancellationToken::new())
+        .await
+        .unwrap();
     assert_eq!(current.definitions()[0].input_schema["type"], "integer");
     assert!(matches!(
         original_handlers

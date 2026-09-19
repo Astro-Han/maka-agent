@@ -24,7 +24,7 @@ import {
   type ClientIdentity,
 } from '@maka-agent/plugin-sdk/client';
 import { loadClientBundle } from './bundle.js';
-import { ClientInstance, type ClientRemoteFactory } from './instance.js';
+import { ClientInstance, type ClientRemoteFactory, type ClientFilesFactory } from './instance.js';
 import { ClientSlotStore } from './slots.js';
 
 export interface ClientSnapshot {
@@ -38,6 +38,7 @@ export interface ClientRuntimeOptions {
   readonly source: (descriptor: ClientDescriptor, signal: AbortSignal) => Promise<string>;
   readonly report: (diagnostic: ClientDiagnostic) => void;
   readonly remote?: ClientRemoteFactory;
+  readonly localFiles?: ClientFilesFactory;
 }
 
 export class ClientRuntime {
@@ -132,7 +133,7 @@ export class ClientRuntime {
       for (const descriptor of snapshot.entries) {
         signal.throwIfAborted();
         if (this.#fenced.has(descriptor.entryId)) throw new Error('Client cleanup unconfirmed; reload the document');
-        const instance = new ClientInstance(descriptor, (error) => this.#options.report({ identity: descriptor, error }), this.#options.remote);
+        const instance = new ClientInstance(descriptor, (error) => this.#options.report({ identity: descriptor, error }), this.#options.remote, this.#options.localFiles);
         staged.push(instance);
         await interruptible(instance.initialize(materialize(descriptor.extensionId).default, this.#options.document), signal);
       }

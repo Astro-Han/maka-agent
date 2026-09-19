@@ -48,10 +48,38 @@ pub struct Target {
 
 #[derive(Clone)]
 pub struct Caller {
+    /// Captured transport identity; never chosen by a Client payload.
+    pub connection_id: Uuid,
     pub client_instance_id: String,
     pub document_id: Uuid,
     pub session_id: Option<String>,
     pub cancellation: CancellationToken,
+}
+
+/// A read-only view of the caller's existing Session, not filesystem authority
+/// or an Agent invocation. Embedders supply this capability explicitly.
+pub struct SessionView {
+    pub workspace: maka_runtime::execution::WorkspaceProjection,
+    pub tools: std::collections::HashSet<String>,
+}
+
+pub trait Sessions: Send + Sync {
+    fn read(&self, caller: Caller) -> BoxFuture<'_, Result<SessionView, Error>>;
+}
+
+/// A proposed Session view does not create a Session or grant execution rights.
+/// Endpoints accepting Host paths must declare `Access::HostPaths`.
+pub struct WorkspaceViewInput {
+    pub workspace: maka_runtime::execution::WorkspaceTarget,
+    pub permission_mode: maka_runtime::execution::PermissionMode,
+    pub collaboration_mode: maka_runtime::execution::CollaborationMode,
+}
+pub trait Workspaces: Send + Sync {
+    fn read(
+        &self,
+        input: WorkspaceViewInput,
+        caller: Caller,
+    ) -> BoxFuture<'_, Result<SessionView, Error>>;
 }
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -92,17 +120,31 @@ pub enum Handler {
 }
 
 pub struct Endpoint {
+    pub access: Access,
     pub content_digest: String,
     pub handler: Handler,
     registration: Uuid,
 }
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum Access {
+    /// The caller's existing Remote grant is sufficient.
+    #[default]
+    Granted,
+    /// The Host must additionally authorize caller-supplied filesystem paths.
+    HostPaths,
+}
 impl Endpoint {
     pub fn new(content_digest: String, handler: Handler) -> Self {
         Self {
+            access: Access::Granted,
             content_digest,
             handler,
             registration: Uuid::new_v4(),
         }
+    }
+    pub fn requiring_host_paths(mut self) -> Self {
+        self.access = Access::HostPaths;
+        self
     }
     pub fn target(&self, owner: &Identity) -> Target {
         Target {

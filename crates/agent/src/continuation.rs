@@ -113,7 +113,7 @@ pub(super) async fn inspect(
         return Err(invalid("continuation workspace identity changed"));
     }
     if let crate::RunWork::Handoff { pause, .. } = &input.work
-        && (configuration != &input.configuration
+        && (configuration.as_ref() != &input.configuration
             || !matches!(
                 &prefix.events.last().expect("checked nonempty source").event.fact,
                 Fact::InvocationEnded {
@@ -169,7 +169,10 @@ pub(super) async fn inspect(
     let definitions = if matches!(input.work, crate::RunWork::Handoff { .. }) {
         tools.handoff_definitions()
     } else {
-        tools.capture()?.definitions()
+        tools
+            .capture(&input.configuration.cwd, cancellation.clone())
+            .await?
+            .definitions()
     };
     // Handoff restores the base catalog's checkpoint; dynamic plugins must not
     // change that digest. Ordinary resume validates the full current inventory,

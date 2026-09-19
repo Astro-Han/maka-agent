@@ -145,7 +145,10 @@ async fn provider_preflight_rejects_before_t1_and_exclusivity_follows_call_order
             mode,
             cells.clone(),
         );
-        let request = run.capture().unwrap();
+        let request = run
+            .capture(".", tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
         let names: Vec<_> = request.definitions().into_iter().map(|d| d.name).collect();
         assert_eq!(
             names,
@@ -263,7 +266,8 @@ async fn nested_preflight_is_effect_free_and_diagnostics_are_successful_parent_v
             cells.clone(),
         );
         let value = run
-            .capture()
+            .capture(".", tokio_util::sync::CancellationToken::new())
+            .await
             .unwrap()
             .into_step(&invocation.invocation_id)
             .invoke(&call, CancellationToken::new())

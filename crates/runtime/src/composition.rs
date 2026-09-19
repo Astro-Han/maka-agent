@@ -25,6 +25,7 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
+    Input,
     Tool,
     PromptSection,
     PromptVariable,

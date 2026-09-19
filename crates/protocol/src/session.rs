@@ -57,7 +57,7 @@ pub struct SessionCreateInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<CollaborationMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub orchestration_mode: Option<OrchestrationMode>,
+    pub orchestration_mode: Option<BehaviorId>,
 }
 
 /// The untagged wire contract selects exactly one backend. The flattened

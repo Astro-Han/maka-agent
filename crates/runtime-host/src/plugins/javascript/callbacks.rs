@@ -90,7 +90,8 @@ impl Provider for Prompt {
             let value = invoke(
                 &callback.module,
                 callback.id,
-                json!({ "invocation": request.invocation }),
+                serde_json::to_value(request.target)
+                    .map_err(|e| maka_plugins::Error::Invalid(e.to_string()))?,
                 Value::Null,
                 request.cancellation,
             )

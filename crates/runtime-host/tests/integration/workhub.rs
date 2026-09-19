@@ -241,6 +241,39 @@ async fn original_client_workhub_answer_scopes_read_and_desktop_calls_without_re
     let log = fixture.log().await;
     let before = log.prefix(256, 512 * 1024).await.unwrap();
     use maka_runtime::event::Fact;
+    let prompt = before
+        .events
+        .iter()
+        .find_map(|row| match &row.event.fact {
+            Fact::InvocationOpened {
+                configuration: Some(configuration),
+                ..
+            } => configuration.system_prompt.as_ref(),
+            _ => None,
+        })
+        .expect("WorkHub must freeze its plugin-owned policy");
+    assert!(
+        prompt
+            .sources
+            .iter()
+            .any(|source| source.package_id == "maka.workhub" && !source.activation.is_empty())
+    );
+    for row in &before.events {
+        if matches!(row.event.fact, Fact::ModelRequested { .. }) {
+            let surface = log
+                .request_composition(COORDINATION_SESSION_ID, &row.event.id)
+                .await
+                .unwrap()
+                .expect("model request composition");
+            assert!(
+                prompt
+                    .sources
+                    .iter()
+                    .all(|source| surface.sources.contains(source)),
+                "each request must retain the admitted policy provenance"
+            );
+        }
+    }
     let composition = before
         .events
         .iter()

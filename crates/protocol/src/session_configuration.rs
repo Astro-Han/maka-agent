@@ -18,7 +18,7 @@
  */
 
 use super::{
-    CollaborationMode, OrchestrationMode, PermissionMode, SessionModelTarget, SessionUpdateResult,
+    BehaviorId, CollaborationMode, PermissionMode, SessionModelTarget, SessionUpdateResult,
     ThinkingLevel, WorkspaceTarget, mutation, validation,
 };
 use crate::{ProtocolError, Result};
@@ -38,7 +38,7 @@ pub struct SessionConfigurationPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collaboration_mode: Option<CollaborationMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub orchestration_mode: Option<OrchestrationMode>,
+    pub orchestration_mode: Option<BehaviorId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

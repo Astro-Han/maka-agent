@@ -73,6 +73,20 @@ export type SkillCatalogInvocableContextResolver = (
 /** Serialized single authority lane for catalog recovery, reads, and mutations. */
 export class HostSkillCatalogCoordinator {
   readonly handlers: SkillCatalogOperationHandlerMap = {
+    'skill.source.import': async () => ({
+      ok: false,
+      error: {
+        code: 'operation_unavailable',
+        message: 'Skill source import requires the Rust Host',
+      },
+    }),
+    'skill.catalog.resolve-path': async () => ({
+      ok: false,
+      error: {
+        code: 'operation_unavailable',
+        message: 'Skill path resolution requires the Rust Host',
+      },
+    }),
     'skill.catalog.query': (input) => this.query(input),
     'skill.catalog.invocable.query': (input, context) => this.queryInvocable(input, context),
     'skill.catalog.mutate': (input) => this.mutate(input),

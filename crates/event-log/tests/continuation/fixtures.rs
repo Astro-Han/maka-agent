@@ -28,7 +28,7 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
             invocation_id: id.into(),
         },
         Fact::InvocationOpened {
-            configuration: Some(InvocationConfiguration {
+            configuration: Some(Box::new(InvocationConfiguration {
                 system_prompt: None,
                 tool_composition: None,
                 cwd: ".".into(),
@@ -38,11 +38,11 @@ pub(super) fn opening(id: &str, claim: Option<ContinuationClaim>) -> RuntimeEven
                 ),
                 permission_mode: PermissionMode::Explore,
                 collaboration_mode: CollaborationMode::Agent,
-                orchestration_mode: OrchestrationMode::Default,
+                orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::Direct,
                 model: None,
                 thinking_level: None,
-            }),
+            })),
             input: match claim {
                 Some(claim) => InvocationInput::Continuation {
                     claim: Box::new(claim),

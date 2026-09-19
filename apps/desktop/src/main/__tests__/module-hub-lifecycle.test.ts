@@ -36,7 +36,6 @@ test('Module Hub owns deferred startup, default-Host refresh, and cleanup', () =
         return () => calls.push('unsubscribe-hosts');
       },
     },
-    refreshProjectSkills: () => calls.push('skills'),
     refreshScheduledTasks: () => calls.push('tasks'),
     scheduler: {
       requestFrame(callback) {
@@ -52,7 +51,7 @@ test('Module Hub owns deferred startup, default-Host refresh, and cleanup', () =
 
   assert.deepEqual(calls, ['request-frame']);
   frame?.(0);
-  assert.deepEqual(calls, ['request-frame', 'skills', 'tasks']);
+  assert.deepEqual(calls, ['request-frame', 'tasks']);
 
   hostChange?.({
     profileId: 'remote',
@@ -64,7 +63,7 @@ test('Module Hub owns deferred startup, default-Host refresh, and cleanup', () =
     readiness: 'ready',
     isDefault: false,
   });
-  assert.deepEqual(calls, ['request-frame', 'skills', 'tasks']);
+  assert.deepEqual(calls, ['request-frame', 'tasks']);
 
   hostChange?.({
     profileId: 'remote',
@@ -74,9 +73,7 @@ test('Module Hub owns deferred startup, default-Host refresh, and cleanup', () =
   });
   assert.deepEqual(calls, [
     'request-frame',
-    'skills',
     'tasks',
-    'skills',
     'tasks',
   ]);
 

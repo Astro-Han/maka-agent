@@ -203,7 +203,9 @@ impl Executions {
                 }
                 Err(error) => return Err(error),
             };
-            let Some(environment) = candidate.commit(self, &input.session_id).await? else {
+            let Some((environment, _input_admission)) =
+                candidate.commit(self, &input.session_id).await?
+            else {
                 continue;
             };
             let run = match self

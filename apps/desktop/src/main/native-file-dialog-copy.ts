@@ -28,7 +28,6 @@ import type { UiCatalog, UiLocale } from '@maka/core/ui-locale';
 interface NativeFileDialogCopy {
   readonly referenceFolder: string;
   readonly addAttachments: string;
-  readonly importSkillSource: string;
   readonly importCustomPet: string;
   readonly saveDailyReview: string;
   readonly saveConversation: string;
@@ -39,7 +38,6 @@ const COPY = {
   'zh-CN': {
     referenceFolder: '引用文件夹',
     addAttachments: '添加附件',
-    importSkillSource: '导入 Skill 源文件',
     importCustomPet: '导入自定义宠物',
     saveDailyReview: '保存每日回顾',
     saveConversation: '保存对话',
@@ -48,7 +46,6 @@ const COPY = {
   'zh-TW': {
     referenceFolder: '引用資料夾',
     addAttachments: '新增附件',
-    importSkillSource: '匯入 Skill 原始檔',
     importCustomPet: '匯入自訂寵物',
     saveDailyReview: '儲存每日回顧',
     saveConversation: '儲存對話',
@@ -57,7 +54,6 @@ const COPY = {
   en: {
     referenceFolder: 'Reference folder',
     addAttachments: 'Add attachments',
-    importSkillSource: 'Import Skill source',
     importCustomPet: 'Import custom pet',
     saveDailyReview: 'Save daily review',
     saveConversation: 'Save conversation',

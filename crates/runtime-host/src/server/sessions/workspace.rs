@@ -119,6 +119,10 @@ pub(in crate::server) async fn resolve(
         }
         WorkspaceTarget::HostPath { path } => path.clone(),
     };
+    resolve_path(path).await
+}
+
+pub(crate) async fn resolve_path(path: String) -> Result<WorkspaceProjection> {
     let cwd = tokio::task::spawn_blocking(move || canonical_directory(&path))
         .await
         .map_err(|error| failure(Code::InternalFailure, &error.to_string()))??;

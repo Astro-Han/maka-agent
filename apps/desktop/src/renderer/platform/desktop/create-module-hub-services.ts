@@ -29,7 +29,7 @@ type DesktopModuleHubSettingsBridge = Partial<
 
 export type DesktopModuleHubBridge = Pick<
   MakaBridge,
-  'dailyReview' | 'runtimeHostProfiles' | 'scheduledTasks' | 'skills'
+  'dailyReview' | 'runtimeHostProfiles' | 'scheduledTasks'
 > & {
   /** Optional at runtime so a renderer can coexist with an older preload. */
   readonly settings?: DesktopModuleHubSettingsBridge;
@@ -64,25 +64,6 @@ export function createDesktopModuleHubServices(
             removed: event.removed,
           }),
         ),
-    },
-    skills: {
-      list: (host) => bridge.skills.list(host),
-      listManagedSources: (host) => bridge.skills.sources.list(host),
-      listBundledCatalog: (host) => bridge.skills.catalog.list(host),
-      importManagedSource: (host) => bridge.skills.sources.importLocalFile(host),
-      installManaged: (sourceId, host) =>
-        bridge.skills.installManaged(sourceId, host),
-      installBundled: (id, host) => bridge.skills.catalog.install(id, host),
-      previewUpdate: (skillId, host) =>
-        bridge.skills.previewUpdate(skillId, host),
-      updateManaged: (skillId, options, host) =>
-        bridge.skills.updateManaged(skillId, options, host),
-      setEnabled: (skillId, enabled, host) =>
-        bridge.skills.setEnabled(skillId, enabled, host),
-      setPinned: (skillRef, pinned, host) =>
-        bridge.skills.setPinned(skillRef, pinned, host),
-      delete: (skillRef, host) => bridge.skills.delete(skillRef, host),
-      open: (skillId, target, host) => bridge.skills.open(skillId, target, host),
     },
     scheduledTasks: bridge.scheduledTasks,
     clientSettings: {

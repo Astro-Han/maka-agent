@@ -393,7 +393,7 @@ async fn stop_sealed_turn_uses_public_identity_without_provider_and_survives_res
         admitted.model = Some(unavailable);
         for (index, fact) in [
             Fact::InvocationOpened {
-                configuration: Some(admitted),
+                configuration: Some(Box::new(admitted)),
                 input: InvocationInput::Message {
                     content: "stop this task".into(),
                     request_fingerprint: None,

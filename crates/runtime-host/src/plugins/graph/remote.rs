@@ -18,7 +18,6 @@
  */
 
 use super::read::{self, Query};
-use crate::execution::Executions;
 use futures_util::future::BoxFuture;
 use maka_event_log::EventLog;
 use maka_graph::{
@@ -32,20 +31,20 @@ use maka_plugins::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore, watch};
 use tokio_util::sync::CancellationToken;
 
 pub(super) fn register(
     staged: &mut Staged,
     log: Arc<EventLog>,
-    executions: Weak<Executions>,
+    sessions: Arc<dyn super::host::Sessions>,
     catalog: Catalog,
     digest: &str,
 ) -> Result<(), String> {
     let service = Arc::new(Service {
         log,
-        executions,
+        sessions,
         catalog,
         reads: Semaphore::new(2),
     });
@@ -80,7 +79,7 @@ pub(super) fn register(
 }
 struct Service {
     log: Arc<EventLog>,
-    executions: Weak<Executions>,
+    sessions: Arc<dyn super::host::Sessions>,
     catalog: Catalog,
     reads: Semaphore,
 }
@@ -127,42 +126,10 @@ impl Method for Call {
                     if caller.cancellation.is_cancelled() {
                         return Err(Error::Cancelled);
                     }
-                    let host = service.executions.upgrade().ok_or(Error::Retired)?;
-                    let _admission = host.lock_admission().await;
-                    if caller.cancellation.is_cancelled() {
-                        return Err(Error::Cancelled);
-                    }
-                    // Freeze the owner before committing the epoch-specific stop.
-                    // A new root Turn cannot be admitted until it has been signalled.
-                    let owner = host.active_session_owner(&root);
-                    let submission = service
-                        .catalog
-                        .snapshot::<super::Submission>(&Scope::Session(root.clone()))
-                        .entries
-                        .remove("agent-graph")
-                        .filter(|entry| entry.value.graph_id == input.graph_id);
                     service
-                        .log
-                        .stop_graph(&root, &input.graph_id)
-                        .await
-                        .map_err(|error| {
-                            if matches!(
-                                error,
-                                maka_event_log::StoreError::CommitUnknown(_)
-                                    | maka_event_log::StoreError::OperationUnknown
-                            ) {
-                                host.begin_drain();
-                            }
-                            failure(error)
-                        })?;
-                    if let Some(submission) = submission {
-                        submission.value.stop.cancel();
-                    }
-                    if let Some(owner) = owner {
-                        host.retire_owner(&owner, maka_agent::CancellationCause::Runtime)
-                            .await
-                            .map_err(|error| failure(error.message))?;
-                    }
+                        .sessions
+                        .stop(root, input.graph_id, caller.cancellation)
+                        .await?;
                     Ok(Value::Null)
                 }
             }

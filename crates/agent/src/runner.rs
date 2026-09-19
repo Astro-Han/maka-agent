@@ -93,7 +93,7 @@ pub async fn run(
         &inner,
         &input.invocation,
         Fact::InvocationOpened {
-            configuration: Some(input.configuration.clone()),
+            configuration: Some(Box::new(input.configuration.clone())),
             input: opening,
         },
     )

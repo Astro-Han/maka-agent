@@ -21,6 +21,9 @@ use crate::{Error, composition::Scope, identifier};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod directory;
+pub use directory::{Directories, Directory};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Namespace {
     package: String,

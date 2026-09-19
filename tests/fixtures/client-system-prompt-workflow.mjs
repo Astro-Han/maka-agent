@@ -47,8 +47,14 @@ export async function verifySystemPrompt(connection, workspace, reopened) {
   assert(global);
   const writeInstructions = async (version) => {
     await writeFile(join(global, 'AGENTS.md'), `GLOBAL_INSTRUCTIONS_${version}`);
-    await writeFile(join(workspace, 'AGENTS.md'), `PROJECT_INSTRUCTIONS_${version}`);
-    await writeFile(join(workspace, 'CLAUDE.md'), `PROJECT_INSTRUCTIONS_${version}`);
+    await writeFile(
+      join(workspace, 'AGENTS.md'),
+      `PROJECT_INSTRUCTIONS_${version} {{literal user text}}`,
+    );
+    await writeFile(
+      join(workspace, 'CLAUDE.md'),
+      `PROJECT_INSTRUCTIONS_${version} {{literal user text}}`,
+    );
   };
   const sourceFragment = () =>
     buildWorkspaceInstructionsPromptFragment(workspace, { homeDir: dirname(global) });
@@ -183,7 +189,12 @@ export async function verifySystemPrompt(connection, workspace, reopened) {
     assert.deepEqual(await enableInstructions(3, true), { kind: 'committed', revision: 4 });
     fixture.verify();
     const prompts = fixture.records.map(({ input }) => system(input));
-    assert.equal(prompts[0], prompts[1], 'policy edits cannot alter an admitted invocation');
+    assert.notEqual(
+      prompts[0],
+      prompts[1],
+      'the next logical step samples published prompt sources',
+    );
+    assert.equal(prompts[1], prompts[2], 'unchanged sources retain the same request surface');
     assert(prompts[0].includes('First preference'));
     assert(!prompts[0].includes('Second preference'));
     assert(prompts[2].includes('Second preference'));

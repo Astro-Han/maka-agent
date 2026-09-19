@@ -51,6 +51,7 @@ impl Host {
                         self,
                         connection_id,
                         client_instance_id,
+                        authority,
                         *request,
                     )
                     .await
@@ -84,8 +85,15 @@ impl Host {
         if maka_protocol::workhub::supports(operation) {
             return super::workhub::execute(self, operation, &input, connection_id).await;
         }
-        if operation == Operation::SkillCatalogQuery {
-            return super::skills::sources::execute(self, &input).await;
+        if matches!(
+            operation,
+            Operation::SkillCatalogQuery
+                | Operation::SkillCatalogPreviewUpdate
+                | Operation::SkillCatalogResolvePath
+                | Operation::SkillSourceImport
+                | Operation::SkillCatalogMutate
+        ) {
+            return super::skills::sources::execute(self, operation, &input).await;
         }
         if operation == Operation::SkillCatalogInvocableQuery {
             return super::skills::execute(self, connection_id, &input).await;

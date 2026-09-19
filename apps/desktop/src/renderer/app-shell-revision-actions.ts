@@ -69,6 +69,7 @@ export interface AppShellRevisionActions {
   beginEditUserMessage(turnId: string): void;
   /** Lazily create the before-turn branch immediately before normal send. */
   prepareRevisionSend(text: string): Promise<boolean>;
+  completeRevisionSend(draft: TurnRevisionDraft): void;
   cancelRevisionDraft(): Promise<void>;
 }
 
@@ -388,7 +389,17 @@ export function createAppShellRevisionActions(deps: {
     }
   }
 
-  return { beginEditUserMessage, prepareRevisionSend, cancelRevisionDraft };
+  function completeRevisionSend(draft: TurnRevisionDraft): void {
+    completeTurnRevisionCopyAttempt(draft);
+    if (revisionDraftRef.current !== draft) return;
+    composerRef.current?.clearDraft(draft.draftSessionId);
+    if (draft.sourceSessionId !== draft.draftSessionId) {
+      composerRef.current?.clearDraft(draft.sourceSessionId);
+    }
+    commitRevisionDraft(null);
+  }
+
+  return { beginEditUserMessage, prepareRevisionSend, completeRevisionSend, cancelRevisionDraft };
 }
 
 export function completeTurnRevisionCopyAttempt(draft: TurnRevisionDraft): void {

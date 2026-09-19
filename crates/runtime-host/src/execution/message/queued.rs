@@ -36,7 +36,7 @@ impl Executions {
         invocation: Invocation,
         mut source: RootSourceMessage,
         root_id: &str,
-        prepared: Option<crate::execution::skills::PreparedSkillInput>,
+        prepared: Option<crate::execution::input::PreparedMessageInput>,
     ) -> Result<SubmitResult> {
         if source.submitted_intent.is_some() {
             return Err(failure(
@@ -44,16 +44,8 @@ impl Executions {
                 "Exact Turn intent requires an idle Session",
             ));
         }
-        self.validate_message_content(
-            &invocation.session_id,
-            &source.message.content.clone().into(),
-            root_id,
-        )
-        .await?;
         let mut required_tools = Default::default();
-        if source.message.content.text.contains("/skill:") {
-            let prepared =
-                prepared.ok_or_else(|| super::internal("Queued Skills were not prepared"))?;
+        if let Some(prepared) = prepared {
             source.message.content = prepared.content;
             match prepared.selection {
                 crate::execution::skills::SkillPreparation::Ready {
@@ -68,6 +60,12 @@ impl Executions {
                 }
             };
         }
+        self.validate_message_content(
+            &invocation.session_id,
+            &source.message.content.clone().into(),
+            root_id,
+        )
+        .await?;
         source.disposition = match source.submitted_placement {
             Placement::CurrentTurn => MessageDisposition::Steering,
             Placement::NextTurn => MessageDisposition::Followup,

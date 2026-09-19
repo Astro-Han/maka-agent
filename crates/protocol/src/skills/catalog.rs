@@ -17,111 +17,11 @@
  * under the License.
  */
 
-use super::{MAX_ITEMS, MAX_PAGE_BYTES, WorkspaceContext, invalid, revision, text};
-use crate::{Result, codec, session::WorkspaceProjection};
-use serde::{Deserialize, Serialize};
+use super::{MAX_ITEMS, MAX_PAGE_BYTES, invalid, revision, text};
+use crate::{Result, codec};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CatalogView {
-    Governance,
-    Bundled,
-    ManagedSources,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum CatalogInput {
-    Start {
-        context: WorkspaceContext,
-        view: CatalogView,
-    },
-    Continue {
-        context: WorkspaceContext,
-        view: CatalogView,
-        revision: String,
-        cursor: String,
-    },
-}
-impl CatalogInput {
-    pub fn context(&self) -> &WorkspaceContext {
-        match self {
-            Self::Start { context, .. } | Self::Continue { context, .. } => context,
-        }
-    }
-    pub fn view(&self) -> CatalogView {
-        match self {
-            Self::Start { view, .. } | Self::Continue { view, .. } => *view,
-        }
-    }
-    pub fn uses_host_paths(&self) -> bool {
-        matches!(
-            self.context().workspace,
-            crate::session::WorkspaceTarget::HostPath { .. }
-        )
-    }
-}
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ManagedSourceType {
-    Local,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum CatalogItem {
-    Skill(super::GovernanceItem),
-    DiscoveryDiagnostic(super::GovernanceItem),
-    Bundled {
-        id: String,
-        name: String,
-        description: String,
-        category: String,
-        declared_tools: Vec<String>,
-        metadata_truncated: bool,
-        installed: bool,
-    },
-    ManagedSource {
-        id: String,
-        name: String,
-        description: String,
-        category: String,
-        source_type: ManagedSourceType,
-        metadata_truncated: bool,
-        installed: bool,
-    },
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum CatalogResult {
-    Page {
-        view: CatalogView,
-        revision: String,
-        items: Vec<CatalogItem>,
-        next_cursor: Option<String>,
-        resolved_workspace: WorkspaceProjection,
-    },
-    RevisionChanged {
-        expected_revision: String,
-        actual_revision: String,
-        resolved_workspace: WorkspaceProjection,
-    },
-}
+use super::{CatalogInput, CatalogItem, CatalogResult, CatalogView};
 pub fn decode_catalog_input(value: &Value) -> Result<CatalogInput> {
     let input: CatalogInput = serde_json::from_value(value.clone()).map_err(invalid)?;
     super::validate_workspace(&input.context().workspace)?;
@@ -181,7 +81,7 @@ pub fn decode_catalog_output(value: &Value) -> Result<CatalogResult> {
                         if *view != CatalogView::Governance {
                             return Err(invalid("Invalid governance page"));
                         }
-                        item.validate()?;
+                        super::governance::validate(item)?;
                         continue;
                     }
                     CatalogItem::Bundled {
@@ -239,14 +139,6 @@ pub fn decode_catalog_output(value: &Value) -> Result<CatalogResult> {
             resolved_workspace
         }
     };
-    super::validate_workspace(&workspace.target)?;
-    super::validate_workspace(&crate::session::WorkspaceTarget::HostPath {
-        path: workspace.host_cwd.clone(),
-    })?;
-    if let crate::session::WorkspaceTarget::HostPath { path } = &workspace.target
-        && path != &workspace.host_cwd
-    {
-        return Err(invalid("Workspace path mismatch"));
-    }
+    super::validate_projection(workspace)?;
     Ok(result)
 }

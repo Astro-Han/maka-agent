@@ -205,6 +205,12 @@
       const context = Object.freeze({
         identity: Object.freeze(identity),
         signal,
+        input: Object.freeze({
+          prepare: (name, prepare) =>
+            register('input_preparation', { name }, (request, call) =>
+              prepare(Object.freeze({ ...request, signal: call.signal })),
+            ),
+        }),
         tools: Object.freeze({
           register: (definition, invoke) => register('tool', definition, invoke),
         }),

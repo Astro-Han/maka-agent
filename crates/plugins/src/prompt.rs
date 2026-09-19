@@ -36,8 +36,34 @@ pub type TextFuture = Pin<Box<dyn Future<Output = Result<Option<String>, Error>>
 /// Read-only request identity, never fabricated Tool-call authority.
 #[derive(Clone)]
 pub struct Request {
-    pub invocation: Invocation,
+    pub target: Target,
     pub cancellation: CancellationToken,
+}
+
+/// Pre-admission executor instructions and logical model steps are both
+/// read-only prompt contexts; neither fabricates a Tool-call identity.
+#[derive(Clone, serde::Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum Target {
+    Session { session_id: String, cwd: String },
+    ModelStep { invocation: Invocation, cwd: String },
+}
+impl Target {
+    pub fn session_id(&self) -> &str {
+        match self {
+            Self::Session { session_id, .. } => session_id,
+            Self::ModelStep { invocation, .. } => &invocation.session_id,
+        }
+    }
+    pub fn cwd(&self) -> &str {
+        match self {
+            Self::Session { cwd, .. } | Self::ModelStep { cwd, .. } => cwd,
+        }
+    }
 }
 
 pub trait Provider: Send + Sync {
@@ -56,13 +82,35 @@ pub enum SectionMode {
     Complete,
 }
 
+#[derive(Clone, Copy, Default, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Format {
+    Plain,
+    #[default]
+    Template,
+}
+impl Format {
+    fn render(
+        self,
+        text: &str,
+        variables: &BTreeMap<String, Option<String>>,
+    ) -> Result<String, Error> {
+        match self {
+            Self::Plain => Ok(text.to_owned()),
+            Self::Template => render::interpolate(text, variables),
+        }
+    }
+}
+
 pub struct Section {
+    pub format: Format,
     pub order: i32,
     pub mode: SectionMode,
     pub text: Text,
 }
 pub struct Variable(pub Text);
 pub struct DynamicContext {
+    pub format: Format,
     pub order: i32,
     pub text: Text,
 }
@@ -89,7 +137,12 @@ pub async fn resolve(
     };
     let sections = captured.typed::<Section>().entries;
     let variables = captured.typed::<Variable>().entries;
-    let contexts = captured.typed::<DynamicContext>().entries;
+    // Temporary user context belongs to model steps, not executor system instructions.
+    let contexts = if matches!(request.target, Target::Session { .. }) {
+        BTreeMap::new()
+    } else {
+        captured.typed::<DynamicContext>().entries
+    };
     if sections.is_empty() && variables.is_empty() && contexts.is_empty() {
         return Ok(result);
     }
@@ -118,8 +171,10 @@ pub async fn resolve(
             .values()
             .any(|entry| entry.value.mode == SectionMode::Complete);
         let mut rendered = Vec::new();
-        if !complete && let Some(base) = base {
-            rendered.push((0, String::new(), render::interpolate(base, &values)?));
+        // Explicit Session/behavior instructions are execution constraints, not
+        // the replaceable assistant persona supplied by another Contribution.
+        if let Some(base) = base {
+            rendered.push((0, String::new(), base.to_owned()));
         }
         for (name, entry) in sections {
             if complete && entry.value.mode != SectionMode::Complete {
@@ -128,7 +183,7 @@ pub async fn resolve(
             let text = evaluate(&entry.value.text, &entry, &request)
                 .await?
                 .unwrap_or_default();
-            let text = render::interpolate(&text, &values)?;
+            let text = entry.value.format.render(&text, &values)?;
             result
                 .sources
                 .push(source(&entry, SourceKind::PromptSection, &name, &text)?);
@@ -143,7 +198,7 @@ pub async fn resolve(
             let text = evaluate(&entry.value.text, &entry, &request)
                 .await?
                 .unwrap_or_default();
-            let text = render::interpolate(&text, &values)?;
+            let text = entry.value.format.render(&text, &values)?;
             result
                 .sources
                 .push(source(&entry, SourceKind::PromptContext, &name, &text)?);
@@ -165,6 +220,38 @@ pub async fn resolve(
         result = tokio::time::timeout(Duration::from_secs(5), assembly) =>
             result.map_err(|_| Error::Invalid("prompt assembly timed out".into()))?,
     }
+}
+
+/// Final admission checks the exact registrations that produced the snapshot.
+/// No provider callback runs while Host holds its admission gate.
+pub fn admit(
+    captured: &Captured,
+    sources: &[SourceRevision],
+) -> Result<Vec<crate::fiber::CallGuard>, Error> {
+    fn guard<T: Send + Sync + 'static>(
+        captured: &Captured,
+        source: &SourceRevision,
+    ) -> Result<crate::fiber::CallGuard, Error> {
+        let contribution = captured
+            .typed::<T>()
+            .entries
+            .remove(&source.name)
+            .ok_or(Error::Retired)?;
+        if contribution.owner.identity()?.activation != source.activation {
+            return Err(Error::Retired);
+        }
+        contribution.admit()
+    }
+    sources
+        .iter()
+        .map(|source| match source.kind {
+            SourceKind::PromptSection => guard::<Section>(captured, source),
+            SourceKind::PromptVariable => guard::<Variable>(captured, source),
+            _ => Err(Error::Invalid(
+                "Only system-prompt sources can be admitted".into(),
+            )),
+        })
+        .collect()
 }
 
 async fn evaluate<T>(
@@ -232,11 +319,14 @@ mod tests {
         owner.publish().unwrap();
         let catalog = Catalog::default();
         let request = Request {
-            invocation: Invocation {
-                session_id: "session".into(),
-                turn_id: "turn".into(),
-                run_id: "run".into(),
-                invocation_id: "invocation".into(),
+            target: Target::ModelStep {
+                invocation: Invocation {
+                    session_id: "session".into(),
+                    turn_id: "turn".into(),
+                    run_id: "run".into(),
+                    invocation_id: "invocation".into(),
+                },
+                cwd: "/workspace".into(),
             },
             cancellation: CancellationToken::new(),
         };
@@ -257,12 +347,29 @@ mod tests {
                 .unwrap();
             assert_eq!(unused.system.as_deref(), Some("base"));
             revisions.push(unused.sources[0].revision.clone());
-            let rendered = resolve(
+            let literal = resolve(
                 Some(&captured),
                 Some("before{{optional}}after"),
                 request.clone(),
             )
-            .await;
+            .await
+            .unwrap();
+            assert_eq!(literal.system.as_deref(), Some("before{{optional}}after"));
+            let mut template = Staged::default();
+            template
+                .insert(
+                    "template",
+                    Section {
+                        format: Format::Template,
+                        order: 0,
+                        mode: SectionMode::Append,
+                        text: Text::Literal("before{{optional}}after".into()),
+                    },
+                )
+                .unwrap();
+            let template = catalog.register(&owner.context(), template).unwrap();
+            let captured = catalog.capture(&Scope::Profile);
+            let rendered = resolve(Some(&captured), None, request.clone()).await;
             if missing {
                 assert!(
                     matches!(rendered, Err(Error::Invalid(message)) if message.contains("has no value"))
@@ -270,6 +377,7 @@ mod tests {
             } else {
                 assert_eq!(rendered.unwrap().system.as_deref(), Some("beforeafter"));
             }
+            drop(template);
             drop(registration);
         }
         assert_ne!(revisions[0], revisions[1]);

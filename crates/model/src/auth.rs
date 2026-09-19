@@ -100,7 +100,7 @@ pub(crate) fn prepare(request: &mut ModelRequest) -> Result<(), ModelError> {
                 }
                 _ => None,
             })
-            .unwrap_or_else(|| "You are Maka, a helpful AI assistant.".into());
+            .unwrap_or_default();
         options.insert("instructions".into(), Value::String(instructions));
     }
     options.insert("store".into(), Value::Bool(false));

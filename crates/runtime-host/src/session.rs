@@ -87,7 +87,7 @@ pub struct SessionConfiguration {
     #[serde(default)]
     pub boundary_revision: u64,
     pub collaboration_mode: CollaborationMode,
-    pub orchestration_mode: OrchestrationMode,
+    pub orchestration_mode: BehaviorId,
 }
 
 impl SessionConfiguration {
@@ -112,7 +112,7 @@ impl SessionConfiguration {
             workspace_identity: Some(workspace_identity),
             permission_mode: self.permission_mode,
             collaboration_mode: self.collaboration_mode,
-            orchestration_mode: self.orchestration_mode,
+            orchestration_mode: self.orchestration_mode.clone(),
             tool_mode: self.tool_mode,
             model: self.target.model().cloned(),
             thinking_level: self.thinking_level,
@@ -132,7 +132,7 @@ pub struct PreparedSession {
     thinking_level: Option<ThinkingLevel>,
     tool_profile: Option<SessionToolProfile>,
     collaboration_mode: CollaborationMode,
-    orchestration_mode: OrchestrationMode,
+    orchestration_mode: BehaviorId,
 }
 
 impl PreparedSession {
@@ -143,7 +143,8 @@ impl PreparedSession {
                 || input.mode.is_some()
                 || input
                     .orchestration_mode
-                    .is_some_and(|mode| mode != OrchestrationMode::Default)
+                    .as_ref()
+                    .is_some_and(|mode| mode != &BehaviorId::default())
                 || input
                     .collaboration_mode
                     .is_some_and(|mode| mode != CollaborationMode::Agent))
@@ -192,9 +193,7 @@ impl PreparedSession {
             thinking_level: input.thinking_level,
             tool_profile: input.tool_profile,
             collaboration_mode: input.collaboration_mode.unwrap_or(CollaborationMode::Agent),
-            orchestration_mode: input
-                .orchestration_mode
-                .unwrap_or(OrchestrationMode::Default),
+            orchestration_mode: input.orchestration_mode.unwrap_or_default(),
         })
     }
 

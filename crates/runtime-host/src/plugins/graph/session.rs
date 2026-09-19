@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::{ID, Manager, NativeOperators, Root, Submission, error, now, tools};
+use super::{ID, Manager, NativeOperators, Root, Submission, error, tools};
 use crate::session::SessionConfiguration;
 use futures_util::future::BoxFuture;
 use maka_graph::{Mode, coordinator::Coordinator, owner::Handle};
@@ -26,23 +26,24 @@ use maka_plugins::{
     fiber::Fiber,
     session::{Behavior, Preparation},
 };
-use maka_runtime::execution::OrchestrationMode;
 use std::{sync::Arc, time::Duration};
 
-impl Behavior for Manager {
+pub(super) struct GraphBehavior {
+    pub manager: Arc<Manager>,
+    pub mode: Mode,
+}
+impl Behavior for GraphBehavior {
+    fn prepare(&self, session_id: String) -> BoxFuture<'_, Result<Preparation, String>> {
+        self.manager.prepare(session_id, self.mode)
+    }
+}
+impl Manager {
     fn prepare(
         &self,
         session_id: String,
-        orchestration: OrchestrationMode,
+        mode: Mode,
     ) -> BoxFuture<'_, Result<Preparation, String>> {
         Box::pin(async move {
-            let mode = match orchestration {
-                OrchestrationMode::Graph => Mode::Graph,
-                OrchestrationMode::Swarm => Mode::Swarm,
-                OrchestrationMode::Default => {
-                    return Err("Session behavior requires Graph or Swarm".into());
-                }
-            };
             let mut handle = self.ensure(&session_id, mode, false).await?;
             let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
             loop {
@@ -134,7 +135,6 @@ impl Manager {
         mode: Mode,
         reopen_closed: bool,
     ) -> Result<Handle, String> {
-        let host = self.executions.upgrade().ok_or("Host is closed")?;
         let session = self
             .log
             .get_session::<SessionConfiguration>(session_id)
@@ -191,31 +191,6 @@ impl Manager {
                 .await
                 .map_err(error)?;
         }
-        // Environment preparation runs outside Host admission. Publish its
-        // submission gate under that lock, so stop either sees the gate or
-        // this initializer observes the durable stop before becoming effective.
-        let _admission = host.lock_admission().await;
-        if previous.is_some()
-            && let Some(owner) = host.active_session_owner(session_id)
-            && self
-                .log
-                .run_boundary(session_id, &owner.run_id)
-                .await
-                .map_err(error)?
-                .is_some_and(|boundary| {
-                    !matches!(
-                        boundary.state,
-                        maka_event_log::turns::InvocationState::Ended { .. }
-                    )
-                })
-        {
-            return Err("Previous Graph supervisor is still settling".into());
-        }
-        let epoch = self
-            .log
-            .open_graph(session_id, mode, previous.as_ref(), now()?)
-            .await
-            .map_err(error)?;
         let child = Fiber::new(
             ID,
             &format!("graph-{}", uuid::Uuid::new_v4().simple()),
@@ -224,61 +199,57 @@ impl Manager {
         .map_err(error)?;
         child.begin_loading().map_err(error)?;
         let context = child.context();
-        let submission = Submission {
-            graph_id: epoch.graph_id.clone(),
-            stop: tokio_util::sync::CancellationToken::new(),
-        };
-        if self
-            .log
-            .graph_control(session_id, Some(&epoch.graph_id))
-            .await
-            .map_err(error)?
-            .is_some_and(|control| control.closed())
-        {
-            submission.stop.cancel();
-        }
-        let commands = host
-            .authorize_plugin(
-                context.clone(),
-                &[session_id.into()],
-                &self.root,
-                submission.stop.clone(),
-            )
-            .await
-            .map_err(error)?;
-        let operators = Arc::new(NativeOperators {
-            commands: commands.clone(),
-            log: self.log.clone(),
-            context: context.clone(),
-            root: session_id.into(),
-            graph_id: epoch.graph_id.clone(),
-            definitions: super::definitions::Definitions {
-                configuration: self.configuration.clone(),
-                catalog: self.catalog.clone(),
-            },
-            storage: host.plugin_store(context.clone()).map_err(error)?,
-        });
-        let coordinator = Coordinator::new(epoch, self.log.clone(), commands, operators.clone())
-            .map_err(error)?;
-        let (handle, owner) = maka_graph::owner::start(coordinator).map_err(error)?;
-        context
-            .spawn("Agent Graph coordinator", owner)
-            .map_err(error)?;
-        let mut staged = tools::register(handle.clone(), operators)?;
-        staged
-            .insert("agent-graph", handle.clone())
-            .map_err(error)?;
-        staged.insert("agent-graph", submission).map_err(error)?;
-        child.ready().map_err(error)?;
-        let lifecycle = self
-            .catalog
-            .publish_child(&self.parent, child, staged)
-            .map_err(error)?;
-        *slot = Some(Root {
-            lifecycle,
-            handle: handle.clone(),
-            mode,
-        });
+        let stop = tokio_util::sync::CancellationToken::new();
+        let submission_stop = stop.clone();
+        let log = self.log.clone();
+        let sessions = self.sessions.clone();
+        let catalog = self.catalog.clone();
+        let root_id = session_id.to_owned();
+        let root = self
+            .sessions
+            .activate(super::host::Activation {
+                session: session_id.into(),
+                mode,
+                previous,
+                child,
+                stop,
+                parent: self.parent.clone(),
+                build: Box::new(move |opened| {
+                    let super::host::Opened {
+                        epoch,
+                        commands,
+                        storage,
+                    } = opened;
+                    let operators = Arc::new(NativeOperators {
+                        commands: commands.clone(),
+                        log: log.clone(),
+                        context: context.clone(),
+                        root: root_id,
+                        graph_id: epoch.graph_id.clone(),
+                        definitions: super::definitions::Definitions { sessions, catalog },
+                        storage,
+                    });
+                    let submission = Submission {
+                        graph_id: epoch.graph_id.clone(),
+                        stop: submission_stop,
+                    };
+                    let coordinator =
+                        Coordinator::new(epoch, log, commands, operators.clone()).map_err(error)?;
+                    let (handle, owner) = maka_graph::owner::start(coordinator).map_err(error)?;
+                    context
+                        .spawn("Agent Graph coordinator", owner)
+                        .map_err(error)?;
+                    let mut staged = tools::register(handle.clone(), operators)?;
+                    staged
+                        .insert("agent-graph", handle.clone())
+                        .map_err(error)?;
+                    staged.insert("agent-graph", submission).map_err(error)?;
+                    Ok((handle, staged))
+                }),
+            })
+            .await?;
+        let handle = root.handle.clone();
+        *slot = Some(root);
         Ok(handle)
     }
 
@@ -310,8 +281,6 @@ impl Manager {
                 }
                 continue;
             }
-            let host = self.executions.upgrade().ok_or("Host is closed")?;
-            let admission = host.lock_admission().await;
             let candidates: Vec<_> = self
                 .roots
                 .lock()
@@ -332,15 +301,19 @@ impl Manager {
                         && view.snapshot.quiescent
                         && !view.pending_work
                 });
-                if idle && !host.has_session_work(&id).await.map_err(error)? {
-                    if let Some(root) = guard.as_ref() {
-                        root.lifecycle.retire();
-                    }
+                if idle
+                    && self
+                        .sessions
+                        .retire_idle(
+                            id.clone(),
+                            guard.as_ref().map(|root| root.lifecycle.clone()),
+                        )
+                        .await?
+                {
                     retired = Some((id, slot, guard));
                     break;
                 }
             }
-            drop(admission);
             let Some((id, slot, guard)) = retired else {
                 return Err("Agent Graph active Session limit reached".into());
             };

@@ -210,6 +210,11 @@ impl Kernel {
             let context = PluginContext {
                 lifecycle: live.context.clone(),
                 services: live.services.clone(),
+                data: self
+                    .data
+                    .as_ref()
+                    .map(|data| data.bind(live.context.clone()))
+                    .transpose()?,
             };
             let config = live.plan.entry.config.clone();
             let result = live

@@ -129,6 +129,8 @@ impl Operation {
                 | Self::SkillCatalogMutate
                 | Self::SkillCatalogPreviewUpdate
                 | Self::SkillCatalogQuery
+                | Self::SkillCatalogResolvePath
+                | Self::SkillSourceImport
                 | Self::SubscriptionClose
                 | Self::SubscriptionOpen
                 | Self::SubscriptionPtyInterestSet

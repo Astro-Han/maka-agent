@@ -238,8 +238,56 @@ async fn scenario() {
     .await;
     peer.close().await;
     wait_count(&state.live, 0).await;
-    stop.cancel();
+    // An idle Client keeps observing changes. Delivery waits must not prevent
+    // cooperative retirement, which still cancels and joins the owned stream.
+    let (mut peer, hello) = Peer::handshake(host.clone(), "observing-client").await;
+    let document = rpc(&mut peer, json!({"kind":"open_document"})).await["document"].clone();
+    let stream = rpc(
+        &mut peer,
+        json!({"kind":"open","binding":binding,"target":target,"document":document,"input":null}),
+    )
+    .await["stream"]
+        .clone();
+    for _ in 0..2 {
+        rpc(
+            &mut peer,
+            json!({"kind":"next","document":document,"stream":stream}),
+        )
+        .await;
+    }
+    let reads = state.reads.load(Ordering::SeqCst);
+    peer.send_rpc(
+        "observing",
+        "plugin.remote",
+        json!({"kind":"next","document":document,"stream":stream}),
+    );
+    wait_count(&state.reads, reads + 1).await;
+    let status = success(peer.rpc("host.status", json!({})).await);
+    assert_eq!(status["activeOperations"], 0, "{status}");
+    peer.send_rpc(
+        "retire",
+        "host.upgrade.prepare",
+        json!({
+            "expectedHostEpoch":hello["hostEpoch"], "allowInterruptActiveTasks":false,
+            "allowCooperativeHandoff":true, "allowIdleConnections":true
+        }),
+    );
+    let replies = [response(&mut peer).await, response(&mut peer).await];
+    assert!(
+        replies
+            .iter()
+            .any(|r| r["requestId"] == "retire" && r["result"]["kind"] == "prepared"),
+        "{replies:?}"
+    );
+    assert!(
+        replies
+            .iter()
+            .any(|r| r["requestId"] == "observing" && r["ok"] == false),
+        "{replies:?}"
+    );
     server.await.unwrap().unwrap();
+    assert_eq!(state.live.load(Ordering::SeqCst), 0);
+    peer.close().await;
     cleanup.disarm();
 }
 async fn wait_count(counter: &AtomicUsize, expected: usize) {

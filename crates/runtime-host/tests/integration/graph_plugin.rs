@@ -129,7 +129,9 @@ async fn scenario(implementation: bool) {
             commands
                 .submit(Submit {
                     operation_id: "next-epoch".into(),
-                    orchestration_mode: Some(maka_runtime::execution::OrchestrationMode::Graph),
+                    orchestration_mode: Some(
+                        maka_runtime::execution::BehaviorId::try_from("graph".to_owned()).unwrap(),
+                    ),
                     session_id: "graph-root".into(),
                     content: "Start a fresh Graph task; no delegation is necessary.".into(),
                 })
@@ -319,7 +321,9 @@ async fn scenario(implementation: bool) {
             commands
                 .submit(Submit {
                     operation_id: "initial".into(),
-                    orchestration_mode: Some(maka_runtime::execution::OrchestrationMode::Graph),
+                    orchestration_mode: Some(
+                        maka_runtime::execution::BehaviorId::try_from("graph".to_owned()).unwrap(),
+                    ),
                     session_id: "graph-root".into(),
                     content: "Coordinate a Graph acceptance task".into(),
                 })

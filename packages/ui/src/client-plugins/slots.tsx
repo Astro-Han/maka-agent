@@ -17,15 +17,16 @@
  * under the License.
  */
 
-import { Component, createElement, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
+import { Component, useSyncExternalStore, type ReactNode } from 'react';
 import type { ClientIdentity, ClientSlots } from '@maka-agent/plugin-sdk/client';
 
-export interface SlotEntry<K extends keyof ClientSlots = keyof ClientSlots> {
+export interface SlotEntry {
   readonly owner: ClientIdentity;
-  readonly slot: K;
+  readonly slot: keyof ClientSlots;
   readonly key: string;
   readonly order: number;
-  readonly component: ComponentType<ClientSlots[K]>;
+  /** Existential input: only the matching slot may invoke this renderer. */
+  readonly render: (input: never) => ReactNode;
 }
 
 /** A single immutable publication; plugins cannot mutate the live registry. */
@@ -53,7 +54,7 @@ export function ClientSlot<K extends keyof ClientSlots>(props: {
   const entries = useSyncExternalStore(props.store.subscribe, props.store.snapshot, props.store.snapshot);
   return entries.filter((entry) => entry.slot === props.name).map((entry) => (
     <SlotBoundary key={`${entry.owner.activation}/${entry.key}`} owner={entry.owner} onError={props.onError}>
-      {createElement(entry.component, props.input)}
+      {entry.render(props.input as never)}
     </SlotBoundary>
   ));
 }

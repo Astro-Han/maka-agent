@@ -17,6 +17,7 @@
  * under the License.
  */
 
+import type { ClientIdentity, ClientFileRequest } from '@maka-agent/plugin-sdk/client';
 import type {
   WorkHubAnswerInput,
   WorkHubAnswerResult,
@@ -260,7 +261,6 @@ import type {
 } from '@maka/runtime/stream-graph-read-model';
 import type { BotStatus, WechatBridgeQrCodeResult } from '@maka/runtime/bots';
 import type { ShellRunPtyDataEvent, ShellRunPtySnapshot } from '@maka/runtime/shell-run-contract';
-import type { BundledSkillCatalogEntry, ManagedSkillSourceEntry, ManagedSkillUpdatePreview, SkillEntry } from '@maka/ui';
 import type { ConfigCategory } from '@maka/storage/config-transfer';
 import type { OnboardingMilestone, OnboardingMilestoneId, OnboardingState } from '@maka/core/onboarding';
 import type {
@@ -858,11 +858,13 @@ export interface MakaBridge {
   };
 
   clientPlugins: {
-    connection(host: DesktopRuntimeHostRef): Promise<string>;
+    file(host: DesktopRuntimeHostRef, targetEpoch: string, identity: ClientIdentity, input: ClientFileRequest): Promise<string | null>;
+    connection(host: DesktopRuntimeHostRef): Promise<{ epoch: string; localFiles: boolean }>;
     session(host: DesktopRuntimeHostRef, targetEpoch: string, sessionId: string): Promise<string>;
     remote(host: DesktopRuntimeHostRef, targetEpoch: string, input: OperationInput<'plugin.remote'>): Promise<OperationOutput<'plugin.remote'> | { kind: 'connection_retired' }>;
     query(host: DesktopRuntimeHostRef, input: OperationInput<'plugin.client.query'>): Promise<OperationOutput<'plugin.client.query'>>;
     subscribeChanges(host: DesktopRuntimeHostRef, handler: (revision: string) => void): () => void;
+    subscribeContext(host: DesktopRuntimeHostRef, handler: () => void): () => void;
   };
 
   runtimeHost: {
@@ -998,15 +1000,6 @@ export interface MakaBridge {
       { ok: true; project: ProjectRecord } | { ok: false; reason: 'cancelled' }
     >;
     getConnections(host: DesktopNewTaskHostRef): Promise<DesktopConnectionSnapshot>;
-    listInvocableSkills(
-      target: DesktopNewTaskTarget,
-      context?: {
-        llmConnectionSlug?: string;
-        model?: string;
-        collaborationMode?: 'agent' | 'plan';
-        permissionMode?: ChatDefaultsSettings['permissionMode'];
-      },
-    ): Promise<import('@maka/runtime/skill-invocation').InvocableSkillEntry[]>;
     getReadiness(
       target: DesktopNewTaskTarget,
       input?: DesktopTaskSubmissionReadinessRequest,
@@ -1881,7 +1874,7 @@ export interface MakaBridge {
       projectGit: { isGitRepo: boolean; branch?: string };
     }>;
     openPath(
-      key: 'workspace' | 'skills' | 'memory' | 'project',
+      key: 'workspace' | 'memory' | 'project',
       sessionId?: string,
       host?: DesktopRuntimeHostRef,
     ): Promise<
@@ -1954,59 +1947,6 @@ export interface MakaBridge {
     readText(sessionId: string, artifactId: string): Promise<ArtifactTextReadResult>;
     readBinary(sessionId: string, artifactId: string): Promise<ArtifactBinaryReadResult>;
     delete(sessionId: string, artifactId: string): Promise<void>;
-  };
-  skills: {
-    list(host?: DesktopRuntimeHostRef): Promise<SkillEntry[]>;
-    listInvocable(
-      sessionId?: string,
-      newSessionContext?: {
-        llmConnectionSlug?: string;
-        model?: string;
-        collaborationMode?: 'agent' | 'plan';
-      },
-    ): Promise<import('@maka/runtime/skill-invocation').InvocableSkillEntry[]>;
-    catalog: {
-      list(host?: DesktopRuntimeHostRef): Promise<BundledSkillCatalogEntry[]>;
-      install(id: string, host?: DesktopRuntimeHostRef): Promise<
-        | { ok: true; skill: SkillEntry }
-        | { ok: false; reason: 'not_found' | 'already_exists' | 'blocked_path' | 'write_failed' }
-      >;
-    };
-    sources: {
-      list(host?: DesktopRuntimeHostRef): Promise<ManagedSkillSourceEntry[]>;
-      importLocalFile(host?: DesktopRuntimeHostRef): Promise<
-        | { ok: true; source: ManagedSkillSourceEntry }
-        | { ok: false; reason: 'cancelled' | 'invalid_skill' | 'already_exists' | 'blocked_path' | 'write_failed' }
-      >;
-    };
-    installManaged(sourceId: string, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | { ok: false; reason: 'not_found' | 'already_exists' | 'blocked_path' | 'write_failed' }
-    >;
-    previewUpdate(skillId: string, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; preview: ManagedSkillUpdatePreview }
-      | { ok: false; reason: 'not_managed' | 'source_missing' | 'metadata_error' | 'blocked_path' | 'read_failed' }
-    >;
-    updateManaged(skillId: string, options?: { force?: boolean; expectedCurrentSha256?: string; expectedSourceSha256?: string }, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | { ok: false; reason: 'not_managed' | 'source_missing' | 'local_modified' | 'metadata_error' | 'blocked_path' | 'write_failed' }
-    >;
-    setEnabled(skillId: string, enabled: boolean, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'state_error' | 'write_failed' }
-    >;
-    setPinned(skillRef: string, pinned: boolean, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'state_error' | 'write_failed' }
-    >;
-    delete(idOrRef: string, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed' }
-    >;
-    open(id: string, target?: 'file' | 'directory', host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; target: 'file' | 'directory' }
-      | { ok: false; reason: 'invalid_id' | 'missing' | 'blocked_path' | 'not_file' | 'not_directory' | 'open_failed' }
-    >;
   };
   browser: {
     setActiveSession(sessionId: string | null): void;

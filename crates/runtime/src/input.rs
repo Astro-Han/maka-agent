@@ -91,6 +91,9 @@ impl InvocationInput {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageInput {
+    /// Host-stamped provenance of immutable plugin-prepared input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preparation: Vec<InputReceipt>,
     pub text: String,
     pub display_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -173,6 +176,7 @@ impl DeliveredMessage {
 impl From<String> for MessageInput {
     fn from(text: String) -> Self {
         Self {
+            preparation: Vec::new(),
             text,
             display_text: None,
             attachments: None,
@@ -181,6 +185,13 @@ impl From<String> for MessageInput {
             inline_references: None,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InputReceipt {
+    pub source: crate::composition::SourceRevision,
+    pub receipt: serde_json::Value,
 }
 
 impl From<&str> for MessageInput {

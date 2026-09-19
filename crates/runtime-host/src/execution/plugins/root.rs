@@ -230,7 +230,7 @@ async fn configuration(
         // interactive create codec restricts Explore to UI-specific modes.
         permission_mode: None,
         collaboration_mode: Some(template.collaboration_mode),
-        orchestration_mode: Some(template.orchestration_mode),
+        orchestration_mode: Some(template.orchestration_mode.clone()),
     })
     .map_err(|error| Error::Invalid(error.to_string()))?;
     let mut config = prepared.bind(

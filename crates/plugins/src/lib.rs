@@ -36,6 +36,7 @@ pub mod prompt;
 mod registration;
 pub mod remote;
 pub use registration::Registration;
+pub mod input;
 pub mod services;
 pub mod session;
 pub mod storage;

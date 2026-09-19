@@ -32,7 +32,9 @@ export function createDesktopClientPluginServices(
     connect(host) {
       const query: typeof bridge.clientPlugins.query = async (origin, input) => bridge.clientPlugins.query(origin, input);
       let targetEpoch: string | undefined;
+      let localFiles = false;
       return {
+        subscribeContext: (listener) => bridge.clientPlugins.subscribeContext(host, listener),
         async session(sessionId) {
           if (!targetEpoch) throw new Error('Client catalog has no connection identity');
           return bridge.clientPlugins.session(host, targetEpoch, sessionId);
@@ -41,8 +43,21 @@ export function createDesktopClientPluginServices(
           if (!targetEpoch) throw new Error('Client catalog has no connection identity');
           return clientPluginRemote(bridge.clientPlugins.remote, host, targetEpoch)(identity, signal);
         },
+        localFiles(identity, signal) {
+          if (!targetEpoch) throw new Error('Client catalog has no connection identity');
+          if (!localFiles) return undefined;
+          const epoch = targetEpoch;
+          return {
+            pick: () => bounded(bridge.clientPlugins.file(host, epoch, identity, {kind:'pick'}), signal),
+            async open(path) {
+              await bounded(bridge.clientPlugins.file(host, epoch, identity, {kind:'open',path}),
+                AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
+            },
+          };
+        },
         async snapshot(signal): Promise<ClientSnapshot> {
-          const epoch = await bounded(bridge.clientPlugins.connection(host), signal);
+          const connection = await bounded(bridge.clientPlugins.connection(host), signal);
+          const { epoch } = connection;
           const entries: ClientDescriptor[] = [];
           let cursor: { revision: string; afterEntry: string } | null = null;
           let revision: string | undefined;
@@ -59,9 +74,10 @@ export function createDesktopClientPluginServices(
             cursor = page.nextCursor;
           } while (cursor);
           if (revision === undefined) throw new Error('Client snapshot has no revision');
-          if (epoch !== await bounded(bridge.clientPlugins.connection(host), signal))
+          if (epoch !== (await bounded(bridge.clientPlugins.connection(host), signal)).epoch)
             throw new Error('Client connection changed during snapshot');
           targetEpoch = epoch;
+          localFiles = connection.localFiles;
           return { revision: JSON.stringify([epoch, revision]), entries };
         },
         async source(descriptor, signal) {

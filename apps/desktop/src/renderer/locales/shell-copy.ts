@@ -51,7 +51,6 @@ export const STATIC_COMMAND_IDS = [
   'nav:daily-review',
   'diag:open-workspace',
   'diag:open-project-folder',
-  'diag:open-skills',
   'diag:export-conversation',
   'diag:save-conversation-file',
   'diag:copy-today-daily-review',
@@ -101,7 +100,6 @@ const STATIC_COMMAND_KEYWORDS: Record<StaticCommandId, readonly string[]> = {
   'nav:daily-review': ['daily', 'review', 'today', '每日', '回顾', '今天'],
   'diag:open-workspace': ['workspace', 'folder', 'open', 'finder', '工作区', '文件夹', '目录'],
   'diag:open-project-folder': ['project', 'folder', 'open', 'finder', '项目', '目录', '文件夹'],
-  'diag:open-skills': ['skills', 'folder', 'open', 'finder', '技能', '文件夹'],
   'diag:export-conversation': ['export', 'markdown', 'copy', 'conversation', '导出', '任务', '剪贴板', 'md'],
   'diag:save-conversation-file': [
     'save',
@@ -569,11 +567,6 @@ const ZH_STATIC_COMMANDS: Record<StaticCommandId, CommandCopy> = {
     hint: 'Finder',
     group: '诊断',
   },
-  'diag:open-skills': {
-    label: '打开 Skills 文件夹',
-    hint: 'Finder',
-    group: '诊断',
-  },
   'diag:export-conversation': {
     label: '导出当前任务为 Markdown',
     hint: '复制到剪贴板',
@@ -665,11 +658,6 @@ const EN_STATIC_COMMANDS: Record<StaticCommandId, CommandCopy> = {
   },
   'diag:open-project-folder': {
     label: 'Open project folder',
-    hint: 'Finder',
-    group: 'Diagnostics',
-  },
-  'diag:open-skills': {
-    label: 'Open Skills folder',
     hint: 'Finder',
     group: 'Diagnostics',
   },

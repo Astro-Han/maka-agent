@@ -129,7 +129,7 @@ pub(super) async fn verify(
         tool_mode: maka_runtime::execution::ToolMode::CodeMode,
         permission_mode: maka_runtime::execution::PermissionMode::Explore,
         collaboration_mode: maka_runtime::execution::CollaborationMode::Agent,
-        orchestration_mode: maka_runtime::execution::OrchestrationMode::Default,
+        orchestration_mode: maka_runtime::execution::BehaviorId::default(),
     };
     let roots = host
         .authorize_plugin_root_execution(

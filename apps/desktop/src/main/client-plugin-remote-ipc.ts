@@ -19,6 +19,8 @@
 
 import { HOST_OPERATION_SPECS, type PluginRemoteInput, type PluginRemoteResult } from '@maka/runtime-host/protocol';
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from 'electron';
+import { isAbsolute } from 'node:path';
+import type { PluginClientQueryInput } from '@maka/runtime-host/protocol';
 
 interface DocumentOwner {
   readonly nonce: string;
@@ -37,6 +39,11 @@ export function registerClientPluginRemoteIpc(input: {
   };
   readonly ownsRenderer: (contents: WebContents) => boolean;
   readonly report: (error: unknown) => void;
+  readonly files?: {
+    validate(input: PluginClientQueryInput): Promise<void>;
+    pick(): Promise<string | null>;
+    open(path: string): Promise<void>;
+  };
 }): () => Promise<void> {
   const owners = new Map<WebContents, DocumentOwner>();
   const draining = new Set<Promise<unknown>>();
@@ -109,6 +116,28 @@ export function registerClientPluginRemoteIpc(input: {
     // Commands are never automatically replayed after connection loss.
     if (value.kind === 'close_document') owner.documents.delete(value.document);
     return track(owner.pending, request(value));
+  });
+
+  input.ipcMain.handle('plugins:files', async (event, nonce: unknown, rawClient: unknown, raw: unknown) => {
+    const owner = ownerFor(event, nonce);
+    const files = input.files;
+    if (!files) throw new Error('Desktop-local files are unavailable for this Host');
+    if (!rawClient || typeof rawClient !== 'object' || !raw || typeof raw !== 'object')
+      throw new Error('Invalid Client file request');
+    const client = rawClient as Record<string, unknown>;
+    const action = raw as Record<string, unknown>;
+    const binding = HOST_OPERATION_SPECS['plugin.client.query'].decodeInput({
+      kind:'bundle', entryId:client.entryId, activation:client.activation, clientDigest:client.clientDigest, offset:0,
+    });
+    if (action.kind !== 'pick' && action.kind !== 'open') throw new Error('Unknown Client file action');
+    if (action.kind === 'open' && (typeof action.path !== 'string' || !isAbsolute(action.path)
+      || action.path.length > 32768 || action.path.includes('\0'))) throw new Error('Invalid local path');
+    await files.validate(binding);
+    if (owner.closed) throw new Error('Client document has retired');
+    if (action.kind === 'open') { await files.open(action.path as string); return null; }
+    const path = await files.pick();
+    if (owner.closed) throw new Error('Client document retired during file selection');
+    return path;
   });
 
   return async () => {

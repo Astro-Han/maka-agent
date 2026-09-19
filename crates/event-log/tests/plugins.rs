@@ -187,7 +187,8 @@ async fn execution_receipts_commit_with_work_and_survive_delivery_restarts_and_l
     );
     assert!(log.pending_messages("session").await.unwrap().is_empty());
     let mut changed = request.clone();
-    changed.orchestration_mode = Some(maka_runtime::execution::OrchestrationMode::Swarm);
+    changed.orchestration_mode =
+        Some(maka_runtime::execution::BehaviorId::try_from("swarm".to_owned()).unwrap());
     assert!(matches!(
         log.admit_plugin_execution(&namespace, changed).await,
         Err(StoreError::EventConflict)

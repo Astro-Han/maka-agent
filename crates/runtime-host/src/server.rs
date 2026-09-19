@@ -48,6 +48,7 @@ mod registration;
 mod resources;
 pub(crate) mod retirement;
 mod sessions;
+pub(crate) use sessions::workspace::resolve_path as resolve_workspace_path;
 mod skills;
 mod subscriptions;
 mod turns;
@@ -231,19 +232,30 @@ impl Host {
             interactions.clone(),
             crate::execution::ExecutionPaths {
                 state_root: root.canonical_path().to_owned(),
-                global_instructions,
-                skill_home: options.skill_home.take(),
             },
             runtime.clone(),
         )?);
         let mut setup = std::mem::take(&mut options.plugins);
+        crate::plugins::skills::install(
+            &mut setup,
+            configuration.clone(),
+            root.canonical_path().to_owned(),
+            options.skill_home.take(),
+            &executions,
+        )?;
+        crate::plugins::assistant::install(
+            &mut setup,
+            configuration.clone(),
+            global_instructions,
+            &executions.plugin_catalog,
+        )?;
         crate::plugins::graph::install(
             &mut setup,
             log.clone(),
-            configuration.clone(),
-            &executions,
-            root.root_id().into(),
+            crate::execution::GraphSessions::new(&executions, root.root_id().into()),
+            executions.plugin_catalog.clone(),
         )?;
+        crate::plugins::workhub::install(&mut setup, &executions.plugin_catalog)?;
         crate::plugins::scheduler::install(
             &mut setup,
             log.clone(),
@@ -259,13 +271,22 @@ impl Host {
                 root.root_id().into(),
             )?));
         }
+        let data_root = root.canonical_path().to_owned();
+        let data = tokio::task::spawn_blocking(move || {
+            maka_plugins::storage::Directories::open(&data_root)
+        })
+        .await??;
+        let kernel = maka_plugins::kernel::Kernel::new(
+            maka_plugins::services::Services::default(),
+            executions.plugin_catalog.clone(),
+        )
+        .with_data(data);
         let (plugins, plugin_owner) = crate::plugins::Platform::open(
             log.clone(),
             Arc::new(crate::plugins::ExternalLoader(setup.loader)),
             setup.builtins,
             setup.layers,
-            maka_plugins::services::Services::default(),
-            executions.plugin_catalog.clone(),
+            kernel,
             draining.clone(),
         )
         .await?;

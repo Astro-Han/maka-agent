@@ -98,7 +98,7 @@ impl Executions {
             controllers: self.controllers.clone(),
         }
     }
-    pub(super) async fn validate_message_content(
+    pub(crate) async fn validate_message_content(
         &self,
         session: &str,
         content: &MessageContent,
@@ -145,13 +145,20 @@ impl Executions {
         }
         let session = environment.session;
         let mut configuration = session.invocation_configuration().await.map_err(internal)?;
-        configuration.system_prompt = Some(environment.prompt.clone());
+        configuration.system_prompt = environment.prompt.clone();
         configuration.tool_composition = Some(environment.composition);
         let invocation = Invocation {
             session_id: input.session_id.clone(),
             turn_id: input.turn_id.clone(),
             run_id: Uuid::new_v4().to_string(),
             invocation_id: Uuid::new_v4().to_string(),
+        };
+        let prepared_content = if source_messages.is_empty() {
+            input.content.into()
+        } else {
+            maka_runtime::message::aggregate(
+                source_messages.iter().map(|source| &source.message.content),
+            )
         };
         let model = match environment.backend {
             Backend::Executor(binding) => {
@@ -165,9 +172,9 @@ impl Executions {
                     request: maka_plugins::executor::Request {
                         invocation,
                         conversation_key: input.session_id,
-                        content: input.content.into(),
+                        content: prepared_content,
                         cwd: configuration.cwd.clone(),
-                        instructions: Some(environment.prompt.text),
+                        instructions: environment.prompt.map(|prompt| prompt.text),
                     },
                     binding,
                     configuration,
@@ -191,7 +198,7 @@ impl Executions {
             work: RunWork::Message {
                 source_messages,
                 skill_invocation: Default::default(),
-                message: input.content.into(),
+                message: prepared_content,
                 tools,
                 max_steps,
             },

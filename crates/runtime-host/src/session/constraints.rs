@@ -30,14 +30,24 @@ impl SessionConfiguration {
         }
     }
 
-    pub(crate) fn append_instructions(
+    pub(crate) fn initial_prompt(
         &self,
-        prompt: &mut SystemPrompt,
-    ) -> Result<(), &'static str> {
-        if let Some(instructions) = &self.instructions {
-            prompt.text.push_str("\n\n");
-            prompt.text.push_str(instructions);
+        additional: &str,
+    ) -> Result<Option<SystemPrompt>, &'static str> {
+        let text = [self.instructions.as_deref().unwrap_or(""), additional]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if text.is_empty() {
+            return Ok(None);
         }
-        prompt.validate()
+        let prompt = SystemPrompt {
+            text,
+            policy_revision: 0,
+            sources: Vec::new(),
+        };
+        prompt.validate()?;
+        Ok(Some(prompt))
     }
 }

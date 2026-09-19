@@ -98,8 +98,7 @@ async fn accepted_plugin_mutations_survive_lost_waiters_and_activation_failure_i
         Arc::new(Loader),
         BTreeMap::new(),
         BTreeMap::new(),
-        Services::default(),
-        catalog.clone(),
+        maka_plugins::kernel::Kernel::new(Services::default(), catalog.clone()),
         shutdown.clone(),
     )
     .await
@@ -200,8 +199,7 @@ async fn accepted_plugin_mutations_survive_lost_waiters_and_activation_failure_i
         Arc::new(Loader),
         BTreeMap::new(),
         BTreeMap::new(),
-        Services::default(),
-        catalog.clone(),
+        maka_plugins::kernel::Kernel::new(Services::default(), catalog.clone()),
         shutdown.clone(),
     )
     .await

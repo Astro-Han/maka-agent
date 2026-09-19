@@ -25,14 +25,12 @@ publish.workspace = true
 
 [dependencies]
 maka-plugins.workspace = true
-regex = "1"
 maka-runtime.workspace = true
 maka-client-capability.workspace = true
 maka-js-runtime.workspace = true
-jsonschema.workspace = true
+maka-tool-catalog.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true

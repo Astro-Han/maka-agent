@@ -33,6 +33,7 @@ async fn compact_next_main_and_reopen_use_durable_baseline_with_complete_tail() 
     let input = |base: &str, id: &str, compact| {
         let mut input = support::input(base, id, compact);
         input.configuration.system_prompt = Some(maka_runtime::execution::SystemPrompt {
+            sources: Vec::new(),
             text: "MAIN_SYSTEM_PROMPT_EVIDENCE".into(),
             policy_revision: 3,
         });

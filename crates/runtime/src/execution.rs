@@ -34,13 +34,8 @@ pub enum CollaborationMode {
     Plan,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OrchestrationMode {
-    Default,
-    Swarm,
-    Graph,
-}
+mod behavior;
+pub use behavior::BehaviorId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,6 +71,8 @@ pub struct ModelBinding {
 pub struct SystemPrompt {
     pub text: String,
     pub policy_revision: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<crate::composition::SourceRevision>,
 }
 
 impl SystemPrompt {
@@ -104,7 +101,7 @@ pub struct InvocationConfiguration {
     pub workspace_identity: Option<WorkspaceIdentity>,
     pub permission_mode: PermissionMode,
     pub collaboration_mode: CollaborationMode,
-    pub orchestration_mode: OrchestrationMode,
+    pub orchestration_mode: BehaviorId,
     pub tool_mode: ToolMode,
     /// None means there was no Session-owned model binding (e.g. local Code).
     pub model: Option<ModelBinding>,
@@ -133,6 +130,14 @@ pub struct ToolComposition {
 pub enum WorkspaceTarget {
     Project { project_id: String },
     HostPath { path: String },
+}
+
+/// Host-resolved location; a locator alone never authorizes filesystem access.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceProjection {
+    pub target: WorkspaceTarget,
+    pub host_cwd: String,
 }
 
 /// Intrinsic workspace identity is distinct from its current filesystem location.

@@ -22,6 +22,7 @@ mod callbacks;
 mod effects;
 mod executor;
 mod http;
+mod input;
 mod invocation;
 mod process;
 mod registration;

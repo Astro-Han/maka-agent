@@ -40,18 +40,57 @@ export interface ClientDescriptor extends ClientIdentity {
 
 /** Augment this interface for slots agreed upon by a product and its plugins. */
 export interface ClientSlots {
+  'workspace.composer.before': ClientWorkspace & {
+    readonly contextRevision?: number;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+    readonly appendText?: (text: string) => void;
+    readonly publishSuggestions?: (items: readonly ComposerSuggestion[]) => ComposerPublication;
+  };
+  'workspace.manage': ClientWorkspace & {
+    readonly contextRevision?: number;
+    readonly section: string;
+    readonly locale: 'en' | 'zh-CN' | 'zh-TW';
+  };
   'session.composer.before': {
+    /** Invalidation hint only; Host still resolves the authoritative Session. */
+    readonly contextRevision?: number;
     readonly sessionId: string;
     readonly locale: 'en' | 'zh-CN' | 'zh-TW';
     /** Canonical Session ID from this plugin's Host, not a Desktop projection key. */
     readonly onOpenSession: (sessionId: string) => void;
+    /** Edit the current draft only; never submits a message or changes Session. */
+    readonly appendText?: (text: string) => void;
+    readonly publishSuggestions?: (items: readonly ComposerSuggestion[]) => ComposerPublication;
   };
+}
+
+/** A proposed workspace, not a resolved path or execution permission. */
+export interface ClientWorkspace {
+  readonly workspace: { kind: 'project'; projectId: string } | { kind: 'host_path'; path: string };
+  readonly permissionMode: 'explore' | 'ask' | 'bypass';
+  readonly collaborationMode: 'agent' | 'plan';
+}
+
+/** Draft-only completion. Choosing one inserts text; it cannot execute a command. */
+export interface ComposerSuggestion {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly insertText: string;
+}
+
+/** One publisher's draft suggestions. Updating keeps item identities stable. */
+export interface ComposerPublication {
+  update(items: readonly ComposerSuggestion[]): void;
+  dispose(): void;
 }
 
 export interface ClientContext {
   readonly identity: ClientIdentity;
   readonly signal: AbortSignal;
   readonly remote: ClientRemote;
+  /** Optional desktop-local paths; never interpreted as paths on a remote Host. */
+  readonly localFiles?: ClientLocalFiles;
   readonly slots: {
     /** Registrations are staged until initialization succeeds. Keys are local to this Entry. */
     register<K extends keyof ClientSlots>(
@@ -65,6 +104,12 @@ export interface ClientContext {
   effect(setup: () => void | (() => Awaitable<void>)): () => void;
   style(css: string): () => void;
 }
+
+export interface ClientLocalFiles {
+  pick(): Promise<string | null>;
+  open(path: string): Promise<void>;
+}
+export type ClientFileRequest = { kind: 'pick' } | { kind: 'open'; path: string };
 
 /** Handles bind once. Retirement never redirects a call to a new implementation. */
 export interface ClientRemote {

@@ -23,11 +23,7 @@ use std::{collections::BTreeSet, sync::Arc};
 /// Session behavior prepares its scoped capabilities. It cannot modify an
 /// already-frozen model request or replace Host execution authority.
 pub trait Behavior: Send + Sync {
-    fn prepare(
-        &self,
-        session_id: String,
-        mode: maka_runtime::execution::OrchestrationMode,
-    ) -> BoxFuture<'_, Result<Preparation, String>>;
+    fn prepare(&self, session_id: String) -> BoxFuture<'_, Result<Preparation, String>>;
 }
 
 pub struct SessionBehavior(pub Arc<dyn Behavior>);

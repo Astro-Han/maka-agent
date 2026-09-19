@@ -19,7 +19,9 @@
 
 export const ORCHESTRATION_MODES = ['default', 'swarm', 'graph'] as const;
 
-export type OrchestrationMode = (typeof ORCHESTRATION_MODES)[number];
+/** A Host-published behavior ID. The built-in choices are not the complete registry. */
+export type BehaviorId = string;
+export type OrchestrationMode = BehaviorId;
 
 export const TURN_ORCHESTRATION_SOURCES = ['slash_command', 'host_api'] as const;
 
@@ -46,7 +48,7 @@ export interface EffectiveOrchestration {
 }
 
 export function isOrchestrationMode(value: unknown): value is OrchestrationMode {
-  return typeof value === 'string' && (ORCHESTRATION_MODES as readonly string[]).includes(value);
+  return typeof value === 'string' && /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
 export function isTurnOrchestrationSource(value: unknown): value is TurnOrchestrationSource {

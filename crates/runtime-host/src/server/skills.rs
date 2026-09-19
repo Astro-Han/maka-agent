@@ -23,8 +23,6 @@ use maka_protocol::{OperationError, OperationErrorCode as Code, Outcome, skills:
 use serde_json::Value;
 use uuid::Uuid;
 
-mod governance;
-mod page;
 pub(super) mod sources;
 pub(super) const ERRORS: &[Code] = &[
     Code::HostNotReady,
@@ -88,16 +86,9 @@ async fn query(
                         error
                     })?
                     .ok_or_else(|| failure(Code::NotFound, "WorkHub Session does not exist"))?;
-                return page::invocable(
-                    input,
-                    &session.configuration.workspace.host_cwd,
-                    &FrozenSkills {
-                        preference_revision: None,
-                        discovery: Default::default(),
-                        preferences: maka_skills::Preferences::Available(Default::default()),
-                        host: Default::default(),
-                    },
-                );
+                return FrozenSkills::empty()
+                    .invocable(input, &session.configuration.workspace.host_cwd)
+                    .map_err(crate::execution::skills::skill_error);
             }
             let config = session.configuration;
             require_agent(config.collaboration_mode)?;
@@ -130,7 +121,9 @@ async fn query(
         .executions
         .preview_skills(session_id, connection, &cwd, mode, profile)
         .await?;
-    page::invocable(input, &cwd, &skills)
+    skills
+        .invocable(input, &cwd)
+        .map_err(crate::execution::skills::skill_error)
 }
 fn require_agent(mode: maka_protocol::session::CollaborationMode) -> Result<(), OperationError> {
     if mode == maka_protocol::session::CollaborationMode::Agent {

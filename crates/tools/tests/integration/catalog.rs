@@ -215,7 +215,10 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
             ToolMode::Direct,
             CodeExecutor::new(1, CellLimits::default()).unwrap(),
         );
-        let request = run.capture().unwrap();
+        let request = run
+            .capture(".", tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(
             request
                 .definitions()
@@ -247,7 +250,10 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
             }
         );
         assert!(result["blocked"]["schemaChars"].as_u64().unwrap() > 33_000);
-        let next = run.capture().unwrap();
+        let next = run
+            .capture(".", tokio_util::sync::CancellationToken::new())
+            .await
+            .unwrap();
         let checkpoint = run.checkpoint();
         let restored = RunTools::new(
             log.clone(),
@@ -258,7 +264,11 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
         );
         restored.restore(&checkpoint).unwrap();
         assert_eq!(
-            restored.capture().unwrap().definitions(),
+            restored
+                .capture(".", tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap()
+                .definitions(),
             next.definitions()
         );
         let mut invalid = checkpoint.clone();
@@ -294,7 +304,14 @@ async fn discovery_reports_schema_limits_without_loading_blocked_tools_or_runnin
                 .count(),
             1
         );
-        assert_eq!(run.capture().unwrap().definitions().len(), 1);
+        assert_eq!(
+            run.capture(".", tokio_util::sync::CancellationToken::new())
+                .await
+                .unwrap()
+                .definitions()
+                .len(),
+            1
+        );
         assert_eq!(effects.0.load(Ordering::SeqCst), 0);
         drop(run);
         Arc::try_unwrap(log).ok().unwrap().close().await.unwrap();

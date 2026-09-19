@@ -21,15 +21,17 @@ use super::{Executions, Result, SessionConfiguration, failure, internal, tools};
 use maka_client_capability::{BindingMode, PreparedBindings};
 use maka_protocol::OperationErrorCode as Code;
 use maka_runtime::execution::SystemPrompt;
-use std::sync::Arc;
 
 /// Candidate input, never execution authority. Files and schemas are prepared
 /// without the admission gate; commit rechecks the mutable control basis.
 pub(crate) struct Environment {
+    session_id: String,
     digest: String,
     pub session: SessionConfiguration,
     pub backend: Backend,
-    pub prompt: SystemPrompt,
+    pub prompt: Option<SystemPrompt>,
+    policy_revision: Option<u64>,
+    prompt_capture: Option<maka_plugins::contributions::Captured>,
     pub composition: maka_runtime::execution::ToolComposition,
     bindings: Option<PreparedBindings>,
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
@@ -41,7 +43,14 @@ pub(crate) enum Backend {
 pub(crate) struct ModelEnvironment {
     behavior: Option<BehaviorBasis>,
     pub tools: maka_tools::ToolCatalog,
-    pub skills: Arc<super::super::skills::FrozenSkills>,
+    input_catalog: maka_plugins::contributions::Catalog,
+    prepared_input: Option<maka_plugins::input::Prepared>,
+}
+
+pub(crate) struct Admission {
+    _input: Option<maka_plugins::input::Admission>,
+    _behavior: Option<maka_plugins::fiber::CallGuard>,
+    _prompt: Vec<maka_plugins::fiber::CallGuard>,
 }
 
 struct BehaviorBasis {
@@ -55,7 +64,7 @@ impl Executions {
         session_id: &str,
         connection: Option<uuid::Uuid>,
         mode: BindingMode,
-        orchestration: Option<maka_runtime::execution::OrchestrationMode>,
+        orchestration: Option<maka_runtime::execution::BehaviorId>,
     ) -> Result<Environment> {
         let record = self
             .log
@@ -72,18 +81,18 @@ impl Executions {
         record: maka_event_log::sessions::SessionRecord<SessionConfiguration>,
         connection: Option<uuid::Uuid>,
         mode: BindingMode,
-        orchestration: Option<maka_runtime::execution::OrchestrationMode>,
+        orchestration: Option<maka_runtime::execution::BehaviorId>,
     ) -> Result<Environment> {
         let session_id = &record.id;
         let mut session = record.configuration;
-        if let Some(mode) = orchestration {
-            session.orchestration_mode = mode;
+        if let Some(mode) = &orchestration {
+            session.orchestration_mode = mode.clone();
         }
         if record.archived {
             return Err(failure(Code::SessionArchived, "Session is archived"));
         }
         self.prepare_worktree(&session).await?;
-        use maka_protocol::session::{CollaborationMode, OrchestrationMode};
+        use maka_protocol::session::CollaborationMode;
         if session.collaboration_mode != CollaborationMode::Agent {
             return Err(failure(
                 Code::OperationUnavailable,
@@ -113,14 +122,30 @@ impl Executions {
                 .runtime_policy()
                 .await
                 .map_err(crate::server::configuration::failure)?;
-            let mut prompt = super::super::prompt::resolve(
-                policy,
-                session.workspace.host_cwd.clone().into(),
-                self.paths.global_instructions.clone(),
+            let captured = self
+                .plugin_catalog
+                .capture(&maka_plugins::composition::Scope::Session(
+                    session_id.clone(),
+                ));
+            let base = session.initial_prompt("").map_err(internal)?;
+            let resolved = maka_plugins::prompt::resolve(
+                Some(&captured),
+                base.as_ref().map(|prompt| prompt.text.as_str()),
+                maka_plugins::prompt::Request {
+                    target: maka_plugins::prompt::Target::Session {
+                        session_id: session_id.clone(),
+                        cwd: session.workspace.host_cwd.clone(),
+                    },
+                    cancellation: self.shutdown.child_token(),
+                },
             )
             .await
             .map_err(internal)?;
-            session.append_instructions(&mut prompt).map_err(internal)?;
+            let prompt = resolved.system.map(|text| SystemPrompt {
+                text,
+                policy_revision: policy.revision,
+                sources: resolved.sources,
+            });
             let cwd = session.workspace.host_cwd.clone();
             let directory = tokio::task::spawn_blocking(move || {
                 maka_fs_tools::workspace::directory::PublishedDirectory::open(std::path::Path::new(
@@ -131,6 +156,7 @@ impl Executions {
             .map_err(internal)?
             .map_err(internal)?;
             return Ok(Environment {
+                session_id: session_id.clone(),
                 composition: maka_runtime::execution::ToolComposition {
                     clients: bindings.composition(),
                     bound_tools: session.bound_tools.clone(),
@@ -140,26 +166,33 @@ impl Executions {
                 digest: record.configuration_digest,
                 session,
                 backend: Backend::Executor(binding),
+                policy_revision: Some(policy.revision),
+                prompt_capture: Some(captured),
                 prompt,
                 directory,
             });
         }
-        let (behavior, basis) = if session.orchestration_mode != OrchestrationMode::Default {
+        let (behavior, basis) = {
             let snapshot = self
                 .plugin_catalog
-                .capture(&maka_plugins::composition::Scope::Profile)
+                .capture(&maka_plugins::composition::Scope::Session(
+                    session_id.clone(),
+                ))
                 .typed::<maka_plugins::session::SessionBehavior>();
-            let behavior = snapshot.entries.get("agent-graph").ok_or_else(|| {
-                failure(
-                    Code::OperationUnavailable,
-                    "Agent Graph plugin is not active",
-                )
-            })?;
+            let behavior = snapshot
+                .entries
+                .get(session.orchestration_mode.as_str())
+                .ok_or_else(|| {
+                    failure(
+                        Code::OperationUnavailable,
+                        "Selected behavior is not active",
+                    )
+                })?;
             let _lease = behavior.admit().map_err(internal)?;
             let preparation = behavior
                 .value
                 .0
-                .prepare(session_id.clone(), session.orchestration_mode)
+                .prepare(session_id.clone())
                 .await
                 .map_err(internal)?;
             preparation.validate().map_err(internal)?;
@@ -168,44 +201,22 @@ impl Executions {
                 admission: preparation.admission.clone(),
             };
             (preparation, Some(basis))
-        } else {
-            (maka_plugins::session::Preparation::default(), None)
         };
         additional.push(self.interactions.question_tool());
-        let policy = self
-            .configuration
-            .runtime_policy()
-            .await
-            .map_err(crate::server::configuration::failure)?;
-        let (skills, prompt) = tokio::join!(
-            self.load_skills(&session.workspace.host_cwd, Default::default()),
-            super::super::prompt::resolve(
-                policy,
-                session.workspace.host_cwd.clone().into(),
-                self.paths.global_instructions.clone()
-            ),
-        );
-        let skills = skills?;
-        let mut prompt = prompt.map_err(internal)?;
-        session.append_instructions(&mut prompt).map_err(internal)?;
-        if !behavior.instructions.is_empty() {
-            prompt.text.push_str("\n\n");
-            prompt.text.push_str(&behavior.instructions);
-            prompt.validate().map_err(internal)?;
-        }
+        let prompt = session
+            .initial_prompt(&behavior.instructions)
+            .map_err(internal)?;
         let native = self.native_tools(&session.workspace.host_cwd, session.tool_profile);
         let ceiling = session.tool_ceiling(behavior.tool_ceiling);
         let native_ceiling = ceiling.clone();
         let mode = session.permission_mode;
-        let (directory, tools, skills, skills_digest) = tokio::task::spawn_blocking(move || {
+        let (directory, tools) = tokio::task::spawn_blocking(move || {
             let directory = maka_fs_tools::workspace::directory::PublishedDirectory::open(
                 std::path::Path::new(&native.cwd),
             )
             .map_err(internal)?;
-            let (tools, skills) =
-                tools::catalog(native, mode, additional, skills, native_ceiling.as_ref())?;
-            let skills_digest = skills.catalog().fingerprint().map_err(internal)?;
-            Ok::<_, maka_protocol::OperationError>((directory, tools, skills, skills_digest))
+            let tools = tools::catalog(native, mode, additional, native_ceiling.as_ref())?;
+            Ok::<_, maka_protocol::OperationError>((directory, tools))
         })
         .await
         .map_err(internal)??;
@@ -216,28 +227,25 @@ impl Executions {
                 ceiling.clone(),
             )
             .map_err(internal)?;
-        let fragment = skills
-            .catalog()
-            .prompt((64 * 1024usize).saturating_sub(prompt.text.len() + 2));
-        if !fragment.is_empty() {
-            prompt.text.push_str("\n\n");
-            prompt.text.push_str(&fragment);
-        }
         Ok(Environment {
+            session_id: session_id.clone(),
             composition: maka_runtime::execution::ToolComposition {
                 clients: bindings.composition(),
                 bound_tools: ceiling,
-                skills_digest: Some(skills_digest),
+                skills_digest: None,
             },
             bindings: Some(bindings),
             backend: Backend::Model(Box::new(ModelEnvironment {
                 behavior: basis,
                 tools,
-                skills,
+                input_catalog: self.plugin_catalog.clone(),
+                prepared_input: None,
             })),
             digest: record.configuration_digest,
             session,
             prompt,
+            policy_revision: None,
+            prompt_capture: None,
             directory,
         })
     }
@@ -245,15 +253,15 @@ impl Executions {
 
 impl Environment {
     pub(in crate::execution) async fn expand(
-        self,
-        mut content: maka_runtime::input::MessageInput,
+        mut self,
+        content: maka_runtime::input::MessageInput,
         ids: Vec<String>,
     ) -> Result<(
         Self,
         maka_runtime::input::MessageInput,
         super::super::skills::SkillPreparation,
     )> {
-        let Backend::Model(model) = &self.backend else {
+        let Backend::Model(model) = &mut self.backend else {
             executor_skills(&content, &ids)?;
             return Ok((
                 self,
@@ -264,13 +272,31 @@ impl Environment {
                 },
             ));
         };
-        let skills = model.skills.clone();
-        let (content, selection) = tokio::task::spawn_blocking(move || {
-            let selection = skills.prepare(&mut content, &ids)?;
-            Ok::<_, maka_protocol::OperationError>((content, selection))
-        })
-        .await
-        .map_err(internal)??;
+        let tools = model
+            .tools
+            .resolve_plugins()
+            .map_err(internal)?
+            .names()
+            .into_iter()
+            .collect();
+        let mut selections = std::collections::BTreeMap::new();
+        if !ids.is_empty() {
+            selections.insert(maka_skills::plugin::ID.into(), ids);
+        }
+        let (prepared, selection) = super::super::input::prepare(
+            &model.input_catalog,
+            maka_plugins::input::Request {
+                session_id: self.session_id.clone(),
+                cwd: self.session.workspace.host_cwd.clone(),
+                content,
+                selections,
+                tools,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            },
+        )
+        .await?;
+        let content = prepared.content.clone();
+        model.prepared_input = Some(prepared);
         Ok((self, content, selection))
     }
     /// Caller has repeated canonical replay/active/queue checks under admission.
@@ -279,7 +305,7 @@ impl Environment {
         mut self,
         executions: &Executions,
         session_id: &str,
-    ) -> Result<Option<Self>> {
+    ) -> Result<Option<(Self, Admission)>> {
         let record = executions
             .log
             .get_session::<SessionConfiguration>(session_id)
@@ -289,14 +315,17 @@ impl Environment {
         if record.archived {
             return Err(failure(Code::SessionArchived, "Session is archived"));
         }
-        if record.configuration_digest != self.digest
-            || executions
+        if record.configuration_digest != self.digest {
+            return Ok(None);
+        }
+        if let Some(revision) = self.policy_revision
+            && executions
                 .configuration
                 .runtime_policy()
                 .await
                 .map_err(crate::server::configuration::failure)?
                 .revision
-                != self.prompt.policy_revision
+                != revision
         {
             return Ok(None);
         }
@@ -320,21 +349,31 @@ impl Environment {
                         "Prepared Session behavior has retired",
                     ));
                 }
-                if executions
-                    .configuration
-                    .skill_preferences()
-                    .await
-                    .ok()
-                    .map(|p| p.revision)
-                    != model.skills.preference_revision
-                {
-                    return Ok(None);
-                }
             }
             Backend::Executor(binding) if !binding.is_effective() => {
                 return Err(failure(Code::OperationUnavailable, "Executor was retired"));
             }
             Backend::Executor(_) => {}
+        }
+        let mut admission = Admission {
+            _input: None,
+            _behavior: None,
+            _prompt: Vec::new(),
+        };
+        if let (Some(captured), Some(prompt)) = (&self.prompt_capture, &self.prompt) {
+            admission._prompt = maka_plugins::prompt::admit(captured, &prompt.sources)
+                .map_err(|e| failure(Code::OperationUnavailable, &e.to_string()))?;
+        }
+        if let Backend::Model(model) = &self.backend {
+            if let Some(basis) = &model.behavior {
+                admission._behavior = Some(basis.source.admit().map_err(internal)?);
+            }
+            if let Some(prepared) = &model.prepared_input {
+                let Some(guard) = prepared.admit().map_err(internal)? else {
+                    return Ok(None);
+                };
+                admission._input = Some(guard);
+            }
         }
         if !executions
             .capabilities
@@ -343,7 +382,7 @@ impl Environment {
         {
             return Ok(None);
         }
-        Ok(Some(self))
+        Ok(Some((self, admission)))
     }
 }
 

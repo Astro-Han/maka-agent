@@ -44,7 +44,7 @@ function methodRecorder(calls: Call[], prefix: string) {
 }
 
 describe('createDesktopModuleHubServices', () => {
-  it('maps host-scoped Skills, Scheduled Tasks, Daily Review, and clipboard operations', async () => {
+  it('maps host-scoped Scheduled Tasks, Daily Review, and clipboard operations', async () => {
     const calls: Call[] = [];
     const host: ModuleHubRuntimeHostRef = {
       profileId: 'remote-a',
@@ -55,10 +55,6 @@ describe('createDesktopModuleHubServices', () => {
         getDefaultHost: async () => host,
         subscribeChanges: () => () => undefined,
       },
-      skills: Object.assign(methodRecorder(calls, 'skills'), {
-        sources: methodRecorder(calls, 'skills.sources'),
-        catalog: methodRecorder(calls, 'skills.catalog'),
-      }),
       scheduledTasks: methodRecorder(calls, 'scheduledTasks'),
       dailyReview: methodRecorder(calls, 'dailyReview'),
     } as unknown as DesktopModuleHubBridge;
@@ -70,18 +66,6 @@ describe('createDesktopModuleHubServices', () => {
     const services = createDesktopModuleHubServices(bridge, { clipboard });
 
     assert.deepEqual(await services.runtimeHosts.getDefault(), host);
-    await services.skills.list(host);
-    await services.skills.listManagedSources(host);
-    await services.skills.listBundledCatalog(host);
-    await services.skills.importManagedSource(host);
-    await services.skills.installManaged('managed', host);
-    await services.skills.installBundled('bundled', host);
-    await services.skills.previewUpdate('skill', host);
-    await services.skills.updateManaged('skill', { force: true }, host);
-    await services.skills.setEnabled('skill', true, host);
-    await services.skills.setPinned('user:skill', false, host);
-    await services.skills.delete('user:skill', host);
-    await services.skills.open('skill', 'directory', host);
 
     const createInput = { title: 'Task' } as Parameters<
       typeof services.scheduledTasks.create
@@ -109,18 +93,6 @@ describe('createDesktopModuleHubServices', () => {
     await services.clipboard.writeText('review');
 
     assert.deepEqual(calls, [
-      { name: 'skills.list', args: [host] },
-      { name: 'skills.sources.list', args: [host] },
-      { name: 'skills.catalog.list', args: [host] },
-      { name: 'skills.sources.importLocalFile', args: [host] },
-      { name: 'skills.installManaged', args: ['managed', host] },
-      { name: 'skills.catalog.install', args: ['bundled', host] },
-      { name: 'skills.previewUpdate', args: ['skill', host] },
-      { name: 'skills.updateManaged', args: ['skill', { force: true }, host] },
-      { name: 'skills.setEnabled', args: ['skill', true, host] },
-      { name: 'skills.setPinned', args: ['user:skill', false, host] },
-      { name: 'skills.delete', args: ['user:skill', host] },
-      { name: 'skills.open', args: ['skill', 'directory', host] },
       { name: 'scheduledTasks.list', args: [host] },
       { name: 'scheduledTasks.create', args: [createInput, host] },
       { name: 'scheduledTasks.update', args: ['task', updateInput, host] },
@@ -164,10 +136,6 @@ describe('createDesktopModuleHubServices', () => {
           },
         ),
       },
-      skills: Object.assign(methodRecorder([], 'skills'), {
-        sources: methodRecorder([], 'skills.sources'),
-        catalog: methodRecorder([], 'skills.catalog'),
-      }),
       scheduledTasks: Object.assign(methodRecorder([], 'scheduledTasks'), {
         subscribeChanges: subscribe((handler) => {
           scheduledChangeHandler = handler;
@@ -234,10 +202,6 @@ describe('createDesktopModuleHubServices', () => {
         getDefaultHost: async () => ({ profileId: 'local', hostId: 'local' }),
         subscribeChanges: () => () => undefined,
       },
-      skills: Object.assign(methodRecorder([], 'skills'), {
-        sources: methodRecorder([], 'skills.sources'),
-        catalog: methodRecorder([], 'skills.catalog'),
-      }),
       scheduledTasks: methodRecorder([], 'scheduledTasks'),
       dailyReview: methodRecorder([], 'dailyReview'),
     };

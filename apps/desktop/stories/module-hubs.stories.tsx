@@ -27,23 +27,15 @@ import {
   DailyReviewPage,
   getSharedUiCopy,
   ModuleHubSelector,
-  SkillsPage,
-  type ManagedSkillUpdatePreview,
-  type SkillEntry,
   ToastProvider,
   useUiLocale,
 } from '@maka/ui';
 import { type ComponentProps, type ReactNode, useState } from 'react';
 import {
-  createModuleHubCommandPort,
-  ModuleHubHost,
   ModuleHubHostView,
-  ModuleHubProvider,
-  ModuleHubServicesProvider,
 } from '../src/renderer/features/module-hub';
 import {
   createFakeModuleHubHostModel,
-  createFakeModuleHubServices,
 } from '../src/renderer/features/module-hub/testing';
 import { AppShellDetailPanel } from '../src/renderer/app-shell-detail-panel';
 import { McpPage } from '../src/renderer/mcp-page';
@@ -75,153 +67,6 @@ const CONFIGURED_COMPLETED_LAST_RUN = {
   outcome: 'ok',
   message: '已发送。',
 } satisfies ScheduledTaskRun;
-
-const INSTALLED_SKILLS: SkillEntry[] = [
-  {
-    ref: 'workspace:maka:skill-git-flow',
-    id: 'skill-git-flow',
-    name: 'git-flow',
-    description: '封装分支创建、合并与发布打 tag 的常用 git 操作。',
-    path: '~/.maka/skills/git-flow',
-    declaredTools: ['Bash', 'Write'],
-    sourceType: 'workspace',
-    scope: 'workspace',
-    contextStatus: 'advertised',
-    manageable: true,
-    enabled: true,
-    runtimeStatus: 'enabled',
-  },
-  {
-    ref: 'user:agents:skill-docs-screenshot',
-    id: 'skill-docs-screenshot',
-    name: 'docs-screenshot',
-    description: '把组件截图同步进设计文档，按 token 分类命名。',
-    path: '~/.maka/skills/docs-screenshot',
-    declaredTools: ['Bash', 'Read'],
-    sourceType: 'workspace',
-    scope: 'user',
-    contextStatus: 'disabled',
-    manageable: true,
-    enabled: false,
-    runtimeStatus: 'disabled',
-  },
-  {
-    ref: 'project:maka:skill-release-notes',
-    id: 'skill-release-notes',
-    name: 'release-notes',
-    description: '从最近的 commit 历史生成发布说明草稿。',
-    path: '~/.maka/skills/release-notes',
-    declaredTools: ['Bash'],
-    sourceType: 'bundled',
-    scope: 'project',
-    contextStatus: 'advertised',
-    manageable: false,
-    enabled: true,
-    runtimeStatus: 'enabled',
-  },
-];
-
-const UPDATE_AVAILABLE_SKILLS: SkillEntry[] = [
-  {
-    ref: 'workspace:maka:release-checklist',
-    id: 'release-checklist',
-    name: 'release-checklist',
-    description: '发布前检查版本、测试证据和变更说明。',
-    path: '~/.maka/skills/release-checklist',
-    declaredTools: ['Bash', 'Read'],
-    sourceType: 'managed',
-    managedUpdateStatus: 'update_available',
-    scope: 'workspace',
-    contextStatus: 'advertised',
-    manageable: true,
-    enabled: true,
-    runtimeStatus: 'enabled',
-  },
-];
-
-const UPDATE_AVAILABLE_PREVIEW: ManagedSkillUpdatePreview = {
-  skill: {
-    id: 'release-checklist',
-    name: 'release-checklist',
-    description: '发布前检查版本、测试证据和变更说明。',
-    path: '~/.maka/skills/release-checklist/SKILL.md',
-    declaredTools: ['Bash', 'Read'],
-    sourceType: 'managed',
-    userModified: false,
-    validationStatus: 'ok',
-    enabled: true,
-    runtimeStatus: 'enabled',
-    validationCodes: [],
-    validationMessages: [],
-    managedSourceId: 'release-checklist-source',
-    managedUpdateStatus: 'update_available',
-    hasManagedBaseline: true,
-  },
-  currentContent: '# Release checklist\n\nRun the release tests.',
-  sourceContent: '# Release checklist\n\nRun tests and attach the release evidence.',
-  baselineContent: '# Release checklist\n\nRun the release tests.',
-  expectedCurrentSha256: 'current-story-sha256',
-  expectedSourceSha256: 'source-story-sha256',
-  summary: {
-    currentLineCount: 3,
-    sourceLineCount: 3,
-    changedLineCount: 1,
-  },
-};
-
-const DISABLED_SKILLS: SkillEntry[] = [
-  {
-    ref: 'workspace:maka:spreadsheet-audit',
-    id: 'spreadsheet-audit',
-    name: 'spreadsheet-audit',
-    description: '检查工作簿中的公式、格式和异常值。',
-    path: '~/.maka/skills/spreadsheet-audit',
-    declaredTools: ['Read'],
-    sourceType: 'bundled',
-    scope: 'workspace',
-    contextStatus: 'disabled',
-    manageable: true,
-    enabled: false,
-    runtimeStatus: 'disabled',
-  },
-];
-
-// Enough installed Skills that the list genuinely scrolls at the story's
-// viewport — the #2236 regression surface (the view switch scrolling away
-// with the list) only exists when the list is taller than its container.
-const LONG_LIST_SKILLS: SkillEntry[] = Array.from({ length: 40 }, (_, index) => ({
-  ref: `workspace:maka:skill-long-${index}`,
-  id: `skill-long-${index}`,
-  name: `long-list-skill-${index}`,
-  description: '长列表占位技能，用于滚动契约。',
-  path: `~/.maka/skills/skill-long-${index}`,
-  declaredTools: ['Bash'],
-  sourceType: 'workspace',
-  scope: 'workspace',
-  contextStatus: 'advertised',
-  manageable: true,
-  enabled: true,
-  runtimeStatus: 'enabled',
-}));
-
-const BUNDLED_SKILLS: NonNullable<ComponentProps<typeof SkillsPage>['bundledSkillCatalog']> = [
-  {
-    id: 'document-review',
-    name: 'Document review',
-    description: 'Review and refine documents before sharing.',
-    category: '文档与写作',
-    declaredTools: ['Read', 'Write'],
-    installed: false,
-  },
-  {
-    id: 'image-workbench',
-    name: 'Image workbench',
-    description: 'Generate and edit visual assets.',
-    category: '设计与UI',
-    declaredTools: ['Read', 'Write'],
-    installed: true,
-  },
-];
 
 type StoryScheduledTask = Omit<
   ScheduledTask,
@@ -676,43 +521,6 @@ function ModuleSurface(props: {
   );
 }
 
-function ExtensionsSkillsSurface(props: {
-  skills?: SkillEntry[];
-  bundledSkillCatalog?: NonNullable<ComponentProps<typeof SkillsPage>['bundledSkillCatalog']>;
-  onSetSkillEnabled?: ComponentProps<typeof SkillsPage>['onSetSkillEnabled'];
-  onUpdateManagedSkill?: ComponentProps<typeof SkillsPage>['onUpdateManagedSkill'];
-}) {
-  const copy = getSharedUiCopy(useUiLocale()).moduleHubs.extensions;
-  return (
-    <ModuleSurface agentsView="skills">
-      <SkillsPage
-        hubHeader={{
-          title: copy.title,
-          subtitle: copy.description,
-          badge: <ModuleHubSelector hub="extensions" value="skills" onChange={() => {}} />,
-        }}
-        skills={props.skills ?? []}
-        managedSkillSources={[]}
-        bundledSkillCatalog={props.bundledSkillCatalog ?? []}
-        onRefreshSkills={noop}
-        onRefreshManagedSkillSources={noop}
-        onRefreshBundledSkillCatalog={noop}
-        onOpenSkill={noop}
-        onUseSkill={noop}
-        onOpenSkillsFolder={noop}
-        onInstallBundledSkill={noop}
-        onPreviewManagedSkillUpdate={async (skillId) => (
-          skillId === UPDATE_AVAILABLE_PREVIEW.skill.id ? UPDATE_AVAILABLE_PREVIEW : null
-        )}
-        onUpdateManagedSkill={props.onUpdateManagedSkill ?? (async () => true)}
-        onSetSkillEnabled={props.onSetSkillEnabled ?? noop}
-        onSetSkillPinned={noop}
-        onDeleteSkill={noop}
-      />
-    </ModuleSurface>
-  );
-}
-
 function ExtensionsMcpSurface() {
   const copy = getSharedUiCopy(useUiLocale()).moduleHubs.extensions;
   return (
@@ -792,11 +600,6 @@ function ModuleHubHostSurface(props: {
   const base = createFakeModuleHubHostModel(props.selection);
   const model = {
     ...base,
-    skills: {
-      ...base.skills,
-      skills: INSTALLED_SKILLS,
-      bundledSkillCatalog: BUNDLED_SKILLS,
-    },
     scheduledTasks: {
       ...base.scheduledTasks,
       scheduledTasks: CONFIGURED_TASKS,
@@ -816,37 +619,6 @@ function ModuleHubHostSurface(props: {
   return (
     <ModuleSurface agentsView={agentsView}>
       <ModuleHubHostView model={model} />
-    </ModuleSurface>
-  );
-}
-
-function ProductionModuleHubHostSurface() {
-  const [commandPort] = useState(createModuleHubCommandPort);
-  const [services] = useState(() => {
-    const defaults = createFakeModuleHubServices();
-    return createFakeModuleHubServices({
-      skills: {
-        ...defaults.skills,
-        list: async () => INSTALLED_SKILLS,
-        listBundledCatalog: async () => BUNDLED_SKILLS,
-      },
-    });
-  });
-  return (
-    <ModuleSurface agentsView="skills">
-      <ModuleHubServicesProvider services={services}>
-        <ModuleHubProvider
-          selection={{ section: 'extensions', module: 'skills' }}
-          selectModule={noop}
-          useSkillInChat={noop}
-          openSession={noop}
-          appendComposerText={noop}
-          captureActiveComposerClaim={() => undefined}
-          commandPort={commandPort}
-        >
-          <ModuleHubHost />
-        </ModuleHubProvider>
-      </ModuleHubServicesProvider>
     </ModuleSurface>
   );
 }
@@ -883,16 +655,6 @@ async function waitForStoryText(canvasElement: HTMLElement, text: string): Promi
   throw new Error(`Story text did not render: ${text}`);
 }
 
-// Real path: sidebar → 扩展 → 技能, before any Skill or bundled catalog entry exists.
-export const ExtensionsSkillsEmpty: Story = {
-  render: () => <ExtensionsSkillsSurface />,
-};
-
-// Full production composition: public Provider → Context → public Host.
-export const HostExtensionsSkills: Story = {
-  render: () => <ProductionModuleHubHostSurface />,
-};
-
 // Focused view seams keep the other route variants deterministic.
 export const HostExtensionsMcp: Story = {
   decorators: [withEmptyMcpBridge],
@@ -917,75 +679,6 @@ export const HostAutomationsDailyReview: Story = {
       selection={{ section: 'automations', module: 'daily-review' }}
     />
   ),
-};
-
-// Real path: sidebar → 扩展 → 技能, with several installed Skills.
-export const ExtensionsSkillsInstalled: Story = {
-  render: () => <ExtensionsSkillsSurface skills={INSTALLED_SKILLS} />,
-};
-
-// Real path: sidebar → 扩展 → 技能, with bundled Skills available to install.
-export const ExtensionsSkillsBundled: Story = {
-  render: () => <ExtensionsSkillsSurface bundledSkillCatalog={BUNDLED_SKILLS} />,
-};
-
-// Real path: sidebar → 扩展 → 技能, after a managed source reports an update.
-// The review flow lives in the inspector now: select the row, then 查看更新.
-export const ExtensionsSkillsUpdateAvailable: Story = {
-  render: () => (
-    <ExtensionsSkillsSurface
-      skills={UPDATE_AVAILABLE_SKILLS}
-      onUpdateManagedSkill={async () => true}
-    />
-  ),
-  play: async ({ canvasElement }) => {
-    const row = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.textContent?.includes('release-checklist') === true,
-    );
-    row.click();
-
-    const viewUpdate = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.textContent?.trim() === '查看更新',
-    );
-    viewUpdate.click();
-
-    await waitForStorySelector<HTMLElement>(canvasElement, '[aria-label="Skill 更新审查"]');
-  },
-};
-
-// Real path: sidebar → 扩展 → 技能 → click an installed row, which opens the
-// inspector where every per-skill control now lives. Wide only: below 1024px
-// the page trades the panel for a dialog.
-export const ExtensionsSkillsInspector: Story = {
-  render: () => <ExtensionsSkillsSurface skills={INSTALLED_SKILLS} />,
-  play: async ({ canvasElement }) => {
-    const row = await waitForStoryButton(
-      canvasElement,
-      (candidate) => candidate.textContent?.includes('git-flow') === true,
-    );
-    row.click();
-    await waitForStoryText(canvasElement, '固定到技能上下文');
-  },
-};
-
-// Real path: sidebar → 扩展 → 技能, long installed list (visual catalog only).
-// Do not pin scroll geometry / Astryx List a11y in play — those are vendor DOM
-// contracts, not product journeys.
-export const ExtensionsSkillsScrollContainment: Story = {
-  render: () => <ExtensionsSkillsSurface skills={LONG_LIST_SKILLS} />,
-};
-
-// Real path: sidebar → 扩展 → 技能, with an installed Skill disabled.
-export const ExtensionsSkillsDisabled: Story = {
-  render: () => <ExtensionsSkillsSurface skills={DISABLED_SKILLS} />,
-};
-
-// Real path: sidebar → 扩展 → 技能, at a narrow desktop window.
-export const ExtensionsSkillsNarrow: Story = {
-  render: () => <ExtensionsSkillsSurface skills={INSTALLED_SKILLS} />,
-  parameters: { viewport: { defaultViewport: 'mobile2' } },
 };
 
 // Real path: sidebar → 扩展 → MCP, before any server has been configured.

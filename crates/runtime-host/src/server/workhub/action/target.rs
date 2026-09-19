@@ -211,7 +211,7 @@ pub(super) async fn prepare(
                     .as_ref()
                     .and_then(|defaults| defaults.permission_mode),
                 collaboration_mode: Some(CollaborationMode::Agent),
-                orchestration_mode: Some(OrchestrationMode::Default),
+                orchestration_mode: Some(BehaviorId::default()),
             })
             .map_err(|error| failure(Code::OperationConflict, error.to_string()))?;
             let workspace = sessions::workspace::resolve(host, prepared.workspace())

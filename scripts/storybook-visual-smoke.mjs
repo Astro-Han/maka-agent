@@ -43,7 +43,6 @@ const REQUIRED_COMPUTER_USE_STORY_IDS = new Set([
   'product-module-hubs--extensions-mcp-editor',
   'product-module-hubs--extensions-mcp-inspector',
   'product-module-hubs--extensions-mcp-narrow',
-  'product-module-hubs--extensions-skills-narrow',
   'product-module-hubs--scheduled-daily-review-report',
   'product-module-hubs--scheduled-tasks-narrow',
   'product-module-hubs--scheduled-tasks-inspector',

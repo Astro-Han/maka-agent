@@ -138,14 +138,21 @@ fn legacy_and_unsafe_markers_fail_closed() {
     assert!(RootOwner::open(&legacy, &ns).is_err());
     let path = temp.path().join("root");
     let owner = RootOwner::create(&path, &ns).unwrap();
-    let skills = temp.path().join("skills");
-    fs::create_dir(&skills).unwrap();
-    std::os::unix::fs::symlink(&skills, path.join("skills")).unwrap();
+    let data = temp.path().join("external-data");
+    fs::create_dir(&data).unwrap();
+    std::os::unix::fs::symlink(&data, path.join("arbitrary-business-data")).unwrap();
     assert!(
         maka_event_log::root::initialize(&path, &ns).is_err(),
-        "a Skill directory alias cannot bypass root layout checks"
+        "a domain directory alias cannot bypass root layout checks"
     );
-    fs::remove_file(path.join("skills")).unwrap();
+    fs::remove_file(path.join("arbitrary-business-data")).unwrap();
+    let database = path.join(maka_event_log::root::ROOT_DATABASE);
+    fs::create_dir(&database).unwrap();
+    assert!(
+        maka_event_log::root::initialize(&path, &ns).is_err(),
+        "reserved database names must not be accepted as domain directories"
+    );
+    fs::remove_dir(database).unwrap();
     let saved = temp.path().join("marker");
     fs::rename(path.join(ROOT_MARKER), &saved).unwrap();
     std::os::unix::fs::symlink(&saved, path.join(ROOT_MARKER)).unwrap();

@@ -29,12 +29,6 @@ import type {
   ScheduledTask,
   UpdateScheduledTaskInput,
 } from '@maka/core/scheduled-task';
-import type {
-  BundledSkillCatalogEntry,
-  ManagedSkillSourceEntry,
-  ManagedSkillUpdatePreview,
-  SkillEntry,
-} from '@maka/ui';
 
 export type ModuleHubUnsubscribe = () => void;
 
@@ -56,115 +50,6 @@ export interface ModuleHubRuntimeHostsService {
   subscribeChanges(
     handler: (event: ModuleHubRuntimeHostChangedEvent) => void,
   ): ModuleHubUnsubscribe;
-}
-
-export type InstallSkillResult =
-  | { ok: true; skill: SkillEntry }
-  | {
-      ok: false;
-      reason: 'not_found' | 'already_exists' | 'blocked_path' | 'write_failed';
-    };
-
-export type ImportManagedSkillSourceResult =
-  | { ok: true; source: ManagedSkillSourceEntry }
-  | {
-      ok: false;
-      reason:
-        | 'cancelled'
-        | 'invalid_skill'
-        | 'already_exists'
-        | 'blocked_path'
-        | 'write_failed';
-    };
-
-export type PreviewManagedSkillUpdateResult =
-  | { ok: true; preview: ManagedSkillUpdatePreview }
-  | {
-      ok: false;
-      reason:
-        | 'not_managed'
-        | 'source_missing'
-        | 'metadata_error'
-        | 'blocked_path'
-        | 'read_failed';
-    };
-
-export type UpdateManagedSkillResult =
-  | { ok: true; skill: SkillEntry }
-  | {
-      ok: false;
-      reason:
-        | 'not_managed'
-        | 'source_missing'
-        | 'local_modified'
-        | 'metadata_error'
-        | 'blocked_path'
-        | 'write_failed';
-    };
-
-export type ChangeSkillRuntimeStateResult =
-  | { ok: true; skill: SkillEntry }
-  | {
-      ok: false;
-      reason: 'not_found' | 'blocked_path' | 'state_error' | 'write_failed';
-    };
-
-export type DeleteSkillResult =
-  | { ok: true }
-  | {
-      ok: false;
-      reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed';
-    };
-
-export type OpenSkillResult =
-  | { ok: true; target: 'file' | 'directory' }
-  | {
-      ok: false;
-      reason:
-        | 'invalid_id'
-        | 'missing'
-        | 'blocked_path'
-        | 'not_file'
-        | 'not_directory'
-        | 'open_failed';
-    };
-
-export interface ModuleHubSkillsService {
-  list(host: ModuleHubRuntimeHostRef): Promise<SkillEntry[]>;
-  listManagedSources(host: ModuleHubRuntimeHostRef): Promise<ManagedSkillSourceEntry[]>;
-  listBundledCatalog(host: ModuleHubRuntimeHostRef): Promise<BundledSkillCatalogEntry[]>;
-  importManagedSource(host: ModuleHubRuntimeHostRef): Promise<ImportManagedSkillSourceResult>;
-  installManaged(sourceId: string, host: ModuleHubRuntimeHostRef): Promise<InstallSkillResult>;
-  installBundled(id: string, host: ModuleHubRuntimeHostRef): Promise<InstallSkillResult>;
-  previewUpdate(
-    skillId: string,
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<PreviewManagedSkillUpdateResult>;
-  updateManaged(
-    skillId: string,
-    options: {
-      force?: boolean;
-      expectedCurrentSha256?: string;
-      expectedSourceSha256?: string;
-    },
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<UpdateManagedSkillResult>;
-  setEnabled(
-    skillId: string,
-    enabled: boolean,
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<ChangeSkillRuntimeStateResult>;
-  setPinned(
-    skillRef: string,
-    pinned: boolean,
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<ChangeSkillRuntimeStateResult>;
-  delete(skillRef: string, host: ModuleHubRuntimeHostRef): Promise<DeleteSkillResult>;
-  open(
-    skillId: string,
-    target: 'file' | 'directory',
-    host: ModuleHubRuntimeHostRef,
-  ): Promise<OpenSkillResult>;
 }
 
 export type ScheduledTaskCreateInput = Omit<CreateScheduledTaskInput, 'createdBy'>;
@@ -238,7 +123,6 @@ export interface ModuleHubClipboardService {
 /** Environment capabilities owned by the Module Hub feature slice. */
 export interface ModuleHubServices {
   runtimeHosts: ModuleHubRuntimeHostsService;
-  skills: ModuleHubSkillsService;
   scheduledTasks: ModuleHubScheduledTasksService;
   clientSettings: ModuleHubClientSettingsService;
   dailyReview: ModuleHubDailyReviewService;

@@ -163,7 +163,7 @@ pub(super) fn validate(record: &SessionRecord<SessionConfiguration>) -> Result<(
         || config.tool_profile != Some(SessionToolProfile::WorkhubCoordinationV2)
         || config.permission_mode != PermissionMode::Bypass
         || config.collaboration_mode != CollaborationMode::Agent
-        || config.orchestration_mode != OrchestrationMode::Default
+        || config.orchestration_mode != BehaviorId::default()
         || config.tool_mode != ToolMode::Direct
     {
         return Err(failure(
@@ -298,7 +298,7 @@ async fn resolve(host: &Host) -> Result<(), OperationError> {
         permission_mode: PermissionMode::Bypass,
         boundary_revision: 0,
         collaboration_mode: CollaborationMode::Agent,
-        orchestration_mode: OrchestrationMode::Default,
+        orchestration_mode: BehaviorId::default(),
     };
     let record = host
         .log

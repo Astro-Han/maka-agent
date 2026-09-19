@@ -380,11 +380,9 @@ export function QuoteCompanionPanel(props: {
               allowAttachmentOnlySend
               pendingAttachments={pendingAttachments}
               onRemoveAttachment={removeAttachment}
-              mentionSkills={mentions?.mentionSkills}
+              slashCommands={mentions?.suggestions}
               onSearchMentionFiles={mentions?.searchMentionFiles}
               pendingQuotes={props.quotes.map((quote) => quote.value)}
-              mentionSkillsUnavailable={mentions?.mentionSkillsUnavailable}
-              mentionSkillsLoading={mentions?.mentionSkillsLoading}
               contextDrawerDefaultCollapsed
               showStaticModelUnavailableStatus={false}
               onRemoveQuote={(index) => {

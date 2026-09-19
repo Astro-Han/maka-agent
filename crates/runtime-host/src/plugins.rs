@@ -17,6 +17,7 @@
  * under the License.
  */
 
+pub(crate) mod assistant;
 mod authority;
 mod client;
 mod entrypoint;
@@ -25,8 +26,10 @@ pub(crate) mod javascript;
 mod owner;
 pub(crate) mod remote;
 pub(crate) mod scheduler;
+pub(crate) mod skills;
 pub(crate) mod storage;
 pub mod wire;
+pub(crate) mod workhub;
 
 use maka_event_log::{EventLog, StoreError};
 use maka_plugins::{
@@ -34,7 +37,6 @@ use maka_plugins::{
     contributions::Catalog,
     kernel::{Definitions, Kernel, Status},
     package::Package,
-    services::Services,
 };
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -148,8 +150,7 @@ impl Platform {
         loader: Arc<dyn PackageLoader>,
         builtins: Definitions,
         builtin_layers: BTreeMap<String, Vec<Operation>>,
-        services: Services,
-        catalog: Catalog,
+        mut kernel: Kernel,
         shutdown: CancellationToken,
     ) -> Result<
         (
@@ -158,13 +159,14 @@ impl Platform {
         ),
         Error,
     > {
+        let catalog = kernel.catalog().clone();
+        let services_changed = kernel.subscribe_services();
         catalog
             .host_only::<maka_plugins::remote::Endpoint>()
             .map_err(|error| invalid(&error.to_string()))?;
         catalog
             .host_only::<Arc<dyn maka_plugins::background::BackgroundWork>>()
             .map_err(|error| invalid(&error.to_string()))?;
-        let mut kernel = Kernel::new(services.clone(), catalog.clone());
         let mut ledger = log.plugin_composition().await?;
         let mut packages = BTreeMap::new();
         for (id, _) in log.plugin_packages().await? {
@@ -251,7 +253,7 @@ impl Platform {
                 catalog,
                 clients: Arc::default(),
             },
-            owner.run(receiver, services.subscribe(), shutdown),
+            owner.run(receiver, services_changed, shutdown),
         ))
     }
 

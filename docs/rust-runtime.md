@@ -189,6 +189,12 @@ Do not run untrusted code or point test instances at existing user data.
 
 ## Design
 
+Native plugins receive private files through `PluginContext.data`, namespaced by
+package and scope. File workers retain their Fiber until completion; retirement
+rejects new operations without deleting data. Root validates core files and directory
+safety, not business names. Plugins own file formats, locking and recovery; existing
+user/project content paths stay separate from private journals.
+
 - **Log Is the Runtime:** model history, transcript and recovery derive from
   committed semantic facts. Compaction changes the model projection, not history.
   Failed response fragments remain display evidence, not accepted model history;
@@ -232,13 +238,19 @@ Do not run untrusted code or point test instances at existing user data.
 - Explicit Skills in `turn.start` and `turn.message.submit` freeze instructions and receipts at
   admission. Queued messages retain their required tools; promotion and successor
   execution check the actual target Run without reloading Skill files.
-- `SkillSearch` and `Skill` share the Run's frozen inventory with explicit loading.
+- `SkillSearch` and `Skill` bind one inventory, handlers and supporting context per logical model step.
+  Physical retries keep that snapshot; the next step can observe changes.
   Discovery exposes bounded metadata; loaded instructions retain readable archive pages.
 - The agent-mode Skill selector previews current permissions without binding a Session or
   resolving a model. Bundled and local-library source catalogs report actual installation
   occupancy and validated managed-source aliases. Governance exposes validation,
   preferences and source updates without reading baselines or claiming Run advertisement.
-  Pages are revision-bound; Plan and Skill mutations remain unavailable.
+  Catalog views share a revision; cursors also bind their view. The `maka.skills` built-in
+  owns discovery, input expansion, enable/pin CAS, raw-byte update previews and recoverable
+  creation/install/delete/update. Its Client bundle supplies management, selectors and draft suggestions.
+  Desktop supplies target-bound Slots and authorized native file actions. Disabling the plugin
+  rejects new explicit Skills without blocking ordinary chat or rewriting accepted receipts.
+  Plan-mode execution remains outside this domain and is not implemented.
 - Rust owns storage, network routing, tools and native process/PTY lifetimes.
   Plugins enter through catalogs and scoped Host services, sharing
   journaled effects, permissions and draining rather than replacing the Engine.
@@ -269,6 +281,7 @@ All crates are in `crates/`; directory names describe their responsibilities.
 | --- | --- |
 | Facts and persistence | `runtime`, `event-log`, `presentation`, `config` |
 | Execution | `agent`, `model`, `js-runtime`, `tools`, `fs-tools`, `process`, `apply-patch`, `skills` |
+| Plugin lifecycle and tool catalogues | `plugins`, `tool-catalog` |
 | Client and host | `protocol`, `transport`, `client-capability`, `network`, `runtime-host` |
 | Executable | `cli` |
 
@@ -360,19 +373,8 @@ Discovery does not authorize delegation; admission rechecks interactions and uns
 Pending interactions drive the shared Session catalog and its change notifications,
 so WorkHub's “Needs you” view agrees with candidate discovery and clears after resolution.
 
-The remaining parity gaps below are checked against main `f02ac9433` (2026-09-18).
-An implemented protocol name or stored setting does not imply an execution consumer.
-
-| Area | Remaining work |
-| --- | --- |
-| Skills | Create/install/delete/enable/pin/update, update previews, atomic publication and recovery. Discovery and invocation are implemented. |
-| Session/Turn | Branch/revision, removal and preview, recap, shared/todo queries, regeneration, session bundles and external imports (Codex/Claude Code/OpenCode). Ordinary resume and crash recovery are implemented. |
-| Execution | Plan, Goal, daily review, deep research, hosted execution and ordinary named tool profiles. Graph/Swarm and scheduling are implemented. |
-| Capability services | Recall ranked Session-history passages; built-in WebSearch/WebFetch; Usage/Pricing revision-consistent screens and activity paging; background-task process/endpoint health. |
-| Configuration | Shell, web-search and external-agent policy consumers; credential export and external-agent setup. Subagent presets, network proxy, personalization and new-Session defaults are consumed. |
-| Cross-Host collaboration | Principal revocation, rotation prepare/revoke, invitations, grants, Turn requests and Peer Mesh. Pairing, credential replacement/finalization/revocation and authenticated remote transport are implemented. |
-| Providers | Google/Cohere and Command Code GO execution; remaining adapter-specific auth/options; runtime models.dev metadata refresh; Copilot/xAI inference and credential-backed verification. OpenAI/Codex, Chat-compatible, Anthropic and plaintext Responses paths are distinct contracts, not blanket provider support. |
-| Host | `host.resources.query`. Diagnostics, local/SSH/WSL deployment and recoverable updates are implemented. |
+Remaining functionality and the whole-domain built-in plugin migration plan are maintained in
+[Rust parity and built-in plugins](rust-parity.md), including SDK and client integration gaps.
 
 Recall is conversation-history retrieval, not the excluded Memory subsystem.
 Native deployment and updates do not imply full product compatibility.

@@ -234,32 +234,63 @@ async fn dependency_replacement_waits_for_cleanup_and_reactivates_consumers() {
 }
 
 #[tokio::test]
-async fn failed_publication_never_starts_a_business_task() {
-    let services = Services::default();
-    let catalog = Catalog::default();
-    catalog.reserve::<u64>("core").unwrap();
-    let starts = Arc::new(AtomicUsize::new(0));
-    let mut kernel = Kernel::new(services, catalog.clone());
-    kernel
-        .configure(&composition(json!(1), false), definitions(&starts, "core"))
-        .unwrap();
-    timeout(Duration::from_secs(2), async {
-        loop {
-            let status = kernel.tick().unwrap();
-            if status.entries.iter().any(|entry| entry.error.is_some()) {
-                break;
-            }
-            tokio::task::yield_now().await;
+async fn reserved_publication_only_admits_its_designated_package() {
+    for package in [None, Some("provider"), Some("consumer")] {
+        let catalog = Catalog::default();
+        match package {
+            None => catalog.reserve::<u64>("core").unwrap(),
+            Some(package) => catalog.reserve_for::<u64>("core", package).unwrap(),
         }
-    })
-    .await
-    .unwrap();
-    assert_eq!(starts.load(Ordering::SeqCst), 0);
-    assert!(catalog.snapshot::<u64>(&Scope::Profile).entries.is_empty());
-    kernel
-        .shutdown(Instant::now() + Duration::from_secs(1))
-        .await
-        .unwrap();
+        assert!(catalog.reserve_for::<u64>("core", "impostor").is_err());
+        let starts = Arc::new(AtomicUsize::new(0));
+        let mut kernel = Kernel::new(Services::default(), catalog.clone());
+        kernel
+            .configure(&composition(json!(1), false), definitions(&starts, "core"))
+            .unwrap();
+        if package == Some("consumer") {
+            converge(&mut kernel).await;
+            let contribution = catalog
+                .snapshot::<u64>(&Scope::Profile)
+                .entries
+                .remove("core")
+                .unwrap();
+            assert_eq!(*contribution.value, 1);
+            let call = contribution.admit().unwrap();
+            drop(call);
+            kernel
+                .shutdown(Instant::now() + Duration::from_secs(1))
+                .await
+                .unwrap();
+            assert!(contribution.admit().is_err());
+        } else {
+            timeout(Duration::from_secs(2), async {
+                loop {
+                    if kernel
+                        .tick()
+                        .unwrap()
+                        .entries
+                        .iter()
+                        .any(|entry| entry.error.is_some())
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                starts.load(Ordering::SeqCst),
+                0,
+                "failed publication cannot start business work"
+            );
+            assert!(catalog.snapshot::<u64>(&Scope::Profile).entries.is_empty());
+            kernel
+                .shutdown(Instant::now() + Duration::from_secs(1))
+                .await
+                .unwrap();
+        }
+    }
 }
 
 #[tokio::test]

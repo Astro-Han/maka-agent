@@ -177,6 +177,7 @@ impl From<maka_runtime::input::MessageInput> for MessageContent {
 impl From<MessageContent> for maka_runtime::input::MessageInput {
     fn from(content: MessageContent) -> Self {
         Self {
+            preparation: Vec::new(),
             text: content.text,
             display_text: content.display_text,
             attachments: content.attachments,

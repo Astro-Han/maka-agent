@@ -79,7 +79,10 @@ impl Executions {
                                 &input.session_id,
                                 Some(connection_id),
                                 maka_client_capability::BindingMode::Strict,
-                                input.turn_orchestration.as_ref().map(|intent| intent.mode),
+                                input
+                                    .turn_orchestration
+                                    .as_ref()
+                                    .map(|intent| intent.mode.clone()),
                             )
                             .await?;
                         environment
@@ -94,7 +97,9 @@ impl Executions {
                 continue;
             };
             let (environment, content, selection) = candidate?;
-            let Some(environment) = environment.commit(self, &input.session_id).await? else {
+            let Some((environment, _input_admission)) =
+                environment.commit(self, &input.session_id).await?
+            else {
                 continue;
             };
             let selection_result = match selection {
@@ -106,6 +111,7 @@ impl Executions {
                 }
             };
             input.skill_ids = None;
+            input.content = content.clone().into();
             let mut run = self
                 .prepare_message(
                     input,

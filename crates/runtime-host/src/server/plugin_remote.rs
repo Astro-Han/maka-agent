@@ -36,6 +36,7 @@ pub(super) async fn execute(
     host: &Arc<Host>,
     connection: Uuid,
     client: &str,
+    authority: &super::authority::Authority,
     request: RemoteRequest,
 ) -> Result<RemoteResult, OperationError> {
     match request {
@@ -105,6 +106,14 @@ pub(super) async fn execute(
                     })?;
             }
             let bound = host.plugins.bind_remote(&binding, target.as_ref())?;
+            if bound.endpoint.value.access == maka_plugins::remote::Access::HostPaths
+                && !authority.can_use_host_paths()
+            {
+                return Err(OperationError {
+                    code: Code::Unauthorized,
+                    message: "Remote endpoint requires Host path access".into(),
+                });
+            }
             let Some((document, input, stream)) = call else {
                 return Ok(RemoteResult::Bound {
                     target: bound.target,
@@ -116,6 +125,7 @@ pub(super) async fn execute(
             };
             let reservation = host.plugin_remotes.get(connection, document)?.reserve()?;
             let caller = Caller {
+                connection_id: connection,
                 client_instance_id: client.into(),
                 document_id: document,
                 session_id: binding.session_id,

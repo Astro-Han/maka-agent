@@ -17,16 +17,10 @@
  * under the License.
  */
 
-//! Immutable run-scoped tool capabilities, argument validation and composition.
-mod availability;
-mod catalog;
+//! Journaled tool execution, client capabilities and Code Mode.
 mod cell;
 mod client;
-pub use client::{ApprovalFuture, ClientInteractions, ClientTools, PermissionFuture};
 mod dispatch;
-pub mod plugins;
-pub use catalog::*;
+pub use client::{ApprovalFuture, ClientInteractions, ClientTools, PermissionFuture};
 pub use dispatch::{RequestTools, RunTools, StepTools};
-pub use maka_runtime::tools::{
-    PreparationFuture, PreparedEffect, ToolCallContext, ToolHandler, ToolPreparer,
-};
+pub use maka_tool_catalog::*;

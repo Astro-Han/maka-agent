@@ -36,7 +36,7 @@ impl Surface {
         input: &RunInput,
         cancellation: &CancellationToken,
     ) -> Result<Self, RunError> {
-        let prompt = tools
+        let mut prompt = tools
             .prompt(
                 input
                     .configuration
@@ -47,6 +47,13 @@ impl Surface {
                 cancellation.clone(),
             )
             .await?;
+        if let Some(base) = &input.configuration.system_prompt {
+            for source in &base.sources {
+                if !prompt.sources.contains(source) {
+                    prompt.sources.push(source.clone());
+                }
+            }
+        }
         let evidence = RequestComposition {
             system_prompt: prompt.system.clone(),
             dynamic_context: prompt.contexts.clone(),

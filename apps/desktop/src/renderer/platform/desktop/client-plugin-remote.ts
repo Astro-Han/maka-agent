@@ -22,7 +22,7 @@ import type { Json } from '@maka-agent/plugin-sdk/host';
 import type { ClientRemoteFactory } from '@maka/ui/client-plugins';
 import type { PluginRemoteBinding, PluginRemoteTarget } from '@maka/runtime-host/protocol';
 import type { MakaBridge } from '../../../preload/bridge-contract.js';
-import type { ClientHostRef } from '../../features/client-plugins/ports.js';
+import type { ClientHostRef } from '../../features/client-plugins/index.js';
 
 /** One document per UI instance, lazily allocated and never retargeted. */
 export function clientPluginRemote(

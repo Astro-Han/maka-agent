@@ -43,7 +43,8 @@ fn durable_lease_blocks_other_process_even_after_cache_removal() {
     let ns = namespaces(temp.path());
     let path = temp.path().join("root");
     let owner = RootOwner::create(&path, &ns).unwrap();
-    fs::create_dir(path.join("skills")).unwrap();
+    fs::create_dir(path.join("arbitrary-business-data")).unwrap();
+    fs::write(path.join("arbitrary-business-data/domain.bin"), b"opaque").unwrap();
     assert_eq!(
         maka_event_log::root::initialize(&path, &ns).unwrap(),
         owner.root_id()

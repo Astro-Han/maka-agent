@@ -25,9 +25,7 @@ use maka_js_runtime::{CellLimits, CodeExecutor};
 use maka_runtime::{
     capability::{AdmissionEvidence, CallResult, ClientFrame, HostFrame},
     event::Fact,
-    execution::{
-        CollaborationMode, InvocationConfiguration, OrchestrationMode, PermissionMode, ToolMode,
-    },
+    execution::{BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode},
     interaction::GrantTarget,
     model::ModelToolCall,
     tool_call::{ToolOrigin, ToolRejection},
@@ -162,7 +160,7 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
             PermissionMode::Bypass
         },
         collaboration_mode: CollaborationMode::Agent,
-        orchestration_mode: OrchestrationMode::Default,
+        orchestration_mode: BehaviorId::default(),
         tool_mode: mode,
         model: None,
         thinking_level: None,
@@ -245,7 +243,8 @@ async fn run(mode: ToolMode, cut: Cut, cells: CodeExecutor) {
     let cancellation = CancellationToken::new();
     let cancel = cancellation.clone();
     let execution = tokio::spawn(async move {
-        run.capture()
+        run.capture(".", tokio_util::sync::CancellationToken::new())
+            .await
             .unwrap()
             .into_step("step")
             .invoke(&call, cancel)

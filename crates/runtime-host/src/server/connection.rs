@@ -272,10 +272,17 @@ impl Host {
             }
             // Register before checking admission, with no await between them:
             // drain cannot observe zero while an admitted request is untracked.
+            // A Remote next only awaits delivery from an already owned stream.
+            // Keep its flush resident, but let retirement cancel idle observers.
+            let is_observation = request.operation.mode() == maka_protocol::operation::OperationMode::Query
+                || (request.operation == Operation::PluginRemote
+                    && matches!(
+                        serde_json::from_value::<maka_protocol::plugin::RemoteRequest>(request.input.clone()),
+                        Ok(maka_protocol::plugin::RemoteRequest::Next { .. })
+                    ));
             let mut residency = Some(RequestResidency {
                 _request: self.requests.token(),
-                _command: (request.operation.mode() != maka_protocol::operation::OperationMode::Query)
-                    .then(|| self.commands.token()),
+                _command: (!is_observation).then(|| self.commands.token()),
             });
             in_flight.insert(request.request_id.clone(), request.operation);
             let phase = *self.retirement.lock().unwrap_or_else(|e| e.into_inner());

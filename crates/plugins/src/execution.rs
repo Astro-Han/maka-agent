@@ -57,7 +57,7 @@ pub struct Submit {
     pub content: MessageInput,
     /// This execution only; never changes the Session's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub orchestration_mode: Option<maka_runtime::execution::OrchestrationMode>,
+    pub orchestration_mode: Option<maka_runtime::execution::BehaviorId>,
 }
 
 impl Submit {

@@ -138,7 +138,7 @@ impl Authority {
     }
 
     pub(super) fn authorizes(&self, request: &Request) -> bool {
-        let Self::Managed(credential) = self else {
+        let Self::Managed(_) = self else {
             return true;
         };
         request.operation.allows_remote_owner()
@@ -148,8 +148,16 @@ impl Authority {
                     request.operation,
                     Operation::ClientCapabilityReplace | Operation::ClientCapabilityUnregister
                 ))
-            && ((!restricted_candidate(credential) && credential.can_use_host_paths)
-                || path_free(request))
+            && (self.can_use_host_paths() || path_free(request))
+    }
+
+    pub(super) fn can_use_host_paths(&self) -> bool {
+        match self {
+            Self::LocalOwner => true,
+            Self::Managed(credential) => {
+                !restricted_candidate(credential) && credential.can_use_host_paths
+            }
+        }
     }
 
     pub(super) fn receives(&self, notice: &Value) -> bool {
@@ -180,11 +188,29 @@ fn restricted_candidate(credential: &AccessCredential) -> bool {
 /// silently grant host-path access to restricted remote credentials.
 fn path_free(request: &Request) -> bool {
     match request.operation {
+        // Remote endpoints declare additional path requirements; dispatch
+        // checks those against the current transport authority before binding
+        // or calling. Ordinary UI reads do not imply filesystem privileges.
+        Operation::PluginClientQuery | Operation::PluginRemote => true,
         Operation::ScheduledTaskMutate => {
             serde_json::from_value::<maka_scheduler::command::Mutation>(request.input.clone())
                 .is_ok_and(|input| !input.uses_host_paths())
         }
         Operation::SkillCatalogQuery => maka_protocol::skills::decode_catalog_input(&request.input)
+            .is_ok_and(|input| !input.uses_host_paths()),
+        Operation::SkillCatalogResolvePath => {
+            maka_protocol::skills::decode_path_input(&request.input).is_ok_and(|input| {
+                !matches!(
+                    input.context.workspace,
+                    maka_runtime::execution::WorkspaceTarget::HostPath { .. }
+                )
+            })
+        }
+        Operation::SkillCatalogPreviewUpdate => {
+            maka_protocol::skills::decode_preview_input(&request.input)
+                .is_ok_and(|input| !input.uses_host_paths())
+        }
+        Operation::SkillCatalogMutate => maka_protocol::skills::decode_mutate_input(&request.input)
             .is_ok_and(|input| !input.uses_host_paths()),
         Operation::SkillCatalogInvocableQuery => {
             maka_protocol::skills::decode_invocable_input(&request.input)

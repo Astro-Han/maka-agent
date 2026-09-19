@@ -21,23 +21,23 @@ import {
   DailyReviewPage,
   ModuleHubSelector,
   ScheduledTasksPage,
-  SkillsPage,
   getSharedUiCopy,
   useUiLocale,
   type ModuleHubHeader,
 } from '@maka/ui';
+import type { ReactNode } from 'react';
 import { McpPage } from '../../../mcp-page.js';
 import type { ModuleHubHostModel } from '../controller/use-module-hub-controller.js';
 import { resolveModuleHubHostRoute } from '../controller/module-hub-route.js';
 import { useModuleHubHostModel } from './module-hub-provider.js';
 
 /** Selects and mounts exactly one Module Hub leaf for the Shell selection. */
-export function ModuleHubHost() {
-  return <ModuleHubHostView model={useModuleHubHostModel()} />;
+export function ModuleHubHost({ extensionContent }: { extensionContent?: ReactNode }) {
+  return <ModuleHubHostView model={useModuleHubHostModel()} extensionContent={extensionContent} />;
 }
 
 /** Environment-free view seam for focused tests and Storybook. */
-export function ModuleHubHostView({ model }: { model: ModuleHubHostModel }) {
+export function ModuleHubHostView({ model, extensionContent }: { model: ModuleHubHostModel; extensionContent?: ReactNode }) {
   const copy = getSharedUiCopy(useUiLocale()).moduleHubs;
   const selection = model.selection;
   const route = resolveModuleHubHostRoute(selection);
@@ -62,11 +62,10 @@ export function ModuleHubHostView({ model }: { model: ModuleHubHostModel }) {
       return <McpPage hubHeader={header} />;
     }
     return (
-      <SkillsPage
-        hubHeader={header}
-        scheduledTasks={model.scheduledTasks.scheduledTasks}
-        {...model.skills}
-      />
+      <section className="maka-main detailPane maka-module-main agents-chat-panel" data-page-shell="layout" data-module={route} aria-label={header.title}>
+        <header><h1>{header.title}</h1>{header.badge}</header>
+        {extensionContent}
+      </section>
     );
   }
 

@@ -507,8 +507,14 @@ impl Coordinator {
                 snapshot_key: signal.clone(),
                 request: Submit {
                     orchestration_mode: Some(match self.schedule.epoch.mode {
-                        crate::Mode::Graph => maka_runtime::execution::OrchestrationMode::Graph,
-                        crate::Mode::Swarm => maka_runtime::execution::OrchestrationMode::Swarm,
+                        crate::Mode::Graph => {
+                            maka_runtime::execution::BehaviorId::try_from("graph".to_owned())
+                                .unwrap()
+                        }
+                        crate::Mode::Swarm => {
+                            maka_runtime::execution::BehaviorId::try_from("swarm".to_owned())
+                                .unwrap()
+                        }
                     }),
                     operation_id: format!("graph-wake:{}", signal.strip_prefix("sha256:").unwrap()),
                     session_id: self.schedule.epoch.root_session_id.clone(),

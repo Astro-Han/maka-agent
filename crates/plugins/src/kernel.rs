@@ -53,6 +53,8 @@ pub trait Plugin: Send + Sync {
 pub struct PluginContext {
     pub lifecycle: Context,
     pub services: ServiceView,
+    /// Absent when the embedding Host does not provide persistent files.
+    pub data: Option<crate::storage::Directory>,
 }
 
 pub struct Definition {
@@ -158,6 +160,7 @@ pub struct Kernel {
     live: BTreeMap<String, Live>,
     roots: Vec<Fiber>,
     activation_timeout: Duration,
+    data: Option<crate::storage::Directories>,
 }
 
 impl Kernel {
@@ -172,7 +175,21 @@ impl Kernel {
             live: BTreeMap::new(),
             roots: Vec::new(),
             activation_timeout: Duration::from_secs(10),
+            data: None,
         }
+    }
+
+    pub fn with_data(mut self, data: crate::storage::Directories) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    pub fn catalog(&self) -> &Catalog {
+        &self.catalog
+    }
+
+    pub fn subscribe_services(&self) -> tokio::sync::watch::Receiver<()> {
+        self.services.subscribe()
     }
 
     /// Static validation completes before any current instance is retired.

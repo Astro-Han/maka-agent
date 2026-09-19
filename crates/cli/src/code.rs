@@ -25,7 +25,7 @@ use maka_event_log::EventLog;
 use maka_js_runtime::{CellAbort, CellDiagnosticKind, CellLimits, CellResult, CodeExecutor};
 use maka_runtime::event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent};
 use maka_runtime::execution::{
-    CollaborationMode, InvocationConfiguration, OrchestrationMode, PermissionMode, ToolMode,
+    BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode,
 };
 use maka_runtime::tools::{JournaledTools, ToolError, ToolExecutor, ToolFuture};
 use serde::Deserialize;
@@ -115,7 +115,7 @@ pub(super) async fn run(path: &Path) -> Result<(), maka_runtime_host::server::Ho
     log.append(&EventWrite::plain(RuntimeEvent::new(
         invocation.clone(),
         Fact::InvocationOpened {
-            configuration: Some(InvocationConfiguration {
+            configuration: Some(Box::new(InvocationConfiguration {
                 system_prompt: None,
                 tool_composition: None,
                 workspace_identity: None,
@@ -125,11 +125,11 @@ pub(super) async fn run(path: &Path) -> Result<(), maka_runtime_host::server::Ho
                     .map_err(|_| "code working directory is not UTF-8")?,
                 permission_mode: PermissionMode::Bypass,
                 collaboration_mode: CollaborationMode::Agent,
-                orchestration_mode: OrchestrationMode::Default,
+                orchestration_mode: BehaviorId::default(),
                 tool_mode: ToolMode::CodeMode,
                 model: None,
                 thinking_level: None,
-            }),
+            })),
             input: maka_runtime::input::InvocationInput::Code {
                 source: source.clone(),
             },

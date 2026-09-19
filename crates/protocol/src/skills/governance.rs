@@ -17,111 +17,35 @@
  * under the License.
  */
 
-use super::{invalid, text};
+use super::{GovernanceItem, invalid, text};
 use crate::Result;
-pub use maka_runtime::skills::{SkillScope, SkillSource, SkillValidationCode};
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GovernanceSourceType {
-    Workspace,
-    Bundled,
-    Managed,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ValidationStatus {
-    Ok,
-    MissingLock,
-    Modified,
-    MetadataError,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ManagedUpdateStatus {
-    NotManaged,
-    SourceMissing,
-    UpToDate,
-    UpdateAvailable,
-    LocalModified,
-    MetadataError,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SkillRuntimeStatus {
-    Enabled,
-    Disabled,
-    StateError,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContextStatus {
-    Unknown,
-    Advertised,
-    Disabled,
-    Invalid,
-    HostIncompatible,
-    Shadowed,
-    Budget,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GovernanceItem {
-    #[serde(rename = "ref")]
-    pub reference: String,
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub declared_tools: Vec<String>,
-    pub metadata_truncated: bool,
-    pub source_type: GovernanceSourceType,
-    pub user_modified: bool,
-    pub validation_status: ValidationStatus,
-    pub validation_codes: Vec<SkillValidationCode>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub managed_update_status: Option<ManagedUpdateStatus>,
-    pub enabled: bool,
-    pub pinned: bool,
-    pub runtime_status: SkillRuntimeStatus,
-    pub scope: SkillScope,
-    pub source: SkillSource,
-    pub context_status: ContextStatus,
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub context_rank: Option<u64>,
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub shadowed_by: Option<String>,
-    pub needs_review: bool,
-    pub manageable: bool,
-}
-impl GovernanceItem {
-    pub(super) fn validate(&self) -> Result<()> {
-        identity(&self.reference, 512)?;
-        identity(&self.id, 256)?;
-        if let Some(reference) = &self.shadowed_by {
-            identity(reference, 512)?;
+pub(super) fn validate(item: &GovernanceItem) -> Result<()> {
+    identity(&item.reference, 512)?;
+    identity(&item.id, 256)?;
+    if let Some(path) = &item.path {
+        text(path, 4096)?;
+        if !crate::codec::absolute_host_path(path) {
+            return Err(invalid("Invalid Skill display path"));
         }
-        if self.name.len() > 256
-            || self.description.len() > 4096
-            || self.declared_tools.len() > 64
-            || self.validation_codes.len() > 64
-            || self
-                .context_rank
-                .is_some_and(|rank| !(1..=9_007_199_254_740_991).contains(&rank))
-        {
-            return Err(invalid("Invalid Skill governance projection"));
-        }
-        for tool in &self.declared_tools {
-            text(tool, 256)?;
-        }
-        Ok(())
     }
+    if let Some(reference) = &item.shadowed_by {
+        identity(reference, 512)?;
+    }
+    if item.name.len() > 256
+        || item.description.len() > 4096
+        || item.declared_tools.len() > 64
+        || item.validation_codes.len() > 64
+        || item
+            .context_rank
+            .is_some_and(|rank| !(1..=9_007_199_254_740_991).contains(&rank))
+    {
+        return Err(invalid("Invalid Skill governance projection"));
+    }
+    for tool in &item.declared_tools {
+        text(tool, 256)?;
+    }
+    Ok(())
 }
 fn identity(value: &str, limit: usize) -> Result<()> {
     text(value, limit)?;

@@ -21,7 +21,7 @@ use super::*;
 use maka_runtime::{
     continuation::{ContinuationClaim, REPLAY_VERSION, ReplayEvidence, RunBoundary, SessionBase},
     execution::{
-        CollaborationMode, InvocationConfiguration, OrchestrationMode, PermissionMode, ToolMode,
+        BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode,
         WorkspaceIdentity,
     },
 };

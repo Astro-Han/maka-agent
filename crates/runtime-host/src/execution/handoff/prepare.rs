@@ -37,7 +37,6 @@ pub(super) struct PreparedHandoff {
     configuration: InvocationConfiguration,
     bindings: RestoredBindings,
     tools: maka_tools::ToolCatalog,
-    skills: Option<Arc<super::super::skills::FrozenSkills>>,
     directory: maka_fs_tools::workspace::directory::PublishedDirectory,
 }
 
@@ -114,42 +113,18 @@ impl Executions {
             self.interactions.clone(),
         )
         .registrations();
-        let (tools, skills) = if source.session_id == COORDINATION_SESSION_ID {
-            if proof.skills_digest.is_some() {
-                return Err(unavailable("WorkHub handoff has an incompatible profile"));
-            }
-            (
-                super::super::workhub::profile::catalog(self, additional)?,
-                None,
-            )
+        let tools = if source.session_id == COORDINATION_SESSION_ID {
+            super::super::workhub::profile::catalog(self, additional)?
         } else {
             additional.push(self.interactions.question_tool());
-            let skills = self
-                .load_skills(&configuration.cwd, Default::default())
-                .await?;
             let native = self.native_tools(&configuration.cwd, record.configuration.tool_profile);
             let mode = configuration.permission_mode;
             let ceiling = proof.bound_tools.clone();
-            let expected = proof
-                .skills_digest
-                .clone()
-                .ok_or_else(|| unavailable("Handoff has no frozen Skills evidence"))?;
-            let (tools, skills) = tokio::task::spawn_blocking(move || {
-                let (tools, skills) = super::super::tools::catalog(
-                    native,
-                    mode,
-                    additional,
-                    skills,
-                    ceiling.as_ref(),
-                )?;
-                if skills.catalog().fingerprint().map_err(internal)? != expected {
-                    return Err(unavailable("Handoff Skills changed"));
-                }
-                Ok((tools, skills))
+            tokio::task::spawn_blocking(move || {
+                super::super::tools::catalog(native, mode, additional, ceiling.as_ref())
             })
             .await
-            .map_err(internal)??;
-            (tools, Some(skills))
+            .map_err(internal)??
         };
         if tools.digest() != pause.execution.tools.catalog_digest {
             return Err(unavailable("Handoff tool catalog changed"));
@@ -181,10 +156,9 @@ impl Executions {
         Ok(PreparedHandoff {
             source: boundary,
             pause,
-            configuration,
+            configuration: *configuration,
             bindings,
             tools,
-            skills,
             directory,
         })
     }
@@ -196,17 +170,6 @@ impl PreparedHandoff {
         self.directory
             .validate(Path::new(&self.configuration.cwd))
             .map_err(|error| unavailable(&error.to_string()))?;
-        if let Some(skills) = &self.skills
-            && executions
-                .configuration
-                .skill_preferences()
-                .await
-                .ok()
-                .map(|p| p.revision)
-                != skills.preference_revision
-        {
-            return Ok(false);
-        }
         let target = self
             .configuration
             .model

@@ -141,7 +141,8 @@ async fn original_client_submits_one_canonical_root_and_replays_after_cancel_and
             .count(),
         400
     );
-    assert_eq!(value["skill"]["metadataTruncated"], true);
+    assert_eq!(value["skill"]["metadataTruncated"], false);
+    assert_eq!(value["skill"]["description"], "refreshed archival");
     let Fact::InvocationOpened {
         input:
             maka_runtime::input::InvocationInput::Message {

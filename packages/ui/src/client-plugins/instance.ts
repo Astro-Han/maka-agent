@@ -17,9 +17,10 @@
  * under the License.
  */
 
-import type { ClientContext, ClientDescriptor, ClientIdentity, ClientPlugin, ClientRemote } from '@maka-agent/plugin-sdk/client';
+import type { ClientContext, ClientDescriptor, ClientIdentity, ClientPlugin, ClientRemote, ClientLocalFiles } from '@maka-agent/plugin-sdk/client';
 import type { Json } from '@maka-agent/plugin-sdk/host';
 import type { SlotEntry } from './slots.js';
+import { createElement } from 'react';
 
 type Cleanup = () => void | PromiseLike<void>;
 interface Effect { readonly setup: () => void | Cleanup; cancelled: boolean; cleanup?: Cleanup }
@@ -27,6 +28,7 @@ export type ClientRemoteFactory = (identity: ClientIdentity, signal: AbortSignal
   readonly api: ClientRemote;
   close(): Promise<void>;
 };
+export type ClientFilesFactory = (identity: ClientIdentity, signal: AbortSignal) => ClientLocalFiles | undefined;
 
 export class ClientInstance {
   readonly lifetime = new AbortController();
@@ -38,8 +40,9 @@ export class ClientInstance {
   #initializing?: Promise<void>;
   readonly #remote?: ReturnType<ClientRemoteFactory>;
   readonly #identity: ClientIdentity;
+  readonly #files?: ClientLocalFiles;
 
-  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory) {
+  constructor(readonly descriptor: ClientDescriptor, onError: (error: unknown) => void, remote?: ClientRemoteFactory, files?: ClientFilesFactory) {
     this.#onError = onError;
     this.#identity = Object.freeze({
       entryId: descriptor.entryId, extensionId: descriptor.extensionId,
@@ -47,6 +50,7 @@ export class ClientInstance {
       clientDigest: descriptor.clientDigest,
     });
     this.#remote = remote?.(this.#identity, this.lifetime.signal);
+    this.#files = files?.(this.#identity, this.lifetime.signal);
   }
 
   initialize(plugin: ClientPlugin, document: Document): Promise<void> {
@@ -58,6 +62,18 @@ export class ClientInstance {
     const context: ClientContext = {
       identity: this.#identity,
       signal: this.lifetime.signal,
+      localFiles: this.#files ? {
+        pick: async () => {
+          this.#assertActive();
+          const path = await this.#files!.pick();
+          this.#assertActive();
+          return path;
+        },
+        open: async (path) => {
+          this.#assertActive();
+          await this.#files!.open(path);
+        },
+      } : undefined,
       remote: {
         method: <I extends Json, O extends Json>(name: string, session?: string) => {
           const call = this.#remote?.api.method<I, O>(name, session);
@@ -84,7 +100,8 @@ export class ClientInstance {
             throw new Error('Invalid or excessive Client slot registration');
           if (this.slots.some((entry) => entry.slot === slot && entry.key === key))
             throw new Error('Duplicate Client slot key');
-          const entry: SlotEntry = { owner: context.identity, slot, key, component, order };
+          const entry: SlotEntry = { owner: context.identity, slot, key, order,
+            render: (input) => createElement(component, input) };
           this.slots.push(entry);
           return () => {
             this.#assertStaged();

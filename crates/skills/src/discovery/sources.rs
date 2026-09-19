@@ -26,6 +26,7 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug)]
 pub struct BundledSource {
     pub id: &'static str,
+    pub content: &'static str,
     pub document: SkillDocument,
     pub content_sha256: String,
 }
@@ -141,6 +142,7 @@ fn catalog(
 ) -> Result<SourceCatalog, SourceCatalogError> {
     let bundled = vec![BundledSource {
         id: "computer-use",
+        content: COMPUTER_USE,
         document: crate::parse(COMPUTER_USE)
             .map_err(|_| SourceCatalogError::InvalidBundledMetadata)?,
         content_sha256: maka_runtime::artifact::content_digest(COMPUTER_USE.as_bytes()),

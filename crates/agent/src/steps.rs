@@ -150,7 +150,9 @@ pub(super) async fn run(
                 )
                 .await?;
         }
-        let request_tools = tools.capture()?;
+        let request_tools = tools
+            .capture(&input.configuration.cwd, cancellation.clone())
+            .await?;
         let surface = Arc::new(
             crate::request_composition::Surface::capture(&request_tools, input, cancellation)
                 .await?,

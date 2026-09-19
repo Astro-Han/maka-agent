@@ -98,25 +98,6 @@ export async function getWorkHubPage(app: ElectronApplication): Promise<Page> {
 }
 
 /**
- * Wait for Runtime's authoritative Skill projection, not merely for the
- * composer DOM to mount. The renderer requests this projection after its first
- * render, so a visible editor can still have an empty `/` source during cold
- * start.
- */
-export async function waitForInvocableSkills(
-  page: Page,
-  expectedIds: readonly string[],
-): Promise<void> {
-  await expect
-    .poll(async () =>
-      page.evaluate(async () =>
-        (await window.maka.skills.listInvocable(undefined)).map((skill) => skill.id),
-      ),
-    )
-    .toEqual(expect.arrayContaining(expectedIds));
-}
-
-/**
  * Pre-seed a real-looking connection into the throwaway workspace so onboarding
  * clears and the composer is enabled. Actual sessions still run on the fake
  * backend (BackendRegistry override in main); this only satisfies the UI
@@ -264,58 +245,6 @@ async function seedParentRemovalSessions(userDataDir: string): Promise<void> {
   }
 }
 
-async function seedE2eInvocableSkills(userDataDir: string): Promise<void> {
-  const workspaceRoot = path.join(userDataDir, 'workspaces', 'default');
-  const projectRoot = path.join(userDataDir, 'project');
-  const projectSkillRoot = path.join(projectRoot, '.maka', 'skills');
-  const workspaceSkillRoot = path.join(workspaceRoot, 'skills');
-  // Under the sandboxed HOME (see buildE2eEnv), so `~/.agents/skills` here is
-  // the throwaway dir, never the developer's. This is the only user-scope
-  // skill the suite sees, which is what makes the delete journey assertable.
-  const userSkillRoot = path.join(userDataDir, 'home', '.agents', 'skills');
-  await Promise.all([
-    mkdir(path.join(projectSkillRoot, 'project-only'), { recursive: true }),
-    mkdir(path.join(projectSkillRoot, 'host-incompatible'), { recursive: true }),
-    mkdir(path.join(projectSkillRoot, 'agent-write'), { recursive: true }),
-    mkdir(path.join(projectSkillRoot, 'deep-research-only'), { recursive: true }),
-    mkdir(path.join(workspaceSkillRoot, 'workspace-only'), { recursive: true }),
-    mkdir(path.join(userSkillRoot, 'user-only'), { recursive: true }),
-  ]);
-  await writeFile(
-    path.join(userSkillRoot, 'user-only', 'SKILL.md'),
-    `---\nname: User Only\ndescription: User-scoped install, deletable from the panel.\n---\n# User Only`,
-    'utf8',
-  );
-  await Promise.all([
-    writeFile(
-      path.join(projectSkillRoot, 'project-only', 'SKILL.md'),
-      `---\nname: Project Only\ndescription: Project-scoped suggestion.\n---\n# Project Only`,
-      'utf8',
-    ),
-    writeFile(
-      path.join(projectSkillRoot, 'host-incompatible', 'SKILL.md'),
-      `---\nname: Host Incompatible\ndescription: Must be hidden from this host.\nrequired-tools: [DefinitelyMissingTool]\n---\n# Host Incompatible`,
-      'utf8',
-    ),
-    writeFile(
-      path.join(projectSkillRoot, 'agent-write', 'SKILL.md'),
-      `---\nname: Agent Write\ndescription: Requires a mutating tool excluded from Plan mode.\nrequired-tools: [Write]\n---\n# Agent Write`,
-      'utf8',
-    ),
-    writeFile(
-      path.join(projectSkillRoot, 'deep-research-only', 'SKILL.md'),
-      `---\nname: Deep Research Only\ndescription: Requires a tool available only in Deep Research mode.\nrequired-tools: [deep_research_status]\n---\n# Deep Research Only`,
-      'utf8',
-    ),
-    writeFile(
-      path.join(workspaceSkillRoot, 'workspace-only', 'SKILL.md'),
-      `---\nname: Workspace Only\ndescription: Maka workspace suggestion.\n---\n# Workspace Only`,
-      'utf8',
-    ),
-  ]);
-  await seedCurrentProject(workspaceRoot, projectRoot);
-}
-
 async function seedE2eGitReviewProject(
   userDataDir: string,
   extraUntrackedFiles = 0,
@@ -399,7 +328,6 @@ export async function withE2eWindow(
     locale,
     platform,
     showWindow,
-    invocableSkills,
     gitReviewExtraFiles,
     parentRemovalSessions,
     railRenderSessions,
@@ -416,7 +344,6 @@ export async function withE2eWindow(
     platform?: 'darwin' | 'win32' | 'linux';
     /** Show fixtures whose contract depends on compositor-paced frames. */
     showWindow?: boolean;
-    invocableSkills?: boolean;
     gitReviewExtraFiles?: number;
     parentRemovalSessions?: boolean;
     railRenderSessions?: boolean;
@@ -438,7 +365,6 @@ export async function withE2eWindow(
     if (seed) await seedE2eConnection(userDataDir);
     if (parentRemovalSessions) await seedParentRemovalSessions(userDataDir);
     if (railRenderSessions) await seedRailRenderSessions(userDataDir);
-    if (invocableSkills) await seedE2eInvocableSkills(userDataDir);
     if (gitReviewExtraFiles !== undefined) {
       await seedE2eGitReviewProject(userDataDir, gitReviewExtraFiles);
     }
@@ -490,9 +416,6 @@ export async function withE2eWindow(
     // Centralize the cold-start wait so test bodies are flake-free under retries:0.
     try {
       await page.waitForSelector(readinessSelector, { timeout: readinessTimeoutMs });
-      if (invocableSkills) {
-        await waitForInvocableSkills(page, ['project-only', 'workspace-only']);
-      }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const mainDetail = mainLogs.length > 0 ? `\nElectron main console:\n${mainLogs.join('\n')}` : '';
@@ -529,7 +452,6 @@ type E2eTestFixtures = {
   sessionLocalWindow: { page: Page; app: ElectronApplication; restart(): Promise<Page> };
   window: Page;
   gitReviewWindow: { page: Page; projectRoot: string };
-  invocableSkillsWindow: Page;
   projectSidebarWindow: Page;
   renameFocusWindow: { page: Page; app: ElectronApplication };
   parentRemovalWindow: Page;
@@ -584,15 +506,6 @@ export const test = base.extend<E2eTestFixtures>({
         });
       },
     );
-  },
-  // Project + workspace Skills for draft/chip journeys.
-  invocableSkillsWindow: async ({}, use) => {
-    await withE2eWindow({
-      seed: true,
-      readinessSelector: COMPOSER_INPUT,
-      locale: 'zh-CN',
-      invocableSkills: true,
-    }, use);
   },
   // Seeded connection so the composer is ready, plus one registered Project so
   // the workspace picker under it has a second target to move to.

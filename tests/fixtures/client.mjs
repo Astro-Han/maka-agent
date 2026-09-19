@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { withSourceBundle } from '../support/source.mjs';
 
 const entries = [
+  ['--skills-client-workspace', 'client-skills-entry.mjs'],
   ['--scheduler-workspace', 'client-scheduler-entry.mjs'],
   ['--plugin-remote', 'client-plugin-remote-entry.mjs'],
   ['--workhub-workspace', 'client-workhub-entry.mjs'],

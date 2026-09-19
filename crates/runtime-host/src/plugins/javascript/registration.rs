@@ -31,6 +31,10 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum Registration {
+    InputPreparation {
+        name: String,
+        callback: u32,
+    },
     RemoteMethod {
         name: String,
         callback: u32,
@@ -59,6 +63,8 @@ pub(super) enum Registration {
         semantics: Semantics,
     },
     Section {
+        #[serde(default)]
+        format: prompt::Format,
         name: String,
         callback: u32,
         #[serde(default)]
@@ -71,6 +77,8 @@ pub(super) enum Registration {
         callback: u32,
     },
     Context {
+        #[serde(default)]
+        format: prompt::Format,
         name: String,
         callback: u32,
         #[serde(default)]
@@ -110,6 +118,22 @@ pub(super) fn stage_entries(
     for registration in registrations {
         let remote_stream = matches!(&registration, Registration::RemoteStream { .. });
         match registration {
+            Registration::InputPreparation { name, callback } => {
+                validate_callback(callback)?;
+                staged
+                    .insert(
+                        name.clone(),
+                        maka_plugins::input::InputPreparation(Arc::new(super::input::Input {
+                            name,
+                            callback: Arc::new(callbacks::Callback {
+                                module: module.clone(),
+                                id: callback,
+                                calls: calls.clone(),
+                            }),
+                        })),
+                    )
+                    .map_err(super::message)?;
+            }
             Registration::RemoteMethod { name, callback }
             | Registration::RemoteStream { name, callback } => {
                 validate_callback(callback)?;
@@ -198,6 +222,7 @@ pub(super) fn stage_entries(
                 staged.insert(name, tool).map_err(super::message)?;
             }
             Registration::Section {
+                format,
                 name,
                 callback,
                 order,
@@ -207,6 +232,7 @@ pub(super) fn stage_entries(
                     .insert(
                         name,
                         prompt::Section {
+                            format,
                             order,
                             mode: if complete {
                                 prompt::SectionMode::Complete
@@ -224,6 +250,7 @@ pub(super) fn stage_entries(
                     .map_err(super::message)?;
             }
             Registration::Context {
+                format,
                 name,
                 callback,
                 order,
@@ -232,6 +259,7 @@ pub(super) fn stage_entries(
                     .insert(
                         name,
                         prompt::DynamicContext {
+                            format,
                             order,
                             text: provider(module, callback, calls)?,
                         },
@@ -246,6 +274,7 @@ pub(super) fn stage_entries(
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Kind {
+    InputPreparation,
     RemoteMethod,
     RemoteStream,
     Executor,
@@ -262,6 +291,9 @@ pub(super) fn withdraw(
     name: &str,
 ) -> Result<(), maka_plugins::Error> {
     match kind {
+        Kind::InputPreparation => {
+            catalog.withdraw::<maka_plugins::input::InputPreparation>(context, name)
+        }
         Kind::RemoteMethod | Kind::RemoteStream => {
             let package = context.identity()?.package_id;
             catalog.withdraw::<maka_plugins::remote::Endpoint>(

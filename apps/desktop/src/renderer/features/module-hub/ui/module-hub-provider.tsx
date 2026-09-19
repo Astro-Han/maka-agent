@@ -35,7 +35,6 @@ const ModuleHubHostContext = createContext<ModuleHubHostModel | null>(null);
 const ModuleHubScheduledTasksContext = createContext<
   readonly ScheduledTask[] | null
 >(null);
-const ModuleHubSkillCatalogRevisionContext = createContext<number | null>(null);
 
 export interface ModuleHubCommandPort extends ModuleHubCommands {
   connect(target: ModuleHubCommands): () => void;
@@ -66,8 +65,6 @@ export function createModuleHubCommandPort(): ModuleHubCommandPort {
         if (target === next) target = null;
       };
     },
-    refreshProjectSkills: () =>
-      target?.refreshProjectSkills() ?? Promise.resolve(),
     openScheduledTaskCreate: () => target?.openScheduledTaskCreate(),
     copyTodayDailyReview: () =>
       target?.copyTodayDailyReview() ?? Promise.resolve(),
@@ -103,11 +100,7 @@ export function ModuleHubProvider({
       <ModuleHubScheduledTasksContext.Provider
         value={controller.selectors.scheduledTasks}
       >
-        <ModuleHubSkillCatalogRevisionContext.Provider
-          value={controller.selectors.skillCatalogRevision}
-        >
-          {children}
-        </ModuleHubSkillCatalogRevisionContext.Provider>
+        {children}
       </ModuleHubScheduledTasksContext.Provider>
     </ModuleHubHostContext.Provider>
   );
@@ -137,23 +130,6 @@ export function ModuleHubScheduledTasksBoundary(props: {
   const scheduledTasks = useContext(ModuleHubScheduledTasksContext);
   if (!scheduledTasks) throw new Error('ModuleHubProvider is missing');
   return props.render(scheduledTasks, props.children);
-}
-
-/** Hands the Skill catalog revision to Composer mentions without waking AppShell. */
-export function ModuleHubSkillCatalogRevisionBoundary(props: {
-  readonly render: (
-    skillCatalogRevision: number,
-    children: ReactNode,
-  ) => ReactNode;
-  readonly children?: ReactNode;
-}): ReactNode {
-  const skillCatalogRevision = useContext(
-    ModuleHubSkillCatalogRevisionContext,
-  );
-  if (skillCatalogRevision === null) {
-    throw new Error('ModuleHubProvider is missing');
-  }
-  return props.render(skillCatalogRevision, props.children);
 }
 
 export type { ModuleHubCommands } from '../controller/use-module-hub-controller.js';

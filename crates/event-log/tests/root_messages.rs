@@ -20,7 +20,7 @@
 use maka_event_log::{EventLog, message_resolution::MessageExecution};
 use maka_runtime::{
     event::{EventWrite, Fact, Invocation, InvocationInput, InvocationOutcome, RuntimeEvent},
-    execution::OrchestrationMode,
+    execution::BehaviorId,
     input::{DeliveredMessage, MessageInput},
     message::{
         self, MessageDisposition, Placement, RootSourceMessage, SubmittedTurnIntent,
@@ -94,7 +94,7 @@ async fn root_sources_are_atomic_exclusive_delivery_proofs_and_rebuild_exact_vis
     first.submitted_intent = Some(SubmittedTurnIntent {
         skill_ids: vec!["project:review".into()],
         turn_orchestration: Some(TurnOrchestration {
-            mode: OrchestrationMode::Graph,
+            mode: BehaviorId::try_from("graph".to_owned()).unwrap(),
             source: TurnOrchestrationSource::SlashCommand,
         }),
     });

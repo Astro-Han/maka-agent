@@ -19,7 +19,7 @@
 
 use super::{Error, SessionBoundary, name};
 use maka_runtime::execution::{
-    CollaborationMode, ModelBinding, OrchestrationMode, PermissionMode, ThinkingLevel, ToolMode,
+    BehaviorId, CollaborationMode, ModelBinding, PermissionMode, ThinkingLevel, ToolMode,
     WorkspaceIdentity, WorkspaceTarget,
 };
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,7 @@ pub struct RootTemplate {
     pub tool_mode: ToolMode,
     pub permission_mode: PermissionMode,
     pub collaboration_mode: CollaborationMode,
-    pub orchestration_mode: OrchestrationMode,
+    pub orchestration_mode: BehaviorId,
 }
 impl RootTemplate {
     pub fn validate(&self) -> Result<(), Error> {

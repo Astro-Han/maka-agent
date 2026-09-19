@@ -22,14 +22,18 @@ mod admission;
 mod archive;
 mod compact;
 mod control;
+mod graph;
+pub(crate) use graph::GraphSessions;
 mod handoff;
 pub(crate) use handoff::CooperativeRun;
+mod client_view;
+pub(crate) mod input;
 mod interrupt;
 mod launch;
 mod message;
 mod plugins;
+pub(crate) use client_view::SessionViews;
 mod prepare;
-mod prompt;
 mod provider;
 mod read;
 mod recovery;
@@ -92,8 +96,6 @@ struct ActiveRun {
 
 pub(crate) struct ExecutionPaths {
     pub state_root: std::path::PathBuf,
-    pub global_instructions: Option<std::path::PathBuf>,
-    pub skill_home: Option<std::path::PathBuf>,
 }
 
 impl Executions {

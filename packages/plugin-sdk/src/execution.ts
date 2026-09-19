@@ -99,7 +99,7 @@ export interface Executions {
     sessionId: string;
     content: MessageContent;
     /** Applies to this execution without changing the Session default. */
-    orchestrationMode?: 'default' | 'graph' | 'swarm';
+    orchestrationMode?: string;
   }): Promise<ExecutionReceipt>;
   createChild(input: {
     operationId: string;

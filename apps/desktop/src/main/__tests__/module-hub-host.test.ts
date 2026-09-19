@@ -18,46 +18,32 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import type { NavSelection } from '@maka/ui';
-import { resolveModuleHubHostRoute } from '../../renderer/features/module-hub/testing.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { LocaleProvider } from '@maka/ui';
+import type * as HostModule from '../../renderer/features/module-hub/index.js';
+import { build } from 'esbuild';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createFakeModuleHubHostModel } from '../../renderer/features/module-hub/testing.js';
 
-test('Module Hub resolves all four leaf routes and no chat route', () => {
-  const cases: Array<[NavSelection, ReturnType<typeof resolveModuleHubHostRoute>]> = [
-    [{ section: 'extensions', module: 'skills' }, 'skills'],
-    [{ section: 'extensions', module: 'mcp' }, 'mcp'],
-    [{ section: 'automations', module: 'scheduled-tasks' }, 'scheduled-tasks'],
-    [{ section: 'automations', module: 'daily-review' }, 'daily-review'],
-    [{ section: 'sessions' }, null],
-  ];
-  for (const [selection, expected] of cases) {
-    assert.equal(resolveModuleHubHostRoute(selection), expected);
-  }
-});
-
-test('Host maps each route to one existing leaf and preserves the MCP exception', () => {
-  const desktopRoot = resolve(
-    fileURLToPath(new URL('../../../', import.meta.url)),
-  );
-  const source = readFileSync(
-    resolve(
-      desktopRoot,
-      'src/renderer/features/module-hub/ui/module-hub-host.tsx',
-    ),
-    'utf8',
-  );
-  for (const leaf of [
-    '<SkillsPage',
-    '<McpPage',
-    '<ScheduledTasksPage',
-    '<DailyReviewPage',
-  ]) {
-    assert.equal(source.split(leaf).length - 1, 1, leaf);
-  }
-  assert.match(source, /route === 'mcp'/);
-  assert.match(source, /MCP keeps its existing page-owned/);
-  assert.match(source, /return null;/);
+test('extension route mounts supplied Client content without owning its business controller', async (t) => {
+  const repo = resolve(import.meta.dirname, '../../../../..');
+  const directory = await mkdtemp(resolve(import.meta.dirname, 'module-hub-render-'));
+  t.after(() => rm(directory, {recursive:true,force:true}));
+  const outfile = resolve(directory, 'host.mjs');
+  await build({entryPoints:[resolve(repo, 'apps/desktop/src/renderer/features/module-hub/ui/module-hub-host.tsx')],
+    outfile,bundle:true,packages:'external',platform:'node',format:'esm',jsx:'automatic',logLevel:'silent'});
+  const {ModuleHubHostView} = await import(pathToFileURL(outfile).href) as typeof HostModule;
+  const extensionContent = createElement('div', {'data-client-domain':true}, 'plugin owned');
+  const render = (model: ReturnType<typeof createFakeModuleHubHostModel>) =>
+    renderToStaticMarkup(createElement(LocaleProvider, {locale:'en',children:
+      createElement(ModuleHubHostView, {model, extensionContent}),
+    }));
+  const skills = render(createFakeModuleHubHostModel({section:'extensions',module:'skills'}));
+  assert.match(skills, /data-client-domain="true"/);
+  assert.match(skills, /plugin owned/);
+  assert.equal(render(createFakeModuleHubHostModel({section:'sessions'})), '');
 });

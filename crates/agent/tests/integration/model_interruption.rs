@@ -200,7 +200,7 @@ async fn continuation_claim_replays_only_its_lineage_and_retries_at_fresh_bounda
         source.configuration.workspace_identity = Some(
             maka_runtime::execution::WorkspaceIdentity::from_marker_id("c193cd58-f929-4ba2-bfb5-6887beaf8132").unwrap());
         let opening = |text: &str| Fact::InvocationOpened {
-            configuration: Some(source.configuration.clone()),
+            configuration: Some(Box::new(source.configuration.clone())),
             input: InvocationInput::Message { content: text.into(), request_fingerprint: None,
                 source_messages: Vec::new(), skill_invocation: None },
         };

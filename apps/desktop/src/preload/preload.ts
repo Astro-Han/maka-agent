@@ -231,7 +231,6 @@ import type {
 import type { BotStatus, WechatBridgeQrCodeResult } from '@maka/runtime/bots';
 import type { ShellRunPtyDataEvent, ShellRunPtySnapshot } from '@maka/runtime/shell-run-contract';
 import type { GoalState } from '@maka/runtime/goal-state';
-import type { BundledSkillCatalogEntry, ManagedSkillSourceEntry, ManagedSkillUpdatePreview, SkillEntry } from '@maka/ui';
 import type { ConfigCategory } from '@maka/storage/config-transfer';
 import {
   SENSITIVE_PLACEHOLDER,
@@ -1429,7 +1428,25 @@ const makaBridge = {
   workHubControl: workHubControlBridge,
   workHubPresentation: workHubPresentationBridge,
   clientPlugins: {
-    async connection(host) { return (await runtimeHostScope(host)).targetEpoch; },
+    subscribeContext(host, handler) {
+      const disposers = [
+        subscribeSelectedRuntimeHostEvent('mcp:changed', host, handler),
+        subscribeSelectedRuntimeHostEvent('projects:changed', host, handler),
+        subscribeSelectedRuntimeHostEvent<[SessionChangedEvent]>('sessions:changed', host, (event) => {
+          if (['updated', 'mode-change', 'turn-status-change', 'rebound'].includes(event.reason)) handler();
+        }),
+      ];
+      return () => { for (const dispose of disposers) dispose(); };
+    },
+    async file(host, targetEpoch, identity, input) {
+      const scope = await runtimeHostScope(host);
+      if (scope.targetEpoch !== targetEpoch) throw new Error('Client connection has retired');
+      return ipcRenderer.invoke('plugins:files', scope, browserDocumentId, identity, input);
+    },
+    async connection(host) {
+      const scope = await runtimeHostScope(host);
+      return { epoch: scope.targetEpoch, localFiles: runtimeHostMetadataFor(scope)?.profileKind === 'local' };
+    },
     async session(host, targetEpoch, sessionId) {
       const scope = await runtimeHostScope(host);
       if (scope.targetEpoch !== targetEpoch) throw new Error('Client connection has retired');
@@ -1910,22 +1927,6 @@ const makaBridge = {
       return ipcRenderer.invoke(
         'connections:getSnapshot',
         await runtimeHostScope(host),
-      );
-    },
-    async listInvocableSkills(
-      target: DesktopNewTaskTarget,
-      context?: {
-        llmConnectionSlug?: string;
-        model?: string;
-        collaborationMode?: 'agent' | 'plan';
-        permissionMode?: import('@maka/core/settings').ChatDefaultPermissionMode;
-      },
-    ) {
-      return ipcRenderer.invoke(
-        'skills:listInvocable',
-        await runtimeHostScope(target),
-        undefined,
-        { ...context, projectId: target.projectId },
       );
     },
     async getReadiness(
@@ -3743,7 +3744,7 @@ const makaBridge = {
       return invokeSessionRuntimeHost('app:sessionProjectInfo', sessionId);
     },
     openPath(
-      key: 'workspace' | 'skills' | 'memory' | 'project',
+      key: 'workspace' | 'memory' | 'project',
       sessionId?: string,
       host?: DesktopRuntimeHostRef,
     ): Promise<
@@ -3898,90 +3899,6 @@ const makaBridge = {
       return invokeSessionRuntimeHost('artifacts:delete', sessionId, artifactId);
     },
   },
-  skills: {
-    list(host?: DesktopRuntimeHostRef): Promise<SkillEntry[]> {
-      return invokeSelectedRuntimeHost(host, 'skills:list');
-    },
-    listInvocable(
-      sessionId?: string,
-      newSessionContext?: {
-        llmConnectionSlug?: string;
-        model?: string;
-        collaborationMode?: 'agent' | 'plan';
-      },
-    ): Promise<import('@maka/runtime/skill-invocation').InvocableSkillEntry[]> {
-      return sessionId
-        ? invokeSessionRuntimeHost('skills:listInvocable', sessionId, newSessionContext)
-        : invokeActiveRuntimeHost('skills:listInvocable', undefined, newSessionContext);
-    },
-    catalog: {
-      list(host?: DesktopRuntimeHostRef): Promise<BundledSkillCatalogEntry[]> {
-        return invokeSelectedRuntimeHost(host, 'skills:catalog:list');
-      },
-      install(id: string, host?: DesktopRuntimeHostRef): Promise<
-        | { ok: true; skill: SkillEntry }
-        | { ok: false; reason: 'not_found' | 'already_exists' | 'blocked_path' | 'write_failed' }
-      > {
-        return invokeSelectedRuntimeHost(host, 'skills:catalog:install', id);
-      },
-    },
-    sources: {
-      list(host?: DesktopRuntimeHostRef): Promise<ManagedSkillSourceEntry[]> {
-        return invokeSelectedRuntimeHost(host, 'skills:sources:list');
-      },
-      importLocalFile(host?: DesktopRuntimeHostRef): Promise<
-        | { ok: true; source: ManagedSkillSourceEntry }
-        | { ok: false; reason: 'cancelled' | 'invalid_skill' | 'already_exists' | 'blocked_path' | 'write_failed' }
-      > {
-        return invokeSelectedRuntimeHost(host, 'skills:sources:importLocalFile');
-      },
-    },
-    installManaged(sourceId: string, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | { ok: false; reason: 'not_found' | 'already_exists' | 'blocked_path' | 'write_failed' }
-    > {
-      return invokeSelectedRuntimeHost(host, 'skills:installManaged', sourceId);
-    },
-    previewUpdate(skillId: string, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; preview: ManagedSkillUpdatePreview }
-      | { ok: false; reason: 'not_managed' | 'source_missing' | 'metadata_error' | 'blocked_path' | 'read_failed' }
-    > {
-      return invokeSelectedRuntimeHost(host, 'skills:previewUpdate', skillId);
-    },
-    updateManaged(skillId: string, options?: { force?: boolean; expectedCurrentSha256?: string; expectedSourceSha256?: string }, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | { ok: false; reason: 'not_managed' | 'source_missing' | 'local_modified' | 'metadata_error' | 'blocked_path' | 'write_failed' }
-    > {
-      return invokeSelectedRuntimeHost(host, 'skills:updateManaged', skillId, options);
-    },
-    setEnabled(skillId: string, enabled: boolean, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'state_error' | 'write_failed' }
-    > {
-      return invokeSelectedRuntimeHost(host, 'skills:setEnabled', skillId, enabled);
-    },
-    setPinned(skillRef: string, pinned: boolean, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; skill: SkillEntry }
-      | {
-          ok: false;
-          reason: 'not_found' | 'blocked_path' | 'state_error' | 'write_failed';
-        }
-    > {
-      return invokeSelectedRuntimeHost(host, 'skills:setPinned', skillRef, pinned);
-    },
-    delete(idOrRef: string, host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true }
-      | { ok: false; reason: 'not_found' | 'blocked_path' | 'blocked_scope' | 'delete_failed' }
-    > {
-      return invokeSelectedRuntimeHost(host, 'skills:delete', idOrRef);
-    },
-    open(id: string, target: 'file' | 'directory' = 'file', host?: DesktopRuntimeHostRef): Promise<
-      | { ok: true; target: 'file' | 'directory' }
-      | { ok: false; reason: 'invalid_id' | 'missing' | 'blocked_path' | 'not_file' | 'not_directory' | 'open_failed' }
-    > {
-      return invokeSelectedRuntimeHost(host, 'skills:open', id, target);
-    },
-  },
   // Embedded browser (P3). The native WebContentsView floats above the DOM; the
   // renderer panel only mirrors its strip's rect and drives navigation. No
   // automation endpoint/secret is ever exposed here — that stays main-internal.
@@ -4052,12 +3969,11 @@ const makaBridge = {
 // exposeInMainWorld: the bridge is cloned into the main world at expose time,
 // and the exposed clone is sealed against later patching.
 if (process.env.MAKA_E2E === '1' && process.env.MAKA_E2E_USER_DATA_DIR) {
-  type LatchKey = 'newTasks.listInvocableSkills' | 'sessions.list' | 'sessions.observe';
+  type LatchKey = 'sessions.list' | 'sessions.observe';
   const gates = new Map<LatchKey, { promise: Promise<void>; oneShot: boolean }>();
   const releases = new Map<LatchKey, { resolve: () => void; reject: (error: Error) => void }>();
   let nextSessionObservationError: Error | undefined;
   let nextTranscriptOpenError: Error | undefined;
-  const invocableSkillsWaiters = new Map<string, Array<() => void>>();
   const waitForLatch = async (key: LatchKey): Promise<void> => {
     const gate = gates.get(key);
     if (!gate) return;
@@ -4071,10 +3987,6 @@ if (process.env.MAKA_E2E === '1' && process.env.MAKA_E2E_USER_DATA_DIR) {
     await waitForLatch(key);
     return call(...args);
   };
-  makaBridge.newTasks.listInvocableSkills = wrapLatched(
-    makaBridge.newTasks.listInvocableSkills.bind(makaBridge.newTasks),
-    'newTasks.listInvocableSkills',
-  );
   makaBridge.sessions.list = wrapLatched(
     makaBridge.sessions.list.bind(makaBridge.sessions),
     'sessions.list',
@@ -4112,24 +4024,6 @@ if (process.env.MAKA_E2E === '1' && process.env.MAKA_E2E_USER_DATA_DIR) {
     nextTranscriptOpenError = undefined;
     return nextError ? Promise.reject(nextError) : openTranscript(...args);
   };
-  const listInvocableSkills = makaBridge.skills.listInvocable.bind(makaBridge.skills);
-  makaBridge.skills.listInvocable = async (...args) => {
-    try {
-      return await listInvocableSkills(...args);
-    } finally {
-      const sessionId = args[0];
-      if (sessionId) {
-        const waiters = invocableSkillsWaiters.get(sessionId);
-        const resolve = waiters?.shift();
-        if (waiters?.length === 0) invocableSkillsWaiters.delete(sessionId);
-        if (resolve) {
-          // Let consumers of the bridge promise run their state updates before
-          // the test continues from the observed completion.
-          setTimeout(resolve, 0);
-        }
-      }
-    }
-  };
   contextBridge.exposeInMainWorld('makaE2eLatch', {
     arm(key: LatchKey, options?: { oneShot?: boolean }) {
       let resolve: () => void = () => {};
@@ -4140,13 +4034,6 @@ if (process.env.MAKA_E2E === '1' && process.env.MAKA_E2E_USER_DATA_DIR) {
       });
       gates.set(key, { promise, oneShot: options?.oneShot === true });
       releases.set(key, { resolve, reject });
-    },
-    waitForInvocableSkillsCall(sessionId: string) {
-      return new Promise<void>((resolve) => {
-        const waiters = invocableSkillsWaiters.get(sessionId) ?? [];
-        waiters.push(resolve);
-        invocableSkillsWaiters.set(sessionId, waiters);
-      });
     },
     rejectNextSessionObservation(message: string) {
       nextSessionObservationError = new Error(message);

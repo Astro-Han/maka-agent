@@ -172,7 +172,7 @@ pub(super) async fn act(
                     );
                     continue;
                 };
-                let Some(environment) = candidate?
+                let Some((environment, _input_admission)) = candidate?
                     .commit(&host.executions, &owner.invocation.session_id)
                     .await?
                 else {

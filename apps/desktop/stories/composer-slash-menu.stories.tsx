@@ -17,23 +17,10 @@
  * under the License.
  */
 
-/**
- * The composer's `/` menu, on the real Composer with the real Desktop command
- * derivation behind it.
- *
- * Fidelity convention (#1433): app-shell.tsx renders this Composer with
- * `slashCommands` derived from the catalog and `mentionSkills` from Runtime's
- * invocable projection through `ComposerMentionsProvider`. The projection is
- * the real one here, over a bridge that answers the way IPC does; the command
- * list is assembled from the same authorities (see below). See FIDELITY.md.
- *
- * A browser, not a DOM shim: what these assert is where the caret is, which
- * text node it sits in, and whether Astryx's patched `useTriggerMenu` reads a
- * boundary in front of it (`patches/@astryxdesign+core+0.5.2.patch`). None of
- * that exists without a real Selection.
- */
+// Real Composer and target-scoped plugin suggestion publications. Browser
+// assertions cover native selection, caret boundaries and menu identity.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { slashCommandsForSurface } from '@maka/core/slash-command-catalog';
@@ -42,6 +29,7 @@ import {
   ComposerMentionsProvider,
   useComposerMentionsContext,
 } from '../src/renderer/composer-mentions';
+import { usePublishComposerSuggestions } from '../src/renderer/features/client-plugins/testing';
 import { desktopSlashCommandAvailability } from '../src/renderer/desktop-slash-command';
 import { getShellCopy } from '../src/renderer/locales/shell-copy';
 import { withScopedMakaBridge } from './maka-bridge';
@@ -68,52 +56,29 @@ function slashCommandOptions(state: { hasSession: boolean; streaming: boolean })
     .map(({ id }) => ({ id, ...copy[id] }));
 }
 
-/** What Runtime's invocable projection answers for this Session. */
-const invocableSkills = [
-  { ref: 'project/project-only', id: 'project-only', name: 'Project Only', description: 'Project-scoped suggestion.' },
-  { ref: 'workspace/workspace-only', id: 'workspace-only', name: 'Workspace Only', description: 'Maka workspace suggestion.' },
+const suggestions = [
+  { id: 'project-only', name: 'Project Only', description: 'Project-scoped suggestion.', insertText: '/skill:project-only ' },
+  { id: 'workspace-only', name: 'Workspace Only', description: 'Workspace suggestion.', insertText: '/skill:workspace-only ' },
 ];
+let refreshPublication: (() => void) | undefined;
+let publications = 0;
 
-/** Publish a Session 'updated' event, the way a thinking-level change does. */
-let publishSessionUpdate: (() => void) | undefined;
-/** Projection loads served so far, so a story can wait for one to land. */
-let projectionLoads = 0;
-let holdNextProjection = false;
-let releaseHeldProjection: (() => void) | undefined;
-
-/**
- * The bridge `useComposerMentions` reads. A fresh array per call on purpose:
- * a real IPC round trip never hands back the object it handed back last time,
- * so holding the projection's identity steady is work the renderer has to do.
- */
-const loadProjection = async () => {
-  projectionLoads += 1;
-  if (holdNextProjection) {
-    holdNextProjection = false;
-    await new Promise<void>((resolve) => {
-      releaseHeldProjection = resolve;
-    });
-    releaseHeldProjection = undefined;
-  }
-  return invocableSkills.map((skill) => ({ ...skill }));
-};
+function SuggestionPublisher() {
+  const publish = usePublishComposerSuggestions();
+  useEffect(() => {
+    const owner = publish?.(suggestions);
+    publications += 1;
+    refreshPublication = () => {
+      owner?.update(suggestions.map((item) => ({ ...item })));
+      publications += 1;
+    };
+    return () => { refreshPublication = undefined; owner?.dispose(); };
+  }, [publish]);
+  return null;
+}
 
 const makaBridge = {
-  skills: { listInvocable: loadProjection },
-  newTasks: {
-    listInvocableSkills: loadProjection,
-    searchFiles: async () => ({ ok: true, files: [] }),
-    subscribeChanges: () => () => {},
-  },
-  sessions: {
-    subscribeChanges(listener: (event: { sessionId: string; reason: string }) => void) {
-      publishSessionUpdate = () => listener({ sessionId: SESSION_ID, reason: 'updated' });
-      return () => {
-        publishSessionUpdate = undefined;
-      };
-    },
-  },
-  mcp: { subscribeChanges: () => () => {} },
+  newTasks: { searchFiles: async () => ({ ok: true, files: [] }) },
   workspace: { searchFiles: async () => ({ ok: true, files: [] }) },
 };
 
@@ -134,11 +99,8 @@ function SlashMenuComposer({
   return (
     <Composer
       draftKey="story-slash-menu"
-      mentionSkills={mentions?.mentionSkills}
-      mentionSkillsUnavailable={mentions?.mentionSkillsUnavailable}
-      mentionSkillsLoading={mentions?.mentionSkillsLoading}
       onSearchMentionFiles={mentions?.searchMentionFiles}
-      slashCommands={slashCommands}
+      slashCommands={[...slashCommands, ...(mentions?.suggestions ?? [])]}
       onSend={() => {}}
       onStop={() => {}}
     />
@@ -155,46 +117,17 @@ function SlashMenuHarness({
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', height: 520, padding: 24 }}>
       <ComposerMentionsProvider
-        skillCatalogRevision={0}
+        scope={hasSession ? SESSION_ID : 'new-task'}
         sessionId={hasSession ? SESSION_ID : undefined}
-        projectPath="/workspace/maka-agent"
         newTaskTarget={
           hasSession
             ? undefined
             : { profileId: 'profile-local', hostId: 'host-local', projectId: 'project-maka' }
         }
       >
+        <SuggestionPublisher />
         <SlashMenuComposer hasSession={hasSession} streaming={streaming} />
       </ComposerMentionsProvider>
-    </div>
-  );
-}
-
-function ContextSwitchHarness(): React.ReactElement {
-  const [hasSession, setHasSession] = useState(true);
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 520, padding: 24 }}>
-      <button
-        type="button"
-        onClick={() => {
-          holdNextProjection = true;
-          setHasSession(false);
-        }}
-      >
-        Switch to new task
-      </button>
-      <div style={{ display: 'flex', flex: 1, alignItems: 'flex-end' }}>
-        <ComposerMentionsProvider
-          skillCatalogRevision={0}
-          sessionId={hasSession ? SESSION_ID : undefined}
-          projectPath="/workspace/maka-agent"
-          newTaskTarget={hasSession
-            ? undefined
-            : { profileId: 'profile-local', hostId: 'host-local', projectId: 'project-maka' }}
-        >
-          <SlashMenuComposer hasSession={hasSession} streaming={false} />
-        </ComposerMentionsProvider>
-      </div>
     </div>
   );
 }
@@ -257,34 +190,31 @@ function caretOffset(composer: HTMLElement): number {
 }
 
 // Real path: 主窗口的新任务 composer（还没有 Session）→ 在空草稿开头输入 `/`。
-// Only the commands that need no Session are offered; the Skill projection is
-// still the second group.
+// Only commands that need no Session are offered, alongside plugin suggestions.
 export const BeforeAnySessionExists: Story = {
   args: { hasSession: false },
   play: async ({ canvasElement }) => {
     const menu = await openMenu(canvasElement);
     const commands = within(menu).getByRole('group', { name: '命令' });
     const options = within(commands).getAllByRole('option');
-    await expect(options).toHaveLength(2);
-    await expect(options.map((option) => option.getAttribute('aria-label') ?? option.textContent))
+    await expect(options).toHaveLength(4);
+    await expect(options.slice(0, 2).map((option) => option.getAttribute('aria-label') ?? option.textContent))
       .toEqual([expect.stringContaining('/graph'), expect.stringContaining('/swarm')]);
     await expect(within(options[0]!).getByText('使用 Graph')).toBeVisible();
   },
 };
 
 // Real path: 打开一个已有 Session → 在 composer 的空草稿开头输入 `/`。
-// Commands first, Skills second, and each command row carries the token a user
-// would otherwise have to know how to type.
+// Commands and plugin completions carry the exact text they insert.
 export const InAnActiveSession: Story = {
   play: async ({ canvasElement }) => {
     const menu = await openMenu(canvasElement);
     const groups = within(menu).getAllByRole('group');
-    await expect(groups).toHaveLength(2);
+    await expect(groups).toHaveLength(1);
     await expect(groups[0]).toHaveAttribute('aria-label', '命令');
-    await expect(groups[1]).toHaveAttribute('aria-label', 'Skills');
-    await expect(within(groups[0]!).getAllByRole('option')).toHaveLength(4);
+    await expect(within(groups[0]!).getAllByRole('option')).toHaveLength(6);
     await expect(within(groups[0]!).getByText('/compact')).toBeVisible();
-    await expect(within(groups[1]!).getByText('Workspace Only')).toBeVisible();
+    await expect(within(groups[0]!).getByText('Workspace Only')).toBeVisible();
   },
 };
 
@@ -303,41 +233,16 @@ export const PickingACommandWritesItsInvocation: Story = {
   },
 };
 
-// Real path: select a Skill with `/`, reopen the picker, then delete the chip
-// and select it again. The live selection and token deletion need Chromium.
-export const SelectedSkillsLeaveThePickerUntilRemoved: Story = {
+// Real path: choose a plugin suggestion from the new-task slash menu.
+// It writes plain draft text, without creating a legacy Skill chip or sending.
+export const PickingAPluginSuggestionWritesDraftText: Story = {
   play: async ({ canvasElement }) => {
-    const composer = editor(canvasElement);
     const menu = await openMenu(canvasElement);
     await userEvent.click(within(menu).getByRole('option', { name: /Project Only/ }));
-    const chips = () => composer.querySelectorAll('[data-astryx-token-value="/skill:project-only"]');
-    await waitFor(() => expect(chips()).toHaveLength(1));
-
-    await userEvent.keyboard(' /');
-    const remaining = await overlay().findByRole('listbox', { name: MENU_LABEL });
-    await expect(within(remaining).queryByRole('option', { name: /Project Only/ })).toBeNull();
-    await expect(within(remaining).getByRole('option', { name: /Workspace Only/ })).toBeVisible();
-
-    // An explicit query must not offer the already-staged Skill either.
-    await userEvent.keyboard('skill:project-only');
-    await waitFor(() => expect(overlay().queryByRole('option', { name: /Project Only/ })).toBeNull());
-    await userEvent.keyboard('{Escape}');
-    await userEvent.clear(composer);
-    await waitFor(() => expect(chips()).toHaveLength(0));
-
-    // With the previous chip removed, the query itself is not a selection.
-    await userEvent.keyboard('/skill:project-only');
-    const restored = await overlay().findByRole('option', { name: /Project Only/ });
-    await userEvent.click(restored);
-    await waitFor(() => expect(chips()).toHaveLength(1));
-
-    // Reopen through the other entry point; it shares the same filtered list.
-    await userEvent.click(overlay().getByRole('button', { name: '添加上下文' }));
-    const contextMenu = overlay().getByRole('menu', { name: '添加上下文' });
-    await userEvent.click(within(contextMenu).getByRole('menuitem', { name: /选择技能/ }));
-    const reopened = await overlay().findByRole('listbox', { name: MENU_LABEL });
-    await expect(within(reopened).queryByRole('option', { name: /Project Only/ })).toBeNull();
-    await expect(within(reopened).getByRole('option', { name: /Workspace Only/ })).toBeVisible();
+    const composer = editor(canvasElement);
+    await waitFor(() => expect(composer.textContent).toBe('/skill:project-only '));
+    await expect(composer.querySelector('[data-astryx-token-value]')).toBeNull();
+    await expect(overlay().queryByRole('listbox', { name: MENU_LABEL })).not.toBeInTheDocument();
   },
 };
 
@@ -396,28 +301,25 @@ export const ABlockBreakIsALineBoundary: Story = {
 
     await waitFor(() => expect(composer.innerText).toBe('first line\n/'));
     const menu = await overlay().findByRole('listbox', { name: MENU_LABEL });
-    // Skills only: the slash does not open the draft, so it addresses no
-    // command — `slashCommandQuery` owns that rule and is tested on its own.
-    await expect(within(menu).getByRole('group', { name: 'Skills' })).toBeVisible();
-    await expect(within(menu).queryByRole('group', { name: '命令' })).not.toBeInTheDocument();
+    // Draft suggestions work within text; executable commands require the start.
+    await expect(within(menu).getByRole('option', { name: /Project Only/ })).toBeVisible();
+    await expect(within(menu).queryByRole('option', { name: /压缩上下文/ })).toBeNull();
   },
 };
 
-// Real path: `/` 菜单开着时 Session 发出 'updated'（改 thinking level、MCP 变更），
-// Skill 投影随之重载。
-// #2667: republishing the projection with the same content used to alternate
-// the popup. The menu element and its Skills group must survive as the same
+// Real path: a plugin republishes suggestions while the slash menu is open.
+// Same-content publication updates must preserve the menu and its group as the same
 // nodes — a menu torn down and rebuilt loses the highlighted item and the
 // keyboard position under the user's hands.
 export const SurvivesASameContentProjectionRefresh: Story = {
   play: async ({ canvasElement }) => {
     const menu = await openMenu(canvasElement);
-    const skillsGroup = within(menu).getByRole('group', { name: 'Skills' });
+    const suggestionGroup = within(menu).getByRole('group', { name: '命令' });
     const container = menu.parentElement;
     if (!container) throw new Error('slash menu container is missing');
 
-    const removals = { menu: 0, skillsGroup: 0 };
-    const record = (mutations: MutationRecord[], watched: Node, key: 'menu' | 'skillsGroup') => {
+    const removals = { menu: 0, suggestionGroup: 0 };
+    const record = (mutations: MutationRecord[], watched: Node, key: 'menu' | 'suggestionGroup') => {
       for (const mutation of mutations) {
         for (const node of mutation.removedNodes) if (node === watched) removals[key] += 1;
       }
@@ -427,15 +329,15 @@ export const SurvivesASameContentProjectionRefresh: Story = {
     // about this menu's identity.
     const menuObserver = new MutationObserver((mutations) => record(mutations, menu, 'menu'));
     const groupObserver = new MutationObserver((mutations) =>
-      record(mutations, skillsGroup, 'skillsGroup'),
+      record(mutations, suggestionGroup, 'suggestionGroup'),
     );
     menuObserver.observe(container, { childList: true });
     groupObserver.observe(menu, { childList: true });
     try {
       for (let round = 0; round < 3; round += 1) {
-        const before = projectionLoads;
-        publishSessionUpdate?.();
-        await waitFor(() => expect(projectionLoads).toBeGreaterThan(before));
+        const before = publications;
+        refreshPublication?.();
+        await waitFor(() => expect(publications).toBeGreaterThan(before));
         await new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         });
@@ -444,53 +346,13 @@ export const SurvivesASameContentProjectionRefresh: Story = {
       // Drain the last queued batch before closing the window this story is
       // about; polling a monotonic counter cannot turn a failure into a pass.
       record(menuObserver.takeRecords(), menu, 'menu');
-      record(groupObserver.takeRecords(), skillsGroup, 'skillsGroup');
+      record(groupObserver.takeRecords(), suggestionGroup, 'suggestionGroup');
       menuObserver.disconnect();
       groupObserver.disconnect();
     }
 
-    await expect(removals).toEqual({ menu: 0, skillsGroup: 0 });
+    await expect(removals).toEqual({ menu: 0, suggestionGroup: 0 });
     await expect(menu.isConnected).toBe(true);
-    await expect(skillsGroup.isConnected).toBe(true);
-  },
-};
-
-// Real path: leaving an existing Session for a new-task composer. The previous
-// Session's populated Skill projection must stop being actionable in the same
-// render; the new surface stays busy until its own projection resolves.
-export const ContextSwitchStartsWithALoadingCatalog: Story = {
-  render: () => <ContextSwitchHarness />,
-  play: async ({ canvasElement }) => {
-    const page = overlay();
-    await waitFor(() => expect(projectionLoads).toBeGreaterThan(0));
-    await userEvent.click(within(canvasElement).getByRole('button', {
-      name: 'Switch to new task',
-    }));
-    await userEvent.click(page.getByRole('button', { name: '添加上下文' }));
-    const menu = page.getByRole('menu', { name: '添加上下文' });
-    const skillsRow = within(menu).getByRole('menuitem', { name: /选择技能/ });
-
-    await waitFor(() => expect(skillsRow).toHaveAttribute('aria-busy', 'true'));
-    await expect(skillsRow).not.toHaveAttribute('aria-disabled', 'true');
-    await userEvent.click(skillsRow);
-    await waitFor(() => expect(menu).toBeVisible(), { timeout: 5_000 });
-    await expect(editor(canvasElement)).toHaveTextContent('');
-    await expect(page.queryByRole('listbox', { name: /技能/ })).not.toBeInTheDocument();
-
-    releaseHeldProjection?.();
-    await waitFor(() => {
-      const settledRow = within(
-        page.getByRole('menu', { name: '添加上下文' }),
-      ).getByRole('menuitem', { name: /选择技能/ });
-      expect(settledRow).not.toHaveAttribute('aria-busy');
-    });
-    const settledRow = within(
-      page.getByRole('menu', { name: '添加上下文' }),
-    ).getByRole('menuitem', { name: /选择技能/ });
-    await userEvent.click(settledRow);
-    await waitFor(
-      () => expect(page.getByRole('listbox', { name: /技能/ })).toBeVisible(),
-      { timeout: 5_000 },
-    );
+    await expect(suggestionGroup.isConnected).toBe(true);
   },
 };

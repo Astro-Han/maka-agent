@@ -58,12 +58,10 @@ import {
   readRuntimeHostAgentGraphEpochs,
   readRuntimeHostConnectionCatalog,
   type RuntimeHostConnectionCatalogSnapshot,
-  readRuntimeHostInvocableSkills,
   readRuntimeHostResources,
   readRuntimeHostProjectDetails,
   readRuntimeHostProjects,
   readRuntimeHostSessions,
-  readRuntimeHostSkillCatalog,
 } from "@maka/runtime-host/client";
 import {
   ARTIFACT_INGEST_CHUNK_MAX_BYTES,
@@ -138,16 +136,6 @@ import {
   type SessionLifecycleState,
   type SessionMetadataPatch,
   type SessionUpdateResult,
-  type SkillCatalogWorkspaceContext,
-  type SkillCatalogInvocableItem,
-  type SkillCatalogInvocableTarget,
-  type SkillCatalogMutateInput,
-  type SkillCatalogMutateResult,
-  type SkillCatalogPageItem,
-  type SkillCatalogPreviewUpdateInput,
-  type SkillCatalogPreviewUpdateResult,
-  type SkillCatalogRevision,
-  type SkillCatalogView,
   type SubscriptionFrame,
   type TurnInterruptInput,
   type TurnInterruptResult,
@@ -231,13 +219,6 @@ export interface DesktopPricingSnapshot {
   readonly connectionId: string;
   readonly revision: number;
   readonly entries: readonly EffectivePricingEntry[];
-}
-
-export interface DesktopSkillCatalogSnapshot {
-  readonly revision: SkillCatalogRevision;
-  readonly view: SkillCatalogView;
-  readonly items: readonly SkillCatalogPageItem[];
-  readonly workspace: WorkspaceProjection;
 }
 
 export interface DesktopPricingMutationInput {
@@ -597,59 +578,6 @@ export class DesktopRuntimeHostClient {
     provider: OperationInput<"oauth.enrollment.query">["provider"],
   ): Promise<OperationOutput<"oauth.enrollment.query">> {
     return this.request("oauth.enrollment.query", { provider });
-  }
-
-  async loadSkillCatalog(
-    context: SkillCatalogWorkspaceContext,
-    view: SkillCatalogView,
-  ): Promise<DesktopSkillCatalogSnapshot> {
-    this.#assertOpen();
-    try {
-      const snapshot = await readRuntimeHostSkillCatalog(
-        this.connection,
-        context,
-        view,
-      );
-      return {
-        revision: snapshot.revision,
-        view: snapshot.view,
-        items: snapshot.items,
-        workspace: snapshot.resolvedWorkspace,
-      };
-    } catch (error) {
-      if (!(error instanceof RuntimeHostCatalogReadError)) throw error;
-      throw new DesktopRuntimeHostClientError(
-        "skill_catalog_unstable",
-        "Skill catalog kept changing while Desktop read it",
-      );
-    }
-  }
-
-  async listInvocableSkills(
-    target: SkillCatalogInvocableTarget,
-  ): Promise<readonly SkillCatalogInvocableItem[]> {
-    this.#assertOpen();
-    try {
-      return await readRuntimeHostInvocableSkills(this.connection, target);
-    } catch (error) {
-      if (!(error instanceof RuntimeHostCatalogReadError)) throw error;
-      throw new DesktopRuntimeHostClientError(
-        "skill_catalog_unstable",
-        "Invocable Skill catalog kept changing while Desktop read it",
-      );
-    }
-  }
-
-  mutateSkillCatalog(
-    input: SkillCatalogMutateInput,
-  ): Promise<SkillCatalogMutateResult> {
-    return this.request("skill.catalog.mutate", input);
-  }
-
-  previewSkillUpdate(
-    input: SkillCatalogPreviewUpdateInput,
-  ): Promise<SkillCatalogPreviewUpdateResult> {
-    return this.request("skill.catalog.preview-update", input);
   }
 
   async loadPricingSnapshot(): Promise<DesktopPricingSnapshot> {

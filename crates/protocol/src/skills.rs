@@ -17,104 +17,21 @@
  * under the License.
  */
 
-use crate::{
-    ProtocolError, Result, codec,
-    session::{CollaborationMode, PermissionMode, WorkspaceTarget},
-};
-use serde::{Deserialize, Serialize};
+use crate::{ProtocolError, Result, codec, session::WorkspaceTarget};
 use serde_json::Value;
 
-pub const MAX_PAGE_BYTES: usize = 48 * 1024;
-pub const MAX_ITEMS: usize = 128;
+pub use maka_skills::api::*;
 mod catalog;
-pub use catalog::*;
 mod governance;
-pub use governance::*;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkspaceContext {
-    pub workspace: WorkspaceTarget,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum InvocableTarget {
-    Session {
-        session_id: String,
-    },
-    NewSession {
-        context: WorkspaceContext,
-        collaboration_mode: CollaborationMode,
-        permission_mode: PermissionMode,
-    },
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum InvocableInput {
-    Start {
-        target: InvocableTarget,
-    },
-    Continue {
-        target: InvocableTarget,
-        revision: String,
-        cursor: String,
-    },
-}
-impl InvocableInput {
-    pub fn target(&self) -> &InvocableTarget {
-        match self {
-            Self::Start { target } | Self::Continue { target, .. } => target,
-        }
-    }
-    pub fn uses_host_paths(&self) -> bool {
-        matches!(
-            self.target(),
-            InvocableTarget::NewSession {
-                context: WorkspaceContext {
-                    workspace: WorkspaceTarget::HostPath { .. }
-                },
-                ..
-            }
-        )
-    }
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InvocableItem {
-    #[serde(rename = "ref")]
-    pub reference: String,
-    pub id: String,
-    pub name: String,
-    pub description: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum InvocableResult {
-    Page {
-        revision: String,
-        items: Vec<InvocableItem>,
-        next_cursor: Option<String>,
-    },
-    RevisionChanged {
-        expected_revision: String,
-        actual_revision: String,
-    },
-}
+mod mutation;
+pub use mutation::{decode_mutate_input, decode_mutate_output};
+mod import;
+mod path;
+pub use import::{decode_import_input, decode_import_output};
+mod preview;
+pub use catalog::{decode_catalog_input, decode_catalog_output};
+pub use path::{decode_path_input, decode_path_output};
+pub use preview::{decode_preview_input, decode_preview_output};
 
 pub fn decode_invocable_input(value: &Value) -> Result<InvocableInput> {
     let input: InvocableInput = serde_json::from_value(value.clone()).map_err(invalid)?;
@@ -192,6 +109,18 @@ fn validate_workspace(workspace: &WorkspaceTarget) -> Result<()> {
             }
         }
     }
+}
+fn validate_projection(workspace: &maka_runtime::execution::WorkspaceProjection) -> Result<()> {
+    validate_workspace(&workspace.target)?;
+    validate_workspace(&WorkspaceTarget::HostPath {
+        path: workspace.host_cwd.clone(),
+    })?;
+    if let WorkspaceTarget::HostPath { path } = &workspace.target
+        && path != &workspace.host_cwd
+    {
+        return Err(invalid("Workspace path mismatch"));
+    }
+    Ok(())
 }
 fn revision(value: &str) -> Result<()> {
     let Some(hex) = value.strip_prefix("sha256:") else {

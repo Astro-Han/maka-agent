@@ -17,199 +17,68 @@
  * under the License.
  */
 
-import { strict as assert } from 'node:assert';
-import { test, type TestContext } from 'node:test';
-import { parseHTML } from 'linkedom';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { act, createElement, useLayoutEffect } from 'react';
-import { createRoot } from 'react-dom/client';
-import type { InvocableSkillEntry } from '@maka/runtime/skill-invocation';
-import {
-  ComposerMentionsProvider,
-  useComposerMentionsContext,
-  type ComposerMentions,
-} from '../../renderer/composer-mentions.js';
+import type { ComposerPublication, ComposerSuggestion } from '@maka-agent/plugin-sdk/client';
+import { ComposerMentionsProvider, useComposerMentionsContext, type ComposerMentions } from '../../renderer/composer-mentions.js';
+import { usePublishComposerSuggestions } from '../../renderer/features/client-plugins/testing.js';
+import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 
-interface CatalogObservation {
-  sessionId: string;
-  skills: ComposerMentions['mentionSkills'];
-  loading: boolean;
-  unavailable: boolean;
-}
-
-const skillA: InvocableSkillEntry = {
-  ref: 'workspace:skill-a',
-  id: 'skill-a',
-  name: 'Skill A',
-  description: 'Available in session A.',
-};
-const skillB: InvocableSkillEntry = {
-  ref: 'workspace:skill-b',
-  id: 'skill-b',
-  name: 'Skill B',
-  description: 'Available in session B.',
-};
-
-function installCatalogRenderer(t: TestContext) {
-  const originalGlobals = {
-    document: globalThis.document,
-    window: globalThis.window,
-    HTMLElement: globalThis.HTMLElement,
-    HTMLIFrameElement: globalThis.HTMLIFrameElement,
-    IS_REACT_ACT_ENVIRONMENT: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
-      .IS_REACT_ACT_ENVIRONMENT,
-  };
-  const { document, window } = parseHTML('<div id="root"></div>');
-  Object.assign(globalThis, {
-    document,
-    window,
-    HTMLElement: window.HTMLElement,
-    HTMLIFrameElement: window.HTMLIFrameElement ?? class HTMLIFrameElement {},
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-
-  const pending: Array<{
-    sessionId: string;
-    resolve(skills: InvocableSkillEntry[]): void;
-  }> = [];
-  (window as unknown as { maka: unknown }).maka = {
-    skills: {
-      listInvocable: (sessionId: string) => new Promise<InvocableSkillEntry[]>((resolve) => {
-        pending.push({ sessionId, resolve });
-      }),
-    },
-    sessions: { subscribeChanges: () => () => {} },
-    mcp: { subscribeChanges: () => () => {} },
-  };
-
-  const observations: CatalogObservation[] = [];
-  function Consumer({ sessionId }: { sessionId: string }) {
-    const mentions = useComposerMentionsContext();
-    assert.ok(mentions);
+test('composer publications retire by owner and cannot cross a target switch or replace the draft', async (t) => {
+  const { root } = installReactRenderer();
+  t.after(() => cleanupFakeDom());
+  let publish: ((items: readonly ComposerSuggestion[]) => ComposerPublication) | undefined;
+  let observed: ComposerMentions | undefined;
+  const observations: string[][] = [];
+  let draft: HTMLInputElement | undefined;
+  function View() {
+    publish = usePublishComposerSuggestions();
+    const value = useComposerMentionsContext();
     useLayoutEffect(() => {
-      // Record what a consumer sees before the provider's passive effect can
-      // replace the previous context's catalog and hide a missing render guard.
-      observations.push({
-        sessionId,
-        skills: mentions.mentionSkills,
-        loading: mentions.mentionSkillsLoading,
-        unavailable: mentions.mentionSkillsUnavailable,
-      });
+      observed = value;
+      observations.push(value?.suggestions.map((item) => item.insertText) ?? []);
     });
-    return null;
+    return createElement('input', {defaultValue:'unfinished draft', ref: (node: HTMLInputElement | null) => { if (node) draft = node; }});
   }
-
-  const container = document.querySelector('#root');
-  assert.ok(container);
-  const root = createRoot(container);
-  t.after(async () => {
-    try {
-      await act(() => root.unmount());
-    } finally {
-      Object.assign(globalThis, originalGlobals);
-    }
+  const render = (scope: string) => act(() => root.render(createElement(ComposerMentionsProvider, {
+    scope, sessionId:scope, children:createElement(View),
+  })));
+  await render('a');
+  assert.ok(draft);
+  const originalDraft = draft;
+  let first!: ComposerPublication;
+  let second!: ComposerPublication;
+  const originalPublisher = publish!;
+  const item = (text: string): ComposerSuggestion => ({id:'same-id',name:text,insertText:text});
+  await act(() => {
+    first = originalPublisher([item('/first ')]);
+    second = originalPublisher([item('/second ')]);
   });
-
-  return {
-    observations,
-    latest() {
-      const observation = observations.at(-1);
-      assert.ok(observation);
-      return observation;
-    },
-    pendingRequestCount() {
-      return pending.length;
-    },
-    async render(sessionId: string, skillCatalogRevision = 0, projectPath?: string) {
-      await act(() => root.render(createElement(ComposerMentionsProvider, {
-        sessionId,
-        projectPath,
-        skillCatalogRevision,
-        children: createElement(Consumer, { sessionId }),
-      })));
-    },
-    async settleNext(sessionId: string, skills: InvocableSkillEntry[]) {
-      const request = pending.shift();
-      assert.ok(request, 'A catalog request must be waiting for its response.');
-      assert.equal(request.sessionId, sessionId);
-      await act(async () => request.resolve(skills));
-    },
-  };
-}
-
-for (const previous of [
-  { name: 'populated', skills: [skillA] },
-  { name: 'empty', skills: [] },
-]) {
-  test(`a session switch immediately replaces the ${previous.name} catalog with loading`, async (t) => {
-    const renderer = installCatalogRenderer(t);
-    await renderer.render('session-a');
-    await renderer.settleNext('session-a', previous.skills);
-    assert.deepEqual(renderer.latest(), {
-      sessionId: 'session-a',
-      skills: previous.skills,
-      loading: false,
-      unavailable: previous.skills.length === 0,
-    });
-
-    const beforeSwitch = renderer.observations.length;
-    await renderer.render('session-b');
-    const firstInSessionB = renderer.observations
-      .slice(beforeSwitch)
-      .find((observation) => observation.sessionId === 'session-b');
-    const loadingCatalog = {
-      sessionId: 'session-b',
-      skills: [],
-      loading: true,
-      unavailable: false,
-    };
-    assert.deepEqual(firstInSessionB, loadingCatalog);
-    assert.deepEqual(renderer.latest(), loadingCatalog);
-
-    await renderer.settleNext('session-b', [skillB]);
-    assert.deepEqual(renderer.latest(), {
-      sessionId: 'session-b',
-      skills: [skillB],
-      loading: false,
-      unavailable: false,
-    });
+  assert.deepEqual(observed!.suggestions.map((item) => item.insertText), ['/first ', '/second ']);
+  assert.notEqual(observed!.suggestions[0].id, observed!.suggestions[1].id);
+  const snapshot = observed!.suggestions;
+  await act(() => first.update([item('/first ')]));
+  assert.equal(observed!.suggestions, snapshot, 'same-content refresh keeps the open menu stable');
+  await act(() => first.update([item('/revised ')]));
+  assert.equal(observed!.suggestions[0].id, snapshot[0].id);
+  assert.equal(observed!.suggestions[0].insertText, '/revised ');
+  await act(() => first.dispose());
+  await act(() => first.update([item('/retired ')]));
+  assert.deepEqual(observed!.suggestions.map((item) => item.insertText), ['/second ']);
+  const before = observations.length;
+  await render('b');
+  assert.ok(observations.slice(before).every((items) => items.length === 0));
+  assert.equal(draft, originalDraft);
+  assert.equal(draft.value, 'unfinished draft');
+  let current!: ComposerPublication;
+  await act(() => {
+    current = publish!([item('/current ')]);
+    second.dispose();
+    const late = originalPublisher([item('/late ')]);
+    late.dispose();
   });
-}
-
-test('a same-context refresh keeps the settled skills visible until it resolves', async (t) => {
-  const renderer = installCatalogRenderer(t);
-  await renderer.render('session-a');
-  await renderer.settleNext('session-a', [skillA]);
-
-  // A catalog revision reloads the same backend surface without changing its key.
-  await renderer.render('session-a', 1);
-  assert.deepEqual(renderer.latest(), {
-    sessionId: 'session-a',
-    skills: [skillA],
-    loading: true,
-    unavailable: false,
-  });
-
-  await renderer.settleNext('session-a', [skillB]);
-  assert.deepEqual(renderer.latest(), {
-    sessionId: 'session-a',
-    skills: [skillB],
-    loading: false,
-    unavailable: false,
-  });
-});
-
-test('resolving the project path for an existing session keeps its catalog settled', async (t) => {
-  const renderer = installCatalogRenderer(t);
-  await renderer.render('session-a');
-  await renderer.settleNext('session-a', [skillA]);
-
-  await renderer.render('session-a', 0, '/workspace/project-a');
-
-  assert.deepEqual(renderer.latest(), {
-    sessionId: 'session-a',
-    skills: [skillA],
-    loading: false,
-    unavailable: false,
-  });
-  assert.equal(renderer.pendingRequestCount(), 0);
+  assert.deepEqual(observed!.suggestions.map((item) => item.insertText), ['/current ']);
+  await act(() => current.dispose());
+  assert.deepEqual(observed!.suggestions, []);
 });

@@ -43,7 +43,7 @@ impl Executions {
         let mut prepared = None;
         let mut queued: Option<(
             maka_runtime::event::Invocation,
-            Result<super::skills::PreparedSkillInput>,
+            Result<super::input::PreparedMessageInput>,
         )> = None;
         loop {
             let admission = self.lock_admission().await;
@@ -158,17 +158,15 @@ impl Executions {
                 .find(|run| run.invocation.session_id == input.session_id)
                 .map(|run| run.invocation.clone());
             if let Some(invocation) = active {
-                let skills = if source.submitted_intent.is_none()
-                    && source.message.content.text.contains("/skill:")
-                {
+                let (skills, _input_admission) = if source.submitted_intent.is_none() {
                     match queued.take() {
                         Some((owner, candidate)) if owner == invocation => {
-                            let Some(candidate) =
+                            let Some((candidate, admission)) =
                                 candidate?.commit(self, &input.session_id).await?
                             else {
                                 continue;
                             };
-                            Some(candidate)
+                            (Some(candidate), admission)
                         }
                         _ => {
                             let session = self
@@ -193,7 +191,7 @@ impl Executions {
                             };
                             drop(admission);
                             let candidate = self
-                                .prepare_skill_input(
+                                .prepare_message_input(
                                     session,
                                     source.message.content.clone(),
                                     connection_id,
@@ -205,7 +203,7 @@ impl Executions {
                         }
                     }
                 } else {
-                    None
+                    (None, None)
                 };
                 return self
                     .queue_message(epoch, invocation, source, root_id, skills)
@@ -241,7 +239,10 @@ impl Executions {
                                 &input.session_id,
                                 Some(connection_id),
                                 maka_client_capability::BindingMode::Strict,
-                                input.turn_orchestration.as_ref().map(|intent| intent.mode),
+                                input
+                                    .turn_orchestration
+                                    .as_ref()
+                                    .map(|intent| intent.mode.clone()),
                             )
                             .await?;
                         environment
@@ -256,7 +257,9 @@ impl Executions {
                 continue;
             };
             let (environment, content, selection) = candidate?;
-            let Some(environment) = environment.commit(self, &input.session_id).await? else {
+            let Some((environment, _input_admission)) =
+                environment.commit(self, &input.session_id).await?
+            else {
                 continue;
             };
             let skill_invocation = match selection {
@@ -275,7 +278,7 @@ impl Executions {
                     TurnStartInput {
                         session_id: input.session_id,
                         turn_id: Uuid::new_v4().to_string(),
-                        content: input.content,
+                        content: content.clone().into(),
                         // Original skill intent stays in the source identity.
                         // Preparation below uses this Run's actual frozen tools.
                         skill_ids: None,

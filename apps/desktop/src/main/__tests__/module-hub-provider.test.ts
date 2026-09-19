@@ -26,7 +26,6 @@ import {
   createModuleHubCommandPort,
   ModuleHubProvider,
   ModuleHubScheduledTasksBoundary,
-  ModuleHubSkillCatalogRevisionBoundary,
   ModuleHubServicesProvider,
   createFakeModuleHubServices,
   type ModuleHubCommands,
@@ -103,15 +102,12 @@ test('controller scoping removes shell-wide work from Module Hub updates', async
     scopedShell: 0,
     scopedUnrelated: 0,
     scopedReader: 0,
-    scopedSkillReader: 0,
   };
   let legacyObservedTasks: readonly ScheduledTask[] = [];
   let scopedObservedTasks: readonly ScheduledTask[] = [];
-  let scopedObservedSkillRevision = -1;
   const controllerInput = {
     selection: { section: 'sessions' } as const,
     selectModule: () => undefined,
-    useSkillInChat: () => undefined,
     openSession: () => undefined,
     appendComposerText: () => undefined,
     captureActiveComposerClaim: () => undefined,
@@ -143,12 +139,6 @@ test('controller scoping removes shell-wide work from Module Hub updates', async
     return null;
   }
 
-  function ScopedSkillCatalogProbe(props: { skillCatalogRevision: number }) {
-    renders.scopedSkillReader += 1;
-    scopedObservedSkillRevision = props.skillCatalogRevision;
-    return null;
-  }
-
   function LegacyShellReplica() {
     renders.legacyShell += 1;
     const controller = useModuleHubController(controllerInput);
@@ -177,10 +167,6 @@ test('controller scoping removes shell-wide work from Module Hub updates', async
         createElement(ModuleHubScheduledTasksBoundary, {
           render: (scheduledTasks) =>
             createElement(ScopedScheduledTasksProbe, { scheduledTasks }),
-        }),
-        createElement(ModuleHubSkillCatalogRevisionBoundary, {
-          render: (skillCatalogRevision) =>
-            createElement(ScopedSkillCatalogProbe, { skillCatalogRevision }),
         }),
       ),
     );
@@ -222,7 +208,6 @@ test('controller scoping removes shell-wide work from Module Hub updates', async
     scopedShell: baseline.scopedShell,
     scopedUnrelated: baseline.scopedUnrelated,
     scopedReader: baseline.scopedReader,
-    scopedSkillReader: baseline.scopedSkillReader,
   });
   assert.deepEqual(
     legacyObservedTasks.map(({ id }) => id),
@@ -241,36 +226,18 @@ test('controller scoping removes shell-wide work from Module Hub updates', async
     scopedShell: afterLegacy.scopedShell,
     scopedUnrelated: afterLegacy.scopedUnrelated,
     scopedReader: afterLegacy.scopedReader + 1,
-    scopedSkillReader: afterLegacy.scopedSkillReader,
   });
   assert.deepEqual(
     scopedObservedTasks.map(({ id }) => id),
     ['scoped-task'],
   );
 
-  const afterScheduledTasks = { ...renders };
-  const previousSkillRevision = scopedObservedSkillRevision;
-  await act(async () => {
-    await commandPort.refreshProjectSkills();
-  });
-  assert.deepEqual(renders, {
-    legacyShell: afterScheduledTasks.legacyShell,
-    legacyUnrelated: afterScheduledTasks.legacyUnrelated,
-    legacyReader: afterScheduledTasks.legacyReader,
-    scopedShell: afterScheduledTasks.scopedShell,
-    scopedUnrelated: afterScheduledTasks.scopedUnrelated,
-    scopedReader: afterScheduledTasks.scopedReader,
-    scopedSkillReader: afterScheduledTasks.scopedSkillReader + 1,
-  });
-  assert.equal(scopedObservedSkillRevision, previousSkillRevision + 1);
+
 });
 
 test('command port keeps the newest controller through stale cleanup', async () => {
   const calls: string[] = [];
   const commands = (name: string): ModuleHubCommands => ({
-    refreshProjectSkills: async () => {
-      calls.push(`${name}:refresh`);
-    },
     openScheduledTaskCreate: () => calls.push(`${name}:create`),
     copyTodayDailyReview: async () => {
       calls.push(`${name}:copy`);
@@ -287,11 +254,10 @@ test('command port keeps the newest controller through stale cleanup', async () 
   const disconnectSecond = port.connect(commands('second'));
 
   disconnectFirst();
-  await port.refreshProjectSkills();
   port.openScheduledTaskCreate();
-  assert.deepEqual(calls, ['second:refresh', 'second:create']);
+  assert.deepEqual(calls, ['second:create']);
 
   disconnectSecond();
   await port.copyTodayDailyReview();
-  assert.deepEqual(calls, ['second:refresh', 'second:create']);
+  assert.deepEqual(calls, ['second:create']);
 });

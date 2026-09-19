@@ -29,11 +29,16 @@ const require = createRequire(resolve(dependencies, 'package.json'));
 const lock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
 if (require('esbuild/package.json').version !== lock.packages['node_modules/esbuild'].version)
   throw new Error('Client compiler does not match the repository lockfile');
-const source = await buildClient(
-  {
-    packageId: 'maka.agent-graph',
-    entryPoint: resolve(root, 'crates/runtime-host/src/plugins/graph/client.tsx'),
-  },
-  require('esbuild').build,
-);
-writeFileSync(resolve(process.argv[2], 'agent-graph-client.js'), source);
+for (const [name, entryPoint] of [
+  ['agent-graph', 'crates/runtime-host/src/plugins/graph/client.tsx'],
+  ['skills', 'crates/skills/src/client.tsx'],
+]) {
+  const source = await buildClient(
+    {
+      packageId: `maka.${name}`,
+      entryPoint: resolve(root, entryPoint),
+    },
+    require('esbuild').build,
+  );
+  writeFileSync(resolve(process.argv[2], `${name}-client.js`), source);
+}

@@ -103,7 +103,7 @@ async fn handoff_waits_for_settlement_rollback_keeps_run_and_seal_survives_reope
                 branch
             }, "unrelated branch")] {
                 for fact in [
-                    Fact::InvocationOpened { configuration: Some(run.configuration.clone()),
+                    Fact::InvocationOpened { configuration: Some(Box::new(run.configuration.clone())),
                         input: InvocationInput::Message { content: text.into(), request_fingerprint: None,
                             source_messages: Vec::new(), skill_invocation: None } },
                     Fact::InvocationEnded { outcome: InvocationOutcome::Cancelled { source: "user".into() } },

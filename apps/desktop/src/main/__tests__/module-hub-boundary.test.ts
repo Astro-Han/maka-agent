@@ -126,7 +126,7 @@ describe('Module Hub feature boundary', () => {
       assert.equal(appShell.includes(forbidden), false, forbidden);
     }
     assert.equal(appShell.includes('<ModuleHub.ModuleHubProvider'), true);
-    assert.equal(appShell.includes('<ModuleHub.ModuleHubHost />'), true);
+    assert.match(appShell, /<ModuleHub\.ModuleHubHost(?:\s|\/)/);
 
     const effects = readFileSync(
       join(desktopRoot, 'src', 'renderer', 'app-shell-effects.ts'),

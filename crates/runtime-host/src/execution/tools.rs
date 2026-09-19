@@ -35,7 +35,9 @@ use maka_tools::{
 use std::{path::PathBuf, sync::Arc};
 
 mod live;
+mod preview;
 pub(super) use live::NativeTools;
+pub(super) use preview::validate_pending_tools;
 
 pub(super) fn reserve_core_names(
     catalog: &maka_plugins::contributions::Catalog,
@@ -55,8 +57,6 @@ pub(super) fn reserve_core_names(
         SHELL_NAME,
         shell::STOP_NAME,
         shell::WRITE_STDIN_NAME,
-        "Skill",
-        "SkillSearch",
         "AskUserQuestion",
         "tool_search",
         "exec",
@@ -72,9 +72,8 @@ pub(super) fn catalog(
     native: NativeTools,
     mode: PermissionMode,
     additional_tools: Vec<ToolRegistration>,
-    mut skills: super::skills::FrozenSkills,
     ceiling: Option<&std::collections::BTreeSet<String>>,
-) -> Result<(ToolCatalog, Arc<super::skills::FrozenSkills>), OperationError> {
+) -> Result<ToolCatalog, OperationError> {
     let mut registrations = native.registrations(mode)?;
     let live = Arc::new(live::LiveTools::new(native, &registrations, mode));
     for registration in &mut registrations {
@@ -83,32 +82,9 @@ pub(super) fn catalog(
     registrations.extend(additional_tools);
     if let Some(ceiling) = ceiling {
         registrations.retain(|tool| ceiling.contains(&tool.definition.name));
-        skills.host.tools.retain(|name| ceiling.contains(name));
-    }
-    skills.host.tools.extend(
-        registrations
-            .iter()
-            .map(|tool| tool.definition.name.clone()),
-    );
-    skills.host.tools.extend(
-        ["Skill", "SkillSearch"]
-            .into_iter()
-            .filter(|name| ceiling.is_none_or(|names| names.contains(*name)))
-            .map(str::to_owned),
-    );
-    let skills = Arc::new(skills);
-    // An empty frozen inventory cannot service either tool during this Run.
-    if skills.catalog().available().next().is_some() {
-        registrations.extend(
-            skills
-                .registrations()
-                .into_iter()
-                .filter(|tool| ceiling.is_none_or(|names| names.contains(&tool.definition.name))),
-        );
     }
     ToolCatalog::new(registrations)
         .map(ToolCatalog::with_discovery)
-        .map(|catalog| (catalog, skills))
         .map_err(unavailable)
 }
 

@@ -31,7 +31,7 @@ use serde::Serialize;
 use std::{collections::BTreeSet, sync::Arc};
 
 pub(super) struct Definitions {
-    pub configuration: Arc<maka_config::ConfigurationStore>,
+    pub sessions: Arc<dyn super::host::Sessions>,
     pub catalog: Catalog,
 }
 
@@ -94,12 +94,7 @@ impl Definitions {
         }
     }
     pub(super) async fn list(&self) -> Result<Listing, String> {
-        let policy = self
-            .configuration
-            .runtime_policy()
-            .await
-            .map_err(super::error)?;
-        let catalog = self.configuration.catalog().await.map_err(super::error)?;
+        let preferences = self.sessions.preferences().await?;
         let agents = [
             (
                 Profile::General,
@@ -123,14 +118,12 @@ impl Definitions {
             tools: profile.tools(),
         })
         .collect();
-        let presets = policy
-            .policy
-            .subagents
+        let presets = preferences
             .presets
             .into_iter()
             .filter(|preset| preset.enabled)
             .map(|preset| {
-                let available = Self::preset_model(&preset, &catalog).is_ok();
+                let available = Self::preset_model(&preset, &preferences.models).is_ok();
                 Preset {
                     availability: if available {
                         self.availability(preset.profile.into())
@@ -193,24 +186,17 @@ impl Definitions {
                 if executor_id.is_some() {
                     return Err("A model preset cannot also select an executor".into());
                 }
-                let policy = self
-                    .configuration
-                    .runtime_policy()
-                    .await
-                    .map_err(super::error)?;
-                let preset = policy
-                    .policy
-                    .subagents
+                let preferences = self.sessions.preferences().await?;
+                let preset = preferences
                     .presets
                     .iter()
                     .find(|preset| preset.id == *preset_id && preset.enabled)
                     .ok_or("Agent preset is missing or disabled")?;
-                let catalog = self.configuration.catalog().await.map_err(super::error)?;
                 (
                     preset.profile.into(),
                     preset.name.clone(),
                     Some(ChildTarget::Model {
-                        model: Self::preset_model(preset, &catalog)?,
+                        model: Self::preset_model(preset, &preferences.models)?,
                         thinking_level: preset.thinking_level,
                     }),
                     executor_id,

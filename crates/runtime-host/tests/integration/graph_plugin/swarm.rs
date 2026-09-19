@@ -320,7 +320,7 @@ async fn scenario() {
             .unwrap()
             .configuration
             .orchestration_mode,
-        maka_runtime::execution::OrchestrationMode::Default
+        maka_runtime::execution::BehaviorId::default()
     );
     let prefix = log.prefix(500, 4 * 1024 * 1024).await.unwrap();
     for row in &prefix.events {
@@ -333,9 +333,9 @@ async fn scenario() {
             assert_eq!(
                 configuration.orchestration_mode,
                 if row.event.invocation.turn_id == "plain" {
-                    maka_runtime::execution::OrchestrationMode::Default
+                    maka_runtime::execution::BehaviorId::default()
                 } else {
-                    maka_runtime::execution::OrchestrationMode::Swarm
+                    maka_runtime::execution::BehaviorId::try_from("swarm".to_owned()).unwrap()
                 }
             );
         }

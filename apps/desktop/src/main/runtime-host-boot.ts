@@ -177,7 +177,6 @@ import {
   registerPermissionOverlayIpc,
 } from "./permission-overlay/permission-overlay-main.js";
 import { resolveProjectContextRoot } from "./project-context-root.js";
-import { resolveDefaultPermissionMode } from "./permission-mode-default.js";
 import { createProjectManagementService } from "./project-management-service.js";
 import { projectPickerTitle } from "./project-picker-copy.js";
 import type { ProjectManagementService } from "./project-management-service.js";
@@ -270,7 +269,6 @@ import {
   createRuntimeHostSettingsModule,
   registerRuntimeHostSettingsIpc,
 } from "./runtime-host-settings-ipc-main.js";
-import { registerRuntimeHostSkillsIpc } from "./runtime-host-skills-ipc-main.js";
 import { registerRuntimeHostUsageIpc } from "./runtime-host-usage-ipc-main.js";
 import { registerRuntimeHostWorkspaceIpc } from "./runtime-host-workspace-ipc-main.js";
 import { resolveShellEnv } from "./shell-env.js";
@@ -1821,6 +1819,17 @@ function registerHostClientIpc(
     ipcMain: scopedIpc, client,
     ownsRenderer: (contents) => mainWindowController.ownsRenderer(contents),
     report: (error) => console.error('[plugins] Remote cleanup failed:', error),
+    files: usesHostWorkspace ? undefined : {
+      validate: async (input) => { await client.request('plugin.client.query', input); },
+      pick: async () => {
+        const selection = await mainWindowController.showOpenDialog({properties:['openFile']});
+        return selection.canceled ? null : selection.filePaths[0] ?? null;
+      },
+      open: async (path) => {
+        const error = await shell.openPath(path);
+        if (error) throw new Error(error);
+      },
+    },
   });
   registerRuntimeHostArtifactsIpc({
     uiLocale: () => desktopLocale.current(),
@@ -1896,31 +1905,6 @@ function registerHostClientIpc(
   registerPermissionOverlayIpc({
     controller: permissionOverlay,
     ipcMain: scopedIpc,
-  });
-  registerRuntimeHostSkillsIpc({
-    resolveLocale: () => desktopLocale.resolve(),
-    ipcMain: scopedIpc,
-    client,
-    workspaceRoot,
-    mainWindowController,
-    getSelectedWorkspaceTarget: () => selectedDesktopWorkspaceTarget(target),
-    resolveNewSessionWorkspaceTarget: async (projectId) => {
-      if (typeof projectId === "string") {
-        return { kind: "project", projectId };
-      }
-      if (projectId === null) {
-        if (usesHostWorkspace) return undefined;
-        return {
-          kind: "host_path",
-          path: (await requireRuntimePolicyTarget(target).projectManagement.current()).path,
-        };
-      }
-      return selectedDesktopWorkspaceTarget(target);
-    },
-    getDefaultPermissionMode: () =>
-      resolveDefaultPermissionMode(() => runtimeHostSettings.get()),
-    openPath: (path) => shell.openPath(path),
-    allowLocalPaths: !usesHostWorkspace,
   });
   registerRuntimeHostSearchIpc({ ipcMain: scopedIpc, client });
   registerRuntimeHostUsageIpc({

@@ -40,6 +40,12 @@
   max-width: var(--maka-reading-measure);
 }
 
+.maka-composer-plugin-slot {
+  width: min(var(--maka-reading-measure), calc(100% - 2 * var(--space-6)));
+  margin: 0 auto;
+  min-width: 0;
+}
+
 .maka-return-workhub {
   --_button-radius: var(--radius-chat);
   display: flex;

@@ -27,11 +27,9 @@ export {
   createModuleHubCommandPort,
   ModuleHubProvider,
   ModuleHubScheduledTasksBoundary,
-  ModuleHubSkillCatalogRevisionBoundary,
   type ModuleHubCommands,
 } from "./ui/module-hub-provider.js";
 export { startModuleHubLifecycle } from "./controller/module-hub-lifecycle.js";
-export { resolveModuleHubHostRoute } from "./controller/module-hub-route.js";
 export {
   useModuleHubController,
   type ModuleHubHostModel,
@@ -54,11 +52,6 @@ export type {
   ModuleHubRuntimeHostChangedEvent,
   ModuleHubRuntimeHostRef,
 } from "./ports.js";
-export {
-  useSkillsController,
-  type SkillsController,
-  type UseSkillsControllerInput,
-} from "./controller/use-skills-controller.js";
 
 const noopSubscription = (): (() => void) => () => undefined;
 const notConfigured = (operation: string): never => {
@@ -73,23 +66,6 @@ export function createFakeModuleHubHostModel(
   return {
     selection,
     selectModule: () => undefined,
-    skills: {
-      skills: [],
-      managedSkillSources: [],
-      bundledSkillCatalog: [],
-      onRefreshSkills: async () => undefined,
-      onUseSkill: () => undefined,
-      onRefreshManagedSkillSources: async () => undefined,
-      onImportManagedSkillSource: async () => undefined,
-      onInstallManagedSkill: async () => undefined,
-      onRefreshBundledSkillCatalog: async () => undefined,
-      onInstallBundledSkill: async () => undefined,
-      onPreviewManagedSkillUpdate: async () => null,
-      onUpdateManagedSkill: async () => false,
-      onSetSkillEnabled: async () => undefined,
-      onSetSkillPinned: async () => undefined,
-      onDeleteSkill: async () => undefined,
-    },
     scheduledTasks: {
       scheduledTasks: [],
       createRequestNonce: 0,
@@ -134,21 +110,6 @@ export function createFakeModuleHubServices(
     runtimeHosts: {
       getDefault: async () => ({ profileId: "local", hostId: "local" }),
       subscribeChanges: noopSubscription,
-    },
-    skills: {
-      list: async () => [],
-      listManagedSources: async () => [],
-      listBundledCatalog: async () => [],
-      importManagedSource: async () =>
-        notConfigured("skills.importManagedSource"),
-      installManaged: async () => notConfigured("skills.installManaged"),
-      installBundled: async () => notConfigured("skills.installBundled"),
-      previewUpdate: async () => notConfigured("skills.previewUpdate"),
-      updateManaged: async () => notConfigured("skills.updateManaged"),
-      setEnabled: async () => notConfigured("skills.setEnabled"),
-      setPinned: async () => notConfigured("skills.setPinned"),
-      delete: async () => notConfigured("skills.delete"),
-      open: async () => notConfigured("skills.open"),
     },
     scheduledTasks: {
       list: async () => [],

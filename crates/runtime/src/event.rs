@@ -120,7 +120,7 @@ pub enum Fact {
         input: InvocationInput,
         /// Absent only for older/synthetic facts; never recover it from mutable metadata.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        configuration: Option<crate::execution::InvocationConfiguration>,
+        configuration: Option<Box<crate::execution::InvocationConfiguration>>,
     },
     ModelRequested {
         step_id: String,

@@ -227,6 +227,8 @@ operations! {
     SkillCatalogMutate => ("skill.catalog.mutate", Command, Ready),
     SkillCatalogPreviewUpdate => ("skill.catalog.preview-update", Query, Ready),
     SkillCatalogQuery => ("skill.catalog.query", Query, Ready),
+    SkillCatalogResolvePath => ("skill.catalog.resolve-path", Query, Ready),
+    SkillSourceImport => ("skill.source.import", Command, Ready),
     SubscriptionClose => ("subscription.close", Control, Ready),
     SubscriptionOpen => ("subscription.open", Control, Ready),
     SubscriptionPtyInterestSet => ("subscription.pty_interest.set", Control, Ready),

@@ -40,6 +40,7 @@ import {
 import type { ContextBudgetDiagnostic } from '@maka/core/usage-stats/types';
 import { providerRetryDisplaySeconds } from '@maka/core/provider-retry-countdown';
 import type { ThinkingLevel } from '@maka/core/model-thinking';
+import type { OrchestrationMode } from '@maka/core/orchestration';
 import {
   defineUiMessageCatalog,
   resolveUiMessageCatalog,
@@ -213,7 +214,7 @@ export interface MakaPiTranscriptMetadata {
   model: string;
   connectionSlug: string;
   permissionMode: string;
-  orchestrationMode?: 'default' | 'swarm' | 'graph';
+  orchestrationMode?: OrchestrationMode;
   thinkingLevel?: ThinkingLevel;
   thinkingLevels?: readonly ThinkingLevel[];
   sessionId?: string | null;

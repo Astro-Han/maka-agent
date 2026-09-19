@@ -125,7 +125,12 @@ impl Executions {
         let content = input.content();
         self.validate_message_content(COORDINATION_SESSION_ID, &content, root_id)
             .await?;
-        let (tools, composition) = profile::tools(self, &session.configuration, connection_id)?;
+        let policy = profile::resolve(self)?;
+        let _policy_admission = policy
+            .admit()
+            .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
+        let (tools, composition) =
+            profile::tools(self, &session.configuration, connection_id, &policy.value)?;
         let provider = provider::resolve(
             &self.configuration,
             &self.oauth,
@@ -151,7 +156,7 @@ impl Executions {
         } else {
             maka_runtime::execution::ToolMode::Direct
         };
-        configuration.system_prompt = Some(profile::prompt());
+        configuration.system_prompt = Some(policy.value.prompt.clone());
         configuration.tool_composition = Some(composition);
         let run = RunInput {
             invocation: Invocation {

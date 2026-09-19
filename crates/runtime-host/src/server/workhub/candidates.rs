@@ -22,7 +22,7 @@ use crate::session::SessionConfiguration;
 use maka_event_log::sessions::{SessionExecutionState, SessionRecord};
 use maka_protocol::{
     OperationError, OperationErrorCode as Code,
-    session::{CollaborationMode, OrchestrationMode},
+    session::{BehaviorId, CollaborationMode},
     workhub::{Candidate, CandidatesResult},
 };
 use maka_runtime::{artifact::content_digest, workhub::COORDINATION_SESSION_ID};
@@ -132,7 +132,7 @@ fn eligible(id: &str, config: &SessionConfiguration) -> bool {
     id != COORDINATION_SESSION_ID
         && config.tool_profile.is_none()
         && config.collaboration_mode == CollaborationMode::Agent
-        && config.orchestration_mode == OrchestrationMode::Default
+        && config.orchestration_mode == BehaviorId::default()
         && !config
             .labels
             .iter()

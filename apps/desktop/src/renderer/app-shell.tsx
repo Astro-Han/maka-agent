@@ -71,7 +71,8 @@ import { useTaskSubmissionReadiness } from './use-task-submission-readiness';
 import { useAppShellSessionUiReads } from './use-app-shell-session-ui-reads';
 import * as Conversation from './features/conversation';
 import { deriveWorkspaceReadinessRecovery } from './workspace-readiness-recovery';
-import { ClientPluginComposerSlot } from './features/client-plugins/index.js';
+import { ClientPluginComposerSlot, ClientPluginSlot } from './features/client-plugins/index.js';
+import type { ClientWorkspace } from '@maka-agent/plugin-sdk/client';
 import { ChatComposerRegion, selectLatestRequestUsage } from './chat-composer-region';
 import { WorkbarHost, useWorkbarController } from './features/workbar';
 import { AppUpdateProvider } from './features/app-update/index.js';
@@ -182,7 +183,7 @@ import { useComposerAttachments, desktopSlashCommandPresentation } from './featu
 import { useAppShellComposerQuotes } from './use-app-shell-composer-quotes';
 import {
   type ComposerMentionsSurfaceInput,
-  renderComposerMentionsProvider,
+  ComposerMentionsProvider,
 } from './composer-mentions';
 import { useAppShellSessionWorkspace } from './use-app-shell-session-workspace';
 import { useShellMemoryPill } from './use-shell-memory-pill';
@@ -899,24 +900,6 @@ function AppShellContent({
     [],
   );
 
-  /** 技能页 使用: jump to the chat view and seed the composer with a skill
-   *  invocation. Same human-in-the-loop rule as maka://compose — we never
-   *  auto-send; the user finishes the sentence and presses Enter.
-   *  U4: append (not replace) so an in-progress draft survives — appendText
-   *  falls back to a plain set when the draft is empty, so the empty-composer
-   *  path is unchanged while a half-written message is no longer clobbered. */
-  const useSkillInChat = useCallback(
-    (_skillId: string, skillName: string) => {
-    setNavSelection({ section: 'sessions' });
-    const seed = () => {
-        composerRef.current?.appendText(shellCopy.useSkillPrompt(skillName));
-      composerRef.current?.focus();
-    };
-    if (activeIdRef.current) window.requestAnimationFrame(seed);
-    else void createSession().then(() => window.requestAnimationFrame(seed));
-    },
-    [shellCopy],
-  );
   const openWorkHub = useCallback(() => {
     if (!workHubEnabledRef.current) return;
     overlays.commands.closeSettings();
@@ -1134,7 +1117,6 @@ function AppShellContent({
     restoreProject,
     openProjectFolder,
     openWorkspaceFolder,
-    openSkillsFolder,
   } = useAppShellProjectContext({
     uiLocale,
     rendererMountedRef,
@@ -1143,7 +1125,6 @@ function AppShellContent({
     sessionProjectId: sharedSessionActive ? undefined : activeSession?.projectId,
     sessionProfileKind: sharedSessionActive ? undefined : activeDesktopSession?.profileKind,
     onProjectSelected: (ownerSessionId) => {
-      void moduleHubCommands.refreshProjectSkills();
       if (ownerSessionId && activeIdRef.current === ownerSessionId) openNewTaskSurface();
     },
     toastApi,
@@ -1272,18 +1253,11 @@ function AppShellContent({
   // the SURFACE is named here — the projection itself is owned by
   // `ComposerMentionsProvider` below, so its reloads do not re-render the shell.
   const composerMentionsSurface: ComposerMentionsSurfaceInput = {
+    scope: JSON.stringify(ownerActiveId
+      ? [activeCatalogSession?.profileId, activeCatalogSession?.runtimeHostId, ownerActiveId]
+      : [taskEntry.selectors.target, taskEntry.selectors.projectPath, newTaskPermissionMode, newChatPlanModeActive]),
     sessionId: ownerActiveId,
-    projectPath: activeId
-      ? ownerActiveId
-        ? projectInfo?.projectPath
-        : undefined
-      : taskEntry.selectors.projectPath,
     newTaskTarget: activeId ? undefined : taskEntry.selectors.target,
-    newSessionModel: newChatModel,
-    newSessionCollaborationMode: newChatPlanModeActive ? 'plan' : 'agent',
-    // Refresh only; Desktop Main re-reads the authoritative default before
-    // constructing the Runtime Host preview target.
-    newSessionPermissionMode: newTaskPermissionMode,
   };
 
   const hasModalOpen = overlays.selectors.anyModalOpen || sharedSessionDialog.isOpen;
@@ -1480,6 +1454,7 @@ function AppShellContent({
   const {
     beginEditUserMessage,
     prepareRevisionSend,
+    completeRevisionSend,
     cancelRevisionDraft,
   } = useStableActions(createAppShellRevisionActions, {
     uiLocale,
@@ -1769,16 +1744,7 @@ function AppShellContent({
       settleNewTaskImageNoticeOwner(sessionId);
       if (sessionId) delete retractedWorkspaceReferencesRef.current[sessionId];
     }
-    if (ok !== false && revisionSend) {
-      if (expectedRevisionDraft) {
-        completeTurnRevisionCopyAttempt(expectedRevisionDraft);
-        composerRef.current?.clearDraft(expectedRevisionDraft.draftSessionId);
-        if (expectedRevisionDraft.sourceSessionId !== expectedRevisionDraft.draftSessionId) {
-          composerRef.current?.clearDraft(expectedRevisionDraft.sourceSessionId);
-        }
-      }
-      commitRevisionDraft(null);
-    }
+    if (ok !== false && expectedRevisionDraft) completeRevisionSend(expectedRevisionDraft);
     return ok;
   }
 
@@ -2176,7 +2142,6 @@ function AppShellContent({
     openSideConversation: () => commands.openTool('side-chat'),
     openSettings,
     openSettingsSection,
-    openSkillsFolder,
     openWorkspaceFolder,
     refreshConnections: defaultHostConnections.refreshConnections,
     copyTodayDailyReview: moduleHubCommands.copyTodayDailyReview,
@@ -2197,6 +2162,16 @@ function AppShellContent({
         ? navSelection.module
         : 'im_hub';
 
+  const workspaceTarget = taskEntry.selectors.target;
+  const pluginWorkspace: ClientWorkspace | undefined = workspaceTarget && (
+    workspaceTarget.projectId || taskEntry.selectors.projectPath
+  ) ? {
+    workspace: workspaceTarget.projectId
+      ? { kind: 'project', projectId: workspaceTarget.projectId }
+      : { kind: 'host_path', path: taskEntry.selectors.projectPath! },
+    permissionMode: newTaskPermissionMode,
+    collaborationMode: newChatPlanModeActive ? 'plan' : 'agent',
+  } : undefined;
   return (
     // Feature controllers live below the shell. Task Entry publishes a stable
     // shell projection plus reader-local Host/Workspace Picker projections;
@@ -2213,16 +2188,12 @@ function AppShellContent({
     <ModuleHub.ModuleHubProvider
       selection={navSelection}
       selectModule={setNavSelection}
-      openSkillsFolder={projectCapabilities.viewClientPath ? openSkillsFolder : undefined}
-      useSkillInChat={useSkillInChat}
       openSession={openSessionInChat}
       appendComposerText={(text) => composerRef.current?.appendText(text)}
       captureActiveComposerClaim={captureActiveComposerClaim}
       commandPort={moduleHubCommands}
     >
-    <ModuleHub.ModuleHubSkillCatalogRevisionBoundary
-      render={renderComposerMentionsProvider(composerMentionsSurface)}
-    >
+    <ComposerMentionsProvider {...composerMentionsSurface}>
     <SessionCollaboration.SessionTurnRequestInboxProvider
       sessions={sessions}
       onOpenSession={openSession}
@@ -2399,7 +2370,10 @@ function AppShellContent({
             <div className="mainColumn" data-home-surface={homeSurfaceActive ? 'true' : undefined}
               inert={switchingSession || undefined}
               aria-busy={switchingSession || undefined}>
-              <ModuleHub.ModuleHubHost />
+              <ModuleHub.ModuleHubHost extensionContent={newTaskHost && pluginWorkspace ? (
+                <ClientPluginSlot host={newTaskHost} name="workspace.manage"
+                  input={{ ...pluginWorkspace, locale: uiLocale, section: 'skills' }} />
+              ) : null} />
               <WorkHubMainNavigation workbarReady={workHubActive && Boolean(workbar.host.activeId)}
                 onOpenUsage={() => commands.toggleTool('inspector')} onToggleWorkbar={commands.toggleRight}
                 onOpenWorkHub={openWorkHub} onOpenSession={(sessionId) => { closeSettings(); openSession(sessionId); }} />
@@ -2431,8 +2405,19 @@ function AppShellContent({
                           sessionId: ownerActiveId,
                           locale: uiLocale,
                           onOpenSession: openSessionInChat,
+                          appendText: sharedSessionActive ? undefined : (text) => {
+                            composerRef.current?.appendText(text);
+                            composerRef.current?.focus();
+                          },
                         }}
                       />
+                    ) : null}
+                    {sessionsSelected && !ownerActiveId && newTaskHost && pluginWorkspace ? (
+                      <ClientPluginSlot host={newTaskHost} name="workspace.composer.before"
+                        input={{ ...pluginWorkspace, locale: uiLocale, appendText: (text) => {
+                          composerRef.current?.appendText(text);
+                          composerRef.current?.focus();
+                        } }} />
                     ) : null}
                     {!sharedSessionActive && sessionsSelected ? <PlanExecutionPanel planMode={planMode} /> : null}
                     <WorkHubReturnButton
@@ -2791,7 +2776,7 @@ function AppShellContent({
       />
     </div>
     </SessionCollaboration.SessionTurnRequestInboxProvider>
-    </ModuleHub.ModuleHubSkillCatalogRevisionBoundary>
+    </ComposerMentionsProvider>
     </ModuleHub.ModuleHubProvider>
     </Goals.GoalProvider>
   );

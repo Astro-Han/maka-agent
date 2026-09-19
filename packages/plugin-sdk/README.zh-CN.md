@@ -46,6 +46,8 @@ export default activate;
 
 打包为不含 import 和顶层 await 的单个 ESM 入口。在 `maka.extension.json` 中声明 `runtime: { entry: "index.mjs", sdkVersion: 1, vm: "shared" }`；`dedicated` 为该包当前加载代申请独立 VM。
 
+Prompt 回调接收类型化的 Session 或模型步骤上下文，不伪造工具调用权限。section 和动态 context 默认解析模板；已解析内容或用户文本使用 `format: 'plain'`。一个 `complete` section 替换其它提示词 Contribution，不删除显式 Session／子任务指令。物理重试复用同一份冻结组合。
+
 - 激活阶段暂存注册；通过 `ctx.run` 在发布生效后启动业务循环。用 `ctx.effect` 注册清理，观察 `ctx.signal`。
 - Tool 和 Executor 回调获得绑定调用身份的服务与进程能力。旧调用句柄会失效；实例级进程需通过下一次调用的 `processes.open(id)` 重新绑定，卸载时由 Host 清理。
 - 启动进程要求当前调用仍有 Bypass 权限，使用冻结的工作目录，以及绝对可执行路径和 argv。默认随调用结束。stdin 字符串按 UTF-8 编码；输出用 `TextDecoder` 增量解码。
@@ -64,12 +66,18 @@ export default activate;
 
 `ctx.executions.createChild({ ..., workspace: 'isolated_git' })` 为子 Session 绑定 Host 管理的 linked worktree。父会话必须允许写入，且工作目录是干净仓库的根目录。重试与 Host 重启保留子任务改动。执行及工作区写入者结束后，`workspacePatch(operationId)` 发布相对于初始提交的不可变 Git patch artifact，包含已提交与未提交改动，不自动合并到父目录。需在子会话进入下一 Turn 前导出。工作区保留用于恢复，不随插件禁用而删除。稀疏检出、子模块、外部 Git filter 和超过 50 MiB 的补丁会明确报错。Host 的 Git 操作使用 gix，不依赖系统 Git 可执行文件。
 
+输入准备使用 `ctx.input.prepare(name, callback)`，返回不变、附回执的准备文本或明确拒绝。此时没有 invocation 权限，不能替换附件或已有回执；Host 标注来源，已接受输入在重放时不重新准备。回调应无副作用；可变来源更新时关闭并重新注册，阻止旧准备结果继续准入。
+
 ## Client SDK
 
 Client SDK API **1** 使用 Desktop 提供的 React。导出来自 `@maka-agent/plugin-sdk/client` 的 `ClientPlugin`；其 `activate(ctx, config)` 暂存带 key 的 Slot 注册和 Effect。业务启动放在 `ctx.effect`，返回清理函数并观察 `ctx.signal`。初始化结束后关闭注册；清理失败时，该 Entry 必须等待页面重载，不能自动重新激活。
 
 用 `@maka-agent/plugin-sdk/build` 的 `buildClient({ packageId, entryPoint })` 构建（作者的构建环境需安装 esbuild）。保存返回的 JavaScript，并在 manifest 中声明 `client: { entry: "client.js", sdkVersion: 1 }`。加载器在执行前校验字节和 SDK 版本。插件共享可信 Renderer，不是沙箱，也不提供 Node 兼容层。
 
-初始列表 Slot 为 `session.composer.before`；每个注册拥有 Entry 内唯一 key 和可选数值排序。包导入需列入 manifest dependencies；React、`react/jsx-runtime` 和 Client SDK 由 Desktop 提供，不要重复打包 React。
+Slot 包括 `session.composer.before`、`workspace.composer.before` 和 `workspace.manage`。工作区参数只是候选目标，不是路径授权。Composer Slot 提供只编辑草稿的 `appendText` 和 `publishSuggestions`。发布对象提供 `update(items)` 和 `dispose()`：刷新时更新同一 owner，effect 清理时销毁。条目身份跨刷新稳定；建议随发布者或目标退出而撤下，不提交消息。每个注册拥有 Entry 内唯一 key 和可选数值排序。包导入需列入 manifest dependencies；React、`react/jsx-runtime` 和 Client SDK 由 Desktop 提供，不要重复打包 React。
+
+可选的 `ctx.localFiles.pick()` / `open(path)` 仅处理 Desktop 本地路径，不用于远程 Host 文件。Desktop 在原生操作前校验 Client 发布身份，导航或退休后返回的文件选择结果会被丢弃。
 
 Host 插件通过 `ctx.remote.method(name, callback)` 或 `ctx.remote.stream(name, open)` 发布接口。Client 插件通过 `ctx.remote.method<Input, Output>(name, sessionId?)` 获取调用函数，或通过 `ctx.remote.stream<Input, Output>(name, sessionId?)` 获取异步迭代器工厂。UI 发布后才能调用；句柄固定到原 Host 连接和后端注册，不随替换重定向。退出迭代会关闭流，UI 卸载或页面导航会关闭所属文档。Remote 调用不是 Agent 调用，不隐含进程权限。
+
+接受调用者 Host 路径的 Rust endpoint 声明 `Endpoint::requiring_host_paths()`。Host 在绑定和调用时都检查路径授权，借用其他连接的注册目标也不能绕过。项目 ID 和已有 Session 查询不要求原始路径权限；插件通过显式注入的只读视图访问它们。

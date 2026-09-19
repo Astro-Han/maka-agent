@@ -18,7 +18,7 @@
  */
 
 use maka_runtime::execution::{
-    CollaborationMode, InvocationConfiguration, OrchestrationMode, PermissionMode, ToolMode,
+    BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode,
 };
 
 pub fn configuration(tool_mode: ToolMode) -> InvocationConfiguration {
@@ -33,7 +33,7 @@ pub fn configuration(tool_mode: ToolMode) -> InvocationConfiguration {
             .expect("UTF-8 test working directory"),
         permission_mode: PermissionMode::Bypass,
         collaboration_mode: CollaborationMode::Agent,
-        orchestration_mode: OrchestrationMode::Default,
+        orchestration_mode: BehaviorId::default(),
         tool_mode,
         model: None,
         thinking_level: None,

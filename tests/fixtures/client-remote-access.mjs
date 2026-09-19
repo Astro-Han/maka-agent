@@ -113,6 +113,8 @@ export async function verifyRemoteAccess(local, handshake, url, control) {
     });
 
     const grantedCredential = await issue([
+      'plugin.client.query',
+      'plugin.remote',
       'connection.catalog.query',
       'session.create',
       'runtime.policy.query',
@@ -123,6 +125,81 @@ export async function verifyRemoteAccess(local, handshake, url, control) {
       'runtime.resource.controller.release',
     ]);
     const granted = await ready(grantedCredential.bearer);
+    // Endpoint path authority is checked at both binding and invocation, not
+    // inferred from the ordinary Remote grant or a client-supplied path.
+    const skillClient = await bounded(
+      (async () => {
+        for (;;) {
+          const catalog = await request(granted, 'plugin.client.query', { kind: 'snapshot' });
+          const entry = catalog.entries.find((entry) => entry.extensionId === 'maka.skills');
+          if (entry) return entry;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      })(),
+      'Skills Client publication',
+    );
+    const binding = {
+      client: {
+        entryId: skillClient.entryId,
+        extensionId: skillClient.extensionId,
+        activation: skillClient.activation,
+        contentDigest: skillClient.contentDigest,
+        clientDigest: skillClient.clientDigest,
+      },
+      method: 'import-source',
+      sessionId: null,
+    };
+    const bound = await request(local, 'plugin.remote', { kind: 'bind', binding });
+    await assert.rejects(request(granted, 'plugin.remote', { kind: 'bind', binding }), {
+      code: 'unauthorized',
+    });
+    const document = await request(granted, 'plugin.remote', { kind: 'open_document' });
+    try {
+      await assert.rejects(
+        request(granted, 'plugin.remote', {
+          kind: 'bind',
+          binding: { ...binding, method: 'path-request' },
+        }),
+        { code: 'unauthorized' },
+      );
+      const project = await request(local, 'project.catalog.mutate', {
+        kind: 'register',
+        path: control,
+      });
+      const projectBinding = { ...binding, method: 'project-request' };
+      const projectBound = await request(granted, 'plugin.remote', {
+        kind: 'bind',
+        binding: projectBinding,
+      });
+      const result = await request(granted, 'plugin.remote', {
+        kind: 'call',
+        binding: projectBinding,
+        target: projectBound.target,
+        document: document.document,
+        input: {
+          projectId: project.project.id,
+          permissionMode: 'ask',
+          collaborationMode: 'agent',
+          request: { kind: 'catalog', view: 'governance', page: null },
+        },
+      });
+      assert.equal(result.value.kind, 'page');
+      await assert.rejects(
+        request(granted, 'plugin.remote', {
+          kind: 'call',
+          binding,
+          target: bound.target,
+          document: document.document,
+          input: { sourcePath: '/not-authorized/SKILL.md' },
+        }),
+        { code: 'unauthorized' },
+      );
+    } finally {
+      await request(granted, 'plugin.remote', {
+        kind: 'close_document',
+        document: document.document,
+      });
+    }
     for (const [operation, input] of [
       [
         'runtime.resource.start',

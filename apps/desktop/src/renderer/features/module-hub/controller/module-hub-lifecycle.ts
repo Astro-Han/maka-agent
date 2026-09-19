@@ -32,13 +32,11 @@ const browserScheduler: ModuleHubLifecycleScheduler = {
 /** Owns Module Hub startup deferral and default Runtime Host invalidation. */
 export function startModuleHubLifecycle(input: {
   runtimeHosts: ModuleHubRuntimeHostsService;
-  refreshProjectSkills(): void;
   refreshScheduledTasks(): void;
   scheduler?: ModuleHubLifecycleScheduler;
 }): () => void {
   const scheduler = input.scheduler ?? browserScheduler;
   const refreshAll = () => {
-    input.refreshProjectSkills();
     input.refreshScheduledTasks();
   };
   const startupFrame = scheduler.requestFrame(refreshAll);

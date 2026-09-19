@@ -20,6 +20,7 @@
 import assert from 'node:assert/strict';
 import { upload } from './client-artifact-upload.mjs';
 import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -206,6 +207,25 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
       },
       3000,
     );
+    const togglePolicy = async (disabled) => {
+      await request('plugin.composition.apply', {
+        operations: [{ type: 'update', entryId: 'maka.workhub', patch: { disabled } }],
+      });
+      const deadline = Date.now() + 5000;
+      while (
+        (await request('plugin.platform.query', { view: 'status' })).convergence !== 'converged'
+      ) {
+        assert(Date.now() < deadline, 'WorkHub policy did not converge');
+        await delay(10);
+      }
+    };
+    await togglePolicy(true);
+    await assert.rejects(
+      request('workhub.coordination.answer', input),
+      (error) => error.code === 'operation_unavailable',
+    );
+    assert.equal(requests.length, 0, 'A disabled policy must fail before model dispatch');
+    await togglePolicy(false);
     observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
     assert.deepEqual(await request('workhub.coordination.answer', input), { turnId });
     await observer.waitFor(
@@ -224,6 +244,7 @@ export async function verifyWorkhubAnswer(connection, workspace, reopened) {
     observer = await watchSession(connection, sessionId, { kind: 'tail', maxBytes: 2 });
     const rows = await observer.subscription.loadTranscript(decodeStoredMessage);
     assert(rows.some((row) => row.type === 'assistant' && row.text === 'workhub verified'));
+    await togglePolicy(true);
     await connection.unregisterClientCapabilities(3000);
     await request('connection.catalog.remove', {
       expected: { connectionId: basis.connectionId, revision: basis.revision },

@@ -150,6 +150,10 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
 
 ## 设计
 
+原生插件通过 `PluginContext.data` 使用按 package/scope 划分的私有文件目录。
+文件工作持有 Fiber 至完成，退休拒绝新操作但不删除数据。Root 只校验核心文件和目录安全，
+不识别业务名称；文件格式、锁与恢复属于插件。既有用户／项目内容路径与私有 journal 分开。
+
 - **Log Is the Runtime：**模型历史、transcript 与恢复来自已提交的语义事实。上下文压缩
   改变模型投影，不改写历史。
   失败响应的片段只用于展示，不纳入模型历史；用户取消不显示为 provider 失败。
@@ -180,11 +184,15 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
   每个逻辑步骤成对捕获工具定义与执行器，物理重试及返回的工具调用共用该视图。
 - `turn.start` 与 `turn.message.submit` 的显式 Skills 在准入时冻结正文和回执。排队消息保留必需工具集合；
   promote 与后继执行按实际目标 Run 校验，不重新加载技能文件。
-- `SkillSearch`、`Skill` 与显式加载共用 Run 的冻结目录。搜索只返回有界元数据，
+- `SkillSearch`、`Skill` 在每逻辑模型步骤共同绑定目录、handler 和支持上下文；物理重试不变，下一步可观察变化。
+  搜索只返回有界元数据，
   加载的正文保留可读的归档分页。
 - Agent 模式的技能选择器按当前权限预览，不绑定 Session 或解析模型；分页绑定修订。
   内置及本地来源目录反映真实安装占用，并识别经校验的托管来源别名。治理查询展示校验、
-  偏好和来源更新状态，不读取 baseline，也不冒充 Run 内已加载状态。Plan 与技能变更仍未实现。
+  偏好和来源更新状态，不读取 baseline，也不冒充 Run 内已加载状态。目录视图共享版本，游标另绑定视图。
+  `maka.skills` 内置插件拥有发现、输入展开、启用／固定 CAS、原始字节更新预览及可恢复的创建／安装／删除／更新。
+  Client bundle 提供管理、选择器和草稿建议；Desktop 提供目标绑定的 Slot 和授权原生文件操作。
+  停用后新显式引用失败，普通聊天与已接受回执不受影响。Plan 模式执行属于独立领域，尚未实现。
 - Rust 管理存储、网络路由、工具和原生进程／PTY。一个惰性启动的长期 V8 并发处理模型
   请求与终端解析；Code Mode 使用独立短生命周期 isolate。数量与字节限制提供背压，
   V8 heap 限制不等于进程内存隔离。
@@ -207,6 +215,7 @@ Host 不可连接不代表进程已停止。`host logs --root-id <rootId>` 返�
 | --- | --- |
 | 事实与持久化 | `runtime`、`event-log`、`presentation`、`config` |
 | 执行 | `agent`、`model`、`js-runtime`、`tools`、`fs-tools`、`process`、`apply-patch`、`skills` |
+| 插件生命周期与工具目录 | `plugins`、`tool-catalog` |
 | 客户端与 Host | `protocol`、`transport`、`client-capability`、`network`、`runtime-host` |
 | 可执行程序 | `cli` |
 
@@ -281,18 +290,8 @@ WorkHub 已支持受限对话、候选发现、交互式目标选择、向已有
 等待确认或阻塞的任务仍可发现；发现不授予委派权限，准入时仍检查待决交互与未决副作用。
 待决交互驱动共用 Session 目录及变更通知，WorkHub 的“需要你”列表与候选发现保持一致，解决交互后及时清除。
 
-以下功能等价缺口以 main `f02ac9433`（2026-09-18）为对照。存在协议名称或能保存设置，不代表执行链路已接入。
-
-| 模块 | 剩余工作 |
-| --- | --- |
-| Skills | 创建、安装、删除、启用、固定、更新，以及更新预览、原子发布与恢复；发现和调用已实现。 |
-| Session／Turn | 分支／修订、删除及预览、recap、shared／todo 查询、重新生成、会话 bundle 和外部导入（Codex／Claude Code／OpenCode）；普通 resume 和崩溃恢复已实现。 |
-| 执行 | Plan、Goal、daily review、deep research、hosted execution、普通命名工具 profile；Graph／Swarm 与定时任务已实现。 |
-| 能力服务 | Recall 会话历史片段检索；内置 WebSearch／WebFetch；Usage／Pricing 一致版本视图与活动分页；后台任务进程／端点健康检查。 |
-| 配置 | shell、web-search、external-agent 设置的执行消费，凭据导出、external-agent setup；subagent preset、网络代理、个性化和新会话默认值已接入消费。 |
-| 跨 Host 协作 | principal 撤销、rotation prepare／revoke、邀请、grant、Turn request、Peer Mesh；配对、凭据替换／确认／撤销和认证远程传输已实现。 |
-| 模型接入 | Google／Cohere、Command Code GO 执行，其余 adapter 特殊鉴权／选项，运行中 models.dev 元数据刷新，Copilot／xAI 推理与真实凭证验证；OpenAI／Codex、Chat-compatible、Anthropic、明文 Responses 各自遵循明确契约，不代表所有 provider 全量兼容。 |
-| Host | `host.resources.query`；diagnostics、本地／SSH／WSL 部署和可恢复更新已实现。 |
+剩余功能、完整领域的内置插件迁移计划及 SDK／客户端接缝统一维护在
+[功能等价与内置插件清单](rust-parity.zh-CN.md)，不在此重复列举。
 
 Recall 是会话历史检索，不属于排除的 Memory 子系统。原生部署和更新能力不代表完整产品兼容。
 插件平台支持静态链接 Rust 包、共享／独立 V8 的 JavaScript 包、作用域 Host 服务、外部 Executor，

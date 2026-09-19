@@ -132,10 +132,15 @@ export interface ExecutorContext extends CallContext {
 export type TextProvider =
   | string
   | ((
-      request: { invocation: Invocation },
+      request: PromptRequest,
       call: { signal: Cancellation },
     ) => Awaitable<string | null | undefined>);
+export type PromptRequest =
+  | { readonly kind: 'session'; readonly sessionId: string; readonly cwd: string }
+  | { readonly kind: 'model_step'; readonly invocation: Invocation; readonly cwd: string };
 export interface PromptSection {
+  /** Use plain for resolved or user-authored text; template interpolates registered variables. */
+  format?: 'plain' | 'template';
   name: string;
   order?: number;
   text: TextProvider;
@@ -152,6 +157,13 @@ export interface StorageMutation {
   data: StorageData;
 }
 export interface HostContext {
+  readonly input: {
+    /** Pure preparation. Close/re-register when its source changes to revoke stale admissions. */
+    prepare(
+      name: string,
+      prepare: (request: InputPreparationRequest) => Awaitable<InputPreparationOutcome>,
+    ): Promise<Registration>;
+  };
   readonly remote: {
     method<I extends Json, O extends Json>(
       name: string,
@@ -199,6 +211,24 @@ export interface HostContext {
   /** Stage during activation; starts only after publication becomes effective. */
   run(task: () => Awaitable<void>): void;
 }
+/** No invocation exists yet; preparation does not grant tool, file or process authority. */
+export interface InputPreparationRequest {
+  readonly sessionId: string;
+  readonly cwd: string;
+  readonly content: MessageContent;
+  readonly selections: readonly string[];
+  readonly tools: readonly string[];
+  readonly signal: Cancellation;
+}
+export type InputPreparationOutcome =
+  | { readonly kind: 'unchanged' }
+  | {
+      readonly kind: 'ready';
+      readonly text: string;
+      readonly receipt: Json;
+      readonly requiredTools?: readonly string[];
+    }
+  | { readonly kind: 'blocked'; readonly message: string; readonly receipt: Json };
 export type HostPlugin<Config = Json> = (
   context: HostContext,
   config: Config,

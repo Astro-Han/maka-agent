@@ -27,5 +27,4 @@ export {
   createModuleHubCommandPort,
   ModuleHubProvider,
   ModuleHubScheduledTasksBoundary,
-  ModuleHubSkillCatalogRevisionBoundary,
 } from './ui/module-hub-provider.js';

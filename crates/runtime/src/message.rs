@@ -19,7 +19,7 @@
 
 //! Durable message provenance shared by admission, execution and recovery.
 use crate::{
-    execution::OrchestrationMode,
+    execution::BehaviorId,
     input::{DeliveredMessage, MessageInput},
     skills::SkillInvocationResult,
 };
@@ -36,7 +36,7 @@ pub enum Placement {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TurnOrchestration {
-    pub mode: OrchestrationMode,
+    pub mode: BehaviorId,
     pub source: TurnOrchestrationSource,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,6 +171,9 @@ pub fn aggregate<'a>(contents: impl IntoIterator<Item = &'a MessageInput>) -> Me
             display.push_str("\n\n");
         }
         result.text.push_str(&content.text);
+        result
+            .preparation
+            .extend(content.preparation.iter().cloned());
         let visible = content.display_text.as_deref().unwrap_or(&content.text);
         display.push_str(visible);
         append(&mut result.attachments, content.attachments.as_deref());

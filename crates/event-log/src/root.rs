@@ -376,14 +376,7 @@ fn check_layout(path: &Path) -> io::Result<()> {
         if name == "model-facts.json" {
             continue;
         }
-        // These dedicated data directories are not alternate database layouts.
-        // Do not accept a symlink/reparse point in place of either directory.
-        if (name == "skills" || name == "workhub-coordination" || name == "subagent-worktrees")
-            && entry.file_type()?.is_dir()
-        {
-            continue;
-        }
-        if !matches!(
+        let core_file = matches!(
             name.to_str(),
             Some(
                 ROOT_MARKER
@@ -397,10 +390,21 @@ fn check_layout(path: &Path) -> io::Result<()> {
                     | "configuration-rust.sqlite-wal"
                     | "configuration-rust.sqlite-shm"
             )
-        ) || !entry.file_type()?.is_file()
-        {
+        );
+        let kind = entry.file_type()?;
+        // Root owns its core files, not the names or layouts of domain data.
+        // A reserved file cannot become a directory; other entries must be
+        // real directories, never aliases or alternate top-level databases.
+        let supported = if core_file {
+            kind.is_file()
+        } else {
+            kind.is_dir()
+        };
+        if !supported {
             return Err(io::Error::other("unsupported files in Rust prototype root"));
         }
+        #[cfg(windows)]
+        windows::open_nofollow(&entry.path(), false)?;
     }
     Ok(())
 }

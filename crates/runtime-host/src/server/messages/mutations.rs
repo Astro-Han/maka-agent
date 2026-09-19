@@ -34,7 +34,7 @@ pub(super) async fn execute(
 ) -> Result<Output, OperationError> {
     let mut prepared: Option<(
         Option<maka_runtime::event::Invocation>,
-        Result<crate::execution::skills::PreparedSkillInput, OperationError>,
+        Result<crate::execution::input::PreparedMessageInput, OperationError>,
     )> = None;
     loop {
         let admission = host.executions.lock_admission().await;
@@ -87,6 +87,7 @@ pub(super) async fn execute(
         }
         let queue = &observation.message_queue;
         let candidate = super::projection::project(&host.epoch, queue);
+        let mut _input_admission = None;
         let edit = match &input {
             Input::Retract(_) => QueueEdit::RetractAll {
                 cancellation_id: id.clone(),
@@ -155,7 +156,7 @@ pub(super) async fn execute(
                     .find(|e| e.source.message.message_id == i.entry_id)
                     .expect("checked entry");
                 let mut source = entry.source.clone();
-                let mut required_tools = Default::default();
+                let required_tools;
                 source.message.content = super::update::content(source.message.content, &i.text)?;
                 source.message.submitted_content_digest =
                     super::update::digest(&source.message.content)?;
@@ -165,7 +166,7 @@ pub(super) async fn execute(
                         reference.kind != maka_runtime::input::InlineReferenceKind::Skill
                     });
                 }
-                if i.text.contains("/skill:") {
+                {
                     let active_tools = (source.disposition
                         == maka_runtime::message::MessageDisposition::Steering)
                         .then(|| host.executions.active_tool_names(entry.steering_target()))
@@ -175,18 +176,19 @@ pub(super) async fn execute(
                         .map(|_| entry.steering_target().clone());
                     let candidate = match prepared.take() {
                         Some((expected_owner, candidate)) if expected_owner == owner => {
-                            let Some(candidate) =
+                            let Some((candidate, guard)) =
                                 candidate?.commit(&host.executions, session).await?
                             else {
                                 continue;
                             };
+                            _input_admission = guard;
                             candidate
                         }
                         _ => {
                             drop(admission);
                             let candidate = host
                                 .executions
-                                .prepare_skill_input(
+                                .prepare_message_input(
                                     observation.session,
                                     source.message.content.clone(),
                                     connection_id,
@@ -198,6 +200,13 @@ pub(super) async fn execute(
                         }
                     };
                     source.message.content = candidate.content;
+                    host.executions
+                        .validate_message_content(
+                            session,
+                            &source.message.content.clone().into(),
+                            host.root_id(),
+                        )
+                        .await?;
                     match candidate.selection {
                         crate::execution::skills::SkillPreparation::Ready {
                             skill_invocation,

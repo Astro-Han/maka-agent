@@ -4416,6 +4416,7 @@ dependencies = [
  "maka-plugins",
  "maka-presentation",
  "maka-runtime",
+ "maka-skills",
  "regress",
  "serde",
  "serde_json",
@@ -4513,31 +4514,51 @@ version = "0.2.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
+ "futures-util",
  "libc",
+ "maka-plugins",
  "maka-runtime",
+ "maka-tool-catalog",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
  "tokio-util",
+ "uuid",
+ "windows-sys 0.61.2",
  "yaml-rust2",
+]
+
+[[package]]
+name = "maka-tool-catalog"
+version = "0.2.0"
+dependencies = [
+ "jsonschema",
+ "maka-plugins",
+ "maka-runtime",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
 name = "maka-tools"
 version = "0.2.0"
 dependencies = [
- "jsonschema",
  "maka-client-capability",
  "maka-event-log",
  "maka-js-runtime",
  "maka-plugins",
  "maka-protocol",
  "maka-runtime",
- "regex",
+ "maka-tool-catalog",
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "uuid",

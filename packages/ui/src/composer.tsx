@@ -141,6 +141,8 @@ export interface ComposerSkillOption {
 }
 
 export interface ComposerSlashCommandOption {
+  /** A completion may insert domain syntax without executing it. */
+  insertText?: string;
   id: string;
   name: string;
   description?: string;
@@ -981,15 +983,16 @@ export const Composer = forwardRef<
       const commandQuery = slashCommandQuery(textBeforeCaret, textAfterCaret, rawQuery);
       const query = skillMentionQuery(rawQuery);
       const selectedSkills = selectedSkillIds(textPort.getValue(), rawQuery);
-      const commandItems = commandQuery === null
-        ? []
-        : (source.slashCommands ?? [])
-            .filter((command) =>
-              mentionQueryMatches(
-                commandQuery,
-                `${command.id} ${command.name} ${command.description ?? ''} ${(command.keywords ?? []).join(' ')}`,
-              ),
-            )
+      const commandItems = (source.slashCommands ?? [])
+            .filter((command) => {
+              // Text completions may appear anywhere in a draft. Executable
+              // slash commands still require the command position.
+              const candidateQuery = command.insertText === undefined ? commandQuery : rawQuery;
+              return candidateQuery !== null && mentionQueryMatches(
+                candidateQuery,
+                `${command.id} ${command.name} ${command.description ?? ''} ${command.insertText ?? ''} ${(command.keywords ?? []).join(' ')}`,
+              );
+            })
             .map((command) => ({
               id: `command:${command.id}`,
               label: command.name,
@@ -1106,7 +1109,7 @@ export const Composer = forwardRef<
                 <span className="maka-composer-mention-text">
                   <span className="maka-composer-mention-name">
                     {command.name}
-                    <span className="maka-composer-command-token">/{command.id}</span>
+                    <span className="maka-composer-command-token">{command.insertText?.trim() ?? `/${command.id}`}</span>
                   </span>
                   <span className="maka-composer-mention-secondary">
                     {command.description}
@@ -1144,7 +1147,7 @@ export const Composer = forwardRef<
         onSelect: (item): string | ChatComposerToken => {
           const suggestion = item.auxiliaryData as ComposerSlashSuggestion;
           if (suggestion.kind === 'command') {
-            return `/${suggestion.command.id} `;
+            return suggestion.command.insertText ?? `/${suggestion.command.id} `;
           }
           return inlineReferenceToken({
             kind: 'skill',

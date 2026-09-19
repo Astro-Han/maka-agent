@@ -66,6 +66,7 @@ fn publish(catalog: &Catalog, version: &str, count: Arc<AtomicUsize>) -> Fiber {
         .insert(
             "system",
             Section {
+                format: Default::default(),
                 order: 0,
                 mode: SectionMode::Complete,
                 text: Text::Literal("Plugin {{version}}".into()),
@@ -76,6 +77,7 @@ fn publish(catalog: &Catalog, version: &str, count: Arc<AtomicUsize>) -> Fiber {
         .insert(
             "context",
             DynamicContext {
+                format: Default::default(),
                 order: 0,
                 text: Text::Literal("Current {{version}}".into()),
             },

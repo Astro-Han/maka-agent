@@ -305,9 +305,7 @@ export function ChatComposerRegion({
           // follow-ups. Other Composer hosts remain gated by default because a
           // text-only running-turn submission would leave attachments behind.
           allowAttachmentImportWhileStreaming
-          mentionSkills={mentions?.mentionSkills}
-          mentionSkillsUnavailable={mentions?.mentionSkillsUnavailable}
-          mentionSkillsLoading={mentions?.mentionSkillsLoading}
+          slashCommands={mentions ? [...(composerRest.slashCommands ?? []), ...mentions.suggestions] : composerRest.slashCommands}
           onSearchMentionFiles={mentions?.searchMentionFiles}
           {...directoryComposerProps}
           onPickDirectory={

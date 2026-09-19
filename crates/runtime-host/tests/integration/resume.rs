@@ -71,7 +71,8 @@ async fn original_client_resumes_selected_lineage_streams_and_reopens_exact_admi
                     .tool_composition
                     .as_ref()
                     .expect("Message and manual resume must freeze admitted Host handlers");
-                assert!(composition.skills_digest.is_some());
+                // Dynamic plugin tools belong to each request, not the Run baseline.
+                assert!(composition.skills_digest.is_none());
             }
         }
         if let Some(original) = &original {

@@ -36,15 +36,10 @@ import {
   useScheduledTasksController,
   type ScheduledTasksController,
 } from './use-scheduled-tasks-controller.js';
-import {
-  useSkillsController,
-  type SkillsHostModel,
-} from './use-skills-controller.js';
 
 export interface ModuleHubHostModel {
   readonly selection: NavSelection;
   readonly selectModule: (selection: NavSelection) => void;
-  readonly skills: SkillsHostModel;
   readonly scheduledTasks: ScheduledTasksController;
   readonly keepSystemAwake: KeepSystemAwakeController;
   readonly dailyReview: DailyReviewController;
@@ -52,7 +47,6 @@ export interface ModuleHubHostModel {
 }
 
 export interface ModuleHubCommands {
-  refreshProjectSkills(): Promise<void>;
   openScheduledTaskCreate(): void;
   copyTodayDailyReview(): Promise<void>;
   pasteTodayDailyReview(): Promise<void>;
@@ -64,16 +58,12 @@ export interface ModuleHubController {
   readonly commands: ModuleHubCommands;
   readonly selectors: {
     readonly scheduledTasks: readonly ScheduledTask[];
-    /** Invalidates the composer's Runtime-owned invocable Skills projection. */
-    readonly skillCatalogRevision: number;
   };
 }
 
 export interface UseModuleHubControllerInput {
   readonly selection: NavSelection;
   readonly selectModule: (selection: NavSelection) => void;
-  readonly openSkillsFolder?: () => void | Promise<void>;
-  readonly useSkillInChat: (skillId: string, skillName: string) => void;
   readonly openSession: (sessionId: string) => void;
   readonly appendComposerText: (text: string) => void;
   readonly captureActiveComposerClaim: () => ActiveComposerClaim | undefined;
@@ -86,16 +76,6 @@ export function useModuleHubController(
   const services = useModuleHubServices();
   const uiLocale = useUiLocale();
   const toastApi = useToast();
-  const isSkillsActive =
-    input.selection.section === 'extensions' &&
-    input.selection.module === 'skills';
-  const skills = useSkillsController({
-    uiLocale,
-    active: isSkillsActive,
-    toastApi,
-    useSkillInChat: input.useSkillInChat,
-    openSkillsFolder: input.openSkillsFolder,
-  });
   const scheduledTasks = useScheduledTasksController({
     uiLocale,
     toastApi,
@@ -116,15 +96,12 @@ export function useModuleHubController(
       selectionRef.current.module === 'daily-review',
   });
 
-  const refreshProjectSkillsRef = useRef(skills.refreshProjectSkills);
   const refreshScheduledTasksRef = useRef(scheduledTasks.refresh);
-  refreshProjectSkillsRef.current = skills.refreshProjectSkills;
   refreshScheduledTasksRef.current = scheduledTasks.refresh;
 
   useEffect(() => {
     return startModuleHubLifecycle({
       runtimeHosts: services.runtimeHosts,
-      refreshProjectSkills: () => void refreshProjectSkillsRef.current(),
       refreshScheduledTasks: () => void refreshScheduledTasksRef.current(),
     });
   }, [services.runtimeHosts]);
@@ -134,14 +111,12 @@ export function useModuleHubController(
       host: {
         selection: input.selection,
         selectModule: input.selectModule,
-        skills: skills.host,
         scheduledTasks,
         keepSystemAwake,
         dailyReview,
         openSession: input.openSession,
       },
       commands: {
-        refreshProjectSkills: skills.refreshProjectSkills,
         openScheduledTaskCreate: scheduledTasks.openCreate,
         copyTodayDailyReview: dailyReview.copyToday,
         pasteTodayDailyReview: dailyReview.pasteToday,
@@ -149,7 +124,6 @@ export function useModuleHubController(
       },
       selectors: {
         scheduledTasks: scheduledTasks.scheduledTasks,
-        skillCatalogRevision: skills.revision,
       },
     }),
     [
@@ -159,9 +133,6 @@ export function useModuleHubController(
       input.selection,
       keepSystemAwake,
       scheduledTasks,
-      skills.host,
-      skills.refreshProjectSkills,
-      skills.revision,
     ],
   );
 }

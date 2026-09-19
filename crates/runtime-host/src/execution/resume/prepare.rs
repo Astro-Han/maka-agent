@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use super::super::{Executions, Result, failure, internal, prompt, provider};
+use super::super::{Executions, Result, failure, internal, provider};
 use crate::session::SessionConfiguration;
 use maka_agent::{RunInput, RunWork};
 use maka_protocol::OperationErrorCode as Code;
@@ -71,20 +71,8 @@ impl Executions {
                 (model.tools, environment.prompt)
             }
             Mode::Observe(connection) => {
-                let mut system_prompt = prompt::resolve(
-                    self.configuration
-                        .runtime_policy()
-                        .await
-                        .map_err(crate::server::configuration::failure)?,
-                    configuration.cwd.clone().into(),
-                    self.paths.global_instructions.clone(),
-                )
-                .await
-                .map_err(internal)?;
-                session
-                    .append_instructions(&mut system_prompt)
-                    .map_err(internal)?;
-                let (tools, skills) = self
+                let system_prompt = session.initial_prompt("").map_err(internal)?;
+                let tools = self
                     .preview_tool_catalog(
                         Some(session_id),
                         connection,
@@ -93,24 +81,10 @@ impl Executions {
                         session.tool_profile,
                     )
                     .await?;
-                let tools = tools
-                    .with_plugins(
-                        self.plugin_catalog.clone(),
-                        maka_plugins::composition::Scope::Session(session_id.clone()),
-                        session.bound_tools.clone(),
-                    )
-                    .map_err(internal)?;
-                let fragment = skills
-                    .catalog()
-                    .prompt((64 * 1024usize).saturating_sub(system_prompt.text.len() + 2));
-                if !fragment.is_empty() {
-                    system_prompt.text.push_str("\n\n");
-                    system_prompt.text.push_str(&fragment);
-                }
                 (tools, system_prompt)
             }
         };
-        configuration.system_prompt = Some(system_prompt);
+        configuration.system_prompt = system_prompt;
         Ok(RunInput {
             invocation: Invocation {
                 session_id: session_id.clone(),

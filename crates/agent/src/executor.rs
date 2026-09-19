@@ -77,7 +77,7 @@ impl Engine {
                 // the same transaction as the invocation admission.
                 let writes = [
                     Fact::InvocationOpened {
-                        configuration: Some(input.configuration),
+                        configuration: Some(Box::new(input.configuration)),
                         input: InvocationInput::Message {
                             content: input.request.content,
                             request_fingerprint: input.request_fingerprint,

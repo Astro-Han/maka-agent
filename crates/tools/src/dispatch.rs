@@ -73,21 +73,32 @@ impl RunTools {
     }
 
     /// Capture once per logical model step, before sending any physical attempt.
-    pub fn capture(&self) -> Result<RequestTools<'_>, ToolError> {
-        let (current, captured) = self.availability.capture()?;
-        Ok(self.request(current, captured))
+    pub async fn capture(
+        &self,
+        cwd: &str,
+        cancellation: CancellationToken,
+    ) -> Result<RequestTools<'_>, ToolError> {
+        let (current, captured, context) = self
+            .availability
+            .capture(self.journal.invocation().clone(), cwd.into(), cancellation)
+            .await?;
+        let mut request = self.request(current, captured, context);
+        request.cwd = cwd.into();
+        Ok(request)
     }
 
     /// Handoff seals settled history and Host capabilities, not a new model step.
     /// Dynamic plugins are sampled afresh by the successor after restoration.
     pub fn handoff_definitions(&self) -> Vec<ToolDefinition> {
-        self.request(self.availability.clone(), None).definitions()
+        self.request(self.availability.clone(), None, Default::default())
+            .definitions()
     }
 
     fn request(
         &self,
         current: Availability,
         captured: Option<maka_plugins::contributions::Captured>,
+        context: maka_plugins::prompt::Resolved,
     ) -> RequestTools<'_> {
         let digest = current.digest();
         let direct = if self.mode == ToolMode::CodeMode {
@@ -101,6 +112,8 @@ impl RunTools {
             current
         };
         RequestTools {
+            cwd: String::new(),
+            context,
             captured,
             digest,
             direct,
@@ -114,6 +127,8 @@ impl RunTools {
 /// The advertised schemas and their handlers share one captured capability view.
 /// Search settlement affects future captures, never this request or its retries.
 pub struct RequestTools<'a> {
+    cwd: String,
+    context: maka_plugins::prompt::Resolved,
     captured: Option<maka_plugins::contributions::Captured>,
     digest: String,
     direct: ToolCatalog,
@@ -134,12 +149,29 @@ impl<'a> RequestTools<'a> {
         cancellation: CancellationToken,
     ) -> Result<maka_plugins::prompt::Resolved, ToolError> {
         let request = maka_plugins::prompt::Request {
-            invocation,
+            target: maka_plugins::prompt::Target::ModelStep {
+                invocation,
+                cwd: self.cwd.clone(),
+            },
             cancellation,
         };
         let mut prompt = maka_plugins::prompt::resolve(self.captured.as_ref(), base, request)
             .await
             .map_err(|error| ToolError::Failed(error.to_string()))?;
+        if prompt
+            .contexts
+            .iter()
+            .chain(&self.context.contexts)
+            .map(String::len)
+            .sum::<usize>()
+            > 64 * 1024
+        {
+            return Err(ToolError::Failed("request context exceeds 64 KiB".into()));
+        }
+        prompt
+            .contexts
+            .extend(self.context.contexts.iter().cloned());
+        prompt.sources.extend(self.context.sources.iter().cloned());
         if let Some(captured) = &self.captured {
             for (name, entry) in captured.typed::<crate::plugins::PluginTool>().entries {
                 if !self.catalog.contains(&name) && !self.direct.contains(&name) {

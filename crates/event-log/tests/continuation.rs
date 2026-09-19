@@ -23,7 +23,7 @@ use maka_runtime::{
     continuation::{ContinuationClaim, REPLAY_VERSION, ReplayEvidence, RunBoundary, SessionBase},
     event::{EventWrite, Fact, Invocation, InvocationOutcome, RuntimeEvent, StoredEvent},
     execution::{
-        CollaborationMode, InvocationConfiguration, OrchestrationMode, PermissionMode, ToolMode,
+        BehaviorId, CollaborationMode, InvocationConfiguration, PermissionMode, ToolMode,
         WorkspaceIdentity,
     },
     input::InvocationInput,
