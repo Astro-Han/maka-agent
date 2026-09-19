@@ -50,7 +50,7 @@
 | 领域／当前耦合 | 目标与完成条件 |
 | --- | --- |
 | **Skills：**`maka.skills` 拥有发现、输入准备、每步工具／上下文快照、治理、偏好 CAS、预览、导入及 workspace／user 发布；已发布的 Client Contribution 拥有 Session／新工作区选择器、管理页与草稿建议。 | Desktop 提供目标绑定的 Slot、通用 Remote 传输及授权的原生文件操作；旧扫描、导入、控制器和 Skills IPC／preload 门面已删除。Host 仅保留薄外部协议适配、准入与不可变回执，不再解析 Skill。 |
-| **WorkHub：**`maka.workhub` 拥有协调会话配置、回答组合、原生 `workhub_tasks`、路由／选择／纠正／Stop／Resume 流程和恢复策略。Client 通过 Remote 解析主窗口与浮动窗口 Session 绑定，并按规范消息执行链读取委派反馈；后端退休撤下 Client 并拒绝旧代调用。Desktop 提供窗口控制与工作区／偏好，不再编排任务。 | 会话视图、任务模型和 controller 位于 `packages/workhub`；controller 显式接收 Session 端口，不接收原生窗口服务。补齐 Client 挂载与 origin-bound 适配，替换私有执行 profile 并补齐协调会话 steering／followup。保留精确消息定位、原子准入／取消／回执，以及 Host 对已接受操作的结算。 |
+| **WorkHub：**`maka.workhub` 拥有协调会话配置、回答组合、原生 `workhub_tasks`、路由／选择／纠正／Stop／Resume、steering／followup 及恢复策略。Session behavior 为初始及后续 Turn 一致冻结工具与 Direct／Code Mode。 | 发布的 Client 在 `packages/workhub` 中拥有完整主窗口／浮动界面，通过 Remote 及原 Host 绑定的 Session／附件端口工作。Desktop 负责原生呈现，不编排任务；Host 负责受管 Session 保留、精确准入、规范回执和结算。Client 换代按原身份协调待确认提交，不跨 Host epoch 重投。 |
 | **默认助手行为：**`maka.assistant` 发布默认 behavior、persona、个性化和工作区指令。 | 每逻辑模型步骤冻结来源；停用后不保留隐藏 persona。显式 Session／子任务指令独立于可替换的提示词 Contribution；执行／压缩不变量仍由 Host 维护。 |
 | **Graph／Swarm 与 Scheduler：**已经是内置插件，behavior 按开放的类型化身份选择。Graph 使用原子激活／停止／空闲退休命令及只读偏好，不接收 `Executions`、配置写入器或 Host 锁。 | 保持已有编排与唤醒行为；语义相同时复用这些窄命令，按同一归属规则复核 Scheduler。类型化领域 repository 可以保留。 |
 | **Code Mode：**模式选择、嵌套派发及历史投影跨越多个 crate。 | 首批领域迁移后，在有实际 Contribution 边界收益时迁移面向用户的工具和模式策略；V8 所有权、嵌套调用权限、派发／结算及规范历史保留 runtime。不为搬迁 `exec` 发明万能执行 hook。 |
@@ -100,10 +100,10 @@ runtime 契约不能反向依赖插件实现，协议适配层可以保留现有
 | --- | --- |
 | 输入准备 | 原生类型化 Contribution 与 JS `ctx.input.prepare` 共用有序准备、来源回执和退休检查；原生 revision 支持非阻塞的准入／失效排序。队列编辑和 steering 在准入前准备，已接受输入的提升／重放不再扫描来源。 |
 | Skills：保留工具名归属 | Skill／SkillSearch 是绑定指定包的普通 Contribution。每步绑定在工具上限内共同捕获 handler 和支持上下文，物理重试保持原快照。 |
-| WorkHub：精确执行命令 | 现有纠正原子修改意图、pending delivery 和规范关联事实。提取带稳定操作 ID、精确目标、预期 revision 的类型化命令，保留事务与恢复边界；不暴露 SQL 事务回调，也不为了适配 SDK 拆成无关联写入。业务决策放在该边界之外。 |
+| WorkHub：精确执行命令 | 类型化命令携带稳定操作 ID、精确目标及预期 revision。纠正原子更新意图、投递与规范关联；已接受工作不依赖插件可用性继续结算。队列编辑保留原提交凭证。插件不获得 SQL 事务回调或无限制执行句柄。 |
 | WorkHub／Graph／Plan：可选择的 behavior | 已用开放的 `BehaviorId` 选择类型化 Contribution，Graph／Swarm 独立注册；非内置业务已通过 Host 验收。保留 Session 默认值和持久单 Turn 选择；请求的 behavior 不可用时明确失败。behavior 准备与输入准备是独立契约，不合并为 hook 总线。 |
 | Skills／Web／Recall／Insights：授权服务 | Execution SDK 只读自己提交的 operation。首个消费者需要时补有界历史／用量／资源查询及用户／后台资源能力；invocation、Remote、后台调用仍各自授权，不能用宽泛的 `Executions`／Host handle 代替。领域目录／修改接口可作为类型化插件 Service，不必成为内核方法。 |
-| Skills／WorkHub／默认行为：业务 UI 与 Prompt 上下文 | 已有 Prompt Contribution、Session／工作区 Slot、草稿建议、可选本地文件能力及 Remote 方法／流。迁移真实选择器、管理页和 WorkHub 消费端，只补需要的 Slot／路由及受限 Prompt 来源读取。Remote 不等于 UI 接入；功能停用应明确显示不可用，不阻塞普通聊天。 |
+| Skills／WorkHub／默认行为：业务 UI 与 Prompt 上下文 | 发布的 Client 通过 Slot 和 Remote 拥有真实 Skills 选择器／管理页及 WorkHub 界面。原生适配验证原 Host 与 document；连接换代撤销旧 Remote 租约，不重放调用。Prompt Contribution 拥有业务指令。功能停用明确显示不可用，不阻塞普通聊天。 |
 | 其余 TS 扩展服务 | 新 SDK 尚缺等价的公开 LSP 路由、Commands、Skills／Goals 查询、shell 环境变量 Contribution、Settings 定义、授权流程及 LLM adapter 注册；直接提问／审批、附件服务便利 API 也需按消费者适配。能由插件服务实现的领域注册放在插件侧，敏感行为权威仍归 Host。`llm.generate` 不等于 adapter 注册。 |
 
 这些是需要补齐或适配的功能接口，不是逐个复制 TS 方法。
@@ -117,7 +117,7 @@ TS 的 LLM adapter 注册服务于插件模型调用，本身不等于主 Sessio
 ## 实现顺序
 
 1. **Skills：**迁移已有发现／调用，同领域补齐治理／发布，贯通输入准备、保留名注册、领域 Service、Prompt 和真实 Desktop 消费端。
-2. **WorkHub：**整体迁移已实现领域，包括纠正、附件、停止、resume 和恢复；发展精确 Host 命令，不削弱既有原子性。
+2. **WorkHub（已迁移）：**编排、纠正、附件、停止／resume、恢复及完整 Client 界面归插件；精确 Host 命令保留原子性。
 3. **默认行为与既有插件收敛：**迁移 persona／工作区策略，以 Graph 和 Scheduler 验证提取出的 API，删除不必要的 Host 私有捷径。
 4. **缺失业务领域：**完整实现 Web、Recall、todo，再做 Plan／Goal 和研究／复盘；完成外部 adapter、Insights／健康。复用领域边界，不先在 Host 写新业务再搬一次。
 5. **其余核心等价：**完成 Session 生命周期／谱系／迁入迁出、policy、接入／协作、Peer Mesh、provider 和诊断。前面消费者所需的核心命令前置到对应阶段，核心工作不等待全部插件或商店。首批领域验证边界后评估 Code Mode／工具装配迁移，不将其作为功能等价的前提。

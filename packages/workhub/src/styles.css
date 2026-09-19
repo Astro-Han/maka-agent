@@ -148,6 +148,13 @@
   opacity: 1;
 }
 
+.workHubLive:has(.maka-workbar-edge) .maka-prompt-rail {
+  right: 30px;
+}
+.workHubLive:has(.maka-workbar-edge) .maka-prompt-rail:hover {
+  right: 33px;
+}
+
 .workhub-navigation-label {
   display: block;
   overflow: hidden;

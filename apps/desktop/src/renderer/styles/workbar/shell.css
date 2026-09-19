@@ -333,8 +333,8 @@ button.maka-workbar-edge:is(:hover, :active, :focus-visible) { background: trans
 }
 /* Leave space between the anchor targets and the edge control, without moving
    the conversation or its scrollbar. The resize separator stays outside both. */
-:is(.maka-detail-with-artifacts, .workHubLive):has(.maka-workbar-edge) .maka-prompt-rail { right: 30px; }
-:is(.maka-detail-with-artifacts, .workHubLive):has(.maka-workbar-edge) .maka-prompt-rail:hover { right: 33px; }
+.maka-detail-with-artifacts:has(.maka-workbar-edge) .maka-prompt-rail { right: 30px; }
+.maka-detail-with-artifacts:has(.maka-workbar-edge) .maka-prompt-rail:hover { right: 33px; }
 .maka-workbar-edge-glass {
   position: absolute;
   top: 50%;
