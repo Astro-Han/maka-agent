@@ -58,7 +58,7 @@ export async function settingsSnapshot(request) {
   return { policy, proxy, web };
 }
 
-export async function configureModel(request) {
+export async function configureModel(request, baseUrl = 'http://127.0.0.1:9/v1') {
   const initial = await request('connection.catalog.query', { kind: 'start' });
   assert.equal(initial.revision, 0);
   const created = await request('connection.catalog.create', {
@@ -67,8 +67,7 @@ export async function configureModel(request) {
       slug: 'runtime-policy',
       name: 'Runtime policy fixture',
       providerType: 'openai-compatible',
-      // No model call or discovery is performed by this control-only scenario.
-      baseUrl: 'http://127.0.0.1:9/v1',
+      baseUrl,
       enabled: true,
       enabledModelIds: ['fixture-model'],
     },
@@ -85,7 +84,7 @@ export async function configureModel(request) {
       ...created.connection,
       slug: 'runtime-policy',
       providerType: 'openai-compatible',
-      effectiveBaseUrl: 'http://127.0.0.1:9/v1',
+      effectiveBaseUrl: baseUrl,
     },
     secret: 'runtime-policy-test-model-key',
   });

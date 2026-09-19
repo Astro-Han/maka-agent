@@ -28,7 +28,7 @@ import type {
 import type { SessionSummary, StoredMessage, TurnRecord } from '@maka/core/session';
 import type { UsageStats } from '@maka/core/settings';
 import type { RuntimeHostProfileKind } from '@maka/runtime-host/profile-kind';
-import { desktopSessionKey, type DesktopHostRef } from './runtime-host-identity.js';
+import { desktopSessionKey, parseDesktopSessionKey, type DesktopHostRef } from './runtime-host-identity.js';
 
 export interface DesktopSessionSummary extends SessionSummary {
   /** Client cache is readable history, not evidence of current Host execution. */
@@ -85,6 +85,21 @@ export function projectDesktopAttachmentRefs(
     ...attachment,
     ref: projectDesktopStorageRef(host, attachment.ref),
   }));
+}
+
+/** Convert only references belonging to this exact Host and canonical Session. */
+export function hostAttachmentRefs(
+  session: { scope: DesktopHostRef; sessionId: string },
+  attachments: readonly AttachmentRef[],
+): AttachmentRef[] {
+  return attachments.map((attachment) => {
+    if (attachment.ref.kind !== 'session_file') return attachment;
+    const owner = parseDesktopSessionKey(attachment.ref.sessionId);
+    if (owner.hostId !== session.scope.hostId || owner.sessionId !== session.sessionId) {
+      throw new Error('Retained attachment belongs to another Host or Session');
+    }
+    return { ...attachment, ref: { ...attachment.ref, sessionId: owner.sessionId } };
+  });
 }
 
 function projectMessageContent<T extends MessageContent>(

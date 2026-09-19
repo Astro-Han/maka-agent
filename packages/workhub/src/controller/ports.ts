@@ -70,6 +70,7 @@ export interface CoordinationSessionServices {
     text: string,
     attachments: AttachmentRef[],
     placement: MessageQueuePlacement,
+    expectedTurnId: string,
   ): Promise<'admitted' | 'unknown' | 'rejected'>;
   retractQueueEntry(sessionId: string, entryId: string): Promise<void>;
   promoteQueueEntry(sessionId: string, entryId: string): Promise<void>;

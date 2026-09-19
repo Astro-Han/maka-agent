@@ -53,6 +53,26 @@ pub struct SubmitInput {
     pub turn_orchestration: Option<TurnOrchestration>,
 }
 
+impl SubmitInput {
+    pub fn validate(&mut self) -> Result<()> {
+        epoch(&self.origin_host_epoch)?;
+        turn::entity(&self.session_id)?;
+        turn::entity(&self.message_id)?;
+        let ids = self.skill_ids.as_deref().unwrap_or_default();
+        turn::validate_skill_ids(ids)?;
+        self.content.validate_admission(!ids.is_empty())?;
+        ensure(
+            (ids.is_empty() && self.turn_orchestration.is_none())
+                || self.placement == Placement::CurrentTurn,
+            "Exact-Turn intent requires current_turn placement",
+        )?;
+        if ids.is_empty() {
+            self.skill_ids = None;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QueryInput {
@@ -121,20 +141,7 @@ pub fn decode_input(operation: Operation, value: &Value) -> Result<Input> {
     let input = match operation {
         TurnMessageSubmit => {
             let mut input: SubmitInput = turn::decode(value)?;
-            epoch(&input.origin_host_epoch)?;
-            turn::entity(&input.session_id)?;
-            turn::entity(&input.message_id)?;
-            let ids = input.skill_ids.as_deref().unwrap_or_default();
-            turn::validate_skill_ids(ids)?;
-            input.content.validate_admission(!ids.is_empty())?;
-            ensure(
-                (ids.is_empty() && input.turn_orchestration.is_none())
-                    || input.placement == Placement::CurrentTurn,
-                "Exact-Turn intent requires current_turn placement",
-            )?;
-            if ids.is_empty() {
-                input.skill_ids = None;
-            }
+            input.validate()?;
             Input::Submit(Box::new(input))
         }
         TurnMessageQuery | TurnMessageExecutionQuery => {

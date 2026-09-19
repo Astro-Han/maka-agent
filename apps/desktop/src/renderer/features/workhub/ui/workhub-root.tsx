@@ -17,13 +17,16 @@
  * under the License.
  */
 
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
+import type { HostAttachments } from '@maka/workhub/slots';
 import type { WorkHubRootProps, WorkHubAttachmentServices, WorkHubWindowServices } from '@maka/workhub/surface';
 import { useUiLocale } from '@maka/ui';
 import { ClientPluginSlot, type ClientHostRef } from '../../client-plugins/index.js';
 import { getDesktopConversationCopy } from '../../../locales/conversation-copy.js';
 import { localizedShellErrorMessage } from '../../../locales/shell-copy.js';
 import { useWorkHubServices } from '../services.js';
+import { hostAttachmentRefs } from '../../../../shared/desktop-session-projection.js';
+import { parseDesktopSessionKey } from '../../../../shared/runtime-host-identity.js';
 
 export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionId' | 'feedback'> & { host: ClientHostRef }) {
   const locale = useUiLocale();
@@ -40,6 +43,11 @@ export function WorkHubRoot({ host, ...props }: Pick<WorkHubRootProps, 'sessionI
     copy: (locale) => getDesktopConversationCopy(locale).actions,
     formatError: localizedShellErrorMessage,
   }), [services]);
+  const hostAttachments = useCallback<HostAttachments>((sessionId, refs) => {
+    const session = parseDesktopSessionKey(sessionId);
+    if (session.hostId !== host.hostId) throw new Error('WorkHub Session belongs to another Host');
+    return hostAttachmentRefs({ scope: host, sessionId: session.sessionId }, refs);
+  }, [host.hostId]);
   return <ClientPluginSlot host={host} entryId="maka.workhub.ui" name="workhub.surface" className="workHubPluginSurface"
-    input={{ ...props, locale, sessions: services, native, attachments, contextUsage: services.inspector }} />;
+    input={{ ...props, locale, sessions: services, native, attachments, hostAttachments, contextUsage: services.inspector }} />;
 }

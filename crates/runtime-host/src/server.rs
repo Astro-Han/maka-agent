@@ -266,6 +266,7 @@ impl Host {
             &executions,
             project_usage.clone(),
             root.root_id().into(),
+            epoch.clone(),
             session_catalog.clone(),
             changes.clone(),
         ));

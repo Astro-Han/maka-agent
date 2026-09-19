@@ -50,6 +50,14 @@ pub(crate) struct Stop {
 /// Commands own admission, durable receipts and settlement. No locks, arbitrary
 /// log writes or Host handles are exposed to the business implementation.
 pub(crate) trait Commands: Send + Sync {
+    fn enqueue(
+        &self,
+        caller: Context,
+        input: maka_protocol::message::SubmitInput,
+        expected_turn: String,
+        connection: uuid::Uuid,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> BoxFuture<'_, Result<maka_protocol::message::SubmitResult>>;
     fn message_observation(
         &self,
         session: String,

@@ -24,6 +24,7 @@ import type { SessionSummary } from '@maka/core/session';
 import type { UsageStats } from '@maka/core/settings';
 import { EMPTY_USAGE_PROVENANCE } from '@maka/core/usage-ledger-merge';
 import {
+  hostAttachmentRefs,
   projectDesktopSessionEvent,
   projectDesktopSessionSummary,
   projectDesktopStoredMessage,
@@ -189,6 +190,12 @@ test('projects queued Session attachments into the Desktop host namespace', () =
       relativePath: 'artifact-1',
     },
   );
+  const refs = (projected as Extract<SessionEvent, { type: 'queue_update' }>).followupEntries![0]!.content.attachments!;
+  assert.deepEqual(hostAttachmentRefs({ scope: host, sessionId: 'session-1' }, refs)[0]!.ref, {
+    kind: 'session_file', sessionId: 'session-1', relativePath: 'artifact-1',
+  });
+  assert.throws(() => hostAttachmentRefs({ scope: { hostId: 'other' }, sessionId: 'session-1' }, refs), /another Host or Session/);
+  assert.throws(() => hostAttachmentRefs({ scope: host, sessionId: 'other' }, refs), /another Host or Session/);
 });
 
 test('projects only present Usage Session ids into the Desktop host namespace', () => {

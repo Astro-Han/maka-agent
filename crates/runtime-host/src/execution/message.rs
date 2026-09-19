@@ -31,6 +31,27 @@ use uuid::Uuid;
 
 mod queued;
 
+/// A managed queue submission cannot become an idle-session root when its
+/// observed Turn finishes. The owning namespace is independent of activation.
+pub(crate) struct Manager {
+    pub owner: maka_plugins::fiber::Context,
+    pub expected_turn: String,
+    pub cancellation: tokio_util::sync::CancellationToken,
+}
+impl Manager {
+    fn admit(&self) -> Result<maka_plugins::fiber::CallGuard> {
+        if self.cancellation.is_cancelled() {
+            return Err(failure(
+                Code::OperationConflict,
+                "Message submission was cancelled",
+            ));
+        }
+        self.owner
+            .admit()
+            .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))
+    }
+}
+
 impl Executions {
     pub(crate) async fn submit(
         self: &std::sync::Arc<Self>,
@@ -40,6 +61,49 @@ impl Executions {
         epoch: &str,
     ) -> Result<SubmitResult> {
         self.ordinary_session(&input.session_id).await?;
+        self.submit_authorized(input, connection_id, root_id, epoch, None)
+            .await
+    }
+
+    pub(crate) async fn enqueue_managed(
+        self: &std::sync::Arc<Self>,
+        input: SubmitInput,
+        connection_id: Uuid,
+        root_id: &str,
+        epoch: &str,
+        manager: Manager,
+    ) -> Result<SubmitResult> {
+        let identity = manager
+            .owner
+            .identity()
+            .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
+        let namespace = maka_plugins::storage::Namespace::new(identity.package_id, identity.scope)
+            .map_err(internal)?;
+        if self
+            .log
+            .session_manager(&input.session_id)
+            .await
+            .map_err(internal)?
+            .as_ref()
+            != Some(&namespace)
+        {
+            return Err(failure(
+                Code::OperationConflict,
+                "Session requires its owning manager",
+            ));
+        }
+        self.submit_authorized(input, connection_id, root_id, epoch, Some(manager))
+            .await
+    }
+
+    async fn submit_authorized(
+        self: &std::sync::Arc<Self>,
+        input: SubmitInput,
+        connection_id: Uuid,
+        root_id: &str,
+        epoch: &str,
+        manager: Option<Manager>,
+    ) -> Result<SubmitResult> {
         let mut prepared = None;
         let mut queued: Option<(
             maka_runtime::event::Invocation,
@@ -47,6 +111,7 @@ impl Executions {
         )> = None;
         loop {
             let admission = self.lock_admission().await;
+            let _manager = manager.as_ref().map(Manager::admit).transpose()?;
             if self.shutdown.is_cancelled() {
                 return Err(failure(Code::HostDraining, "Host is draining"));
             }
@@ -157,6 +222,16 @@ impl Executions {
                 .values()
                 .find(|run| run.invocation.session_id == input.session_id)
                 .map(|run| run.invocation.clone());
+            if let Some(manager) = &manager
+                && active
+                    .as_ref()
+                    .is_none_or(|invocation| invocation.turn_id != manager.expected_turn)
+            {
+                return Err(failure(
+                    Code::OperationConflict,
+                    "Observed Turn is no longer active",
+                ));
+            }
             if let Some(invocation) = active {
                 let (skills, _input_admission) = if source.submitted_intent.is_none() {
                     match queued.take() {

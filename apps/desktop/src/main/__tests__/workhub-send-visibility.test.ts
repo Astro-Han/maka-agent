@@ -500,7 +500,7 @@ test('WorkHub steering keeps the current Turn and Stop authority and reconciles 
   await act(async () => { assert.equal(await h.controller.send('change direction', attachments, 'steer'), true); });
   assert.equal(h.requests.length, 1, 'steering must not start or queue another answer');
   assert.equal(h.controller.liveTurn?.turnId, turnId);
-  assert.deepEqual(h.steers[0]!.slice(2), ['change direction', attachments, 'current_turn']);
+  assert.deepEqual(h.steers[0]!.slice(2), ['change direction', attachments, 'current_turn', turnId]);
   const messageId = h.steers[0]![1];
   const original: StoredMessage = { type: 'user', id: 'original-canonical-id', turnId, text: 'original request', ts: 1 };
   await act(() => h.publish([original]));
@@ -625,7 +625,7 @@ test('WorkHub defaults to follow-up and moves each message into its admitted suc
     assert.equal(await h.controller.send('second follow-up', []), true);
   });
   assert.deepEqual(h.steers.map((input) => input.slice(2)), [
-    ['first follow-up', attachments, 'next_turn'], ['second follow-up', [], 'next_turn'],
+    ['first follow-up', attachments, 'next_turn', 'active-turn'], ['second follow-up', [], 'next_turn', 'active-turn'],
   ]);
   assert.equal(h.requests.length, 0);
   assert.equal(h.controller.liveTurn?.turnId, 'active-turn');

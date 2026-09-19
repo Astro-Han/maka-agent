@@ -38,6 +38,7 @@ pub(super) fn publish(
         ("resolve", Action::Resolve),
         ("query", Action::Query),
         ("answer", Action::Answer),
+        ("enqueue", Action::Enqueue),
         ("answer-receipt", Action::AnswerReceipt),
         ("configure-model", Action::ConfigureModel),
         ("feedback", Action::Feedback),
@@ -63,6 +64,7 @@ enum Action {
     Resolve,
     Query,
     Answer,
+    Enqueue,
     AnswerReceipt,
     ConfigureModel,
     Feedback,
@@ -70,6 +72,16 @@ enum Action {
 struct Call {
     control: Control,
     action: Action,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Enqueue {
+    origin_host_epoch: String,
+    expected_turn_id: String,
+    message_id: String,
+    content: maka_protocol::turn::MessageContent,
+    placement: maka_protocol::message::Placement,
 }
 
 impl Method for Call {
@@ -90,6 +102,30 @@ impl Method for Call {
                 return Err(Error::Cancelled);
             }
             let result = match action {
+                Action::Enqueue => {
+                    let request: Enqueue = serde_json::from_value(input).map_err(invalid)?;
+                    let mut input = maka_protocol::message::SubmitInput {
+                        origin_host_epoch: request.origin_host_epoch,
+                        session_id: COORDINATION_SESSION_ID.into(),
+                        message_id: request.message_id,
+                        content: request.content,
+                        placement: request.placement,
+                        skill_ids: None,
+                        turn_orchestration: None,
+                    };
+                    input.validate().map_err(invalid)?;
+                    control
+                        .commands
+                        .enqueue(
+                            control.caller.clone(),
+                            input,
+                            request.expected_turn_id,
+                            caller.connection_id,
+                            caller.cancellation,
+                        )
+                        .await
+                        .and_then(encode)
+                }
                 Action::Resolve => {
                     empty(&input)?;
                     control.resolve(caller.cancellation).await.and_then(encode)

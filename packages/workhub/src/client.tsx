@@ -34,11 +34,17 @@ const plugin: ClientPlugin = {
   activate(context) {
     context.style(`@layer components {\n${styles}\n}`);
     registerFeedback(context);
-    const commands = coordinationCommands(context);
     context.slots.register('workhub.surface', 'conversation', function Surface(props) {
       const bound = useMemo(
-        () => bindSurface(props, commands, context.signal),
-        [props.sessions, props.native, props.attachments, props.contextUsage],
+        () =>
+          bindSurface(props, coordinationCommands(context, props.hostAttachments), context.signal),
+        [
+          props.sessions,
+          props.native,
+          props.attachments,
+          props.contextUsage,
+          props.hostAttachments,
+        ],
       );
       return <WorkHubRoot {...props} {...bound} signal={context.signal} />;
     });

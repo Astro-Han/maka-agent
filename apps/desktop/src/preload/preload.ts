@@ -271,6 +271,7 @@ import {
   projectProtocolSessionIds,
 } from './projected-session-runtime-host.js';
 import {
+  hostAttachmentRefs,
   projectDesktopAttachmentRefs,
   projectDesktopDailyReviewSummary,
   projectDesktopSessionEvent,
@@ -474,20 +475,6 @@ async function runtimeHostSessionRef(sessionId: string): Promise<{
     if (scope) return { scope, sessionId: ref.sessionId };
   }
   throw new Error('The Runtime Host for this task is unavailable');
-}
-
-function hostAttachmentRefs(
-  session: { scope: DesktopTargetScope; sessionId: string },
-  attachments: readonly AttachmentRef[],
-): AttachmentRef[] {
-  return attachments.map((attachment) => {
-    if (attachment.ref.kind !== 'session_file') return attachment;
-    const owner = parseDesktopSessionKey(attachment.ref.sessionId);
-    if (owner.hostId !== session.scope.hostId || owner.sessionId !== session.sessionId) {
-      throw new Error('Retained attachment belongs to another Host or Session');
-    }
-    return { ...attachment, ref: { ...attachment.ref, sessionId: owner.sessionId } };
-  });
 }
 
 type DiagnosticRuntimeHostResolution<TTarget extends 'default' | 'task'> = {

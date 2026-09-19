@@ -19,6 +19,7 @@
 
 import type { ClientContext } from '@maka-agent/plugin-sdk/client';
 import type { OperationInput, OperationOutput } from '@maka/runtime-host/protocol';
+import type { HostAttachments } from './slots.js';
 import type {
   CoordinationSessionServices,
   WorkHubAnswerInput,
@@ -35,19 +36,50 @@ type Answer = Wire<OperationInput<'workhub.coordination.answer'>>;
 type Receipt = Wire<OperationOutput<'workhub.coordination.answer'>>;
 type ModelInput = Wire<OperationInput<'workhub.coordination.configureModel'>>;
 type ModelResult = Wire<OperationOutput<'workhub.coordination.configureModel'>>;
+type Enqueue = Pick<
+  Wire<OperationInput<'turn.message.submit'>>,
+  'originHostEpoch' | 'messageId' | 'content' | 'placement'
+> & { expectedTurnId: string };
+type Queued = Wire<OperationOutput<'turn.message.submit'>>;
 
 export function coordinationCommands(
   context: Pick<ClientContext, 'remote' | 'hostEpoch' | 'signal'>,
-): Pick<CoordinationSessionServices, 'answer' | 'configureModel'> {
+  toHost: HostAttachments,
+): Pick<CoordinationSessionServices, 'answer' | 'configureModel' | 'enqueueMessage'> {
   const submit = context.remote.method<Answer, Outcome<Receipt>>('answer');
   const receipt = context.remote.method<Answer, Outcome<Receipt | null>>('answer-receipt');
   const configure = context.remote.method<ModelInput, Outcome<ModelResult>>('configure-model');
+  const enqueue = context.remote.method<Enqueue, Outcome<Queued>>('enqueue');
   return {
-    async answer(_sessionId, input: WorkHubAnswerInput): Promise<WorkHubAnswerResult> {
+    async enqueueMessage(sessionId, messageId, text, attachments, placement, expectedTurnId) {
+      context.signal.throwIfAborted();
+      if (!context.hostEpoch) throw new Error('WorkHub has no originating Host epoch');
+      const content = { text, attachments: toHost(sessionId, attachments) };
+      try {
+        const outcome = await enqueue({
+          originHostEpoch: context.hostEpoch,
+          expectedTurnId,
+          messageId,
+          content,
+          placement,
+        });
+        if (!outcome.ok) return outcome.error.code === 'outcome_unknown' ? 'unknown' : 'rejected';
+        // Accepted delivery can move from steering to its successor during a
+        // lost-response retry. Neither receipt permits another submission.
+        return outcome.result.disposition === 'blocked' ? 'rejected' : 'admitted';
+      } catch {
+        return 'unknown';
+      }
+    },
+    async answer(sessionId, input: WorkHubAnswerInput): Promise<WorkHubAnswerResult> {
       context.signal.throwIfAborted();
       const epoch = input.originHostEpoch ?? context.hostEpoch;
       if (!epoch || !context.hostEpoch) throw new Error('WorkHub has no originating Host epoch');
-      const { originHostEpoch: _origin, ...request } = input;
+      const { originHostEpoch: _origin, ...original } = input;
+      const request = {
+        ...original,
+        ...(input.attachments ? { attachments: toHost(sessionId, input.attachments) } : {}),
+      };
       const unknown = (): WorkHubAnswerResult => ({ kind: 'unknown', originHostEpoch: epoch });
       let outcome: Outcome<Receipt>;
       try {

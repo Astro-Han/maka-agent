@@ -103,7 +103,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
   assert.equal(attachments[0]!.ref.kind === 'session_file' && attachments[0]!.ref.sessionId, sessionId);
   assert.equal((await services.answer(sessionId, { turnId: 'idle-answer', text: 'read this', attachments })).kind, 'admitted');
   for (const placement of ['next_turn', 'current_turn'] as const) {
-    assert.equal(await services.enqueueMessage(sessionId, `message-${placement}`, 'read this', attachments, placement), 'admitted');
+    assert.equal(await services.enqueueMessage(sessionId, `message-${placement}`, 'read this', attachments, placement, 'active-turn'), 'admitted');
   }
   assert.deepEqual(structuredClone(sent.map(({ attachments }) => attachments)), [[uploaded], [uploaded], [uploaded]]);
   assert.equal((await services.readAttachmentBytes(sessionId, 'brief.txt')).ok, true);
@@ -120,7 +120,7 @@ test('WorkHub upload references round-trip through idle answers, both queue mode
   );
   const foreign = [{ ...uploaded, ref: { ...uploaded.ref, kind: 'session_file' as const, sessionId: desktopSessionKey({ hostId: 'foreign-host', sessionId: nativeSessionId }), relativePath: 'brief.txt' } }];
   await assert.rejects(services.answer(sessionId, { turnId: 'foreign', text: 'read this', attachments: foreign }), /another Host or Session/);
-  await assert.rejects(services.enqueueMessage(sessionId, 'foreign', 'read this', foreign, 'next_turn'), /another Host or Session/);
+  await assert.rejects(services.enqueueMessage(sessionId, 'foreign', 'read this', foreign, 'next_turn', 'active-turn'), /another Host or Session/);
 });
 
 

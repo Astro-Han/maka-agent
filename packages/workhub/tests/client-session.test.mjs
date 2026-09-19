@@ -27,20 +27,27 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
   const lifetime = new AbortController();
   const calls = [];
   const replies = new Map();
-  const commands = coordinationCommands({
-    hostEpoch: 'new',
-    signal: lifetime.signal,
-    remote: {
-      method(name) {
-        return async (input) => {
-          calls.push([name, structuredClone(input)]);
-          const reply = replies.get(name);
-          if (reply instanceof Error) throw reply;
-          return await reply;
-        };
+  const commands = coordinationCommands(
+    {
+      hostEpoch: 'new',
+      signal: lifetime.signal,
+      remote: {
+        method(name) {
+          return async (input) => {
+            calls.push([name, structuredClone(input)]);
+            const reply = replies.get(name);
+            if (reply instanceof Error) throw reply;
+            return await reply;
+          };
+        },
       },
     },
-  });
+    (_sessionId, refs) =>
+      refs.map((attachment) => {
+        if (attachment.ref.sessionId !== 'projected-session') throw new Error('foreign attachment');
+        return { ...attachment, ref: { ...attachment.ref, sessionId: 'canonical-session' } };
+      }),
+  );
   replies.set('answer', new Error('response lost after dispatch'));
   assert.deepEqual(await commands.answer('session', request), {
     kind: 'unknown',
@@ -82,6 +89,74 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
     /changed payload/,
   );
 
+  const attachments = [
+    {
+      name: 'brief.txt',
+      ref: { kind: 'session_file', sessionId: 'projected-session', relativePath: 'brief.txt' },
+    },
+  ];
+  const canonical = [
+    { ...attachments[0], ref: { ...attachments[0].ref, sessionId: 'canonical-session' } },
+  ];
+  await commands.answer('projected-session', { ...request, attachments });
+  assert.deepEqual(calls.at(-1), ['answer', { ...request, attachments: canonical }]);
+  await assert.rejects(
+    commands.answer('projected-session', {
+      ...request,
+      attachments: [{ ...attachments[0], ref: { ...attachments[0].ref, sessionId: 'foreign' } }],
+    }),
+    /foreign attachment/,
+  );
+  replies.set('enqueue', { ok: true, result: { disposition: 'followup' } });
+  assert.equal(
+    await commands.enqueueMessage(
+      'projected-session',
+      'message',
+      'queued',
+      attachments,
+      'next_turn',
+      'observed-turn',
+    ),
+    'admitted',
+  );
+  assert.deepEqual(calls.at(-1), [
+    'enqueue',
+    {
+      originHostEpoch: 'new',
+      expectedTurnId: 'observed-turn',
+      messageId: 'message',
+      content: { text: 'queued', attachments: canonical },
+      placement: 'next_turn',
+    },
+  ]);
+  replies.set('enqueue', new Error('response lost'));
+  assert.equal(
+    await commands.enqueueMessage(
+      'projected-session',
+      'message',
+      'queued',
+      [],
+      'next_turn',
+      'observed-turn',
+    ),
+    'unknown',
+  );
+  replies.set('enqueue', {
+    ok: false,
+    error: { code: 'operation_conflict', message: 'Turn ended' },
+  });
+  assert.equal(
+    await commands.enqueueMessage(
+      'projected-session',
+      'message',
+      'queued',
+      [],
+      'next_turn',
+      'observed-turn',
+    ),
+    'rejected',
+  );
+
   // Retirement during reconciliation must not start a fresh submission afterward.
   const pending = Promise.withResolvers();
   replies.set('answer-receipt', pending.promise);
@@ -93,6 +168,10 @@ test('Remote answers reconcile exact receipts without redispatching across Host 
   assert.deepEqual(calls, [['answer-receipt', request]]);
   await assert.rejects(commands.configureModel('session', {}), /retired/);
   await assert.rejects(commands.answer('session', request), /retired/);
+  await assert.rejects(
+    commands.enqueueMessage('session', 'message', 'queued', [], 'next_turn', 'turn'),
+    /retired/,
+  );
   assert.equal(calls.length, 1);
 });
 

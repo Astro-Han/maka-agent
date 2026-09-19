@@ -33,6 +33,7 @@ pub(crate) struct WorkHubCommands {
     executions: Weak<Executions>,
     pub(super) project_usage: crate::server::ProjectUsage,
     root_id: String,
+    epoch: String,
     catalog: Arc<crate::server::CatalogFeed>,
     changes: tokio::sync::broadcast::Sender<serde_json::Value>,
 }
@@ -65,6 +66,7 @@ impl WorkHubCommands {
         executions: &Arc<Executions>,
         project_usage: crate::server::ProjectUsage,
         root_id: String,
+        epoch: String,
         catalog: Arc<crate::server::CatalogFeed>,
         changes: tokio::sync::broadcast::Sender<serde_json::Value>,
     ) -> Self {
@@ -72,6 +74,7 @@ impl WorkHubCommands {
             executions: Arc::downgrade(executions),
             project_usage,
             root_id,
+            epoch,
             catalog,
             changes,
         }
@@ -88,6 +91,30 @@ impl WorkHubCommands {
     }
 }
 impl Commands for WorkHubCommands {
+    fn enqueue(
+        &self,
+        caller: Context,
+        input: maka_protocol::message::SubmitInput,
+        expected_turn: String,
+        connection: uuid::Uuid,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> BoxFuture<'_, Result<maka_protocol::message::SubmitResult>> {
+        Box::pin(async move {
+            self.executions()?
+                .enqueue_managed(
+                    input,
+                    connection,
+                    &self.root_id,
+                    &self.epoch,
+                    crate::execution::message::Manager {
+                        owner: caller,
+                        expected_turn,
+                        cancellation,
+                    },
+                )
+                .await
+        })
+    }
     fn message_observation(
         &self,
         session: String,

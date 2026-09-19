@@ -19,6 +19,13 @@
 
 import type {} from '@maka-agent/plugin-sdk/client';
 import type { WorkHubRootProps } from './surface.js';
+import type { AttachmentRef } from '@maka/core/events';
+
+/** Client-local references to this surface's originating Host namespace. */
+export type HostAttachments = (
+  sessionId: string,
+  attachments: readonly AttachmentRef[],
+) => AttachmentRef[];
 
 export type DelegationReference = {
   readonly id: string;
@@ -52,6 +59,7 @@ declare module '@maka-agent/plugin-sdk/client' {
   interface ClientSlots {
     'workhub.feedback': FeedbackInput;
     'workhub.surface': WorkHubRootProps & {
+      readonly hostAttachments: HostAttachments;
       readonly locale: 'en' | 'zh-CN' | 'zh-TW';
       readonly contextRevision?: number;
     };

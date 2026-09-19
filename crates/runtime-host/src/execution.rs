@@ -32,7 +32,7 @@ pub(crate) use creation::Creation;
 pub(crate) mod input;
 mod interrupt;
 mod launch;
-mod message;
+pub(crate) mod message;
 mod plugins;
 pub(crate) use client_view::SessionViews;
 mod prepare;

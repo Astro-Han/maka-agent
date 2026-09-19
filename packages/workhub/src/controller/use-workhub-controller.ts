@@ -699,6 +699,7 @@ export function useWorkHubController(
           text,
           attachments,
           attempt.placement,
+          attempt.turnId,
         );
         if (result === 'rejected' && pendingQueued.current === attempt) {
           pendingQueued.current = undefined;
