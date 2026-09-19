@@ -24,6 +24,7 @@ pub(crate) mod model;
 mod name;
 mod projection;
 pub use projection::catalog_projection;
+pub(crate) use projection::mutation_projection;
 
 pub use metadata::apply_metadata_patch;
 

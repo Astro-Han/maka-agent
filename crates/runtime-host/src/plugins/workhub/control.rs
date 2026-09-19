@@ -50,6 +50,25 @@ pub(crate) struct Stop {
 /// Commands own admission, durable receipts and settlement. No locks, arbitrary
 /// log writes or Host handles are exposed to the business implementation.
 pub(crate) trait Commands: Send + Sync {
+    fn resolve_model(
+        &self,
+        target: maka_protocol::session::SessionModelTarget,
+        thinking: Option<maka_protocol::session::ThinkingLevel>,
+    ) -> BoxFuture<'_, Result<crate::session::SessionModel>>;
+    fn configure_coordinator(
+        &self,
+        caller: Context,
+        model: super::coordinator::model::Prepared,
+    ) -> BoxFuture<'_, Result<maka_event_log::sessions::SessionMutation<SessionConfiguration>>>;
+    fn coordinator(
+        &self,
+        caller: Context,
+    ) -> BoxFuture<'_, Result<Option<maka_event_log::sessions::SessionRecord<SessionConfiguration>>>>;
+    fn resolve_coordinator(
+        &self,
+        caller: Context,
+        resolution: super::coordinator::Resolution,
+    ) -> BoxFuture<'_, Result<()>>;
     fn selection(
         &self,
         caller: Context,
@@ -120,6 +139,7 @@ pub(crate) trait Commands: Send + Sync {
 pub(crate) struct Control {
     pub(super) commands: Arc<dyn Commands>,
     pub(super) caller: Context,
+    pub(super) workspace: std::path::PathBuf,
 }
 impl Control {
     pub async fn stop(&self, input: ActInput) -> Result<ActResult> {

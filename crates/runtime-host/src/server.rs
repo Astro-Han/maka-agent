@@ -269,6 +269,7 @@ impl Host {
             &mut setup,
             &executions.plugin_catalog,
             workhub_commands.clone(),
+            root.canonical_path(),
         )?;
         crate::plugins::scheduler::install(
             &mut setup,

@@ -69,6 +69,47 @@ impl WorkHubCommands {
     }
 }
 impl Commands for WorkHubCommands {
+    fn resolve_model(
+        &self,
+        target: maka_protocol::session::SessionModelTarget,
+        thinking: Option<maka_protocol::session::ThinkingLevel>,
+    ) -> BoxFuture<'_, Result<crate::session::SessionModel>> {
+        Box::pin(async move {
+            crate::session::model::resolve(&self.executions()?.configuration, &target, thinking)
+                .await
+        })
+    }
+    fn configure_coordinator(
+        &self,
+        caller: Context,
+        model: crate::plugins::workhub::coordinator::model::Prepared,
+    ) -> BoxFuture<'_, Result<maka_event_log::sessions::SessionMutation<SessionConfiguration>>>
+    {
+        Box::pin(
+            async move { super::coordinator::configure(&self.executions()?, caller, model).await },
+        )
+    }
+    fn coordinator(
+        &self,
+        caller: Context,
+    ) -> BoxFuture<'_, Result<Option<maka_event_log::sessions::SessionRecord<SessionConfiguration>>>>
+    {
+        Box::pin(async move {
+            let _call = caller
+                .admit()
+                .map_err(|error| failure(Code::OperationUnavailable, &error.to_string()))?;
+            self.executions()?.workhub_coordinator().await
+        })
+    }
+    fn resolve_coordinator(
+        &self,
+        caller: Context,
+        resolution: crate::plugins::workhub::coordinator::Resolution,
+    ) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async move {
+            super::coordinator::resolve(&self.executions()?, caller, resolution).await
+        })
+    }
     fn selection(
         &self,
         caller: Context,

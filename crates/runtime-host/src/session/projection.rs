@@ -22,6 +22,23 @@ use maka_event_log::sessions::{SessionExecutionState, SessionRecord};
 use maka_protocol::session::*;
 use maka_runtime::event::TerminalStatus;
 
+pub(crate) fn mutation_projection(
+    mutation: maka_event_log::sessions::SessionMutation<SessionConfiguration>,
+) -> SessionUpdateResult {
+    use maka_event_log::sessions::SessionMutation;
+    match mutation {
+        SessionMutation::Committed(record) => SessionUpdateResult::Committed {
+            session: SessionCatalogItem::Projection(Box::new(catalog_projection(record))),
+        },
+        SessionMutation::RevisionConflict { expected, actual } => {
+            SessionUpdateResult::RevisionConflict {
+                expected_revision: expected,
+                actual_revision: actual,
+            }
+        }
+    }
+}
+
 pub fn catalog_projection(
     mut record: SessionRecord<SessionConfiguration>,
 ) -> SessionCatalogProjection {

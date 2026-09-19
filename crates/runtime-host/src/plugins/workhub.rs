@@ -32,6 +32,7 @@ use serde_json::Value;
 use std::sync::Arc;
 pub(crate) mod candidates;
 pub(crate) mod control;
+pub(crate) mod coordinator;
 pub(crate) mod correction;
 pub(crate) mod delegation;
 pub(crate) mod resume;
@@ -59,6 +60,7 @@ pub(crate) fn install(
     setup: &mut Setup,
     catalog: &Catalog,
     commands: Arc<dyn control::Commands>,
+    state_root: &std::path::Path,
 ) -> Result<(), maka_plugins::Error> {
     if setup.builtins.contains_key(ID) || setup.layers.contains_key(ID) {
         return Err(maka_plugins::Error::Invalid(
@@ -76,7 +78,10 @@ pub(crate) fn install(
             revision: env!("CARGO_PKG_VERSION").into(),
             dependencies: vec![],
             inject: vec![],
-            plugin: Arc::new(WorkHub { commands }),
+            plugin: Arc::new(WorkHub {
+                commands,
+                workspace: state_root.join("workhub-coordination"),
+            }),
         }),
     );
     let mut entry = Entry::new(ID)?;
@@ -94,6 +99,7 @@ pub(crate) fn install(
 }
 struct WorkHub {
     commands: Arc<dyn control::Commands>,
+    workspace: std::path::PathBuf,
 }
 impl Plugin for WorkHub {
     fn supports_scope(&self, scope: &Scope) -> bool {
@@ -114,6 +120,7 @@ impl Plugin for WorkHub {
         _: Value,
     ) -> BoxFuture<'static, Result<Staged, String>> {
         let commands = self.commands.clone();
+        let workspace = self.workspace.clone();
         Box::pin(async move {
             let identity = context
                 .lifecycle
@@ -126,6 +133,7 @@ impl Plugin for WorkHub {
                     Control {
                         commands,
                         caller: context.lifecycle.clone(),
+                        workspace,
                     },
                 )
                 .map_err(|error| error.to_string())?;

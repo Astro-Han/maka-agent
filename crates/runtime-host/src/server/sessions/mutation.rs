@@ -19,7 +19,7 @@
 
 use super::{Result, failure, invalid, item, stored};
 use crate::session::{SessionConfiguration, apply_metadata_patch};
-use maka_event_log::{EventLog, StoreError, sessions::SessionMutation};
+use maka_event_log::{EventLog, StoreError};
 use maka_protocol::OperationErrorCode as Code;
 use maka_protocol::session::*;
 use serde_json::Value;
@@ -52,21 +52,7 @@ pub(super) async fn metadata(log: &EventLog, value: &Value) -> Result<SessionUpd
     Ok(output)
 }
 
-pub(in crate::server) fn result(
-    mutation: SessionMutation<SessionConfiguration>,
-) -> SessionUpdateResult {
-    match mutation {
-        SessionMutation::Committed(record) => SessionUpdateResult::Committed {
-            session: item(record),
-        },
-        SessionMutation::RevisionConflict { expected, actual } => {
-            SessionUpdateResult::RevisionConflict {
-                expected_revision: expected,
-                actual_revision: actual,
-            }
-        }
-    }
-}
+pub(in crate::server) use crate::session::mutation_projection as result;
 
 pub(super) async fn read_marker(log: &EventLog, value: &Value) -> Result<SessionCatalogItem> {
     let input = decode_session_read_marker_set_input(value).map_err(invalid)?;

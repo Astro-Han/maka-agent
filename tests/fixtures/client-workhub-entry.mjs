@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { connect } from 'node:net';
 import { once } from 'node:events';
 import { parseArgs } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
 import { access, mkdir, readFile, rmdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { connectRuntimeHostMessageTransport } from '../../packages/runtime-host/src/client/connection.ts';
@@ -120,7 +121,7 @@ try {
       await assert.rejects(resolve(), (e) => e.code === 'operation_conflict');
       await assert.rejects(query(), (e) => e.code === 'persistence_failed');
       const { connection: model } = await configureModel(request);
-      assert.deepEqual(await resolve(), { sessionId });
+      assert.deepEqual(await Promise.all([resolve(), resolve()]), [{ sessionId }, { sessionId }]);
       const initial = await query();
       assert.equal(initial.id, sessionId);
       assert.equal(initial.name, 'WorkHub');
@@ -201,6 +202,29 @@ try {
       await rmdir(initial.workspace.hostCwd);
       assert.deepEqual(await query(), configured.session);
       await assert.rejects(access(initial.workspace.hostCwd), (e) => e.code === 'ENOENT');
+      for (const disabled of [true, false]) {
+        await request('plugin.composition.apply', {
+          operations: [{ type: 'update', entryId: 'maka.workhub', patch: { disabled } }],
+        });
+        const deadline = Date.now() + 5000;
+        while (
+          (await request('plugin.platform.query', { view: 'status' })).convergence !== 'converged'
+        ) {
+          assert(Date.now() < deadline, 'WorkHub did not converge');
+          await delay(10);
+        }
+        if (disabled) {
+          await assert.rejects(query(), (error) => error.code === 'operation_unavailable');
+          await assert.rejects(resolve(), (error) => error.code === 'operation_unavailable');
+          await assert.rejects(
+            configure({ ...input, expectedRevision: configured.session.revision }),
+            (error) => error.code === 'operation_unavailable',
+          );
+        } else {
+          assert.deepEqual(await query(), configured.session);
+        }
+        await assert.rejects(access(initial.workspace.hostCwd), (error) => error.code === 'ENOENT');
+      }
       assert.deepEqual(await resolve(), { sessionId });
       await access(initial.workspace.hostCwd);
       // A prerequisite-free Skill is invocable in an ordinary Session but not
