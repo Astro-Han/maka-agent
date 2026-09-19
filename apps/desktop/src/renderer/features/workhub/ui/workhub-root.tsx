@@ -26,19 +26,19 @@ import { useLiveContextUsage } from '../../../application/contracts/session-insp
 import { selectLatestRequestUsage } from '../../../application/contracts/session-inspector/latest-request-usage.js';
 import { WorkHubProgressCard } from './workhub-progress-card.js';
 import { WorkHubComposer } from './workhub-composer.js';
-import { WorkHubConversation } from './workhub-conversation.js';
+import { WorkHubConversation } from '@maka/workhub/conversation';
 import { FormInteractionPrompt } from '@maka/ui';
 import { getShellCopy } from '../../../locales/shell-copy.js';
 import { WorkbarEdgeToggle } from '../../../application/contracts/workbar-edge-toggle.js';
-import { WorkHubNavigationRail } from './workhub-navigation-rail.js';
-import { useWorkHubHighlightState, WorkHubHighlightContext, WorkHubHueProvider } from './workhub-work-identity.js';
-import { getWorkHubRailCopy } from '../../../locales/workhub-copy.js';
+import { WorkHubNavigationRail } from '@maka/workhub/conversation';
+import { useWorkHubHighlightState, WorkHubHighlightContext, WorkHubHueProvider } from '@maka/workhub/conversation';
+import { getWorkHubRailCopy } from '@maka/workhub/locales';
 import { useWorkHubController } from '../controller/use-workhub-controller.js';
 import type { WorkHubControlSnapshot } from '../../../../shared/workhub-control.js';
 import type { WorkHubPresentationSnapshot } from '../../../../shared/workhub-presentation.js';
-import { workHubLiveCopy } from '../locales/workhub-live-copy.js';
-import { applyWorkHubDelegationFeedback, workHubLinkedWork } from '../model/linked-work.js';
-import type { WorkHubDelegationFeedback } from '../model/linked-work.js';
+import { workHubLiveCopy } from '@maka/workhub/locales';
+import { applyWorkHubDelegationFeedback, workHubLinkedWork } from '@maka/workhub/model';
+import type { WorkHubDelegationFeedback } from '@maka/workhub/model';
 
 function cancelReveal(element: HTMLDivElement | null, content: HTMLDivElement | null) {
   for (const target of [element, content]) for (const animation of target?.getAnimations() ?? []) animation.cancel();
@@ -100,7 +100,7 @@ export function WorkHubRoot({ sessionId, feedback }: {
   const surface = useRef<HTMLElement>(null);
   const [editingProgressRequest, setEditingProgressRequest] = useState<number>();
   const [expandedOverride, setConversationExpanded] = useState<boolean>();
-  const promptStates = new Map<string, import('../model/linked-work.js').WorkHubDelegationState>();
+  const promptStates = new Map<string, import('@maka/workhub/model').WorkHubDelegationState>();
   for (const message of transcript.messages) if (message.type === 'turn_state') promptStates.set(message.turnId, message.status);
   for (const [turnId, state] of Object.entries(controller.turnStates)) promptStates.set(turnId, state);
   if (controller.liveTurn && !controller.liveTurn.terminal) promptStates.set(controller.liveTurn.turnId, 'running');

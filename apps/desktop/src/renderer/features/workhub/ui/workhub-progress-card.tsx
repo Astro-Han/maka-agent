@@ -24,7 +24,7 @@ import { ArrowRight, X } from '@maka/ui/icons';
 import type { StoredMessage } from '@maka/core/session';
 import type { WorkHubControlSnapshot } from '../../../../shared/workhub-control.js';
 import { useWorkHubServices } from '../services.js';
-import { workHubLiveCopy } from '../locales/workhub-live-copy.js';
+import { workHubLiveCopy } from '@maka/workhub/locales';
 
 function latestText(liveTurn: LiveTurnProjection | undefined, messages: readonly StoredMessage[]): string | undefined {
   for (let index = (liveTurn?.steps.length ?? 0) - 1; index >= 0; index--) {

@@ -22,7 +22,10 @@
  * An ID-seeded pseudo-random offset keeps sampling stable during React
  * rendering, while different Works can use different hues in the same band.
  */
-export function allocateWorkHubHues(sessionIds: readonly string[], previous: ReadonlyMap<string, number> = new Map()): ReadonlyMap<string, number> {
+export function allocateWorkHubHues(
+  sessionIds: readonly string[],
+  previous: ReadonlyMap<string, number> = new Map(),
+): ReadonlyMap<string, number> {
   const pending = [...new Set(sessionIds)].filter((id) => !previous.has(id)).sort();
   if (pending.length === 0) return previous;
   const next = new Map(previous);

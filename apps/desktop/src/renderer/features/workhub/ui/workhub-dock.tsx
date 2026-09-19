@@ -23,7 +23,7 @@ import { Button } from '@astryxdesign/core';
 import { useUiLocale } from '@maka/ui';
 import type { WorkHubPresentationSnapshot } from '../../../../shared/workhub-presentation.js';
 import { useWorkHubServices } from '../services.js';
-import { workHubLiveCopy } from '../locales/workhub-live-copy.js';
+import { workHubLiveCopy } from '@maka/workhub/locales';
 
 /** The main window owns only this landing space; the live view keeps its React owner. */
 export function WorkHubDock({ enabled, visible = true, workbarCollapsed }: { enabled: boolean; visible?: boolean; workbarCollapsed: boolean }) {

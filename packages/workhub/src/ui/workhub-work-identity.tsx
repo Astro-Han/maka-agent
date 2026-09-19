@@ -29,7 +29,13 @@ export const WorkHubHighlightContext = createContext<{
   selectedWork?: { sessionId: string; name: string };
   toggleWork(work: { sessionId: string; name: string }): void;
   selectWork(work: { sessionId: string; name: string } | undefined): void;
-}>({ sessionId: undefined, highlight: () => {}, navigateWork: () => {}, selectWork: () => {}, toggleWork: () => {} });
+}>({
+  sessionId: undefined,
+  highlight: () => {},
+  navigateWork: () => {},
+  selectWork: () => {},
+  toggleWork: () => {},
+});
 
 /** Work identity hover and conversation filtering are local presentation state. */
 export function useWorkHubHighlightState() {
@@ -48,13 +54,30 @@ export function useWorkHubHighlightState() {
       setNavigationWork({ sessionId: work.sessionId, nonce: Date.now() });
     }
   };
-  return { sessionId, highlight, navigationWork, navigateWork, selectedWork, selectWork, toggleWork: (work: { sessionId: string; name: string }) => selectWork(selectedWork?.sessionId === work.sessionId ? undefined : work) };
+  return {
+    sessionId,
+    highlight,
+    navigationWork,
+    navigateWork,
+    selectedWork,
+    selectWork,
+    toggleWork: (work: { sessionId: string; name: string }) =>
+      selectWork(selectedWork?.sessionId === work.sessionId ? undefined : work),
+  };
 }
 
 const WorkHubHueContext = createContext<ReadonlyMap<string, number> | undefined>(undefined);
 
-export function WorkHubHueProvider({ sessionIds, children }: { sessionIds: readonly string[]; children: ReactNode }) {
-  const [allocated, setAllocated] = useState<ReadonlyMap<string, number>>(() => allocateWorkHubHues(sessionIds));
+export function WorkHubHueProvider({
+  sessionIds,
+  children,
+}: {
+  sessionIds: readonly string[];
+  children: ReactNode;
+}) {
+  const [allocated, setAllocated] = useState<ReadonlyMap<string, number>>(() =>
+    allocateWorkHubHues(sessionIds),
+  );
   const next = allocateWorkHubHues(sessionIds, allocated);
   if (next !== allocated) setAllocated(next);
   return <WorkHubHueContext.Provider value={next}>{children}</WorkHubHueContext.Provider>;

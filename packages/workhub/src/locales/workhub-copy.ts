@@ -19,7 +19,7 @@
 
 import type { UiCatalog, UiLocale } from '@maka/core/ui-locale';
 
-import type { WorkHubWorkFilter, WorkHubAnchorSession } from '../features/workhub/index.js';
+import type { WorkHubWorkFilter, WorkHubAnchorSession } from '../model/anchor-rail.js';
 
 export interface WorkHubRailCopy {
   readonly work: string;
@@ -27,10 +27,7 @@ export interface WorkHubRailCopy {
   readonly filterWork: string;
   readonly focused: string;
   readonly archived: string;
-  readonly states: Readonly<Record<
-    WorkHubAnchorSession['state'],
-    string
-  >>;
+  readonly states: Readonly<Record<WorkHubAnchorSession['state'], string>>;
   readonly anchorCount: (shown: number, matching: number, total: number) => string;
   readonly noFilteredWork: string;
   readonly filters: ReadonlyArray<{
@@ -41,9 +38,18 @@ export interface WorkHubRailCopy {
 
 const COPY = {
   'zh-CN': {
-    work: '工作', workNavigation: '工作导航', filterWork: '筛选工作', focused: '当前',
+    work: '工作',
+    workNavigation: '工作导航',
+    filterWork: '筛选工作',
+    focused: '当前',
     archived: '已归档',
-    states: { active: '活跃', running: '进行中', waiting_for_user: '等待你', blocked: '受阻', aborted: '已中止' },
+    states: {
+      active: '活跃',
+      running: '进行中',
+      waiting_for_user: '等待你',
+      blocked: '受阻',
+      aborted: '已中止',
+    },
     anchorCount: (shown, matching, total) => `${shown}/${matching} 个锚点 · 共 ${total} 项`,
     noFilteredWork: '此筛选下没有工作',
     filters: [
@@ -54,9 +60,18 @@ const COPY = {
     ],
   },
   'zh-TW': {
-    work: '工作', workNavigation: '工作導覽', filterWork: '篩選工作', focused: '目前',
+    work: '工作',
+    workNavigation: '工作導覽',
+    filterWork: '篩選工作',
+    focused: '目前',
     archived: '已封存',
-    states: { active: '使用中', running: '進行中', waiting_for_user: '等待你', blocked: '受阻', aborted: '已中止' },
+    states: {
+      active: '使用中',
+      running: '進行中',
+      waiting_for_user: '等待你',
+      blocked: '受阻',
+      aborted: '已中止',
+    },
     anchorCount: (shown, matching, total) => `${shown}/${matching} 個錨點 · 共 ${total} 項`,
     noFilteredWork: '此篩選下沒有工作',
     filters: [
@@ -67,9 +82,18 @@ const COPY = {
     ],
   },
   en: {
-    work: 'Work', workNavigation: 'Work navigation', filterWork: 'Filter work', focused: 'Focused',
+    work: 'Work',
+    workNavigation: 'Work navigation',
+    filterWork: 'Filter work',
+    focused: 'Focused',
     archived: 'Archived',
-    states: { active: 'Active', running: 'Running', waiting_for_user: 'Waiting for you', blocked: 'Blocked', aborted: 'Aborted' },
+    states: {
+      active: 'Active',
+      running: 'Running',
+      waiting_for_user: 'Waiting for you',
+      blocked: 'Blocked',
+      aborted: 'Aborted',
+    },
     anchorCount: (shown, matching, total) => `${shown}/${matching} anchors · ${total} total`,
     noFilteredWork: 'No work matches this filter',
     filters: [

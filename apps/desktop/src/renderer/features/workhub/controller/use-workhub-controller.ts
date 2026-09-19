@@ -37,7 +37,7 @@ import type { AttachmentRef, FollowUpMode, MessageQueueEntryProjection, MessageQ
 import type { ThinkingLevel } from '@maka/core/model-thinking';
 import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import { useWorkHubServices } from '../services.js';
-import { workHubLiveCopy } from '../locales/workhub-live-copy.js';
+import { workHubLiveCopy } from '@maka/workhub/locales';
 import type { WorkHubServices, WorkHubTranscript, WorkHubTranscriptSnapshot } from '../ports.js';
 
 const emptyTranscript: WorkHubTranscriptSnapshot = {
@@ -82,7 +82,7 @@ export function useWorkHubController(sessionId: string | undefined, onSubmit?: (
   const refreshInteractions = useRef<() => void>(() => {});
   const interactionRevision = useRef(0);
   const [interactions, setInteractions] = useState<InteractionQueues>({});
-  const [turnStates, setTurnStates] = useState<Record<string, import('../model/linked-work.js').WorkHubDelegationState>>({});
+  const [turnStates, setTurnStates] = useState<Record<string, import('@maka/workhub/model').WorkHubDelegationState>>({});
   const activeInteraction = activeInteractionFor(interactions, sessionId);
   const activeQuestion = activeInteraction?.type === 'user_question_request' ? activeInteraction : undefined;
   const [sending, setSending] = useState(false);

@@ -17,8 +17,7 @@
  * under the License.
  */
 
-
-/** Display basename for a Host path, independent of the renderer platform. */
-export function workspaceNameFromCwd(cwd: string | undefined): string | undefined {
-  return cwd?.replace(/[/\\]+$/, '').split(/[/\\]/).at(-1) || undefined;
-}
+export * from './model/anchor-rail.js';
+export * from './model/linked-work.js';
+export { workspaceNameFromCwd } from './model/workspace-name.js';
+export { allocateWorkHubHues } from './model/identity-colors.js';

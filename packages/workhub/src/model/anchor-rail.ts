@@ -22,12 +22,12 @@ export interface WorkHubAnchorSession {
   readonly projectName: string;
   readonly sessionName: string;
   readonly archived: boolean;
-  readonly state: "active" | "running" | "waiting_for_user" | "blocked" | "aborted";
+  readonly state: 'active' | 'running' | 'waiting_for_user' | 'blocked' | 'aborted';
   readonly latestResult?: string;
   readonly updatedAt: number;
 }
 
-export type WorkHubWorkFilter = "all" | "active" | "attention" | "stopped";
+export type WorkHubWorkFilter = 'all' | 'active' | 'attention' | 'stopped';
 export const MAX_WORKHUB_ANCHORS = 8;
 
 /**
@@ -40,14 +40,10 @@ export function deriveWorkHubAnchors(input: {
   readonly delegatedSessionIds: readonly string[];
   readonly filter: WorkHubWorkFilter;
 }): WorkHubAnchorSession[] {
-  const sessionById = new Map(
-    input.sessions.map((session) => [session.target.sessionId, session]),
-  );
+  const sessionById = new Map(input.sessions.map((session) => [session.target.sessionId, session]));
   const ordered: WorkHubAnchorSession[] = [];
   const seen = new Set<string>();
-  const append = (
-    sessionId: string | undefined,
-  ) => {
+  const append = (sessionId: string | undefined) => {
     if (!sessionId || seen.has(sessionId)) return;
     const session = sessionById.get(sessionId);
     if (!session || !matchesWorkHubFilter(session, input.filter)) return;
@@ -56,8 +52,7 @@ export function deriveWorkHubAnchors(input: {
   };
 
   append(input.focusSessionId);
-  for (const sessionId of input.delegatedSessionIds)
-    append(sessionId);
+  for (const sessionId of input.delegatedSessionIds) append(sessionId);
   for (const session of [...input.sessions].sort(
     (left, right) => right.updatedAt - left.updatedAt,
   )) {
@@ -70,16 +65,12 @@ export function matchesWorkHubFilter(
   session: WorkHubAnchorSession,
   filter: WorkHubWorkFilter,
 ): boolean {
-  if (filter === "all") return true;
-  if (filter === "active")
+  if (filter === 'all') return true;
+  if (filter === 'active')
+    return !session.archived && (session.state === 'active' || session.state === 'running');
+  if (filter === 'attention')
     return (
-      !session.archived &&
-      (session.state === "active" || session.state === "running")
+      !session.archived && (session.state === 'waiting_for_user' || session.state === 'blocked')
     );
-  if (filter === "attention")
-    return (
-      !session.archived &&
-      (session.state === "waiting_for_user" || session.state === "blocked")
-    );
-  return session.archived || session.state === "aborted";
+  return session.archived || session.state === 'aborted';
 }

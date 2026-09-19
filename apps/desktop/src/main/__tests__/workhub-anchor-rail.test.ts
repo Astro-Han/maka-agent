@@ -21,17 +21,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { WorkHubAnchorSession } from "../../renderer/features/workhub/index.js";
+import type { WorkHubAnchorSession } from '@maka/workhub/model';
 import {
   deriveWorkHubAnchors,
   matchesWorkHubFilter,
   MAX_WORKHUB_ANCHORS,
-  WorkHubNavigationRail,
   workHubLinkedWork,
-} from "../../renderer/features/workhub/index.js";
+} from '@maka/workhub/model';
 import { ChatSurfaceLayout, LocaleProvider } from '@maka/ui';
-import { WorkHubConversation, WorkHubDelegationStatus } from '../../renderer/features/workhub/testing.js';
-import { getWorkHubRailCopy } from "../../renderer/locales/workhub-copy.js";
+import { WorkHubConversation, WorkHubDelegationStatus, WorkHubNavigationRail } from '@maka/workhub/conversation';
+import { getWorkHubRailCopy } from '@maka/workhub/locales';
 import { renderTranscriptMarkup } from './transcript-test-dom.js';
 import type { ToolCallMessage, ToolResultMessage } from '@maka/core/session';
 
@@ -192,7 +191,7 @@ test('a shared coordination turn keeps every Work label without assigning one Wo
 
 
 test('WorkHub workspace display names handle Host paths independently of renderer platform', async () => {
-  const { workspaceNameFromCwd } = await import('../../renderer/features/workhub/testing.js');
+  const { workspaceNameFromCwd } = await import('@maka/workhub/model');
   assert.equal(workspaceNameFromCwd('/projects/maka/'), 'maka');
   assert.equal(workspaceNameFromCwd('C:\\projects\\maka\\'), 'maka');
   assert.equal(workspaceNameFromCwd(undefined), undefined);

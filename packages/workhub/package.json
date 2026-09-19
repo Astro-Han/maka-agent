@@ -5,6 +5,9 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./conversation": "./dist/conversation.js",
+    "./model": "./dist/model.js",
+    "./locales": "./dist/locales.js",
     "./client": "./dist/client.js",
     "./slots": "./dist/slots.js"
   },
@@ -14,6 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@astryxdesign/core": "0.6.1",
+    "@maka/core": "0.1.0",
     "@maka-agent/plugin-sdk": "1.0.0",
     "@maka/ui": "0.1.0",
     "react": "^19.3.0"

@@ -17,11 +17,10 @@
  * under the License.
  */
 
-export type { WorkHubServices, WorkHubTranscriptSnapshot } from './ports.js';
-export { WorkHubServicesProvider } from './services.js';
-export { WorkHubRoot } from './ui/workhub-root.js';
-export { WorkHubDock } from './ui/workhub-dock.js';
-export { WorkHubSurfaceSwitch } from './ui/workhub-surface-switch.js';
-export { WorkHubControlOverlay } from './ui/control-overlay.js';
-export { WorkHubMainNavigation } from './ui/main-navigation.js';
-export { WorkHubReturnButton } from './ui/return-button.js';
+export { WorkHubConversation, WorkHubDelegationStatus } from './ui/workhub-conversation.js';
+export { WorkHubNavigationRail } from './ui/workhub-navigation-rail.js';
+export {
+  WorkHubHighlightContext,
+  WorkHubHueProvider,
+  useWorkHubHighlightState,
+} from './ui/workhub-work-identity.js';

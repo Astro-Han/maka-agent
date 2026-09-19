@@ -25,7 +25,7 @@ import type { StoredMessage, SessionSummary } from '@maka/core/session';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, within, waitFor } from 'storybook/test';
 import { WorkHubRoot, WorkHubServicesProvider, type WorkHubServices, type WorkHubTranscriptSnapshot } from '../src/renderer/features/workhub/index.js';
-import { WorkHubConversation, WorkHubHighlightContext } from '../src/renderer/features/workhub/testing.js';
+import { WorkHubConversation, WorkHubHighlightContext } from '@maka/workhub/conversation';
 import { desktopSessionKey } from '../src/shared/runtime-host-identity.js';
 
 // Real host: a persistent WebContentsView mounts WorkHubRoot once and moves between windows.

@@ -17,13 +17,12 @@
  * under the License.
  */
 
-
 import { workspaceNameFromCwd } from './workspace-name.js';
 
 import type { StoredMessage } from '@maka/core/session';
 
-import type { DelegationFeedback as WorkHubDelegationFeedback } from '@maka/workhub/slots';
-export type { DelegationFeedback as WorkHubDelegationFeedback } from '@maka/workhub/slots';
+import type { DelegationFeedback as WorkHubDelegationFeedback } from '../slots.js';
+export type { DelegationFeedback as WorkHubDelegationFeedback } from '../slots.js';
 export type WorkHubDelegationState = WorkHubDelegationFeedback['state'];
 
 export interface WorkHubLinkedWork {
@@ -46,37 +45,59 @@ export function workHubLinkedWork(
 ): WorkHubLinkedWork[] {
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const workspaceName = (id: string) => workspaceNameFromCwd(sessionById.get(id)?.cwd);
-  const taskCalls = new Set(messages.flatMap((message) =>
-    message.type === 'tool_call' && message.toolName === 'mcp__desktop_workhub__tasks' ? [message.id] : [],
-  ));
+  const taskCalls = new Set(
+    messages.flatMap((message) =>
+      message.type === 'tool_call' && message.toolName === 'mcp__desktop_workhub__tasks'
+        ? [message.id]
+        : [],
+    ),
+  );
   return messages.flatMap((message): WorkHubLinkedWork[] => {
-    if (message.type === 'workhub_coordination' && message.kind === 'delegation_assigned') return [{
-      id: message.id,
-      coordinationTurnId: message.coordinationTurnId,
-      targetSessionId: message.targetSessionId,
-      targetSessionName: sessionById.get(message.targetSessionId)?.name ?? message.targetSessionName,
-      workspaceName: workspaceName(message.targetSessionId),
-      targetMessageId: message.targetMessageId,
-      targetTurnId: message.targetTurnId,
-      state: 'accepted',
-    }];
-    if (message.type !== 'tool_result' || message.isError || !taskCalls.has(message.toolUseId)) return [];
+    if (message.type === 'workhub_coordination' && message.kind === 'delegation_assigned')
+      return [
+        {
+          id: message.id,
+          coordinationTurnId: message.coordinationTurnId,
+          targetSessionId: message.targetSessionId,
+          targetSessionName:
+            sessionById.get(message.targetSessionId)?.name ?? message.targetSessionName,
+          workspaceName: workspaceName(message.targetSessionId),
+          targetMessageId: message.targetMessageId,
+          targetTurnId: message.targetTurnId,
+          state: 'accepted',
+        },
+      ];
+    if (message.type !== 'tool_result' || message.isError || !taskCalls.has(message.toolUseId))
+      return [];
     let result: unknown;
     if (message.content.kind === 'json') result = message.content.value;
     else if (message.content.kind === 'text') {
-      try { result = JSON.parse(message.content.text); } catch { return []; }
+      try {
+        result = JSON.parse(message.content.text);
+      } catch {
+        return [];
+      }
     }
-    if (result && typeof result === 'object' && 'structuredContent' in result) result = result.structuredContent;
-    if (!result || typeof result !== 'object' || !('disposition' in result) ||
+    if (result && typeof result === 'object' && 'structuredContent' in result)
+      result = result.structuredContent;
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      !('disposition' in result) ||
       !['create_new', 'delegate_existing', 'replace'].includes(String(result.disposition)) ||
-      !('targetSessionKey' in result) || typeof result.targetSessionKey !== 'string') return [];
-    return [{
-      id: message.id,
-      coordinationTurnId: message.turnId,
-      targetSessionId: result.targetSessionKey,
-      targetSessionName: sessionById.get(result.targetSessionKey)?.name ?? fallbackName,
-      workspaceName: workspaceName(result.targetSessionKey),
-    }];
+      !('targetSessionKey' in result) ||
+      typeof result.targetSessionKey !== 'string'
+    )
+      return [];
+    return [
+      {
+        id: message.id,
+        coordinationTurnId: message.turnId,
+        targetSessionId: result.targetSessionKey,
+        targetSessionName: sessionById.get(result.targetSessionKey)?.name ?? fallbackName,
+        workspaceName: workspaceName(result.targetSessionKey),
+      },
+    ];
   });
 }
 
@@ -87,6 +108,8 @@ export function applyWorkHubDelegationFeedback(
   const byId = new Map(feedback.map((item) => [item.id, item]));
   return assignments.map((assignment) => {
     const item = byId.get(assignment.id);
-    return item ? { ...assignment, state: item.state, resultPreview: item.resultPreview } : assignment;
+    return item
+      ? { ...assignment, state: item.state, resultPreview: item.resultPreview }
+      : assignment;
   });
 }

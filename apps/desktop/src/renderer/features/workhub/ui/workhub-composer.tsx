@@ -26,7 +26,7 @@ import type { AttachmentRef, FollowUpMode } from '@maka/core/events';
 import { getDesktopConversationCopy } from '../../../locales/conversation-copy.js';
 import { localizedShellErrorMessage } from '../../../locales/shell-copy.js';
 import { useWorkHubServices } from '../services.js';
-import { workHubLiveCopy } from '../locales/workhub-live-copy.js';
+import { workHubLiveCopy } from '@maka/workhub/locales';
 
 export type WorkHubComposerProps = Omit<ComposerProps, 'onSend' | 'draftKey'> & {
   sessionId?: string;
