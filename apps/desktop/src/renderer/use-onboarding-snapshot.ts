@@ -37,7 +37,10 @@ import { generalizedErrorMessageForLocale } from '@maka/core/redaction';
 import { type UiLocale } from '@maka/core/ui-locale';
 import { hasSettledInitialOnboarding } from '@maka/core/onboarding-milestone';
 import { useUiLocale } from '@maka/ui';
-import type { OnboardingSnapshot } from '../preload/bridge-contract.js';
+import type {
+  DesktopRuntimeHostProfileEntry,
+  OnboardingSnapshot,
+} from '../preload/bridge-contract.js';
 import { getOnboardingCopy } from './locales/onboarding-copy.js';
 
 /**
@@ -92,6 +95,22 @@ export function getOnboardingActivationCandidate(
     llmConnectionSlug: snapshot.state.connectionSlug,
     model: snapshot.state.model,
   };
+}
+
+/**
+ * Identity absence is pending only while the default Host is still coming
+ * up; once it settles unavailable the snapshot error must surface so the
+ * shell stops treating onboarding as loading.
+ */
+export function isDeferrableOnboardingSnapshotError(
+  error: unknown,
+  defaultReadiness: DesktopRuntimeHostProfileEntry['readiness'] | undefined,
+): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes('identity is unavailable') &&
+    (defaultReadiness === 'connecting' || defaultReadiness === 'reconnecting')
+  );
 }
 
 /**
@@ -245,7 +264,11 @@ const LIVE_DEPS: UseOnboardingSnapshotDeps = {
   // The snapshot read goes through the default Host; while it is still
   // connecting the pull is pending, not failed.
   shouldDeferError: async (error) =>
-    error instanceof Error && error.message.includes('identity is unavailable'),
+    isDeferrableOnboardingSnapshotError(
+      error,
+      (await window.maka.runtimeHostProfiles.getSnapshot().catch(() => null))
+        ?.entries.find((entry) => entry.isDefault)?.readiness,
+    ),
   subscribeInvalidations(onInvalidate) {
     const unsubscribeSessions = window.maka.sessions.subscribeChanges(() => onInvalidate());
     const unsubscribeConnections = window.maka.connections.subscribeEvents(() => onInvalidate());
