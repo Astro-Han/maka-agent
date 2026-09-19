@@ -19,13 +19,10 @@
 
 import type { TurnSnapshot } from '@maka/runtime-host/protocol';
 import type { SessionEvent } from '@maka/core/events';
+import type { SessionExecutionProjection as ExecutionProjection } from '@maka/ui/session-execution';
 
 /** Desktop observation data, never a Runtime event or a client execution claim. */
-export interface SessionExecutionProjection {
-  readonly type: 'host_execution';
-  readonly available: boolean;
-  readonly rootTurn: TurnSnapshot | null;
-}
+export type SessionExecutionProjection = ExecutionProjection<TurnSnapshot>;
 
 export type SessionObservationMessage = SessionExecutionProjection | {
   readonly type: 'host_observation_seed';

@@ -33,7 +33,8 @@ import { WorkbarEdgeToggle } from '../../../application/contracts/workbar-edge-t
 import { WorkHubNavigationRail } from '@maka/workhub/conversation';
 import { useWorkHubHighlightState, WorkHubHighlightContext, WorkHubHueProvider } from '@maka/workhub/conversation';
 import { getWorkHubRailCopy } from '@maka/workhub/locales';
-import { useWorkHubController } from '../controller/use-workhub-controller.js';
+import { useWorkHubController } from '@maka/workhub/controller';
+import { useWorkHubServices } from '../services.js';
 import type { WorkHubControlSnapshot } from '../../../../shared/workhub-control.js';
 import type { WorkHubPresentationSnapshot } from '../../../../shared/workhub-presentation.js';
 import { workHubLiveCopy } from '@maka/workhub/locales';
@@ -77,8 +78,9 @@ export function WorkHubRoot({ sessionId, feedback }: {
 }) {
   const highlight = useWorkHubHighlightState();
   const locale = useUiLocale();
-  const controller = useWorkHubController(sessionId, () => highlight.selectWork(undefined));
-  const { services, session, transcript, busy } = controller;
+  const services = useWorkHubServices();
+  const controller = useWorkHubController(sessionId, services, () => highlight.selectWork(undefined));
+  const { session, transcript, busy } = controller;
   useEffect(() => {
     services.bindBrowserSession(controller.sessionId ?? null);
     return () => services.bindBrowserSession(null);

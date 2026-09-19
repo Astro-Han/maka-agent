@@ -18,3 +18,9 @@
  */
 
 export { useWorkHubController } from './controller/use-workhub-controller.js';
+export type {
+  CoordinationSessionServices,
+  WorkHubAnswerInput,
+  WorkHubAnswerResult,
+  WorkHubTranscriptSnapshot,
+} from './controller/ports.js';

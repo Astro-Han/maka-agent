@@ -29,8 +29,7 @@ import type { IpcHandler } from '../ipc-reconnect-policy.js';
 import type { DesktopSessionStopResult } from '../../preload/bridge-contract.js';
 import type { AttachmentRef } from '@maka/core/events';
 import type { StoredMessage } from '@maka/core/session';
-import { WorkHubServicesProvider, type WorkHubServices, type WorkHubTranscriptSnapshot } from '../../renderer/features/workhub/index.js';
-import { useWorkHubController } from '../../renderer/features/workhub/testing.js';
+import { useWorkHubController, type CoordinationSessionServices as WorkHubServices, type WorkHubTranscriptSnapshot } from '@maka/workhub/controller';
 import { cleanupFakeDom, installReactRenderer } from './fake-dom.js';
 
 afterEach(cleanupFakeDom);
@@ -121,10 +120,10 @@ async function mountController(failFirstRead = false, overrides: Partial<WorkHub
     ...overrides,
   } as unknown as WorkHubServices;
   let submissions = 0;
-  function Probe() { controller = useWorkHubController(sessionId, () => { submissions++; }); return null; }
+  function Probe() { controller = useWorkHubController(sessionId, services, () => { submissions++; }); return null; }
   await act(async () => {
     root.render(createElement(LocaleProvider, { locale: 'en', children:
-      createElement(WorkHubServicesProvider, { services }, createElement(Probe)),
+      createElement(Probe),
     }));
   });
   assert.equal(controller.sessionId, sessionId);
@@ -156,9 +155,16 @@ test('WorkHub model and thinking selection share versioned saves and reject stal
   let snapshot = initial;
   let failSave = false;
   let notify!: () => void;
+  let notifyModels!: () => void;
+  type Choices = Awaited<ReturnType<WorkHubServices['modelChoices']>>;
+  const oldModels = deferred<Choices>();
+  const currentModels = deferred<Choices>();
+  let modelReads = 0;
   let nextRead: Promise<Session> | undefined;
   const requests: Array<Parameters<WorkHubServices['configureModel']>[1]> = [];
   const h = await mountController(false, {
+    modelChoices: () => (++modelReads === 1 ? oldModels.promise : currentModels.promise),
+    subscribeAvailability: (handler) => { notifyModels = handler; return () => {}; },
     getSession: async () => {
       const read = nextRead;
       nextRead = undefined;
@@ -172,6 +178,15 @@ test('WorkHub model and thinking selection share versioned saves and reject stal
       return { kind: 'committed', session: snapshot } as unknown as Awaited<ReturnType<WorkHubServices['configureModel']>>;
     },
   });
+  await act(async () => {
+    notifyModels();
+    currentModels.resolve([{ connectionId: 'connection', connectionSlug: 'provider',
+      providerType: 'openai', providerLabel: 'OpenAI', model: 'B', label: 'B',
+      isDefault: true, thinkingLevels: ['high'] }]);
+  });
+  assert.equal(h.controller.choices[0]?.model, 'B');
+  await act(async () => { oldModels.resolve([]); });
+  assert.equal(h.controller.choices[0]?.model, 'B', 'an old catalog read cannot erase refreshed choices');
   const staleRead = deferred<Session>();
   nextRead = staleRead.promise;
   await act(async () => { notify(); });

@@ -18,28 +18,17 @@
  */
 
 import type { ArtifactBinaryReadResult } from '@maka/core/artifacts';
-import type { ChatModelChoice } from '@maka/core/chat-model-choice';
 import type { UiLocale } from '@maka/core/ui-locale';
-import type { StoredMessage, SessionSummary } from '@maka/core/session';
 import type { ComposerAttachmentService } from '@maka/ui/use-composer-attachments';
-import type { SessionEvent, AttachmentRef, MessageQueuePlacement } from '@maka/core/events';
-import type { OperationInput, OperationOutput } from '@maka/runtime-host/protocol';
-import type { WorkHubAnswerInput, WorkHubAnswerResult } from '../../../shared/workhub-conversation.js';
+import type { AttachmentRef } from '@maka/core/events';
+import type { CoordinationSessionServices } from '@maka/workhub/controller';
 import type { WorkHubControlBridge } from '../../../shared/workhub-control.js';
 import type { WorkHubPresentationBridge } from '../../../shared/workhub-presentation.js';
 
-export interface WorkHubTranscriptSnapshot {
-  readonly messages: readonly StoredMessage[];
-  readonly hasOlder: boolean;
-  readonly ready: boolean;
-}
-export interface WorkHubTranscript {
-  observationChanged(phase: 'pending' | 'ready'): void;
-  loadEarlier(): Promise<void>;
-  close(): Promise<void>;
-}
-export interface WorkHubServices {
-  subscribeAvailability(handler: () => void): () => void;
+export type { WorkHubTranscriptSnapshot } from '@maka/workhub/controller';
+
+/** Desktop adapters; not the plugin SDK. */
+export interface WorkHubServices extends CoordinationSessionServices {
   readonly inspector: import('../../application/contracts/session-inspector/service.js').SessionInspectorService;
   readonly surface: 'main' | 'workhub';
   readonly initialLocale: UiLocale;
@@ -47,40 +36,7 @@ export interface WorkHubServices {
   readonly presentation: WorkHubPresentationBridge;
   readonly control: WorkHubControlBridge;
   bindBrowserSession(sessionId: string | null): void;
-  getSession(sessionId: string): Promise<SessionSummary & { revision: number }>;
-  subscribeSessions(handler: () => void): () => void;
-  listSessions(): Promise<(SessionSummary & { revision: number })[]>;
-  modelChoices(sessionId: string): Promise<ChatModelChoice[]>;
   readonly attachments: ComposerAttachmentService;
   readAttachmentBytes(sessionId: string, artifactId: string): Promise<ArtifactBinaryReadResult>;
   prepareAttachments(sessionId: string, items: Array<{ approvalId: string; name: string; mimeType?: string } | { file: File }>): Promise<AttachmentRef[]>;
-  listActiveInteractions(sessionId: string): Promise<import('@maka/core/events').ActiveInteractionRequestEvent[]>;
-  subscribeActiveInteractions(handler: (event: { sessionId: string; interactions: import('@maka/core/events').ActiveInteractionRequestEvent[] }) => void): () => void;
-  respondToUserForm(sessionId: string, response: import('@maka/core/interaction').InteractionFormResponse): Promise<void>;
-  respondToUserQuestion(sessionId: string, response: import('@maka/core/user-question').UserQuestionResponse): Promise<void>;
-  answer(sessionId: string, input: WorkHubAnswerInput): Promise<WorkHubAnswerResult>;
-  enqueueMessage(sessionId: string, messageId: string, text: string, attachments: AttachmentRef[], placement: MessageQueuePlacement): Promise<'admitted' | 'unknown' | 'rejected'>;
-  retractQueueEntry(sessionId: string, entryId: string): Promise<void>;
-  promoteQueueEntry(sessionId: string, entryId: string): Promise<void>;
-  updateQueueEntry(sessionId: string, entryId: string, expectedQueueRevision: number, text: string): Promise<void>;
-  reorderQueueEntries(sessionId: string, entryIds: readonly string[]): Promise<void>;
-  configureModel(
-    sessionId: string,
-    input: OperationInput<'workhub.coordination.configureModel'>,
-  ): Promise<OperationOutput<'workhub.coordination.configureModel'>>;
-  observe(
-    sessionId: string,
-    handler: (event: SessionEvent) => void,
-    onError: (error: unknown) => void,
-    onPhase: (phase: 'pending' | 'ready') => void,
-    onExecution?: (projection: import('../../../shared/session-execution-projection.js').SessionExecutionProjection | undefined) => void,
-  ): () => void;
-  openTranscript(
-    sessionId: string,
-    handler: (snapshot: WorkHubTranscriptSnapshot) => void,
-    signal: AbortSignal,
-    onError: (error: unknown) => void,
-  ): Promise<WorkHubTranscript>;
-  /** Retracted message IDs, or undefined when the requested Turn was no longer active. */
-  stop(sessionId: string, turnId: string): Promise<readonly string[] | undefined>;
 }

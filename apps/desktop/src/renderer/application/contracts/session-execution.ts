@@ -17,23 +17,6 @@
  * under the License.
  */
 
-import type { SessionExecutionProjection } from '../../../shared/session-execution-projection.js';
 export type { SessionExecutionProjection } from '../../../shared/session-execution-projection.js';
 
-/** Retain the last nonterminal identity for Stop and conservative controls even when observation is unavailable. */
-export function activeHostTurn(projection: SessionExecutionProjection | undefined) {
-  const turn = projection?.rootTurn;
-  return turn && turn.status !== 'completed' && turn.status !== 'failed' && turn.status !== 'cancelled'
-    ? turn : undefined;
-}
-
-/** Presentation fields only; the Host retains ownership of the lifecycle. */
-export function chatTurnActivity(projection: SessionExecutionProjection | undefined) {
-  if (!projection?.available) return undefined;
-  const turn = activeHostTurn(projection);
-  return turn ? {
-    turnId: turn.turnId,
-    awaitingInput: turn.status === 'waiting_for_user',
-    compacting: turn.rootExecutionKind === 'context_compact',
-  } : undefined;
-}
+export { activeHostTurn, chatTurnActivity } from '@maka/ui/session-execution';
