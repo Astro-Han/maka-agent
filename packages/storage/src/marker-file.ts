@@ -106,13 +106,11 @@ export async function publishMarkerFile(
           throw error;
         // Filesystems without hardlinks (exFAT, some network mounts) cannot
         // link the staged file; fall back to an exclusive create.
-        let handle: MarkerFileHandle | undefined;
-        try {
-          handle = await deps.open(markerPath, 'wx', 0o600);
-        } catch (createError) {
-          if (isNodeError(createError, 'EEXIST')) return 'already_exists';
-          throw createError;
-        }
+        const handle = await deps.open(markerPath, 'wx', 0o600).catch((error: unknown) => {
+          if (isNodeError(error, 'EEXIST')) return undefined;
+          throw error;
+        });
+        if (handle === undefined) return 'already_exists';
         try {
           await handle.writeFile(input.contents, 'utf8');
           await handle.sync();

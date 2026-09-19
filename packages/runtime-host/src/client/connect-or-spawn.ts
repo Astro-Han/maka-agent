@@ -479,11 +479,7 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
             input.signal,
           );
           electionSettled = true;
-          await retireCandidateStartupDiagnostic(
-            capability.canonicalPath,
-            capability.rootId,
-            startupFailure,
-          );
+          await retireCandidateStartupDiagnostic(capability.canonicalPath, startupFailure);
           const selected = latestCandidate?.attempt;
           const spawnedProcess =
             selected?.pid === result.registration.pid && selected.exited
@@ -610,7 +606,6 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
                   if (electionSettled) {
                     void clearCandidateStartupDiagnostic(
                       capability.canonicalPath,
-                      capability.rootId,
                       failure.startupAttemptId,
                     ).catch(() => undefined);
                     return;
@@ -626,7 +621,6 @@ export async function connectOrSpawnRuntimeHostWithDependencies(
                   if (obsolete) {
                     void clearCandidateStartupDiagnostic(
                       capability.canonicalPath,
-                      capability.rootId,
                       obsolete.startupAttemptId,
                     ).catch(() => undefined);
                   }
@@ -789,13 +783,12 @@ function createElectionDiagnostic(input: {
 
 async function retireCandidateStartupDiagnostic(
   rootPath: string,
-  rootId: string,
   startupFailure: CandidateStartupFailureReport | undefined,
 ): Promise<void> {
   await Promise.all([
-    clearCandidateStartupDiagnostic(rootPath, rootId),
+    clearCandidateStartupDiagnostic(rootPath),
     ...(startupFailure
-      ? [clearCandidateStartupDiagnostic(rootPath, rootId, startupFailure.startupAttemptId)]
+      ? [clearCandidateStartupDiagnostic(rootPath, startupFailure.startupAttemptId)]
       : []),
   ]).catch(() => undefined);
 }

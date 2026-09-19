@@ -145,7 +145,7 @@ export async function resolveLegacyRuntimeHostPackage(rootId: string) {
     ).href
   );
   if (authority.STORAGE_ROOT_MARKER_SCHEMA_VERSION === 1)
-    return { config, packageRoot: layout.packageRoot };
+    return { packageRoot: layout.packageRoot };
   // A compatible package already selected by a previous installer resumes its
   // interrupted format upgrade here. This never selects a new registry target.
   await prepareRuntimeHostRoot(config.root.path);

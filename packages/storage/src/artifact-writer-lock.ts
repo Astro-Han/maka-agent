@@ -20,7 +20,7 @@
 /// <reference path="./fs-native-extensions.d.ts" />
 
 import { constants as fsConstants } from 'node:fs';
-import { lstat, mkdir, open, realpath, type FileHandle } from 'node:fs/promises';
+import { lstat, mkdir, open, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { unlock, waitForLock } from 'fs-native-extensions';
 import { withArtifactWriterBootstrapLock } from './artifact-writer-bootstrap-lock.js';
@@ -38,8 +38,7 @@ export async function withArtifactWriterLock<T>(
   operation: (canonicalRoot: string) => Promise<T>,
 ): Promise<T> {
   await mkdir(workspaceRoot, { recursive: true });
-  const requestedCanonicalRoot = await realpath(workspaceRoot);
-  const bootstrap = await prepareArtifactWriterBootstrapAuthority(requestedCanonicalRoot);
+  const bootstrap = await prepareArtifactWriterBootstrapAuthority(workspaceRoot);
   return withArtifactWriterBootstrapLock(bootstrap.lockPath, async () => {
     await bootstrap.assertCurrentRoot();
     const authority = await prepareArtifactWriterLockAuthorityForMarkedRoot(

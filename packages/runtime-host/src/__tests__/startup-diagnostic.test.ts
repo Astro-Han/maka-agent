@@ -101,7 +101,7 @@ test('preserves a bounded redacted Candidate startup diagnostic in the private c
       await clearSelectedCandidateStartupDiagnostic(rootPath, rootId, selectedAttemptId),
       true,
     );
-    await clearCandidateStartupDiagnostic(rootPath, rootId, freshAttemptId);
+    await clearCandidateStartupDiagnostic(rootPath, freshAttemptId);
     assert.equal(await readCandidateStartupDiagnostic(rootPath, rootId), undefined);
   } finally {
     await rm(rootPath, { recursive: true, force: true });

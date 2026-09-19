@@ -21,17 +21,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createSocket } from 'node:dgram';
 import { createServer } from 'node:net';
 import { realpathSync } from 'node:fs';
-import {
-  access,
-  mkdir,
-  open,
-  readFile,
-  realpath,
-  rename,
-  rm,
-  stat,
-  unlink,
-} from 'node:fs/promises';
+import { mkdir, open, readFile, realpath, rename, rm, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { truncateUtf8 } from '@maka/core/diagnostic-log';
@@ -898,7 +888,6 @@ async function resolveExpectedServiceRoot(
   }
 }
 
-/** Storage authority errors fold onto the wire member whose guidance applies. */
 export function storageRootErrorDetail(
   error: unknown,
 ): { readonly code: RuntimeHostServiceErrorCode; readonly message: string } | undefined {

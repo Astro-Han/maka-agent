@@ -51,6 +51,7 @@ import {
   type RuntimeHostManagedDeploymentAuthorityRecord,
   type RuntimeHostManagedDeploymentConfig,
   locateRuntimeHostManagedRoot,
+  resolveRuntimeHostManagedDeploymentAuthorityRoot,
   type RuntimeHostManagedDeploymentAuthorityOptions,
 } from './operator/managed-deployment.js';
 import { resolveRuntimeHostNpmDeploymentLayout } from './operator/update-package-evidence.js';
@@ -511,14 +512,10 @@ async function inspectLegacySources(session: StorageRootUpgradeSession): Promise
       : process.platform === 'win32'
         ? join(home, 'AppData', 'Local', 'Maka')
         : join(home, '.cache', 'maka');
-  const durable =
-    process.platform === 'darwin'
-      ? join(home, 'Library', 'Application Support', 'Maka')
-      : process.platform === 'win32'
-        ? join(home, 'AppData', 'Local', 'Maka')
-        : join(home, '.local', 'share', 'Maka');
+  const deployments = resolveRuntimeHostManagedDeploymentAuthorityRoot();
+  const durable = dirname(deployments);
   const control = join(cache, 'runtime-hosts', session.rootId);
-  const deployment = join(durable, 'runtime-host-deployments', session.rootId);
+  const deployment = join(deployments, session.rootId);
   const identity = await stat(session.canonicalPath, { bigint: true });
   if (
     process.platform !== 'win32' &&

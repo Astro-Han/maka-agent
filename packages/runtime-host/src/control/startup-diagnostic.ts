@@ -211,7 +211,6 @@ export async function selectCandidateStartupDiagnostic(
 
 export async function clearCandidateStartupDiagnostic(
   rootPath: string,
-  rootId: string,
   startupAttemptId?: string,
 ): Promise<void> {
   const path = resolveCandidateStartupDiagnosticPath(rootPath, startupAttemptId);
@@ -228,7 +227,7 @@ export async function clearSelectedCandidateStartupDiagnostic(
   assertStartupAttemptId(expectedStartupAttemptId);
   const diagnostic = await readCandidateStartupDiagnostic(rootPath, rootId);
   if (!diagnostic || diagnostic.startupAttemptId !== expectedStartupAttemptId) return false;
-  await clearCandidateStartupDiagnostic(rootPath, rootId);
+  await clearCandidateStartupDiagnostic(rootPath);
   return true;
 }
 

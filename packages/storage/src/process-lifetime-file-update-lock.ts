@@ -51,7 +51,7 @@ export async function withLegacyFileUpdateLockLease<T>(
       // supervision marker therefore proves that its directory lock is ownerless
       // once a later process can acquire this lease.
       await recoverSupervisedLegacyLock(lockPath, supervisionPath);
-      await createSupervisionMarker(supervisionPath);
+      await createExclusiveMarkerFile(supervisionPath);
       supervised = true;
       const result = await operation(lease.fd);
       completed = true;
@@ -102,7 +102,7 @@ export async function withProcessLifetimeFileUpdateLock<T>(
   });
 }
 
-async function createSupervisionMarker(path: string): Promise<void> {
+async function createExclusiveMarkerFile(path: string): Promise<void> {
   const marker = await open(
     path,
     fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
@@ -178,12 +178,7 @@ async function waitForGate(
 async function acquireLegacyMarker(lockPath: string, deadline: number): Promise<void> {
   for (;;) {
     try {
-      const marker = await open(
-        lockPath,
-        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
-        0o600,
-      );
-      await marker.close();
+      await createExclusiveMarkerFile(lockPath);
       return;
     } catch (error) {
       if (!isNodeError(error, 'EEXIST')) throw error;

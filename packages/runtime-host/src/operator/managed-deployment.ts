@@ -576,11 +576,10 @@ export async function resolveRuntimeHostManagedDeployment(
 export async function locateRuntimeHostManagedRoot(
   rootId: string,
   options: RuntimeHostManagedDeploymentAuthorityOptions = {},
-): Promise<{ rootPath: string; legacy: boolean } | undefined> {
+): Promise<{ rootPath: string } | undefined> {
   requireRootId(rootId);
   const locationPath = resolveManagedRootLocationPath(rootId, options);
   let value = await readBoundedJson(locationPath);
-  const legacyLocation = value === undefined;
   if (value === undefined) {
     const legacy = await readBoundedJson(
       join(dirname(locationPath), RUNTIME_HOST_MANAGED_DEPLOYMENT_CONFIG_FILE),
@@ -596,14 +595,13 @@ export async function locateRuntimeHostManagedRoot(
     .strict()
     .safeParse(value);
   if (!location.success) throw deploymentTransactionMismatch('Managed Root location is invalid');
-  const initial = { root: { id: location.data.rootId, path: location.data.rootPath } };
-  if (initial.root.id !== rootId) {
+  if (location.data.rootId !== rootId) {
     throw new RuntimeHostManagedDeploymentError(
       'invalid_config',
       'The Runtime Host managed deployment record has an invalid Root identity',
     );
   }
-  return { rootPath: initial.root.path, legacy: legacyLocation };
+  return { rootPath: location.data.rootPath };
 }
 
 export async function resolveRuntimeHostManagedDeploymentAuthority(
@@ -618,16 +616,15 @@ export async function resolveRuntimeHostManagedDeploymentAuthority(
 > {
   const location = await locateRuntimeHostManagedRoot(rootId, options);
   if (!location) return undefined;
-  const initial = { root: { path: location.rootPath } };
   if (options.repairRootAfterRemount) {
     await repairStorageRootAfterRemount({
-      path: initial.root.path,
+      path: location.rootPath,
       kind: 'interactive',
       expectedRootId: rootId,
     });
   }
   const capability = await resolveExistingStorageRoot({
-    path: initial.root.path,
+    path: location.rootPath,
     kind: 'interactive',
     expectedRootId: rootId,
   });
