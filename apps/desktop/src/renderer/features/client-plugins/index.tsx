@@ -20,15 +20,23 @@
 import * as React from 'react';
 import * as JsxRuntime from 'react/jsx-runtime';
 import * as ClientSdk from '@maka-agent/plugin-sdk/client';
-import { ClientRuntime, ClientSlot, type ClientDiagnostic } from '@maka/ui/client-plugins';
+import { ClientSlot } from '@maka/ui/client-plugins';
 import { createServicesContext } from '../../application/contracts/feature-services.js';
 import type { ClientHostRef, ClientPluginServices } from './ports.js';
 import { usePublishComposerSuggestions } from './suggestions.js';
+import { ClientHostRuntime } from './host-runtime.js';
 export { ComposerSuggestionsProvider, useComposerSuggestions } from './suggestions.js';
 
 export type { ClientHostRef, ClientPluginServices } from './ports.js';
-const { Provider, useServices } = createServicesContext<ClientPluginServices>('ClientPluginServices');
-export const ClientPluginServicesProvider = Provider;
+const { Provider, useServices } = createServicesContext<{
+  services: ClientPluginServices;
+  hosts: Map<string, ClientHostRuntime>;
+}>('ClientPluginServices');
+
+export function ClientPluginServicesProvider(props: { services: ClientPluginServices; children?: React.ReactNode }) {
+  const value = React.useMemo(() => ({ services: props.services, hosts: new Map<string, ClientHostRuntime>() }), [props.services]);
+  return <Provider services={value}>{props.children}</Provider>;
+}
 const modules = { react: React, 'react/jsx-runtime': JsxRuntime, '@maka-agent/plugin-sdk/client': ClientSdk };
 
 /** Bound to an originating Host, never the currently selected default Host. */
@@ -37,73 +45,27 @@ export function ClientPluginSlot<K extends keyof ClientSdk.ClientSlots>(props: {
   readonly name: K;
   readonly input: ClientSdk.ClientSlots[K];
 }): React.ReactNode {
-  const services = useServices();
+  const { services, hosts } = useServices();
   const publishSuggestions = usePublishComposerSuggestions();
-  const [runtime, setRuntime] = React.useState<ClientRuntime>();
-  const [failure, setFailure] = React.useState(false);
-  const [contextRevision, changed] = React.useReducer((value: number) => value + 1, 0);
-  const report = React.useCallback((diagnostic: ClientDiagnostic) => {
-    console.error('Client plugin failed', diagnostic);
-    setFailure(true);
-  }, []);
   const { profileId, hostId } = props.host;
-  const transport = React.useMemo(() => services.connect({ profileId, hostId }), [services, profileId, hostId]);
-  React.useEffect(() => transport.subscribeContext(changed), [transport]);
-  React.useEffect(() => {
-    const lifetime = new AbortController();
-    const instance = new ClientRuntime({ document, modules, source: transport.source, remote: transport.remote,
-      localFiles: transport.localFiles,
-      report: (diagnostic) => {
-        if (!lifetime.signal.aborted) report(diagnostic);
-        else console.error('Client plugin cleanup failed', diagnostic);
-      },
+  const key = JSON.stringify([profileId, hostId]);
+  let owner = hosts.get(key);
+  if (!owner) {
+    owner = new ClientHostRuntime(() => services.connect({ profileId, hostId }), {
+      document, modules, report: (diagnostic) => console.error('Client plugin failed', diagnostic),
     });
-    setRuntime(instance);
-    setFailure(false);
-    let revision = 0;
-    let retry = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let fetching: AbortController | undefined;
-    const refresh = () => {
-      if (lifetime.signal.aborted) return;
-      instance.invalidate();
-      fetching?.abort();
-      fetching = new AbortController();
-      const signal = AbortSignal.any([lifetime.signal, fetching.signal, AbortSignal.timeout(30_000)]);
-      const current = ++revision;
-      void transport.snapshot(signal).then(async (snapshot) => {
-        signal.throwIfAborted();
-        await instance.reconcile(snapshot);
-        if (current !== revision || lifetime.signal.aborted) return;
-        retry = 0;
-        setFailure(false);
-      }).catch((error: unknown) => {
-        if (current !== revision || lifetime.signal.aborted) return;
-        report({ error });
-        if (retry < 3) timer = setTimeout(refresh, 250 * 2 ** retry++);
-      });
-    };
-    const unsubscribe = transport.subscribe(() => {
-      clearTimeout(timer);
-      retry = 0;
-      refresh();
-    });
-    refresh();
-    return () => {
-      lifetime.abort();
-      clearTimeout(timer);
-      unsubscribe();
-      // No state writes into an unmounted component. The error remains observable.
-      void instance.close().catch((error: unknown) => console.error('Client plugin cleanup failed', error));
-    };
-  }, [transport, report]);
+    hosts.set(key, owner);
+  }
+  const { runtime, failure, contextRevision, session } = React.useSyncExternalStore(owner.subscribe, owner.snapshot, owner.snapshot);
+  const report = owner.report;
   const composerInput = {...props.input, contextRevision,
     ...(props.name === 'workspace.manage' ? {} : {publishSuggestions})};
   const input = 'onOpenSession' in composerInput ? {
     ...composerInput,
     onOpenSession(sessionId: string) {
       const open = props.input as ClientSdk.ClientSlots['session.composer.before'];
-      void transport.session(sessionId).then(open.onOpenSession).catch((error: unknown) => report({ error }));
+      if (!session) return;
+      void session(sessionId).then(open.onOpenSession).catch((error: unknown) => report({ error }));
     },
   } : composerInput;
   return <div className={props.name === 'workspace.manage' ? undefined : 'maka-composer-plugin-slot'}>

@@ -17,3 +17,4 @@
  * under the License.
  */
 export { usePublishComposerSuggestions } from './suggestions.js';
+export { ClientHostRuntime } from './host-runtime.js';
